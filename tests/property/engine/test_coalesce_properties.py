@@ -31,6 +31,7 @@ from hypothesis import assume, given, settings
 from hypothesis import strategies as st
 
 from elspeth.contracts import TokenInfo
+from elspeth.contracts.coalesce_enums import CoalescePolicy, MergeStrategy
 from elspeth.contracts.types import NodeID
 from elspeth.core.config import CoalesceSettings
 from elspeth.engine.clock import MockClock
@@ -716,8 +717,8 @@ class TestCoalesceMetadataProperties:
 
         metadata = outcome.coalesce_metadata
         assert metadata is not None
-        assert metadata.policy == "require_all"
-        assert metadata.merge_strategy == "nested"
+        assert metadata.policy == CoalescePolicy.REQUIRE_ALL
+        assert metadata.merge_strategy == MergeStrategy.NESTED
         assert metadata.expected_branches is not None
         assert metadata.branches_arrived is not None
         assert set(metadata.expected_branches) == set(branches)

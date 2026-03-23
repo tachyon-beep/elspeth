@@ -155,7 +155,7 @@ class TestCoalesceOutcome:
         from elspeth.contracts.coalesce_metadata import CoalesceMetadata
 
         token = _make_token()
-        metadata = CoalesceMetadata.for_late_arrival(policy="require_all", reason="test")
+        metadata = CoalesceMetadata.for_late_arrival(policy=CoalescePolicy.REQUIRE_ALL, reason="test")
         outcome = CoalesceOutcome(
             held=False,
             merged_token=token,
@@ -175,7 +175,7 @@ class TestCoalesceOutcome:
         from elspeth.contracts.coalesce_metadata import CoalesceMetadata
 
         token = _make_token()
-        metadata = CoalesceMetadata.for_late_arrival(policy="require_all", reason="test")
+        metadata = CoalesceMetadata.for_late_arrival(policy=CoalescePolicy.REQUIRE_ALL, reason="test")
         outcome = CoalesceOutcome(
             held=False,
             consumed_tokens=(token,),
