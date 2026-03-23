@@ -19,6 +19,7 @@ from typing import Any
 
 import pytest
 
+from elspeth.contracts.coalesce_enums import CoalescePolicy, MergeStrategy
 from elspeth.contracts.coalesce_metadata import ArrivalOrderEntry, CoalesceMetadata
 from elspeth.contracts.node_state_context import (
     AggregationFlushContext,
@@ -268,7 +269,7 @@ class TestProtocolConformance:
 
     def test_coalesce_metadata_has_to_dict(self) -> None:
         """CoalesceMetadata satisfies NodeStateContext protocol."""
-        meta = CoalesceMetadata.for_late_arrival(policy="require_all", reason="test")
+        meta = CoalesceMetadata.for_late_arrival(policy=CoalescePolicy.REQUIRE_ALL, reason="test")
         d = meta.to_dict()
         assert isinstance(d, dict)
         assert "policy" in d
@@ -307,8 +308,8 @@ class TestProtocolConformance:
 
     def test_coalesce_metadata_canonical_json(self) -> None:
         meta = CoalesceMetadata.for_merge(
-            policy="require_all",
-            merge_strategy="union",
+            policy=CoalescePolicy.REQUIRE_ALL,
+            merge_strategy=MergeStrategy.UNION,
             expected_branches=["a", "b"],
             branches_arrived=["a", "b"],
             branches_lost={},

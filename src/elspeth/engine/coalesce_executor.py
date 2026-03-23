@@ -17,6 +17,7 @@ from elspeth.contracts.coalesce_checkpoint import (
     CoalescePendingCheckpoint,
     CoalesceTokenCheckpoint,
 )
+from elspeth.contracts.coalesce_enums import CoalescePolicy, MergeStrategy
 from elspeth.contracts.coalesce_metadata import ArrivalOrderEntry, CoalesceMetadata
 from elspeth.contracts.enums import NodeStateStatus, RowOutcome
 from elspeth.contracts.errors import AuditIntegrityError, CoalesceFailureReason, OrchestrationInvariantError
@@ -401,7 +402,7 @@ class CoalesceExecutor:
                 failure_reason=failure_reason,
                 consumed_tokens=(token,),
                 coalesce_metadata=CoalesceMetadata.for_late_arrival(
-                    policy=settings.policy,
+                    policy=CoalescePolicy(settings.policy),
                     reason="Siblings already merged/failed, this token arrived too late",
                 ),
                 coalesce_name=coalesce_name,
@@ -548,7 +549,7 @@ class CoalesceExecutor:
             failure_reason=failure_reason,
             consumed_tokens=consumed_tokens,
             coalesce_metadata=CoalesceMetadata.for_failure(
-                policy=settings.policy,
+                policy=CoalescePolicy(settings.policy),
                 expected_branches=tuple(settings.branches),
                 branches_arrived=tuple(pending.branches.keys()),
                 branches_lost=pending.lost_branches,
@@ -620,8 +621,8 @@ class CoalesceExecutor:
                 failure_reason="select_branch_not_arrived",
                 consumed_tokens=consumed_tokens,
                 coalesce_metadata=CoalesceMetadata.for_select_not_arrived(
-                    policy=settings.policy,
-                    merge_strategy=settings.merge,
+                    policy=CoalescePolicy(settings.policy),
+                    merge_strategy=MergeStrategy(settings.merge),
                     # select_branch is validated non-None by CoalesceSettings for merge="select"
                     select_branch=settings.select_branch,  # type: ignore[arg-type]
                     branches_arrived=tuple(pending.branches.keys()),
@@ -740,8 +741,8 @@ class CoalesceExecutor:
         # Build audit metadata BEFORE completing node states (Bug l4h fix)
         # This allows us to include it in context_after for each consumed token
         coalesce_metadata = CoalesceMetadata.for_merge(
-            policy=settings.policy,
-            merge_strategy=settings.merge,
+            policy=CoalescePolicy(settings.policy),
+            merge_strategy=MergeStrategy(settings.merge),
             expected_branches=tuple(settings.branches),
             branches_arrived=tuple(pending.branches.keys()),
             branches_lost=pending.lost_branches,

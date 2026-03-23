@@ -19,6 +19,9 @@ from dataclasses import dataclass, replace
 from types import MappingProxyType
 from typing import Any
 
+from elspeth.contracts.coalesce_enums import CoalescePolicy, MergeStrategy
+from elspeth.contracts.freeze import freeze_fields
+
 
 @dataclass(frozen=True, slots=True)
 class ArrivalOrderEntry:
@@ -54,17 +57,25 @@ class CoalesceMetadata:
         union_field_collisions: Field name to contributing branches (union merge).
     """
 
-    policy: str
+    policy: CoalescePolicy
 
     def __post_init__(self) -> None:
         if not self.policy:
             raise ValueError("CoalesceMetadata.policy must not be empty")
+        # Freeze container fields — catches direct construction with raw dicts
+        fields_to_freeze = []
+        if self.branches_lost is not None:
+            fields_to_freeze.append("branches_lost")
+        if self.union_field_collisions is not None:
+            fields_to_freeze.append("union_field_collisions")
+        if fields_to_freeze:
+            freeze_fields(self, *fields_to_freeze)
 
     # Failure context
     reason: str | None = None
 
     # Merge context
-    merge_strategy: str | None = None
+    merge_strategy: MergeStrategy | None = None
     expected_branches: tuple[str, ...] | None = None
     branches_arrived: tuple[str, ...] | None = None
     branches_lost: MappingProxyType[str, str] | None = None
@@ -91,11 +102,11 @@ class CoalesceMetadata:
         Produces output identical to the current dict literals
         in ``coalesce_executor.py``.
         """
-        result: dict[str, Any] = {"policy": self.policy}
+        result: dict[str, Any] = {"policy": self.policy.value}
         if self.reason is not None:
             result["reason"] = self.reason
         if self.merge_strategy is not None:
-            result["merge_strategy"] = self.merge_strategy
+            result["merge_strategy"] = self.merge_strategy.value
         if self.expected_branches is not None:
             result["expected_branches"] = list(self.expected_branches)
         if self.branches_arrived is not None:
@@ -121,7 +132,7 @@ class CoalesceMetadata:
     # ------------------------------------------------------------------
 
     @classmethod
-    def for_late_arrival(cls, *, policy: str, reason: str) -> CoalesceMetadata:
+    def for_late_arrival(cls, *, policy: CoalescePolicy, reason: str) -> CoalesceMetadata:
         """Late arrival after merge/failure already completed."""
         return cls(policy=policy, reason=reason)
 
@@ -129,7 +140,7 @@ class CoalesceMetadata:
     def for_failure(
         cls,
         *,
-        policy: str,
+        policy: CoalescePolicy,
         expected_branches: Sequence[str],
         branches_arrived: Sequence[str],
         branches_lost: dict[str, str] | None = None,
@@ -150,8 +161,8 @@ class CoalesceMetadata:
     def for_select_not_arrived(
         cls,
         *,
-        policy: str,
-        merge_strategy: str,
+        policy: CoalescePolicy,
+        merge_strategy: MergeStrategy,
         select_branch: str,
         branches_arrived: Sequence[str],
     ) -> CoalesceMetadata:
@@ -167,8 +178,8 @@ class CoalesceMetadata:
     def for_merge(
         cls,
         *,
-        policy: str,
-        merge_strategy: str,
+        policy: CoalescePolicy,
+        merge_strategy: MergeStrategy,
         expected_branches: Sequence[str],
         branches_arrived: Sequence[str],
         branches_lost: dict[str, str],

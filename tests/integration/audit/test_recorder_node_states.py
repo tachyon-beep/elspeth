@@ -725,6 +725,7 @@ class TestContextAfterRoundTrip:
         """CoalesceMetadata survives full DB round-trip."""
         import json
 
+        from elspeth.contracts.coalesce_enums import CoalescePolicy, MergeStrategy
         from elspeth.contracts.coalesce_metadata import ArrivalOrderEntry, CoalesceMetadata
         from elspeth.core.landscape.database import LandscapeDB
         from elspeth.core.landscape.recorder import LandscapeRecorder
@@ -749,8 +750,8 @@ class TestContextAfterRoundTrip:
         token = recorder.create_token(row_id=row.row_id)
 
         metadata = CoalesceMetadata.for_merge(
-            policy="require_all",
-            merge_strategy="union",
+            policy=CoalescePolicy.REQUIRE_ALL,
+            merge_strategy=MergeStrategy.UNION,
             expected_branches=["a", "b"],
             branches_arrived=["a", "b"],
             branches_lost={},

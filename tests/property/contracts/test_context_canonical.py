@@ -9,6 +9,7 @@ from __future__ import annotations
 from hypothesis import given, settings
 from hypothesis import strategies as st
 
+from elspeth.contracts.coalesce_enums import CoalescePolicy, MergeStrategy
 from elspeth.contracts.coalesce_metadata import ArrivalOrderEntry, CoalesceMetadata
 from elspeth.contracts.node_state_context import (
     PoolConfigSnapshot,
@@ -80,8 +81,8 @@ def _coalesce_metadata(draw: st.DrawFn) -> CoalesceMetadata:
         for b in arrived
     ]
     return CoalesceMetadata.for_merge(
-        policy=draw(st.sampled_from(["require_all", "first", "quorum", "best_effort"])),
-        merge_strategy=draw(st.sampled_from(["union", "nested", "select"])),
+        policy=draw(st.sampled_from(list(CoalescePolicy))),
+        merge_strategy=draw(st.sampled_from(list(MergeStrategy))),
         expected_branches=branches,
         branches_arrived=arrived,
         branches_lost={},
