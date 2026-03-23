@@ -315,7 +315,7 @@ class LandscapeRecorder:
         node_id: str,
         run_id: str,
         step_index: int,
-        input_data: dict[str, Any],
+        input_data: Mapping[str, object],
         *,
         state_id: str | None = None,
         attempt: int = 0,
@@ -339,7 +339,7 @@ class LandscapeRecorder:
         state_id: str,
         status: Literal[NodeStateStatus.PENDING],
         *,
-        output_data: dict[str, Any] | list[dict[str, Any]] | None = None,
+        output_data: Mapping[str, object] | list[Mapping[str, object]] | None = None,
         duration_ms: float | None = None,
         error: ExecutionError | TransformErrorReason | CoalesceFailureReason | None = None,
         context_after: NodeStateContext | None = None,
@@ -351,7 +351,7 @@ class LandscapeRecorder:
         state_id: str,
         status: Literal[NodeStateStatus.COMPLETED],
         *,
-        output_data: dict[str, Any] | list[dict[str, Any]] | None = None,
+        output_data: Mapping[str, object] | list[Mapping[str, object]] | None = None,
         duration_ms: float | None = None,
         error: ExecutionError | TransformErrorReason | CoalesceFailureReason | None = None,
         success_reason: TransformSuccessReason | None = None,
@@ -364,7 +364,7 @@ class LandscapeRecorder:
         state_id: str,
         status: Literal[NodeStateStatus.FAILED],
         *,
-        output_data: dict[str, Any] | list[dict[str, Any]] | None = None,
+        output_data: Mapping[str, object] | list[Mapping[str, object]] | None = None,
         duration_ms: float | None = None,
         error: ExecutionError | TransformErrorReason | CoalesceFailureReason | None = None,
         context_after: NodeStateContext | None = None,
@@ -375,7 +375,7 @@ class LandscapeRecorder:
         state_id: str,
         status: NodeStateStatus,
         *,
-        output_data: dict[str, Any] | list[dict[str, Any]] | None = None,
+        output_data: Mapping[str, object] | list[Mapping[str, object]] | None = None,
         duration_ms: float | None = None,
         error: ExecutionError | TransformErrorReason | CoalesceFailureReason | None = None,
         success_reason: TransformSuccessReason | None = None,
@@ -496,7 +496,7 @@ class LandscapeRecorder:
         node_id: str,
         operation_type: Literal["source_load", "sink_write"],
         *,
-        input_data: dict[str, Any] | None = None,
+        input_data: Mapping[str, object] | None = None,
     ) -> Operation:
         """Begin an operation for source/sink I/O. Delegates to ExecutionRepository."""
         return self._execution.begin_operation(
@@ -511,7 +511,7 @@ class LandscapeRecorder:
         operation_id: str,
         status: Literal["completed", "failed", "pending"],
         *,
-        output_data: dict[str, Any] | None = None,
+        output_data: Mapping[str, object] | None = None,
         error: str | None = None,
         duration_ms: float | None = None,
     ) -> None:
@@ -725,7 +725,7 @@ class LandscapeRecorder:
         run_id: str,
         source_node_id: str,
         row_index: int,
-        data: dict[str, Any],
+        data: Mapping[str, object],
         *,
         row_id: str | None = None,
         quarantined: bool = False,
@@ -822,7 +822,7 @@ class LandscapeRecorder:
         join_group_id: str | None = None,
         expand_group_id: str | None = None,
         error_hash: str | None = None,
-        context: dict[str, Any] | None = None,
+        context: Mapping[str, object] | None = None,
     ) -> str:
         """Record a token outcome. Delegates to DataFlowRepository."""
         return self._data_flow.record_token_outcome(
@@ -854,7 +854,7 @@ class LandscapeRecorder:
         plugin_name: str,
         node_type: NodeType,
         plugin_version: str,
-        config: dict[str, Any],
+        config: Mapping[str, object],
         *,
         node_id: str | None = None,
         sequence: int | None = None,
@@ -964,7 +964,7 @@ class LandscapeRecorder:
         run_id: str,
         token_id: str,
         transform_id: str,
-        row_data: dict[str, Any] | PipelineRow,
+        row_data: Mapping[str, object] | PipelineRow,
         error_details: TransformErrorReason,
         destination: str,
     ) -> str:

@@ -7,6 +7,7 @@ LandscapeDB.connection() usage.
 from __future__ import annotations
 
 import json
+from collections.abc import Mapping
 from typing import TYPE_CHECKING, Any
 
 import structlog
@@ -272,7 +273,7 @@ class DataFlowRepository:
         run_id: str,
         source_node_id: str,
         row_index: int,
-        data: dict[str, Any],
+        data: Mapping[str, object],
         *,
         row_id: str | None = None,
         quarantined: bool = False,
@@ -758,7 +759,7 @@ class DataFlowRepository:
         join_group_id: str | None = None,
         expand_group_id: str | None = None,
         error_hash: str | None = None,
-        context: dict[str, Any] | None = None,
+        context: Mapping[str, object] | None = None,
     ) -> str:
         """Record a token's outcome in the audit trail.
 
@@ -906,7 +907,7 @@ class DataFlowRepository:
         plugin_name: str,
         node_type: NodeType,
         plugin_version: str,
-        config: dict[str, Any],
+        config: Mapping[str, object],
         *,
         node_id: str | None = None,
         sequence: int | None = None,
@@ -1338,7 +1339,7 @@ class DataFlowRepository:
         run_id: str,
         token_id: str,
         transform_id: str,
-        row_data: dict[str, Any] | PipelineRow,
+        row_data: Mapping[str, object] | PipelineRow,
         error_details: TransformErrorReason,
         destination: str,
     ) -> str:

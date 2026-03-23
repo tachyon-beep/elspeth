@@ -164,27 +164,7 @@ allowed_dict_patterns:
   # pipeline data from execution.
   # ═══════════════════════════════════════════════════════════════════════════
 
-  # Execution repository (node state, call, batch recording)
-  - "src/elspeth/core/landscape/execution_repository.py:ExecutionRepository.begin_node_state:input_data"
-  - "src/elspeth/core/landscape/execution_repository.py:ExecutionRepository.complete_node_state:output_data"
-  - "src/elspeth/core/landscape/execution_repository.py:ExecutionRepository.begin_operation:input_data"
-  - "src/elspeth/core/landscape/execution_repository.py:ExecutionRepository.complete_operation:output_data"
-  # Recorder delegation signatures (pass-through to ExecutionRepository)
-  - "src/elspeth/core/landscape/recorder.py:LandscapeRecorder.begin_node_state:input_data"
-  - "src/elspeth/core/landscape/recorder.py:LandscapeRecorder.complete_node_state:output_data"
-  - "src/elspeth/core/landscape/recorder.py:LandscapeRecorder.begin_operation:input_data"
-  - "src/elspeth/core/landscape/recorder.py:LandscapeRecorder.complete_operation:output_data"
-
-  # Data flow recording
-  - "src/elspeth/core/landscape/data_flow_repository.py:DataFlowRepository.create_row:data"
-  - "src/elspeth/core/landscape/data_flow_repository.py:DataFlowRepository.record_token_outcome:context"
-  - "src/elspeth/core/landscape/data_flow_repository.py:DataFlowRepository.register_node:config"
-  - "src/elspeth/core/landscape/data_flow_repository.py:DataFlowRepository.record_transform_error:row_data"
-  # Recorder delegation signatures (pass-through to DataFlowRepository)
-  - "src/elspeth/core/landscape/recorder.py:LandscapeRecorder.create_row:data"
-  - "src/elspeth/core/landscape/recorder.py:LandscapeRecorder.record_token_outcome:context"
-  - "src/elspeth/core/landscape/recorder.py:LandscapeRecorder.register_node:config"
-  - "src/elspeth/core/landscape/recorder.py:LandscapeRecorder.record_transform_error:row_data"
+  # Execution repository and recorder — narrowed to Mapping[str, object] (Task 5)
 
   # (Call recording entries moved to Execution repository block above)
 
