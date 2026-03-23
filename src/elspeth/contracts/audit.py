@@ -10,10 +10,9 @@ garbage from it, something catastrophic happened - crash immediately.
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from datetime import datetime
-from types import MappingProxyType
 from typing import TYPE_CHECKING, Any, ClassVar, Literal, TypedDict
 
-from elspeth.contracts.freeze import deep_freeze
+from elspeth.contracts.freeze import freeze_fields
 
 if TYPE_CHECKING:
     pass  # Placeholder for future type-only imports
@@ -99,12 +98,7 @@ class Node:
         """Validate enum fields - Tier 1 crash on invalid types."""
         _validate_enum(self.node_type, NodeType, "node_type")
         _validate_enum(self.determinism, Determinism, "determinism")
-        if self.schema_fields is not None and not isinstance(self.schema_fields, tuple):
-            object.__setattr__(
-                self,
-                "schema_fields",
-                tuple(deep_freeze(d) for d in self.schema_fields),
-            )
+        freeze_fields(self, "schema_fields")
 
 
 @dataclass(frozen=True, slots=True)
@@ -457,8 +451,7 @@ class RowLineage:
     payload_available: bool
 
     def __post_init__(self) -> None:
-        if self.source_data is not None and not isinstance(self.source_data, MappingProxyType):
-            object.__setattr__(self, "source_data", MappingProxyType(self.source_data))
+        freeze_fields(self, "source_data")
 
 
 class ExportStatusUpdate(TypedDict, total=False):

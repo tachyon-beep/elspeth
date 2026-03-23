@@ -12,11 +12,10 @@ from __future__ import annotations
 
 import random
 
+from errorworks.engine.latency import LatencySimulator
+from errorworks.engine.types import LatencyConfig
 from hypothesis import given, settings
 from hypothesis import strategies as st
-
-from elspeth.testing.chaosengine.latency import LatencySimulator
-from elspeth.testing.chaosengine.types import LatencyConfig
 
 # =============================================================================
 # Non-Negativity

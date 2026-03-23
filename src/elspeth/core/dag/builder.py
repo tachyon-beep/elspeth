@@ -20,6 +20,7 @@ import networkx as nx
 
 from elspeth.contracts import RouteDestination, RoutingMode, error_edge_label
 from elspeth.contracts.enums import NodeType
+from elspeth.contracts.errors import FrameworkBugError
 from elspeth.contracts.types import (
     AggregationName,
     BranchName,
@@ -90,6 +91,22 @@ def _field_required(field_spec: Any) -> bool:
             ftype = str(next(iter(field_spec.values())))
             return not ftype.strip().endswith("?")
     return True
+
+
+def _validate_output_schema_contract(transform: Any) -> None:
+    """Validate that transforms declaring output fields provide a DAG contract.
+
+    Raises FrameworkBugError if declared_output_fields is non-empty but
+    _output_schema_config is None. This prevents silent DAG validation gaps.
+    """
+    if transform.declared_output_fields and transform._output_schema_config is None:
+        raise FrameworkBugError(
+            f"Transform {transform.name!r} declares output fields "
+            f"{sorted(transform.declared_output_fields)} but provides no "
+            f"_output_schema_config for DAG contract validation. "
+            f"Call self._output_schema_config = self._build_output_schema_config(schema_config) "
+            f"in __init__ after setting declared_output_fields."
+        )
 
 
 def build_execution_graph(
@@ -215,12 +232,10 @@ def build_execution_graph(
         node_config = dict(transform_config)
         node_type = NodeType.TRANSFORM
 
-        # Extract computed output schema config if available (e.g., LLM transforms
-        # compute guaranteed_fields and audit_fields from their configuration).
-        # getattr is appropriate here: this is a framework boundary where the DAG
-        # builder queries an optional plugin capability (not all transforms compute
-        # output schemas). See CLAUDE.md "Legitimate Uses: Framework boundaries."
-        output_schema_config = getattr(transform, "_output_schema_config", None)
+        # Validate output schema contract — crash if transform declares output
+        # fields but provides no DAG contract.
+        _validate_output_schema_contract(transform)
+        output_schema_config = transform._output_schema_config
 
         graph.add_node(
             tid,
@@ -247,8 +262,9 @@ def build_execution_graph(
         aid = node_id("aggregation", agg_name, agg_node_config)
         aggregation_ids[AggregationName(agg_name)] = aid
 
-        # Same framework-boundary getattr as transform case above.
-        agg_output_schema_config = getattr(transform, "_output_schema_config", None)
+        # Same validation for aggregation transforms.
+        _validate_output_schema_contract(transform)
+        agg_output_schema_config = transform._output_schema_config
 
         graph.add_node(
             aid,
@@ -755,11 +771,11 @@ def build_execution_graph(
 
     try:
         topo_order = [NodeID(raw_id) for raw_id in nx.topological_sort(graph._graph)]
-    except nx.NetworkXUnfeasible:
+    except nx.NetworkXUnfeasible as unfeasible_exc:
         try:
             cycle = nx.find_cycle(graph._graph)
             cycle_str = " -> ".join(f"{edge[0]}" for edge in cycle)
-            raise GraphValidationError(f"Pipeline contains a cycle: {cycle_str}")
+            raise GraphValidationError(f"Pipeline contains a cycle: {cycle_str}") from unfeasible_exc
         except nx.NetworkXNoCycle as exc:
             raise GraphValidationError("Pipeline contains a cycle") from exc
     pipeline_nodes = [node_id for node_id in topo_order if node_id in processing_node_ids]

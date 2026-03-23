@@ -1078,3 +1078,102 @@ class TestModelDumpFailureRecordsCall:
         recorder.record_call.assert_called_once()
         call_kwargs = recorder.record_call.call_args
         assert call_kwargs.kwargs["status"] == CallStatus.ERROR
+
+
+class TestTier3UsageBoundary:
+    """Bug: TokenUsage.known() used on Tier 3 response.usage fields.
+
+    LLM providers return usage data as Tier 3 external data. Fields like
+    prompt_tokens/completion_tokens may be floats, non-finite, or non-int.
+    TokenUsage.known() trusts values implicitly — from_dict() must be used
+    at the Tier 3 boundary instead.
+    """
+
+    @staticmethod
+    def _create_mock_recorder() -> Mock:
+        recorder = Mock()
+        recorder.allocate_call_index = Mock(return_value=0)
+        recorder.record_call = Mock()
+        return recorder
+
+    def test_float_usage_values_coerced_via_from_dict(self) -> None:
+        """Float token counts from provider must be coerced to None, not crash."""
+        recorder = self._create_mock_recorder()
+
+        message = Mock()
+        message.content = "Response text"
+
+        choice = Mock()
+        choice.message = message
+        choice.finish_reason = "stop"
+
+        usage = Mock()
+        usage.prompt_tokens = 10.5  # Float — not int
+        usage.completion_tokens = 20.7  # Float — not int
+
+        response = Mock()
+        response.choices = [choice]
+        response.model = "gpt-4"
+        response.usage = usage
+        response.model_dump = Mock(return_value={"id": "resp_float_usage"})
+
+        openai_client = MagicMock()
+        openai_client.chat.completions.create.return_value = response
+
+        client = AuditedLLMClient(
+            recorder=recorder,
+            state_id="state_float",
+            run_id="run_float",
+            telemetry_emit=lambda event: None,
+            underlying_client=openai_client,
+        )
+
+        result = client.chat_completion(
+            model="gpt-4",
+            messages=[{"role": "user", "content": "Hello"}],
+        )
+
+        # Float values should be coerced to None (unknown), not passed through
+        assert result.usage.prompt_tokens is None
+        assert result.usage.completion_tokens is None
+
+    def test_bool_usage_values_rejected_as_invalid_by_from_dict(self) -> None:
+        """Bool token counts must be rejected as invalid (bool is subclass of int but not a valid count)."""
+        recorder = self._create_mock_recorder()
+
+        message = Mock()
+        message.content = "Response text"
+
+        choice = Mock()
+        choice.message = message
+        choice.finish_reason = "stop"
+
+        usage = Mock()
+        usage.prompt_tokens = True  # bool — technically int subclass
+        usage.completion_tokens = False
+
+        response = Mock()
+        response.choices = [choice]
+        response.model = "gpt-4"
+        response.usage = usage
+        response.model_dump = Mock(return_value={"id": "resp_bool_usage"})
+
+        openai_client = MagicMock()
+        openai_client.chat.completions.create.return_value = response
+
+        client = AuditedLLMClient(
+            recorder=recorder,
+            state_id="state_bool",
+            run_id="run_bool",
+            telemetry_emit=lambda event: None,
+            underlying_client=openai_client,
+        )
+
+        result = client.chat_completion(
+            model="gpt-4",
+            messages=[{"role": "user", "content": "Hello"}],
+        )
+
+        # Bool values should be rejected by from_dict
+        assert result.usage.prompt_tokens is None
+        assert result.usage.completion_tokens is None

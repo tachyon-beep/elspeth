@@ -873,6 +873,60 @@ class TestAzureBatchLLMTransformResume:
         assert result.reason["reason"] == "batch_failed"
         assert result.reason["batch_id"] == "batch-456"
 
+    def test_failed_batch_with_none_errors_no_crash(self, ctx_with_checkpoint: PluginContext, transform: AzureBatchLLMTransform) -> None:
+        """Tier 3 boundary: batch.errors may be None from Azure SDK — must not crash.
+
+        Azure SDK's Batch object is Tier 3 external data. The errors field
+        may be None, or may have an unexpected shape. Accessing .errors.data
+        without guarding crashes with AttributeError.
+        """
+        mock_client = Mock()
+        mock_batch = Mock()
+        mock_batch.id = "batch-789"
+        mock_batch.status = "failed"
+        mock_batch.output_file_id = None
+        mock_batch.error_file_id = None
+        mock_batch.errors = None  # Azure SDK returns None, not an object with .data
+        mock_client.batches.retrieve.return_value = mock_batch
+
+        transform._client = mock_client
+
+        rows = [{"text": "hello"}]
+
+        result = transform.process([make_pipeline_row(d) for d in rows], ctx_with_checkpoint)
+
+        assert result.status == "error"
+        assert result.reason is not None
+        assert result.reason["reason"] == "batch_failed"
+        # errors key should not be present when batch.errors is None
+        assert "errors" not in result.reason
+
+    def test_failed_batch_with_errors_data_none_no_crash(
+        self, ctx_with_checkpoint: PluginContext, transform: AzureBatchLLMTransform
+    ) -> None:
+        """Tier 3: batch.errors exists but .data is None — must not crash."""
+        mock_client = Mock()
+        mock_batch = Mock()
+        mock_batch.id = "batch-790"
+        mock_batch.status = "failed"
+        mock_batch.output_file_id = None
+        mock_batch.error_file_id = None
+        mock_batch.errors = Mock()
+        mock_batch.errors.data = None  # errors object exists but data is None
+        mock_client.batches.retrieve.return_value = mock_batch
+
+        transform._client = mock_client
+
+        rows = [{"text": "hello"}]
+
+        result = transform.process([make_pipeline_row(d) for d in rows], ctx_with_checkpoint)
+
+        assert result.status == "error"
+        assert result.reason is not None
+        assert result.reason["reason"] == "batch_failed"
+        # errors key should not be present when batch.errors.data is None
+        assert "errors" not in result.reason
+
     def test_cancelled_batch_returns_error(self, ctx_with_checkpoint: PluginContext, transform: AzureBatchLLMTransform) -> None:
         """Cancelled batch returns TransformResult.error()."""
         mock_client = Mock()
@@ -1689,16 +1743,99 @@ class TestAzureBatchLLMTransformDeclaredOutputFields:
         """declared_output_fields includes the main response field."""
         assert "llm_response" in transform.declared_output_fields
 
-    def test_declared_output_fields_contains_audit_fields(self, transform: AzureBatchLLMTransform) -> None:
-        """declared_output_fields includes suffixed audit/metadata fields."""
+    def test_declared_output_fields_contains_operational_fields(self, transform: AzureBatchLLMTransform) -> None:
+        """declared_output_fields includes guaranteed operational metadata fields."""
         assert "llm_response_usage" in transform.declared_output_fields
         assert "llm_response_model" in transform.declared_output_fields
-        assert "llm_response_template_hash" in transform.declared_output_fields
+        # Audit provenance fields (template_hash etc.) are NOT in declared_output_fields —
+        # they go to success_reason["metadata"], not the row
+        assert "llm_response_template_hash" not in transform.declared_output_fields
 
     def test_declared_output_fields_is_nonempty_frozenset(self, transform: AzureBatchLLMTransform) -> None:
         """declared_output_fields is a non-empty frozenset (immutable)."""
         assert isinstance(transform.declared_output_fields, frozenset)
         assert len(transform.declared_output_fields) > 0
+
+
+class TestAzureBatchAuditMetadataInSuccessReason:
+    """Tests for batch-level audit provenance in success_reason["metadata"]."""
+
+    def test_batch_audit_metadata_in_success_reason(self) -> None:
+        """Completed batch includes template provenance in success_reason["metadata"]."""
+        from datetime import UTC, datetime
+
+        ctx = _make_batch_ctx()
+        recent_timestamp = datetime.now(UTC).isoformat()
+        ctx.set_checkpoint(
+            BatchCheckpointState(
+                batch_id="batch-audit-test",
+                input_file_id="file-123",
+                row_mapping={"row-0-abc12345": RowMappingEntry(index=0, variables_hash="hash0")},
+                template_errors=[],
+                submitted_at=recent_timestamp,
+                row_count=1,
+                requests={
+                    "row-0-abc12345": {
+                        "messages": [{"role": "user", "content": "test"}],
+                        "model": "my-gpt4o-batch",
+                    },
+                },
+            )
+        )
+
+        transform = AzureBatchLLMTransform(
+            {
+                "deployment_name": "my-gpt4o-batch",
+                "endpoint": "https://my-resource.openai.azure.com",
+                "api_key": "azure-api-key",
+                "template": "Analyze: {{ row.text }}",
+                "schema": DYNAMIC_SCHEMA,
+                "required_input_fields": [],
+            }
+        )
+
+        mock_client = Mock()
+        mock_batch = Mock()
+        mock_batch.id = "batch-audit-test"
+        mock_batch.status = "completed"
+        mock_batch.output_file_id = "output-file-789"
+        mock_batch.error_file_id = None
+        mock_client.batches.retrieve.return_value = mock_batch
+
+        output_content = Mock()
+        output_content.text = json.dumps(
+            {
+                "custom_id": "row-0-abc12345",
+                "response": {
+                    "body": {
+                        "choices": [{"message": {"content": "Analysis result"}}],
+                        "usage": {"prompt_tokens": 10, "completion_tokens": 20},
+                    }
+                },
+            }
+        )
+        mock_client.files.content.return_value = output_content
+
+        transform._client = mock_client
+
+        rows = [{"text": "hello"}]
+        result = transform.process([make_pipeline_row(d) for d in rows], ctx)
+
+        assert result.status == "success"
+        assert result.rows is not None
+        assert result.success_reason is not None
+        assert result.success_reason["action"] == "enriched"
+
+        # Audit provenance in metadata, not in rows
+        metadata = result.success_reason["metadata"]
+        assert "llm_response_template_hash" in metadata
+        assert "llm_response_variables_hash" in metadata
+        assert metadata["llm_response_variables_hash"] is None  # Per-row hashes in calls table
+        assert "llm_response_template_source" in metadata
+
+        # Audit fields must NOT be in rows
+        assert "llm_response_template_hash" not in result.rows[0]
+        assert "llm_response_variables_hash" not in result.rows[0]
 
 
 class TestBug4_2_NonDictResponseBody:

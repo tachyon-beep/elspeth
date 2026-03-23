@@ -27,7 +27,7 @@ from dataclasses import dataclass, field
 from types import MappingProxyType
 from typing import Any, Protocol, runtime_checkable
 
-from elspeth.contracts.freeze import deep_freeze, deep_thaw
+from elspeth.contracts.freeze import deep_freeze, deep_thaw, freeze_fields
 from elspeth.contracts.token_usage import TokenUsage
 
 # ---------------------------------------------------------------------------
@@ -58,8 +58,7 @@ class RawCallPayload:
     data: Mapping[str, Any]
 
     def __post_init__(self) -> None:
-        if not isinstance(self.data, MappingProxyType):
-            object.__setattr__(self, "data", deep_freeze(self.data))
+        freeze_fields(self, "data")
 
     def to_dict(self) -> dict[str, Any]:
         return {k: deep_thaw(v) for k, v in self.data.items()}
@@ -93,8 +92,7 @@ class LLMCallRequest:
             "messages",
             tuple(deep_freeze(m) for m in self.messages),
         )
-        if not isinstance(self.extra_kwargs, MappingProxyType):
-            object.__setattr__(self, "extra_kwargs", deep_freeze(self.extra_kwargs))
+        freeze_fields(self, "extra_kwargs")
         if collisions := (_LLM_REQUEST_RESERVED_KEYS & self.extra_kwargs.keys()):
             msg = f"extra_kwargs contains reserved key(s) that would overwrite audit fields: {collisions}"
             raise ValueError(msg)
@@ -127,8 +125,7 @@ class LLMCallResponse:
     raw_response: Mapping[str, Any]
 
     def __post_init__(self) -> None:
-        if not isinstance(self.raw_response, MappingProxyType):
-            object.__setattr__(self, "raw_response", deep_freeze(self.raw_response))
+        freeze_fields(self, "raw_response")
 
     def to_dict(self) -> dict[str, Any]:
         """Serialize to audit-trail dict.
@@ -197,10 +194,7 @@ class HTTPCallRequest:
     def __post_init__(self) -> None:
         if not isinstance(self.headers, MappingProxyType):
             object.__setattr__(self, "headers", MappingProxyType(dict(self.headers)))
-        if self.json is not None and not isinstance(self.json, MappingProxyType):
-            object.__setattr__(self, "json", deep_freeze(self.json))
-        if self.params is not None and not isinstance(self.params, MappingProxyType):
-            object.__setattr__(self, "params", deep_freeze(self.params))
+        freeze_fields(self, "json", "params")
         if self.hop_number is not None and self.resolved_ip is None:
             msg = "hop_number requires resolved_ip (redirect hops are always SSRF-safe)"
             raise ValueError(msg)
@@ -249,8 +243,10 @@ class HTTPCallResponse:
     def __post_init__(self) -> None:
         if not isinstance(self.headers, MappingProxyType):
             object.__setattr__(self, "headers", MappingProxyType(dict(self.headers)))
-        if self.body is not None and isinstance(self.body, dict):
-            object.__setattr__(self, "body", deep_freeze(self.body))
+        if self.body is not None and isinstance(self.body, Mapping):
+            frozen = deep_freeze(self.body)
+            if frozen is not self.body:
+                object.__setattr__(self, "body", frozen)
 
     def to_dict(self) -> dict[str, Any]:
         """Serialize to audit-trail dict.

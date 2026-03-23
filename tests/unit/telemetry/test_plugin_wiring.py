@@ -38,7 +38,6 @@ def _make_lifecycle_ctx(events: list[Any]) -> Mock:
     ctx.landscape = recorder
     ctx.rate_limit_registry = None
     ctx.telemetry_emit = events.append
-    ctx.payload_store = None
     ctx.concurrency_config = None
     return ctx
 
@@ -203,14 +202,12 @@ class TestWebScrapeTelemetryWiring:
 
         events: list[Any] = []
         lifecycle_ctx = _make_lifecycle_ctx(events)
-        # WebScrapeTransform requires rate_limit_registry and payload_store
+        # WebScrapeTransform requires rate_limit_registry
         mock_limiter = Mock()
         mock_limiter.try_acquire = Mock(return_value=True)
         mock_registry = Mock()
         mock_registry.get_limiter = Mock(return_value=mock_limiter)
         lifecycle_ctx.rate_limit_registry = mock_registry
-        lifecycle_ctx.payload_store = Mock()
-        lifecycle_ctx.payload_store.store = Mock(return_value="payload-hash-001")
 
         transform.on_start(lifecycle_ctx)
 
@@ -281,6 +278,8 @@ _KNOWN_AUDITED_CLIENT_USERS: set[str] = {
     "src/elspeth/plugins/transforms/llm/azure_multi_query.py",
     "src/elspeth/plugins/transforms/llm/openrouter.py",
     "src/elspeth/plugins/transforms/llm/openrouter_multi_query.py",
+    # RAG retrieval — uses AuditedHTTPClient for Azure Search API
+    "src/elspeth/plugins/infrastructure/clients/retrieval/azure_search.py",
     # Client definitions (define, not use)
     "src/elspeth/plugins/infrastructure/clients/llm.py",
     "src/elspeth/plugins/infrastructure/clients/http.py",

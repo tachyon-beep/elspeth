@@ -8,7 +8,7 @@ from enum import StrEnum
 
 from elspeth.contracts.enums import RoutingKind, RoutingMode
 from elspeth.contracts.errors import RoutingReason
-from elspeth.contracts.freeze import deep_freeze
+from elspeth.contracts.freeze import freeze_fields
 from elspeth.contracts.types import NodeID, SinkName
 
 
@@ -68,9 +68,7 @@ class RoutingAction:
                 "COPY would require dual terminal states (ROUTED + COMPLETED)."
             )
 
-        # Deep-freeze reason to prevent mutation via retained references.
-        if self.reason is not None:
-            object.__setattr__(self, "reason", deep_freeze(self.reason))
+        freeze_fields(self, "reason")
 
     @classmethod
     def continue_(cls, *, reason: RoutingReason | None = None) -> "RoutingAction":

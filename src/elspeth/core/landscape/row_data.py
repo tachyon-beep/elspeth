@@ -28,7 +28,7 @@ from enum import StrEnum
 from types import MappingProxyType
 from typing import Any, ClassVar
 
-from elspeth.contracts.freeze import deep_freeze
+from elspeth.contracts.freeze import freeze_fields
 
 
 class RowDataState(StrEnum):
@@ -84,8 +84,7 @@ class RowDataResult:
                 case _:
                     actual_type = type(payload).__name__
                     raise TypeError(f"{self.state} state requires dict data, got {actual_type}")
-            if not isinstance(self.data, MappingProxyType):
-                object.__setattr__(self, "data", deep_freeze(self.data))
+            freeze_fields(self, "data")
         if self.state not in self._STATES_WITH_DATA and self.data is not None:
             raise ValueError(f"{self.state} state requires None data")
 
@@ -146,7 +145,6 @@ class CallDataResult:
                 case _:
                     actual_type = type(payload).__name__
                     raise TypeError(f"{self.state} state requires dict data, got {actual_type}")
-            if not isinstance(self.data, MappingProxyType):
-                object.__setattr__(self, "data", deep_freeze(self.data))
+            freeze_fields(self, "data")
         if self.state not in self._STATES_WITH_DATA and self.data is not None:
             raise ValueError(f"{self.state} state requires None data")

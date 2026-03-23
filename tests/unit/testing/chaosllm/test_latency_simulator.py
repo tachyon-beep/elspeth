@@ -5,9 +5,8 @@ import random
 import threading
 
 import pytest
-
-from elspeth.testing.chaosengine.latency import LatencySimulator
-from elspeth.testing.chaosengine.types import LatencyConfig
+from errorworks.engine.latency import LatencySimulator
+from errorworks.engine.types import LatencyConfig
 
 
 class FixedRandom(random.Random):

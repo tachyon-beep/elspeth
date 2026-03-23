@@ -124,7 +124,6 @@ class TestSourceContractIntegration:
                 "path": str(csv_file),
                 "schema": {"mode": "observed"},
                 "on_validation_failure": "discard",
-                "normalize_fields": True,
             }
         )
         ctx = make_test_context()

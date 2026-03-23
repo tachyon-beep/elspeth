@@ -10,8 +10,7 @@ from pathlib import Path
 
 import pytest
 import yaml
-
-from elspeth.testing.chaosengine.config_loader import deep_merge, list_presets, load_preset
+from errorworks.engine.config_loader import deep_merge, list_presets, load_preset
 
 # =============================================================================
 # deep_merge

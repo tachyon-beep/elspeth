@@ -204,11 +204,16 @@ class RowReorderBuffer[T]:
             if self._shutdown:
                 raise ShutdownError(f"Buffer '{self._name}' is shut down")
 
-            # Reserve slot
+            # Validate BEFORE mutating state — RowTicket.__post_init__
+            # rejects invalid inputs (e.g. empty row_id). If we wrote
+            # _PendingEntry first, a validation failure would leave an
+            # orphaned entry in _pending with _next_submit_seq advanced.
             seq = self._next_submit_seq
-            self._next_submit_seq += 1
             now = time.perf_counter()
+            ticket = RowTicket(sequence=seq, row_id=row_id, submitted_at=now)
 
+            # Validation passed — safe to commit state changes
+            self._next_submit_seq += 1
             self._pending[seq] = _PendingEntry(
                 sequence=seq,
                 row_id=row_id,
@@ -218,7 +223,7 @@ class RowReorderBuffer[T]:
             self._total_submitted += 1
             self._max_observed_pending = max(self._max_observed_pending, len(self._pending))
 
-            return RowTicket(sequence=seq, row_id=row_id, submitted_at=now)
+            return ticket
 
     def complete(self, ticket: RowTicket, result: T) -> None:
         """Mark a row as complete with its result.

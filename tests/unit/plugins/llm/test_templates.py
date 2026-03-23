@@ -4,7 +4,8 @@
 import pytest
 
 from elspeth.contracts.schema_contract import SchemaContract
-from elspeth.plugins.transforms.llm.templates import PromptTemplate, TemplateError
+from elspeth.plugins.infrastructure.templates import TemplateError
+from elspeth.plugins.transforms.llm.templates import PromptTemplate
 from elspeth.testing import make_field, make_row
 
 

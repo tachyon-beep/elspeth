@@ -679,20 +679,20 @@ class TestRetryBatch:
         assert retry1.batch_id == retry2.batch_id
         assert retry1.attempt == retry2.attempt
 
-    def test_retry_non_failed_batch_raises_value_error(self) -> None:
+    def test_retry_non_failed_batch_raises_audit_integrity_error(self) -> None:
         """Cannot retry a batch that isn't in FAILED status."""
         _db, repo, _rec, tok = _make_repo_with_token()
 
         batch = repo.create_batch("run-1", "agg-1")
         repo.add_batch_member(batch.batch_id, tok, 0)
         # Batch is still DRAFT, not FAILED
-        with pytest.raises(ValueError, match="Can only retry failed batches"):
+        with pytest.raises(AuditIntegrityError, match="can only retry failed batches"):
             repo.retry_batch(batch.batch_id)
 
-    def test_retry_nonexistent_batch_raises_value_error(self) -> None:
-        """Retrying a nonexistent batch raises ValueError."""
+    def test_retry_nonexistent_batch_raises_audit_integrity_error(self) -> None:
+        """Retrying a nonexistent batch raises AuditIntegrityError."""
         _db, repo, _rec, _tok = _make_repo_with_token()
-        with pytest.raises(ValueError, match="Batch not found"):
+        with pytest.raises(AuditIntegrityError, match="not found"):
             repo.retry_batch("nonexistent-batch")
 
 

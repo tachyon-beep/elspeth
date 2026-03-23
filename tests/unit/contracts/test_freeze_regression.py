@@ -1,0 +1,436 @@
+"""Regression tests for freeze/immutability bug cluster.
+
+Each test verifies that a specific freeze bypass is closed:
+- Node.schema_fields: tuple of mutable dicts was not deep-frozen
+- RowLineage.source_data: shallow MappingProxyType left nested containers mutable
+- BatchCheckpointState.template_errors: list elements inside tuple not coerced to tuples
+- HTTPCallResponse.body: non-dict Mapping types bypassed freeze guard
+- GracefulShutdownError.routed_destinations: MappingProxyType wrapped without copy
+- PendingOutcome._FAILURE_OUTCOMES: class-level frozenset (not per-instance set)
+- deep_freeze: arbitrary Mapping support (non-dict, non-MappingProxyType)
+"""
+
+from collections import OrderedDict
+from collections.abc import Iterator, Mapping
+from datetime import UTC, datetime
+from types import MappingProxyType
+
+import pytest
+
+from elspeth.contracts.audit import Node, RowLineage
+from elspeth.contracts.batch_checkpoint import BatchCheckpointState, RowMappingEntry
+from elspeth.contracts.call_data import HTTPCallResponse
+from elspeth.contracts.engine import PendingOutcome
+from elspeth.contracts.enums import Determinism, NodeType, RowOutcome
+from elspeth.contracts.errors import GracefulShutdownError
+from elspeth.contracts.freeze import deep_freeze
+
+# ── Helpers ──────────────────────────────────────────────────────────────────
+
+
+def _make_node(**kwargs: object) -> Node:
+    """Minimal Node factory — override only what you're testing."""
+    defaults: dict = {
+        "node_id": "n1",
+        "run_id": "r1",
+        "plugin_name": "test",
+        "node_type": NodeType.SOURCE,
+        "plugin_version": "1.0",
+        "determinism": Determinism.DETERMINISTIC,
+        "config_hash": "x",
+        "config_json": "{}",
+        "registered_at": datetime.now(UTC),
+    }
+    defaults.update(kwargs)
+    return Node(**defaults)
+
+
+def _make_lineage(**kwargs: object) -> RowLineage:
+    defaults: dict = {
+        "row_id": "row-1",
+        "run_id": "run-1",
+        "source_node_id": "node-src",
+        "row_index": 0,
+        "source_data_hash": "abc",
+        "created_at": datetime.now(UTC),
+        "payload_available": True,
+    }
+    defaults.update(kwargs)
+    return RowLineage(**defaults)
+
+
+def _make_checkpoint(template_errors: object) -> BatchCheckpointState:
+    # type: ignore[arg-type] suppression is intentional — we pass invalid types
+    # to test that __post_init__ coerces them.
+    return BatchCheckpointState(
+        batch_id="batch-1",
+        input_file_id="file-1",
+        row_mapping={"cid-1": RowMappingEntry(index=0, variables_hash="h1")},
+        template_errors=template_errors,  # type: ignore[arg-type]
+        submitted_at="2026-01-01T00:00:00Z",
+        row_count=1,
+        requests={"cid-1": {"model": "gpt-4"}},
+    )
+
+
+class _CustomMapping(Mapping):
+    """A non-dict Mapping for testing deep_freeze's Mapping fallback."""
+
+    def __init__(self, data: dict) -> None:
+        self._data = data
+
+    def __getitem__(self, key: str) -> object:
+        return self._data[key]
+
+    def __len__(self) -> int:
+        return len(self._data)
+
+    def __iter__(self) -> Iterator[str]:
+        return iter(self._data)
+
+
+# ── deep_freeze: Mapping fallback ───────────────────────────────────────────
+
+
+class TestDeepFreezeArbitraryMapping:
+    """deep_freeze must handle non-dict Mapping types (not just dict/MappingProxyType)."""
+
+    def test_custom_mapping_gets_frozen(self) -> None:
+        custom = _CustomMapping({"key": "val", "nested": {"inner": 1}})
+        frozen = deep_freeze(custom)
+        assert isinstance(frozen, MappingProxyType)
+        assert isinstance(frozen["nested"], MappingProxyType)
+
+    def test_ordered_dict_gets_frozen(self) -> None:
+        od = OrderedDict({"a": [1, 2], "b": {"c": 3}})
+        frozen = deep_freeze(od)
+        assert isinstance(frozen, MappingProxyType)
+        assert isinstance(frozen["a"], tuple)
+        assert isinstance(frozen["b"], MappingProxyType)
+
+
+# ── Node.schema_fields ──────────────────────────────────────────────────────
+
+
+class TestNodeSchemaFieldsDeepFreeze:
+    """Bug: tuple of mutable dicts bypassed the isinstance(…, tuple) guard."""
+
+    def test_tuple_of_dicts_gets_deep_frozen(self) -> None:
+        mutable_fields = ({"name": "col_a", "type": "str"}, {"name": "col_b", "type": "int"})
+        node = _make_node(schema_fields=mutable_fields)
+        assert all(isinstance(f, MappingProxyType) for f in node.schema_fields)  # type: ignore[union-attr]
+
+    def test_frozen_fields_are_immutable(self) -> None:
+        """Attempting to write into a frozen schema field raises TypeError."""
+        node = _make_node(schema_fields=[{"name": "col_a"}])
+        with pytest.raises(TypeError):
+            node.schema_fields[0]["new_key"] = "x"  # type: ignore[index]
+
+    def test_list_of_dicts_gets_deep_frozen(self) -> None:
+        node = _make_node(schema_fields=[{"name": "col_a"}])
+        assert isinstance(node.schema_fields, tuple)
+        assert isinstance(node.schema_fields[0], MappingProxyType)
+
+    def test_already_frozen_is_identity_preserved(self) -> None:
+        frozen = (MappingProxyType({"name": "col_a"}),)
+        node = _make_node(schema_fields=frozen)
+        assert node.schema_fields is frozen
+
+    def test_empty_tuple_passes_through(self) -> None:
+        node = _make_node(schema_fields=())
+        assert node.schema_fields == ()
+        assert isinstance(node.schema_fields, tuple)
+
+    def test_none_schema_fields_unchanged(self) -> None:
+        node = _make_node(schema_fields=None)
+        assert node.schema_fields is None
+
+
+# ── RowLineage.source_data ──────────────────────────────────────────────────
+
+
+class TestRowLineageDeepFreeze:
+    """Bug: shallow MappingProxyType left nested containers mutable."""
+
+    def test_nested_dict_is_deep_frozen(self) -> None:
+        lineage = _make_lineage(source_data={"metadata": {"nested_key": "value"}})
+        assert isinstance(lineage.source_data, MappingProxyType)
+        assert isinstance(lineage.source_data["metadata"], MappingProxyType)  # type: ignore[index]
+
+    def test_nested_dict_is_immutable(self) -> None:
+        """Attempting to write into nested container raises TypeError."""
+        lineage = _make_lineage(source_data={"metadata": {"key": "val"}})
+        with pytest.raises(TypeError):
+            lineage.source_data["metadata"]["new_key"] = "x"  # type: ignore[index]
+
+    def test_nested_list_is_frozen_to_tuple(self) -> None:
+        lineage = _make_lineage(source_data={"tags": ["a", "b"]})
+        assert isinstance(lineage.source_data["tags"], tuple)  # type: ignore[index]
+
+    def test_none_source_data_unchanged(self) -> None:
+        lineage = _make_lineage(source_data=None, payload_available=False)
+        assert lineage.source_data is None
+
+
+# ── BatchCheckpointState.template_errors ────────────────────────────────────
+
+
+class TestBatchCheckpointTemplateErrorsFreeze:
+    """Bug: list elements inside tuple not coerced to tuples."""
+
+    def test_list_elements_become_tuples(self) -> None:
+        cp = _make_checkpoint([[0, "error msg"]])
+        assert isinstance(cp.template_errors, tuple)
+        assert isinstance(cp.template_errors[0], tuple)
+        assert cp.template_errors[0] == (0, "error msg")
+
+    def test_tuple_of_lists_gets_inner_frozen(self) -> None:
+        cp = _make_checkpoint(([0, "err1"], [1, "err2"]))
+        assert all(isinstance(e, tuple) for e in cp.template_errors)
+
+    def test_already_frozen_is_unchanged(self) -> None:
+        cp = _make_checkpoint(((0, "err1"),))
+        assert cp.template_errors == ((0, "err1"),)
+
+    def test_empty_template_errors(self) -> None:
+        cp = _make_checkpoint([])
+        assert cp.template_errors == ()
+
+    def test_empty_tuple_passes_through(self) -> None:
+        cp = _make_checkpoint(())
+        assert cp.template_errors == ()
+
+    def test_wrong_arity_crashes(self) -> None:
+        """A 3-element tuple must crash — not silently persist to checkpoint."""
+        with pytest.raises(ValueError, match=r"must be \(int, str\)"):
+            _make_checkpoint([(0, "err", "extra")])
+
+    def test_wrong_index_type_crashes(self) -> None:
+        with pytest.raises(ValueError, match="must be int"):
+            _make_checkpoint([("zero", "err")])
+
+    def test_wrong_message_type_crashes(self) -> None:
+        with pytest.raises(ValueError, match="must be str"):
+            _make_checkpoint([(0, 42)])
+
+
+# ── HTTPCallResponse.body ───────────────────────────────────────────────────
+
+
+class TestHTTPCallResponseBodyFreeze:
+    """Bug: non-dict Mapping types bypassed isinstance(…, dict) guard."""
+
+    def test_ordered_dict_body_gets_frozen(self) -> None:
+        body = OrderedDict({"result": "ok", "nested": {"key": "val"}})
+        resp = HTTPCallResponse(
+            status_code=200,
+            headers={"content-type": "application/json"},
+            body_size=42,
+            body=body,
+        )
+        assert isinstance(resp.body, MappingProxyType)
+        assert isinstance(resp.body["nested"], MappingProxyType)  # type: ignore[index]
+
+    def test_custom_mapping_body_gets_frozen(self) -> None:
+        """Non-dict, non-OrderedDict Mapping must also be frozen."""
+        body = _CustomMapping({"result": "ok"})
+        resp = HTTPCallResponse(
+            status_code=200,
+            headers={},
+            body_size=10,
+            body=body,
+        )
+        assert isinstance(resp.body, MappingProxyType)
+
+    def test_dict_body_still_frozen(self) -> None:
+        resp = HTTPCallResponse(
+            status_code=200,
+            headers={"content-type": "application/json"},
+            body_size=10,
+            body={"key": "value"},
+        )
+        assert isinstance(resp.body, MappingProxyType)
+
+    def test_frozen_body_is_immutable(self) -> None:
+        """Attempting to write into frozen body raises TypeError."""
+        resp = HTTPCallResponse(
+            status_code=200,
+            headers={},
+            body_size=10,
+            body={"key": "value"},
+        )
+        with pytest.raises(TypeError):
+            resp.body["new_key"] = "x"  # type: ignore[index]
+
+    def test_string_body_unchanged(self) -> None:
+        resp = HTTPCallResponse(
+            status_code=200,
+            headers={},
+            body_size=5,
+            body="hello",
+        )
+        assert resp.body == "hello"
+
+    def test_none_body_unchanged(self) -> None:
+        resp = HTTPCallResponse(status_code=200, headers={})
+        assert resp.body is None
+
+    def test_already_frozen_body_identity_preserved(self) -> None:
+        frozen_body = MappingProxyType({"k": "v"})
+        resp = HTTPCallResponse(
+            status_code=200,
+            headers={},
+            body_size=10,
+            body=frozen_body,
+        )
+        assert resp.body is frozen_body
+
+
+# ── GracefulShutdownError.routed_destinations ───────────────────────────────
+
+
+class TestGracefulShutdownErrorCopyOnWrap:
+    """Bug: MappingProxyType wrapped original dict without copy."""
+
+    def test_caller_mutation_not_visible(self) -> None:
+        destinations = {"sink_a": 10, "sink_b": 5}
+        error = GracefulShutdownError(
+            rows_processed=15,
+            run_id="run-1",
+            routed_destinations=destinations,
+        )
+        destinations["sink_c"] = 99
+        assert "sink_c" not in error.routed_destinations
+
+    def test_destinations_are_immutable(self) -> None:
+        """MappingProxyType wrapping must reject writes."""
+        error = GracefulShutdownError(
+            rows_processed=5,
+            run_id="run-1",
+            routed_destinations={"sink_a": 1},
+        )
+        with pytest.raises(TypeError):
+            error.routed_destinations["sink_b"] = 2  # type: ignore[index]
+
+    def test_none_destinations_gives_empty_mapping(self) -> None:
+        error = GracefulShutdownError(rows_processed=0, run_id="run-1")
+        assert isinstance(error.routed_destinations, MappingProxyType)
+        assert len(error.routed_destinations) == 0
+
+
+# ── PendingOutcome._FAILURE_OUTCOMES ────────────────────────────────────────
+
+
+class TestPendingOutcomeClassVar:
+    """Bug: _failure_outcomes set recreated on every construction."""
+
+    def test_failure_outcomes_is_class_level(self) -> None:
+        assert isinstance(PendingOutcome._FAILURE_OUTCOMES, frozenset)
+
+    def test_failure_outcomes_shared_across_instances(self) -> None:
+        """Both instances must reference the same ClassVar frozenset object."""
+        a = PendingOutcome(outcome=RowOutcome.COMPLETED)
+        b = PendingOutcome(outcome=RowOutcome.ROUTED)
+        assert a._FAILURE_OUTCOMES is b._FAILURE_OUTCOMES
+
+    def test_validation_still_works(self) -> None:
+        with pytest.raises(ValueError, match="QUARANTINED outcome must have error_hash"):
+            PendingOutcome(outcome=RowOutcome.QUARANTINED, error_hash=None)
+        po = PendingOutcome(outcome=RowOutcome.QUARANTINED, error_hash="abc")
+        assert po.error_hash == "abc"
+
+
+# ── deep_freeze: set and frozenset branches ─────────────────────────────────
+
+
+class TestDeepFreezeSetBranches:
+    """deep_freeze must handle set→frozenset and frozenset idempotency."""
+
+    def test_set_becomes_frozenset(self) -> None:
+        result = deep_freeze({"a", "b", "c"})
+        assert isinstance(result, frozenset)
+        assert result == frozenset({"a", "b", "c"})
+
+    def test_set_of_mutable_containers_is_deep_frozen(self) -> None:
+        """Sets can't contain dicts, but nested in a list they can."""
+        result = deep_freeze([{"a", "b"}, {"c"}])
+        assert isinstance(result, tuple)
+        assert all(isinstance(s, frozenset) for s in result)
+
+    def test_frozenset_is_idempotent(self) -> None:
+        """Already-frozen frozenset of scalars returns same object."""
+        fs = frozenset({"x", "y", "z"})
+        assert deep_freeze(fs) is fs
+
+    def test_frozenset_with_mutable_inner_is_rebuilt(self) -> None:
+        """frozenset containing a tuple with a mutable dict gets rebuilt."""
+        # frozenset can't contain dicts directly, but can contain tuples
+        inner = (1, 2)
+        fs = frozenset({inner})
+        # Already all-immutable — should be identity-preserved
+        assert deep_freeze(fs) is fs
+
+
+# ── deep_freeze: None and scalar idempotency ────────────────────────────────
+
+
+class TestDeepFreezeIdempotency:
+    """deep_freeze on None and scalars is a no-op."""
+
+    def test_none_returns_none(self) -> None:
+        assert deep_freeze(None) is None
+
+    def test_string_returns_same(self) -> None:
+        s = "hello"
+        assert deep_freeze(s) is s
+
+    def test_int_returns_same(self) -> None:
+        assert deep_freeze(42) is 42  # noqa: F632 — intentional identity check
+
+    def test_custom_mapping_is_not_identity_preserved(self) -> None:
+        """Non-dict Mapping always rebuilds (no idempotency fast path)."""
+        custom = _CustomMapping({"key": "val"})
+        frozen = deep_freeze(custom)
+        assert frozen is not custom
+        assert isinstance(frozen, MappingProxyType)
+
+
+# ── freeze_fields utility ───────────────────────────────────────────────────
+
+
+class TestFreezeFieldsUtility:
+    """Direct tests for the freeze_fields() utility function."""
+
+    def test_mutable_field_is_replaced(self) -> None:
+        """freeze_fields replaces a mutable dict with a MappingProxyType."""
+        lineage = _make_lineage(source_data={"key": {"nested": "val"}})
+        assert isinstance(lineage.source_data, MappingProxyType)
+        assert isinstance(lineage.source_data["key"], MappingProxyType)  # type: ignore[index]
+
+    def test_already_frozen_field_is_not_reset(self) -> None:
+        """freeze_fields skips object.__setattr__ when field is already frozen."""
+        frozen_data = MappingProxyType({"key": "val"})
+        lineage = _make_lineage(source_data=frozen_data)
+        # Identity preserved — no unnecessary setattr
+        assert lineage.source_data is frozen_data
+
+    def test_none_field_passes_through(self) -> None:
+        """freeze_fields on a None-valued field is a no-op."""
+        lineage = _make_lineage(source_data=None, payload_available=False)
+        assert lineage.source_data is None
+
+    def test_multiple_fields_in_one_call(self) -> None:
+        """freeze_fields can freeze multiple fields in a single call."""
+        cp = BatchCheckpointState(
+            batch_id="b1",
+            input_file_id="f1",
+            row_mapping={"cid": RowMappingEntry(index=0, variables_hash="h")},
+            template_errors=[(0, "err")],
+            submitted_at="2026-01-01T00:00:00Z",
+            row_count=1,
+            requests={"cid": {"model": "gpt-4"}},
+        )
+        # All three container fields should be frozen
+        assert isinstance(cp.row_mapping, MappingProxyType)
+        assert isinstance(cp.template_errors, tuple)
+        assert isinstance(cp.requests, MappingProxyType)

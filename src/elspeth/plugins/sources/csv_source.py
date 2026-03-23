@@ -28,7 +28,7 @@ class CSVSourceConfig(TabularSourceDataConfig):
 
     Inherits from TabularSourceDataConfig, which provides:
     - schema and on_validation_failure (from SourceDataConfig)
-    - columns, normalize_fields, field_mapping (field normalization)
+    - columns, field_mapping (field normalization is mandatory)
     """
 
     delimiter: str = ","
@@ -62,11 +62,11 @@ class CSVSource(BaseSource):
         encoding: File encoding (default: "utf-8")
         skip_rows: Number of header rows to skip (default: 0)
 
-    Field normalization options (via TabularSourceDataConfig):
-        normalize_fields: Normalize messy headers to valid identifiers (default: False)
-        field_mapping: Override specific normalized names (requires normalize_fields)
-        columns: Explicit column names for headerless files (mutually exclusive
-                 with normalize_fields)
+    Field normalization:
+        Headers are always normalized to valid Python identifiers at the
+        source boundary. This is mandatory and not configurable.
+        field_mapping: Override specific normalized names (optional)
+        columns: Explicit column names for headerless files (optional)
 
     The schema can be:
         - Observed: {"mode": "observed"} - accept any fields
@@ -90,7 +90,6 @@ class CSVSource(BaseSource):
 
         # Store normalization config for use in load()
         self._columns = cfg.columns
-        self._normalize_fields = cfg.normalize_fields
         self._field_mapping = cfg.field_mapping
 
         # Field resolution computed at load() time - includes version for audit
@@ -119,14 +118,13 @@ class CSVSource(BaseSource):
         self._contract_builder: ContractBuilder | None = None
 
     def load(self, ctx: SourceContext) -> Iterator[SourceRow]:
-        """Load rows from CSV file with optional field normalization.
+        """Load rows from CSV file with mandatory field normalization.
 
         Uses csv.reader directly on file handle to properly support
         multiline quoted fields (e.g., "field with\nembedded newline").
 
         Field resolution modes:
-        - Default: Headers read from file, used as-is
-        - normalize_fields=True: Headers normalized to valid Python identifiers
+        - Headers from file: Always normalized to valid Python identifiers
         - columns=[...]: Headerless file, use explicit column names
 
         Each row is validated against the configured schema:
@@ -326,7 +324,6 @@ class CSVSource(BaseSource):
         # This may raise ValueError on collision
         self._field_resolution = resolve_field_names(
             raw_headers=raw_headers,
-            normalize_fields=self._normalize_fields,
             field_mapping=self._field_mapping,
             columns=self._columns,
         )
@@ -477,7 +474,7 @@ class CSVSource(BaseSource):
                 row={"__blank_lines__": blank_line_count},
                 error=f"CSV contained {blank_line_count} blank line(s) that were skipped during processing",
                 schema_mode="parse",
-                destination="discard",
+                destination=self._on_validation_failure,
             )
 
         # CRITICAL: Handle empty source case (all rows quarantined or no rows)
@@ -494,7 +491,7 @@ class CSVSource(BaseSource):
         """Return field resolution mapping for audit trail.
 
         Returns the mapping from original CSV headers to final field names,
-        computed during load() when normalize_fields or field_mapping is used.
+        computed during load() via mandatory field normalization or field_mapping.
 
         Returns:
             Tuple of (resolution_mapping, normalization_version) if field resolution

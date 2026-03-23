@@ -15,7 +15,6 @@ import pytest
 
 from elspeth.contracts.engine import BufferEntry
 from elspeth.contracts.results import TransformResult
-from elspeth.contracts.schema_contract import FieldContract, PipelineRow, SchemaContract
 from elspeth.contracts.token_usage import TokenUsage
 from elspeth.plugins.transforms.llm.multi_query import QuerySpec
 from elspeth.plugins.transforms.llm.provider import FinishReason, LLMQueryResult
@@ -157,52 +156,49 @@ def multi_query_result() -> TransformResult:
 
 @pytest.fixture()
 def parallel_multi_query_result() -> TransformResult:
-    """Execute MultiQueryStrategy parallel path via mocked PooledExecutor."""
-    # Build per-query success TransformResults as the pool would return them
-    query_outputs = [
-        {"sentiment": json.dumps({"score": 85, "rationale": "Good"})},
-        {"topic": json.dumps({"category": "tech", "confidence": 0.9})},
-    ]
+    """Execute MultiQueryStrategy parallel path via mocked PooledExecutor.
 
-    buffer_entries: list[BufferEntry[TransformResult]] = []
-    for i, fields in enumerate(query_outputs):
-        observed = SchemaContract(
-            mode="OBSERVED",
-            fields=tuple(
-                FieldContract(
-                    normalized_name=k,
-                    original_name=k,
-                    python_type=str,
-                    required=False,
-                    source="inferred",
+    The mock execute_batch calls process_fn for each context, mirroring
+    the real PooledExecutor contract.  This lets _process_fn populate the
+    audit_metadata_by_index side-channel that _execute_parallel validates.
+    """
+    from collections.abc import Callable
+
+    from elspeth.plugins.infrastructure.pooling.executor import RowContext
+
+    def _fake_execute_batch(
+        contexts: list[RowContext],
+        process_fn: Callable[[dict[str, Any], str], TransformResult],
+    ) -> list[BufferEntry[TransformResult]]:
+        entries: list[BufferEntry[TransformResult]] = []
+        for i, ctx in enumerate(contexts):
+            result = process_fn(ctx.row, ctx.state_id)
+            entries.append(
+                BufferEntry(
+                    submit_index=i,
+                    complete_index=i,
+                    result=result,
+                    submit_timestamp=0.0,
+                    complete_timestamp=0.001,
+                    buffer_wait_ms=0.0,
                 )
-                for k in fields
-            ),
-            locked=True,
-        )
-        result = TransformResult.success(
-            PipelineRow(fields, observed),
-            success_reason={"action": "query_completed", "metadata": {"query_name": f"query_{i}"}},
-        )
-        buffer_entries.append(
-            BufferEntry(
-                submit_index=i,
-                complete_index=i,
-                result=result,
-                submit_timestamp=0.0,
-                complete_timestamp=0.001,
-                buffer_wait_ms=0.0,
             )
-        )
+        return entries
 
     mock_executor = Mock()
-    mock_executor.execute_batch.return_value = buffer_entries
+    mock_executor.execute_batch.side_effect = _fake_execute_batch
 
     strategy = _make_multi_query_strategy(executor=mock_executor)
+    provider = _make_mock_provider(
+        [
+            {"score": 85, "rationale": "Good"},
+            {"category": "tech", "confidence": 0.9},
+        ]
+    )
     row = make_pipeline_row({"text": "hello"})
     ctx = _make_ctx()
 
-    return strategy.execute(row, ctx, provider=Mock(), tracer=Mock())
+    return strategy.execute(row, ctx, provider=provider, tracer=Mock())
 
 
 # ---------------------------------------------------------------------------
@@ -244,6 +240,36 @@ class TestSingleQuerySuccessReason:
         assert isinstance(single_query_result.success_reason["fields_added"], list)
         assert len(single_query_result.success_reason["fields_added"]) > 0
 
+    def test_success_reason_contains_audit_metadata(
+        self,
+        single_query_result: TransformResult,
+    ) -> None:
+        """Audit provenance fields live in success_reason['metadata'], not the row."""
+        assert single_query_result.success_reason is not None
+        metadata = single_query_result.success_reason["metadata"]
+        response_field = "llm_response"
+        assert f"{response_field}_template_hash" in metadata
+        assert f"{response_field}_variables_hash" in metadata
+        assert f"{response_field}_template_source" in metadata
+        assert f"{response_field}_lookup_hash" in metadata
+        assert f"{response_field}_lookup_source" in metadata
+        assert f"{response_field}_system_prompt_source" in metadata
+
+    def test_audit_fields_not_in_row(
+        self,
+        single_query_result: TransformResult,
+    ) -> None:
+        """Audit provenance fields must NOT be in the pipeline row."""
+        assert single_query_result.row is not None
+        row_data = single_query_result.row.to_dict()
+        response_field = "llm_response"
+        from elspeth.plugins.transforms.llm import LLM_AUDIT_SUFFIXES
+
+        for suffix in LLM_AUDIT_SUFFIXES:
+            assert f"{response_field}{suffix}" not in row_data, (
+                f"Audit field '{response_field}{suffix}' found in row — should be in success_reason['metadata'] only"
+            )
+
 
 # ---------------------------------------------------------------------------
 # Multi-query tests (sequential path)
@@ -279,6 +305,18 @@ class TestMultiQuerySuccessReason:
         assert "fields_added" in multi_query_result.success_reason
         assert isinstance(multi_query_result.success_reason["fields_added"], list)
         assert len(multi_query_result.success_reason["fields_added"]) > 0
+
+    def test_success_reason_contains_audit_metadata(
+        self,
+        multi_query_result: TransformResult,
+    ) -> None:
+        """Multi-query audit provenance fields live in success_reason['metadata']."""
+        assert multi_query_result.success_reason is not None
+        metadata = multi_query_result.success_reason["metadata"]
+        for query_name in ("sentiment", "topic"):
+            prefix = f"{query_name}_llm_response"
+            assert f"{prefix}_template_hash" in metadata
+            assert f"{prefix}_variables_hash" in metadata
 
 
 # ---------------------------------------------------------------------------

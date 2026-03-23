@@ -25,7 +25,7 @@ from dataclasses import dataclass, field
 from types import MappingProxyType
 from typing import TYPE_CHECKING, Any
 
-from elspeth.contracts.freeze import deep_freeze
+from elspeth.contracts.freeze import freeze_fields
 
 if TYPE_CHECKING:
     from elspeth.contracts import PendingOutcome, SinkProtocol, SourceProtocol, TokenInfo
@@ -55,16 +55,6 @@ RowPlugin = TransformProtocol
 """Row-processing plugin type for pipeline transforms list."""
 
 
-def _freeze_fields(instance: Any, *field_names: str) -> None:
-    """Freeze named mapping fields on a dataclass via deep_freeze.
-
-    Wraps the common ``object.__setattr__(self, name, MappingProxyType(dict(...)))``
-    boilerplate used across frozen/slotted dataclass ``__post_init__`` methods.
-    """
-    for name in field_names:
-        object.__setattr__(instance, name, deep_freeze(getattr(instance, name)))
-
-
 @dataclass(frozen=True, slots=True)
 class PipelineConfig:
     """Configuration for a pipeline run.
@@ -87,18 +77,26 @@ class PipelineConfig:
     """
 
     source: SourceProtocol
-    transforms: list[RowPlugin]
-    sinks: dict[str, SinkProtocol]
-    config: dict[str, Any] = field(default_factory=dict)
-    gates: list[GateSettings] = field(default_factory=list)
-    aggregation_settings: dict[str, AggregationSettings] = field(default_factory=dict)
-    coalesce_settings: list[CoalesceSettings] = field(default_factory=list)
+    transforms: Sequence[RowPlugin]
+    sinks: Mapping[str, SinkProtocol]
+    config: Mapping[str, Any] = field(default_factory=dict)
+    gates: Sequence[GateSettings] = field(default_factory=list)
+    aggregation_settings: Mapping[str, AggregationSettings] = field(default_factory=dict)
+    coalesce_settings: Sequence[CoalesceSettings] = field(default_factory=list)
 
     def __post_init__(self) -> None:
         if not self.sinks:
             from elspeth.contracts.errors import OrchestrationInvariantError
 
             raise OrchestrationInvariantError("PipelineConfig requires at least one sink")
+        # Freeze mutable container fields — frozen=True prevents reassignment
+        # but list/dict contents remain mutable without explicit freezing.
+        object.__setattr__(self, "transforms", tuple(self.transforms))
+        object.__setattr__(self, "sinks", MappingProxyType(dict(self.sinks)))
+        object.__setattr__(self, "config", MappingProxyType(dict(self.config)))
+        object.__setattr__(self, "gates", tuple(self.gates))
+        object.__setattr__(self, "aggregation_settings", MappingProxyType(dict(self.aggregation_settings)))
+        object.__setattr__(self, "coalesce_settings", tuple(self.coalesce_settings))
 
 
 @dataclass(frozen=True, slots=True)
@@ -120,7 +118,7 @@ class RunResult:
     routed_destinations: Mapping[str, int] = field(default_factory=lambda: MappingProxyType({}))
 
     def __post_init__(self) -> None:
-        _freeze_fields(self, "routed_destinations")
+        freeze_fields(self, "routed_destinations")
 
 
 @dataclass(frozen=True, slots=True)
@@ -142,7 +140,7 @@ class AggregationFlushResult:
     routed_destinations: Mapping[str, int] = field(default_factory=lambda: MappingProxyType({}))
 
     def __post_init__(self) -> None:
-        _freeze_fields(self, "routed_destinations")
+        freeze_fields(self, "routed_destinations")
 
     def __add__(self, other: AggregationFlushResult) -> AggregationFlushResult:
         """Combine two results by summing all counters."""
@@ -274,7 +272,7 @@ class GraphArtifacts:
     coalesce_id_map: Mapping[CoalesceName, NodeID]
 
     def __post_init__(self) -> None:
-        _freeze_fields(
+        freeze_fields(
             self,
             "edge_map",
             "sink_id_map",
@@ -313,7 +311,7 @@ class RunContext:
     agg_transform_lookup: Mapping[str, AggNodeEntry]
 
     def __post_init__(self) -> None:
-        _freeze_fields(self, "coalesce_node_map", "agg_transform_lookup")
+        freeze_fields(self, "coalesce_node_map", "agg_transform_lookup")
 
 
 @dataclass(slots=True)
@@ -347,7 +345,7 @@ class LoopContext:
     last_token_id: str | None = None
 
     def __post_init__(self) -> None:
-        _freeze_fields(self, "agg_transform_lookup", "coalesce_node_map")
+        freeze_fields(self, "agg_transform_lookup", "coalesce_node_map")
 
 
 @dataclass(frozen=True, slots=True)
@@ -381,7 +379,7 @@ class ResumeState:
     schema_contract: SchemaContract
 
     def __post_init__(self) -> None:
-        _freeze_fields(self, "restored_aggregation_state")
+        freeze_fields(self, "restored_aggregation_state")
         # unprocessed_rows contains raw row dicts that PipelineRow expects as
         # plain dict — deep_freeze would convert them to MappingProxyType.
         if not isinstance(self.unprocessed_rows, tuple):

@@ -205,7 +205,7 @@ class LandscapeExporter:
             "config_hash": run.config_hash,
             # Full resolved settings for audit trail portability (not just hash)
             "settings": self._parse_tier1_json(run.settings_json, "settings_json", f"run {run_id}"),
-            "reproducibility_grade": run.reproducibility_grade,
+            "reproducibility_grade": run.reproducibility_grade.value if run.reproducibility_grade is not None else None,
         }
 
         # Secret resolutions (run-level provenance for Key Vault secrets)

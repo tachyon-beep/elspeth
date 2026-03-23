@@ -7,8 +7,7 @@ from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 import pytest
-
-from elspeth.testing.chaosllm_mcp.server import ChaosLLMAnalyzer, create_server
+from errorworks.llm_mcp.server import ChaosLLMAnalyzer, create_server
 
 # === Fixtures ===
 
@@ -480,9 +479,12 @@ class TestCreateServer:
 
     def test_creates_server(self, temp_db: Path) -> None:
         """Server can be created."""
-        server = create_server(str(temp_db))
+        result = create_server(str(temp_db))
+        # errorworks returns (Server, ChaosLLMAnalyzer) tuple
+        server, analyzer = result
         assert server is not None
         assert server.name == "chaosllm-analysis"
+        assert analyzer is not None
 
 
 # === Integration Tests with Actual MCP Protocol ===
@@ -493,14 +495,14 @@ class TestMCPServerTools:
 
     def test_server_has_name(self, temp_db: Path) -> None:
         """Server has correct name."""
-        server = create_server(str(temp_db))
+        server, _analyzer = create_server(str(temp_db))
         assert server.name == "chaosllm-analysis"
 
     def test_diagnose_via_analyzer(self, temp_db: Path) -> None:
         """Diagnose tool can be called via analyzer."""
         # We test through the analyzer directly since MCP protocol testing
         # requires a full stdio server setup
-        from elspeth.testing.chaosllm_mcp.server import ChaosLLMAnalyzer
+        from errorworks.llm_mcp.server import ChaosLLMAnalyzer
 
         analyzer = ChaosLLMAnalyzer(str(temp_db))
         result = analyzer.diagnose()

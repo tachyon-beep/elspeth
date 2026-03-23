@@ -5,9 +5,9 @@ import random
 import threading
 
 import pytest
-
-from elspeth.testing.chaosllm.config import BurstConfig, ErrorInjectionConfig
-from elspeth.testing.chaosllm.error_injector import (
+from errorworks.llm.config import ErrorInjectionConfig
+from errorworks.llm.config import LLMBurstConfig as BurstConfig
+from errorworks.llm.error_injector import (
     CONNECTION_ERRORS,
     HTTP_ERRORS,
     MALFORMED_TYPES,

@@ -34,15 +34,16 @@ from elspeth.plugins.infrastructure.base import BaseTransform
 from elspeth.plugins.infrastructure.clients.http import AuditedHTTPClient
 from elspeth.plugins.infrastructure.pooling import is_capacity_error
 from elspeth.plugins.infrastructure.schema_factory import create_schema_from_config
+from elspeth.plugins.infrastructure.templates import TemplateError
 from elspeth.plugins.transforms.llm import (
     _build_augmented_output_schema,
-    get_llm_audit_fields,
+    build_llm_audit_metadata,
     get_llm_guaranteed_fields,
-    populate_llm_metadata_fields,
+    populate_llm_operational_fields,
 )
 from elspeth.plugins.transforms.llm.base import LLMConfig
 from elspeth.plugins.transforms.llm.langfuse import create_langfuse_tracer
-from elspeth.plugins.transforms.llm.templates import PromptTemplate, TemplateError
+from elspeth.plugins.transforms.llm.templates import PromptTemplate
 from elspeth.plugins.transforms.llm.tracing import (
     TracingConfig,
     parse_tracing_config,
@@ -177,7 +178,7 @@ class OpenRouterBatchLLMTransform(BaseTransform):
         cfg = OpenRouterBatchConfig.from_dict(config)
 
         # Declare output fields for centralized collision detection.
-        self.declared_output_fields = frozenset([*get_llm_guaranteed_fields(cfg.response_field), *get_llm_audit_fields(cfg.response_field)])
+        self.declared_output_fields = frozenset(get_llm_guaranteed_fields(cfg.response_field))
 
         # Pre-build auth headers — avoids storing the raw API key as a named attribute
         self._request_headers = {
@@ -221,17 +222,14 @@ class OpenRouterBatchLLMTransform(BaseTransform):
 
         # Build output schema config with field categorization
         guaranteed = get_llm_guaranteed_fields(self._response_field)
-        audit = get_llm_audit_fields(self._response_field)
 
         # Merge with any existing fields from base schema
         base_guaranteed = schema_config.guaranteed_fields or ()
-        base_audit = schema_config.audit_fields or ()
 
         self._output_schema_config = SchemaConfig(
             mode=schema_config.mode,
             fields=schema_config.fields,
             guaranteed_fields=tuple(set(base_guaranteed) | set(guaranteed)),
-            audit_fields=tuple(set(base_audit) | set(audit)),
             required_fields=schema_config.required_fields,
         )
 
@@ -435,6 +433,8 @@ class OpenRouterBatchLLMTransform(BaseTransform):
             if isinstance(result, Exception):
                 # StreamError escaped from _process_single_row — record to audit
                 # trail so the failure is attributable (h27 fix).
+                # NOTE: Not wrapped in AuditIntegrityError — per-row recording in batch
+                # loop. Crashing here would lose all progress for remaining rows.
                 ctx.record_call(
                     call_type=CallType.LLM,
                     status=CallStatus.ERROR,
@@ -488,9 +488,29 @@ class OpenRouterBatchLLMTransform(BaseTransform):
             for key in all_keys
         )
         output_contract = SchemaContract(mode="OBSERVED", fields=fields, locked=True)
+
+        # Batch-level template provenance — shared across all rows in the batch.
+        # Per-row request/response hashes are in the calls table via record_call().
+        batch_audit = build_llm_audit_metadata(
+            self._response_field,
+            template_hash=self._template.template_hash,
+            variables_hash=None,  # Per-row hashes recorded in calls table via record_call()
+            template_source=self._template.template_source,
+            lookup_hash=self._template.lookup_hash,
+            lookup_source=self._template.lookup_source,
+            system_prompt_source=self._system_prompt_source,
+        )
+
         return TransformResult.success_multi(
             [PipelineRow(r, output_contract) for r in output_rows],
-            success_reason={"action": "enriched", "fields_added": [self._response_field]},
+            success_reason={
+                "action": "enriched",
+                "fields_added": [self._response_field],
+                "metadata": {
+                    "batch_size": len(output_rows),
+                    **batch_audit,
+                },
+            },
         )
 
     def _get_http_client(self, state_id: str, *, token_id: str | None = None) -> AuditedHTTPClient:
@@ -713,17 +733,11 @@ class OpenRouterBatchLLMTransform(BaseTransform):
         # 7. Build output row (OUR CODE - let exceptions crash)
         output = row.to_dict()
         output[self._response_field] = content
-        populate_llm_metadata_fields(
+        populate_llm_operational_fields(
             output,
             self._response_field,
             usage=usage,
             model=response_model,
-            template_hash=rendered.template_hash,
-            variables_hash=rendered.variables_hash,
-            template_source=rendered.template_source,
-            lookup_hash=rendered.lookup_hash,
-            lookup_source=rendered.lookup_source,
-            system_prompt_source=self._system_prompt_source,
         )
 
         return _RowSuccess(row=output)

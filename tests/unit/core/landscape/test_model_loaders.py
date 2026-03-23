@@ -46,6 +46,7 @@ from elspeth.contracts.enums import (
     ExportStatus,
     NodeStateStatus,
     NodeType,
+    ReproducibilityGrade,
     RoutingMode,
     RowOutcome,
     RunStatus,
@@ -135,7 +136,7 @@ class TestRunLoader:
         assert result.started_at == NOW
         assert result.completed_at == LATER
         assert result.exported_at == EVEN_LATER
-        assert result.reproducibility_grade == "full_reproducible"
+        assert result.reproducibility_grade == ReproducibilityGrade.FULL_REPRODUCIBLE
         assert result.export_error == "some error"
         assert result.export_format == "csv"
         assert result.export_sink == "output"

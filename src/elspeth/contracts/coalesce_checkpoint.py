@@ -13,7 +13,7 @@ from types import MappingProxyType
 from typing import Any
 
 from elspeth.contracts.errors import AuditIntegrityError
-from elspeth.contracts.freeze import deep_freeze, deep_thaw
+from elspeth.contracts.freeze import deep_thaw, freeze_fields
 
 
 @dataclass(frozen=True, slots=True)
@@ -42,13 +42,10 @@ class CoalesceTokenCheckpoint:
             if not isinstance(value, str) or not value:
                 raise ValueError(f"{field_name} must be a non-empty string, got {type(value).__name__}: {value!r}")
         if not isinstance(self.row_data, (dict, MappingProxyType)):
-            raise ValueError(f"row_data must be a dict, got {type(self.row_data).__name__}: {self.row_data!r}")
+            raise TypeError(f"CoalesceTokenCheckpoint.row_data must be dict or MappingProxyType, got {type(self.row_data).__name__}")
         if not isinstance(self.contract, (dict, MappingProxyType)):
-            raise ValueError(f"contract must be a dict, got {type(self.contract).__name__}: {self.contract!r}")
-        if not isinstance(self.row_data, MappingProxyType):
-            object.__setattr__(self, "row_data", deep_freeze(self.row_data))
-        if not isinstance(self.contract, MappingProxyType):
-            object.__setattr__(self, "contract", deep_freeze(self.contract))
+            raise TypeError(f"CoalesceTokenCheckpoint.contract must be dict or MappingProxyType, got {type(self.contract).__name__}")
+        freeze_fields(self, "row_data", "contract")
         if self.arrival_offset_seconds < 0 or not math.isfinite(self.arrival_offset_seconds):
             raise ValueError(f"arrival_offset_seconds must be non-negative and finite, got {self.arrival_offset_seconds!r}")
 
@@ -117,10 +114,7 @@ class CoalescePendingCheckpoint:
                 raise ValueError(f"{field_name} must be a non-empty string, got {type(value).__name__}: {value!r}")
         if self.elapsed_age_seconds < 0 or not math.isfinite(self.elapsed_age_seconds):
             raise ValueError(f"elapsed_age_seconds must be non-negative and finite, got {self.elapsed_age_seconds!r}")
-        if not isinstance(self.branches, MappingProxyType):
-            object.__setattr__(self, "branches", MappingProxyType(self.branches))
-        if not isinstance(self.lost_branches, MappingProxyType):
-            object.__setattr__(self, "lost_branches", MappingProxyType(self.lost_branches))
+        freeze_fields(self, "branches", "lost_branches")
         overlap = set(self.branches) & set(self.lost_branches)
         if overlap:
             raise ValueError(f"branches and lost_branches must not overlap, shared keys: {sorted(overlap)}")

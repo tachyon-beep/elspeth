@@ -25,9 +25,9 @@ per_file_rules:
 - pattern: contracts/aggregation_checkpoint.py
   rules:
   - R5
-  reason: Deep-freeze guards and from_dict validation
+  reason: Deep-freeze guards, from_dict validation, and Tier 1 __post_init__ type guards
   expires: null
-  max_hits: 6
+  max_hits: 4
 - pattern: contracts/audit.py
   rules:
   - R5
@@ -37,21 +37,33 @@ per_file_rules:
 - pattern: contracts/batch_checkpoint.py
   rules:
   - R5
-  reason: Deep-freeze guards and template error tuple validation
+  reason: Deep-freeze guards, Tier 1 from_dict type validation, and template error tuple validation
   expires: null
-  max_hits: 3
+  max_hits: 9
+- pattern: contracts/checkpoint.py
+  rules:
+  - R5
+  reason: Tier 1 __post_init__ type guards on ResumePoint — validates checkpoint, token_id, node_id, sequence_number, aggregation_state, coalesce_state
+  expires: null
+  max_hits: 8
+- pattern: contracts/engine.py
+  rules:
+  - R5
+  reason: Tier 1 __post_init__ type guards on BufferEntry — validates submit_index/complete_index are int (not bool/float)
+  expires: null
+  max_hits: 4
 - pattern: contracts/call_data.py
   rules:
   - R5
   reason: MappingProxyType deep-freeze guards on API call data
   expires: null
-  max_hits: 9
+  max_hits: 6
 - pattern: contracts/coalesce_checkpoint.py
   rules:
   - R5
   reason: Deep-freeze guards and from_dict deserialization validation
   expires: null
-  max_hits: 17
+  max_hits: 13
 - pattern: contracts/config/runtime.py
   rules:
   - R5
@@ -75,13 +87,13 @@ per_file_rules:
   - R5
   reason: Recursive container type dispatch for deep_freeze/deep_thaw
   expires: null
-  max_hits: 11
+  max_hits: 12
 - pattern: contracts/hashing.py
   rules:
   - R5
-  reason: Float type detection for NaN/Infinity rejection in canonical hashing
+  reason: Float type detection for NaN/Infinity rejection in canonical hashing; frozen container type dispatch for MappingProxyType/tuple/frozenset normalization
   expires: null
-  max_hits: 3
+  max_hits: 4
 - pattern: contracts/header_modes.py
   rules:
   - R5
@@ -182,19 +194,19 @@ allow_hits:
   owner: bugfix
   reason: Type annotation objects (e.g. list[str]) may not have __name__ attribute - getattr is needed for safe error messages
   safety: Falls back to str(a) for display purposes only; used in error message, not logic
-- key: contracts/plugin_context.py:R1:PluginContext:record_call:fp=0b05c8cbd884c68b
+- key: contracts/plugin_context.py:R1:PluginContext:record_call:fp=4149689a27621dfc
   owner: architecture
   reason: Tier 3 boundary — .get() on serialized LLM response dict to extract optional usage data
   safety: Missing key returns None; no fabrication
-- key: contracts/plugin_context.py:R6:PluginContext:record_validation_error:fp=4f22bd6a49ac36c7
+- key: contracts/plugin_context.py:R6:PluginContext:record_validation_error:fp=c88f374a39d117c6
   owner: architecture
   reason: Tier 3 boundary — ValueError/TypeError from stable_hash on non-canonical data falls back to repr_hash
   safety: Warning logged; row_id still generated via repr_hash for audit trail continuity
-- key: contracts/token_usage.py:R1:TokenUsage:from_dict:fp=404be9092f1cd9c1
+- key: contracts/token_usage.py:R1:TokenUsage:from_dict:fp=950d2df1fec039fa
   owner: architecture
   reason: Tier 3 boundary — from_dict() uses .get() on external LLM API response dicts where keys may be absent
   safety: Missing keys produce None (unknown); no fabrication
-- key: contracts/token_usage.py:R1:TokenUsage:from_dict:fp=62b3eec00a4e699d
+- key: contracts/token_usage.py:R1:TokenUsage:from_dict:fp=9ad24199de6680f8
   owner: architecture
   reason: Tier 3 boundary — from_dict() uses .get() on external LLM API response dicts where keys may be absent
   safety: Missing keys produce None (unknown); no fabrication

@@ -20,6 +20,7 @@ from typing import TYPE_CHECKING, Any
 from deepdiff import DeepDiff
 
 from elspeth.contracts import CallType
+from elspeth.contracts.errors import AuditIntegrityError
 from elspeth.core.canonical import stable_hash
 
 if TYPE_CHECKING:
@@ -41,6 +42,7 @@ class VerificationResult:
         differences: DeepDiff results as dict (empty if match)
         recorded_call_missing: True if no recorded call was found
         payload_missing: True if call exists but response payload is missing/purged
+        no_response_recorded: True if call exists but never had a response (timeout/DNS failure)
 
     Use factory classmethods (``matched``, ``mismatched``, ``missing_recording``,
     ``missing_payload``) for construction — they prevent contradictory flag
@@ -54,6 +56,7 @@ class VerificationResult:
     differences: dict[str, Any] = field(default_factory=dict)
     recorded_call_missing: bool = False
     payload_missing: bool = False
+    no_response_recorded: bool = False
 
     def __post_init__(self) -> None:
         if self.is_match and self.recorded_call_missing:
@@ -62,6 +65,12 @@ class VerificationResult:
             raise ValueError("Cannot have both recorded_call_missing and payload_missing")
         if self.is_match and self.differences:
             raise ValueError("Cannot be a match with non-empty differences")
+        if self.no_response_recorded and self.is_match:
+            raise ValueError("Cannot be a match when no response was recorded")
+        if self.no_response_recorded and self.payload_missing:
+            raise ValueError("Cannot have both no_response_recorded and payload_missing")
+        if self.no_response_recorded and self.recorded_call_missing:
+            raise ValueError("Cannot have both no_response_recorded and recorded_call_missing")
 
     # --- Factory classmethods ---
 
@@ -143,6 +152,7 @@ class VerificationResult:
             live_response=live_response,
             recorded_response=None,
             is_match=False,
+            no_response_recorded=True,
         )
 
     @property
@@ -150,11 +160,13 @@ class VerificationResult:
         """Check if there are meaningful differences.
 
         Returns True when there are actual differences between responses.
-        Missing recordings are not differences. Missing payloads are not
-        differences UNLESS hash-based comparison detected a mismatch
-        (indicated by non-empty differences dict).
+        Missing recordings, missing payloads (without hash mismatch), and
+        calls that never had a response are NOT differences — there is
+        no baseline to compare against in these cases.
         """
         if self.recorded_call_missing:
+            return False
+        if self.no_response_recorded:
             return False
         if self.payload_missing:
             # Hash-based comparison may have populated differences even
@@ -176,6 +188,7 @@ class VerificationReport:
         mismatches: Number of calls with differences from baseline
         missing_recordings: Number of calls with no recorded baseline
         missing_payloads: Number of calls where response payload is missing/purged
+        no_response_recorded: Number of calls where original call had no response (timeout/DNS)
         results: Individual verification results for inspection
     """
 
@@ -184,6 +197,7 @@ class VerificationReport:
     mismatches: int = 0
     missing_recordings: int = 0
     missing_payloads: int = 0
+    no_response_recorded: int = 0
     results: list[VerificationResult] = field(default_factory=list)
 
     @property
@@ -349,15 +363,34 @@ class CallVerifier:
                 self._report.results.append(result)
                 return result
 
-            # Call never had a response (e.g., connection timeout, DNS failure)
-            # Cannot compare, so not a match, but NOT a missing payload
-            # Covers NEVER_STORED and CALL_NOT_FOUND
-            result = VerificationResult.no_recorded_response(
-                request_hash=request_hash,
-                live_response=live_response,
+            # CALL_NOT_FOUND: The call record was found by find_call_by_request_hash
+            # but vanished before get_call_response_data — database corruption or
+            # TOCTOU race. This is a Tier 1 integrity violation, not a normal state.
+            if call_data.state == CallDataState.CALL_NOT_FOUND:
+                raise AuditIntegrityError(
+                    f"CALL_NOT_FOUND for call_id={call.call_id} after successful "
+                    f"find_call_by_request_hash — audit record vanished between queries. "
+                    f"Possible database corruption or concurrent modification."
+                )
+
+            # NEVER_STORED: Call exists but never had a response (e.g., connection
+            # timeout, DNS failure). Cannot compare, not a match, not missing payload.
+            if call_data.state == CallDataState.NEVER_STORED:
+                self._report.no_response_recorded += 1
+                result = VerificationResult.no_recorded_response(
+                    request_hash=request_hash,
+                    live_response=live_response,
+                )
+                self._report.results.append(result)
+                return result
+
+            # Unknown state — CallDataState may have gained a new member.
+            # Offensive programming: crash rather than silently misclassify.
+            raise AuditIntegrityError(
+                f"Unexpected CallDataState {call_data.state!r} for call_id={call.call_id}. "
+                f"The verifier does not know how to handle this state — "
+                f"update the verify() method to handle the new state explicitly."
             )
-            self._report.results.append(result)
-            return result
 
         # AVAILABLE — compare recorded response with live response using DeepDiff.
         # CallDataResult.data is deep-frozen (dict→MappingProxyType, list→tuple).

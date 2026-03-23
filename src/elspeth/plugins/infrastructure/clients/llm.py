@@ -15,7 +15,7 @@ import structlog
 
 from elspeth.contracts import CallStatus, CallType
 from elspeth.contracts.call_data import LLMCallError, LLMCallRequest, LLMCallResponse
-from elspeth.contracts.errors import AuditIntegrityError, FrameworkBugError
+from elspeth.contracts.errors import AuditIntegrityError, FrameworkBugError, PluginRetryableError
 from elspeth.contracts.events import ExternalCallCompleted
 from elspeth.contracts.freeze import deep_freeze
 from elspeth.contracts.token_usage import TokenUsage
@@ -63,7 +63,7 @@ class LLMResponse:
         return self.usage.total_tokens
 
 
-class LLMClientError(Exception):
+class LLMClientError(PluginRetryableError):
     """Error from LLM client.
 
     Base exception for all LLM client errors. Includes retryable
@@ -74,8 +74,7 @@ class LLMClientError(Exception):
     """
 
     def __init__(self, message: str, *, retryable: bool = False) -> None:
-        super().__init__(message)
-        self.retryable = retryable
+        super().__init__(message, retryable=retryable)
 
 
 class RateLimitError(LLMClientError):
@@ -404,11 +403,31 @@ class AuditedLLMClient(AuditedClientBase):
                 # Without this, content-filtered calls vanish from the audit trail
                 # and create unexplained call-index gaps.
                 error_msg = "LLM returned null content (likely content-filtered by provider)"
-                raw_response = response.model_dump()
+                try:
+                    raw_response = response.model_dump()
+                except Exception as dump_exc:
+                    # model_dump() failed — still record the call to prevent
+                    # call-index gaps, then re-raise.
+                    self._recorder.record_call(
+                        state_id=self._state_id,
+                        call_index=call_index,
+                        call_type=CallType.LLM,
+                        status=CallStatus.ERROR,
+                        request_data=request_dto,
+                        error=LLMCallError(
+                            type="ResponseProcessingError",
+                            message=f"model_dump() failed in null-content path: {dump_exc}",
+                            retryable=False,
+                        ),
+                        latency_ms=latency_ms,
+                    )
+                    raise LLMClientError(
+                        f"Failed to serialize LLM response in null-content path: {dump_exc}",
+                        retryable=False,
+                    ) from dump_exc
                 usage = (
-                    TokenUsage.known(
-                        prompt_tokens=response.usage.prompt_tokens,
-                        completion_tokens=response.usage.completion_tokens,
+                    TokenUsage.from_dict(
+                        {"prompt_tokens": response.usage.prompt_tokens, "completion_tokens": response.usage.completion_tokens}
                     )
                     if response.usage is not None
                     else TokenUsage.unknown()
@@ -474,11 +493,12 @@ class AuditedLLMClient(AuditedClientBase):
 
                 raise ContentPolicyError(error_msg)
 
-        # Guard against providers that omit usage data (streaming, certain configs)
+        # Guard against providers that omit usage data (streaming, certain configs).
+        # Tier 3 boundary: use from_dict() to coerce non-int values (float, bool, etc.)
+        # rather than known() which trusts values implicitly.
         if response.usage is not None:
-            usage = TokenUsage.known(
-                prompt_tokens=response.usage.prompt_tokens,
-                completion_tokens=response.usage.completion_tokens,
+            usage = TokenUsage.from_dict(
+                {"prompt_tokens": response.usage.prompt_tokens, "completion_tokens": response.usage.completion_tokens}
             )
         else:
             usage = TokenUsage.unknown()

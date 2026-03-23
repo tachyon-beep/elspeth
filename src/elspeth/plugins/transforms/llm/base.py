@@ -13,7 +13,8 @@ from pydantic import Field, field_validator, model_validator
 
 from elspeth.plugins.infrastructure.config_base import TransformDataConfig
 from elspeth.plugins.infrastructure.pooling import PoolConfig
-from elspeth.plugins.transforms.llm.templates import PromptTemplate, TemplateError
+from elspeth.plugins.infrastructure.templates import TemplateError
+from elspeth.plugins.transforms.llm.templates import PromptTemplate
 
 
 class LLMConfig(TransformDataConfig):

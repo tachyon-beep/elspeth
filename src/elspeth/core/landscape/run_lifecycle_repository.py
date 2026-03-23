@@ -54,7 +54,7 @@ class RunLifecycleRepository:
 
     def begin_run(
         self,
-        config: dict[str, Any],
+        config: Mapping[str, Any],
         canonical_version: str,
         *,
         run_id: str | None = None,
@@ -251,8 +251,8 @@ class RunLifecycleRepository:
             self._ops.execute_update(
                 runs_table.update().where(runs_table.c.run_id == run_id).values(source_field_resolution_json=resolution_json)
             )
-        except AuditIntegrityError as exc:
-            raise AuditIntegrityError(f"Cannot record source field resolution: run {run_id} not found") from exc
+        except AuditIntegrityError:
+            raise  # Preserve original error message from execute_update
 
     def get_source_field_resolution(self, run_id: str) -> dict[str, str] | None:
         """Get source field resolution mapping for a run.
@@ -265,7 +265,7 @@ class RunLifecycleRepository:
 
         Returns:
             Dict mapping original header name -> final field name, or None if no
-            field resolution was recorded (source didn't use normalize_fields).
+            field resolution was recorded.
 
         Note:
             For reverse lookup (final -> original), callers should invert this dict:

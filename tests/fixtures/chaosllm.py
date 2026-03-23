@@ -14,13 +14,12 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 import pytest
-from starlette.testclient import TestClient
-
-from elspeth.testing.chaosllm.config import (
+from errorworks.llm.config import (
     ChaosLLMConfig,
     load_config,
 )
-from elspeth.testing.chaosllm.server import ChaosLLMServer
+from errorworks.llm.server import ChaosLLMServer
+from starlette.testclient import TestClient
 
 if TYPE_CHECKING:
     import httpx

@@ -1341,10 +1341,10 @@ class ExecutionRepository:
             # 1. Get original batch
             original_row = conn.execute(select(batches_table).where(batches_table.c.batch_id == batch_id)).fetchone()
             if original_row is None:
-                raise ValueError(f"Batch not found: {batch_id}")
+                raise AuditIntegrityError(f"retry_batch: batch {batch_id} not found — audit data corruption")
             original = self._batch_loader.load(original_row)
             if original.status != BatchStatus.FAILED:
-                raise ValueError(f"Can only retry failed batches, got status: {original.status}")
+                raise AuditIntegrityError(f"retry_batch: can only retry failed batches, batch {batch_id} has status {original.status!r}")
 
             next_attempt = original.attempt + 1
 

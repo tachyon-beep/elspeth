@@ -7,19 +7,15 @@ from copy import deepcopy
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
-from jinja2 import StrictUndefined, TemplateSyntaxError, UndefinedError
+from jinja2 import TemplateSyntaxError, UndefinedError
 from jinja2.exceptions import SecurityError
-from jinja2.sandbox import ImmutableSandboxedEnvironment
 
 from elspeth.contracts.schema_contract import PipelineRow
 from elspeth.core.canonical import canonical_json
+from elspeth.plugins.infrastructure.templates import TemplateError, create_sandboxed_environment
 
 if TYPE_CHECKING:
     from elspeth.contracts.schema_contract import SchemaContract
-
-
-class TemplateError(Exception):
-    """Error in template rendering (including sandbox violations)."""
 
 
 @dataclass(frozen=True, slots=True)
@@ -109,10 +105,7 @@ class PromptTemplate:
         self._lookup_hash = _sha256(canonical_json(lookup_snapshot)) if lookup_snapshot is not None else None
 
         # Use sandboxed environment for security
-        self._env = ImmutableSandboxedEnvironment(
-            undefined=StrictUndefined,  # Raise on undefined variables
-            autoescape=False,  # No HTML escaping for prompts
-        )
+        self._env = create_sandboxed_environment()
 
         try:
             self._template = self._env.from_string(template_string)

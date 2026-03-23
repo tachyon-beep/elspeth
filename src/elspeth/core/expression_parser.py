@@ -20,6 +20,8 @@ import operator
 from types import MappingProxyType
 from typing import TYPE_CHECKING, Any
 
+from elspeth.contracts.errors import AuditIntegrityError, FrameworkBugError
+
 if TYPE_CHECKING:
     from elspeth.contracts import PipelineRow
 
@@ -691,6 +693,8 @@ class ExpressionParser:
             return evaluator.visit(self._ast)
         except (ExpressionEvaluationError, ExpressionSecurityError):
             raise
+        except (FrameworkBugError, AuditIntegrityError):
+            raise  # Framework bugs must not be wrapped as evaluation errors
         except Exception as exc:
             raise ExpressionEvaluationError(
                 f"Unexpected error evaluating expression {self._expression!r}: {type(exc).__name__}: {exc}"

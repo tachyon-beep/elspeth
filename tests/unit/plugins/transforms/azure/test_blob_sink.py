@@ -8,6 +8,7 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from elspeth.contracts import ArtifactDescriptor
+from elspeth.contracts.errors import AuditIntegrityError
 from elspeth.contracts.plugin_context import PluginContext
 from elspeth.plugins.infrastructure.config_base import PluginConfigError
 from elspeth.plugins.sinks.azure_blob_sink import AzureBlobSink
@@ -764,10 +765,10 @@ class TestAzureBlobSinkErrors:
         sink = AzureBlobSink(make_config(format="csv", overwrite=False))
         rows = [{"id": 1, "name": "alice"}]
 
-        with pytest.raises(RuntimeError, match="Failed to upload blob"):
+        with pytest.raises(AuditIntegrityError, match="Failed to record successful blob upload"):
             sink.write(rows, ctx)
 
-        # Post-upload failure must not commit cumulative rows.
+        # Post-upload audit failure must not commit cumulative rows.
         assert sink._buffered_rows == []
 
         result = sink.write(rows, ctx)

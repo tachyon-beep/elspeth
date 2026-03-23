@@ -9,10 +9,9 @@ from datetime import UTC, datetime
 from pathlib import Path
 
 import pytest
-
-from elspeth.testing.chaosengine.metrics_store import _get_bucket_utc
-from elspeth.testing.chaosengine.types import MetricsConfig
-from elspeth.testing.chaosweb.metrics import (
+from errorworks.engine.metrics_store import _get_bucket_utc
+from errorworks.engine.types import MetricsConfig
+from errorworks.web.metrics import (
     WebMetricsRecorder,
     WebOutcomeClassification,
     _classify_web_outcome,

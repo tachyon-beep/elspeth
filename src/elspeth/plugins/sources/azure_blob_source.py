@@ -20,6 +20,7 @@ from pydantic import BaseModel, Field, ValidationError, field_validator, model_v
 
 from elspeth.contracts import CallStatus, CallType, PluginSchema, SourceRow
 from elspeth.contracts.contexts import SourceContext
+from elspeth.contracts.errors import AuditIntegrityError
 from elspeth.core.identifiers import validate_field_names
 from elspeth.plugins.infrastructure.azure_auth import AzureAuthConfig
 from elspeth.plugins.infrastructure.base import BaseSource
@@ -183,13 +184,9 @@ class AzureBlobSourceConfig(DataPluginConfig):
         default=None,
         description="Explicit column names for headerless CSV blobs",
     )
-    normalize_fields: bool = Field(
-        default=False,
-        description="Normalize CSV headers to valid identifiers (only for CSV format)",
-    )
     field_mapping: dict[str, str] | None = Field(
         default=None,
-        description="Override specific normalized field names (requires normalize_fields or columns)",
+        description="Override specific normalized field names",
     )
     on_validation_failure: str = Field(
         ...,
@@ -220,21 +217,12 @@ class AzureBlobSourceConfig(DataPluginConfig):
     def validate_field_normalization_options(self) -> Self:
         """Validate field normalization options for CSV format."""
         if self.format != "csv":
-            if self.normalize_fields or self.columns is not None or self.field_mapping is not None:
-                raise ValueError("normalize_fields, columns, and field_mapping are only supported for CSV format")
+            if self.columns is not None or self.field_mapping is not None:
+                raise ValueError("columns and field_mapping are only supported for CSV format")
             return self
-
-        if not self.csv_options.has_header and self.normalize_fields:
-            raise ValueError("normalize_fields requires csv_options.has_header: true. Use columns for headerless CSV blobs.")
 
         if self.csv_options.has_header and self.columns is not None:
             raise ValueError("columns requires csv_options.has_header: false for headerless CSV blobs.")
-
-        if self.columns is not None and self.normalize_fields:
-            raise ValueError("normalize_fields cannot be used with columns config. The columns config already provides clean names.")
-
-        if self.field_mapping is not None and not self.normalize_fields and self.columns is None:
-            raise ValueError("field_mapping requires normalize_fields: true or columns config")
 
         if self.columns is not None:
             validate_field_names(self.columns, "columns")
@@ -334,7 +322,6 @@ class AzureBlobSource(BaseSource):
         self._csv_options = cfg.csv_options
         self._json_options = cfg.json_options
         self._columns = cfg.columns
-        self._normalize_fields = cfg.normalize_fields
         self._field_mapping = cfg.field_mapping
         self._field_resolution: FieldResolution | None = None
 
@@ -430,19 +417,28 @@ class AzureBlobSource(BaseSource):
             blob_data = blob_client.download_blob().readall()
             latency_ms = (time.perf_counter() - start_time) * 1000
 
-            # Record successful blob download in audit trail
-            ctx.record_call(
-                call_type=CallType.HTTP,
-                status=CallStatus.SUCCESS,
-                request_data={
-                    "operation": "download_blob",
-                    "container": self._container,
-                    "blob_path": self._blob_path,
-                },
-                response_data={"size_bytes": len(blob_data)},
-                latency_ms=latency_ms,
-                provider="azure_blob_storage",
-            )
+            # Record successful blob download in audit trail.
+            try:
+                ctx.record_call(
+                    call_type=CallType.HTTP,
+                    status=CallStatus.SUCCESS,
+                    request_data={
+                        "operation": "download_blob",
+                        "container": self._container,
+                        "blob_path": self._blob_path,
+                    },
+                    response_data={"size_bytes": len(blob_data)},
+                    latency_ms=latency_ms,
+                    provider="azure_blob_storage",
+                )
+            except Exception as exc:
+                raise AuditIntegrityError(
+                    f"Failed to record successful blob download to audit trail "
+                    f"(container={self._container!r}, blob_path={self._blob_path!r}). "
+                    f"Download completed but audit record is missing."
+                ) from exc
+        except AuditIntegrityError:
+            raise  # Audit failure — do not misattribute as download error
         except ImportError:
             # Re-raise ImportError as-is for clear dependency messaging
             raise
@@ -582,7 +578,6 @@ class AzureBlobSource(BaseSource):
             raw_headers = [str(header) for header in df.columns]
             self._field_resolution = resolve_field_names(
                 raw_headers=raw_headers,
-                normalize_fields=self._normalize_fields,
                 field_mapping=self._field_mapping,
                 columns=None,
             )
@@ -592,7 +587,6 @@ class AzureBlobSource(BaseSource):
         elif self._columns is not None:
             self._field_resolution = resolve_field_names(
                 raw_headers=None,
-                normalize_fields=self._normalize_fields,
                 field_mapping=self._field_mapping,
                 columns=self._columns,
             )

@@ -82,17 +82,17 @@ class TestCoalesceTokenCheckpointPostInit:
             CoalesceTokenCheckpoint(**kwargs)
 
     def test_rejects_non_dict_row_data(self) -> None:
-        """row_data must be a dict."""
+        """row_data must be a dict or MappingProxyType."""
         kwargs = _valid_token_kwargs()
         kwargs["row_data"] = "not a dict"
-        with pytest.raises(ValueError, match="row_data"):
+        with pytest.raises(TypeError, match="row_data must be dict or MappingProxyType"):
             CoalesceTokenCheckpoint(**kwargs)
 
     def test_rejects_non_dict_contract(self) -> None:
-        """contract must be a dict."""
+        """contract must be a dict or MappingProxyType."""
         kwargs = _valid_token_kwargs()
         kwargs["contract"] = ["not", "a", "dict"]
-        with pytest.raises(ValueError, match="contract"):
+        with pytest.raises(TypeError, match="contract must be dict or MappingProxyType"):
             CoalesceTokenCheckpoint(**kwargs)
 
 

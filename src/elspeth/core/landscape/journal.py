@@ -11,7 +11,7 @@ import structlog
 from sqlalchemy import event
 from sqlalchemy.engine import Connection, Engine
 
-from elspeth.contracts.payload_store import PayloadNotFoundError
+from elspeth.contracts.payload_store import IntegrityError, PayloadNotFoundError
 from elspeth.core.landscape._helpers import now
 from elspeth.core.landscape.formatters import serialize_datetime
 from elspeth.core.payload_store import FilesystemPayloadStore
@@ -262,15 +262,24 @@ class LandscapeJournal:
             return None, "payload_store_not_configured"
         try:
             content = self._payload_store.retrieve(ref)
+        except IntegrityError as exc:
+            # Hash mismatch = corruption or tampering — Tier 1 violation.
+            # Always crash regardless of _fail_on_error: payload integrity
+            # failures are not operational issues, they are audit violations.
+            from elspeth.contracts.errors import AuditIntegrityError
+
+            raise AuditIntegrityError(
+                f"Payload integrity check failed for ref={ref!r}: {exc}. This indicates data corruption or tampering in the payload store."
+            ) from exc
         except (OSError, PayloadNotFoundError) as exc:
-            logger.error("Landscape journal payload read failed: %s", exc)
+            logger.error("journal_payload_read_failed", error=str(exc), ref=ref)
             if self._fail_on_error:
                 raise
             return None, f"payload_read_failed: {exc}"
         try:
             return content.decode("utf-8"), None
         except UnicodeDecodeError as exc:
-            logger.error("Landscape journal payload decode failed: %s", exc)
+            logger.error("journal_payload_decode_failed", error=str(exc), ref=ref)
             if self._fail_on_error:
                 raise
             return None, f"payload_decode_failed: {exc}"

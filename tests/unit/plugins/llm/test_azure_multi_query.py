@@ -307,7 +307,7 @@ class TestSingleQueryProcessing:
         """Template rendering errors return error result with details."""
         from unittest.mock import patch as mock_patch
 
-        from elspeth.plugins.transforms.llm.templates import TemplateError
+        from elspeth.plugins.infrastructure.templates import TemplateError
 
         transform = LLMTransform(_make_config())
         mock_provider = _make_mock_provider()
@@ -880,8 +880,12 @@ class TestMultiQueryDeclaredOutputFields:
         assert "cs1_diagnosis_llm_response_usage" in transform.declared_output_fields
         assert "cs1_diagnosis_llm_response_model" in transform.declared_output_fields
 
-    def test_declared_output_fields_contains_prefixed_audit_fields(self) -> None:
-        """Multi-query declared_output_fields includes prefixed audit fields."""
+    def test_declared_output_fields_excludes_audit_fields(self) -> None:
+        """Multi-query declared_output_fields excludes audit fields.
+
+        Audit fields (template_hash, variables_hash, etc.) now travel via
+        success_reason["metadata"], not the output row.
+        """
         transform = LLMTransform(_make_config())
-        assert "cs1_diagnosis_llm_response_template_hash" in transform.declared_output_fields
-        assert "cs1_diagnosis_llm_response_variables_hash" in transform.declared_output_fields
+        assert "cs1_diagnosis_llm_response_template_hash" not in transform.declared_output_fields
+        assert "cs1_diagnosis_llm_response_variables_hash" not in transform.declared_output_fields

@@ -27,7 +27,6 @@ if TYPE_CHECKING:
     from elspeth.contracts.batch_checkpoint import BatchCheckpointState
     from elspeth.contracts.config.runtime import RuntimeConcurrencyConfig
     from elspeth.contracts.identity import TokenInfo
-    from elspeth.contracts.payload_store import PayloadStore
     from elspeth.contracts.plugin_context import ValidationErrorToken
     from elspeth.contracts.schema_contract import SchemaContract
     from elspeth.core.landscape.recorder import LandscapeRecorder
@@ -176,8 +175,8 @@ class LifecycleContext(Protocol):
     and use them throughout processing.
 
     This protocol is wider than the per-row protocols because lifecycle
-    hooks need access to infrastructure (rate limiters, payload store,
-    concurrency config) that per-row processing doesn't need directly.
+    hooks need access to infrastructure (rate limiters, concurrency config)
+    that per-row processing doesn't need directly.
     """
 
     @property
@@ -194,9 +193,6 @@ class LifecycleContext(Protocol):
 
     @property
     def telemetry_emit(self) -> Callable[[Any], None]: ...
-
-    @property
-    def payload_store(self) -> PayloadStore | None: ...
 
     @property
     def concurrency_config(self) -> RuntimeConcurrencyConfig | None: ...

@@ -8,14 +8,13 @@ from typing import Any
 
 import jinja2
 import pytest
-
-from elspeth.testing.chaosllm.config import (
+from errorworks.llm.config import (
     PresetResponseConfig,
     RandomResponseConfig,
     ResponseConfig,
     TemplateResponseConfig,
 )
-from elspeth.testing.chaosllm.response_generator import (
+from errorworks.llm.response_generator import (
     ENGLISH_VOCABULARY,
     LOREM_VOCABULARY,
     OpenAIResponse,
@@ -462,7 +461,7 @@ class TestTemplateMode:
         """Template random_words helper generates words."""
         config = ResponseConfig(
             mode="template",
-            template=TemplateResponseConfig(body="{{ random_words(5, 'english') }}"),
+            template=TemplateResponseConfig(body="{{ random_words(5) }}"),
         )
         generator = ResponseGenerator(config)
 

@@ -29,10 +29,9 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 import pytest
+from errorworks.web.config import ChaosWebConfig, load_config
+from errorworks.web.server import ChaosWebServer
 from starlette.testclient import TestClient
-
-from elspeth.testing.chaosweb.config import ChaosWebConfig, load_config
-from elspeth.testing.chaosweb.server import ChaosWebServer
 
 if TYPE_CHECKING:
     import httpx

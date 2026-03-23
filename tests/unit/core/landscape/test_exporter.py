@@ -438,6 +438,33 @@ class TestExportRunUnsigned:
         for record in records:
             assert "signature" not in record
 
+    def test_reproducibility_grade_exported_as_string_not_enum(self) -> None:
+        """Regression: elspeth-c74458d938 — StrEnum survives json.dumps but
+        breaks non-stdlib encoders (orjson, canonical_json, rfc8785).
+        Export must emit .value, not the raw enum object."""
+        exporter = _make_exporter()
+        records = list(exporter.export_run("run-1"))
+        run_record = records[0]
+        grade = run_record["reproducibility_grade"]
+        assert type(grade) is str, f"Expected plain str, got {type(grade).__name__}: {grade!r}"
+        assert grade == "full_reproducible"
+
+    def test_reproducibility_grade_none_exported_as_none(self) -> None:
+        """Null grade must export as None, not raise AttributeError."""
+        run_no_grade = Run(
+            run_id="run-1",
+            started_at=_DT,
+            config_hash="cfg-hash",
+            settings_json='{"key": "value"}',
+            canonical_version="v1",
+            status=RunStatus.COMPLETED,
+            completed_at=_DT2,
+            reproducibility_grade=None,
+        )
+        exporter = _make_exporter(run=run_no_grade)
+        records = list(exporter.export_run("run-1"))
+        assert records[0]["reproducibility_grade"] is None
+
 
 # ===========================================================================
 # export_run — signed

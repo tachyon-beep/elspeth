@@ -14,6 +14,7 @@ from typing import TYPE_CHECKING, Any, Protocol, runtime_checkable
 
 from elspeth.contracts.enums import Determinism
 from elspeth.contracts.header_modes import HeaderMode
+from elspeth.contracts.schema import SchemaConfig
 
 if TYPE_CHECKING:
     from elspeth.contracts.contexts import LifecycleContext, SinkContext, SourceContext, TransformContext
@@ -206,6 +207,13 @@ class TransformProtocol(Protocol):
     # the transform, preventing wasted API calls and making collision detection
     # mandatory (not opt-in per plugin). Empty frozenset = no fields added = no check.
     declared_output_fields: frozenset[str]
+
+    # DAG contract: output schema for transforms that declare output fields.
+    # Set by BaseTransform._build_output_schema_config() after declared_output_fields
+    # is populated. None for shape-preserving transforms that add no fields.
+    # The DAG builder validates that non-empty declared_output_fields always has
+    # a corresponding _output_schema_config (raises FrameworkBugError otherwise).
+    _output_schema_config: SchemaConfig | None
 
     # Input validation (centralized in TransformExecutor).
     # When True, executor validates input against input_schema before process().

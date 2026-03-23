@@ -583,3 +583,53 @@ class TestFieldMapperContractPropagation:
 
         header = output_path.read_text().splitlines()[0]
         assert header == "Amount USD"
+
+
+class TestOutputSchemaConfig:
+    def test_guaranteed_fields_from_mapping_targets(self):
+        from elspeth.plugins.transforms.field_mapper import FieldMapper
+
+        transform = FieldMapper(
+            {
+                "mapping": {"old_name": "new_name", "source": "target"},
+                "schema": {"mode": "observed"},
+            }
+        )
+        assert transform._output_schema_config is not None
+        assert frozenset(transform._output_schema_config.guaranteed_fields) == frozenset({"new_name", "target"})
+
+    def test_guaranteed_fields_empty_mapping(self):
+        from elspeth.plugins.transforms.field_mapper import FieldMapper
+
+        transform = FieldMapper(
+            {
+                "mapping": {},
+                "schema": {"mode": "observed"},
+            }
+        )
+        assert transform._output_schema_config is not None
+        assert frozenset(transform._output_schema_config.guaranteed_fields) == frozenset()
+
+    def test_declared_output_fields_set_from_mapping(self):
+        from elspeth.plugins.transforms.field_mapper import FieldMapper
+
+        transform = FieldMapper(
+            {
+                "mapping": {"a": "b", "c": "d"},
+                "schema": {"mode": "observed"},
+            }
+        )
+        assert transform.declared_output_fields == frozenset({"b", "d"})
+
+    def test_declared_output_fields_excludes_identity_mappings(self):
+        """Identity mappings (same source and target) are excluded from declared fields."""
+        from elspeth.plugins.transforms.field_mapper import FieldMapper
+
+        transform = FieldMapper(
+            {
+                "mapping": {"score": "score", "name": "display_name"},
+                "schema": {"mode": "observed"},
+            }
+        )
+        # "score" → "score" is identity (excluded), "name" → "display_name" is a rename (included)
+        assert transform.declared_output_fields == frozenset({"display_name"})

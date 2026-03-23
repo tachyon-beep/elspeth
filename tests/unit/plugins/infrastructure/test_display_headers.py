@@ -356,11 +356,16 @@ class TestInitDisplayHeaders:
     """Test init_display_headers precondition."""
 
     def test_raises_if_output_contract_not_set(self) -> None:
-        """Sinks must call super().__init__() before init_display_headers()."""
+        """Sinks must call super().__init__() before init_display_headers().
+
+        Per CLAUDE.md offensive programming: direct attribute access crashes
+        with AttributeError if _output_contract is missing — no defensive
+        try/except wrapping.
+        """
         from elspeth.plugins.infrastructure.display_headers import init_display_headers
 
         class _BadSink:
             pass  # No _output_contract — forgot super().__init__()
 
-        with pytest.raises(RuntimeError, match=r"super\(\).__init__\(\)"):
+        with pytest.raises(AttributeError):
             init_display_headers(_BadSink(), HeaderMode.NORMALIZED)

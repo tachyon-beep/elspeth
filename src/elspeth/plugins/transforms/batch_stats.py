@@ -83,6 +83,22 @@ class BatchStats(BaseTransform):
         self._group_by = cfg.group_by
         self._compute_mean = cfg.compute_mean
 
+        # Guaranteed output fields — always present in every successful result.
+        # skipped_non_finite/skipped_non_finite_indices are conditional (only when
+        # non-finite values exist) so they are NOT guaranteed. They are declared
+        # separately for collision detection at init time.
+        stat_fields: set[str] = {"count", "sum", "batch_size"}
+        if cfg.compute_mean:
+            stat_fields.add("mean")
+        self.declared_output_fields = frozenset(stat_fields)
+        self._all_possible_output_keys = frozenset(stat_fields | {"skipped_non_finite", "skipped_non_finite_indices"})
+
+        if cfg.group_by is not None and cfg.group_by in self._all_possible_output_keys:
+            raise ValueError(
+                f"group_by field '{cfg.group_by}' collides with aggregate output key. "
+                f"Choose a group_by field name that is not one of: {', '.join(sorted(self._all_possible_output_keys))}"
+            )
+
         self._schema_config = cfg.schema_config
 
         self.input_schema, self.output_schema = self._create_schemas(
@@ -90,6 +106,7 @@ class BatchStats(BaseTransform):
             "BatchStats",
             adds_fields=True,
         )
+        self._output_schema_config = self._build_output_schema_config(cfg.schema_config)
 
     def process(  # type: ignore[override] # Batch signature: list[PipelineRow] instead of PipelineRow
         self, rows: list[PipelineRow], ctx: TransformContext
@@ -144,11 +161,28 @@ class BatchStats(BaseTransform):
             values.append(raw_value)
 
         count = len(values)
-        total = sum(values) if values else 0
+
+        # All-non-finite is the same condition as empty batch — no real data to aggregate.
+        # Fabricating sum=0/count=0 would produce phantom statistics indistinguishable
+        # from a legitimate computation over zero-valued data.
+        if count == 0 and skipped_non_finite_indices:
+            return TransformResult.error(
+                {
+                    "reason": "all_non_finite",
+                    "batch_size": len(rows),
+                    "skipped_non_finite": len(skipped_non_finite_indices),
+                    "skipped_non_finite_indices": skipped_non_finite_indices,
+                },
+                retryable=False,
+            )
+
+        # At this point, values is guaranteed non-empty: empty batch returns error
+        # at line 127, and all-non-finite returns error above. count > 0.
+        total = sum(values)
 
         # Guard against overflow: summing many large-but-valid floats can produce inf.
         # Integer sums use arbitrary precision and cannot overflow.
-        if count > 0 and isinstance(total, float) and not math.isfinite(total):
+        if isinstance(total, float) and not math.isfinite(total):
             return TransformResult.error(
                 {"reason": "float_overflow", "batch_size": len(rows), "valid_count": count},
                 retryable=False,
@@ -160,10 +194,8 @@ class BatchStats(BaseTransform):
             "batch_size": len(rows),  # Total rows, including those with missing values
         }
 
-        if self._compute_mean and count > 0:
+        if self._compute_mean:
             result["mean"] = total / count
-        elif self._compute_mean:
-            result["mean"] = None
 
         if skipped_non_finite_indices:
             result["skipped_non_finite"] = len(skipped_non_finite_indices)
@@ -171,12 +203,8 @@ class BatchStats(BaseTransform):
 
         # Include group_by field — validate homogeneity across batch.
         # group_by is configured contract, so missing field is an upstream bug.
-        if self._group_by is not None and self._group_by in result:
-            raise ValueError(
-                f"group_by field '{self._group_by}' collides with aggregate output key. "
-                f"Choose a group_by field name that is not one of: {', '.join(sorted(result.keys()))}"
-            )
-        if self._group_by and rows:
+        # Collision between group_by and output keys is caught at init time.
+        if self._group_by:
             group_value = rows[0][self._group_by]
             for row in rows[1:]:
                 val = row[self._group_by]
@@ -189,15 +217,9 @@ class BatchStats(BaseTransform):
                     )
             result[self._group_by] = group_value
 
-        # Determine which fields were added
-        fields_added = ["count", "sum", "batch_size"]
-        if self._compute_mean:
-            fields_added.append("mean")
-        if skipped_non_finite_indices:
-            fields_added.append("skipped_non_finite")
-            fields_added.append("skipped_non_finite_indices")
-        if self._group_by and rows:
-            fields_added.append(self._group_by)
+        # Derive fields_added directly from result dict — single source of truth.
+        # No parallel list to diverge from the actual output.
+        fields_added = list(result.keys())
 
         fields = tuple(
             FieldContract(

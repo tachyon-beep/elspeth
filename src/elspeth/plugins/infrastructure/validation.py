@@ -191,7 +191,7 @@ class PluginConfigValidator:
                 return [ValidationError(field="schema", message=str(cause), value=config["schema"])]
             return [ValidationError(field="config", message=str(cause), value=config)]
 
-        raise
+        raise error
 
     def validate_schema_config(
         self,

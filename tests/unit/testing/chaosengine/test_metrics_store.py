@@ -8,9 +8,8 @@ time-series bucketing, stats computation, and lifecycle management.
 from __future__ import annotations
 
 import pytest
-
-from elspeth.testing.chaosengine.metrics_store import MetricsStore, _generate_ddl, _get_bucket_utc
-from elspeth.testing.chaosengine.types import ColumnDef, MetricsConfig, MetricsSchema
+from errorworks.engine.metrics_store import MetricsStore, _generate_ddl, _get_bucket_utc
+from errorworks.engine.types import ColumnDef, MetricsConfig, MetricsSchema
 
 # Minimal test schema for MetricsStore unit tests.
 _TEST_SCHEMA = MetricsSchema(
@@ -78,8 +77,14 @@ class TestDDLGeneration:
     def test_no_indexes_when_empty(self) -> None:
         """Schema with no indexes generates no CREATE INDEX."""
         schema = MetricsSchema(
-            request_columns=(ColumnDef("id", "TEXT", nullable=False, primary_key=True),),
-            timeseries_columns=(ColumnDef("bucket_utc", "TEXT", nullable=False, primary_key=True),),
+            request_columns=(
+                ColumnDef("id", "TEXT", nullable=False, primary_key=True),
+                ColumnDef("timestamp_utc", "TEXT", nullable=False),
+            ),
+            timeseries_columns=(
+                ColumnDef("bucket_utc", "TEXT", nullable=False, primary_key=True),
+                ColumnDef("requests_total", "INTEGER", nullable=False, default="0"),
+            ),
         )
         ddl = _generate_ddl(schema)
         assert "CREATE INDEX" not in ddl

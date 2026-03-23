@@ -59,10 +59,12 @@ class TestSourceRowWithContract:
         assert pipeline_row["name"] == "Alice"
 
     def test_to_pipeline_row_raises_without_contract(self) -> None:
-        """to_pipeline_row() raises if no contract attached."""
+        """to_pipeline_row() raises FrameworkBugError if no contract attached."""
+        from elspeth.contracts.errors import FrameworkBugError
+
         source_row = SourceRow.valid({"id": 1})
 
-        with pytest.raises(ValueError, match="no contract"):
+        with pytest.raises(FrameworkBugError, match="no contract"):
             source_row.to_pipeline_row()
 
     def test_to_pipeline_row_raises_if_quarantined(self, sample_contract: SchemaContract) -> None:

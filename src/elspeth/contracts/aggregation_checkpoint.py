@@ -24,7 +24,7 @@ from types import MappingProxyType
 from typing import Any
 
 from elspeth.contracts.errors import AuditIntegrityError
-from elspeth.contracts.freeze import deep_freeze, deep_thaw
+from elspeth.contracts.freeze import deep_thaw, freeze_fields
 
 
 @dataclass(frozen=True, slots=True)
@@ -59,9 +59,8 @@ class AggregationTokenCheckpoint:
         if not self.contract_version:
             raise ValueError("AggregationTokenCheckpoint.contract_version must not be empty")
         if not isinstance(self.row_data, (dict, MappingProxyType)):
-            raise ValueError(f"row_data must be a dict, got {type(self.row_data).__name__}: {self.row_data!r}")
-        if not isinstance(self.row_data, MappingProxyType):
-            object.__setattr__(self, "row_data", deep_freeze(self.row_data))
+            raise TypeError(f"AggregationTokenCheckpoint.row_data must be dict or MappingProxyType, got {type(self.row_data).__name__}")
+        freeze_fields(self, "row_data")
 
     def to_dict(self) -> dict[str, Any]:
         """Serialize to checkpoint dict format."""
@@ -147,9 +146,8 @@ class AggregationNodeCheckpoint:
                 f"AggregationNodeCheckpoint.condition_fire_offset must be non-negative and finite, got {self.condition_fire_offset}"
             )
         if not isinstance(self.contract, (dict, MappingProxyType)):
-            raise ValueError(f"contract must be a dict, got {type(self.contract).__name__}: {self.contract!r}")
-        if not isinstance(self.contract, MappingProxyType):
-            object.__setattr__(self, "contract", deep_freeze(self.contract))
+            raise TypeError(f"AggregationNodeCheckpoint.contract must be dict or MappingProxyType, got {type(self.contract).__name__}")
+        freeze_fields(self, "contract")
 
     def to_dict(self) -> dict[str, Any]:
         """Serialize to checkpoint dict format."""
@@ -234,8 +232,9 @@ class AggregationCheckpointState:
     def __post_init__(self) -> None:
         if not self.version:
             raise ValueError("AggregationCheckpointState.version must not be empty")
-        if not isinstance(self.nodes, MappingProxyType):
-            object.__setattr__(self, "nodes", MappingProxyType(self.nodes))
+        if not isinstance(self.nodes, (dict, MappingProxyType)):
+            raise TypeError(f"AggregationCheckpointState.nodes must be dict or MappingProxyType, got {type(self.nodes).__name__}")
+        freeze_fields(self, "nodes")
 
     def to_dict(self) -> dict[str, Any]:
         """Serialize to flat wire-format dict.

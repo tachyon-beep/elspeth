@@ -677,13 +677,13 @@ class TestRowProcessingWithPipelining:
         assert result.reason is not None
         assert "json" in result.reason["reason"].lower()
 
-    def test_process_row_includes_metadata_in_output(
+    def test_process_row_includes_operational_metadata_in_output(
         self,
         ctx: PluginContext,
         transform: LLMTransform,
         collector: CollectorOutputPort,
     ) -> None:
-        """Each query result includes audit metadata (usage, model, template_hash)."""
+        """Each query result includes operational metadata in row, audit metadata in success_reason."""
         call_count = [0]
         responses = [
             make_query_result({"score": 85, "rationale": "R1"}),
@@ -721,12 +721,19 @@ class TestRowProcessingWithPipelining:
         assert result.row is not None
         output = result.row
 
-        # Metadata fields present for first query
-        # Multi-query uses {query_name}_{response_field} pattern for metadata
+        # Operational metadata fields present in output row
         assert "cs1_diagnosis_llm_response_usage" in output
         assert "cs1_diagnosis_llm_response_model" in output
-        assert "cs1_diagnosis_llm_response_template_hash" in output
-        assert "cs1_diagnosis_llm_response_variables_hash" in output
+
+        # Audit metadata fields are in success_reason, not the output row
+        assert "cs1_diagnosis_llm_response_template_hash" not in output
+        assert "cs1_diagnosis_llm_response_variables_hash" not in output
+
+        # Audit metadata is in success_reason["metadata"]
+        assert result.success_reason is not None
+        metadata = result.success_reason["metadata"]
+        assert "cs1_diagnosis_llm_response_template_hash" in metadata
+        assert "cs1_diagnosis_llm_response_variables_hash" in metadata
 
 
 class TestMultiRowPipelining:

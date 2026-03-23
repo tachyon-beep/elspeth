@@ -19,14 +19,11 @@ from __future__ import annotations
 import random
 
 import pytest
-from hypothesis import given, settings
-from hypothesis import strategies as st
-
-from elspeth.testing.chaosweb.config import (
+from errorworks.web.config import (
     WebBurstConfig,
     WebErrorInjectionConfig,
 )
-from elspeth.testing.chaosweb.error_injector import (
+from errorworks.web.error_injector import (
     SSRF_TARGETS,
     WEB_CONNECTION_ERRORS,
     WEB_HTTP_ERRORS,
@@ -36,6 +33,8 @@ from elspeth.testing.chaosweb.error_injector import (
     WebErrorDecision,
     WebErrorInjector,
 )
+from hypothesis import given, settings
+from hypothesis import strategies as st
 
 # =============================================================================
 # WebErrorDecision Factory Properties

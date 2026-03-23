@@ -13,20 +13,19 @@ from datetime import datetime
 from typing import Any
 
 import pytest
-from hypothesis import assume, given, settings
-from hypothesis import strategies as st
-from pydantic import ValidationError
-
-from elspeth.testing.chaosengine.config_loader import deep_merge as _deep_merge
-from elspeth.testing.chaosengine.metrics_store import _get_bucket_utc
-from elspeth.testing.chaosllm.config import (
+from errorworks.engine.config_loader import deep_merge as _deep_merge
+from errorworks.engine.metrics_store import _get_bucket_utc
+from errorworks.llm.config import (
     ChaosLLMConfig,
     ErrorInjectionConfig,
     LatencyConfig,
     RandomResponseConfig,
     ServerConfig,
 )
-from elspeth.testing.chaosllm.metrics import _classify_outcome
+from errorworks.llm.metrics import _classify_outcome
+from hypothesis import assume, given, settings
+from hypothesis import strategies as st
+from pydantic import ValidationError
 
 # =============================================================================
 # _get_bucket_utc Properties

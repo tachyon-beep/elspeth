@@ -543,8 +543,8 @@ class TestOpenRouterBatchErrorHandling:
 class TestOpenRouterBatchAuditFields:
     """Tests for audit trail field generation."""
 
-    def test_audit_fields_present(self, chaosllm_server) -> None:
-        """Successful response includes all audit fields."""
+    def test_operational_fields_present_in_row(self, chaosllm_server) -> None:
+        """Successful response includes operational fields in row (not audit provenance)."""
         transform, ctx = _create_transform_with_context()
         row = {"text": "Test"}
 
@@ -554,16 +554,38 @@ class TestOpenRouterBatchAuditFields:
         assert result.row is not None
         output = result.row
 
-        # Required audit fields
+        # Operational fields in row (contract-stable)
         assert "llm_response" in output
         assert "llm_response_usage" in output
         assert "llm_response_model" in output
-        assert "llm_response_template_hash" in output
-        assert "llm_response_variables_hash" in output
-        assert "llm_response_template_source" in output
-        assert "llm_response_lookup_hash" in output
-        assert "llm_response_lookup_source" in output
-        assert "llm_response_system_prompt_source" in output
+
+        # Audit provenance fields must NOT be in row — they go to success_reason["metadata"]
+        assert "llm_response_template_hash" not in output
+        assert "llm_response_variables_hash" not in output
+        assert "llm_response_template_source" not in output
+        assert "llm_response_lookup_hash" not in output
+        assert "llm_response_lookup_source" not in output
+        assert "llm_response_system_prompt_source" not in output
+
+    def test_batch_audit_metadata_in_success_reason(self, chaosllm_server) -> None:
+        """Batch-level template provenance appears in success_reason["metadata"]."""
+        transform, ctx = _create_transform_with_context()
+        rows = [{"text": "Row 1"}, {"text": "Row 2"}]
+
+        responses = [_create_mock_response(chaosllm_server) for _ in range(2)]
+
+        with mock_httpx_client(chaosllm_server, responses):
+            result = transform.process([make_pipeline_row(r) for r in rows], ctx)
+
+        assert result.status == "success"
+        assert result.success_reason is not None
+        assert result.success_reason["action"] == "enriched"
+        metadata = result.success_reason["metadata"]
+        assert metadata["batch_size"] == 2
+        assert "llm_response_template_hash" in metadata
+        assert "llm_response_variables_hash" in metadata
+        assert metadata["llm_response_variables_hash"] is None  # Per-row hashes in calls table
+        assert "llm_response_template_source" in metadata
 
     def test_custom_response_field(self, chaosllm_server) -> None:
         """Custom response_field is used for all output fields."""
@@ -789,12 +811,14 @@ class TestOpenRouterBatchDeclaredOutputFields:
         transform, _ctx = _create_transform_with_context()
         assert "llm_response" in transform.declared_output_fields
 
-    def test_declared_output_fields_contains_audit_fields(self) -> None:
-        """declared_output_fields includes suffixed audit/metadata fields."""
+    def test_declared_output_fields_contains_operational_fields(self) -> None:
+        """declared_output_fields includes guaranteed operational metadata fields."""
         transform, _ctx = _create_transform_with_context()
         assert "llm_response_usage" in transform.declared_output_fields
         assert "llm_response_model" in transform.declared_output_fields
-        assert "llm_response_template_hash" in transform.declared_output_fields
+        # Audit provenance fields (template_hash etc.) are NOT in declared_output_fields —
+        # they go to success_reason["metadata"], not the row
+        assert "llm_response_template_hash" not in transform.declared_output_fields
 
 
 class TestOpenRouterBatchErrorKeyCollision:

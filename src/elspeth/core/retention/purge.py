@@ -13,6 +13,7 @@ from typing import TYPE_CHECKING, Any
 import structlog
 from sqlalchemy import ColumnElement, CompoundSelect, FromClause, and_, or_, select, union
 
+from elspeth.contracts.errors import AuditIntegrityError
 from elspeth.contracts.payload_store import PayloadStore
 from elspeth.core.landscape.reproducibility import update_grade_after_purge
 from elspeth.core.landscape.schema import (
@@ -398,10 +399,14 @@ class PurgeManager:
         for run_id in sorted(affected_run_ids):
             try:
                 update_grade_after_purge(self._db, run_id)
-            except Exception:
+            except AuditIntegrityError:
+                raise  # Tier 1 corruption must crash — never swallow
+            except Exception as exc:
                 logger.warning(
                     "grade_update_failed",
                     run_id=run_id,
+                    error=str(exc),
+                    error_type=type(exc).__name__,
                     msg="Payloads already deleted but grade update failed — run may have stale reproducibility grade",
                 )
                 grade_update_failures.append(run_id)

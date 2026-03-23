@@ -24,6 +24,7 @@ from collections.abc import Mapping
 from typing import TYPE_CHECKING, Any, Literal, overload
 
 from elspeth.contracts import CallType, Determinism, RunStatus
+from elspeth.contracts.errors import FrameworkBugError
 
 if TYPE_CHECKING:
     from elspeth.contracts import (
@@ -193,7 +194,7 @@ class LandscapeRecorder:
 
     def begin_run(
         self,
-        config: dict[str, Any],
+        config: Mapping[str, Any],
         canonical_version: str,
         *,
         run_id: str | None = None,
@@ -459,6 +460,35 @@ class LandscapeRecorder:
             request_ref=request_ref,
             response_ref=response_ref,
         )
+
+    def store_payload(self, content: bytes, *, purpose: str) -> str:
+        """Store a transform-produced artifact in the payload store.
+
+        For blobs that have no corresponding external call record — e.g.,
+        post-extraction processed content. The purpose label is a code-level
+        documentation convention — it is not persisted or emitted to telemetry.
+        It exists solely to force callers to name what they're storing at the
+        call site, making the intent visible in code review.
+
+        Args:
+            content: Raw bytes to store.
+            purpose: Semantic label (e.g., "processed_content", "extracted_markdown").
+                Not persisted — call-site documentation only.
+
+        Returns:
+            SHA-256 hex digest of stored content.
+
+        Raises:
+            FrameworkBugError: If recorder was constructed without a payload_store.
+        """
+        if self._payload_store is None:
+            raise FrameworkBugError(
+                f"store_payload(purpose={purpose!r}) called but recorder has no "
+                f"payload_store. Orchestrator must configure LandscapeRecorder with "
+                f"a payload_store when transforms that produce processed content "
+                f"blobs are in the pipeline."
+            )
+        return self._payload_store.store(content)
 
     def begin_operation(
         self,

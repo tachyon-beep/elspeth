@@ -128,7 +128,6 @@ class TestCSVSourceContract:
                 "path": str(csv_file),
                 "schema": {"mode": "observed"},
                 "on_validation_failure": "quarantine",
-                "normalize_fields": True,
             }
         )
 

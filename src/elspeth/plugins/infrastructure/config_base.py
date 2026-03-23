@@ -169,27 +169,20 @@ class TabularSourceDataConfig(SourceDataConfig):
 
     Extends SourceDataConfig with field normalization options:
     - columns: Explicit column names for headerless files
-    - normalize_fields: Auto-normalize messy headers to identifiers
     - field_mapping: Override specific normalized names
 
+    Field normalization is mandatory at all source boundaries. Raw headers
+    are always normalized to valid Python identifiers. The columns config
+    provides clean names for headerless files (mutually exclusive path).
     """
 
     columns: list[str] | None = None
-    normalize_fields: bool = False
     field_mapping: dict[str, str] | None = None
 
     @model_validator(mode="after")
     def _validate_normalization_options(self) -> Self:
         """Validate field normalization option interactions."""
         from elspeth.core.identifiers import validate_field_names
-
-        # normalize_fields + columns is invalid
-        if self.columns is not None and self.normalize_fields:
-            raise ValueError("normalize_fields cannot be used with columns config. The columns config already provides clean names.")
-
-        # field_mapping requires normalize_fields or columns
-        if self.field_mapping is not None and not self.normalize_fields and self.columns is None:
-            raise ValueError("field_mapping requires normalize_fields: true or columns config")
 
         # Validate columns entries are valid identifiers and not keywords
         if self.columns is not None:

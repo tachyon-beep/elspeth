@@ -25,8 +25,6 @@ from elspeth.contracts.types import AggregationName
 from elspeth.core.config import ElspethSettings, SourceSettings, load_settings, resolve_config
 from elspeth.core.dag import ExecutionGraph, GraphValidationError
 from elspeth.core.security.config_secrets import SecretLoadError, load_secrets_from_config
-from elspeth.testing.chaosllm.cli import app as chaosllm_app
-from elspeth.testing.chaosllm.cli import mcp_app as chaosllm_mcp_app
 
 if TYPE_CHECKING:
     from elspeth.cli_helpers import PluginBundle
@@ -68,9 +66,6 @@ app = typer.Typer(
     help="ELSPETH: Auditable Sense/Decide/Act pipelines.",
     no_args_is_help=True,
 )
-
-app.add_typer(chaosllm_app, name="chaosllm", help="ChaosLLM server commands.")
-app.add_typer(chaosllm_mcp_app, name="chaosllm-mcp", help="ChaosLLM MCP analysis tools.")
 
 
 def version_callback(value: bool) -> None:
@@ -403,7 +398,7 @@ def run(
         typer.echo(f"Error: Settings file not found: {settings}", err=True)
         raise typer.Exit(1) from None
     except (YamlParserError, YamlScannerError) as e:
-        typer.echo(f"YAML syntax error in {settings}: {e.problem}", err=True)
+        typer.echo(f"YAML syntax error in {settings}: {e.problem if e.problem is not None else e}", err=True)
         raise typer.Exit(1) from None
     except yaml.YAMLError as e:
         typer.echo(f"YAML syntax error in {settings}: {e}", err=True)
@@ -1330,11 +1325,12 @@ def purge(
         try:
             config, _secret_resolutions = _load_settings_with_secrets(settings_path)
         except (YamlParserError, YamlScannerError) as e:
+            problem = e.problem if e.problem is not None else str(e)
             if not database:
-                typer.echo(f"YAML syntax error in settings.yaml: {e.problem}", err=True)
+                typer.echo(f"YAML syntax error in settings.yaml: {problem}", err=True)
                 typer.echo("Specify --database to provide path directly.", err=True)
                 raise typer.Exit(1) from None
-            typer.echo(f"Warning: YAML syntax error in settings.yaml: {e.problem}", err=True)
+            typer.echo(f"Warning: YAML syntax error in settings.yaml: {problem}", err=True)
         except yaml.YAMLError as e:
             if not database:
                 typer.echo(f"YAML error in settings.yaml: {e}", err=True)
@@ -1907,6 +1903,29 @@ def resume(
                 typer.echo(f"\nResume interrupted after {e.rows_processed} rows.")
                 typer.echo(f"Resume with: elspeth resume {e.run_id} --execute")
             raise typer.Exit(3)  # noqa: B904 -- distinct exit code: 0=success, 1=error, 3=interrupted
+        except (FrameworkBugError, AuditIntegrityError) as e:
+            # Tier 1 violations and framework bugs MUST be clearly distinguishable
+            # from config errors — same pattern as the `run` command handler.
+            import traceback
+
+            if output_format == "json":
+                import json as json_mod_fatal
+
+                typer.echo(
+                    json_mod_fatal.dumps(
+                        {
+                            "event": "fatal",
+                            "error": str(e),
+                            "error_type": type(e).__name__,
+                            "traceback": traceback.format_exc(),
+                        }
+                    ),
+                    err=True,
+                )
+            else:
+                typer.echo(f"\nFATAL — {type(e).__name__}: {e}", err=True)
+                typer.echo(traceback.format_exc(), err=True)
+            raise typer.Exit(4) from e  # Exit 4: audit integrity / framework bug
         except Exception as e:
             import traceback
 

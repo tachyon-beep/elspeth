@@ -32,6 +32,7 @@ dependencies = [
     "pluggy>=1.6,<2",  # Plugin architecture (pytest uses this)
 
     # Data handling
+    "numpy>=1.26,<3",  # Numeric types (pandas dependency, explicit for schema validation)
     "pandas>=2.2,<3",  # DataFrame operations
 
     # HTTP client
@@ -84,8 +85,8 @@ dev = [
     # Mutation testing (Phase 3)
     "mutmut>=2.4,<3",  # Mutation testing
     # ChaosLLM test server
-    "starlette>=0.45,<1",  # ASGI framework for ChaosLLM
-    "uvicorn>=0.34,<1",  # ASGI server for ChaosLLM
+    "errorworks>=0.1.1",  # Chaos testing servers (ChaosLLM, ChaosWeb)
+    "starlette>=0.45,<1",  # ASGI framework (needed for TestClient in fixtures)
     # HTTP mocking
     "respx>=0.21,<1",  # httpx mocking for web scrape tests
 ]
@@ -112,6 +113,11 @@ web = [
     # Web scraping and HTML processing
     "html2text>=2024.2.26",  # HTML to markdown conversion
     "beautifulsoup4>=4.12,<5",  # HTML parsing and element stripping
+]
+
+rag = [
+    # RAG retrieval plugin pack — ChromaDB provider
+    "chromadb>=1.0,<2",
 ]
 
 mcp = [
@@ -153,8 +159,8 @@ all = [
     "types-networkx>=3.2,<4",
     "types-PyYAML>=6.0,<7",
     "mutmut>=2.4,<3",
+    "errorworks>=0.1.1",
     "starlette>=0.45,<1",
-    "uvicorn>=0.34,<1",
     "respx>=0.21,<1",
     # llm dependencies
     "jinja2>=3.1,<4",
@@ -175,15 +181,13 @@ all = [
     "langfuse>=3.12,<4",
     # security dependencies
     "sqlcipher3>=0.5.4,<1",
+    # rag dependencies
+    "chromadb>=1.0,<2",
 ]
 
 [project.scripts]
 elspeth = "elspeth.cli:app"
 elspeth-mcp = "elspeth.mcp:main"
-chaosengine = "elspeth.testing.chaosengine.cli:main"
-chaosllm = "elspeth.testing.chaosllm.cli:main"
-chaosllm-mcp = "elspeth.testing.chaosllm.cli:mcp_main_entry"
-chaosweb = "elspeth.testing.chaosweb.cli:main"
 check-contracts = "scripts.check_contracts:main"
 
 [project.urls]
@@ -264,6 +268,7 @@ module = [
     "ddtrace.*",
     "sqlcipher3.*",
     "langfuse.*",
+    "chromadb.*",
 ]
 ignore_missing_imports = true
 

@@ -75,9 +75,9 @@ transforms:
   on_error: discard
   options:
     mapping:
-      product_name: product        # Rename: product → product_name
-      item_id: id                  # Rename: id → item_id
-      cost: price                  # Rename: price → cost
+      product: product_name        # Rename: product → product_name
+      id: item_id                  # Rename: id → item_id
+      price: cost                  # Rename: price → cost
     select_only: true              # Only include mapped fields (drops category, description)
     schema:
       mode: observed

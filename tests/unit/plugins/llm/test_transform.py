@@ -504,7 +504,7 @@ class TestTemplateTierPolicy:
     def test_per_query_template_syntax_error_raises_at_construction(self) -> None:
         """A syntactically invalid per-query template must fail at construction,
         not be deferred to the first row (structural = Tier 2 init-time validation)."""
-        from elspeth.plugins.transforms.llm.templates import TemplateError
+        from elspeth.plugins.infrastructure.templates import TemplateError
         from elspeth.plugins.transforms.llm.transform import LLMTransform
 
         config = _make_multi_query_config()
@@ -735,9 +735,11 @@ class TestMultiQueryJSONExtraction:
         result = transform._process_row(_make_row(), _make_ctx())
         assert result.status == "success"
         assert result.row is not None
-        output = result.row.to_dict()
-        assert output["q1_llm_response_lookup_hash"] is not None
-        assert output["q1_llm_response_lookup_source"] == "prompts/lookups.yaml"
+        # Audit metadata (lookup_hash, lookup_source) travels via success_reason, not output row
+        assert result.success_reason is not None
+        metadata = result.success_reason["metadata"]
+        assert metadata["q1_llm_response_lookup_hash"] is not None
+        assert metadata["q1_llm_response_lookup_source"] == "prompts/lookups.yaml"
 
     def test_output_fields_extracts_typed_fields_from_json(self) -> None:
         """When output_fields is configured, JSON is parsed and fields extracted."""
@@ -1157,10 +1159,11 @@ class TestMultiQueryDeclaredOutputFields:
         )
         transform = LLMTransform(config)
 
-        # Must include prefixed metadata (usage, model, audit fields)
+        # Must include prefixed operational metadata (usage, model)
         assert "quality_llm_response_usage" in transform.declared_output_fields
         assert "quality_llm_response_model" in transform.declared_output_fields
-        assert "quality_llm_response_template_hash" in transform.declared_output_fields
+        # Audit fields (template_hash etc.) travel via success_reason, not output row
+        assert "quality_llm_response_template_hash" not in transform.declared_output_fields
 
     def test_multi_query_declares_extracted_output_fields(self) -> None:
         """When output_fields are configured, their prefixed names must be declared."""
@@ -1239,8 +1242,11 @@ class TestMultiQueryOutputSchemaConfig:
         assert "relevance_llm_response_usage" in guaranteed
         assert "relevance_llm_response_model" in guaranteed
 
-    def test_multi_query_audit_fields_are_prefixed(self) -> None:
-        """_output_schema_config.audit_fields must contain query-prefixed audit names."""
+    def test_multi_query_schema_config_has_no_audit_fields(self) -> None:
+        """_output_schema_config.audit_fields is not set for multi-query.
+
+        Audit fields now travel via success_reason["metadata"], not the output row.
+        """
         from elspeth.plugins.transforms.llm.transform import LLMTransform
 
         transform = LLMTransform(
@@ -1252,10 +1258,9 @@ class TestMultiQueryOutputSchemaConfig:
             )
         )
 
-        assert transform._output_schema_config.audit_fields is not None
-        audit = set(transform._output_schema_config.audit_fields)
-        assert "quality_llm_response_template_hash" in audit
-        assert "quality_llm_response_variables_hash" in audit
+        # audit_fields should be None or empty — no audit fields in SchemaConfig
+        audit_fields = transform._output_schema_config.audit_fields
+        assert audit_fields is None or len(audit_fields) == 0
 
     def test_multi_query_schema_config_excludes_unprefixed_fields(self) -> None:
         """Multi-query _output_schema_config must NOT contain unprefixed single-query fields.
@@ -1275,16 +1280,13 @@ class TestMultiQueryOutputSchemaConfig:
         )
 
         assert transform._output_schema_config.guaranteed_fields is not None
-        assert transform._output_schema_config.audit_fields is not None
         guaranteed = set(transform._output_schema_config.guaranteed_fields)
-        audit = set(transform._output_schema_config.audit_fields)
-        all_fields = guaranteed | audit
 
         # Unprefixed single-query fields must NOT appear
-        assert "llm_response" not in all_fields
-        assert "llm_response_usage" not in all_fields
-        assert "llm_response_model" not in all_fields
-        assert "llm_response_template_hash" not in all_fields
+        assert "llm_response" not in guaranteed
+        assert "llm_response_usage" not in guaranteed
+        assert "llm_response_model" not in guaranteed
+        assert "llm_response_template_hash" not in guaranteed
 
     def test_multi_query_output_schema_has_prefixed_model_fields(self) -> None:
         """Pydantic output_schema model must include prefixed fields for explicit schemas."""
@@ -1319,7 +1321,7 @@ class TestMultiQueryOutputSchemaConfig:
         assert "llm_response_model" in guaranteed
 
     def test_schema_config_consistent_with_declared_output_fields(self) -> None:
-        """All guaranteed + audit fields in _output_schema_config must appear in declared_output_fields."""
+        """All guaranteed fields in _output_schema_config must appear in declared_output_fields."""
         from elspeth.plugins.transforms.llm.transform import LLMTransform
 
         transform = LLMTransform(
@@ -1333,8 +1335,8 @@ class TestMultiQueryOutputSchemaConfig:
         )
 
         assert transform._output_schema_config.guaranteed_fields is not None
-        assert transform._output_schema_config.audit_fields is not None
-        schema_fields = set(transform._output_schema_config.guaranteed_fields) | set(transform._output_schema_config.audit_fields)
+        # audit_fields no longer set for multi-query (audit goes to success_reason)
+        schema_fields = set(transform._output_schema_config.guaranteed_fields)
         declared = transform.declared_output_fields
 
         # Every field advertised in schema config must be in declared_output_fields
@@ -2375,7 +2377,6 @@ def _make_lifecycle_ctx() -> Mock:
     ctx.rate_limit_registry = None
     ctx.telemetry_emit = Mock()
     ctx.node_id = "node-1"
-    ctx.payload_store = None
     ctx.concurrency_config = None
     return ctx
 
@@ -2476,3 +2477,450 @@ class TestAzureAITracingOnStart:
         ) as mock_configure:
             transform.on_start(ctx)
             mock_configure.assert_not_called()
+
+
+# ---------------------------------------------------------------------------
+# Bug cluster: LLM transform parallel execution fixes
+# ---------------------------------------------------------------------------
+
+
+class TestFinishReasonAuditTrail:
+    """Bug elspeth-393d2459aa: None finish_reason must be distinguishable from
+    STOP in the audit trail's success_reason metadata."""
+
+    def test_stop_finish_reason_recorded_in_success_metadata(self) -> None:
+        """finish_reason=STOP must appear as 'stop' in success_reason.metadata."""
+        transform, mock_provider = _make_transform_with_mock_provider()
+        mock_provider.execute_query.return_value = LLMQueryResult(
+            content="clean response",
+            usage=TokenUsage.known(10, 5),
+            model="gpt-4o",
+            finish_reason=FinishReason.STOP,
+        )
+
+        result = transform._process_row(_make_row(), _make_ctx())
+        assert result.status == "success"
+        assert result.success_reason is not None
+        metadata = result.success_reason["metadata"]
+        assert metadata["finish_reason"] == "stop"
+
+    def test_none_finish_reason_recorded_as_null_in_success_metadata(self) -> None:
+        """finish_reason=None must appear as None in success_reason.metadata,
+        making it distinguishable from finish_reason='stop'."""
+        transform, mock_provider = _make_transform_with_mock_provider()
+        mock_provider.execute_query.return_value = LLMQueryResult(
+            content="content with absent finish_reason",
+            usage=TokenUsage.known(10, 5),
+            model="gpt-4o",
+            finish_reason=None,
+        )
+
+        result = transform._process_row(_make_row(), _make_ctx())
+        assert result.status == "success"
+        assert result.success_reason is not None
+        metadata = result.success_reason["metadata"]
+        assert "finish_reason" in metadata, (
+            "success_reason.metadata must include 'finish_reason' so the audit "
+            "trail can distinguish absent finish_reason from confirmed STOP"
+        )
+        assert metadata["finish_reason"] is None
+
+    def test_unrecognized_finish_reason_recorded_as_raw_string(self) -> None:
+        """UnrecognizedFinishReason must serialize to its raw string value."""
+        from elspeth.plugins.transforms.llm.transform import _serialize_finish_reason
+
+        result = _serialize_finish_reason(UnrecognizedFinishReason("end_turn"))
+        assert result == "end_turn"
+
+
+class TestParallelErrorReasonNotFabricated:
+    """Bug elspeth-c00ff79303: parallel error path must not fabricate a reason
+    dict when first_result.reason is None — that's a FrameworkBugError."""
+
+    def test_none_reason_in_error_result_raises_framework_bug(self) -> None:
+        """TransformResult(status='error', reason=None) from the pool must raise
+        FrameworkBugError, not fabricate {'reason': 'multi_query_failed'}."""
+        from collections.abc import Callable
+
+        from elspeth.contracts.engine import BufferEntry
+        from elspeth.contracts.errors import FrameworkBugError
+        from elspeth.plugins.infrastructure.pooling.executor import RowContext
+        from elspeth.plugins.transforms.llm.multi_query import QuerySpec
+        from elspeth.plugins.transforms.llm.templates import PromptTemplate
+        from elspeth.plugins.transforms.llm.transform import MultiQueryStrategy
+
+        # Create a minimal strategy with a fake executor
+        mock_executor = Mock()
+
+        query_specs = [
+            QuerySpec(name="quality", input_fields={"text_content": "text"}),
+        ]
+        template = PromptTemplate("{{ text_content }}")
+        strategy = MultiQueryStrategy(
+            query_specs=query_specs,
+            template=template,
+            system_prompt=None,
+            system_prompt_source=None,
+            model="gpt-4o",
+            temperature=0.0,
+            max_tokens=100,
+            response_field="llm_response",
+            executor=mock_executor,
+        )
+
+        # TransformResult.__post_init__ validates that error results have a reason,
+        # so we can't construct one directly with reason=None. Create a valid one
+        # and then corrupt it to simulate a future regression or corruption.
+        bogus_error_result = TransformResult.error(
+            {"reason": "placeholder"},
+            retryable=False,
+        )
+        object.__setattr__(bogus_error_result, "reason", None)
+
+        def _fake_execute_batch(
+            contexts: list[RowContext],
+            process_fn: Callable[[dict[str, Any], str], TransformResult],
+        ) -> list[BufferEntry[TransformResult]]:
+            return [
+                BufferEntry(
+                    submit_index=0,
+                    complete_index=0,
+                    result=bogus_error_result,
+                    submit_timestamp=0.0,
+                    complete_timestamp=0.001,
+                    buffer_wait_ms=0.0,
+                )
+            ]
+
+        mock_executor.execute_batch.side_effect = _fake_execute_batch
+
+        from elspeth.testing import make_pipeline_row
+
+        row = make_pipeline_row({"text": "hello"})
+        ctx = _make_ctx()
+
+        with pytest.raises(FrameworkBugError, match="reason=None"):
+            strategy.execute(row, ctx, provider=Mock(), tracer=Mock())
+
+
+class TestParallelAuditMetadataThreadSafety:
+    """Bug elspeth-d322dea78c: audit_metadata_by_index must be protected
+    against concurrent writes from pool workers."""
+
+    def test_parallel_audit_metadata_protected_by_lock(self) -> None:
+        """Verify that _execute_parallel creates and uses a threading.Lock
+        to protect writes to the audit_metadata_by_index side channel."""
+        from collections.abc import Callable
+
+        from elspeth.contracts.engine import BufferEntry
+        from elspeth.plugins.infrastructure.pooling.executor import RowContext
+        from elspeth.plugins.transforms.llm.multi_query import QuerySpec
+        from elspeth.plugins.transforms.llm.templates import PromptTemplate
+        from elspeth.plugins.transforms.llm.transform import MultiQueryStrategy
+
+        lock_enter_count = 0
+
+        class CountingLock:
+            """Counts how many times the lock context is entered."""
+
+            def __enter__(self) -> CountingLock:
+                nonlocal lock_enter_count
+                lock_enter_count += 1
+                return self
+
+            def __exit__(self, *args: Any) -> None:
+                pass
+
+        mock_executor = Mock()
+        query_specs = [
+            QuerySpec(name="sentiment", input_fields={"text": "text"}),
+            QuerySpec(name="topic", input_fields={"text": "text"}),
+        ]
+        template = PromptTemplate("Analyze: {{ row.text }}")
+        strategy = MultiQueryStrategy(
+            query_specs=query_specs,
+            template=template,
+            system_prompt=None,
+            system_prompt_source=None,
+            model="gpt-4o",
+            temperature=0.0,
+            max_tokens=100,
+            response_field="llm_response",
+            executor=mock_executor,
+        )
+
+        mock_provider = Mock()
+        mock_provider.execute_query.return_value = LLMQueryResult(
+            content="result",
+            usage=TokenUsage.known(10, 5),
+            model="gpt-4o",
+            finish_reason=FinishReason.STOP,
+        )
+
+        def _fake_execute_batch(
+            contexts: list[RowContext],
+            process_fn: Callable[[dict[str, Any], str], TransformResult],
+        ) -> list[BufferEntry[TransformResult]]:
+            entries: list[BufferEntry[TransformResult]] = []
+            for i, ctx_item in enumerate(contexts):
+                result = process_fn(ctx_item.row, ctx_item.state_id)
+                entries.append(
+                    BufferEntry(
+                        submit_index=i,
+                        complete_index=i,
+                        result=result,
+                        submit_timestamp=0.0,
+                        complete_timestamp=0.001,
+                        buffer_wait_ms=0.0,
+                    )
+                )
+            return entries
+
+        mock_executor.execute_batch.side_effect = _fake_execute_batch
+
+        from elspeth.testing import make_pipeline_row
+
+        row = make_pipeline_row({"text": "hello"})
+        ctx = _make_ctx()
+
+        # Patch threading.Lock to use our counting lock
+        with patch("elspeth.plugins.transforms.llm.transform.threading.Lock", return_value=CountingLock()):
+            result = strategy.execute(row, ctx, provider=mock_provider, tracer=Mock())
+
+        assert result.status == "success"
+        # Each successful query writes to audit_metadata_by_index under the lock.
+        # 2 queries → lock acquired 2 times.
+        assert lock_enter_count == len(query_specs), (
+            f"Expected lock to be acquired {len(query_specs)} times (once per successful query), but was acquired {lock_enter_count} times"
+        )
+
+    def test_concurrent_audit_metadata_writes_no_lost_entries(self) -> None:
+        """Concurrent pool workers must not lose audit metadata entries.
+
+        Uses a real ThreadPoolExecutor with a Barrier to force simultaneous
+        writes, verifying that all entries survive under actual concurrency.
+        """
+        import threading
+        from collections.abc import Callable
+        from concurrent.futures import ThreadPoolExecutor
+
+        from elspeth.contracts.engine import BufferEntry
+        from elspeth.plugins.infrastructure.pooling.executor import RowContext
+        from elspeth.plugins.transforms.llm.multi_query import QuerySpec
+        from elspeth.plugins.transforms.llm.templates import PromptTemplate
+        from elspeth.plugins.transforms.llm.transform import MultiQueryStrategy
+
+        NUM_QUERIES = 8
+        barrier = threading.Barrier(NUM_QUERIES)
+
+        mock_executor = Mock()
+        query_specs = [QuerySpec(name=f"q{i}", input_fields={"text": "text"}) for i in range(NUM_QUERIES)]
+        template = PromptTemplate("Analyze: {{ row.text }}")
+        strategy = MultiQueryStrategy(
+            query_specs=query_specs,
+            template=template,
+            system_prompt=None,
+            system_prompt_source=None,
+            model="gpt-4o",
+            temperature=0.0,
+            max_tokens=100,
+            response_field="llm_response",
+            executor=mock_executor,
+        )
+
+        mock_provider = Mock()
+        mock_provider.execute_query.return_value = LLMQueryResult(
+            content="result",
+            usage=TokenUsage.known(10, 5),
+            model="gpt-4o",
+            finish_reason=FinishReason.STOP,
+        )
+
+        def _concurrent_execute_batch(
+            contexts: list[RowContext],
+            process_fn: Callable[[dict[str, Any], str], TransformResult],
+        ) -> list[BufferEntry[TransformResult]]:
+            """Execute process_fn concurrently with barrier synchronization."""
+            results: list[TransformResult | None] = [None] * len(contexts)
+
+            def _worker(idx: int) -> None:
+                barrier.wait()  # Force all workers to start simultaneously
+                results[idx] = process_fn(contexts[idx].row, contexts[idx].state_id)
+
+            with ThreadPoolExecutor(max_workers=NUM_QUERIES) as pool:
+                futures = [pool.submit(_worker, i) for i in range(len(contexts))]
+                for f in futures:
+                    f.result()  # Raise any worker exceptions
+
+            entries: list[BufferEntry[TransformResult]] = []
+            for i, r in enumerate(results):
+                assert r is not None
+                entries.append(
+                    BufferEntry(
+                        submit_index=i,
+                        complete_index=i,
+                        result=r,
+                        submit_timestamp=0.0,
+                        complete_timestamp=0.001,
+                        buffer_wait_ms=0.0,
+                    )
+                )
+            return entries
+
+        mock_executor.execute_batch.side_effect = _concurrent_execute_batch
+
+        from elspeth.testing import make_pipeline_row
+
+        row = make_pipeline_row({"text": "hello"})
+        ctx = _make_ctx()
+
+        result = strategy.execute(row, ctx, provider=mock_provider, tracer=Mock())
+
+        assert result.status == "success", f"Expected success, got error: {result.reason}"
+        # The key assertion: all 8 queries' audit metadata survived concurrent writes.
+        # If the lock were missing, some entries could be lost under thread interleaving.
+        assert result.success_reason is not None
+        metadata = result.success_reason["metadata"]
+        for i in range(NUM_QUERIES):
+            assert f"q{i}_finish_reason" in metadata, f"Audit metadata for query q{i} is missing — concurrent write was lost"
+
+
+class TestMultiQueryFinishReasonAudit:
+    """Bug elspeth-393d2459aa: Multi-query path must also record finish_reason
+    in audit metadata with per-query prefixed keys."""
+
+    def test_sequential_multi_query_records_finish_reason_per_query(self) -> None:
+        """Each query's finish_reason must appear in success_reason.metadata
+        with the key '{spec.name}_finish_reason'."""
+        from elspeth.plugins.transforms.llm.multi_query import QuerySpec
+        from elspeth.plugins.transforms.llm.templates import PromptTemplate
+        from elspeth.plugins.transforms.llm.transform import MultiQueryStrategy
+
+        query_specs = [
+            QuerySpec(name="sentiment", input_fields={"text": "text"}),
+            QuerySpec(name="topic", input_fields={"text": "text"}),
+        ]
+        template = PromptTemplate("Analyze: {{ row.text }}")
+        strategy = MultiQueryStrategy(
+            query_specs=query_specs,
+            template=template,
+            system_prompt=None,
+            system_prompt_source=None,
+            model="gpt-4o",
+            temperature=0.0,
+            max_tokens=100,
+            response_field="llm_response",
+            executor=None,  # Sequential mode
+        )
+
+        mock_provider = Mock()
+        mock_provider.execute_query.return_value = LLMQueryResult(
+            content="result",
+            usage=TokenUsage.known(10, 5),
+            model="gpt-4o",
+            finish_reason=FinishReason.STOP,
+        )
+
+        from elspeth.testing import make_pipeline_row
+
+        row = make_pipeline_row({"text": "hello"})
+        ctx = _make_ctx()
+
+        result = strategy.execute(row, ctx, provider=mock_provider, tracer=Mock())
+        assert result.status == "success"
+        assert result.success_reason is not None
+        metadata = result.success_reason["metadata"]
+
+        assert metadata["sentiment_finish_reason"] == "stop"
+        assert metadata["topic_finish_reason"] == "stop"
+
+    def test_sequential_multi_query_records_none_finish_reason(self) -> None:
+        """Absent finish_reason in multi-query mode must be distinguishable
+        from confirmed STOP."""
+        from elspeth.plugins.transforms.llm.multi_query import QuerySpec
+        from elspeth.plugins.transforms.llm.templates import PromptTemplate
+        from elspeth.plugins.transforms.llm.transform import MultiQueryStrategy
+
+        query_specs = [
+            QuerySpec(name="analysis", input_fields={"text": "text"}),
+        ]
+        template = PromptTemplate("Analyze: {{ row.text }}")
+        strategy = MultiQueryStrategy(
+            query_specs=query_specs,
+            template=template,
+            system_prompt=None,
+            system_prompt_source=None,
+            model="gpt-4o",
+            temperature=0.0,
+            max_tokens=100,
+            response_field="llm_response",
+            executor=None,
+        )
+
+        mock_provider = Mock()
+        mock_provider.execute_query.return_value = LLMQueryResult(
+            content="result",
+            usage=TokenUsage.known(10, 5),
+            model="gpt-4o",
+            finish_reason=None,  # Provider couldn't extract it
+        )
+
+        from elspeth.testing import make_pipeline_row
+
+        row = make_pipeline_row({"text": "hello"})
+        ctx = _make_ctx()
+
+        result = strategy.execute(row, ctx, provider=mock_provider, tracer=Mock())
+        assert result.status == "success"
+        assert result.success_reason is not None
+        metadata = result.success_reason["metadata"]
+
+        assert "analysis_finish_reason" in metadata
+        assert metadata["analysis_finish_reason"] is None
+
+
+class TestSequentialErrorReasonNotFabricated:
+    """Mirrors TestParallelErrorReasonNotFabricated for the sequential path."""
+
+    def test_none_reason_in_sequential_error_raises_framework_bug(self) -> None:
+        """Sequential _execute_sequential must also raise FrameworkBugError
+        for reason=None, not silently return the broken result."""
+        from elspeth.contracts.errors import FrameworkBugError
+        from elspeth.plugins.transforms.llm.multi_query import QuerySpec
+        from elspeth.plugins.transforms.llm.templates import PromptTemplate
+        from elspeth.plugins.transforms.llm.transform import MultiQueryStrategy
+
+        query_specs = [
+            QuerySpec(name="quality", input_fields={"text": "text"}),
+        ]
+        template = PromptTemplate("Analyze: {{ row.text }}")
+        strategy = MultiQueryStrategy(
+            query_specs=query_specs,
+            template=template,
+            system_prompt=None,
+            system_prompt_source=None,
+            model="gpt-4o",
+            temperature=0.0,
+            max_tokens=100,
+            response_field="llm_response",
+            executor=None,  # Sequential mode
+        )
+
+        # Patch _execute_one_query at the class level (frozen slots dataclass
+        # prevents instance-level patching) to return a corrupted error result.
+        bogus_error_result = TransformResult.error(
+            {"reason": "placeholder"},
+            retryable=False,
+        )
+        object.__setattr__(bogus_error_result, "reason", None)
+
+        from elspeth.testing import make_pipeline_row
+
+        row = make_pipeline_row({"text": "hello"})
+        ctx = _make_ctx()
+
+        with (
+            patch.object(MultiQueryStrategy, "_execute_one_query", return_value=bogus_error_result),
+            pytest.raises(FrameworkBugError, match="reason=None"),
+        ):
+            strategy.execute(row, ctx, provider=Mock(), tracer=Mock())

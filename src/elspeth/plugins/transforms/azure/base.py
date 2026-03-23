@@ -22,6 +22,7 @@ from pydantic import Field, field_validator
 
 from elspeth.contracts import Determinism
 from elspeth.contracts.contexts import LifecycleContext, TransformContext
+from elspeth.contracts.errors import PluginRetryableError
 from elspeth.contracts.schema_contract import PipelineRow
 from elspeth.plugins.infrastructure.base import BaseTransform
 from elspeth.plugins.infrastructure.batching import BatchTransformMixin, OutputPort
@@ -285,14 +286,10 @@ class BaseAzureSafetyTransform(BaseTransform, BatchTransformMixin):
                     retryable=False,
                 )
             except httpx.RequestError as e:
-                return TransformResult.error(
-                    {
-                        "reason": "api_error",
-                        "error_type": "network_error",
-                        "message": str(e),
-                    },
-                    retryable=True,
-                )
+                # Network errors are transient — re-raise for engine retry.
+                # TransformResult.error(retryable=True) was dead code: the engine
+                # retries by catching PluginRetryableError, not by inspecting results.
+                raise PluginRetryableError(f"Azure API network error: {e}", retryable=True) from e
             except MalformedResponseError as e:
                 # Malformed API response — fail CLOSED, non-retryable
                 # (response structure won't improve on retry)

@@ -266,7 +266,6 @@ TransformErrorCategory = Literal[
     "api_error",
     "api_call_failed",
     "llm_call_failed",
-    "llm_retryable_error_no_retry",  # LLM error that would be retried but retry disabled
     "network_error",
     "permanent_error",
     "retry_timeout",
@@ -308,6 +307,10 @@ TransformErrorCategory = Literal[
     "rate_limited",
     # Content extraction errors (Tier 3 boundary - external HTML/text parsing)
     "content_extraction_failed",
+    # Retrieval errors (RAG retrieval transform)
+    "retrieval_failed",
+    "no_results",
+    "no_regex_match",
     # Content filtering
     "blocked_content",
     "content_filtered",
@@ -336,6 +339,7 @@ TransformErrorCategory = Literal[
     "intentional_failure",
     # Batch processing
     "empty_batch",
+    "all_non_finite",  # All values in batch were NaN/Inf — no real data to aggregate
 ]
 
 
@@ -388,6 +392,11 @@ class TransformErrorReason(TypedDict):
         original_field: Original field name before normalization
         count: Number of violations (multiple_contract_violations only)
         violations: Per-violation reason entries (multiple_contract_violations only)
+
+    RAG retrieval context:
+        provider: Retrieval provider name (e.g., "azure_search", "chroma")
+        cause: Sub-cause within an error category (e.g., "null_value", "empty_query")
+        pattern: Regex pattern string (for no_regex_match errors)
 
     Rate limiting/timeout context:
         elapsed_seconds: Time elapsed before timeout
@@ -490,6 +499,11 @@ class TransformErrorReason(TypedDict):
     max_wait_hours: NotRequired[float]  # Batch max wait time (hours)
     status_code: NotRequired[int]
 
+    # RAG retrieval context
+    provider: NotRequired[str]  # Retrieval provider name (e.g., "azure_search", "chroma")
+    cause: NotRequired[str]  # Sub-cause within error category (e.g., "null_value", "empty_query")
+    pattern: NotRequired[str]  # Regex pattern string (for no_regex_match errors)
+
     # Content filtering context
     matched_pattern: NotRequired[str]
     match_context: NotRequired[str]
@@ -508,6 +522,8 @@ class TransformErrorReason(TypedDict):
     output_file_id: NotRequired[str]  # Batch output file reference
     malformed_count: NotRequired[int]  # Count of malformed batch lines
     errors: NotRequired[list[str | ErrorDetail]]  # Error messages or structured errors
+    skipped_non_finite: NotRequired[int]  # Count of NaN/Inf values skipped
+    skipped_non_finite_indices: NotRequired[list[int]]  # Row indices with non-finite values
 
 
 class SourceQuarantineReason(TypedDict):
@@ -649,7 +665,7 @@ class GracefulShutdownError(Exception):
         self.rows_quarantined = rows_quarantined
         self.rows_routed = rows_routed
         self.routed_destinations: Mapping[str, int] = (
-            MappingProxyType(routed_destinations) if routed_destinations is not None else MappingProxyType({})
+            MappingProxyType(dict(routed_destinations)) if routed_destinations is not None else MappingProxyType({})
         )
         super().__init__(
             f"Pipeline interrupted after {rows_processed} rows (run_id={run_id}). Resume with: elspeth resume {run_id} --execute"
@@ -693,6 +709,24 @@ class OrchestrationInvariantError(Exception):
     """
 
     pass
+
+
+class PluginRetryableError(Exception):
+    """Base for plugin exceptions eligible for engine retry.
+
+    All plugin error types that may be retried by the engine's RetryManager
+    must inherit from this class. The processor catches PluginRetryableError
+    and dispatches to retry logic based on the retryable attribute.
+
+    Attributes:
+        retryable: Whether the error is transient and should be retried.
+        status_code: HTTP status code if applicable (for audit context).
+    """
+
+    def __init__(self, message: str, *, retryable: bool, status_code: int | None = None) -> None:
+        super().__init__(message)
+        self.retryable = retryable
+        self.status_code = status_code
 
 
 class FrameworkBugError(Exception):

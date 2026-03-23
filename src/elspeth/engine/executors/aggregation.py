@@ -31,6 +31,7 @@ from elspeth.contracts.errors import (
     OrchestrationInvariantError,
     PluginContractViolation,
 )
+from elspeth.contracts.freeze import deep_thaw
 from elspeth.contracts.node_state_context import AggregationFlushContext
 from elspeth.contracts.plugin_context import PluginContext
 from elspeth.contracts.types import NodeID, StepResolver
@@ -279,7 +280,7 @@ class AggregationExecutor:
         node = self._get_node(node_id, "execute_flush")
         batch_id = node.batch_id
         if batch_id is None:
-            raise RuntimeError(f"No batch exists for node {node_id} - cannot flush")
+            raise OrchestrationInvariantError(f"No batch exists for node {node_id} - cannot flush")
 
         # Snapshot buffered data (consolidated state eliminates KeyError risk —
         # buffers and tokens are structurally tied to the same node entry)
@@ -287,13 +288,13 @@ class AggregationExecutor:
         buffered_tokens = list(node.tokens)
 
         if not buffered_rows:
-            raise RuntimeError(f"Cannot flush empty buffer for node {node_id}")
+            raise OrchestrationInvariantError(f"Cannot flush empty buffer for node {node_id}")
 
         # Defensive validation: buffer and tokens must be same length
         # This should never happen (checkpoint restore ensures they stay in sync)
         # but crashes explicitly if internal state is corrupted
         if len(buffered_rows) != len(buffered_tokens):
-            raise RuntimeError(
+            raise OrchestrationInvariantError(
                 f"Internal state corruption in AggregationExecutor node '{node_id}': "
                 f"buffer has {len(buffered_rows)} rows but tokens has {len(buffered_tokens)} entries. "
                 f"These must always match. This indicates a bug in checkpoint "
@@ -311,7 +312,7 @@ class AggregationExecutor:
         for row_dict, token in zip(buffered_rows, buffered_tokens, strict=True):
             contract = token.row_data.contract
             if contract is None:
-                raise RuntimeError(
+                raise OrchestrationInvariantError(
                     f"Token {token.token_id} has no contract - cannot reconstruct PipelineRow. "
                     f"This indicates a bug in buffer_row() or checkpoint restore."
                 )
@@ -459,11 +460,10 @@ class AggregationExecutor:
                         output_data = [r.to_dict() for r in result.rows]
                     else:
                         # Contract violation: success status requires output data
-                        raise RuntimeError(
+                        raise PluginContractViolation(
                             f"Aggregation transform '{transform.name}' returned success status but "
                             f"neither row nor rows contains data. Batch-aware transforms must return "
-                            f"output via TransformResult.success(row) or TransformResult.success_multi(rows). "
-                            f"This is a plugin bug."
+                            f"output via TransformResult.success(row) or TransformResult.success_multi(rows)."
                         )
 
                     flush_context = AggregationFlushContext(
@@ -531,8 +531,8 @@ class AggregationExecutor:
                             trigger_type=trigger_type,
                             state_id=guard.state_id,
                         )
-                    except (FrameworkBugError, AuditIntegrityError):
-                        raise  # System bugs and audit corruption must crash immediately
+                    except (FrameworkBugError, AuditIntegrityError, OrchestrationInvariantError):
+                        raise  # System bugs, audit corruption, and invariant violations must crash immediately
                     except (TypeError, AttributeError, KeyError, NameError):
                         raise  # Programming errors in recorder — crash to surface the bug
                     except Exception as cleanup_err:
@@ -624,7 +624,7 @@ class AggregationExecutor:
             condition_fire_offset = node.trigger.get_condition_fire_offset()
 
             if node.batch_id is None:
-                raise RuntimeError(
+                raise OrchestrationInvariantError(
                     f"AggregationExecutor checkpoint missing batch_id for node {node_id}. "
                     "Buffered tokens exist without an active batch_id - internal state corruption."
                 )
@@ -680,7 +680,7 @@ class AggregationExecutor:
             logger.warning(f"Large checkpoint: {size_mb:.1f}MB for {total_rows} buffered rows across {len(nodes)} nodes")
 
         if size_mb > 10:
-            raise RuntimeError(
+            raise OrchestrationInvariantError(
                 f"Checkpoint size {size_mb:.1f}MB exceeds 10MB limit. "
                 f"Buffer contains {total_rows} total rows across {len(nodes)} nodes. "
                 f"Solutions: (1) Reduce aggregation count trigger to <5000 rows, "
@@ -742,7 +742,9 @@ class AggregationExecutor:
                     )
 
                 # Reconstruct PipelineRow from checkpoint data
-                row_data = PipelineRow(dict(t.row_data), restored_contract)
+                # deep_thaw() recursively converts MappingProxyType→dict and tuple→list,
+                # preventing frozen nested containers from surviving into restored rows.
+                row_data = PipelineRow(deep_thaw(t.row_data), restored_contract)
 
                 reconstructed_tokens.append(
                     TokenInfo(

@@ -97,7 +97,7 @@ Input CSV (crazy headers)
     ▼
 ┌─────────────────────────────┐
 │ CSVSource                   │
-│ - normalize_fields: true    │
+│ - field normalization (auto) │
 │ - Creates SchemaContract    │  ──► Audit: runs.schema_contract_json
 │   with field resolution     │
 └─────────────────────────────┘
@@ -149,7 +149,7 @@ In healthcare AI systems:
 | File | Purpose |
 |------|---------|
 | `input.csv` | Medical case studies with crazy headers |
-| `settings.yaml` | Pipeline with `normalize_fields: true` |
+| `settings.yaml` | Pipeline with schema validation |
 | `criteria_lookup.yaml` | Assessment criteria definitions |
 | `output/results.csv` | LLM assessment results |
 | `runs/audit.db` | Full audit trail with contracts |

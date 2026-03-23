@@ -12,7 +12,7 @@ from __future__ import annotations
 
 import hashlib
 from collections import deque
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from types import MappingProxyType
 from typing import TYPE_CHECKING, Any, cast
@@ -36,7 +36,13 @@ if TYPE_CHECKING:
 
 from elspeth.contracts import BatchTransformProtocol, TransformProtocol
 from elspeth.contracts.enums import NodeStateStatus, OutputMode, RoutingKind, RoutingMode, TriggerType
-from elspeth.contracts.errors import MaxRetriesExceeded, OrchestrationInvariantError, TransformErrorCategory, TransformErrorReason
+from elspeth.contracts.errors import (
+    MaxRetriesExceeded,
+    OrchestrationInvariantError,
+    PluginRetryableError,
+    TransformErrorCategory,
+    TransformErrorReason,
+)
 from elspeth.contracts.plugin_context import PluginContext
 from elspeth.contracts.results import FailureInfo
 from elspeth.core.config import AggregationSettings, GateSettings
@@ -50,7 +56,6 @@ from elspeth.engine.executors import (
 from elspeth.engine.retry import RetryManager
 from elspeth.engine.spans import SpanFactory
 from elspeth.engine.tokens import TokenManager
-from elspeth.plugins.infrastructure.clients.llm import LLMClientError
 from elspeth.plugins.infrastructure.pooling import CapacityError
 
 # Iteration guard to prevent infinite loops from bugs
@@ -1017,7 +1022,7 @@ class RowProcessor:
     ) -> tuple[TransformResult, TokenInfo, str | None]:
         """Convert a retryable exception to a TransformResult.error when no retry manager is configured.
 
-        Shared handler for LLMClientError (retryable) and transient exceptions
+        Shared handler for PluginRetryableError (retryable) and transient exceptions
         (ConnectionError, TimeoutError, OSError, CapacityError). Records the
         error in the audit trail and emits a DIVERT routing event if on_error
         routes to a sink.
@@ -1100,17 +1105,14 @@ class RowProcessor:
                     ctx=ctx,
                     attempt=0,
                 )
-            except LLMClientError as e:
-                if e.retryable:
-                    return self._convert_retryable_to_error_result(
-                        e,
-                        transform,
-                        token,
-                        ctx,
-                        reason="llm_retryable_error_no_retry",
-                    )
-                # Non-retryable errors re-raise (already handled by transform)
-                raise
+            except PluginRetryableError as e:
+                return self._convert_retryable_to_error_result(
+                    e,
+                    transform,
+                    token,
+                    ctx,
+                    reason="transient_error_no_retry" if e.retryable else "permanent_error",
+                )
             except (ConnectionError, TimeoutError, OSError, CapacityError) as e:
                 return self._convert_retryable_to_error_result(
                     e,
@@ -1134,13 +1136,7 @@ class RowProcessor:
             )
 
         def is_retryable(e: BaseException) -> bool:
-            # Retry transient errors (network, timeout, rate limit)
-            # Don't retry programming errors (AttributeError, TypeError, etc.)
-            #
-            # LLMClientError has a retryable attribute:
-            # - RateLimitError, NetworkError, ServerError: retryable=True
-            # - ContentPolicyError, ContextLengthError: retryable=False
-            if isinstance(e, LLMClientError):
+            if isinstance(e, PluginRetryableError):
                 return e.retryable
             return isinstance(e, ConnectionError | TimeoutError | OSError | CapacityError)
 
@@ -1153,7 +1149,7 @@ class RowProcessor:
         self,
         row_index: int,
         source_row: SourceRow,
-        transforms: list[Any],
+        transforms: Sequence[Any],
         ctx: PluginContext,
         *,
         coalesce_node_id: NodeID | None = None,
@@ -1221,7 +1217,7 @@ class RowProcessor:
         self,
         row_id: str,
         row_data: PipelineRow,
-        transforms: list[Any],
+        transforms: Sequence[Any],
         ctx: PluginContext,
         *,
         coalesce_node_id: NodeID | None = None,

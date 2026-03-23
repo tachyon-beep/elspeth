@@ -164,18 +164,25 @@ def _process_merged_coalesce_outcome(
 
     Extracted from handle_coalesce_timeouts and flush_coalesce_pending which
     had identical merge routing logic.
+
+    Does NOT increment rows_coalesced. Counting ownership belongs exclusively
+    to accumulate_row_outcomes (COALESCED branch). Terminal coalesces produce
+    RowOutcome.COALESCED which accumulate_row_outcomes counts. Non-terminal
+    coalesces produce COMPLETED — the row's terminal state is "completed after
+    coalesce", not "coalesced", so rows_coalesced is correctly not incremented.
     """
-    counters.rows_coalesced += 1
     merged_token = outcome.merged_token
     if merged_token is None:
         raise OrchestrationInvariantError("CoalesceOutcome has_merged=True but merged_token is None")
     coalesce_node_id = coalesce_node_map[coalesce_name]
-    continuation_results = processor.process_token(
-        token=merged_token,
-        ctx=ctx,
-        current_node_id=coalesce_node_id,
-        coalesce_node_id=coalesce_node_id,
-        coalesce_name=coalesce_name,
+    continuation_results: list[RowResult] = list(
+        processor.process_token(
+            token=merged_token,
+            ctx=ctx,
+            current_node_id=coalesce_node_id,
+            coalesce_node_id=coalesce_node_id,
+            coalesce_name=coalesce_name,
+        )
     )
     accumulate_row_outcomes(
         continuation_results,

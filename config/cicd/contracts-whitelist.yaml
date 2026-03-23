@@ -167,10 +167,6 @@ allowed_dict_patterns:
   # Query repository - returns deserialized user row data (dynamic per-pipeline schema)
   - "src/elspeth/core/landscape/query_repository.py:QueryRepository._retrieve_and_parse_payload:return"
 
-  # Run lifecycle repository + recorder delegation
-  - "src/elspeth/core/landscape/run_lifecycle_repository.py:RunLifecycleRepository.begin_run:config"
-  - "src/elspeth/core/landscape/recorder.py:LandscapeRecorder.begin_run:config"
-
   # Execution repository (node state, call, batch recording)
   - "src/elspeth/core/landscape/execution_repository.py:ExecutionRepository.begin_node_state:input_data"
   - "src/elspeth/core/landscape/execution_repository.py:ExecutionRepository.complete_node_state:output_data"
@@ -222,6 +218,10 @@ allowed_dict_patterns:
   # LLM transforms handle dynamic row data and external API responses
   # ═══════════════════════════════════════════════════════════════════════════
 
+  # RAG query construction — row_data is Tier 2 pipeline data (user-defined schema)
+  - "src/elspeth/plugins/transforms/rag/query.py:QueryBuilder.build:row_data"
+  - "src/elspeth/plugins/transforms/rag/query.py:QueryBuilder._build_template:row_data"
+
   # LLM templates
   - "src/elspeth/plugins/transforms/llm/templates.py:PromptTemplate.__init__:lookup_data"
   - "src/elspeth/plugins/transforms/llm/templates.py:PromptTemplate.render:row"
@@ -255,6 +255,9 @@ allowed_dict_patterns:
 
   # Unified LLM transform (T10 consolidation — dispatches to Azure/OpenRouter providers)
   - "src/elspeth/plugins/transforms/llm/transform.py:LLMTransform.__init__:config"
+
+  # RAG retrieval transform (config is user YAML — Tier 3 boundary, parsed into RAGRetrievalConfig)
+  - "src/elspeth/plugins/transforms/rag/transform.py:RAGRetrievalTransform.__init__:config"
   # Multi-query partial output (keys are dynamic: query-spec-dependent field names — _QuerySuccess.fields)
   # Pool work context (PooledExecutor row interface is dict[str, Any])
   - "src/elspeth/plugins/transforms/llm/transform.py:MultiQueryStrategy._process_fn:work"
@@ -268,6 +271,23 @@ allowed_dict_patterns:
 
   # Azure blob storage
   - "src/elspeth/plugins/sources/azure_blob_source.py:AzureBlobSource.__init__:config"
+
+  # Dataverse plugins
+  - "src/elspeth/plugins/sources/dataverse.py:DataverseSource.__init__:config"
+  - "src/elspeth/plugins/sources/dataverse.py:DataverseSource._strip_odata_metadata:row"
+  - "src/elspeth/plugins/sources/dataverse.py:DataverseSource._strip_odata_metadata:return"
+  - "src/elspeth/plugins/sources/dataverse.py:DataverseSource._normalize_row_fields:row"
+  - "src/elspeth/plugins/sources/dataverse.py:DataverseSource._normalize_row_fields:return"
+  - "src/elspeth/plugins/sinks/dataverse.py:DataverseSink.__init__:config"
+  - "src/elspeth/plugins/sinks/dataverse.py:DataverseSink._map_row:row"
+  - "src/elspeth/plugins/sinks/dataverse.py:DataverseSink._map_row:return"
+  - "src/elspeth/plugins/sinks/dataverse.py:DataverseSink.write:rows (list)"
+  - "src/elspeth/plugins/infrastructure/clients/dataverse.py:DataverseClient._execute_request:json_body"
+  - "src/elspeth/plugins/infrastructure/clients/dataverse.py:DataverseClient.upsert:body"
+  - "src/elspeth/plugins/sources/dataverse.py:DataverseSource._emit_telemetry:request_data"
+  - "src/elspeth/plugins/sources/dataverse.py:DataverseSource._emit_telemetry:response_data"
+  - "src/elspeth/plugins/sinks/dataverse.py:DataverseSink._emit_telemetry:request_data"
+  - "src/elspeth/plugins/sinks/dataverse.py:DataverseSink._emit_telemetry:response_data"
   - "src/elspeth/plugins/sinks/azure_blob_sink.py:AzureBlobSink.__init__:config"
   - "src/elspeth/plugins/sinks/azure_blob_sink.py:AzureBlobSink._serialize_rows:rows (list)"
   - "src/elspeth/plugins/sinks/azure_blob_sink.py:AzureBlobSink._serialize_csv:rows (list)"
@@ -280,6 +300,15 @@ allowed_dict_patterns:
   - "src/elspeth/plugins/transforms/azure/base.py:BaseAzureSafetyTransform.__init__:config"
   - "src/elspeth/plugins/transforms/azure/content_safety.py:AzureContentSafety.__init__:config"
   - "src/elspeth/plugins/transforms/azure/prompt_shield.py:AzurePromptShield.__init__:config"
+
+  # ═══════════════════════════════════════════════════════════════════════════
+  # RETRIEVAL CLIENTS - External search API trust boundary
+  # Azure AI Search API returns untyped JSON; response_data and body are
+  # inherently dict[str, Any] at the Tier 3 boundary before validation.
+  # ═══════════════════════════════════════════════════════════════════════════
+  - "src/elspeth/plugins/infrastructure/clients/retrieval/azure_search.py:AzureSearchProvider._execute_search:return"
+  - "src/elspeth/plugins/infrastructure/clients/retrieval/azure_search.py:AzureSearchProvider._build_request_body:return"
+  - "src/elspeth/plugins/infrastructure/clients/retrieval/azure_search.py:AzureSearchProvider._parse_response:response_data"
 
   # ═══════════════════════════════════════════════════════════════════════════
   # HTTP CLIENTS - External API trust boundary
@@ -376,70 +405,6 @@ allowed_dict_patterns:
   - "src/elspeth/testing/__init__.py:make_success_reason:return"
   - "src/elspeth/testing/__init__.py:make_error_reason:return"
   - "src/elspeth/testing/__init__.py:make_contract_audit_record:data"
-
-  # ═══════════════════════════════════════════════════════════════════════════
-  # CHAOSLLM - Fault injection test server
-  # ChaosLLM is a fault-injection test server for LLM reliability testing.
-  # ═══════════════════════════════════════════════════════════════════════════
-  - "src/elspeth/testing/chaosllm/server.py:ChaosLLMServer.get_stats:return"
-  - "src/elspeth/testing/chaosllm/server.py:ChaosLLMServer.update_config:updates"
-  - "src/elspeth/testing/chaosllm/server.py:ChaosLLMServer._get_current_config:return"
-  - "src/elspeth/testing/chaosllm/server.py:ChaosLLMServer._handle_success_response:body"
-  - "src/elspeth/testing/chaosllm/config.py:load_config:cli_overrides"
-  - "src/elspeth/testing/chaosllm/config.py:load_preset:return"
-  - "src/elspeth/testing/chaosllm/response_generator.py:OpenAIResponse.to_dict:return"
-  - "src/elspeth/testing/chaosllm/response_generator.py:ResponseGenerator._generate_template_response:request"
-  - "src/elspeth/testing/chaosllm/response_generator.py:ResponseGenerator._generate_echo_response:request"
-  - "src/elspeth/testing/chaosllm/response_generator.py:ResponseGenerator._extract_prompt_text:request"
-  - "src/elspeth/testing/chaosllm/response_generator.py:ResponseGenerator.generate:request"
-  - "src/elspeth/testing/chaosllm/metrics.py:MetricsRecorder.get_stats:return"
-  - "src/elspeth/testing/chaosllm/metrics.py:MetricsRecorder.get_requests:return (list)"
-  - "src/elspeth/testing/chaosllm/metrics.py:MetricsRecorder.get_timeseries:return (list)"
-  - "src/elspeth/testing/chaosllm/metrics.py:MetricsRecorder.export_data:return"
-  - "src/elspeth/testing/chaosllm/server.py:ChaosLLMServer.export_metrics:return"
-  - "src/elspeth/testing/chaosllm/server.py:ChaosLLMServer._handle_slow_response:body"
-
-  # ChaosLLM MCP server (test tooling)
-  - "src/elspeth/testing/chaosllm_mcp/server.py:ChaosLLMAnalyzer.diagnose:return"
-  - "src/elspeth/testing/chaosllm_mcp/server.py:ChaosLLMAnalyzer.analyze_aimd_behavior:return"
-  - "src/elspeth/testing/chaosllm_mcp/server.py:ChaosLLMAnalyzer.analyze_errors:return"
-  - "src/elspeth/testing/chaosllm_mcp/server.py:ChaosLLMAnalyzer.analyze_latency:return"
-  - "src/elspeth/testing/chaosllm_mcp/server.py:ChaosLLMAnalyzer.find_anomalies:return"
-  - "src/elspeth/testing/chaosllm_mcp/server.py:ChaosLLMAnalyzer.get_burst_events:return"
-  - "src/elspeth/testing/chaosllm_mcp/server.py:ChaosLLMAnalyzer.get_error_samples:return"
-  - "src/elspeth/testing/chaosllm_mcp/server.py:ChaosLLMAnalyzer.get_time_window:return"
-  - "src/elspeth/testing/chaosllm_mcp/server.py:ChaosLLMAnalyzer.query:return (list)"
-  - "src/elspeth/testing/chaosllm_mcp/server.py:ChaosLLMAnalyzer.describe_schema:return"
-  - "src/elspeth/testing/chaosllm_mcp/server.py:call_tool:arguments"
-  - "src/elspeth/testing/chaosllm_mcp/server.py:ChaosLLMAnalyzer._avg_success:b_list (list)"
-  - "src/elspeth/testing/chaosllm_mcp/server.py:ChaosLLMAnalyzer._avg_latency:b_list (list)"
-
-  # ChaosEngine - shared utilities for chaos testing servers
-  # MetricsStore returns dynamic dicts for stats/export (schema-driven SQLite).
-  # Config loader uses dict[str, Any] for YAML config merging and preset loading.
-  - "src/elspeth/testing/chaosengine/metrics_store.py:MetricsStore.get_stats:return"
-  - "src/elspeth/testing/chaosengine/metrics_store.py:MetricsStore.export_data:return"
-  - "src/elspeth/testing/chaosengine/metrics_store.py:MetricsStore.get_requests:return (list)"
-  - "src/elspeth/testing/chaosengine/metrics_store.py:MetricsStore.get_timeseries:return (list)"
-  - "src/elspeth/testing/chaosengine/config_loader.py:deep_merge:base"
-  - "src/elspeth/testing/chaosengine/config_loader.py:deep_merge:override"
-  - "src/elspeth/testing/chaosengine/config_loader.py:deep_merge:return"
-  - "src/elspeth/testing/chaosengine/config_loader.py:load_config:cli_overrides"
-  - "src/elspeth/testing/chaosengine/config_loader.py:load_preset:return"
-
-  # ChaosWeb - fault-injection test server for web scraping resilience testing
-  # Mirrors ChaosLLM patterns: YAML config loading, JSONL preset parsing, and
-  # metrics/admin APIs return dynamic dicts (same pattern as ChaosLLM).
-  - "src/elspeth/testing/chaosweb/config.py:load_preset:return"
-  - "src/elspeth/testing/chaosweb/config.py:load_config:cli_overrides"
-  - "src/elspeth/testing/chaosweb/server.py:ChaosWebServer.get_stats:return"
-  - "src/elspeth/testing/chaosweb/server.py:ChaosWebServer.export_metrics:return"
-  - "src/elspeth/testing/chaosweb/server.py:ChaosWebServer.update_config:updates"
-  - "src/elspeth/testing/chaosweb/server.py:ChaosWebServer._get_current_config:return"
-  - "src/elspeth/testing/chaosweb/metrics.py:WebMetricsRecorder.get_stats:return"
-  - "src/elspeth/testing/chaosweb/metrics.py:WebMetricsRecorder.export_data:return"
-  - "src/elspeth/testing/chaosweb/metrics.py:WebMetricsRecorder.get_requests:return (list)"
-  - "src/elspeth/testing/chaosweb/metrics.py:WebMetricsRecorder.get_timeseries:return (list)"
 
   # ═══════════════════════════════════════════════════════════════════════════
   # BATCHING INFRASTRUCTURE - Row buffering for batch operations

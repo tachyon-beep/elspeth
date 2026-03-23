@@ -20,6 +20,7 @@ from elspeth.contracts.types import CoalesceName, GateName, NodeID, SinkName
 from elspeth.engine.orchestrator.types import (
     AggregationFlushResult,
     ExecutionCounters,
+    PipelineConfig,
 )
 
 
@@ -269,3 +270,76 @@ class TestExecutionCountersToRunResultRequired:
 
         result2 = counters.to_run_result("run-1", status=RunStatus.RUNNING)
         assert result2.status == RunStatus.RUNNING
+
+
+class TestPipelineConfig:
+    """PipelineConfig freezes mutable containers in __post_init__."""
+
+    def _make_config(self) -> PipelineConfig:
+        """Minimal valid PipelineConfig for testing."""
+        source = Mock()
+        source.node_id = None
+        transform = Mock()
+        transform.node_id = None
+        transform.on_error = "discard"
+        sink = Mock()
+        sink.node_id = None
+        return PipelineConfig(
+            source=source,
+            transforms=[transform],
+            sinks={"output": sink},
+            config={"key": "value"},
+            gates=[Mock()],
+            aggregation_settings={"agg-1": Mock()},
+            coalesce_settings=[Mock()],
+        )
+
+    def test_list_fields_frozen_to_tuple(self) -> None:
+        config = self._make_config()
+        assert isinstance(config.transforms, tuple)
+        assert isinstance(config.gates, tuple)
+        assert isinstance(config.coalesce_settings, tuple)
+
+    def test_dict_fields_frozen_to_mapping_proxy(self) -> None:
+        config = self._make_config()
+        assert isinstance(config.sinks, MappingProxyType)
+        assert isinstance(config.config, MappingProxyType)
+        assert isinstance(config.aggregation_settings, MappingProxyType)
+
+    def test_tuple_fields_reject_append(self) -> None:
+        config = self._make_config()
+        with pytest.raises(AttributeError):
+            config.transforms.append(Mock())  # type: ignore[union-attr]
+
+    def test_mapping_proxy_fields_reject_assignment(self) -> None:
+        config = self._make_config()
+        with pytest.raises(TypeError):
+            config.sinks["new"] = Mock()  # type: ignore[index]
+        with pytest.raises(TypeError):
+            config.config["new"] = "value"  # type: ignore[index]
+
+    def test_idempotent_with_already_frozen_inputs(self) -> None:
+        source = Mock()
+        source.node_id = None
+        sink = Mock()
+        sink.node_id = None
+        frozen_transforms = (Mock(),)
+        frozen_sinks = MappingProxyType({"output": sink})
+        frozen_config = MappingProxyType({"key": "value"})
+        frozen_gates = (Mock(),)
+        frozen_agg = MappingProxyType({"agg-1": Mock()})
+        frozen_coal = (Mock(),)
+
+        config = PipelineConfig(
+            source=source,
+            transforms=frozen_transforms,
+            sinks=frozen_sinks,
+            config=frozen_config,
+            gates=frozen_gates,
+            aggregation_settings=frozen_agg,
+            coalesce_settings=frozen_coal,
+        )
+        assert isinstance(config.transforms, tuple)
+        assert isinstance(config.sinks, MappingProxyType)
+        assert config.transforms == frozen_transforms
+        assert config.sinks == frozen_sinks

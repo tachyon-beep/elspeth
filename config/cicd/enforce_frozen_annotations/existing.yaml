@@ -1,0 +1,37 @@
+# Existing frozen dataclasses with intentional mutable container annotations.
+# These are data containers for external/pipeline data where the dict/list
+# annotation accurately reflects the runtime type (no __post_init__ freezing).
+allow:
+  # ResumeState: dict inside a tuple element — nested, not a direct field type issue
+  - key: "src/elspeth/engine/orchestrator/types.py:ResumeState:unprocessed_rows"
+
+  # MCP tool definition: Callable signature contains dict parameter
+  - key: "src/elspeth/mcp/server.py:_ToolDef:handler"
+
+  # Dataverse API response — Tier 3 external data, genuinely mutable
+  - key: "src/elspeth/plugins/infrastructure/clients/dataverse.py:DataversePageResponse:rows"
+  - key: "src/elspeth/plugins/infrastructure/clients/dataverse.py:DataversePageResponse:headers"
+  - key: "src/elspeth/plugins/infrastructure/clients/dataverse.py:DataversePageResponse:request_headers"
+
+  # Retrieval chunk metadata — external search API response (Tier 3)
+  - key: "src/elspeth/plugins/infrastructure/clients/retrieval/types.py:RetrievalChunk:metadata"
+
+  # Verification results — external API responses (Tier 3)
+  - key: "src/elspeth/plugins/infrastructure/clients/verifier.py:VerificationResult:live_response"
+  - key: "src/elspeth/plugins/infrastructure/clients/verifier.py:VerificationResult:recorded_response"
+  - key: "src/elspeth/plugins/infrastructure/clients/verifier.py:VerificationResult:differences"
+
+  # Pooled executor row context — pipeline row data (Tier 2)
+  - key: "src/elspeth/plugins/infrastructure/pooling/executor.py:RowContext:row"
+
+  # LLM batch results — pipeline/API data
+  - key: "src/elspeth/plugins/transforms/llm/openrouter_batch.py:_RowSuccess:row"
+  - key: "src/elspeth/plugins/transforms/llm/openrouter_batch.py:_RowFailure:error"
+
+  # LLM transform internals — query templates and results
+  - key: "src/elspeth/plugins/transforms/llm/transform.py:MultiQueryStrategy:_query_templates"
+  - key: "src/elspeth/plugins/transforms/llm/transform.py:_QuerySuccess:fields"
+  - key: "src/elspeth/plugins/transforms/llm/transform.py:_QuerySuccess:audit_metadata"
+
+  # RAG query result — error dict from external API (Tier 3)
+  - key: "src/elspeth/plugins/transforms/rag/query.py:QueryResult:error"

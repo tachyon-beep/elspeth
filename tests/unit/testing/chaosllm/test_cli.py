@@ -2,9 +2,8 @@
 
 from unittest.mock import AsyncMock, patch
 
+from errorworks.llm.cli import mcp_app
 from typer.testing import CliRunner
-
-from elspeth.testing.chaosllm.cli import mcp_app
 
 runner = CliRunner()
 
@@ -21,7 +20,7 @@ def test_mcp_main_calls_run_server(tmp_path):
     mock_run_server = AsyncMock()
 
     with patch(
-        "elspeth.testing.chaosllm_mcp.server.run_server",
+        "errorworks.llm_mcp.server.run_server",
         mock_run_server,
     ):
         result = runner.invoke(mcp_app, ["--database", str(db_file)])

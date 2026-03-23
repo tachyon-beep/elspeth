@@ -607,11 +607,14 @@ class TestResumeValidationWithOriginalHeaders:
         result = sink.validate_output_target()
         assert result.valid, f"Validation failed: {result.error_message}"
 
-    def test_csv_resume_validation_without_resolution_fails(self, tmp_path: Path) -> None:
-        """CSV resume validation fails when headers: original but no resolution provided.
+    def test_csv_resume_validation_without_resolution_skips(self, tmp_path: Path) -> None:
+        """CSV resume validation skips when headers: original but no resolution provided.
 
-        Without the field resolution, validation compares normalized schema names
-        (user_id, amount_usd) against display names (User ID, Amount (USD)) and fails.
+        Without the field resolution mapping, comparing normalized schema names
+        (user_id, amount_usd) against display names (User ID, Amount (USD)) would
+        produce a misleading failure. The validation correctly skips and returns
+        success — validation will be performed once headers are resolved during
+        the first write() call.
         """
         from elspeth.plugins.sinks.csv_sink import CSVSink
 
@@ -634,11 +637,9 @@ class TestResumeValidationWithOriginalHeaders:
             }
         )
 
-        # Without resolution, validation SHOULD fail (compares wrong field names)
+        # Without resolution, validation skips — can't compare normalized vs display names
         result = sink.validate_output_target()
-        # The validation compares ["user_id", "amount_usd"] against ["User ID", "Amount (USD)"]
-        assert not result.valid, "Should fail when headers: original but no resolution"
-        assert result.missing_fields is not None
+        assert result.valid, "Should skip validation when resolution not yet available"
 
     def test_jsonl_resume_validation_with_original_headers(self, tmp_path: Path) -> None:
         """JSONL resume validation succeeds when original headers mapping is provided."""

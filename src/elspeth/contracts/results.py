@@ -15,6 +15,7 @@ from dataclasses import dataclass, field
 from types import MappingProxyType
 from typing import TYPE_CHECKING, Any, Literal
 
+from elspeth.contracts.freeze import freeze_fields
 from elspeth.contracts.url import SanitizedDatabaseUrl, SanitizedWebhookUrl
 
 if TYPE_CHECKING:
@@ -390,8 +391,7 @@ class ArtifactDescriptor:
     metadata: MappingProxyType[str, object] | None = None
 
     def __post_init__(self) -> None:
-        if self.metadata is not None:
-            object.__setattr__(self, "metadata", MappingProxyType(dict(self.metadata)))
+        freeze_fields(self, "metadata")
 
     @classmethod
     def for_file(
@@ -574,13 +574,17 @@ class SourceRow:
             PipelineRow wrapping row data with contract
 
         Raises:
-            ValueError: If row is quarantined or has no contract
+            ValueError: If row is quarantined
+            FrameworkBugError: If contract is None (engine must set it)
         """
         from elspeth.contracts.schema_contract import PipelineRow
 
         if self.is_quarantined:
             raise ValueError("Cannot convert quarantined row to PipelineRow")
         if self.contract is None:
-            raise ValueError("SourceRow has no contract - cannot create PipelineRow")
+            raise FrameworkBugError(
+                "SourceRow has no contract — cannot create PipelineRow. "
+                "The engine must set contract on SourceRow before calling to_pipeline_row()."
+            )
 
         return PipelineRow(self.row, self.contract)

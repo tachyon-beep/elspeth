@@ -832,3 +832,33 @@ class TestJSONExplodeDeclaredOutputFields:
         )
 
         assert transform.declared_output_fields
+
+
+class TestOutputSchemaConfig:
+    def test_guaranteed_fields_with_index(self):
+        from elspeth.plugins.transforms.json_explode import JSONExplode
+
+        transform = JSONExplode(
+            {
+                "array_field": "items",
+                "output_field": "item",
+                "include_index": True,
+                "schema": {"mode": "observed"},
+            }
+        )
+        assert transform._output_schema_config is not None
+        assert frozenset(transform._output_schema_config.guaranteed_fields) == frozenset({"item", "item_index"})
+
+    def test_guaranteed_fields_without_index(self):
+        from elspeth.plugins.transforms.json_explode import JSONExplode
+
+        transform = JSONExplode(
+            {
+                "array_field": "items",
+                "output_field": "item",
+                "include_index": False,
+                "schema": {"mode": "observed"},
+            }
+        )
+        assert transform._output_schema_config is not None
+        assert frozenset(transform._output_schema_config.guaranteed_fields) == frozenset({"item"})

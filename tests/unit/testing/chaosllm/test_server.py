@@ -6,19 +6,21 @@ import sqlite3
 import time
 
 import pytest
-from starlette.testclient import TestClient
-
-from elspeth.testing.chaosllm.config import (
+from errorworks.llm.config import (
     ChaosLLMConfig,
     ErrorInjectionConfig,
     LatencyConfig,
     MetricsConfig,
     ResponseConfig,
+    ServerConfig,
 )
-from elspeth.testing.chaosllm.server import (
+from errorworks.llm.server import (
     ChaosLLMServer,
     create_app,
 )
+from starlette.testclient import TestClient
+
+_TEST_ADMIN_TOKEN = "test-admin-token-for-unit-tests"
 
 
 @pytest.fixture
@@ -33,7 +35,14 @@ def config(tmp_metrics_db):
     return ChaosLLMConfig(
         metrics=MetricsConfig(database=tmp_metrics_db),
         latency=LatencyConfig(base_ms=0, jitter_ms=0),  # No latency for tests
+        server=ServerConfig(admin_token=_TEST_ADMIN_TOKEN),
     )
+
+
+@pytest.fixture
+def admin_headers():
+    """Authorization headers for admin endpoints."""
+    return {"Authorization": f"Bearer {_TEST_ADMIN_TOKEN}"}
 
 
 @pytest.fixture
@@ -413,9 +422,9 @@ class TestResponseModeOverrides:
 class TestAdminConfigEndpoint:
     """Tests for /admin/config endpoint."""
 
-    def test_get_config(self, client):
+    def test_get_config(self, client, admin_headers):
         """GET /admin/config returns current configuration."""
-        response = client.get("/admin/config")
+        response = client.get("/admin/config", headers=admin_headers)
         assert response.status_code == 200
         data = response.json()
 
@@ -424,10 +433,10 @@ class TestAdminConfigEndpoint:
         assert "response" in data
         assert "latency" in data
 
-    def test_post_config_updates_error_injection(self, client):
+    def test_post_config_updates_error_injection(self, client, admin_headers):
         """POST /admin/config updates error injection settings."""
         # First verify current state
-        response = client.get("/admin/config")
+        response = client.get("/admin/config", headers=admin_headers)
         original = response.json()
         assert original["error_injection"]["rate_limit_pct"] == 0.0
 
@@ -435,11 +444,12 @@ class TestAdminConfigEndpoint:
         response = client.post(
             "/admin/config",
             json={"error_injection": {"rate_limit_pct": 50.0}},
+            headers=admin_headers,
         )
         assert response.status_code == 200
 
         # Verify update
-        response = client.get("/admin/config")
+        response = client.get("/admin/config", headers=admin_headers)
         updated = response.json()
         assert updated["error_injection"]["rate_limit_pct"] == 50.0
 
@@ -447,9 +457,9 @@ class TestAdminConfigEndpoint:
 class TestAdminStatsEndpoint:
     """Tests for /admin/stats endpoint."""
 
-    def test_get_stats_empty(self, client):
+    def test_get_stats_empty(self, client, admin_headers):
         """GET /admin/stats returns stats even when empty."""
-        response = client.get("/admin/stats")
+        response = client.get("/admin/stats", headers=admin_headers)
         assert response.status_code == 200
         data = response.json()
 
@@ -458,7 +468,7 @@ class TestAdminStatsEndpoint:
         assert "total_requests" in data
         assert data["total_requests"] == 0
 
-    def test_stats_increment_after_request(self, client):
+    def test_stats_increment_after_request(self, client, admin_headers):
         """Stats increment after successful request."""
         # Make a request
         client.post(
@@ -467,7 +477,7 @@ class TestAdminStatsEndpoint:
         )
 
         # Check stats
-        response = client.get("/admin/stats")
+        response = client.get("/admin/stats", headers=admin_headers)
         data = response.json()
         assert data["total_requests"] == 1
 
@@ -475,7 +485,7 @@ class TestAdminStatsEndpoint:
 class TestAdminResetEndpoint:
     """Tests for /admin/reset endpoint."""
 
-    def test_reset_clears_stats(self, client):
+    def test_reset_clears_stats(self, client, admin_headers):
         """POST /admin/reset clears metrics and starts new run."""
         # Make some requests
         for _ in range(3):
@@ -485,14 +495,14 @@ class TestAdminResetEndpoint:
             )
 
         # Verify we have stats
-        response = client.get("/admin/stats")
+        response = client.get("/admin/stats", headers=admin_headers)
         assert response.json()["total_requests"] == 3
 
         # Get original run_id
         original_run_id = response.json()["run_id"]
 
         # Reset
-        response = client.post("/admin/reset")
+        response = client.post("/admin/reset", headers=admin_headers)
         assert response.status_code == 200
         data = response.json()
         assert data["status"] == "reset"
@@ -500,7 +510,7 @@ class TestAdminResetEndpoint:
         assert data["new_run_id"] != original_run_id
 
         # Verify stats are cleared
-        response = client.get("/admin/stats")
+        response = client.get("/admin/stats", headers=admin_headers)
         assert response.json()["total_requests"] == 0
 
     def test_reset_records_run_info(self, tmp_metrics_db):
@@ -508,12 +518,14 @@ class TestAdminResetEndpoint:
         config = ChaosLLMConfig(
             metrics=MetricsConfig(database=tmp_metrics_db),
             preset_name="gentle",
+            server=ServerConfig(admin_token=_TEST_ADMIN_TOKEN),
         )
         app = create_app(config)
         client = TestClient(app)
+        headers = {"Authorization": f"Bearer {_TEST_ADMIN_TOKEN}"}
 
         # Initial run info should be recorded on startup
-        stats = client.get("/admin/stats").json()
+        stats = client.get("/admin/stats", headers=headers).json()
         run_id = stats["run_id"]
         with sqlite3.connect(tmp_metrics_db) as conn:
             row = conn.execute("SELECT run_id, preset_name, config_json FROM run_info").fetchone()
@@ -523,7 +535,7 @@ class TestAdminResetEndpoint:
         assert row[2]
 
         # Reset should replace run_info with new run
-        reset = client.post("/admin/reset").json()
+        reset = client.post("/admin/reset", headers=headers).json()
         new_run_id = reset["new_run_id"]
         assert new_run_id != run_id
         with sqlite3.connect(tmp_metrics_db) as conn:
@@ -536,14 +548,14 @@ class TestAdminResetEndpoint:
 class TestMetricsRecording:
     """Tests for metrics recording behavior."""
 
-    def test_successful_request_recorded(self, client):
+    def test_successful_request_recorded(self, client, admin_headers):
         """Successful requests are recorded in metrics."""
         client.post(
             "/v1/chat/completions",
             json={"model": "gpt-4", "messages": []},
         )
 
-        response = client.get("/admin/stats")
+        response = client.get("/admin/stats", headers=admin_headers)
         data = response.json()
         assert data["total_requests"] == 1
         assert data["requests_by_outcome"].get("success", 0) == 1
@@ -554,16 +566,18 @@ class TestMetricsRecording:
             metrics=MetricsConfig(database=tmp_metrics_db),
             latency=LatencyConfig(base_ms=0, jitter_ms=0),
             error_injection=ErrorInjectionConfig(rate_limit_pct=100.0),
+            server=ServerConfig(admin_token=_TEST_ADMIN_TOKEN),
         )
         app = create_app(config)
         client = TestClient(app)
+        headers = {"Authorization": f"Bearer {_TEST_ADMIN_TOKEN}"}
 
         client.post(
             "/v1/chat/completions",
             json={"model": "gpt-4", "messages": []},
         )
 
-        response = client.get("/admin/stats")
+        response = client.get("/admin/stats", headers=headers)
         data = response.json()
         assert data["total_requests"] == 1
         # Should be recorded as error

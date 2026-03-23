@@ -728,7 +728,10 @@ class TestSchemaContractCheckpoint:
             SchemaContract.from_checkpoint(data)
 
     def test_from_checkpoint_unknown_type_crashes(self) -> None:
-        """from_checkpoint() crashes on unknown type (Tier 1 integrity)."""
+        """Regression: elspeth-b74920ffda — unknown python_type raises
+        AuditIntegrityError, not KeyError (Tier 1 data)."""
+        from elspeth.contracts.errors import AuditIntegrityError
+
         data = {
             "mode": "FIXED",
             "locked": True,
@@ -742,7 +745,25 @@ class TestSchemaContractCheckpoint:
                 }
             ],
         }
-        with pytest.raises(KeyError):
+        with pytest.raises(AuditIntegrityError, match="Corrupt SchemaContract"):
+            SchemaContract.from_checkpoint(data)
+
+    def test_from_checkpoint_missing_field_key_crashes_with_audit_error(self) -> None:
+        """Regression: elspeth-b74920ffda — missing inner field key raises
+        AuditIntegrityError consistently with other blocks."""
+        from elspeth.contracts.errors import AuditIntegrityError
+
+        data = {
+            "mode": "FIXED",
+            "locked": True,
+            "fields": [
+                {
+                    "normalized_name": "x",
+                    # missing original_name, python_type, etc.
+                }
+            ],
+        }
+        with pytest.raises(AuditIntegrityError, match="Corrupt SchemaContract"):
             SchemaContract.from_checkpoint(data)
 
     def test_from_checkpoint_nonetype_round_trip(self) -> None:

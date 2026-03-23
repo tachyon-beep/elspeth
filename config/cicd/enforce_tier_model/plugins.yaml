@@ -50,12 +50,31 @@ per_file_rules:
   reason: Type discrimination for Azure API response validation
   expires: null
   max_hits: 7
-- pattern: plugins/infrastructure/clients/http.py
+- pattern: plugins/infrastructure/clients/dataverse.py
+  rules:
+  - R1
+  - R5
+  - R6
+  reason: Dataverse OData API responses are external data (Tier 3) — isinstance/type checks for response validation, error classification, and retry-after parsing
+  expires: null
+- pattern: plugins/infrastructure/clients/fingerprinting.py
+  rules:
+  - R1
+  - R6
+  reason: HMAC header fingerprinting — env var access and try/except for fingerprint key availability check
+  expires: null
+- pattern: plugins/infrastructure/clients/json_utils.py
   rules:
   - R5
-  reason: Tier 3 external JSON NaN detection
+  reason: Tier 3 boundary — isinstance checks for recursive NaN/Infinity detection in parsed JSON
   expires: null
-  max_hits: 3
+- pattern: plugins/sinks/dataverse.py
+  rules:
+  - R4
+  - R5
+  reason: R5 offensive guard for alternate key type; R4 broad except in telemetry emission (must not crash audit trail — same pattern as AuditedHTTPClient._record_and_emit)
+  expires: null
+  max_hits: 2
 - pattern: plugins/infrastructure/clients/llm.py
   rules:
   - R5
@@ -122,31 +141,35 @@ allow_hits:
   reason: Rollback protection — catch any rollback failure so secondary exception doesn't bury original diagnostic
   safety: Logs rollback error then re-raises the original exception unchanged
   expires: null
-- key: plugins/infrastructure/clients/http.py:R6:AuditedHTTPClient:_filter_request_headers:fp=24e482e71988b3c5
-  owner: architecture
-  reason: except ValueError on HMAC fingerprinting - external secret may be invalid bytes
-  safety: Falls back to [REDACTED] placeholder instead of crashing on malformed secrets
-  expires: '2026-05-02'
-- key: plugins/infrastructure/clients/http.py:R1:AuditedHTTPClient:_execute_request:fp=4e79314904cf0229
+- key: plugins/infrastructure/clients/http.py:R1:AuditedHTTPClient:_execute_request:fp=1d9351405d977ee4
   owner: architecture
   reason: httpx Client.get() method call - dispatched based on HTTP method
   safety: This is the actual external HTTP call, not a defensive dict access
   expires: '2026-05-02'
-- key: plugins/infrastructure/clients/http.py:R1:AuditedHTTPClient:get_ssrf_safe:fp=0b820be5ecd0b599
+- key: plugins/infrastructure/clients/http.py:R1:AuditedHTTPClient:get_ssrf_safe:fp=e0d73f57c68af01a
   owner: architecture
   reason: httpx Client.get() method call - ephemeral client for TLS/SNI isolation
   safety: This is the actual external HTTP call with IP pinning
   expires: '2026-05-02'
-- key: plugins/infrastructure/clients/http.py:R1:AuditedHTTPClient:_follow_redirects_safe:fp=0295809997e9ae36
+- key: plugins/infrastructure/clients/http.py:R1:AuditedHTTPClient:get_ssrf_safe:fp=74e5b8375db71dfe
+  owner: architecture
+  reason: HTTP response content-type header access at external system boundary
+  safety: Falls back to binary encoding if content-type absent
+  expires: '2026-05-02'
+- key: plugins/infrastructure/clients/http.py:R1:AuditedHTTPClient:_follow_redirects_safe:fp=09bdba46a18ce4a0
   owner: architecture
   reason: httpx Client.get() method call — ephemeral client per redirect hop for TLS isolation
   safety: This is the actual external HTTP call, not a defensive dict access
-- key: plugins/sinks/database_sink.py:R1:DatabaseSink:__init__:fp=67d8cd6ce6ab133f
+- key: plugins/infrastructure/clients/http.py:R1:AuditedHTTPClient:_follow_redirects_safe:fp=69270a7a922c6561
   owner: architecture
-  reason: Optional field access at trust boundary
-  safety: Code reviewed - legitimate pattern
+  reason: HTTP redirect Location header — external system boundary, header may be absent
+  safety: Missing Location header breaks redirect loop naturally
+- key: plugins/sinks/database_sink.py:R1:DatabaseSink:__init__:fp=5565ae22ee269a37
+  owner: architecture
+  reason: os.environ.get() for optional env var at trust boundary — ELSPETH_ALLOW_RAW_SECRETS is genuinely optional with empty-string default
+  safety: Empty string default is meaning-preserving (feature disabled); no data fabrication
   expires: '2026-05-02'
-- key: plugins/sinks/csv_sink.py:R1:CSVSink:validate_output_target:fp=79de1ac15fd8954b
+- key: plugins/sinks/csv_sink.py:R1:CSVSink:validate_output_target:fp=c7d8579f470f2ef8
   owner: feature
   reason: Display header mapping - fields not in map keep original name (transform-added fields)
   safety: Intentional fallback to original field name, not bug hiding
@@ -222,58 +245,148 @@ allow_hits:
   reason: Cleanup/pop with default - key may not exist in race or optional scenarios
   safety: Code reviewed - legitimate pattern
   expires: '2026-05-02'
-- key: plugins/infrastructure/clients/http.py:R1:AuditedHTTPClient:_filter_request_headers:fp=16e39f36db178a15
-  owner: architecture
-  reason: os.environ.get() for optional ELSPETH_ALLOW_RAW_SECRETS override
-  safety: Environment variable access with default - not a dict.get() on data
-  expires: '2026-05-02'
-- key: plugins/infrastructure/clients/http.py:R1:AuditedHTTPClient:_parse_response_body:fp=dbe48f8106742459
+- key: plugins/infrastructure/clients/http.py:R1:AuditedHTTPClient:_parse_response_body:fp=c10e1a372d3013e8
   owner: architecture
   reason: HTTP response content-type header - external system boundary, header may be missing
   safety: Falls back to binary encoding if content-type absent
   expires: '2026-05-02'
-- key: plugins/infrastructure/clients/http.py:R4:AuditedHTTPClient:_record_and_emit:fp=1a0afad77e3812dc
+- key: plugins/infrastructure/clients/http.py:R4:AuditedHTTPClient:_record_and_emit:fp=e80a11000f5c6b3c
   owner: architecture
   reason: Telemetry emission failure - must not crash main request flow
   safety: Logged and continues - telemetry is non-critical to HTTP processing
   expires: '2026-05-06'
-- key: plugins/infrastructure/clients/http.py:R1:AuditedHTTPClient:get_ssrf_safe:fp=3c1d4034d1962f96
-  owner: architecture
-  reason: HTTP response content-type header - external system boundary, header may be missing
-  safety: Falls back to binary encoding if content-type absent
-  expires: '2026-05-02'
-- key: plugins/infrastructure/clients/http.py:R4:AuditedHTTPClient:get_ssrf_safe:fp=412c61367177a4ba
+- key: plugins/infrastructure/clients/http.py:R4:AuditedHTTPClient:get_ssrf_safe:fp=e737a44a219111af
   owner: architecture
   reason: Telemetry emission failure - must not crash main request flow
   safety: Logged and continues - telemetry is non-critical to HTTP processing
   expires: '2026-05-06'
-- key: plugins/infrastructure/clients/http.py:R4:AuditedHTTPClient:get_ssrf_safe:fp=00dcfdf7b9a89863
+- key: plugins/infrastructure/clients/http.py:R4:AuditedHTTPClient:get_ssrf_safe:fp=42e95ca4630f5311
   owner: architecture
   reason: Telemetry emission failure - must not crash main request flow
   safety: Logged and continues - telemetry is non-critical to HTTP processing
   expires: '2026-05-06'
-- key: plugins/infrastructure/clients/http.py:R1:AuditedHTTPClient:_follow_redirects_safe:fp=4bc40163c3a61bea
-  owner: architecture
-  reason: HTTP redirect Location header - external system boundary, header may be absent
-  safety: Missing Location header breaks redirect loop naturally (no redirect target)
-  expires: '2026-05-02'
-- key: plugins/infrastructure/pooling/executor.py:R4:PooledExecutor:_execute_batch_locked:fp=5f6e4b59e528052c
+- key: plugins/infrastructure/pooling/executor.py:R4:PooledExecutor:_execute_batch_locked:fp=15c82d9735566f01
   owner: bugfix
-  reason: Worker thread can raise any exception type — must catch broadly to prevent buffer slot leak
-  safety: Exception converted to TransformResult.error (row gets quarantined), buffer stays consistent
+  reason: Worker thread can raise any exception type — must catch broadly to prevent buffer slot leak (FrameworkBugError/AuditIntegrityError re-raised before this catch)
+  safety: Exception converted to TransformResult.error (row gets quarantined), buffer stays consistent; framework errors re-raised above
   expires: '2026-06-08'
-- key: plugins/sinks/azure_blob_sink.py:R5:AzureBlobSinkConfig:headers_mapping:fp=f00b44dd7d4e2fea
+- key: plugins/sinks/azure_blob_sink.py:R5:AzureBlobSinkConfig:headers_mapping:fp=2ec56a095db42344
   owner: refactor
   reason: isinstance(dict) check for config field type discrimination — same pattern as SinkPathConfig.headers_mapping
   safety: Config validated by Pydantic before this property runs; isinstance only distinguishes dict from str
   expires: null
-- key: plugins/infrastructure/base.py:R2:BaseSink:needs_resume_field_resolution:fp=aa78bde542b4abfa
-  owner: refactor
-  reason: getattr default for sinks that don't call init_display_headers (e.g. DatabaseSink)
-  safety: Returns False (safe default); attribute always exists for sinks using display headers
-  expires: null
-- key: plugins/transforms/web_scrape.py:R5:WebScrapeHTTPConfig:_validate_allowed_hosts:fp=9535cac5e3ad0a53
+- key: plugins/transforms/web_scrape.py:R5:WebScrapeHTTPConfig:_validate_allowed_hosts:fp=c519710da4a8ea7f
   owner: architecture
   reason: Pydantic field_validator wraps ipaddress.ip_network() on user-provided CIDR strings — Tier 3 config boundary
   safety: ValueError re-raised as Pydantic ValidationError; invalid config crashes at load time, not at runtime
+  expires: null
+- key: plugins/transforms/rag/query.py:R5:QueryBuilder:_build_field_only:fp=2292b6dad24076f3
+  owner: feature
+  reason: Offensive isinstance(str) guard on Tier 2 pipeline data — crashes immediately with TypeError if upstream plugin sends non-string value to query_field
+  safety: Raises TypeError (crash), does not suppress or coerce; message identifies the upstream plugin bug
+  expires: null
+- key: plugins/transforms/rag/query.py:R5:QueryBuilder:_build_regex:fp=ec4af2b38344f664
+  owner: feature
+  reason: Offensive isinstance(str) guard on Tier 2 pipeline data — crashes immediately with TypeError if upstream plugin sends non-string value to query_field
+  safety: Raises TypeError (crash), does not suppress or coerce; message identifies the upstream plugin bug
+  expires: null
+- key: plugins/transforms/rag/config.py:R6:_get_providers:fp=85498180a2efe5bc
+  owner: feature
+  reason: Optional provider registration — ImportError means the provider's optional dependency (e.g. azure-search-documents) is not installed; provider is silently omitted from registry rather than crashing the import
+  safety: Unknown provider raises ValueError at config validation time with list of available providers; no silent data loss
+  expires: null
+- key: plugins/transforms/rag/config.py:R6:_get_providers:fp=69824056a89e3fec
+  owner: feature
+  reason: Optional ChromaDB provider registration — ImportError means chromadb is not installed ([rag] extra absent); provider is silently omitted from registry
+  safety: Unknown provider raises ValueError at config validation time with list of available providers; no silent data loss
+  expires: null
+- key: plugins/infrastructure/clients/retrieval/chroma.py:R1:ChromaSearchProvider:__init__:fp=4589e3566d1726e6
+  owner: feature
+  reason: ChromaDB collection metadata is persisted external data (Tier 3) — .get() safely detects distance_function mismatch on pre-existing collections without crashing on absent key
+  safety: Missing key yields None (no mismatch detected — safe); present key with wrong value raises RetrievalError immediately
+  expires: null
+- key: plugins/infrastructure/clients/retrieval/chroma.py:R5:ChromaSearchProvider:search:fp=3ff33e6b86bd451b
+  owner: bugfix
+  reason: Tier 3 boundary type check — ChromaDB SDK may return non-string documents from corrupt index; isinstance guards pipeline from non-string content
+  safety: Non-string documents are skipped (continue); only validated str content enters pipeline as Tier 2
+  expires: null
+- key: plugins/transforms/rag/config.py:R5:RAGRetrievalConfig:coerce_schema_config:fp=4a027df2f322fde0
+  owner: feature
+  reason: Pydantic before-validator at config boundary — isinstance(dict) needed to distinguish raw dict (from YAML/direct construction) from already-parsed SchemaConfig; same pattern as config_base.py R5 exemption
+  safety: Non-dict values pass through unchanged; dict values validated by SchemaConfig.from_dict which raises on invalid input
+  expires: null
+- key: plugins/transforms/rag/config.py:R1:RAGRetrievalConfig:validate_provider_config:fp=bb927661731d8cb8
+  owner: feature
+  reason: Provider lookup — dict.get() with explicit None check and meaningful ValueError; this IS the guard that catches unknown providers at config load time rather than first-row execution
+  safety: None result raises ValueError immediately with list of available providers; no silent pass-through
+  expires: null
+- key: plugins/infrastructure/clients/retrieval/azure_search.py:R1:AzureSearchProvider:_parse_response:fp=ac3495bbb7ec9639
+  owner: feature
+  reason: Azure AI Search API response parsing at Tier 3 boundary — @search.score is optional in malformed responses; absence recorded in skipped_items
+  safety: Missing score causes item to be skipped and recorded; no silent data loss
+  expires: null
+- key: plugins/infrastructure/clients/retrieval/azure_search.py:R1:AzureSearchProvider:_parse_response:fp=866a8f498d10e0fe
+  owner: feature
+  reason: Azure AI Search API Tier 3 — item.get("id") in skipped item record; ID may be absent on malformed items
+  safety: Captured in skipped_items for audit; no data corruption
+  expires: null
+- key: plugins/infrastructure/clients/retrieval/azure_search.py:R5:AzureSearchProvider:_parse_response:fp=83c83b73ebf0ae32
+  owner: bugfix
+  reason: Tier 3 boundary type validation — isinstance(raw_score, bool) guards against Python bool-is-int before arithmetic
+  safety: Invalid score type causes item to be skipped and recorded in skipped_items as "invalid_score_type"
+  expires: null
+- key: plugins/infrastructure/clients/retrieval/azure_search.py:R5:AzureSearchProvider:_parse_response:fp=cdec26776f3d3d1a
+  owner: bugfix
+  reason: Tier 3 boundary type validation — rejects non-numeric score types (string, list, dict) before math.isfinite
+  safety: Invalid score type causes item to be skipped and recorded; no crash
+  expires: null
+- key: plugins/infrastructure/clients/retrieval/azure_search.py:R1:AzureSearchProvider:_parse_response:fp=d3ae8b449f567803
+  owner: bugfix
+  reason: Azure AI Search API Tier 3 — item.get("id") in skipped item record for invalid score type
+  safety: Captured in skipped_items for audit; no data corruption
+  expires: null
+- key: plugins/infrastructure/clients/retrieval/azure_search.py:R1:AzureSearchProvider:_parse_response:fp=f9be71eef8e59cb3
+  owner: feature
+  reason: Azure AI Search API Tier 3 — item.get("id") in skipped item record for missing content
+  safety: Captured in skipped_items for audit; no data corruption
+  expires: null
+- key: plugins/infrastructure/clients/retrieval/azure_search.py:R1:AzureSearchProvider:_parse_response:fp=1a56c5169fca221b
+  owner: feature
+  reason: Azure AI Search API Tier 3 — content field may be absent in malformed responses
+  safety: Missing content (None) causes item to be skipped and recorded in skipped_items as "missing_content"
+  expires: null
+- key: plugins/infrastructure/clients/retrieval/azure_search.py:R1:AzureSearchProvider:_parse_response:fp=46bde1db12749de8
+  owner: feature
+  reason: Azure AI Search API Tier 3 — item.get("id") in skipped item record for empty content
+  safety: Captured in skipped_items as "empty_content" for audit; no data corruption
+  expires: null
+- key: plugins/infrastructure/clients/retrieval/azure_search.py:R1:AzureSearchProvider:_parse_response:fp=d1f5265e28000e0f
+  owner: feature
+  reason: Azure AI Search API Tier 3 — source ID lookup chain (id then @search.documentId); items without any ID are skipped
+  safety: No fabricated IDs; items without source_id skipped and recorded
+  expires: null
+- key: plugins/infrastructure/clients/retrieval/azure_search.py:R1:AzureSearchProvider:_parse_response:fp=b60212fd103dba98
+  owner: feature
+  reason: Azure AI Search API Tier 3 — @search.documentId fallback in source ID chain
+  safety: No fabricated IDs; items without source_id skipped and recorded
+  expires: null
+- key: plugins/infrastructure/clients/retrieval/azure_search.py:R5:AzureSearchProvider:_parse_response:fp=f8dda98dc46281fe
+  owner: feature
+  reason: Azure AI Search API response metadata coercion at Tier 3 boundary — isinstance check converts non-primitive types to str for JSON serializability
+  safety: Non-serializable types coerced to str; RetrievalChunk validates metadata JSON-serializability at construction
+  expires: null
+- key: plugins/infrastructure/clients/retrieval/chroma.py:R5:ChromaSearchProvider:search:fp=a438ed23ab599de8
+  owner: bugfix
+  reason: Offensive type guard — ChromaDB is our infrastructure, not external API; non-numeric distance indicates index corruption or SDK bug
+  safety: Raises RetrievalError immediately (crash) — not silently skipped
+  expires: null
+- key: plugins/infrastructure/clients/retrieval/chroma.py:R5:ChromaSearchProvider:search:fp=2422ae2a2039987b
+  owner: bugfix
+  reason: Offensive type guard — rejects non-numeric distance types with crash; corrupt ChromaDB index must not produce silent wrong results
+  safety: Raises RetrievalError immediately (crash) — not silently skipped
+  expires: null
+- key: plugins/transforms/web_scrape.py:R5:WebScrapeTransform:__init__:fp=189a33d2bccf7c9b
+  owner: feature
+  reason: Offensive isinstance assertion — detects Pydantic validator bug if allowed_hosts is not list[str] after validation
+  safety: Crashes immediately with descriptive error; better than silently iterating string characters as ip_network calls
   expires: null

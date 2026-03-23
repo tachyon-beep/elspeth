@@ -27,6 +27,7 @@ from pydantic import BaseModel, Field, field_validator, model_validator
 
 from elspeth.contracts import ArtifactDescriptor, CallStatus, CallType, PluginSchema
 from elspeth.contracts.contexts import SinkContext
+from elspeth.contracts.errors import AuditIntegrityError
 from elspeth.contracts.header_modes import HeaderMode, parse_header_mode
 from elspeth.plugins.infrastructure.azure_auth import AzureAuthConfig
 from elspeth.plugins.infrastructure.base import BaseSink
@@ -594,27 +595,6 @@ class AzureBlobSink(BaseSink):
             # can safely overwrite the same blob if post-upload steps fail.
             self._has_uploaded = True
 
-            # Record successful blob upload in audit trail
-            ctx.record_call(
-                call_type=CallType.HTTP,
-                status=CallStatus.SUCCESS,
-                request_data={
-                    "operation": "upload_blob",
-                    "container": self._container,
-                    "blob_path": rendered_path,
-                    "overwrite": upload_overwrite,
-                },
-                response_data={
-                    "size_bytes": size_bytes,
-                    "content_hash": content_hash,
-                },
-                latency_ms=latency_ms,
-                provider="azure_blob_storage",
-            )
-            # Commit cumulative in-memory buffer only after full success path
-            # (upload + audit recording) to keep write retries idempotent.
-            self._buffered_rows = candidate_rows
-
         except ImportError:
             # Re-raise ImportError as-is for clear dependency messaging
             raise
@@ -652,6 +632,36 @@ class AzureBlobSink(BaseSink):
             # exceptions (HttpResponseError, ResourceExistsError, etc.) have
             # multi-parameter constructors that won't accept a single string.
             raise RuntimeError(f"Failed to upload blob '{rendered_path}' to container '{self._container}': {e}") from e
+
+        # Record successful blob upload in audit trail.
+        # Outside the upload try/except so ctx.record_call errors don't
+        # silently lose the audit record for a successful upload.
+        try:
+            ctx.record_call(
+                call_type=CallType.HTTP,
+                status=CallStatus.SUCCESS,
+                request_data={
+                    "operation": "upload_blob",
+                    "container": self._container,
+                    "blob_path": rendered_path,
+                    "overwrite": upload_overwrite,
+                },
+                response_data={
+                    "size_bytes": size_bytes,
+                    "content_hash": content_hash,
+                },
+                latency_ms=latency_ms,
+                provider="azure_blob_storage",
+            )
+        except Exception as exc:
+            raise AuditIntegrityError(
+                f"Failed to record successful blob upload to audit trail "
+                f"(container={self._container!r}, blob={rendered_path!r}). "
+                f"Upload completed but audit record is missing."
+            ) from exc
+        # Commit cumulative in-memory buffer only after full success path
+        # (upload + audit recording) to keep write retries idempotent.
+        self._buffered_rows = candidate_rows
 
         return ArtifactDescriptor(
             artifact_type="file",

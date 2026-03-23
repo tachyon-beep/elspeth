@@ -329,3 +329,61 @@ class TestIdempotency:
         thawed_once = deep_thaw(original)
         thawed_twice = deep_thaw(thawed_once)
         assert thawed_once == thawed_twice
+
+
+# =============================================================================
+# Shallow dict() vs deep_thaw() — checkpoint restore regression
+# =============================================================================
+
+
+class TestShallowDictVsDeepThaw:
+    """Regression: elspeth-77602748e9, elspeth-d2f7b61d71.
+
+    Checkpoint restore used dict() on frozen data, leaving nested
+    MappingProxyType/tuple inside restored PipelineRow objects. Downstream
+    transforms that mutate nested values crash with TypeError on resume.
+    """
+
+    def test_dict_leaves_nested_mapping_proxy_frozen(self) -> None:
+        """dict() on a frozen mapping only unfreezes the top level."""
+        frozen = deep_freeze({"outer": {"inner": [1, 2, 3]}})
+        shallow = dict(frozen)
+
+        assert isinstance(shallow, dict)  # Top level is mutable
+        assert isinstance(shallow["outer"], MappingProxyType)  # Inner is STILL frozen
+        with pytest.raises(TypeError):
+            shallow["outer"]["new_key"] = "crash"  # This is the resume crash
+
+    def test_deep_thaw_fully_unfreezes_nested_structure(self) -> None:
+        """deep_thaw() recursively unfreezes all containers."""
+        frozen = deep_freeze({"outer": {"inner": [1, 2, 3]}})
+        thawed = deep_thaw(frozen)
+
+        assert isinstance(thawed, dict)
+        assert isinstance(thawed["outer"], dict)  # Inner is now mutable
+        assert isinstance(thawed["outer"]["inner"], list)
+        thawed["outer"]["new_key"] = "no crash"  # Must not raise
+
+    def test_checkpoint_round_trip_with_nested_json_data(self) -> None:
+        """Simulates a checkpoint save/restore cycle with JSON-origin row data."""
+        original_row_data = {
+            "id": 42,
+            "metadata": {"source": "api", "tags": ["urgent", "review"]},
+            "nested": {"deep": {"value": 99}},
+        }
+
+        # Save path: to_dict() produces plain dicts
+        saved = dict(original_row_data)  # to_dict() equivalent
+
+        # If checkpoint serialization involved freezing (e.g., via typed dataclass)
+        frozen_checkpoint = deep_freeze(saved)
+
+        # Restore path: deep_thaw instead of dict()
+        restored = deep_thaw(frozen_checkpoint)
+
+        assert restored == original_row_data
+        assert isinstance(restored["metadata"], dict)
+        assert isinstance(restored["metadata"]["tags"], list)
+        # Can mutate nested values (downstream transform scenario)
+        restored["metadata"]["tags"].append("processed")
+        assert "processed" in restored["metadata"]["tags"]

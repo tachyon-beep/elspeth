@@ -619,6 +619,49 @@ class TestLoadPayload:
         with pytest.raises(TypeError, match="bad type in store"):
             journal._load_payload("some-ref")
 
+    def test_integrity_error_always_crashes_as_audit_violation(self, tmp_path: Path) -> None:
+        """IntegrityError (hash mismatch) must always crash as AuditIntegrityError.
+
+        Payload integrity failures indicate corruption or tampering — Tier 1
+        violations that must never be silently swallowed, regardless of
+        _fail_on_error setting. A pipeline that continues past a hash
+        mismatch would be operating on potentially tampered data.
+        """
+        from elspeth.contracts.errors import AuditIntegrityError
+        from elspeth.contracts.payload_store import IntegrityError
+
+        journal = _make_journal(
+            tmp_path,
+            include_payloads=True,
+            payload_base_path=str(tmp_path / "payloads"),
+        )
+        journal._payload_store = Mock()
+        journal._payload_store.retrieve.side_effect = IntegrityError("expected abc123, got def456")
+
+        with pytest.raises(AuditIntegrityError, match="corruption or tampering"):
+            journal._load_payload("some-ref")
+
+    def test_integrity_error_with_fail_on_error_also_crashes(self, tmp_path: Path) -> None:
+        """IntegrityError crashes as AuditIntegrityError even with fail_on_error=True.
+
+        _fail_on_error only controls OSError/PayloadNotFoundError behavior.
+        IntegrityError always crashes regardless.
+        """
+        from elspeth.contracts.errors import AuditIntegrityError
+        from elspeth.contracts.payload_store import IntegrityError
+
+        journal = _make_journal(
+            tmp_path,
+            fail_on_error=True,
+            include_payloads=True,
+            payload_base_path=str(tmp_path / "payloads"),
+        )
+        journal._payload_store = Mock()
+        journal._payload_store.retrieve.side_effect = IntegrityError("expected abc123, got def456")
+
+        with pytest.raises(AuditIntegrityError, match="corruption or tampering"):
+            journal._load_payload("some-ref")
+
     def test_decode_failure_returns_error(self, tmp_path: Path) -> None:
         journal = _make_journal(
             tmp_path,

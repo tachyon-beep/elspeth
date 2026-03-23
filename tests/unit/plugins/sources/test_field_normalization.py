@@ -93,6 +93,21 @@ class TestNormalizeFieldName:
         assert normalize_field_name("CLASS") == "class_"
         assert normalize_field_name("For ") == "for_"
 
+    def test_dunder_names_neutralized(self) -> None:
+        """Dunder names from external headers are stripped of leading/trailing underscores.
+
+        Security regression test: __class__, __init__, __import__ must not
+        survive normalization as dunder patterns. Step 6 (strip underscores)
+        is the critical defense.
+        """
+        from elspeth.plugins.sources.field_normalization import normalize_field_name
+
+        assert normalize_field_name("__class__") == "class_"  # stripped + keyword suffix
+        assert normalize_field_name("__init__") == "init"
+        assert normalize_field_name("__import__") == "import_"  # stripped + keyword suffix
+        assert normalize_field_name("___private") == "private"
+        assert normalize_field_name("__double__leading__trailing__") == "double_leading_trailing"
+
     def test_accented_chars_preserved(self) -> None:
         """Accented characters are valid identifiers (PEP 3131)."""
         from elspeth.plugins.sources.field_normalization import normalize_field_name
@@ -259,13 +274,12 @@ class TestResolveFieldNames:
     """Tests for the complete field resolution flow."""
 
     def test_normalize_only(self) -> None:
-        """Resolution with normalize_fields=True, no mapping."""
+        """Resolution with raw headers always normalizes."""
         from elspeth.plugins.sources.field_normalization import resolve_field_names
 
         raw_headers = ["User ID", "Amount $"]
         result = resolve_field_names(
             raw_headers=raw_headers,
-            normalize_fields=True,
             field_mapping=None,
             columns=None,
         )
@@ -284,7 +298,6 @@ class TestResolveFieldNames:
         raw_headers = ["User ID", "Amount $"]
         result = resolve_field_names(
             raw_headers=raw_headers,
-            normalize_fields=True,
             field_mapping={"user_id": "uid"},
             columns=None,
         )
@@ -301,7 +314,6 @@ class TestResolveFieldNames:
 
         result = resolve_field_names(
             raw_headers=None,
-            normalize_fields=False,
             field_mapping=None,
             columns=["id", "name", "amount"],
         )
@@ -320,7 +332,6 @@ class TestResolveFieldNames:
 
         result = resolve_field_names(
             raw_headers=None,
-            normalize_fields=False,
             field_mapping={"id": "customer_id"},
             columns=["id", "name"],
         )
@@ -331,39 +342,16 @@ class TestResolveFieldNames:
             "name": "name",
         }
 
-    def test_no_normalization_passthrough(self) -> None:
-        """Without normalize_fields, headers pass through unchanged."""
+    def test_collision_on_duplicate_raw_headers_raises(self) -> None:
+        """Duplicate raw headers that normalize to same value raise collision error."""
         from elspeth.plugins.sources.field_normalization import resolve_field_names
 
-        raw_headers = ["User ID", "Amount $"]
-        result = resolve_field_names(
-            raw_headers=raw_headers,
-            normalize_fields=False,
-            field_mapping=None,
-            columns=None,
-        )
-
-        assert result.final_headers == ("User ID", "Amount $")
-        assert result.resolution_mapping == {
-            "User ID": "User ID",
-            "Amount $": "Amount $",
-        }
-
-    def test_no_normalization_duplicate_raw_headers_raises(self) -> None:
-        """Duplicate raw headers must fail fast in passthrough mode."""
-        from elspeth.plugins.sources.field_normalization import resolve_field_names
-
-        with pytest.raises(ValueError, match="Duplicate raw header names") as exc_info:
+        with pytest.raises(ValueError, match="collision"):
             resolve_field_names(
-                raw_headers=["id", "id", "name"],
-                normalize_fields=False,
+                raw_headers=["id", "ID"],
                 field_mapping=None,
                 columns=None,
             )
-
-        error = str(exc_info.value)
-        assert "column 0 ('id')" in error
-        assert "column 1 ('id')" in error
 
     def test_mapping_key_not_found_raises(self) -> None:
         """Mapping key not in headers raises helpful error."""
@@ -372,7 +360,6 @@ class TestResolveFieldNames:
         with pytest.raises(ValueError, match="not found") as exc_info:
             resolve_field_names(
                 raw_headers=["user_id", "amount"],
-                normalize_fields=True,
                 field_mapping={"nonexistent": "x"},
                 columns=None,
             )

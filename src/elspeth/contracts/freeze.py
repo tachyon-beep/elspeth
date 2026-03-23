@@ -1,7 +1,7 @@
 """Recursive deep-freeze utility for immutable dataclass fields.
 
 Converts mutable containers to their immutable equivalents:
-- ``dict`` → ``MappingProxyType``
+- ``dict`` (and any ``Mapping``) → ``MappingProxyType``
 - ``list`` → ``tuple``
 - ``set`` → ``frozenset``
 
@@ -15,6 +15,7 @@ This module is L0 (contracts layer) — no imports from core, engine, or plugins
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from types import MappingProxyType
 from typing import Any
 
@@ -22,9 +23,10 @@ from typing import Any
 def deep_freeze(value: Any) -> Any:
     """Recursively freeze mutable containers.
 
-    Converts ``dict`` → ``MappingProxyType`` and ``list`` → ``tuple``,
-    recursing into values. Non-container types (str, int, float, bool,
-    None, enum members, dataclass instances) are returned unchanged.
+    Converts ``dict`` (and any ``Mapping``) → ``MappingProxyType`` and
+    ``list`` → ``tuple``, recursing into values. Non-container types
+    (str, int, float, bool, None, enum members, dataclass instances)
+    are returned unchanged.
 
     This is the standard freeze function for ``__post_init__`` guards
     on frozen dataclasses throughout the contracts layer.
@@ -66,8 +68,38 @@ def deep_freeze(value: Any) -> Any:
         if frozen_fs == value:
             return value
         return frozen_fs
+    # Non-dict Mapping types (OrderedDict is a dict subclass so handled above,
+    # but other Mapping implementations like custom read-only wrappers are not).
+    # Convert to dict first, then freeze recursively.
+    if isinstance(value, Mapping):
+        return MappingProxyType({k: deep_freeze(v) for k, v in value.items()})
     # Scalars and opaque objects (str, int, float, bool, None, enums, dataclasses)
     return value
+
+
+def freeze_fields(instance: object, *field_names: str) -> None:
+    """Freeze named container fields on a frozen dataclass instance.
+
+    Applies deep_freeze() to each named field, with identity-preserving
+    idempotency (skips object.__setattr__ when the field is already frozen).
+
+    This is the standard utility for __post_init__ methods on frozen
+    dataclasses. Use it instead of hand-rolling deep_freeze + setattr.
+
+    Example:
+        @dataclass(frozen=True, slots=True)
+        class MyRecord:
+            data: Mapping[str, Any]
+            items: Sequence[str]
+
+            def __post_init__(self) -> None:
+                freeze_fields(self, "data", "items")
+    """
+    for name in field_names:
+        value = getattr(instance, name)
+        frozen = deep_freeze(value)
+        if frozen is not value:
+            object.__setattr__(instance, name, frozen)
 
 
 def deep_thaw(value: Any) -> Any:

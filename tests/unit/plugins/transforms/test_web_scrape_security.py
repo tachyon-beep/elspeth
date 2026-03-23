@@ -7,6 +7,7 @@ Tests the complete SSRF-safe pipeline:
 """
 
 import socket
+from datetime import UTC, datetime
 from typing import Any
 from unittest.mock import Mock, patch
 
@@ -14,6 +15,8 @@ import httpx
 import pytest
 import respx
 
+from elspeth.contracts import CallStatus, CallType
+from elspeth.contracts.audit import Call
 from elspeth.contracts.plugin_context import PluginContext
 from elspeth.contracts.schema_contract import PipelineRow
 from elspeth.plugins.transforms.web_scrape import WebScrapeTransform
@@ -58,9 +61,29 @@ def transform(mock_ctx):
 
 
 @pytest.fixture
-def mock_ctx(payload_store):
+def mock_ctx():
     """Create PluginContext with required attributes for security testing."""
     landscape = Mock()
+
+    # Configure record_call to return a proper Call object so process() can
+    # read call.request_ref and call.response_ref without FrameworkBugError.
+    mock_call = Call(
+        call_id="test-call-id",
+        call_index=0,
+        call_type=CallType.HTTP,
+        status=CallStatus.SUCCESS,
+        request_hash="test-request-hash",
+        created_at=datetime.now(UTC),
+        state_id="state-123",
+        request_ref="test-request-ref-hash",
+        response_hash="test-response-hash",
+        response_ref="test-response-ref-hash",
+        latency_ms=100.0,
+    )
+    landscape.record_call.return_value = mock_call
+    landscape.allocate_call_index.return_value = 0
+    landscape.store_payload.return_value = "test-processed-hash"
+
     rate_limit_registry = Mock()
     rate_limit_registry.get_limiter.return_value = None
 
@@ -69,7 +92,6 @@ def mock_ctx(payload_store):
         config={},
         landscape=landscape,
         rate_limit_registry=rate_limit_registry,
-        payload_store=payload_store,
         state_id="state-123",
     )
 
@@ -201,15 +223,18 @@ def test_contract_includes_output_fields(transform, mock_ctx):
         # Input field should be preserved
         assert "url" in field_names
 
-        # New fields from transform must be in contract
+        # New operational fields from transform must be in contract
         assert "page_content" in field_names, "content_field must be in output contract"
         assert "page_fingerprint" in field_names, "fingerprint_field must be in output contract"
         assert "fetch_status" in field_names, "fetch_status must be in output contract"
         assert "fetch_url_final" in field_names, "fetch_url_final must be in output contract"
         assert "fetch_url_final_ip" in field_names, "fetch_url_final_ip must be in output contract"
-        assert "fetch_request_hash" in field_names, "fetch_request_hash must be in output contract"
-        assert "fetch_response_raw_hash" in field_names, "fetch_response_raw_hash must be in output contract"
-        assert "fetch_response_processed_hash" in field_names, "fetch_response_processed_hash must be in output contract"
+        # Hash fields are audit-only (in success_reason["metadata"]) — not in row contract
+        assert "fetch_request_hash" not in field_names, "fetch_request_hash is audit-only, must not be in row contract"
+        assert "fetch_response_raw_hash" not in field_names, "fetch_response_raw_hash is audit-only, must not be in row contract"
+        assert "fetch_response_processed_hash" not in field_names, (
+            "fetch_response_processed_hash is audit-only, must not be in row contract"
+        )
 
 
 @respx.mock
@@ -225,15 +250,13 @@ def test_contract_field_types_are_correct(transform, mock_ctx):
         # Get field contracts by name
         field_by_name = {f.normalized_name: f for f in result.row.contract.fields}
 
-        # Check types
+        # Check types for operational fields in the row
         assert field_by_name["page_content"].python_type is str
         assert field_by_name["page_fingerprint"].python_type is str
         assert field_by_name["fetch_status"].python_type is int
         assert field_by_name["fetch_url_final"].python_type is str
         assert field_by_name["fetch_url_final_ip"].python_type is str
-        assert field_by_name["fetch_request_hash"].python_type is str
-        assert field_by_name["fetch_response_raw_hash"].python_type is str
-        assert field_by_name["fetch_response_processed_hash"].python_type is str
+        # Hash fields are audit-only — they live in success_reason["metadata"], not in the row
 
 
 # ===========================================================================

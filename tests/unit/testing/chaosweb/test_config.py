@@ -5,9 +5,7 @@ from __future__ import annotations
 from pathlib import Path
 
 import pytest
-from pydantic import ValidationError
-
-from elspeth.testing.chaosweb.config import (
+from errorworks.web.config import (
     ChaosWebConfig,
     RandomContentConfig,
     WebBurstConfig,
@@ -17,6 +15,7 @@ from elspeth.testing.chaosweb.config import (
     load_config,
     load_preset,
 )
+from pydantic import ValidationError
 
 
 class TestListPresets:

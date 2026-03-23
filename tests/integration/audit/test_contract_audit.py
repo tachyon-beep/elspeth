@@ -58,7 +58,7 @@ class TestFullAuditTrailWithContracts:
     def test_full_audit_trail_with_contracts(self, tmp_path: Path) -> None:
         """Complete pipeline records contract with mode=OBSERVED, locked=True.
 
-        Creates CSV with messy headers, runs with dynamic schema and normalize_fields,
+        Creates CSV with messy headers, runs with dynamic schema and field normalization,
         then verifies the contract is properly stored in the audit trail.
         """
         # Create CSV with messy headers that will be normalized
@@ -77,7 +77,6 @@ class TestFullAuditTrailWithContracts:
             {
                 "path": str(csv_file),
                 "schema": {"mode": "observed"},
-                "normalize_fields": True,
                 "on_validation_failure": "discard",
             }
         )
@@ -334,7 +333,6 @@ class TestContractSurvivesAuditRoundTrip:
             {
                 "path": str(csv_file),
                 "schema": {"mode": "observed"},
-                "normalize_fields": True,
                 "on_validation_failure": "discard",
             }
         )
@@ -557,7 +555,6 @@ class TestContractWithCheckpointRegistry:
             {
                 "path": str(csv_file),
                 "schema": {"mode": "observed"},
-                "normalize_fields": True,
                 "on_validation_failure": "discard",
             }
         )

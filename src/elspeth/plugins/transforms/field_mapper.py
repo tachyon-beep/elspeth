@@ -90,6 +90,12 @@ class FieldMapper(BaseTransform):
         self._strict: bool = cfg.strict
         self.validate_input = cfg.validate_input
 
+        # Mapping targets are the fields this transform guarantees in output.
+        # Exclude targets that also appear as sources (identity/rename mappings
+        # like {"score": "score"}) — these fields already exist in input and
+        # would trigger false collision detection in TransformExecutor.
+        self.declared_output_fields = frozenset(cfg.mapping.values()) - frozenset(cfg.mapping.keys())
+
         self._schema_config = cfg.schema_config
 
         self.input_schema, self.output_schema = self._create_schemas(
@@ -97,6 +103,7 @@ class FieldMapper(BaseTransform):
             "FieldMapper",
             adds_fields=True,
         )
+        self._output_schema_config = self._build_output_schema_config(cfg.schema_config)
 
     def process(self, row: PipelineRow, ctx: TransformContext) -> TransformResult:
         """Apply field mapping to row.

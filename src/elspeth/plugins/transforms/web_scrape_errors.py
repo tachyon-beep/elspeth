@@ -4,13 +4,14 @@ Follows LLM plugin pattern: retryable errors are re-raised for engine
 RetryManager, non-retryable errors return TransformResult.error().
 """
 
+from elspeth.contracts.errors import PluginRetryableError
 
-class WebScrapeError(Exception):
+
+class WebScrapeError(PluginRetryableError):
     """Base error for web scrape transform."""
 
     def __init__(self, message: str, *, retryable: bool = False) -> None:
-        super().__init__(message)
-        self.retryable = retryable
+        super().__init__(message, retryable=retryable)
 
 
 # Retryable errors (re-raise for engine retry)

@@ -1180,10 +1180,11 @@ class TestPromptShieldInternalProcessing:
         assert result.reason["reason"] == "api_error"
         assert result.retryable is False
 
-    def test_process_single_with_state_returns_error_on_network_error(self, mock_httpx_client: MagicMock) -> None:
-        """Network errors return TransformResult.error (retryable)."""
+    def test_process_single_with_state_raises_retryable_on_network_error(self, mock_httpx_client: MagicMock) -> None:
+        """Network errors raise PluginRetryableError for engine retry."""
         import httpx
 
+        from elspeth.contracts.errors import PluginRetryableError
         from elspeth.plugins.transforms.azure.prompt_shield import AzurePromptShield
 
         mock_httpx_client.post.side_effect = httpx.RequestError("Connection failed")
@@ -1202,13 +1203,8 @@ class TestPromptShieldInternalProcessing:
 
         row_data = {"prompt": "test", "id": 1}
         row = make_pipeline_row(row_data)
-        result = transform._process_single_with_state(row, "test-state-id")
-
-        assert result.status == "error"
-        assert result.reason is not None
-        assert result.reason["reason"] == "api_error"
-        assert result.reason["error_type"] == "network_error"
-        assert result.retryable is True
+        with pytest.raises(PluginRetryableError, match="network error"):
+            transform._process_single_with_state(row, "test-state-id")
 
 
 class TestResourceCleanup:

@@ -5,6 +5,7 @@ from collections.abc import Iterator, Mapping
 from typing import Any, ClassVar
 
 from elspeth.contracts import PipelineRow, SourceRow
+from elspeth.contracts.schema import SchemaConfig
 from elspeth.testing import make_pipeline_row
 from tests.fixtures.factories import make_context
 from tests.fixtures.landscape import make_recorder
@@ -165,6 +166,7 @@ class TestTransformProtocol:
             is_batch_aware = False  # Batch support (structural aggregation)
             creates_tokens = False  # Deaggregation (multi-row output)
             declared_output_fields: frozenset[str] = frozenset()  # Collision detection
+            _output_schema_config: SchemaConfig | None = None  # Set by BaseTransform
             on_error: str | None = None  # Error routing (WP-11.99b)
             on_success: str | None = None  # Success routing
             validate_input: bool = False  # Centralized in executor

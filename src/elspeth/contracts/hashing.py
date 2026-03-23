@@ -1,22 +1,21 @@
-"""Primitive-only canonical hashing for the contracts layer.
+"""Canonical hashing for the contracts layer.
 
 Provides canonical JSON serialization (RFC 8785/JCS) and stable hashing
-for data that contains only JSON-safe primitives (str, int, float, bool,
-None, dict, list).
+for data that contains JSON-safe primitives and their frozen equivalents.
+Frozen container types produced by ``deep_freeze`` (``MappingProxyType``,
+``tuple``) are normalized to their mutable equivalents before serialization.
 
 This module exists to break the circular dependency between contracts/
-and core/canonical.py. Contracts callers only hash primitive dicts, so
-they don't need the pandas/numpy normalization in core/canonical.py.
-
-For data containing pandas/numpy types or PipelineRow, use
-elspeth.core.canonical instead — it adds a normalization phase before
-delegating to rfc8785.
+and core/canonical.py. For data containing pandas/numpy types or
+PipelineRow, use elspeth.core.canonical instead — it adds a normalization
+phase for domain-specific types before delegating to rfc8785.
 """
 
 from __future__ import annotations
 
 import hashlib
 import math
+from collections.abc import Mapping
 from typing import Any
 
 import rfc8785
@@ -26,44 +25,55 @@ import rfc8785
 CANONICAL_VERSION = "sha256-rfc8785-v1"
 
 
-def _reject_non_finite(obj: Any) -> None:
-    """Reject NaN and Infinity anywhere in a primitive data structure.
+def _normalize_frozen_and_reject_non_finite(obj: Any) -> Any:
+    """Normalize frozen containers and reject non-finite floats.
 
-    Raises ValueError with a clear message instead of letting rfc8785 raise
-    a cryptic FloatDomainError. Matches the rejection pattern in
-    core/canonical.py's _normalize_for_canonical().
+    Single recursive traversal that:
+    - Converts any ``Mapping`` (including ``MappingProxyType``) → ``dict``
+    - Converts ``tuple`` → ``list``
+    - Rejects ``frozenset`` with ``TypeError`` (no canonical JSON ordering)
+    - Rejects NaN/Infinity with ``ValueError``
+    - Returns the normalized structure ready for ``rfc8785.dumps()``
     """
     if isinstance(obj, float):
         if math.isnan(obj):
             raise ValueError(f"Cannot canonicalize NaN. Use None for missing values, not NaN. Got: {obj!r}")
         if math.isinf(obj):
             raise ValueError(f"Cannot canonicalize Infinity. Use None for missing values, not Infinity. Got: {obj!r}")
-    elif isinstance(obj, dict):
-        for v in obj.values():
-            _reject_non_finite(v)
-    elif isinstance(obj, (list, tuple)):
-        for item in obj:
-            _reject_non_finite(item)
+        return obj
+    if isinstance(obj, frozenset):
+        raise TypeError(
+            f"frozenset is not JSON-serializable and has no canonical ordering. Use list or tuple for ordered collections. Got: {obj!r}"
+        )
+    # Mapping ABC covers both dict and MappingProxyType. The dict
+    # comprehension normalizes MappingProxyType → dict for rfc8785.
+    if isinstance(obj, Mapping):
+        return {k: _normalize_frozen_and_reject_non_finite(v) for k, v in obj.items()}
+    if isinstance(obj, (list, tuple)):
+        return [_normalize_frozen_and_reject_non_finite(item) for item in obj]
+    return obj
 
 
 def canonical_json(obj: Any) -> str:
-    """Produce canonical JSON per RFC 8785/JCS for primitive data.
+    """Produce canonical JSON per RFC 8785/JCS.
 
+    Handles JSON-safe primitives and their frozen equivalents
+    (``MappingProxyType`` → ``dict``, ``tuple`` → ``list``).
     For data containing pandas/numpy types or PipelineRow, use
     ``elspeth.core.canonical.canonical_json()`` instead.
 
     Args:
-        obj: JSON-safe data structure (no pandas/numpy types)
+        obj: JSON-safe data structure, optionally containing frozen containers
 
     Returns:
         Canonical JSON string (deterministic key order, no whitespace)
 
     Raises:
         ValueError: If data contains NaN or Infinity
-        TypeError: If data contains non-serializable types
+        TypeError: If data contains frozenset or other non-serializable types
     """
-    _reject_non_finite(obj)
-    result: bytes = rfc8785.dumps(obj)
+    normalized = _normalize_frozen_and_reject_non_finite(obj)
+    result: bytes = rfc8785.dumps(normalized)
     return result.decode("utf-8")
 
 

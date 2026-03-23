@@ -16,6 +16,7 @@ Architecture:
 from __future__ import annotations
 
 import json
+import threading
 import time
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field
@@ -25,6 +26,7 @@ import structlog
 
 from elspeth.contracts import Determinism, TransformErrorReason, TransformResult, propagate_contract
 from elspeth.contracts.contexts import LifecycleContext, TransformContext
+from elspeth.contracts.errors import FrameworkBugError
 from elspeth.contracts.schema import SchemaConfig
 from elspeth.contracts.schema_contract import FieldContract, PipelineRow, SchemaContract
 from elspeth.plugins.infrastructure.base import BaseTransform
@@ -32,12 +34,13 @@ from elspeth.plugins.infrastructure.batching import BatchTransformMixin, OutputP
 from elspeth.plugins.infrastructure.clients.llm import ContextLengthError, LLMClientError
 from elspeth.plugins.infrastructure.pooling import PooledExecutor, RowContext
 from elspeth.plugins.infrastructure.schema_factory import create_schema_from_config
+from elspeth.plugins.infrastructure.templates import TemplateError
 from elspeth.plugins.transforms.llm import (
     _build_augmented_output_schema,
     _build_multi_query_output_schema,
-    get_llm_audit_fields,
+    build_llm_audit_metadata,
     get_llm_guaranteed_fields,
-    populate_llm_metadata_fields,
+    populate_llm_operational_fields,
 )
 from elspeth.plugins.transforms.llm.base import LLMConfig
 from elspeth.plugins.transforms.llm.langfuse import LangfuseTracer, create_langfuse_tracer
@@ -45,7 +48,7 @@ from elspeth.plugins.transforms.llm.multi_query import QuerySpec, ResponseFormat
 from elspeth.plugins.transforms.llm.provider import FinishReason, LLMProvider, ParsedFinishReason, UnrecognizedFinishReason
 from elspeth.plugins.transforms.llm.providers.azure import AzureLLMProvider, AzureOpenAIConfig, _configure_azure_monitor
 from elspeth.plugins.transforms.llm.providers.openrouter import OpenRouterConfig, OpenRouterLLMProvider
-from elspeth.plugins.transforms.llm.templates import PromptTemplate, TemplateError
+from elspeth.plugins.transforms.llm.templates import PromptTemplate
 from elspeth.plugins.transforms.llm.tracing import AzureAITracingConfig, TracingConfig, parse_tracing_config
 from elspeth.plugins.transforms.llm.validation import reject_nonfinite_constant, strip_markdown_fences, validate_field_value
 
@@ -77,6 +80,27 @@ class _FinishReasonError:
     error_message: str
 
 
+def _serialize_finish_reason(finish_reason: ParsedFinishReason) -> str | None:
+    """Serialize finish_reason for audit metadata and error reporting.
+
+    Single source of truth for converting ParsedFinishReason to its string
+    representation. Used by both _finish_reason_error (error path) and
+    success metadata recording (audit path) to eliminate parallel isinstance
+    dispatch chains that would need synchronized updates.
+
+    Returns a string for known enum values, the raw string for unrecognized
+    values, and None when the provider couldn't extract it. The audit trail
+    must distinguish these three cases.
+    """
+    if finish_reason is None:
+        return None
+    if isinstance(finish_reason, FinishReason):
+        return finish_reason.value
+    if isinstance(finish_reason, UnrecognizedFinishReason):
+        return finish_reason.raw
+    return str(finish_reason)  # type: ignore[unreachable]  # pragma: no cover — exhaustive, but future-proof
+
+
 def _finish_reason_error(
     finish_reason: ParsedFinishReason,
     *,
@@ -87,10 +111,10 @@ def _finish_reason_error(
     """Fail closed on non-STOP finish reasons.
 
     Only explicit STOP is allowlisted.  Absent finish_reason (None) is
-    treated as a retryable error — known-bad reasons get specific error
-    messages, unknown/unrecognized reasons get a generic rejection.
-    This ensures new provider finish reasons are never silently treated
-    as success.
+    accepted with a structured warning (Drifting Goals intervention — see
+    below). Known-bad reasons get specific error messages, unknown/unrecognized
+    reasons get a generic rejection. This ensures new provider finish reasons
+    are never silently treated as success.
     """
 
     def _build_reason(**base_fields: str) -> dict[str, Any]:
@@ -107,12 +131,15 @@ def _finish_reason_error(
     if finish_reason == FinishReason.STOP:
         return None
 
-    # Absent finish_reason (None) means the provider couldn't extract it
-    # (e.g. Azure SDK omits raw_response or choices in some configurations).
-    # The provider already validated content is non-empty via LLMQueryResult,
-    # and logged a warning about "truncation undetectable". Accept the
-    # response — rejecting every row when the SDK shape varies makes the
-    # provider unusable.
+    # Absent finish_reason (None) is a valid response shape for some providers
+    # (e.g. Azure SDK omits raw_response or choices in certain configurations).
+    # This is provider-normal behavior, not a defect. The provider already
+    # validated content is non-empty via LLMQueryResult, and logged a warning
+    # about "truncation undetectable".
+    #
+    # Callers record finish_reason in success_reason.metadata so the audit
+    # trail distinguishes None (absent) from STOP (confirmed completion).
+    # This is queryable via MCP diagnose() for operational visibility.
     if finish_reason is None:
         return None
 
@@ -131,14 +158,15 @@ def _finish_reason_error(
                 ),
                 error_message=error_message,
             )
-        # Known enum member not in STOP or error dict — fail closed.
-        raw_value = finish_reason.value
-    elif isinstance(finish_reason, UnrecognizedFinishReason):
-        raw_value = finish_reason.raw
-    else:  # pragma: no cover — exhaustive, but fail closed on new subtypes
-        raw_value = str(finish_reason)  # type: ignore[unreachable]
+        # entry is None: this FinishReason is not in the error dict but is also
+        # not STOP — fall through to the catch-all so it is rejected.
 
-    # Catch-all: any finish reason not explicitly allowlisted is an error.
+    # Catch-all: any finish reason not explicitly allowlisted (including
+    # known enum members not in STOP or error dict, and unrecognized values)
+    # is an error. Uses _serialize_finish_reason as the single source of truth
+    # for string conversion. None was handled above; raw_value is always str.
+    raw_value = _serialize_finish_reason(finish_reason)
+    assert raw_value is not None, "finish_reason=None was handled above — unreachable"
     return _FinishReasonError(
         result=TransformResult.error(
             cast(
@@ -306,14 +334,19 @@ class SingleQueryStrategy:
             latency_ms=latency_ms,
         )
 
-        # 6. Build output row
+        # 6. Build output row — operational fields only
         output = row.to_dict()
         output[self.response_field] = content
-        populate_llm_metadata_fields(
+        populate_llm_operational_fields(
             output,
             self.response_field,
             usage=result.usage,
             model=result.model,
+        )
+
+        # 7. Build audit metadata (goes to success_reason, not the row)
+        audit_metadata = build_llm_audit_metadata(
+            self.response_field,
             template_hash=rendered.template_hash,
             variables_hash=rendered.variables_hash,
             template_source=rendered.template_source,
@@ -322,7 +355,7 @@ class SingleQueryStrategy:
             system_prompt_source=self.system_prompt_source,
         )
 
-        # 7. Propagate contract
+        # 8. Propagate contract
         output_contract = propagate_contract(
             input_contract=row.contract,
             output_row=output,
@@ -334,7 +367,12 @@ class SingleQueryStrategy:
             success_reason={
                 "action": "enriched",
                 "fields_added": [self.response_field],
-                "metadata": {"model": result.model, **result.usage.to_dict()},
+                "metadata": {
+                    "model": result.model,
+                    "finish_reason": _serialize_finish_reason(result.finish_reason),
+                    **result.usage.to_dict(),
+                    **audit_metadata,
+                },
             },
         )
 
@@ -408,6 +446,7 @@ class MultiQueryStrategy:
         """
 
         fields: dict[str, Any]
+        audit_metadata: dict[str, object]
 
     def _execute_one_query(
         self,
@@ -649,11 +688,15 @@ class MultiQueryStrategy:
             # Unstructured: store raw content only
             partial[f"{spec.name}_{self.response_field}"] = content
 
-        populate_llm_metadata_fields(
+        populate_llm_operational_fields(
             partial,
             f"{spec.name}_{self.response_field}",
             usage=result.usage,
             model=result.model,
+        )
+
+        audit_metadata = build_llm_audit_metadata(
+            f"{spec.name}_{self.response_field}",
             template_hash=rendered.template_hash,
             variables_hash=rendered.variables_hash,
             template_source=rendered.template_source,
@@ -661,8 +704,11 @@ class MultiQueryStrategy:
             lookup_source=rendered.lookup_source,
             system_prompt_source=self.system_prompt_source,
         )
+        # Record finish_reason so audit trail distinguishes None (absent) from
+        # STOP (confirmed completion). See Bug elspeth-393d2459aa.
+        audit_metadata[f"{spec.name}_finish_reason"] = _serialize_finish_reason(result.finish_reason)
 
-        return self._QuerySuccess(fields=partial)
+        return self._QuerySuccess(fields=partial, audit_metadata=audit_metadata)
 
     def _execute_sequential(
         self,
@@ -679,6 +725,7 @@ class MultiQueryStrategy:
         wastefully re-execute all queries from scratch.
         """
         accumulated_outputs: dict[str, Any] = {}
+        accumulated_audit: dict[str, object] = {}
 
         for query_idx, spec in enumerate(self.query_specs):
             try:
@@ -706,19 +753,26 @@ class MultiQueryStrategy:
 
             # Error from template/JSON/validation/non-retryable LLM
             if isinstance(result, TransformResult):
+                # A TransformResult with status="error" and reason=None is a bug
+                # in our code — mirrors the same guard in _execute_parallel.
+                if result.reason is None:
+                    raise FrameworkBugError(
+                        f"Multi-query sequential execution produced TransformResult with "
+                        f"status='error' but reason=None for query index {query_idx} "
+                        f"(query_name={spec.name!r}). Every error path must set a reason dict."
+                    )
                 # Add discarded count for error reporting — copy first to avoid
                 # mutating the original dict (which may be shared with audit records)
-                if result.reason is not None:
-                    augmented_reason = cast(TransformErrorReason, dict(result.reason))
-                    augmented_reason["discarded_successful_queries"] = query_idx
-                    return TransformResult.error(
-                        augmented_reason,
-                        retryable=result.retryable,
-                        context_after=result.context_after,
-                    )
-                return result
+                augmented_reason = cast(TransformErrorReason, dict(result.reason))
+                augmented_reason["discarded_successful_queries"] = query_idx
+                return TransformResult.error(
+                    augmented_reason,
+                    retryable=result.retryable,
+                    context_after=result.context_after,
+                )
 
             accumulated_outputs.update(result.fields)
+            accumulated_audit.update(result.audit_metadata)
 
         # All queries succeeded — build output row
         output = {**row.to_dict(), **accumulated_outputs}
@@ -734,7 +788,7 @@ class MultiQueryStrategy:
                 "action": "multi_query_enriched",
                 "queries_completed": len(self.query_specs),
                 "fields_added": list(accumulated_outputs.keys()),
-                "metadata": {"model": self.model},
+                "metadata": {"model": self.model, **accumulated_audit},
             },
         )
 
@@ -754,6 +808,12 @@ class MultiQueryStrategy:
         """
         if self.executor is None:
             raise RuntimeError("_execute_parallel called without executor")
+
+        # Side channel for audit metadata — _process_fn writes here, outer scope reads after pool.
+        # Protected by lock: PooledExecutor runs _process_fn across ThreadPoolExecutor
+        # workers, so concurrent dict writes require synchronization.
+        audit_metadata_by_index: dict[int, dict[str, object]] = {}
+        audit_metadata_lock = threading.Lock()
 
         # Build RowContext for each query — the pool treats each as a "row"
         contexts = [
@@ -786,6 +846,10 @@ class MultiQueryStrategy:
             )
             if isinstance(result, TransformResult):
                 return result  # Error passthrough
+            # Stash audit metadata in side channel before wrapping in TransformResult.
+            # Lock required: multiple pool workers write concurrently.
+            with audit_metadata_lock:
+                audit_metadata_by_index[work["query_idx"]] = result.audit_metadata
             # Success: wrap partial fields in TransformResult for pool interface
             observed = SchemaContract(
                 mode="OBSERVED",
@@ -814,9 +878,19 @@ class MultiQueryStrategy:
         if failed:
             first_idx, first_result = failed[0]
             spec = self.query_specs[first_idx]
+            # A TransformResult with status="error" and reason=None is a bug in
+            # our code — every error path in _execute_one_query sets a reason dict.
+            # Fabricating a reason here would hide the bug. Crash per offensive
+            # programming policy.
+            if first_result.reason is None:
+                raise FrameworkBugError(
+                    f"Multi-query parallel execution produced TransformResult with "
+                    f"status='error' but reason=None for query index {first_idx} "
+                    f"(query_name={spec.name!r}). Every error path must set a reason dict."
+                )
             error_reason: TransformErrorReason = cast(
                 TransformErrorReason,
-                dict(first_result.reason) if first_result.reason else {"reason": "multi_query_failed"},
+                dict(first_result.reason),
             )
             error_reason["failed_query_name"] = spec.name
             error_reason["failed_query_index"] = first_idx
@@ -831,6 +905,21 @@ class MultiQueryStrategy:
             if result.row is not None:
                 accumulated_outputs.update(result.row.to_dict())
 
+        # Merge audit metadata from side channel (written by _process_fn).
+        # Validate that every successful query contributed its audit metadata —
+        # a missing entry means incomplete provenance in the audit trail.
+        success_indices = {i for i, r in enumerate(query_results) if r.status == "success"}
+        missing_audit = success_indices - set(audit_metadata_by_index.keys())
+        if missing_audit:
+            raise FrameworkBugError(
+                f"Multi-query parallel execution lost audit metadata for query indices "
+                f"{sorted(missing_audit)}. Side-channel write in _process_fn did not "
+                f"execute for these successful queries."
+            )
+        accumulated_audit: dict[str, object] = {}
+        for idx in sorted(audit_metadata_by_index):
+            accumulated_audit.update(audit_metadata_by_index[idx])
+
         output = {**row.to_dict(), **accumulated_outputs}
         output_contract = propagate_contract(
             input_contract=row.contract,
@@ -844,7 +933,7 @@ class MultiQueryStrategy:
                 "action": "multi_query_enriched",
                 "queries_completed": len(self.query_specs),
                 "fields_added": list(accumulated_outputs.keys()),
-                "metadata": {"model": self.model},
+                "metadata": {"model": self.model, **accumulated_audit},
             },
         )
 
@@ -961,27 +1050,29 @@ class LLMTransform(BaseTransform, BatchTransformMixin):
                 executor=self._query_executor,
             )
 
-            # Multi-query emits prefixed fields — compute all field sets
+            # Multi-query emits prefixed fields — compute guaranteed field sets
+            # (audit fields now travel via success_reason, not the row)
             prefixed_guaranteed: set[str] = set()
-            prefixed_audit: set[str] = set()
             for spec in query_specs:
                 prefix = f"{spec.name}_{self._response_field}"
                 prefixed_guaranteed.add(prefix)
                 prefixed_guaranteed.update(get_llm_guaranteed_fields(prefix))
-                prefixed_audit.update(get_llm_audit_fields(prefix))
                 if spec.output_fields:
                     for field in spec.output_fields:
                         prefixed_guaranteed.add(f"{spec.name}_{field.suffix}")
-            self.declared_output_fields = frozenset(prefixed_guaranteed | prefixed_audit)
+            self.declared_output_fields = frozenset(prefixed_guaranteed)
 
-            # Output schema config with prefixed fields for DAG contract propagation
+            # Output schema config with prefixed fields for DAG contract propagation.
+            # INVARIANT: guaranteed_fields must be a superset of declared_output_fields.
+            # This transform builds _output_schema_config manually (not via
+            # _build_output_schema_config) because multi-query field computation
+            # requires prefix interpolation beyond the generic helper's scope.
+            # See: docs/superpowers/specs/2026-03-20-output-schema-contract-enforcement-design.md
             base_guaranteed = schema_config.guaranteed_fields or ()
-            base_audit = schema_config.audit_fields or ()
             self._output_schema_config = SchemaConfig(
                 mode=schema_config.mode,
                 fields=schema_config.fields,
                 guaranteed_fields=tuple(set(base_guaranteed) | prefixed_guaranteed),
-                audit_fields=tuple(set(base_audit) | prefixed_audit),
                 required_fields=schema_config.required_fields,
             )
 
@@ -1009,19 +1100,18 @@ class LLMTransform(BaseTransform, BatchTransformMixin):
                 response_field=self._response_field,
             )
 
-            # Single-query emits unprefixed fields
+            # Single-query emits unprefixed fields (operational only — audit goes to success_reason)
             guaranteed = get_llm_guaranteed_fields(self._response_field)
-            audit = get_llm_audit_fields(self._response_field)
-            self.declared_output_fields = frozenset([*guaranteed, *audit])
+            self.declared_output_fields = frozenset(guaranteed)
 
-            # Output schema config with unprefixed fields
+            # Output schema config with LLM output fields for DAG contract propagation.
+            # INVARIANT: guaranteed_fields must be a superset of declared_output_fields.
+            # See: docs/superpowers/specs/2026-03-20-output-schema-contract-enforcement-design.md
             base_guaranteed = schema_config.guaranteed_fields or ()
-            base_audit = schema_config.audit_fields or ()
             self._output_schema_config = SchemaConfig(
                 mode=schema_config.mode,
                 fields=schema_config.fields,
                 guaranteed_fields=tuple(set(base_guaranteed) | set(guaranteed)),
-                audit_fields=tuple(set(base_audit) | set(audit)),
                 required_fields=schema_config.required_fields,
             )
 

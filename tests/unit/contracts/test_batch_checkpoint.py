@@ -37,12 +37,21 @@ class TestRowMappingEntry:
             entry.index = 99  # type: ignore[misc]
 
     def test_from_dict_missing_index_crashes(self) -> None:
-        with pytest.raises(KeyError, match="index"):
+        with pytest.raises(AuditIntegrityError, match="missing required fields"):
             RowMappingEntry.from_dict({"variables_hash": "abc"})
 
     def test_from_dict_missing_hash_crashes(self) -> None:
-        with pytest.raises(KeyError, match="variables_hash"):
+        with pytest.raises(AuditIntegrityError, match="missing required fields"):
             RowMappingEntry.from_dict({"index": 0})
+
+    def test_from_dict_wrong_type_index_crashes(self) -> None:
+        """Regression: elspeth-e859f70488 — string index must crash, not coerce."""
+        with pytest.raises(AuditIntegrityError, match="'index' must be int"):
+            RowMappingEntry.from_dict({"index": "5", "variables_hash": "abc"})
+
+    def test_from_dict_empty_dict_crashes(self) -> None:
+        with pytest.raises(AuditIntegrityError, match="missing required fields"):
+            RowMappingEntry.from_dict({})
 
 
 # ---------------------------------------------------------------------------
@@ -153,7 +162,7 @@ class TestBatchCheckpointState:
         """Corrupt row_mapping entry (missing 'index') crashes."""
         d = _make_state().to_dict()
         d["row_mapping"]["row-0-aaa"] = {"variables_hash": "h0"}  # missing index
-        with pytest.raises(KeyError, match="index"):
+        with pytest.raises(AuditIntegrityError, match="missing required fields"):
             BatchCheckpointState.from_dict(d)
 
     def test_round_trip_through_json_preserves_tuple_types(self) -> None:
@@ -190,7 +199,7 @@ class TestBatchCheckpointState:
         """Template error entries must be exactly 2-element (index, message)."""
         d = _make_state().to_dict()
         d["template_errors"] = [[0, "err", "extra"]]  # 3 elements — corrupt
-        with pytest.raises((ValueError, TypeError)):
+        with pytest.raises(AuditIntegrityError, match="2-element"):
             BatchCheckpointState.from_dict(d)
 
     def test_empty_batch_round_trips(self) -> None:
@@ -203,3 +212,54 @@ class TestBatchCheckpointState:
         )
         restored = BatchCheckpointState.from_dict(state.to_dict())
         assert restored == state
+
+
+# ---------------------------------------------------------------------------
+# Regression: Tier 1 type guards (elspeth-a2ccbf2f40, a1389d6a4c, e859f70488)
+# ---------------------------------------------------------------------------
+
+
+class TestBatchCheckpointTier1TypeGuards:
+    """from_dict must crash with AuditIntegrityError on wrong types, not coerce."""
+
+    def test_row_mapping_non_dict_crashes(self) -> None:
+        """Regression: elspeth-a1389d6a4c — row_mapping as list produces AuditIntegrityError."""
+        d = _make_state().to_dict()
+        d["row_mapping"] = [{"index": 0, "variables_hash": "h"}]
+        with pytest.raises(AuditIntegrityError, match="'row_mapping' must be a dict"):
+            BatchCheckpointState.from_dict(d)
+
+    def test_requests_non_dict_crashes(self) -> None:
+        """Regression: elspeth-a1389d6a4c — requests as string produces AuditIntegrityError."""
+        d = _make_state().to_dict()
+        d["requests"] = "not a dict"
+        with pytest.raises(AuditIntegrityError, match="'requests' must be a dict"):
+            BatchCheckpointState.from_dict(d)
+
+    def test_template_errors_string_index_crashes(self) -> None:
+        """Regression: elspeth-a2ccbf2f40 — string index must crash, not coerce via int()."""
+        d = _make_state().to_dict()
+        d["template_errors"] = [["3", "error message"]]
+        with pytest.raises(AuditIntegrityError, match="must be int"):
+            BatchCheckpointState.from_dict(d)
+
+    def test_template_errors_non_string_message_crashes(self) -> None:
+        """Regression: elspeth-a2ccbf2f40 — non-string message must crash, not coerce via str()."""
+        d = _make_state().to_dict()
+        d["template_errors"] = [[0, 42]]
+        with pytest.raises(AuditIntegrityError, match="must be str"):
+            BatchCheckpointState.from_dict(d)
+
+    def test_template_errors_wrong_structure_crashes(self) -> None:
+        """Single-element entry is structural corruption."""
+        d = _make_state().to_dict()
+        d["template_errors"] = [[0]]
+        with pytest.raises(AuditIntegrityError, match="2-element"):
+            BatchCheckpointState.from_dict(d)
+
+    def test_template_errors_valid_types_pass(self) -> None:
+        """Correctly typed template_errors deserialize without error."""
+        d = _make_state().to_dict()
+        d["template_errors"] = [[0, "err0"], [3, "err1"]]
+        restored = BatchCheckpointState.from_dict(d)
+        assert restored.template_errors == ((0, "err0"), (3, "err1"))

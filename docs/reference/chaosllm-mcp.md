@@ -10,12 +10,7 @@ chaosllm-mcp
 
 # Specify database explicitly
 chaosllm-mcp --database ./chaosllm-metrics.db
-
-# As Python module
-python -m elspeth.testing.chaosllm_mcp.server --database ./metrics.db
 ```
-
-> **Note:** All `chaosllm-mcp` commands also work as `elspeth chaosllm-mcp`.
 
 ## Tool Reference
 

@@ -50,14 +50,10 @@ def init_display_headers(
         RuntimeError: If _output_contract is not set on the sink (forgot super().__init__()).
     """
     # Offensive assertion: _output_contract must already be set by BaseSink.__init__().
-    # Without this, get_effective_display_headers() will AttributeError at first write().
-    try:
-        _ = sink._output_contract
-    except AttributeError as exc:
-        raise RuntimeError(
-            "sink._output_contract not set — call super().__init__() before "
-            "init_display_headers(). BaseSink.__init__ sets _output_contract."
-        ) from exc
+    # Access directly — if it's missing, AttributeError IS the correct crash.
+    # Per CLAUDE.md: "hasattr() is unconditionally banned" and try/except AttributeError
+    # is equivalent banned defensive programming.
+    _ = sink._output_contract  # Crashes with AttributeError if super().__init__() not called
 
     sink._headers_mode = headers_mode
     sink._headers_custom_mapping = headers_custom_mapping
@@ -190,7 +186,7 @@ def resolve_display_headers_if_needed(sink: DisplayHeaderHost, ctx: SinkContext)
     if resolution_mapping is None:
         raise ValueError(
             "headers: original but source did not record field resolution. "
-            "Ensure source uses normalize_fields: true to enable header restoration."
+            "Field normalization records the resolution mapping automatically."
         )
 
     # Build reverse mapping: final (normalized) → original

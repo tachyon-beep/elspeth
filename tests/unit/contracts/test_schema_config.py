@@ -423,6 +423,27 @@ class TestAuditFields:
         with pytest.raises(ValueError, match="valid Python identifier"):
             SchemaConfig.from_dict({"mode": "observed", "audit_fields": ["valid", "invalid-field"]})
 
+    def test_llm_output_schema_config_has_no_audit_fields(self) -> None:
+        """LLM transform _output_schema_config must have audit_fields=None.
+
+        Audit provenance for LLM transforms travels via success_reason['metadata'],
+        not the output schema. The _output_schema_config must not declare any
+        audit_fields so downstream contract validation does not expect them in rows.
+        """
+        from elspeth.contracts.schema import SchemaConfig
+
+        base_config = SchemaConfig.from_dict({"mode": "observed"})
+        output_schema_config = SchemaConfig(
+            mode=base_config.mode,
+            fields=base_config.fields,
+            guaranteed_fields=base_config.guaranteed_fields,
+            required_fields=base_config.required_fields,
+            # audit_fields intentionally omitted — provenance goes to success_reason
+        )
+        assert output_schema_config.audit_fields is None, (
+            "LLM transform output schema must not declare audit_fields — provenance lives in success_reason['metadata'], not pipeline rows"
+        )
+
 
 class TestContractFieldSubsetValidation:
     """Tests for validating contract fields are subsets of declared fields.
