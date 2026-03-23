@@ -179,7 +179,6 @@ class TestResolveFieldNamesProperties:
         try:
             result = resolve_field_names(
                 raw_headers=headers,
-                normalize_fields=True,
                 field_mapping=None,
                 columns=None,
             )
@@ -200,7 +199,6 @@ class TestResolveFieldNamesProperties:
         try:
             result = resolve_field_names(
                 raw_headers=headers,
-                normalize_fields=True,
                 field_mapping=None,
                 columns=None,
             )
@@ -220,7 +218,6 @@ class TestResolveFieldNamesProperties:
         """
         result = resolve_field_names(
             raw_headers=None,
-            normalize_fields=False,  # Doesn't apply in columns mode
             field_mapping=None,
             columns=columns,
         )
@@ -230,37 +227,49 @@ class TestResolveFieldNamesProperties:
 
     @given(headers=st.lists(normalizable_headers, min_size=1, max_size=10, unique=True))
     @settings(max_examples=100)
-    def test_resolve_without_normalization_passthrough(self, headers: list[str]) -> None:
-        """Property: With normalize_fields=False, headers pass through unchanged."""
-        result = resolve_field_names(
-            raw_headers=headers,
-            normalize_fields=False,
-            field_mapping=None,
-            columns=None,
-        )
+    def test_resolve_always_normalizes_raw_headers(self, headers: list[str]) -> None:
+        """Property: Raw headers are always normalized to valid identifiers."""
+        try:
+            result = resolve_field_names(
+                raw_headers=headers,
+                field_mapping=None,
+                columns=None,
+            )
+        except ValueError:
+            # Collisions or empty normalizations are valid rejections
+            assume(False)
 
-        assert result.final_headers == tuple(headers), "Without normalization, headers should pass through"
-        assert result.normalization_version is None, "Without normalization, version should be None"
+        assert result.normalization_version is not None, "Raw headers must record normalization version"
+        for header in result.final_headers:
+            assert header.isidentifier(), f"'{header}' is not a valid identifier"
 
     @given(headers=st.lists(normalizable_headers, min_size=2, max_size=10, unique=True), data=st.data())
     @settings(max_examples=100)
     def test_resolve_applies_field_mapping(self, headers: list[str], data: st.DataObject) -> None:
-        """Property: field_mapping overrides only specified headers."""
-        # Choose a subset of headers to map
-        keys_to_map = data.draw(st.lists(st.sampled_from(headers), min_size=1, max_size=len(headers), unique=True))
+        """Property: field_mapping overrides only specified normalized headers."""
+        # First resolve without mapping to get normalized names
+        try:
+            base_result = resolve_field_names(
+                raw_headers=headers,
+                field_mapping=None,
+                columns=None,
+            )
+        except ValueError:
+            assume(False)
+
+        normalized = list(base_result.final_headers)
+        # Choose a subset of normalized headers to map
+        keys_to_map = data.draw(st.lists(st.sampled_from(normalized), min_size=1, max_size=len(normalized), unique=True))
         field_mapping = {key: f"mapped_{i}" for i, key in enumerate(keys_to_map)}
 
         result = resolve_field_names(
             raw_headers=headers,
-            normalize_fields=False,
             field_mapping=field_mapping,
             columns=None,
         )
 
-        for original in headers:
-            expected = field_mapping.get(original, original)
-            assert result.resolution_mapping[original] == expected
-        assert result.final_headers == tuple(field_mapping.get(h, h) for h in headers)
+        # Each final header is either mapped or the normalized form
+        assert result.final_headers == tuple(field_mapping.get(h, h) for h in normalized)
 
     @given(headers=st.lists(normalizable_headers, min_size=1, max_size=10, unique=True))
     @settings(max_examples=50)
@@ -273,7 +282,6 @@ class TestResolveFieldNamesProperties:
         try:
             resolve_field_names(
                 raw_headers=headers,
-                normalize_fields=False,
                 field_mapping=field_mapping,
                 columns=None,
             )
@@ -285,15 +293,26 @@ class TestResolveFieldNamesProperties:
     @settings(max_examples=50)
     def test_resolve_rejects_mapping_collisions(self, headers: list[str], data: st.DataObject) -> None:
         """Property: field_mapping cannot collapse multiple headers to same name."""
-        key_a = data.draw(st.sampled_from(headers))
-        key_b = data.draw(st.sampled_from(headers))
+        # First resolve to get normalized names for mapping keys
+        try:
+            base_result = resolve_field_names(
+                raw_headers=headers,
+                field_mapping=None,
+                columns=None,
+            )
+        except ValueError:
+            assume(False)
+
+        normalized = list(base_result.final_headers)
+        assume(len(normalized) >= 2)
+        key_a = data.draw(st.sampled_from(normalized))
+        key_b = data.draw(st.sampled_from(normalized))
         assume(key_a != key_b)
         field_mapping = {key_a: "collision", key_b: "collision"}
 
         try:
             resolve_field_names(
                 raw_headers=headers,
-                normalize_fields=False,
                 field_mapping=field_mapping,
                 columns=None,
             )

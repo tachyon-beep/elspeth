@@ -9,35 +9,6 @@ from elspeth.plugins.infrastructure.config_base import PluginConfigError
 class TestTabularSourceDataConfigValidation:
     """Tests for field normalization config option validation."""
 
-    def test_normalize_with_columns_raises(self) -> None:
-        """normalize_fields=True with columns raises error."""
-        from elspeth.plugins.infrastructure.config_base import TabularSourceDataConfig
-
-        with pytest.raises(PluginConfigError, match="cannot be used with columns"):
-            TabularSourceDataConfig.from_dict(
-                {
-                    "path": "/tmp/test.csv",
-                    "schema": {"mode": "observed"},
-                    "on_validation_failure": "quarantine",
-                    "columns": ["a", "b"],
-                    "normalize_fields": True,
-                }
-            )
-
-    def test_mapping_without_normalize_or_columns_raises(self) -> None:
-        """field_mapping without normalize_fields or columns raises error."""
-        from elspeth.plugins.infrastructure.config_base import TabularSourceDataConfig
-
-        with pytest.raises(PluginConfigError, match="requires normalize_fields"):
-            TabularSourceDataConfig.from_dict(
-                {
-                    "path": "/tmp/test.csv",
-                    "schema": {"mode": "observed"},
-                    "on_validation_failure": "quarantine",
-                    "field_mapping": {"a": "b"},
-                }
-            )
-
     def test_columns_with_python_keyword_raises(self) -> None:
         """columns entry that is Python keyword raises error."""
         from elspeth.plugins.infrastructure.config_base import TabularSourceDataConfig
@@ -90,13 +61,12 @@ class TestTabularSourceDataConfigValidation:
                     "path": "/tmp/test.csv",
                     "schema": {"mode": "observed"},
                     "on_validation_failure": "quarantine",
-                    "normalize_fields": True,
                     "field_mapping": {"user_id": "class"},
                 }
             )
 
-    def test_valid_config_with_normalize_fields(self) -> None:
-        """Valid config with normalize_fields passes."""
+    def test_valid_config_default(self) -> None:
+        """Valid config with defaults passes — normalization is always on."""
         from elspeth.plugins.infrastructure.config_base import TabularSourceDataConfig
 
         cfg = TabularSourceDataConfig.from_dict(
@@ -104,10 +74,8 @@ class TestTabularSourceDataConfigValidation:
                 "path": "/tmp/test.csv",
                 "schema": {"mode": "observed"},
                 "on_validation_failure": "quarantine",
-                "normalize_fields": True,
             }
         )
-        assert cfg.normalize_fields is True
         assert cfg.field_mapping is None
         assert cfg.columns is None
 
@@ -124,10 +92,9 @@ class TestTabularSourceDataConfigValidation:
             }
         )
         assert cfg.columns == ["id", "name", "amount"]
-        assert cfg.normalize_fields is False
 
-    def test_valid_config_with_normalize_and_mapping(self) -> None:
-        """Valid config with normalize_fields + field_mapping passes."""
+    def test_valid_config_with_mapping(self) -> None:
+        """Valid config with field_mapping passes."""
         from elspeth.plugins.infrastructure.config_base import TabularSourceDataConfig
 
         cfg = TabularSourceDataConfig.from_dict(
@@ -135,11 +102,9 @@ class TestTabularSourceDataConfigValidation:
                 "path": "/tmp/test.csv",
                 "schema": {"mode": "observed"},
                 "on_validation_failure": "quarantine",
-                "normalize_fields": True,
                 "field_mapping": {"user_id": "uid"},
             }
         )
-        assert cfg.normalize_fields is True
         assert cfg.field_mapping == {"user_id": "uid"}
 
     def test_empty_field_mapping_treated_as_none(self) -> None:
@@ -151,7 +116,6 @@ class TestTabularSourceDataConfigValidation:
                 "path": "/tmp/test.csv",
                 "schema": {"mode": "observed"},
                 "on_validation_failure": "quarantine",
-                "normalize_fields": True,
                 "field_mapping": {},
             }
         )
@@ -171,3 +135,17 @@ class TestTabularSourceDataConfigValidation:
             }
         )
         assert cfg.columns == ["id"]
+
+    def test_normalize_fields_config_key_rejected(self) -> None:
+        """normalize_fields is no longer a valid config key — Pydantic rejects unknown fields."""
+        from elspeth.plugins.infrastructure.config_base import TabularSourceDataConfig
+
+        with pytest.raises(PluginConfigError):
+            TabularSourceDataConfig.from_dict(
+                {
+                    "path": "/tmp/test.csv",
+                    "schema": {"mode": "observed"},
+                    "on_validation_failure": "quarantine",
+                    "normalize_fields": True,
+                }
+            )

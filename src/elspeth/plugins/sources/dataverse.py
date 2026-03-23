@@ -105,10 +105,6 @@ class DataverseSourceConfig(DataPluginConfig):
     )
 
     # Field handling
-    normalize_fields: bool = Field(
-        default=True,
-        description="Normalize Dataverse logical names to Python identifiers",
-    )
     field_mapping: dict[str, str] | None = Field(
         default=None,
         description="Manual field name overrides",
@@ -210,7 +206,6 @@ class DataverseSource(BaseSource):
         self._orderby = cfg.orderby
         self._top = cfg.top
         self._fetch_xml = cfg.fetch_xml
-        self._normalize_fields = cfg.normalize_fields
         self._field_mapping = cfg.field_mapping
         self._include_formatted_values = cfg.include_formatted_values
         self._additional_domains = tuple(cfg.additional_domains) if cfg.additional_domains else ()
@@ -418,7 +413,6 @@ class DataverseSource(BaseSource):
             raw_headers = list(row.keys())
             self._field_resolution = resolve_field_names(
                 raw_headers=raw_headers,
-                normalize_fields=self._normalize_fields,
                 field_mapping=self._field_mapping,
                 columns=None,
             )
@@ -435,7 +429,7 @@ class DataverseSource(BaseSource):
             normalized_name = mapping.get(k)
             if normalized_name is None:
                 # Field not in initial mapping — normalize individually
-                normalized_name = normalize_field_name(k) if self._normalize_fields else k
+                normalized_name = normalize_field_name(k)
             result[normalized_name] = v
         return result
 

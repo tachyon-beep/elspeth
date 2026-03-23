@@ -50,7 +50,7 @@ runs_table = Table(
     # when resuming from payloads (datetime/Decimal string -> typed values)
     Column("source_schema_json", Text),  # Nullable — populated on new runs, NULL for runs created before this column
     # Field resolution mapping from source.load() - captures original→final header mapping
-    # when normalize_fields or field_mapping is used. Stored at run level since one source per run.
+    # Field normalization is mandatory; mapping records original→final header names. Stored at run level since one source per run.
     Column("source_field_resolution_json", Text),  # Nullable — populated on new runs, NULL for runs created before this column
     Column("status", String(32), nullable=False),
     # Export tracking - separate from run status so export failures

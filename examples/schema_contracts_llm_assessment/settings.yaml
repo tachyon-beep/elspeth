@@ -5,7 +5,6 @@ source:
     path: examples/schema_contracts_llm_assessment/input.csv
     schema:
       mode: observed
-    normalize_fields: true
     on_validation_failure: discard
 transforms:
 - name: llm_0

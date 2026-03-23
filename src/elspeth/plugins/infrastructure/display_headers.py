@@ -186,7 +186,7 @@ def resolve_display_headers_if_needed(sink: DisplayHeaderHost, ctx: SinkContext)
     if resolution_mapping is None:
         raise ValueError(
             "headers: original but source did not record field resolution. "
-            "Ensure source uses normalize_fields: true to enable header restoration."
+            "Field normalization records the resolution mapping automatically."
         )
 
     # Build reverse mapping: final (normalized) → original

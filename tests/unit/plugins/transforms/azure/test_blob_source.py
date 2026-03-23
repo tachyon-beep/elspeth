@@ -63,7 +63,6 @@ def make_config(
     csv_options: dict[str, Any] | None = None,
     json_options: dict[str, Any] | None = None,
     columns: list[str] | None = None,
-    normalize_fields: bool = False,
     field_mapping: dict[str, str] | None = None,
     schema: dict[str, Any] | None = None,
     on_validation_failure: str = QUARANTINE_SINK,
@@ -101,8 +100,6 @@ def make_config(
         config["json_options"] = json_options
     if columns is not None:
         config["columns"] = columns
-    if normalize_fields:
-        config["normalize_fields"] = True
     if field_mapping is not None:
         config["field_mapping"] = field_mapping
     return config
@@ -268,14 +265,14 @@ class TestAzureBlobSourceCSV:
         # \xe9 in latin-1 decodes to U+00E9 (LATIN SMALL LETTER E WITH ACUTE)
         assert rows[0].row["name"] == "caf\u00e9"
 
-    def test_csv_normalize_fields(self, mock_blob_client: MagicMock, ctx: PluginContext) -> None:
-        """CSV header normalization matches CSVSource behavior."""
+    def test_csv_headers_always_normalized(self, mock_blob_client: MagicMock, ctx: PluginContext) -> None:
+        """CSV headers are always normalized to valid identifiers."""
         csv_data = b"User ID,Amount $,Email Address\n1,100,a@b.com\n"
         mock_client = MagicMock()
         mock_client.download_blob.return_value.readall.return_value = csv_data
         mock_blob_client.return_value = mock_client
 
-        source = AzureBlobSource(make_config(normalize_fields=True))
+        source = AzureBlobSource(make_config())
         rows = list(source.load(ctx))
 
         assert rows[0].row == {"user_id": "1", "amount": "100", "email_address": "a@b.com"}
@@ -295,15 +292,17 @@ class TestAzureBlobSourceCSV:
         mock_client.download_blob.return_value.readall.return_value = csv_data
         mock_blob_client.return_value = mock_client
 
-        source = AzureBlobSource(make_config(normalize_fields=True, field_mapping={"amount": "total_amount"}))
+        source = AzureBlobSource(make_config(field_mapping={"amount": "total_amount"}))
         rows = list(source.load(ctx))
 
         assert rows[0].row == {"user_id": "1", "total_amount": "100"}
 
-    def test_csv_normalize_fields_requires_header(self) -> None:
-        """normalize_fields requires csv_options.has_header: true."""
-        with pytest.raises(PluginConfigError, match=r"normalize_fields requires csv_options\.has_header: true"):
-            AzureBlobSource(make_config(normalize_fields=True, csv_options={"has_header": False}))
+    def test_csv_normalize_fields_config_key_rejected(self) -> None:
+        """normalize_fields is no longer a valid config key."""
+        config = make_config()
+        config["normalize_fields"] = True
+        with pytest.raises(PluginConfigError):
+            AzureBlobSource(config)
 
 
 class TestAzureBlobSourceJSON:

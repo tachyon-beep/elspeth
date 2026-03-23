@@ -184,13 +184,9 @@ class AzureBlobSourceConfig(DataPluginConfig):
         default=None,
         description="Explicit column names for headerless CSV blobs",
     )
-    normalize_fields: bool = Field(
-        default=False,
-        description="Normalize CSV headers to valid identifiers (only for CSV format)",
-    )
     field_mapping: dict[str, str] | None = Field(
         default=None,
-        description="Override specific normalized field names (requires normalize_fields or columns)",
+        description="Override specific normalized field names",
     )
     on_validation_failure: str = Field(
         ...,
@@ -221,21 +217,12 @@ class AzureBlobSourceConfig(DataPluginConfig):
     def validate_field_normalization_options(self) -> Self:
         """Validate field normalization options for CSV format."""
         if self.format != "csv":
-            if self.normalize_fields or self.columns is not None or self.field_mapping is not None:
-                raise ValueError("normalize_fields, columns, and field_mapping are only supported for CSV format")
+            if self.columns is not None or self.field_mapping is not None:
+                raise ValueError("columns and field_mapping are only supported for CSV format")
             return self
-
-        if not self.csv_options.has_header and self.normalize_fields:
-            raise ValueError("normalize_fields requires csv_options.has_header: true. Use columns for headerless CSV blobs.")
 
         if self.csv_options.has_header and self.columns is not None:
             raise ValueError("columns requires csv_options.has_header: false for headerless CSV blobs.")
-
-        if self.columns is not None and self.normalize_fields:
-            raise ValueError("normalize_fields cannot be used with columns config. The columns config already provides clean names.")
-
-        if self.field_mapping is not None and not self.normalize_fields and self.columns is None:
-            raise ValueError("field_mapping requires normalize_fields: true or columns config")
 
         if self.columns is not None:
             validate_field_names(self.columns, "columns")
@@ -335,7 +322,6 @@ class AzureBlobSource(BaseSource):
         self._csv_options = cfg.csv_options
         self._json_options = cfg.json_options
         self._columns = cfg.columns
-        self._normalize_fields = cfg.normalize_fields
         self._field_mapping = cfg.field_mapping
         self._field_resolution: FieldResolution | None = None
 
@@ -592,7 +578,6 @@ class AzureBlobSource(BaseSource):
             raw_headers = [str(header) for header in df.columns]
             self._field_resolution = resolve_field_names(
                 raw_headers=raw_headers,
-                normalize_fields=self._normalize_fields,
                 field_mapping=self._field_mapping,
                 columns=None,
             )
@@ -602,7 +587,6 @@ class AzureBlobSource(BaseSource):
         elif self._columns is not None:
             self._field_resolution = resolve_field_names(
                 raw_headers=None,
-                normalize_fields=self._normalize_fields,
                 field_mapping=self._field_mapping,
                 columns=self._columns,
             )

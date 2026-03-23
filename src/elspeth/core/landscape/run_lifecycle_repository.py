@@ -265,7 +265,7 @@ class RunLifecycleRepository:
 
         Returns:
             Dict mapping original header name -> final field name, or None if no
-            field resolution was recorded (source didn't use normalize_fields).
+            field resolution was recorded.
 
         Note:
             For reverse lookup (final -> original), callers should invert this dict:

@@ -668,8 +668,8 @@ class TestCSVSourceFieldNormalization:
         """Create a plugin context with real landscape and source node records."""
         return make_source_context(plugin_name="csv")
 
-    def test_normalize_fields_transforms_headers(self, tmp_path: Path, ctx: PluginContext) -> None:
-        """normalize_fields=True transforms messy headers to identifiers."""
+    def test_headers_always_normalized(self, tmp_path: Path, ctx: PluginContext) -> None:
+        """Field normalization is mandatory — messy headers become identifiers."""
         from elspeth.plugins.sources.csv_source import CSVSource
 
         csv_file = tmp_path / "messy.csv"
@@ -680,7 +680,6 @@ class TestCSVSourceFieldNormalization:
                 "path": str(csv_file),
                 "schema": {"mode": "observed"},
                 "on_validation_failure": "quarantine",
-                "normalize_fields": True,
             }
         )
 
@@ -701,7 +700,6 @@ class TestCSVSourceFieldNormalization:
                 "path": str(csv_file),
                 "schema": {"mode": "observed"},
                 "on_validation_failure": "quarantine",
-                "normalize_fields": True,
                 "field_mapping": {"user_id": "uid"},
             }
         )
@@ -743,7 +741,6 @@ class TestCSVSourceFieldNormalization:
                 "path": str(csv_file),
                 "schema": {"mode": "observed"},
                 "on_validation_failure": "quarantine",
-                "normalize_fields": True,
             }
         )
 
@@ -751,22 +748,21 @@ class TestCSVSourceFieldNormalization:
             list(source.load(ctx))
 
     def test_duplicate_raw_headers_raise_at_load(self, tmp_path: Path, ctx: PluginContext) -> None:
-        """Duplicate raw headers fail fast even when normalize_fields is disabled."""
+        """Duplicate raw headers that normalize to the same value raise collision error."""
         from elspeth.plugins.sources.csv_source import CSVSource
 
         csv_file = tmp_path / "duplicate_raw_headers.csv"
-        csv_file.write_text("id,id,name\n1,2,alice\n")
+        csv_file.write_text("id,ID,name\n1,2,alice\n")
 
         source = CSVSource(
             {
                 "path": str(csv_file),
                 "schema": {"mode": "observed"},
                 "on_validation_failure": "quarantine",
-                # normalize_fields defaults to False
             }
         )
 
-        with pytest.raises(ValueError, match="Duplicate raw header names"):
+        with pytest.raises(ValueError, match="collision"):
             list(source.load(ctx))
 
     def test_field_resolution_stored_for_audit(self, tmp_path: Path, ctx: PluginContext) -> None:
@@ -781,7 +777,6 @@ class TestCSVSourceFieldNormalization:
                 "path": str(csv_file),
                 "schema": {"mode": "observed"},
                 "on_validation_failure": "quarantine",
-                "normalize_fields": True,
                 "field_mapping": {"user_id": "uid"},
             }
         )
@@ -809,7 +804,6 @@ class TestCSVSourceFieldNormalization:
                 "path": str(csv_file),
                 "schema": {"mode": "observed"},
                 "on_validation_failure": "quarantine",
-                "normalize_fields": True,
             }
         )
 
@@ -828,7 +822,6 @@ class TestCSVSourceFieldNormalization:
                 "path": str(csv_file),
                 "schema": {"mode": "observed"},
                 "on_validation_failure": "quarantine",
-                "normalize_fields": True,
             }
         )
 
@@ -879,8 +872,8 @@ class TestCSVSourceFieldNormalization:
         assert rows[0].quarantine_error is not None
         assert "expected 3 fields, got 2" in rows[0].quarantine_error
 
-    def test_default_behavior_no_normalization(self, tmp_path: Path, ctx: PluginContext) -> None:
-        """Without normalize_fields, headers pass through unchanged (backward compatibility)."""
+    def test_default_behavior_always_normalizes(self, tmp_path: Path, ctx: PluginContext) -> None:
+        """Default behavior always normalizes headers to valid identifiers."""
         from elspeth.plugins.sources.csv_source import CSVSource
 
         csv_file = tmp_path / "messy.csv"
@@ -891,13 +884,12 @@ class TestCSVSourceFieldNormalization:
                 "path": str(csv_file),
                 "schema": {"mode": "observed"},
                 "on_validation_failure": "quarantine",
-                # normalize_fields defaults to False
             }
         )
 
         rows = list(source.load(ctx))
-        # Headers should be unchanged
-        assert rows[0].row == {"User ID": "1", "Amount $": "100"}
+        # Headers are always normalized
+        assert rows[0].row == {"user_id": "1", "amount": "100"}
 
     def test_audit_trail_contains_resolution_and_version(self, tmp_path: Path, ctx: PluginContext) -> None:
         """Audit trail includes complete field resolution mapping and version."""
@@ -911,7 +903,6 @@ class TestCSVSourceFieldNormalization:
                 "path": str(csv_file),
                 "schema": {"mode": "observed"},
                 "on_validation_failure": "quarantine",
-                "normalize_fields": True,
             }
         )
 

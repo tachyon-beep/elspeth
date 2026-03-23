@@ -79,16 +79,15 @@ class TestSourceToSinkContractFlow:
     """Test contract propagation from source to sink."""
 
     def test_original_headers_restored_in_output(self, tmp_path: Path) -> None:
-        """Source with normalize_fields creates contract that sink uses for original headers."""
+        """Source with field normalization creates contract that sink uses for original headers."""
         # Create input CSV with messy headers
         input_csv = tmp_path / "input.csv"
         input_csv.write_text("First Name!,Last Name@,Email Address\nJohn,Doe,john@example.com\n")
 
-        # Configure source with normalize_fields
+        # Configure source with field normalization (mandatory)
         source = CSVSource(
             {
                 "path": str(input_csv),
-                "normalize_fields": True,
                 "schema": {"mode": "observed"},
                 "on_validation_failure": "discard",
             }
@@ -154,7 +153,6 @@ class TestSourceToSinkContractFlow:
         source = CSVSource(
             {
                 "path": str(input_csv),
-                "normalize_fields": True,
                 "schema": {"mode": "observed"},
                 "on_validation_failure": "discard",
             }
@@ -191,7 +189,6 @@ class TestSourceToSinkContractFlow:
         source = CSVSource(
             {
                 "path": str(input_csv),
-                "normalize_fields": True,
                 "schema": {"mode": "observed"},
                 "on_validation_failure": "discard",
             }
@@ -286,7 +283,6 @@ class TestContractPreservationThroughTransforms:
         source = CSVSource(
             {
                 "path": str(input_csv),
-                "normalize_fields": True,
                 "schema": {"mode": "observed"},
                 "on_validation_failure": "discard",
             }
@@ -358,7 +354,6 @@ class TestContractWithSinkHeaderModes:
         source = CSVSource(
             {
                 "path": str(input_csv),
-                "normalize_fields": True,
                 "schema": {"mode": "observed"},
                 "on_validation_failure": "discard",
             }

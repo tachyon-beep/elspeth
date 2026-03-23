@@ -401,12 +401,13 @@ class TestDataverseSourceConfigValidation:
         assert cfg.orderby == "createdon desc"
         assert cfg.top == 100
 
-    def test_normalize_fields_defaults_true(self) -> None:
-        """normalize_fields defaults to True."""
+    def test_normalize_fields_config_key_rejected(self) -> None:
+        """normalize_fields is no longer a valid config key."""
+        from elspeth.plugins.infrastructure.config_base import PluginConfigError
         from elspeth.plugins.sources.dataverse import DataverseSourceConfig
 
-        cfg = DataverseSourceConfig.from_dict(_base_config())
-        assert cfg.normalize_fields is True
+        with pytest.raises(PluginConfigError):
+            DataverseSourceConfig.from_dict(_base_config(normalize_fields=True))
 
     def test_include_formatted_values_defaults_false(self) -> None:
         """include_formatted_values defaults to False."""
@@ -537,33 +538,25 @@ class TestODataMetadataStripping:
 class TestFieldNormalization:
     """Tests for _normalize_row_fields behavior."""
 
-    def test_normalize_fields_true_applies_normalization(self) -> None:
-        """With normalize_fields=True, field names are normalized."""
-        source = _make_source(_base_config(normalize_fields=True))
+    def test_normalization_always_applies(self) -> None:
+        """Field names are always normalized."""
+        source = _make_source(_base_config())
         row = {"Contact ID": "abc", "Full Name": "Alice"}
         result = source._normalize_row_fields(row, is_first_row=True)
         # Normalized names should be valid Python identifiers
         for key in result:
             assert key.isidentifier(), f"Key '{key}' is not a valid identifier"
 
-    def test_normalize_fields_false_preserves_names(self) -> None:
-        """With normalize_fields=False, field names pass through unchanged."""
-        source = _make_source(_base_config(normalize_fields=False))
-        row = {"contactid": "abc", "fullname": "Alice"}
-        result = source._normalize_row_fields(row, is_first_row=True)
-        assert "contactid" in result
-        assert "fullname" in result
-
     def test_field_resolution_populated_on_first_row(self) -> None:
         """Field resolution mapping is created on the first row."""
-        source = _make_source(_base_config(normalize_fields=True))
+        source = _make_source(_base_config())
         assert source._field_resolution is None
         source._normalize_row_fields({"contactid": "abc"}, is_first_row=True)
         assert source._field_resolution is not None
 
     def test_field_resolution_reused_on_subsequent_rows(self) -> None:
         """Field resolution mapping is reused (not re-created) for subsequent rows."""
-        source = _make_source(_base_config(normalize_fields=True))
+        source = _make_source(_base_config())
         source._normalize_row_fields({"contactid": "abc"}, is_first_row=True)
         resolution1 = source._field_resolution
         source._normalize_row_fields({"contactid": "def"}, is_first_row=False)
@@ -707,7 +700,7 @@ class TestDataverseSourceLoadStructured:
                 ]
             ),
         ]
-        source = _make_source_for_load(pages, _base_config(normalize_fields=False))
+        source = _make_source_for_load(pages, _base_config())
         ctx = _mock_source_context()
 
         rows = list(source.load(ctx))
@@ -723,7 +716,7 @@ class TestDataverseSourceLoadStructured:
             ),
             _make_page([{"contactid": "2", "fullname": "Bob"}]),
         ]
-        source = _make_source_for_load(pages, _base_config(normalize_fields=False))
+        source = _make_source_for_load(pages, _base_config())
         ctx = _mock_source_context()
 
         rows = list(source.load(ctx))
@@ -743,7 +736,7 @@ class TestDataverseSourceLoadStructured:
                 ]
             ),
         ]
-        source = _make_source_for_load(pages, _base_config(normalize_fields=False))
+        source = _make_source_for_load(pages, _base_config())
         ctx = _mock_source_context()
 
         rows = list(source.load(ctx))
@@ -762,7 +755,7 @@ class TestDataverseSourceLoadStructured:
             ),
             _make_page([{"contactid": "2"}]),
         ]
-        source = _make_source_for_load(pages, _base_config(normalize_fields=False))
+        source = _make_source_for_load(pages, _base_config())
         ctx = _mock_source_context()
 
         list(source.load(ctx))
@@ -783,7 +776,7 @@ class TestDataverseSourceLoadStructured:
         ]
         source = _make_source_for_load(
             pages,
-            _base_config(include_formatted_values=True, normalize_fields=False),
+            _base_config(include_formatted_values=True),
         )
         ctx = _mock_source_context()
 
@@ -810,7 +803,6 @@ class TestDataverseSourceLoadStructured:
             pages,
             _base_config(
                 include_formatted_values=True,
-                normalize_fields=False,
                 on_validation_failure="discard",
             ),
         )
@@ -841,7 +833,7 @@ class TestDataverseSourceLoadStructured:
         pages = [_make_page([{"contactid": "1"}])]
         source = _make_source_for_load(
             pages,
-            _base_config(normalize_fields=False),
+            _base_config(),
             schema_validate_side_effect=failing_validate,
         )
         ctx = _mock_source_context()
@@ -872,7 +864,7 @@ class TestDataverseSourceLoadStructured:
         pages = [_make_page([{"contactid": "1"}])]
         source = _make_source_for_load(
             pages,
-            _base_config(normalize_fields=False, on_validation_failure="discard"),
+            _base_config(on_validation_failure="discard"),
             schema_validate_side_effect=failing_validate,
         )
         ctx = _mock_source_context()
@@ -882,7 +874,7 @@ class TestDataverseSourceLoadStructured:
 
     def test_load_client_error_propagates(self) -> None:
         """DataverseClientError during pagination propagates directly."""
-        source = _make_source_for_load([], _base_config(normalize_fields=False))
+        source = _make_source_for_load([], _base_config())
         # Override client to raise
         source._client.paginate_odata.side_effect = DataverseClientError("Server error", retryable=True, status_code=500, latency_ms=100.0)
 
@@ -892,7 +884,7 @@ class TestDataverseSourceLoadStructured:
 
     def test_load_client_error_records_audit(self) -> None:
         """DataverseClientError is recorded in audit trail before raising."""
-        source = _make_source_for_load([], _base_config(normalize_fields=False))
+        source = _make_source_for_load([], _base_config())
         error = DataverseClientError("Server error", retryable=True, status_code=500, latency_ms=100.0)
         source._client.paginate_odata.side_effect = error
 
@@ -905,7 +897,7 @@ class TestDataverseSourceLoadStructured:
     def test_load_empty_pages(self) -> None:
         """Empty pages produce no rows."""
         pages = [_make_page([])]
-        source = _make_source_for_load(pages, _base_config(normalize_fields=False))
+        source = _make_source_for_load(pages, _base_config())
         ctx = _mock_source_context()
 
         rows = list(source.load(ctx))
@@ -947,7 +939,7 @@ class TestDataverseSourceLoadStructured:
         ]
         source = _make_source_for_load(
             pages,
-            _base_config(normalize_fields=False),
+            _base_config(),
             schema_validate_side_effect=sometimes_failing_validate,
         )
         ctx = _mock_source_context()
@@ -976,7 +968,7 @@ class TestDataverseSourceLoadFetchXML:
                 ]
             ),
         ]
-        source = _make_source_for_load(pages, _fetchxml_config(normalize_fields=False))
+        source = _make_source_for_load(pages, _fetchxml_config())
         ctx = _mock_source_context()
 
         rows = list(source.load(ctx))
@@ -1012,7 +1004,7 @@ class TestDataverseSourceLoadFetchXML:
     def test_fetchxml_uses_paginate_fetchxml(self) -> None:
         """FetchXML mode calls client.paginate_fetchxml, not paginate_odata."""
         pages = [_make_page([{"contactid": "1"}])]
-        source = _make_source_for_load(pages, _fetchxml_config(normalize_fields=False))
+        source = _make_source_for_load(pages, _fetchxml_config())
         ctx = _mock_source_context()
 
         list(source.load(ctx))
@@ -1031,7 +1023,7 @@ class TestSchemaContractLocking:
     def test_contract_locked_after_first_valid_row(self) -> None:
         """Contract builder processes first valid row and sets the flag."""
         pages = [_make_page([{"contactid": "1", "fullname": "Alice"}])]
-        source = _make_source_for_load(pages, _base_config(normalize_fields=False))
+        source = _make_source_for_load(pages, _base_config())
         assert source._contract_builder is not None
 
         ctx = _mock_source_context()
@@ -1050,7 +1042,7 @@ class TestSchemaContractLocking:
                 ]
             )
         ]
-        source = _make_source_for_load(pages, _base_config(normalize_fields=False))
+        source = _make_source_for_load(pages, _base_config())
         ctx = _mock_source_context()
 
         rows = list(source.load(ctx))
@@ -1071,7 +1063,7 @@ class TestSchemaContractLocking:
             ),
             _make_page([{"contactid": "2", "fullname": "Bob"}]),
         ]
-        source = _make_source_for_load(pages, _base_config(normalize_fields=False))
+        source = _make_source_for_load(pages, _base_config())
         ctx = _mock_source_context()
 
         rows = list(source.load(ctx))
@@ -1082,7 +1074,7 @@ class TestSchemaContractLocking:
     def test_contract_force_locked_when_no_valid_rows(self) -> None:
         """Contract is force-locked when load() yields no valid rows."""
         pages = [_make_page([])]
-        source = _make_source_for_load(pages, _base_config(normalize_fields=False))
+        source = _make_source_for_load(pages, _base_config())
         ctx = _mock_source_context()
 
         list(source.load(ctx))
@@ -1095,7 +1087,7 @@ class TestSchemaContractLocking:
     def test_first_valid_row_flag_resets_per_load_call(self) -> None:
         """_first_valid_row_processed resets at the start of each load() call."""
         pages = [_make_page([{"contactid": "1"}])]
-        source = _make_source_for_load(pages, _base_config(normalize_fields=False))
+        source = _make_source_for_load(pages, _base_config())
         ctx = _mock_source_context()
 
         # First load
@@ -1111,7 +1103,7 @@ class TestSchemaContractLocking:
     def test_valid_rows_carry_contract(self) -> None:
         """Each valid SourceRow carries the schema contract."""
         pages = [_make_page([{"contactid": "1", "fullname": "Alice"}])]
-        source = _make_source_for_load(pages, _base_config(normalize_fields=False))
+        source = _make_source_for_load(pages, _base_config())
         ctx = _mock_source_context()
 
         rows = list(source.load(ctx))
@@ -1134,7 +1126,7 @@ class TestGetFieldResolution:
 
     def test_returns_mapping_after_normalization(self) -> None:
         """get_field_resolution returns the mapping and version after rows are processed."""
-        source = _make_source(_base_config(normalize_fields=True))
+        source = _make_source(_base_config())
         source._normalize_row_fields({"contactid": "abc"}, is_first_row=True)
 
         result = source.get_field_resolution()
@@ -1144,9 +1136,9 @@ class TestGetFieldResolution:
         assert version is not None
         assert isinstance(version, str)
 
-    def test_returns_mapping_with_normalize_false(self) -> None:
-        """get_field_resolution works with normalize_fields=False (identity mapping)."""
-        source = _make_source(_base_config(normalize_fields=False))
+    def test_returns_mapping_with_already_clean_names(self) -> None:
+        """get_field_resolution works when field names are already clean identifiers."""
+        source = _make_source(_base_config())
         source._normalize_row_fields({"contactid": "abc"}, is_first_row=True)
 
         result = source.get_field_resolution()
@@ -1258,7 +1250,7 @@ class TestNormalizeFieldQuarantine:
         normalize_field_name. The quarantine behavior (catching this
         ValueError in load()) is tested separately below.
         """
-        source = _make_source(_base_config(normalize_fields=True))
+        source = _make_source(_base_config())
 
         # Build the initial resolution mapping from a valid row
         source._normalize_row_fields({"contactid": "abc"}, is_first_row=True)
@@ -1269,7 +1261,7 @@ class TestNormalizeFieldQuarantine:
 
     def test_normalize_error_in_load_yields_quarantined_row(self) -> None:
         """In the full load() path, normalize errors yield quarantined rows."""
-        source = _make_source(_base_config(normalize_fields=True))
+        source = _make_source(_base_config())
         ctx = _mock_source_context()
 
         # Mock client to return a page with a problematic field

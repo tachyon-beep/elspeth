@@ -199,15 +199,18 @@ class FieldResolution:
 def resolve_field_names(
     *,
     raw_headers: list[str] | None,
-    normalize_fields: bool,
     field_mapping: dict[str, str] | None,
     columns: list[str] | None,
 ) -> FieldResolution:
     """Resolve final field names from raw headers and config.
 
+    Field normalization is mandatory for raw headers. Source field names are
+    normalized to valid Python identifiers at the source boundary. When
+    columns are provided (headerless mode), they are used as-is since they
+    are already clean identifiers validated at config time.
+
     Args:
         raw_headers: Headers from file, or None if using columns config
-        normalize_fields: Whether to apply normalization algorithm
         field_mapping: Optional mapping overrides (keys are effective names)
         columns: Explicit column names for headerless mode
 
@@ -217,23 +220,17 @@ def resolve_field_names(
     Raises:
         ValueError: On collision, invalid mapping key, or configuration error
     """
-    # Track whether normalization was used
-    used_normalization = False
-
     # Determine source of headers
     if columns is not None:
         # Headerless mode - use explicit columns
         original_names = columns
         effective_headers = list(columns)
+        used_normalization = False
     elif raw_headers is not None:
         original_names = raw_headers
-        if normalize_fields:
-            effective_headers = [normalize_field_name(h) for h in raw_headers]
-            check_normalization_collisions(raw_headers, effective_headers)
-            used_normalization = True
-        else:
-            check_duplicate_raw_headers(raw_headers)
-            effective_headers = list(raw_headers)
+        effective_headers = [normalize_field_name(h) for h in raw_headers]
+        check_normalization_collisions(raw_headers, effective_headers)
+        used_normalization = True
     else:
         raise ValueError("Either raw_headers or columns must be provided")
 

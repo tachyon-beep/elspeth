@@ -717,7 +717,7 @@ class BaseSource(ABC):
     def get_field_resolution(self) -> tuple[Mapping[str, str], str | None] | None:
         """Return field resolution mapping computed during load().
 
-        Sources that perform field normalization (e.g., CSVSource with normalize_fields)
+        Sources that perform field normalization (e.g., CSVSource with field normalization)
         should override this to return the mapping from original header names to final
         field names. This enables audit trail to recover original headers.
 
