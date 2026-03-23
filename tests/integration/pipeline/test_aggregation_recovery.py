@@ -29,6 +29,7 @@ from elspeth.contracts.aggregation_checkpoint import (
     AggregationTokenCheckpoint,
 )
 from elspeth.contracts.enums import BatchStatus, Determinism, NodeType, RunStatus
+from elspeth.contracts.errors import AuditIntegrityError
 from elspeth.contracts.schema_contract import FieldContract, SchemaContract
 from elspeth.contracts.types import NodeID
 from elspeth.core.checkpoint import CheckpointManager, RecoveryManager
@@ -393,17 +394,17 @@ class TestAggregationRecoveryIntegration:
         recorder.add_batch_member(batch.batch_id, token.token_id, ordinal=0)
 
         # Test with draft status
-        with pytest.raises(ValueError, match="Can only retry failed batches"):
+        with pytest.raises(AuditIntegrityError, match="can only retry failed batches"):
             recorder.retry_batch(batch.batch_id)
 
         # Test with executing status
         recorder.update_batch_status(batch.batch_id, BatchStatus.EXECUTING)
-        with pytest.raises(ValueError, match="Can only retry failed batches"):
+        with pytest.raises(AuditIntegrityError, match="can only retry failed batches"):
             recorder.retry_batch(batch.batch_id)
 
         # Test with completed status
         recorder.update_batch_status(batch.batch_id, BatchStatus.COMPLETED)
-        with pytest.raises(ValueError, match="Can only retry failed batches"):
+        with pytest.raises(AuditIntegrityError, match="can only retry failed batches"):
             recorder.retry_batch(batch.batch_id)
 
     def _register_nodes_raw(

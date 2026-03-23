@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from elspeth.contracts import BatchStatus, Determinism, NodeType
+from elspeth.contracts.errors import AuditIntegrityError
 from elspeth.contracts.schema import SchemaConfig
 from elspeth.core.landscape.database import LandscapeDB
 from elspeth.core.landscape.recorder import LandscapeRecorder
@@ -413,7 +414,7 @@ class TestBatchRetry:
         )
         # Batch is in draft status
 
-        with pytest.raises(ValueError, match="Can only retry failed batches"):
+        with pytest.raises(AuditIntegrityError, match="can only retry failed batches"):
             recorder.retry_batch(batch.batch_id)
 
     def test_retry_batch_raises_for_nonexistent_batch(self, landscape_db: LandscapeDB) -> None:
@@ -422,5 +423,5 @@ class TestBatchRetry:
 
         recorder = LandscapeRecorder(landscape_db)
 
-        with pytest.raises(ValueError, match="Batch not found"):
+        with pytest.raises(AuditIntegrityError, match="batch nonexistent-batch-id not found"):
             recorder.retry_batch("nonexistent-batch-id")
