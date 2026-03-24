@@ -138,6 +138,10 @@ TransformActionCategory = Literal[
     "passthrough",  # No changes made (intentional)
     "skipped",  # Processing skipped (e.g., data already present)
     "cached",  # Result retrieved from cache
+    # Plugin-specific actions
+    "query_completed",  # LLM single-query completion
+    "multi_query_enriched",  # LLM multi-query execution completed
+    "rag_retrieval",  # RAG retrieval pipeline completed
 ]
 
 
@@ -340,6 +344,10 @@ TransformErrorCategory = Literal[
     # Batch processing
     "empty_batch",
     "all_non_finite",  # All values in batch were NaN/Inf — no real data to aggregate
+    # Transport/network (batch processing)
+    "transport_exception",  # HTTP transport error during batch retrieval
+    # Replication errors
+    "invalid_copies",  # Invalid copies value in batch_replicate transform
 ]
 
 
