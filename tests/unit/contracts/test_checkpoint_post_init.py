@@ -211,7 +211,7 @@ class TestAggregationCheckpointStatePostInit:
 
 class TestRowMappingEntryPostInit:
     def test_rejects_negative_index(self) -> None:
-        with pytest.raises(ValueError, match="index must be non-negative"):
+        with pytest.raises(ValueError, match="must be >= 0"):
             RowMappingEntry(index=-1, variables_hash="abc")
 
     def test_rejects_empty_variables_hash(self) -> None:
@@ -249,7 +249,7 @@ class TestBatchCheckpointStatePostInit:
             )
 
     def test_rejects_negative_row_count(self) -> None:
-        with pytest.raises(ValueError, match="row_count must be non-negative"):
+        with pytest.raises(ValueError, match="must be >= 0"):
             BatchCheckpointState(
                 batch_id="b1",
                 input_file_id="f1",
