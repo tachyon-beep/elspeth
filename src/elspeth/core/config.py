@@ -196,7 +196,7 @@ class SecretsConfig(BaseModel):
         # Validate URL format
         try:
             parsed = urlparse(v)
-        except Exception as e:
+        except (ValueError, TypeError) as e:
             raise ValueError(f"Invalid URL: {v}") from e
 
         if not parsed.scheme or not parsed.netloc:
