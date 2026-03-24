@@ -2493,3 +2493,171 @@ class TestSecretResolutionInputValidation:
         assert len(fingerprint) == 64
         sri = SecretResolutionInput(**self._valid_kwargs(fingerprint=fingerprint))  # type: ignore[arg-type]
         assert sri.fingerprint == fingerprint
+
+
+class TestRequireIntValidation:
+    """Tests for require_int validation across audit dataclasses.
+
+    Covers representative patterns:
+    1. Class with no prior __post_init__ (Row)
+    2. Class with existing __post_init__ (Call)
+    3. Optional int field (Token.step_in_pipeline)
+    4. min_value=1 field (NodeStateOpen.attempt)
+    """
+
+    # --- Row: no prior __post_init__, min_value=0 ---
+
+    def test_row_rejects_bool_row_index(self) -> None:
+        """Row.row_index must be int, not bool."""
+        with pytest.raises(TypeError, match="row_index must be int"):
+            Row(
+                row_id="row-1",
+                run_id="run-1",
+                source_node_id="node-1",
+                row_index=True,  # type: ignore[arg-type]
+                source_data_hash="abc123",
+                created_at=datetime.now(UTC),
+            )
+
+    def test_row_rejects_str_row_index(self) -> None:
+        """Row.row_index must be int, not str."""
+        with pytest.raises(TypeError, match="row_index must be int"):
+            Row(
+                row_id="row-1",
+                run_id="run-1",
+                source_node_id="node-1",
+                row_index="0",  # type: ignore[arg-type]
+                source_data_hash="abc123",
+                created_at=datetime.now(UTC),
+            )
+
+    def test_row_rejects_negative_row_index(self) -> None:
+        """Row.row_index must be >= 0."""
+        with pytest.raises(ValueError, match="row_index must be >= 0"):
+            Row(
+                row_id="row-1",
+                run_id="run-1",
+                source_node_id="node-1",
+                row_index=-1,
+                source_data_hash="abc123",
+                created_at=datetime.now(UTC),
+            )
+
+    def test_row_accepts_zero_row_index(self) -> None:
+        """Row.row_index accepts 0 (valid minimum)."""
+        row = Row(
+            row_id="row-1",
+            run_id="run-1",
+            source_node_id="node-1",
+            row_index=0,
+            source_data_hash="abc123",
+            created_at=datetime.now(UTC),
+        )
+        assert row.row_index == 0
+
+    # --- Call: existing __post_init__, require_int added before enum validation ---
+
+    def test_call_rejects_bool_call_index(self) -> None:
+        """Call.call_index must be int, not bool."""
+        with pytest.raises(TypeError, match="call_index must be int"):
+            Call(
+                call_id="call-1",
+                state_id="state-1",
+                call_index=False,  # type: ignore[arg-type]
+                call_type=CallType.LLM,
+                status=CallStatus.SUCCESS,
+                request_hash="abc123",
+                created_at=datetime.now(UTC),
+            )
+
+    def test_call_rejects_negative_call_index(self) -> None:
+        """Call.call_index must be >= 0."""
+        with pytest.raises(ValueError, match="call_index must be >= 0"):
+            Call(
+                call_id="call-1",
+                state_id="state-1",
+                call_index=-1,
+                call_type=CallType.LLM,
+                status=CallStatus.SUCCESS,
+                request_hash="abc123",
+                created_at=datetime.now(UTC),
+            )
+
+    # --- Token.step_in_pipeline: optional int ---
+
+    def test_token_step_in_pipeline_accepts_none(self) -> None:
+        """Token.step_in_pipeline accepts None (optional)."""
+        token = Token(
+            token_id="tok-1",
+            row_id="row-1",
+            created_at=datetime.now(UTC),
+            run_id="run-1",
+            step_in_pipeline=None,
+        )
+        assert token.step_in_pipeline is None
+
+    def test_token_step_in_pipeline_rejects_bool(self) -> None:
+        """Token.step_in_pipeline must be int or None, not bool."""
+        with pytest.raises(TypeError, match="step_in_pipeline must be int"):
+            Token(
+                token_id="tok-1",
+                row_id="row-1",
+                created_at=datetime.now(UTC),
+                run_id="run-1",
+                step_in_pipeline=True,  # type: ignore[arg-type]
+            )
+
+    def test_token_step_in_pipeline_accepts_zero(self) -> None:
+        """Token.step_in_pipeline accepts 0."""
+        token = Token(
+            token_id="tok-1",
+            row_id="row-1",
+            created_at=datetime.now(UTC),
+            run_id="run-1",
+            step_in_pipeline=0,
+        )
+        assert token.step_in_pipeline == 0
+
+    # --- NodeStateOpen.attempt: min_value=0 (0-indexed: first attempt is 0) ---
+
+    def test_node_state_open_rejects_negative_attempt(self) -> None:
+        """NodeStateOpen.attempt must be >= 0 (0-indexed)."""
+        with pytest.raises(ValueError, match="attempt must be >= 0"):
+            NodeStateOpen(
+                state_id="state-1",
+                token_id="tok-1",
+                node_id="node-1",
+                step_index=0,
+                attempt=-1,
+                status=NodeStateStatus.OPEN,
+                input_hash="abc123",
+                started_at=datetime.now(UTC),
+            )
+
+    def test_node_state_open_accepts_zero_attempt(self) -> None:
+        """NodeStateOpen.attempt accepts 0 (first attempt, 0-indexed)."""
+        state = NodeStateOpen(
+            state_id="state-1",
+            token_id="tok-1",
+            node_id="node-1",
+            step_index=0,
+            attempt=0,
+            status=NodeStateStatus.OPEN,
+            input_hash="abc123",
+            started_at=datetime.now(UTC),
+        )
+        assert state.attempt == 0
+
+    def test_node_state_open_rejects_bool_attempt(self) -> None:
+        """NodeStateOpen.attempt must be int, not bool."""
+        with pytest.raises(TypeError, match="attempt must be int"):
+            NodeStateOpen(
+                state_id="state-1",
+                token_id="tok-1",
+                node_id="node-1",
+                step_index=0,
+                attempt=True,  # type: ignore[arg-type]
+                status=NodeStateStatus.OPEN,
+                input_hash="abc123",
+                started_at=datetime.now(UTC),
+            )
