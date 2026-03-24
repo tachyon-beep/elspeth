@@ -160,7 +160,7 @@ def test_resume_point_rejects_empty_node_id() -> None:
 
 
 def test_resume_point_rejects_negative_sequence_number() -> None:
-    with pytest.raises(ValueError, match="sequence_number must be non-negative"):
+    with pytest.raises(ValueError, match="sequence_number must be >= 0"):
         ResumePoint(
             checkpoint=_checkpoint(),
             token_id="tok-001",
