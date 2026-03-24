@@ -1,7 +1,7 @@
 # RAG Ingestion Pipeline — Design Spec
 
 **Date:** 2026-03-25
-**Status:** Draft (R2 — all R1 issues resolved; R2 fixes: defensive .get() in _build_audit_snapshot, count/reachable canonical idiom, DependencyRunResult status Literal, build_collection_probes tie-breaking rule)
+**Status:** Draft (R3 — specialist review fixes: ExpressionParser replaces eval(), bootstrap_and_run extraction, unified CollectionReadinessResult, explicit collection_probes config, depth limit, indexed_at timestamp, expanded testing strategy with audit trail verification)
 **Target ChromaDB version:** `chromadb >= 0.4`
 **Scope:** ChromaSink plugin, pipeline `depends_on` mechanism, commencement gates, RAG retrieval readiness contract
 
@@ -36,8 +36,8 @@ src/elspeth/plugins/
 └── infrastructure/
     └── clients/
         └── retrieval/
-            ├── base.py                          # +check_readiness() on protocol
-            ├── types.py                         # +ReadinessResult dataclass
+            ├── base.py                          # +check_readiness() on protocol (returns CollectionReadinessResult from L0)
+            ├── types.py                         # (no new types — ReadinessResult unified into L0)
             ├── chroma.py                        # +check_readiness() implementation
             └── azure_search.py                  # +check_readiness() implementation
 
@@ -50,6 +50,7 @@ src/elspeth/engine/
                                                  # +commencement gate evaluation phase
 
 src/elspeth/contracts/
+├── probes.py                                    # +CollectionProbe protocol, +CollectionReadinessResult
 └── errors.py                                    # +DependencyFailedError
                                                  # +CommencementGateFailedError
                                                  # +RetrievalNotReadyError
@@ -69,7 +70,7 @@ All new code lives in existing layers. One cross-layer dependency requires a pro
 | Component | Layer | Rationale |
 |-----------|-------|-----------|
 | `ChromaSink` | L3 (plugins/sinks) | Sink plugin, same as CSV/JSON/Database sinks |
-| `ReadinessResult` | L3 (plugins/infrastructure) | Provider-specific type, alongside `RetrievalChunk` |
+| `CollectionReadinessResult` | L0 (contracts/probes) | Unified result type for all collection readiness checks |
 | `check_readiness()` | L3 (plugins/infrastructure) | Provider method, alongside `search()` |
 | `CollectionProbe` protocol | L0 (contracts/) | Protocol for collection readiness probes, defined in contracts so L2 can depend on it |
 | `DependencyConfig` | L1 (core/config) | Pipeline config, alongside `RetrySettings` |
@@ -146,6 +147,7 @@ Field mapping is required, not optional. No convention-based defaults.
 - `host` required when `mode=client`, forbidden when `mode=persistent`.
 - All `field_mapping` fields must appear in the schema's field list.
 - `field_mapping.document` and `field_mapping.id` must be `str` type fields.
+- `field_mapping.metadata` fields must be `str`, `int`, `float`, or `bool` type fields in the schema. This matches ChromaDB's metadata type constraint and ensures canonical JSON hashing works without type-specific serialization surprises.
 - Client mode: HTTPS required unless host is localhost (mirrors `ChromaSearchProviderConfig`).
 
 ### Lifecycle
@@ -206,20 +208,26 @@ Content hash is computed from the Canonical subsystem's two-phase canonicalizati
 | Duplicate ID with `on_duplicate: error` | Pipeline-level error — pre-check IDs via `collection.get(ids)` before write, raise if any exist. Since ChromaDB's `add()`/`upsert()` are batch operations, individual row quarantine is not possible. The entire batch fails. |
 | Audit recording fails after successful write | Raise `AuditIntegrityError` — data written but unrecorded |
 
-### Config Symmetry with Retrieval Provider
+### Config Symmetry with Retrieval Provider — Shared `ChromaConnectionConfig`
 
-The ChromaSink config deliberately mirrors `ChromaSearchProviderConfig`:
+Extract the connection fields into a shared Pydantic model to eliminate validation duplication:
 
-| ChromaSink field | ChromaSearchProviderConfig field |
-|-----------------|--------------------------------|
-| `collection` | `collection` |
-| `mode` | `mode` |
-| `persist_directory` | `persist_directory` |
-| `host` | `host` |
-| `port` | `port` |
-| `distance_function` | `distance_function` |
+```python
+class ChromaConnectionConfig(BaseModel):
+    """Shared ChromaDB connection config — used by ChromaSinkConfig,
+    ChromaSearchProviderConfig, and CollectionProbeConfig."""
+    model_config = ConfigDict(frozen=True, extra="forbid")
+    collection: str
+    mode: Literal["persistent", "client"]
+    persist_directory: str | None = None
+    host: str | None = None
+    port: int = 8000
+    distance_function: Literal["cosine", "l2", "ip"] = "cosine"
+```
 
-Same field names, same validation rules, same semantics. When an indexing pipeline and a query pipeline target the same store, the config is visually identical. Misconfiguration between the two is easy to catch by inspection.
+`ChromaSinkConfig` and `ChromaSearchProviderConfig` compose this model (adding their own fields like `field_mapping` and `on_duplicate`). `CollectionProbeConfig.provider_config` also uses it. Validation rules (mode/host/persist_directory mutual exclusion, HTTPS enforcement) live in one place.
+
+When an indexing pipeline and a query pipeline target the same store, the connection config is visually identical and mechanically identical. Misconfiguration between the two is caught by the shared validation.
 
 ## Component 2: Pipeline `depends_on` Mechanism
 
@@ -291,8 +299,8 @@ When the main pipeline's run record is created, it includes a `dependency_runs` 
             "name": "index_corpus",
             "run_id": "abc-123",
             "settings_hash": "sha256:...",
-            "status": "completed",
-            "duration_ms": 4520
+            "duration_ms": 4520,
+            "indexed_at": "2026-03-25T14:02:33Z"
         }
     ]
 }
@@ -311,11 +319,15 @@ class DependencyRunResult:
     name: str
     run_id: str
     settings_hash: str
-    status: Literal["completed"]
     duration_ms: int
+    indexed_at: str  # ISO 8601 timestamp of dependency completion
 ```
 
 All fields are scalars — no `__post_init__` freeze guard needed.
+
+The `status` field was removed — the existence of a `DependencyRunResult` already implies successful completion (failed dependencies raise `DependencyFailedError` before construction). When deserializing from the Landscape, validate that the record exists and crash if the expected structure is missing (Tier 1 read guard).
+
+The `indexed_at` field records when the dependency completed. This prevents the "Drifting Goals" dynamic where corpus freshness erodes to mere presence — operators and future `if_stale` conditions can reason about when the data was last indexed, not just that data exists.
 
 ### Engine Changes
 
@@ -332,15 +344,32 @@ The orchestrator's `run()` method gains a new phase inserted before database ini
 
 The dependency resolution phase:
 
+**Pre-requisite:** Extract the current CLI/entry-point pipeline bootstrap sequence into a reusable function:
+
+```python
+def bootstrap_and_run(settings_path: Path) -> RunResult:
+    """Full pipeline bootstrap and execution from a settings file path.
+
+    Handles the complete lifecycle: config loading, plugin instantiation,
+    ExecutionGraph construction, LandscapeDB setup, PayloadStore creation,
+    and orchestrator execution. Returns a RunResult with run_id, status,
+    duration, and failure reason (if any).
+
+    This function is used by both the CLI `execute` command and the
+    dependency resolution phase. It ensures dependency pipelines go
+    through the identical code path as manually-invoked pipelines.
+    """
+```
+
+This extraction is a pre-requisite for the `depends_on` implementation. The current `Orchestrator.__init__` requires `LandscapeDB`, and `run()` requires `PipelineConfig`, `ExecutionGraph`, `PayloadStore`, etc. — significant construction complexity that must not be duplicated in `_resolve_dependencies`.
+
 ```python
 def _resolve_dependencies(self, settings: ElspethSettings) -> list[DependencyRunResult]:
     results = []
     for dep in settings.depends_on:
         dep_settings_path = self._resolve_relative_path(dep.settings)
-        dep_settings = load_settings(dep_settings_path)
-        dep_orchestrator = Orchestrator(dep_settings)
 
-        run_result = dep_orchestrator.run()
+        run_result = bootstrap_and_run(dep_settings_path)
 
         if not run_result.success:
             raise DependencyFailedError(
@@ -352,9 +381,9 @@ def _resolve_dependencies(self, settings: ElspethSettings) -> list[DependencyRun
         results.append(DependencyRunResult(
             name=dep.name,
             run_id=run_result.run_id,
-            settings_hash=hash_settings(dep_settings),
-            status="completed",
+            settings_hash=hash_settings_file(dep_settings_path),
             duration_ms=run_result.duration_ms,
+            indexed_at=run_result.completed_at,
         ))
     return results
 ```
@@ -363,9 +392,11 @@ def _resolve_dependencies(self, settings: ElspethSettings) -> list[DependencyRun
 
 Dependencies can themselves have `depends_on` declarations. The engine resolves the full dependency graph recursively. If pipeline A depends on B and B depends on C, the execution order is: C → B → A.
 
+**Depth limit:** Nested dependency resolution is capped at 3 levels. A pipeline at depth 4 fails with a clear error. This prevents wide-shallow graphs from becoming pathologically expensive (each level creates a full pipeline with its own database connections, plugin instances, and audit records). The limit can be raised if a legitimate use case arises, but for the dogfood, 3 levels is generous.
+
 ### Circular Dependency Detection
 
-Before running any dependencies, the engine recursively traverses the full dependency graph by loading `depends_on` from each referenced settings file (and their dependencies, transitively). It builds a directed graph of settings file paths and checks for cycles using a standard DFS cycle detector. If a cycle is detected, the pipeline fails immediately with a clear error listing the full cycle path. This check is cheap (only reads the `depends_on` key from each config, not the full pipeline) and prevents infinite recursion.
+Before running any dependencies, the engine recursively traverses the full dependency graph by loading `depends_on` from each referenced settings file (and their dependencies, transitively). It builds a directed graph of **canonicalized** settings file paths (using `pathlib.Path.resolve()` to collapse symlinks and relative paths) and checks for cycles using a standard DFS cycle detector. If a cycle is detected, the pipeline fails immediately with a clear error listing the full cycle path. This check is cheap (only reads the `depends_on` key from each config, not the full pipeline) and prevents infinite recursion.
 
 ### Idempotency
 
@@ -387,8 +418,12 @@ Hard fail only. If a dependency fails, the main pipeline does not start. The ope
 
 `DependencyConfig.settings` paths are validated at two points:
 
-1. **`elspeth validate` time**: The validator resolves the path and checks that the referenced file exists and is parseable as a valid `ElspethSettings`. This catches typos and missing files before execution.
+1. **`elspeth validate` time**: The validator resolves the path and checks that the referenced file exists and is parseable as a valid `ElspethSettings`. This catches typos and missing files before execution. Additionally, if `depends_on` is non-empty and `commencement_gates` is empty, `elspeth validate` emits a warning: "Pipeline declares dependencies but no commencement gates — consider adding a gate to verify dependency output." This is a warning, not an error, to avoid forcing gates on simple pipelines, but it structurally counters the tendency to rely on the readiness contract alone.
 2. **Runtime**: The orchestrator re-resolves and loads the dependency settings. This is the authoritative check — the validate-time check is a convenience.
+
+### Signal Handling
+
+If the process receives `SIGINT` or `SIGTERM` during a dependency run, the signal is propagated as `KeyboardInterrupt` to the child orchestrator's `run()` call. The child run terminates (recording its interrupted state in the Landscape), and the parent re-raises the `KeyboardInterrupt` — not a `DependencyFailedError`. This ensures the operator sees "interrupted" rather than "dependency failed," which require different responses.
 
 ### Telemetry
 
@@ -474,28 +509,55 @@ The orchestrator (L2) cannot directly construct ChromaDB clients (L3). Collectio
 **Protocol** (L0, `contracts/probes.py`):
 
 ```python
+@dataclass(frozen=True, slots=True)
+class CollectionReadinessResult:
+    """Unified result type for collection readiness checks.
+
+    Used by both CollectionProbe (commencement gates) and
+    RetrievalProvider.check_readiness() (transform pre-condition).
+    """
+    collection: str
+    reachable: bool
+    count: int
+    message: str  # Human-readable: "Collection 'X' has 450 documents"
+
 @runtime_checkable
 class CollectionProbe(Protocol):
     """Probes a vector store collection for readiness."""
     collection_name: str
 
-    def probe(self) -> CollectionProbeResult: ...
-
-@dataclass(frozen=True, slots=True)
-class CollectionProbeResult:
-    collection: str
-    reachable: bool
-    count: int
+    def probe(self) -> CollectionReadinessResult: ...
 ```
 
-`CollectionProbeResult` has only scalar fields — no `__post_init__` freeze guard needed.
+All fields on `CollectionReadinessResult` are scalars — no `__post_init__` freeze guard needed. This type is defined in L0 (`contracts/probes.py`) and used by both the `CollectionProbe` protocol and `RetrievalProvider.check_readiness()`, eliminating the previous duplication between `CollectionProbeResult` (L0) and `ReadinessResult` (L3).
 
 **Implementations** (L3, `plugins/infrastructure/clients/retrieval/`):
 - `ChromaCollectionProbe`: Constructs a ChromaDB client, calls `collection.count()`.
 - `AzureSearchCollectionProbe`: Calls the Azure Search count endpoint.
 
+**Explicit probe declarations** (pipeline YAML):
+
+Collection probes are explicitly declared in the pipeline config, not auto-discovered from plugin configs. This avoids implicit coupling where a factory must understand the internal config shape of every vector-store plugin.
+
+```yaml
+collection_probes:
+  - collection: science-facts
+    provider: chroma
+    provider_config:
+      mode: persistent
+      persist_directory: ./chroma_data
+```
+
+`ElspethSettings` gains an optional field:
+
+```python
+collection_probes: list[CollectionProbeConfig] = Field(default_factory=list)
+```
+
+`CollectionProbeConfig` is a Pydantic model in `core/config.py` with `collection` (str), `provider` (str), and `provider_config` (dict). The connection fields in `provider_config` reuse the shared `ChromaConnectionConfig` (see Config Symmetry below).
+
 **Assembly** (L3, `plugins/infrastructure/`):
-A factory function `build_collection_probes(settings: ElspethSettings) -> list[CollectionProbe]` scans all plugin configs in the pipeline (sources, transforms, sinks) for fields referencing collections (RAG transform's `provider_config.collection`, ChromaSink's `collection`). For each unique collection name, it constructs a probe using the first plugin's connection config encountered during the scan. If the same collection name appears in multiple plugins with different connection configs (e.g., different `host`), this is a configuration error — the factory raises at assembly time rather than silently picking one. This function lives in L3 and is called by the orchestrator before gate evaluation.
+A factory function `build_collection_probes(probe_configs: list[CollectionProbeConfig]) -> list[CollectionProbe]` constructs a probe for each declared config. This function lives in L3 and is called by the orchestrator before gate evaluation. It does not scan plugin configs — the operator explicitly declares what to probe.
 
 **Injection into L2:**
 The orchestrator calls `build_collection_probes()` and receives a list of `CollectionProbe` protocol objects. It calls `probe.probe()` on each and assembles the `collections` context dict. The orchestrator never imports ChromaDB or any L3 client — it only knows the L0 protocol.
@@ -506,23 +568,15 @@ If a probe raises an exception (collection unreachable), the result is `Collecti
 
 ### Expression Evaluation
 
-Gate expressions are evaluated using Python's `eval()` in a restricted namespace containing only the pre-flight context dict keys. No builtins, no imports, no function calls beyond dict/list operations.
+Gate expressions are evaluated using ELSPETH's existing `ExpressionParser` (`core/expression_parser.py`), not `eval()`. The parser uses AST node whitelisting — it parses the expression with `ast.parse()`, walks the AST, and rejects any node type not in an explicit allow-list. This eliminates `eval()` bypass vectors (e.g., `.__class__.__bases__` traversal) at parse time.
 
-The restricted namespace:
+**Allowed AST nodes:** `Expression`, `BoolOp`, `Compare`, `Subscript`, `Name`, `Constant`, `And`, `Or`, `Not`, `Gt`, `Lt`, `GtE`, `LtE`, `Eq`, `NotEq`. No `Attribute`, no `Call`, no `Import`.
 
-```python
-namespace = {
-    "__builtins__": {},      # No builtins
-    "dependency_runs": ...,
-    "collections": ...,
-    "env": ...,
-}
-result = eval(gate.condition, namespace)
-```
+**Extension required:** The existing parser evaluates against `PipelineRow` objects. It needs a minor extension to accept a plain dict context for commencement gate evaluation. The allowed node set and evaluation mechanics are the same — only the namespace binding changes.
 
-**Security note:** The `__builtins__: {}` restriction is advisory, not a security sandbox. It prevents accidental use of `print()`, `open()`, etc. but is not hardened against deliberate bypass. This is acceptable because operators control their own pipeline configs — gate expressions are not a user-facing attack surface. If ELSPETH later accepts untrusted pipeline configs, this must be replaced with a proper sandbox (AST whitelist or a restricted expression language).
+**Validation at config load time:** Gate expressions are parsed and AST-validated during `CommencementGateConfig` construction (Pydantic `@model_validator`). If the AST contains disallowed nodes, a `ValueError` is raised — Pydantic converts that to a validation error. This means `elspeth validate` catches malformed expressions before execution, not mid-run.
 
-If the expression raises an exception, the gate fails with the exception message included in the error. This is intentional — a gate expression that can't evaluate is a configuration error, not a pass.
+If the expression raises an exception during evaluation, the gate fails with the exception message included in the error. This is intentional — a gate expression that can't evaluate is a configuration error, not a pass.
 
 ### Execution
 
@@ -534,17 +588,22 @@ def _evaluate_commencement_gates(
     gates: list[CommencementGateConfig],
     context: dict[str, Any],
 ) -> list[GateResult]:
+    # Freeze the entire context before evaluation to close the TOCTOU window.
+    # Between context assembly and gate evaluation, no mutation is possible.
+    frozen_context = deep_freeze(context)
+    audit_snapshot = _build_audit_snapshot(frozen_context)
+
     results = []
     for gate in gates:
         try:
-            result = eval(gate.condition, {"__builtins__": {}, **context})
-            passed = bool(result)
+            parser = ExpressionParser(gate.condition)
+            passed = bool(parser.evaluate(frozen_context))
         except Exception as exc:
             raise CommencementGateFailedError(
                 gate_name=gate.name,
                 condition=gate.condition,
                 reason=f"Expression raised {type(exc).__name__}: {exc}",
-                context_snapshot=context,
+                context_snapshot=audit_snapshot,
             ) from exc
 
         if not passed:
@@ -552,14 +611,14 @@ def _evaluate_commencement_gates(
                 gate_name=gate.name,
                 condition=gate.condition,
                 reason="Condition evaluated to falsy",
-                context_snapshot=context,
+                context_snapshot=audit_snapshot,
             )
 
         results.append(GateResult(
             name=gate.name,
             condition=gate.condition,
             result=True,
-            context_snapshot=_build_audit_snapshot(context),
+            context_snapshot=audit_snapshot,
         ))
     return results
 ```
@@ -632,7 +691,7 @@ The existing `RAGRetrievalTransform` gains a readiness check in `on_start()` tha
 
 ### Provider Protocol Extension
 
-`RetrievalProvider` gains a new method:
+`RetrievalProvider` gains a new method returning the unified `CollectionReadinessResult` from L0:
 
 ```python
 @runtime_checkable
@@ -640,27 +699,14 @@ class RetrievalProvider(Protocol):
     def search(self, query: str, top_k: int, min_score: float,
                *, state_id: str, token_id: str) -> list[RetrievalChunk]: ...
 
-    def check_readiness(self) -> ReadinessResult: ...
+    def check_readiness(self) -> CollectionReadinessResult: ...
 ```
 
-### ReadinessResult
+`CollectionReadinessResult` (defined in `contracts/probes.py`, see Component 3) is the single result type for all collection readiness checks — used by both `CollectionProbe.probe()` and `RetrievalProvider.check_readiness()`. Fields:
 
-New frozen dataclass in `plugins/infrastructure/clients/retrieval/types.py`:
-
-```python
-@dataclass(frozen=True, slots=True)
-class ReadinessResult:
-    ready: bool
-    collection: str
-    document_count: int
-    message: str
-```
-
-All fields are scalars — no `__post_init__` freeze guard needed.
-
-- `ready`: `True` if collection exists and has at least one document.
 - `collection`: Collection name that was checked.
-- `document_count`: Number of documents found (0 if collection doesn't exist).
+- `reachable`: `True` if the collection endpoint responded.
+- `count`: Number of documents found (0 if collection doesn't exist or is unreachable).
 - `message`: Human-readable status. Examples:
   - `"Collection 'science-facts' has 450 documents"`
   - `"Collection 'science-facts' not found"`
@@ -694,7 +740,7 @@ def on_start(self, ctx: LifecycleContext) -> None:
     # ... existing provider construction ...
 
     result = self._provider.check_readiness()
-    if not result.ready:
+    if result.count == 0:
         raise RetrievalNotReadyError(
             f"RAG transform '{self.name}' requires a populated collection. "
             f"{result.message}"
@@ -788,6 +834,13 @@ landscape:
 depends_on:
   - name: index_corpus
     settings: ./index_pipeline.yaml
+
+collection_probes:
+  - collection: science-facts
+    provider: chroma
+    provider_config:
+      mode: persistent
+      persist_directory: ./chroma_data
 
 commencement_gates:
   - name: corpus_ready
@@ -892,59 +945,109 @@ For any output row, an auditor can trace:
 
 ## Testing Strategy
 
+**Critical requirement:** Integration tests MUST use `ExecutionGraph.from_plugin_instances()` and `instantiate_plugins_from_config()` per CLAUDE.md. Tests that construct plugins or orchestrators from hand-built objects bypass production code paths and are not valid integration tests.
+
+**ChromaDB test mode:** All integration tests use ChromaDB persistent mode with `tmp_path` fixture (pytest). This is deterministic, requires no running server, and works in all CI environments. Client mode against a container is not required for the dogfood.
+
 ### Unit Tests
 
-**ChromaSink:**
-- Config validation (field mapping required, mode/connection validation, on_duplicate values).
+**ChromaSink config:**
+- Field mapping required — missing `field_mapping` raises validation error.
+- Mode/connection mutual exclusion — `persist_directory` with `mode=client` raises.
+- `field_mapping.document` pointing to a non-`str` schema field raises.
+- `field_mapping.metadata` field with `datetime` type raises (must be str/int/float/bool).
+- `field_mapping.metadata` field not in schema raises.
+- `on_duplicate` values — only `overwrite`, `skip`, `error` accepted.
+
+**ChromaSink write:**
 - `write()` with mocked ChromaDB client — verify correct API calls, content hashing, artifact descriptor.
-- `on_duplicate` modes — overwrite calls `upsert()`, skip calls `add()`, error checks existence first.
-- Audit recording — verify `record_call()` invoked with correct parameters.
-- Error paths — unreachable server in `on_start()`, write failure, audit recording failure.
+- `on_duplicate: overwrite` — calls `collection.upsert()`.
+- `on_duplicate: skip` — calls `collection.get()` to find existing IDs, then `collection.add()` only for new ones. Verify skipped IDs appear in `record_call()` request_data.
+- `on_duplicate: error` with all-new IDs — calls `collection.get()`, finds none, proceeds with `add()`.
+- `on_duplicate: error` with partial overlap (3 of 5 IDs exist) — raises pipeline-level error listing only the duplicate IDs. No write occurs.
+- Audit recording — verify `record_call()` invoked with correct `provider`, `call_type`, `row_count`, `document_ids`.
+- `AuditIntegrityError` path — mock `record_call()` to raise after successful `collection.upsert()`. Verify `AuditIntegrityError` propagates (not swallowed).
+- `flush()` — verify no ChromaDB client method is called (no-op assertion via mock call count).
 
 **Dependency resolution:**
-- Single dependency, success path.
-- Single dependency, failure path — verify `DependencyFailedError`.
-- Multiple dependencies, sequential execution order.
-- Circular dependency detection.
-- Relative path resolution from parent config directory.
+- Single dependency, success — `bootstrap_and_run()` called with resolved path, `DependencyRunResult` constructed with `indexed_at`.
+- Single dependency, failure — `DependencyFailedError` raised with dependency name and run_id.
+- Multiple dependencies — sequential execution verified by call order.
+- Circular detection (self-loop) — A→A detected.
+- Circular detection (2-hop) — A→B→A detected.
+- Circular detection (3-hop) — A→B→C→A detected.
+- Depth limit exceeded — 4-level nesting raises clear error.
+- Path resolution — relative paths resolved from parent config directory using `pathlib.Path.resolve()`.
+- `KeyboardInterrupt` during dependency — propagated as interrupt, not `DependencyFailedError`.
+- Dependency resolution seam: `bootstrap_and_run()` is injectable (the function, not the orchestrator class) so unit tests substitute a stub that returns a `RunResult` without running a real pipeline.
 
 **Commencement gates:**
-- Gate passes — verify result recorded.
-- Gate fails — verify `CommencementGateFailedError` with context snapshot.
-- Expression error — verify error includes exception details.
-- Restricted namespace — verify no builtins, no imports.
-- Context assembly — verify collection probes, dependency results, env snapshot.
+- Gate passes — `GateResult` recorded with frozen context snapshot.
+- Gate fails — `CommencementGateFailedError` with context snapshot. Verify `reachable=False` included in error reason when `count=0` due to unreachable collection.
+- Expression error — verify error includes exception details and gate name.
+- AST validation — disallowed nodes (`__import__('os')`, `open('/etc/passwd')`, `print('x')`, `().__class__.__bases__`) rejected at config validation time, not at evaluation time. Assert `ValueError` from Pydantic, not `CommencementGateFailedError`.
+- Context snapshot excludes `env` — build context with `env: {"SECRET_KEY": "abc123"}`, run `_build_audit_snapshot()`, assert `SECRET_KEY` not in result.
+- Context is frozen before evaluation — verify `deep_freeze()` called on context before `ExpressionParser.evaluate()`.
+- Hypothesis property test: generate arbitrary strings as gate expressions. Verify they either evaluate to truthy/falsy or raise — never produce side effects observable outside the namespace.
 
 **Readiness contract:**
-- Collection exists with documents — ready.
-- Collection exists but empty — not ready, clear message.
-- Collection doesn't exist — not ready, clear message.
-- Provider unreachable — error propagation.
+- Collection exists with documents — ready (count > 0, reachable = True).
+- Collection exists but empty — not ready, message includes "is empty".
+- Collection doesn't exist — not ready, message includes "not found".
+- Provider unreachable — error propagation (single-attempt, no retry).
+- All existing `RetrievalProvider` test doubles updated with `check_readiness()` — use `spec_set` not `spec` on mocks to catch missing methods.
+
+**Collection probes:**
+- `build_collection_probes()` constructs probes from explicit config declarations.
+- Probe success — `CollectionReadinessResult` with correct count.
+- Probe failure (unreachable) — `CollectionReadinessResult(reachable=False, count=0)`.
 
 ### Integration Tests
 
-**ChromaSink lifecycle:**
-- Full pipeline: CSV source → ChromaSink with real ephemeral ChromaDB.
+**ChromaSink lifecycle** (focused):
+- Full pipeline: CSV source → ChromaSink with real ephemeral ChromaDB (persistent mode, `tmp_path`).
+- Uses `instantiate_plugins_from_config()` and `ExecutionGraph.from_plugin_instances()`.
 - Verify documents written to collection with correct IDs, content, metadata.
-- Verify audit trail records all calls.
+- **Audit trail assertion:** Query Landscape for `record_call` entries — verify `provider="chromadb"`, correct `row_count`, content hash matches canonical JSON of input.
 
-**depends_on + commencement gates + readiness:**
-- Full end-to-end: query pipeline with `depends_on` indexing pipeline.
-- Verify indexing runs first, query pipeline uses populated collection.
-- Verify Landscape correlation (dependency_runs metadata on query run).
-- Verify commencement gate results recorded.
+**depends_on** (focused):
+- Two-pipeline integration: indexing pipeline populates collection, query pipeline retrieves from it.
+- Uses `bootstrap_and_run()` for the dependency (same code path as CLI).
+- **Audit trail assertion:** Query run metadata — verify `dependency_runs` contains child `run_id` and `indexed_at` timestamp.
+- Verify indexing run's Landscape has `record_call` entries for ChromaSink writes.
+
+**Commencement gates** (focused):
+- Gate evaluates against pre-populated collection. Gate passes.
+- **Audit trail assertion:** Query run metadata — verify `commencement_gates` entry with correct condition, result, and context_snapshot. Verify snapshot does NOT contain `env`.
+
+**Readiness contract** (focused):
+- RAG transform against empty collection — `RetrievalNotReadyError` raised, pipeline never processes rows.
+- RAG transform against populated collection — readiness check passes, rows processed normally.
+
+**End-to-end smoke test:**
+- Full `depends_on` + commencement gate + RAG retrieval pipeline.
+- Verify all three mechanisms fire in order: dependency runs, gate evaluates, readiness checks, rows processed.
 
 **Failure paths:**
-- Dependency fails → main pipeline never starts.
-- Commencement gate fails → main pipeline never starts, clear error.
-- Empty collection with no depends_on, no commencement gate → readiness contract catches it.
+- Dependency fails → main pipeline never starts. Landscape records the failed dependency run.
+- Gate fails → main pipeline never starts. Error includes gate name, condition, context snapshot.
+- Empty collection, no `depends_on`, no gate → readiness contract catches it.
+- Resume after interruption — dependencies are NOT re-run. Verify no second child `run_id` in Landscape.
+
+**Nested dependency ordering:**
+- A depends on B, B depends on C. Verify execution order C→B→A via Landscape `run_id` timestamps.
 
 ## Future Extensions
 
 These are explicitly out of scope for this design but inform the shape of what we're building:
 
+### P1 Follow-On (implement soon after this design ships)
+
+- **`if_stale` dependency condition**: Run the dependency only if the collection hasn't been updated since a threshold. The `indexed_at` timestamp on `DependencyRunResult` provides the foundation — this extension adds a `condition` field to `DependencyConfig` that evaluates against the last `indexed_at` for the same `settings_hash`. Without this, the "Fixes that Fail" dynamic identified in systems review will push operators to bypass `depends_on` as corpus size grows, re-opening the audit gap.
+
+### P2 (build when needed)
+
 - **Chunking transform**: A transform that splits long documents into overlapping segments. Would sit between the source and ChromaSink in the indexing pipeline.
 - **Additional commencement gate conditions**: `warn` (log but proceed), service health probes, Landscape queries ("last successful indexing run was < 24h ago").
-- **`if_stale` dependency condition**: Run the dependency only if the collection hasn't been updated since a threshold. Requires tracking last-modified metadata.
 - **Multi-source DAGs (Approach C)**: Eventually, the dependency pipeline could be compiled into the main pipeline's DAG as prefix stages. This requires breaking the one-source-per-run invariant.
 - **Azure Search sink**: Same pattern as ChromaSink but targeting Azure AI Search indexes.
