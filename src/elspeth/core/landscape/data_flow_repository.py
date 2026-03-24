@@ -333,7 +333,7 @@ class DataFlowRepository:
                         "Quarantined row data not canonically serializable (using repr fallback for payload): %s",
                         type(data).__name__,
                     )
-                    payload_bytes = json.dumps({"_repr": repr(data)}).encode("utf-8")
+                    payload_bytes = json.dumps({"_repr": repr(data)}, allow_nan=False).encode("utf-8")
             else:
                 payload_bytes = canonical_json(data).encode("utf-8")
             final_payload_ref = self._payload_store.store(payload_bytes)
@@ -524,7 +524,7 @@ class DataFlowRepository:
                     is_terminal=1,
                     recorded_at=now(),
                     fork_group_id=fork_group_id,
-                    expected_branches_json=json.dumps(branches),
+                    expected_branches_json=json.dumps(branches, allow_nan=False),
                 )
             )
             if result.rowcount == 0:
@@ -737,7 +737,7 @@ class DataFlowRepository:
                         recorded_at=now(),
                         expand_group_id=expand_group_id,
                         # Store expected count for recovery validation
-                        expected_branches_json=json.dumps({"count": count}),
+                        expected_branches_json=json.dumps({"count": count}, allow_nan=False),
                     )
                 )
                 if result.rowcount == 0:
@@ -1296,7 +1296,7 @@ class DataFlowRepository:
             row_hash = repr_hash(row_data)
             # Store non-canonical representation with type metadata
             metadata = NonCanonicalMetadata.from_error(row_data, e)
-            row_data_json = json.dumps(metadata.to_dict())
+            row_data_json = json.dumps(metadata.to_dict(), allow_nan=False)
 
         # Extract contract violation details if provided
         violation_type: str | None = None
@@ -1386,7 +1386,8 @@ class DataFlowRepository:
                     "__non_canonical__": True,
                     "repr": repr(error_details)[:500],
                     "serialization_error": str(e),
-                }
+                },
+                allow_nan=False,
             )
 
         # row_data may contain NaN/Infinity (valid floats that passed source
@@ -1403,7 +1404,7 @@ class DataFlowRepository:
             )
             row_hash = repr_hash(row_data)
             metadata = NonCanonicalMetadata.from_error(row_data, e)
-            row_data_json = json.dumps(metadata.to_dict())
+            row_data_json = json.dumps(metadata.to_dict(), allow_nan=False)
 
         self._ops.execute_insert(
             transform_errors_table.insert().values(
