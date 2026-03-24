@@ -85,9 +85,9 @@ per_file_rules:
 - pattern: contracts/freeze.py
   rules:
   - R5
-  reason: Recursive container type dispatch for deep_freeze/deep_thaw
+  reason: Recursive container type dispatch for deep_freeze/deep_thaw/require_int
   expires: null
-  max_hits: 12
+  max_hits: 14
 - pattern: contracts/hashing.py
   rules:
   - R5

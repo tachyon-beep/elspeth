@@ -130,3 +130,35 @@ def deep_thaw(value: Any) -> Any:
     if isinstance(value, list):
         return [deep_thaw(item) for item in value]
     return value
+
+
+def require_int(
+    value: object,
+    field_name: str,
+    *,
+    optional: bool = False,
+    min_value: int | None = None,
+) -> None:
+    """Validate that a value is strictly int (not bool, str, or float).
+
+    Tier 1 offensive validation: crash immediately on wrong types.
+    bool is rejected because ``isinstance(True, int)`` is ``True`` in Python
+    (bool is a subclass of int), which means a bool could silently pass
+    through int-typed fields without this guard.
+
+    Args:
+        value: The value to validate.
+        field_name: Field name for error messages.
+        optional: If True, None is acceptable.
+        min_value: If set, value must be >= min_value.
+
+    Raises:
+        TypeError: If value is not int (or not None when optional=True).
+        ValueError: If value < min_value.
+    """
+    if optional and value is None:
+        return
+    if isinstance(value, bool) or not isinstance(value, int):
+        raise TypeError(f"{field_name} must be int, got {type(value).__name__}: {value!r}")
+    if min_value is not None and value < min_value:
+        raise ValueError(f"{field_name} must be >= {min_value}, got {value}")
