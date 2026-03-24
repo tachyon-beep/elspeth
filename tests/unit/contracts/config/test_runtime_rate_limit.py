@@ -155,3 +155,28 @@ class TestRuntimeRateLimitPostInit:
             services=mutable_dict,
         )
         assert isinstance(config.services, MappingProxyType)
+
+    def test_service_rate_limit_rejects_bool(self) -> None:
+        """requests_per_minute=True should raise TypeError — bool is not int."""
+        import pytest
+
+        from elspeth.contracts.config.runtime import RuntimeServiceRateLimit
+
+        with pytest.raises(TypeError, match="requests_per_minute must be int"):
+            RuntimeServiceRateLimit(requests_per_minute=True)  # type: ignore[arg-type]  # Intentional: testing bool rejection
+
+    def test_config_rejects_bool_default_rpm(self) -> None:
+        """default_requests_per_minute=True should raise TypeError — bool is not int."""
+        from types import MappingProxyType
+
+        import pytest
+
+        from elspeth.contracts.config.runtime import RuntimeRateLimitConfig
+
+        with pytest.raises(TypeError, match="default_requests_per_minute must be int"):
+            RuntimeRateLimitConfig(
+                enabled=True,
+                default_requests_per_minute=True,  # type: ignore[arg-type]  # Intentional: testing bool rejection
+                persistence_path=None,
+                services=MappingProxyType({}),
+            )

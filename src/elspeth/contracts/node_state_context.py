@@ -17,6 +17,8 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, Protocol
 
+from elspeth.contracts.freeze import require_int
+
 if TYPE_CHECKING:
     from elspeth.contracts.engine import BufferEntry
     from elspeth.contracts.results import TransformResult
@@ -41,6 +43,9 @@ class PoolConfigSnapshot:
     max_capacity_retry_seconds: float
     dispatch_delay_at_completion_ms: float
 
+    def __post_init__(self) -> None:
+        require_int(self.pool_size, "pool_size", min_value=0)
+
     def to_dict(self) -> dict[str, Any]:
         return {
             "pool_size": self.pool_size,
@@ -60,6 +65,11 @@ class PoolStatsSnapshot:
     total_throttle_time_ms: float
     max_concurrent_reached: int
 
+    def __post_init__(self) -> None:
+        require_int(self.capacity_retries, "capacity_retries", min_value=0)
+        require_int(self.successes, "successes", min_value=0)
+        require_int(self.max_concurrent_reached, "max_concurrent_reached", min_value=0)
+
     def to_dict(self) -> dict[str, Any]:
         return {
             "capacity_retries": self.capacity_retries,
@@ -78,6 +88,10 @@ class QueryOrderEntry:
     submit_index: int
     complete_index: int
     buffer_wait_ms: float
+
+    def __post_init__(self) -> None:
+        require_int(self.submit_index, "submit_index", min_value=0)
+        require_int(self.complete_index, "complete_index", min_value=0)
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -193,6 +207,9 @@ class AggregationFlushContext:
     trigger_type: str
     buffer_size: int
     batch_id: str
+
+    def __post_init__(self) -> None:
+        require_int(self.buffer_size, "buffer_size", min_value=0)
 
     def to_dict(self) -> dict[str, Any]:
         return {

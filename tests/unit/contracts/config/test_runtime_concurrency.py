@@ -105,3 +105,10 @@ class TestRuntimeConcurrencyValidation:
 
         with pytest.raises(ValueError, match="max_workers must be >= 1"):
             RuntimeConcurrencyConfig(max_workers=-1)
+
+    def test_max_workers_rejects_bool(self) -> None:
+        """max_workers=True should raise TypeError — bool is not int."""
+        from elspeth.contracts.config.runtime import RuntimeConcurrencyConfig
+
+        with pytest.raises(TypeError, match="max_workers must be int"):
+            RuntimeConcurrencyConfig(max_workers=True)  # type: ignore[arg-type]  # Intentional: testing bool rejection

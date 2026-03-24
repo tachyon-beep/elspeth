@@ -196,11 +196,11 @@ allow_hits:
   owner: architecture
   reason: Tier 3 boundary — ValueError/TypeError from stable_hash on non-canonical data falls back to repr_hash
   safety: Warning logged; row_id still generated via repr_hash for audit trail continuity
-- key: contracts/token_usage.py:R1:TokenUsage:from_dict:fp=950d2df1fec039fa
+- key: contracts/token_usage.py:R1:TokenUsage:from_dict:fp=22da73e68c808d7f
   owner: architecture
   reason: Tier 3 boundary — from_dict() uses .get() on external LLM API response dicts where keys may be absent
   safety: Missing keys produce None (unknown); no fabrication
-- key: contracts/token_usage.py:R1:TokenUsage:from_dict:fp=9ad24199de6680f8
+- key: contracts/token_usage.py:R1:TokenUsage:from_dict:fp=f302312f3d30b520
   owner: architecture
   reason: Tier 3 boundary — from_dict() uses .get() on external LLM API response dicts where keys may be absent
   safety: Missing keys produce None (unknown); no fabrication

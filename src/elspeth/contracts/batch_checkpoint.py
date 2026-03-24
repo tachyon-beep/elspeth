@@ -15,7 +15,7 @@ from dataclasses import dataclass
 from typing import Any
 
 from elspeth.contracts.errors import AuditIntegrityError
-from elspeth.contracts.freeze import deep_thaw, freeze_fields
+from elspeth.contracts.freeze import deep_thaw, freeze_fields, require_int
 
 
 @dataclass(frozen=True, slots=True)
@@ -30,8 +30,7 @@ class RowMappingEntry:
     variables_hash: str
 
     def __post_init__(self) -> None:
-        if self.index < 0:
-            raise ValueError(f"RowMappingEntry.index must be non-negative, got {self.index}")
+        require_int(self.index, "RowMappingEntry.index", min_value=0)
         if not self.variables_hash:
             raise ValueError("RowMappingEntry.variables_hash must not be empty")
 
@@ -81,14 +80,13 @@ class BatchCheckpointState:
     requests: Mapping[str, Mapping[str, Any]]
 
     def __post_init__(self) -> None:
+        require_int(self.row_count, "BatchCheckpointState.row_count", min_value=0)
         if not self.batch_id:
             raise ValueError("BatchCheckpointState.batch_id must not be empty")
         if not self.input_file_id:
             raise ValueError("BatchCheckpointState.input_file_id must not be empty")
         if not self.submitted_at:
             raise ValueError("BatchCheckpointState.submitted_at must not be empty")
-        if self.row_count < 0:
-            raise ValueError(f"BatchCheckpointState.row_count must be non-negative, got {self.row_count}")
         freeze_fields(self, "row_mapping", "template_errors")
         for i, entry in enumerate(self.template_errors):
             if len(entry) != 2:

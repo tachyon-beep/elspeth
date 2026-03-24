@@ -219,6 +219,18 @@ class TestBatchCheckpointState:
 # ---------------------------------------------------------------------------
 
 
+class TestRequireIntValidation:
+    """require_int guards reject bool (and wrong types) on int fields."""
+
+    def test_row_mapping_entry_rejects_bool_index(self) -> None:
+        with pytest.raises(TypeError, match=r"RowMappingEntry\.index must be int"):
+            RowMappingEntry(index=True, variables_hash="hash")  # type: ignore[arg-type]
+
+    def test_batch_checkpoint_state_rejects_bool_row_count(self) -> None:
+        with pytest.raises(TypeError, match=r"BatchCheckpointState\.row_count must be int"):
+            _make_state(row_count=True)  # type: ignore[arg-type]
+
+
 class TestBatchCheckpointTier1TypeGuards:
     """from_dict must crash with AuditIntegrityError on wrong types, not coerce."""
 

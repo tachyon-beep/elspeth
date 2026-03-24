@@ -35,20 +35,20 @@ class TestTokenUsageFactories:
         """Negative token counts are physically impossible."""
         import pytest
 
-        with pytest.raises(ValueError, match="prompt_tokens must be non-negative"):
+        with pytest.raises(ValueError, match="prompt_tokens must be >= 0"):
             TokenUsage.known(-1, 20)
 
     def test_known_rejects_negative_completion_tokens(self) -> None:
         import pytest
 
-        with pytest.raises(ValueError, match="completion_tokens must be non-negative"):
+        with pytest.raises(ValueError, match="completion_tokens must be >= 0"):
             TokenUsage.known(10, -5)
 
     def test_direct_construction_rejects_negative(self) -> None:
         """Direct construction also validates (not just factories)."""
         import pytest
 
-        with pytest.raises(ValueError, match="prompt_tokens must be non-negative"):
+        with pytest.raises(ValueError, match="prompt_tokens must be >= 0"):
             TokenUsage(prompt_tokens=-100, completion_tokens=None)
 
     def test_zero_tokens_accepted(self) -> None:
@@ -56,6 +56,22 @@ class TestTokenUsageFactories:
         usage = TokenUsage.known(0, 0)
         assert usage.prompt_tokens == 0
         assert usage.completion_tokens == 0
+
+
+class TestRequireIntValidation:
+    """require_int guards reject bool (and wrong types) on int fields."""
+
+    def test_rejects_bool_prompt_tokens(self) -> None:
+        import pytest
+
+        with pytest.raises(TypeError, match="prompt_tokens must be int"):
+            TokenUsage(prompt_tokens=True, completion_tokens=None)  # type: ignore[arg-type]
+
+    def test_rejects_bool_completion_tokens(self) -> None:
+        import pytest
+
+        with pytest.raises(TypeError, match="completion_tokens must be int"):
+            TokenUsage(prompt_tokens=None, completion_tokens=False)  # type: ignore[arg-type]
 
 
 class TestTokenUsageProperties:

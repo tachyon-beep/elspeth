@@ -21,6 +21,8 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any
 
+from elspeth.contracts.freeze import require_int
+
 
 @dataclass(frozen=True, slots=True)
 class TokenUsage:
@@ -43,10 +45,8 @@ class TokenUsage:
         either an API bug or data corruption. Zero is acceptable
         (e.g., cached responses with 0 completion tokens).
         """
-        if self.prompt_tokens is not None and self.prompt_tokens < 0:
-            raise ValueError(f"prompt_tokens must be non-negative, got {self.prompt_tokens}")
-        if self.completion_tokens is not None and self.completion_tokens < 0:
-            raise ValueError(f"completion_tokens must be non-negative, got {self.completion_tokens}")
+        require_int(self.prompt_tokens, "prompt_tokens", optional=True, min_value=0)
+        require_int(self.completion_tokens, "completion_tokens", optional=True, min_value=0)
 
     # ------------------------------------------------------------------
     # Derived properties
