@@ -2,6 +2,8 @@
 
 from datetime import UTC, datetime
 
+import pytest
+
 
 def test_transform_completed_in_contracts():
     """TransformCompleted should be importable from contracts."""
@@ -345,3 +347,141 @@ class TestExternalCallCompletedSerialization:
         assert d["request_payload"]["resolved_ip"] == "93.184.216.34"
         assert "json" not in d["request_payload"]
         assert "params" not in d["request_payload"]
+
+
+# ---------------------------------------------------------------------------
+# require_int validation: RunSummary, RunFinished, FieldResolutionApplied
+# ---------------------------------------------------------------------------
+
+
+class TestRunSummaryIntValidation:
+    """RunSummary rejects bool values for int fields."""
+
+    def test_rejects_bool_total_rows(self) -> None:
+        from elspeth.contracts.events import RunCompletionStatus, RunSummary
+
+        with pytest.raises(TypeError, match="total_rows must be int"):
+            RunSummary(
+                run_id="r",
+                status=RunCompletionStatus.COMPLETED,
+                total_rows=True,
+                succeeded=0,
+                failed=0,
+                quarantined=0,
+                duration_seconds=1.0,
+                exit_code=0,
+            )
+
+    def test_rejects_bool_exit_code(self) -> None:
+        from elspeth.contracts.events import RunCompletionStatus, RunSummary
+
+        with pytest.raises(TypeError, match="exit_code must be int"):
+            RunSummary(
+                run_id="r",
+                status=RunCompletionStatus.COMPLETED,
+                total_rows=0,
+                succeeded=0,
+                failed=0,
+                quarantined=0,
+                duration_seconds=1.0,
+                exit_code=False,
+            )
+
+    def test_rejects_negative_total_rows(self) -> None:
+        from elspeth.contracts.events import RunCompletionStatus, RunSummary
+
+        with pytest.raises(ValueError, match="total_rows must be >= 0"):
+            RunSummary(
+                run_id="r",
+                status=RunCompletionStatus.COMPLETED,
+                total_rows=-1,
+                succeeded=0,
+                failed=0,
+                quarantined=0,
+                duration_seconds=1.0,
+                exit_code=0,
+            )
+
+    def test_valid_run_summary_accepted(self) -> None:
+        from elspeth.contracts.events import RunCompletionStatus, RunSummary
+
+        summary = RunSummary(
+            run_id="r",
+            status=RunCompletionStatus.COMPLETED,
+            total_rows=10,
+            succeeded=9,
+            failed=1,
+            quarantined=0,
+            duration_seconds=2.5,
+            exit_code=1,
+            routed=3,
+        )
+        assert summary.total_rows == 10
+
+
+class TestRunFinishedIntValidation:
+    """RunFinished rejects bool values for row_count."""
+
+    def test_rejects_bool_row_count(self) -> None:
+        from datetime import UTC, datetime
+
+        from elspeth.contracts.enums import RunStatus
+        from elspeth.contracts.events import RunFinished
+
+        with pytest.raises(TypeError, match="row_count must be int"):
+            RunFinished(
+                timestamp=datetime.now(UTC),
+                run_id="r",
+                status=RunStatus.COMPLETED,
+                row_count=True,
+                duration_ms=100.0,
+            )
+
+    def test_valid_run_finished_accepted(self) -> None:
+        from datetime import UTC, datetime
+
+        from elspeth.contracts.enums import RunStatus
+        from elspeth.contracts.events import RunFinished
+
+        event = RunFinished(
+            timestamp=datetime.now(UTC),
+            run_id="r",
+            status=RunStatus.COMPLETED,
+            row_count=5,
+            duration_ms=100.0,
+        )
+        assert event.row_count == 5
+
+
+class TestFieldResolutionAppliedIntValidation:
+    """FieldResolutionApplied rejects bool values for field_count."""
+
+    def test_rejects_bool_field_count(self) -> None:
+        from datetime import UTC, datetime
+
+        from elspeth.contracts.events import FieldResolutionApplied
+
+        with pytest.raises(TypeError, match="field_count must be int"):
+            FieldResolutionApplied(
+                timestamp=datetime.now(UTC),
+                run_id="r",
+                source_plugin="csv",
+                field_count=True,
+                normalization_version="v1",
+                resolution_mapping={"original": "normalized"},
+            )
+
+    def test_valid_field_resolution_accepted(self) -> None:
+        from datetime import UTC, datetime
+
+        from elspeth.contracts.events import FieldResolutionApplied
+
+        event = FieldResolutionApplied(
+            timestamp=datetime.now(UTC),
+            run_id="r",
+            source_plugin="csv",
+            field_count=3,
+            normalization_version="v1",
+            resolution_mapping={"a": "b"},
+        )
+        assert event.field_count == 3

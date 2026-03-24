@@ -46,12 +46,6 @@ per_file_rules:
   reason: Tier 1 __post_init__ type guards on ResumePoint — validates checkpoint, token_id, node_id, sequence_number, aggregation_state, coalesce_state
   expires: null
   max_hits: 8
-- pattern: contracts/engine.py
-  rules:
-  - R5
-  reason: Tier 1 __post_init__ type guards on BufferEntry — validates submit_index/complete_index are int (not bool/float)
-  expires: null
-  max_hits: 4
 - pattern: contracts/call_data.py
   rules:
   - R5
