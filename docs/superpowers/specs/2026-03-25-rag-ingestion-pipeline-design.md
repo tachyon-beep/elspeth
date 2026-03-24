@@ -1,7 +1,7 @@
 # RAG Ingestion Pipeline — Design Spec
 
 **Date:** 2026-03-25
-**Status:** Draft (R1)
+**Status:** Draft (R2 — all R1 issues resolved; R2 fixes: defensive .get() in _build_audit_snapshot, count/reachable canonical idiom, DependencyRunResult status Literal, build_collection_probes tie-breaking rule)
 **Target ChromaDB version:** `chromadb >= 0.4`
 **Scope:** ChromaSink plugin, pipeline `depends_on` mechanism, commencement gates, RAG retrieval readiness contract
 
@@ -311,7 +311,7 @@ class DependencyRunResult:
     name: str
     run_id: str
     settings_hash: str
-    status: str
+    status: Literal["completed"]
     duration_ms: int
 ```
 
@@ -495,12 +495,14 @@ class CollectionProbeResult:
 - `AzureSearchCollectionProbe`: Calls the Azure Search count endpoint.
 
 **Assembly** (L3, `plugins/infrastructure/`):
-A factory function `build_collection_probes(settings: ElspethSettings) -> list[CollectionProbe]` scans the pipeline config for plugins referencing collections (RAG transform's `provider_config.collection`, ChromaSink's `collection`). For each unique collection, it constructs the appropriate probe using the plugin's connection config. This function lives in L3 and is called by the orchestrator before gate evaluation.
+A factory function `build_collection_probes(settings: ElspethSettings) -> list[CollectionProbe]` scans all plugin configs in the pipeline (sources, transforms, sinks) for fields referencing collections (RAG transform's `provider_config.collection`, ChromaSink's `collection`). For each unique collection name, it constructs a probe using the first plugin's connection config encountered during the scan. If the same collection name appears in multiple plugins with different connection configs (e.g., different `host`), this is a configuration error — the factory raises at assembly time rather than silently picking one. This function lives in L3 and is called by the orchestrator before gate evaluation.
 
 **Injection into L2:**
 The orchestrator calls `build_collection_probes()` and receives a list of `CollectionProbe` protocol objects. It calls `probe.probe()` on each and assembles the `collections` context dict. The orchestrator never imports ChromaDB or any L3 client — it only knows the L0 protocol.
 
 If a probe raises an exception (collection unreachable), the result is `CollectionProbeResult(collection=name, reachable=False, count=0)`. Probe failures do not abort the pipeline directly. However, a gate condition like `collections['science-facts']['count'] > 0` will evaluate to `False` when `count=0` (whether the collection is empty or unreachable), causing the gate to fail. The effective behaviour is that unreachable collections fail count-based gates — this is by design, not an accident.
+
+**Canonical gate expression idiom:** Use `collections['name']['count'] > 0` as the standard form. The `reachable` field is informational (useful for diagnostics and error messages) but gate expressions should not need to consult it separately — `count > 0` inherently requires reachability because unreachable collections produce `count=0`. Writing `count > 0 and reachable` is redundant.
 
 ### Expression Evaluation
 
@@ -570,8 +572,8 @@ The context snapshot recorded in the Landscape includes `dependency_runs` and `c
 def _build_audit_snapshot(context: dict[str, Any]) -> Mapping[str, Any]:
     """Build a frozen context snapshot for audit, excluding env."""
     snapshot = {
-        "dependency_runs": context.get("dependency_runs", {}),
-        "collections": context.get("collections", {}),
+        "dependency_runs": context["dependency_runs"],
+        "collections": context["collections"],
     }
     return deep_freeze(snapshot)
 ```
