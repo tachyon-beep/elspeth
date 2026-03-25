@@ -399,9 +399,14 @@ class _ExpressionEvaluator(ast.NodeVisitor):
         context: dict[str, Any] | PipelineRow,
         *,
         allowed_names: frozenset[str] = frozenset({"row"}),
+        single_name_mode: bool = True,
     ) -> None:
         self._context = context
         self._allowed_names = allowed_names
+        # In single-name mode the context IS the value (e.g. row={"x": 5}).
+        # In multi-name mode the context is a namespace dict where each
+        # allowed name maps to its value (e.g. {"collections": {...}, "env": {...}}).
+        self._single_name_mode = single_name_mode
 
     def visit_Expression(self, node: ast.Expression) -> Any:
         """Evaluate the top-level expression."""
@@ -410,10 +415,10 @@ class _ExpressionEvaluator(ast.NodeVisitor):
     def visit_Name(self, node: ast.Name) -> Any:
         """Evaluate name references."""
         if node.id in self._allowed_names:
-            # Single allowed name (default "row"): the context IS the value
-            if len(self._allowed_names) == 1:
+            if self._single_name_mode:
+                # Context IS the value (e.g. evaluate({"x": 5}) for row['x'])
                 return self._context
-            # Multiple allowed names: look up in context dict
+            # Namespace mode: look up name in context dict
             return self._context[node.id]
         if node.id == "True":
             return True
@@ -455,13 +460,15 @@ class _ExpressionEvaluator(ast.NodeVisitor):
             raise ExpressionEvaluationError(msg) from e
 
     def visit_Attribute(self, node: ast.Attribute) -> Any:
-        """Evaluate attribute access (only .get on allowed names)."""
+        """Evaluate attribute access (only .get on allowed-name values)."""
         value = self.visit(node.value)
-        if node.attr == "get" and isinstance(value, dict):
-            return value.get
-        # For PipelineRow (single allowed name mode), check identity
-        if len(self._allowed_names) == 1 and value is self._context and node.attr == "get":
-            return value.get
+        if node.attr == "get":
+            if self._single_name_mode and value is self._context:
+                # Single-name mode: context is the row/dict itself
+                return value.get
+            if not self._single_name_mode and isinstance(node.value, ast.Name) and node.value.id in self._allowed_names:
+                # Namespace mode: .get() on a top-level allowed name
+                return value.get
         msg = f"Forbidden attribute access: {node.attr}"
         raise ExpressionSecurityError(msg)
 
@@ -633,7 +640,12 @@ class ExpressionParser:
             ExpressionSyntaxError: If expression is not valid Python syntax
         """
         self._expression = expression
-        self._allowed_names = frozenset(allowed_names or ["row"])
+        if allowed_names is not None and len(allowed_names) == 0:
+            raise ValueError("allowed_names must not be empty")
+        self._allowed_names = frozenset(allowed_names) if allowed_names is not None else frozenset({"row"})
+        # Single-name mode: caller passes the value directly as context.
+        # Multi-name mode: caller passes a namespace dict keyed by allowed names.
+        self._single_name_mode = allowed_names is None or len(allowed_names) == 1
 
         # Phase 1: Parse the expression
         try:
@@ -715,7 +727,11 @@ class ExpressionParser:
         Returns:
             Result of expression evaluation (typically bool for gate conditions)
         """
-        evaluator = _ExpressionEvaluator(context, allowed_names=self._allowed_names)
+        evaluator = _ExpressionEvaluator(
+            context,
+            allowed_names=self._allowed_names,
+            single_name_mode=self._single_name_mode,
+        )
         try:
             return evaluator.visit(self._ast)
         except (ExpressionEvaluationError, ExpressionSecurityError):
