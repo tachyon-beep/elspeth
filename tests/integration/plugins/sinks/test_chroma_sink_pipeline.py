@@ -12,6 +12,7 @@ from unittest.mock import MagicMock
 import chromadb
 import pytest
 
+from elspeth.contracts.errors import DuplicateDocumentError
 from elspeth.plugins.sinks.chroma_sink import ChromaSink
 
 
@@ -26,9 +27,9 @@ class TestChromaSinkIntegration:
             "persist_directory": str(chroma_dir),
             "distance_function": "cosine",
             "field_mapping": {
-                "document": "text_content",
-                "id": "doc_id",
-                "metadata": ["topic"],
+                "document_field": "text_content",
+                "id_field": "doc_id",
+                "metadata_fields": ["topic"],
             },
             "on_duplicate": "overwrite",
             "schema": {
@@ -104,7 +105,7 @@ class TestChromaSinkIntegration:
             "collection": "idempotent-test",
             "mode": "persistent",
             "persist_directory": str(chroma_dir),
-            "field_mapping": {"document": "text", "id": "id", "metadata": []},
+            "field_mapping": {"document_field": "text", "id_field": "id", "metadata_fields": []},
             "on_duplicate": "overwrite",
             "schema": {"mode": "fixed", "fields": ["id: str", "text: str"]},
         }
@@ -134,7 +135,7 @@ class TestChromaSinkIntegration:
             "collection": "skip-test",
             "mode": "persistent",
             "persist_directory": str(chroma_dir),
-            "field_mapping": {"document": "text", "id": "id", "metadata": []},
+            "field_mapping": {"document_field": "text", "id_field": "id", "metadata_fields": []},
             "on_duplicate": "skip",
             "schema": {"mode": "fixed", "fields": ["id: str", "text: str"]},
         }
@@ -169,16 +170,16 @@ class TestChromaSinkIntegration:
         results = collection.get(ids=["d1"], include=["documents"])
         assert results["documents"][0] == "Original"  # Not "Updated"
 
-    @pytest.mark.parametrize("on_duplicate", ["overwrite", "skip", "error"])
+    @pytest.mark.parametrize("on_duplicate", ["overwrite", "error"])
     def test_content_hash_is_deterministic(self, tmp_path: Path, on_duplicate: str) -> None:
-        """Same rows produce the same content hash regardless of mode."""
+        """Same rows produce the same content hash for overwrite and error modes."""
         chroma_dir = tmp_path / "chroma_data"
 
         config: dict[str, Any] = {
             "collection": f"hash-test-{on_duplicate}",
             "mode": "persistent",
             "persist_directory": str(chroma_dir),
-            "field_mapping": {"document": "text", "id": "id", "metadata": []},
+            "field_mapping": {"document_field": "text", "id_field": "id", "metadata_fields": []},
             "on_duplicate": on_duplicate,
             "schema": {"mode": "fixed", "fields": ["id: str", "text: str"]},
         }
@@ -195,15 +196,54 @@ class TestChromaSinkIntegration:
             write_ctx = MagicMock()
             write_ctx.run_id = "hash-run"
 
-            # For error mode, second run has existing IDs — but we only care about the hash
-            # from the first run, since error mode raises on the second
             try:
                 artifact = sink.write(rows, write_ctx)
                 hashes.append(artifact.content_hash)
-            except Exception:
-                pass
+            except DuplicateDocumentError:
+                pass  # Expected on second run of error mode
             sink.close()
 
         assert len(hashes) >= 1
         if len(hashes) == 2:
             assert hashes[0] == hashes[1]
+
+    def test_skip_mode_hash_reflects_actual_write(self, tmp_path: Path) -> None:
+        """Skip mode hash changes when the actual write payload changes."""
+        chroma_dir = tmp_path / "chroma_data"
+
+        config: dict[str, Any] = {
+            "collection": "hash-skip-test",
+            "mode": "persistent",
+            "persist_directory": str(chroma_dir),
+            "field_mapping": {"document_field": "text", "id_field": "id", "metadata_fields": []},
+            "on_duplicate": "skip",
+            "schema": {"mode": "fixed", "fields": ["id: str", "text: str"]},
+        }
+
+        # First write: d1 and d2 both new
+        sink = ChromaSink(config)
+        ctx = MagicMock()
+        ctx.run_id = "run-1"
+        ctx.telemetry_emit = MagicMock()
+        sink.on_start(ctx)
+        write_ctx = MagicMock()
+        write_ctx.run_id = "run-1"
+        artifact1 = sink.write([{"id": "d1", "text": "Hello"}, {"id": "d2", "text": "World"}], write_ctx)
+        sink.close()
+
+        # Second write: d1 already exists, only d3 is new
+        sink2 = ChromaSink(config)
+        ctx2 = MagicMock()
+        ctx2.run_id = "run-2"
+        ctx2.telemetry_emit = MagicMock()
+        sink2.on_start(ctx2)
+        write_ctx2 = MagicMock()
+        write_ctx2.run_id = "run-2"
+        artifact2 = sink2.write([{"id": "d1", "text": "Hello"}, {"id": "d3", "text": "New"}], write_ctx2)
+        sink2.close()
+
+        # Different actual payloads → different hashes
+        assert artifact1.content_hash != artifact2.content_hash
+        # Second write only wrote d3
+        assert artifact2.metadata is not None
+        assert artifact2.metadata["row_count"] == 1

@@ -19,9 +19,9 @@ def _make_config(**overrides: Any) -> dict[str, Any]:
         "persist_directory": "./test_chroma",
         "distance_function": "cosine",
         "field_mapping": {
-            "document": "text",
-            "id": "doc_id",
-            "metadata": ["topic"],
+            "document_field": "text",
+            "id_field": "doc_id",
+            "metadata_fields": ["topic"],
         },
         "on_duplicate": "overwrite",
         "schema": {
@@ -37,7 +37,6 @@ def _make_sink_with_collection(mock_collection: MagicMock, **config_overrides: A
     """Create a ChromaSink with a pre-set mock collection (skips on_start)."""
     sink = ChromaSink(_make_config(**config_overrides))
     sink._collection = mock_collection
-    sink._run_id = "test-run"
     return sink
 
 
@@ -57,7 +56,7 @@ class TestChromaSinkOnStart:
 
             mock_chromadb.PersistentClient.assert_called_once()
 
-    def test_constructs_http_client(self) -> None:
+    def test_constructs_http_client_with_heartbeat(self) -> None:
         config = {
             "collection": "test-collection",
             "mode": "client",
@@ -65,9 +64,9 @@ class TestChromaSinkOnStart:
             "port": 8000,
             "ssl": False,
             "field_mapping": {
-                "document": "text",
-                "id": "doc_id",
-                "metadata": [],
+                "document_field": "text",
+                "id_field": "doc_id",
+                "metadata_fields": [],
             },
             "schema": {
                 "mode": "fixed",
@@ -91,6 +90,7 @@ class TestChromaSinkOnStart:
                 port=8000,
                 ssl=False,
             )
+            mock_client.heartbeat.assert_called_once()
 
     def test_on_start_failure_raises(self) -> None:
         sink = ChromaSink(_make_config())
@@ -206,6 +206,52 @@ class TestChromaSinkWriteSkip:
 
         mock_collection.add.assert_not_called()
 
+    def test_skip_audit_records_actual_rows_written(self) -> None:
+        """Skip mode must record only the rows actually sent to ChromaDB."""
+        mock_collection = MagicMock()
+        mock_collection.get.return_value = {"ids": ["d1"]}
+        sink = _make_sink_with_collection(mock_collection, on_duplicate="skip")
+
+        mock_ctx = MagicMock()
+        mock_ctx.run_id = "test-run"
+
+        rows = [
+            {"doc_id": "d1", "text": "Existing", "topic": "t"},
+            {"doc_id": "d2", "text": "New", "topic": "t"},
+        ]
+        artifact = sink.write(rows, mock_ctx)
+
+        # Artifact must reflect actual write, not full batch
+        assert artifact.metadata is not None
+        assert artifact.metadata["row_count"] == 1
+
+        # Audit call must include skip info
+        call_kwargs = mock_ctx.record_call.call_args.kwargs
+        assert call_kwargs["response_data"]["rows_written"] == 1
+        assert call_kwargs["response_data"]["rows_skipped"] == 1
+        assert call_kwargs["response_data"]["skipped_ids"] == ["d1"]
+
+    def test_skip_content_hash_reflects_actual_payload(self) -> None:
+        """Hash must be over the subset actually sent, not the full batch."""
+        mock_collection = MagicMock()
+        mock_collection.get.return_value = {"ids": ["d1"]}
+        sink = _make_sink_with_collection(mock_collection, on_duplicate="skip")
+
+        mock_ctx = MagicMock()
+        rows = [
+            {"doc_id": "d1", "text": "Existing", "topic": "t"},
+            {"doc_id": "d2", "text": "New", "topic": "t"},
+        ]
+        skip_artifact = sink.write(rows, mock_ctx)
+
+        # Write only d2 in overwrite mode — should produce the same hash
+        mock_collection2 = MagicMock()
+        sink2 = _make_sink_with_collection(mock_collection2)
+        mock_ctx2 = MagicMock()
+        overwrite_artifact = sink2.write([{"doc_id": "d2", "text": "New", "topic": "t"}], mock_ctx2)
+
+        assert skip_artifact.content_hash == overwrite_artifact.content_hash
+
 
 class TestChromaSinkWriteError:
     def test_error_mode_raises_on_duplicates(self) -> None:
@@ -257,6 +303,21 @@ class TestChromaSinkWriteError:
         mock_ctx.record_call.assert_called_once()
         call_kwargs = mock_ctx.record_call.call_args.kwargs
         assert call_kwargs["status"] is CallStatus.ERROR
+        # Error details must include exception info (#4)
+        assert call_kwargs["error"]["type"] == "DuplicateDocumentError"
+        assert "d1" in call_kwargs["error"]["message"]
+
+    def test_duplicate_ids_stored_as_tuple(self) -> None:
+        """DuplicateDocumentError.duplicate_ids must be immutable."""
+        mock_collection = MagicMock()
+        mock_collection.get.return_value = {"ids": ["d1"]}
+        sink = _make_sink_with_collection(mock_collection, on_duplicate="error")
+
+        mock_ctx = MagicMock()
+        with pytest.raises(DuplicateDocumentError) as exc_info:
+            sink.write([{"doc_id": "d1", "text": "A", "topic": "t"}], mock_ctx)
+
+        assert isinstance(exc_info.value.duplicate_ids, tuple)
 
 
 class TestChromaSinkAuditIntegrity:
@@ -270,11 +331,28 @@ class TestChromaSinkAuditIntegrity:
 
         rows = [{"doc_id": "d1", "text": "Hello", "topic": "t"}]
 
-        with pytest.raises(AuditIntegrityError, match="audit"):
+        with pytest.raises(AuditIntegrityError, match="audit") as exc_info:
             sink.write(rows, mock_ctx)
 
         # The ChromaDB write still happened
         mock_collection.upsert.assert_called_once()
+        # Exception chain preserved (#13)
+        assert exc_info.value.__cause__ is not None
+        assert isinstance(exc_info.value.__cause__, RuntimeError)
+
+    def test_error_path_audit_failure_preserves_original_exception(self) -> None:
+        """If error-path record_call also fails, the original ChromaDB error propagates."""
+        import chromadb.errors
+
+        mock_collection = MagicMock()
+        mock_collection.upsert.side_effect = chromadb.errors.ChromaError("write failed")
+        sink = _make_sink_with_collection(mock_collection)
+
+        mock_ctx = MagicMock()
+        mock_ctx.record_call.side_effect = RuntimeError("audit also broken")
+
+        with pytest.raises(chromadb.errors.ChromaError, match="write failed"):
+            sink.write([{"doc_id": "d1", "text": "A", "topic": "t"}], mock_ctx)
 
 
 class TestChromaSinkFlush:
@@ -291,9 +369,11 @@ class TestChromaSinkClose:
     def test_close_releases_resources(self) -> None:
         mock_collection = MagicMock()
         sink = _make_sink_with_collection(mock_collection)
-        sink._client = MagicMock()
+        mock_client = MagicMock()
+        sink._client = mock_client
 
         sink.close()
 
         assert sink._client is None
         assert sink._collection is None
+        mock_client.clear_system_cache.assert_called_once()

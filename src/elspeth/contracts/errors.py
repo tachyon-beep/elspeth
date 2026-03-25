@@ -1074,5 +1074,5 @@ class DuplicateDocumentError(Exception):
 
     def __init__(self, *, collection: str, duplicate_ids: list[str]) -> None:
         self.collection = collection
-        self.duplicate_ids = duplicate_ids
-        super().__init__(f"Duplicate document IDs in collection {collection!r}: {duplicate_ids}")
+        self.duplicate_ids = tuple(duplicate_ids)
+        super().__init__(f"Duplicate document IDs in collection {collection!r}: {list(self.duplicate_ids)}")

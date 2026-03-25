@@ -19,9 +19,9 @@ class TestFieldMappingConfig:
                 "persist_directory": "./chroma_data",
                 "distance_function": "cosine",
                 "field_mapping": {
-                    "document": "text_content",
-                    "id": "doc_id",
-                    "metadata": ["topic", "subtopic"],
+                    "document_field": "text_content",
+                    "id_field": "doc_id",
+                    "metadata_fields": ["topic", "subtopic"],
                 },
                 "on_duplicate": "overwrite",
                 "schema": {
@@ -36,9 +36,9 @@ class TestFieldMappingConfig:
             }
         )
         assert config.collection == "science-facts"
-        assert config.field_mapping.document == "text_content"
-        assert config.field_mapping.id == "doc_id"
-        assert config.field_mapping.metadata == ["topic", "subtopic"]
+        assert config.field_mapping.document_field == "text_content"
+        assert config.field_mapping.id_field == "doc_id"
+        assert config.field_mapping.metadata_fields == ("topic", "subtopic")
 
     def test_field_mapping_required(self) -> None:
         with pytest.raises(Exception, match="field_mapping"):
@@ -57,7 +57,7 @@ class TestFieldMappingConfig:
                 "collection": "test",
                 "mode": "persistent",
                 "persist_directory": "./data",
-                "field_mapping": {"document": "text", "id": "id", "metadata": []},
+                "field_mapping": {"document_field": "text", "id_field": "id", "metadata_fields": []},
                 "schema": {"mode": "fixed", "fields": ["id: str", "text: str"]},
             }
         )
@@ -107,7 +107,7 @@ class TestConnectionValidation:
                 {
                     "collection": "test",
                     "mode": "persistent",
-                    "field_mapping": {"document": "t", "id": "i", "metadata": []},
+                    "field_mapping": {"document_field": "t", "id_field": "i", "metadata_fields": []},
                     "schema": {"mode": "fixed", "fields": ["i: str", "t: str"]},
                 }
             )
@@ -118,7 +118,7 @@ class TestConnectionValidation:
                 {
                     "collection": "test",
                     "mode": "client",
-                    "field_mapping": {"document": "t", "id": "i", "metadata": []},
+                    "field_mapping": {"document_field": "t", "id_field": "i", "metadata_fields": []},
                     "schema": {"mode": "fixed", "fields": ["i: str", "t: str"]},
                 }
             )
