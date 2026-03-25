@@ -156,10 +156,12 @@ from elspeth.contracts.enums import (
 from elspeth.contracts.errors import (
     BatchPendingError,
     CoalesceFailureReason,
+    CommencementGateFailedError,
     ConfigGateReason,
     # Schema contract violations
     ContractMergeError,
     ContractViolation,
+    DependencyFailedError,
     ErrorDetail,
     ExecutionError,
     ExtraFieldViolation,
@@ -169,6 +171,7 @@ from elspeth.contracts.errors import (
     MissingFieldViolation,
     PluginContractViolation,
     QueryFailureDetail,
+    RetrievalNotReadyError,
     RoutingReason,
     RowErrorEntry,
     SourceQuarantineReason,
@@ -227,6 +230,7 @@ from elspeth.contracts.plugin_protocols import (
     SourceProtocol,
     TransformProtocol,
 )
+from elspeth.contracts.probes import CollectionProbe, CollectionReadinessResult
 from elspeth.contracts.results import (
     ArtifactDescriptor,
     ExceptionResult,
@@ -282,10 +286,13 @@ __all__ = [  # Grouped by category for readability
     "Operation",
     # errors
     "BatchPendingError",
+    "CommencementGateFailedError",
+    "DependencyFailedError",
     "FrameworkBugError",
     "GracefulShutdownError",
     "MaxRetriesExceeded",
     "PluginContractViolation",
+    "RetrievalNotReadyError",
     "CoalesceFailureReason",
     "ConfigGateReason",
     "ErrorDetail",
@@ -506,4 +513,7 @@ __all__ = [  # Grouped by category for readability
     "resolve_headers",
     "validate_output_against_contract",
     "violations_to_error_reason",
+    # probes
+    "CollectionProbe",
+    "CollectionReadinessResult",
 ]
