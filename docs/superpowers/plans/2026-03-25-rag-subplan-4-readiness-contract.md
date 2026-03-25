@@ -6,7 +6,7 @@
 
 **Architecture:** Extend the existing `RetrievalProvider` protocol (L3) with `check_readiness()` returning `CollectionReadinessResult` (L0, from sub-plan 1). The RAG transform calls it in `on_start()` after provider construction. Single-attempt, no retry — transient failures crash the pipeline startup.
 
-**Tech Stack:** `@runtime_checkable` Protocol, chromadb, httpx (via AuditedHTTPClient)
+**Tech Stack:** `@runtime_checkable` Protocol, chromadb, raw httpx (for Azure count probe — NOT AuditedHTTPClient, see Issue 3 notes below)
 
 **Spec:** `docs/superpowers/specs/2026-03-25-rag-ingestion-pipeline-design.md` (Component 4)
 
@@ -153,19 +153,8 @@ class TestChromaSearchProviderReadiness:
         assert result.count == 0
         assert "empty" in result.message
 
-    def test_collection_not_found(self) -> None:
-        """Collection does not exist (None — provider not initialized)."""
-        provider = self._make_provider()
-        provider._collection = None
-
-        result = provider.check_readiness()
-
-        assert result.reachable is False
-        assert result.count == 0
-        assert "not found" in result.message.lower() or "not initialized" in result.message.lower()
-
     def test_connection_error(self) -> None:
-        """ChromaDB is unreachable."""
+        """ChromaDB count() fails — reports unreachable with error details."""
         provider = self._make_provider()
         mock_collection = MagicMock()
         mock_collection.count.side_effect = Exception("Connection refused")
@@ -175,6 +164,7 @@ class TestChromaSearchProviderReadiness:
 
         assert result.reachable is False
         assert result.count == 0
+        assert "Connection refused" in result.message
 ```
 
 **Note:** Read the existing test file to understand the fixture pattern (`_make_provider` or similar). Adapt the test setup to match.
@@ -190,18 +180,16 @@ In `src/elspeth/plugins/infrastructure/clients/retrieval/chroma.py`, add after `
 
 ```python
     def check_readiness(self) -> CollectionReadinessResult:
-        """Check that the ChromaDB collection exists and has documents."""
+        """Check that the ChromaDB collection exists and has documents.
+
+        Called during on_start() AFTER provider construction. self._collection
+        is always set by __init__ (which calls get_or_create_collection).
+        If __init__ fails, the provider doesn't exist and this method is
+        never called. No need to guard against _collection being None.
+        """
         from elspeth.contracts.probes import CollectionReadinessResult
 
         collection_name = self._config.collection
-
-        if self._collection is None:
-            return CollectionReadinessResult(
-                collection=collection_name,
-                reachable=False,
-                count=0,
-                message=f"Collection '{collection_name}' not initialized — provider not started",
-            )
 
         try:
             count = self._collection.count()
@@ -215,12 +203,12 @@ In `src/elspeth/plugins/infrastructure/clients/retrieval/chroma.py`, add after `
                     else f"Collection '{collection_name}' is empty"
                 ),
             )
-        except Exception:
+        except Exception as exc:
             return CollectionReadinessResult(
                 collection=collection_name,
                 reachable=False,
                 count=0,
-                message=f"Collection '{collection_name}' unreachable",
+                message=f"Collection '{collection_name}' unreachable: {type(exc).__name__}: {exc}",
             )
 ```
 
@@ -281,22 +269,43 @@ In `azure_search.py`, add after `close()` (around line 300):
 
 ```python
     def check_readiness(self) -> CollectionReadinessResult:
-        """Check that the Azure Search index exists and has documents."""
+        """Check that the Azure Search index exists and has documents.
+
+        Uses raw httpx (NOT AuditedHTTPClient) because this is a startup probe,
+        not a row-level operation. There is no state_id or token_id available
+        during on_start(). AuditedHTTPClient requires per-row scoping that
+        doesn't exist at this lifecycle phase.
+        """
         from elspeth.contracts.probes import CollectionReadinessResult
 
-        index_name = self._config.index_name
+        index_name = self._config.index  # NOTE: field is 'index', not 'index_name'
 
         try:
-            # Count documents: GET /indexes/{index}/docs/$count?api-version={version}
+            import httpx
+
             count_url = (
                 f"{self._config.endpoint}/indexes/{index_name}"
                 f"/docs/$count?api-version={self._config.api_version}"
             )
-            # Use a simple HTTP GET (not the search POST)
-            # Read the existing HTTP call pattern in search() to understand
-            # how to make the request with auth headers
-            response = self._make_count_request(count_url)
-            count = int(response)
+            headers = {}
+            if self._config.api_key:
+                headers["api-key"] = self._config.api_key
+            # For managed identity, use azure-identity — but for a simple
+            # readiness probe, api-key auth is sufficient. Read the existing
+            # provider's auth setup to match.
+
+            response = httpx.get(count_url, headers=headers, timeout=10.0)
+
+            if response.status_code == 404:
+                return CollectionReadinessResult(
+                    collection=index_name,
+                    reachable=True,
+                    count=0,
+                    message=f"Index '{index_name}' not found",
+                )
+
+            response.raise_for_status()
+            count = int(response.text)
 
             return CollectionReadinessResult(
                 collection=index_name,
@@ -308,16 +317,16 @@ In `azure_search.py`, add after `close()` (around line 300):
                     else f"Index '{index_name}' is empty"
                 ),
             )
-        except Exception:
+        except Exception as exc:
             return CollectionReadinessResult(
                 collection=index_name,
                 reachable=False,
                 count=0,
-                message=f"Index '{index_name}' unreachable",
+                message=f"Index '{index_name}' unreachable: {type(exc).__name__}: {exc}",
             )
 ```
 
-**Important:** Read the existing Azure provider code to understand how HTTP requests are made (it uses `AuditedHTTPClient` with auth headers). The `_make_count_request()` helper is a placeholder — implement it using the same HTTP client pattern as `search()`, targeting the count endpoint instead of the search endpoint.
+**Design note:** `check_readiness()` uses raw `httpx` instead of `AuditedHTTPClient` because this is a startup probe, not a row-level pipeline operation. `AuditedHTTPClient` requires `recorder`, `state_id`, `run_id`, `telemetry_emit`, and `token_id` — none of which exist during `on_start()`. The raw HTTP call is a pre-flight check, not an audited operation. The commencement gate's `context_snapshot` records what the probe found; the HTTP call itself doesn't need per-row audit correlation.
 
 - [ ] **Step 3: Run tests**
 
@@ -393,7 +402,28 @@ class TestRAGTransformReadinessGuard:
             pass  # Call on_start with the mocked provider
 ```
 
-**Note:** Read `tests/unit/plugins/transforms/rag/test_transform.py` carefully. The existing tests have fixtures for constructing the transform and mocking the provider. Adapt the test bodies to use the same pattern. The placeholders above need to be filled in with the actual mock wiring.
+**Test wiring guidance:** The readiness check fires DURING `on_start()`, after provider construction. You cannot call `on_start()` and then replace `_provider` — the check has already run. Instead, mock the `PROVIDERS` registry so the factory returns a mock provider with `check_readiness` pre-configured:
+
+```python
+# Example wiring pattern:
+mock_provider = MagicMock()
+mock_provider.check_readiness.return_value = CollectionReadinessResult(
+    collection="test", reachable=True, count=0,
+    message="Collection 'test' is empty",
+)
+
+mock_factory = MagicMock(return_value=mock_provider)
+mock_config_cls = MagicMock(return_value=MagicMock())
+
+with patch.dict(
+    "elspeth.plugins.transforms.rag.transform.PROVIDERS",
+    {"chroma": (mock_config_cls, mock_factory)},
+):
+    with pytest.raises(RetrievalNotReadyError):
+        transform.on_start(mock_ctx)
+```
+
+Read `tests/unit/plugins/transforms/rag/test_transform.py` for the existing mock context and config patterns. The key is patching `PROVIDERS` before calling `on_start()`.
 
 - [ ] **Step 2: Run tests to verify they fail**
 
@@ -411,10 +441,12 @@ In `src/elspeth/plugins/transforms/rag/transform.py`, after the provider constru
             from elspeth.contracts.errors import RetrievalNotReadyError
 
             raise RetrievalNotReadyError(
-                f"RAG transform '{self.name}' requires a populated collection. "
-                f"{readiness.message}"
+                collection=readiness.collection,
+                reason=readiness.message,
             )
 ```
+
+**IMPORTANT:** `RetrievalNotReadyError` takes keyword-only args `(*, collection: str, reason: str)` — NOT a positional string. This was changed during the sub-plan 1 review. See `contracts/errors.py:1060`.
 
 - [ ] **Step 4: Run all RAG transform tests**
 
@@ -462,7 +494,7 @@ Expected: PASS (no regressions)
 - [ ] **Step 4: Commit**
 
 ```bash
-git add -A
+git add <list specific test files found in Step 1>
 git commit -m "fix: update all RetrievalProvider test doubles with check_readiness()"
 ```
 
@@ -495,6 +527,6 @@ Expected: PASS
 - [ ] **Step 5: Commit if any fixes needed**
 
 ```bash
-git add -A
+git add <list specific files with issues>
 git commit -m "fix: address type/lint/tier issues in readiness contract"
 ```
