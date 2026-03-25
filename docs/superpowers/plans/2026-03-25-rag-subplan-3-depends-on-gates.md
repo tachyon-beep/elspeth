@@ -1,0 +1,1238 @@
+# RAG Ingestion Sub-plan 3: `depends_on` + Commencement Gates — Implementation Plan
+
+> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
+
+**Goal:** Add pipeline-level orchestration: `depends_on` runs dependency pipelines before the main pipeline starts, commencement gates evaluate go/no-go conditions against a pre-flight context, and collection probes check vector store readiness.
+
+**Architecture:** New config models in L1, new orchestration phases in L2, collection probe assembly in L3. The dependency resolution phase calls `bootstrap_and_run()` (extracted from the CLI codepath) for each dependency. Commencement gates use `ExpressionParser` (extended in sub-plan 1) to evaluate expressions against a frozen pre-flight context. Collection probes use the `CollectionProbe` protocol (L0, from sub-plan 1) injected into the orchestrator.
+
+**Tech Stack:** Pydantic v2, ExpressionParser (AST-whitelist), deep_freeze, pathlib
+
+**Spec:** `docs/superpowers/specs/2026-03-25-rag-ingestion-pipeline-design.md` (Components 2 and 3)
+
+**Depends on:** Sub-plan 1 (shared infrastructure) must be merged first.
+
+**Risk:** HIGH — modifies the orchestrator's `run()` method and extracts `bootstrap_and_run()` from the CLI codepath. Needs careful review.
+
+---
+
+## File Structure
+
+| Action | Path | Responsibility |
+|--------|------|---------------|
+| Create | `src/elspeth/core/dependency_config.py` | `DependencyConfig`, `CommencementGateConfig`, `CollectionProbeConfig`, `DependencyRunResult`, `GateResult` |
+| Modify | `src/elspeth/core/config.py` | Add `depends_on`, `commencement_gates`, `collection_probes` fields to `ElspethSettings` |
+| Create | `src/elspeth/engine/bootstrap.py` | `bootstrap_and_run()` extracted from CLI |
+| Create | `src/elspeth/engine/dependency_resolver.py` | `resolve_dependencies()`, cycle detection, depth limit |
+| Create | `src/elspeth/engine/commencement.py` | `evaluate_commencement_gates()`, pre-flight context assembly |
+| Create | `src/elspeth/plugins/infrastructure/probe_factory.py` | `build_collection_probes()` from explicit config |
+| Modify | `src/elspeth/engine/orchestrator/core.py` | Insert dependency + gate phases before existing run |
+| Modify | `src/elspeth/cli.py` | Refactor to use `bootstrap_and_run()` |
+| Create | `tests/unit/core/test_dependency_config.py` | Config model tests |
+| Create | `tests/unit/engine/test_dependency_resolver.py` | Dependency resolution + cycle detection tests |
+| Create | `tests/unit/engine/test_commencement.py` | Gate evaluation + context assembly tests |
+| Create | `tests/unit/plugins/infrastructure/test_probe_factory.py` | Probe factory tests |
+| Create | `tests/integration/engine/test_depends_on.py` | Two-pipeline dependency integration |
+| Create | `tests/integration/engine/test_commencement_gates.py` | Gate evaluation integration |
+
+---
+
+### Task 1: Config Models — `DependencyConfig`, `CommencementGateConfig`, `CollectionProbeConfig`
+
+**Files:**
+- Create: `src/elspeth/core/dependency_config.py`
+- Create: `tests/unit/core/test_dependency_config.py`
+
+- [ ] **Step 1: Write config validation tests**
+
+```python
+# tests/unit/core/test_dependency_config.py
+"""Tests for dependency, commencement gate, and collection probe config models."""
+
+from __future__ import annotations
+
+import pytest
+from pydantic import ValidationError
+
+from elspeth.core.dependency_config import (
+    CollectionProbeConfig,
+    CommencementGateConfig,
+    DependencyConfig,
+)
+
+
+class TestDependencyConfig:
+    def test_valid_config(self) -> None:
+        config = DependencyConfig(name="index_corpus", settings="./index.yaml")
+        assert config.name == "index_corpus"
+        assert config.settings == "./index.yaml"
+
+    def test_frozen(self) -> None:
+        config = DependencyConfig(name="x", settings="./x.yaml")
+        with pytest.raises(ValidationError):
+            config.name = "y"  # type: ignore[misc]
+
+    def test_rejects_extra_fields(self) -> None:
+        with pytest.raises(ValidationError, match="extra"):
+            DependencyConfig(name="x", settings="./x.yaml", extra="bad")  # type: ignore[call-arg]
+
+
+class TestCommencementGateConfig:
+    def test_valid_config(self) -> None:
+        config = CommencementGateConfig(
+            name="corpus_ready",
+            condition="collections['test']['count'] > 0",
+        )
+        assert config.name == "corpus_ready"
+        assert config.on_fail == "abort"  # default
+
+    def test_on_fail_default_abort(self) -> None:
+        config = CommencementGateConfig(name="x", condition="True")
+        assert config.on_fail == "abort"
+
+    def test_rejects_invalid_on_fail(self) -> None:
+        with pytest.raises(ValidationError):
+            CommencementGateConfig(name="x", condition="True", on_fail="warn")  # type: ignore[arg-type]
+
+
+class TestCollectionProbeConfig:
+    def test_valid_config(self) -> None:
+        config = CollectionProbeConfig(
+            collection="science-facts",
+            provider="chroma",
+            provider_config={
+                "mode": "persistent",
+                "persist_directory": "./chroma_data",
+            },
+        )
+        assert config.collection == "science-facts"
+        assert config.provider == "chroma"
+
+    def test_rejects_extra_fields(self) -> None:
+        with pytest.raises(ValidationError, match="extra"):
+            CollectionProbeConfig(
+                collection="x", provider="chroma", provider_config={}, extra="bad"  # type: ignore[call-arg]
+            )
+```
+
+- [ ] **Step 2: Run test to verify it fails**
+
+Run: `.venv/bin/python -m pytest tests/unit/core/test_dependency_config.py -v`
+Expected: FAIL — module not found
+
+- [ ] **Step 3: Implement config models**
+
+```python
+# src/elspeth/core/dependency_config.py
+"""Configuration models for pipeline dependencies and commencement gates."""
+
+from __future__ import annotations
+
+from collections.abc import Mapping
+from dataclasses import dataclass
+from typing import Any, Literal
+
+from pydantic import BaseModel, ConfigDict, Field
+
+from elspeth.contracts.freeze import freeze_fields
+
+
+class DependencyConfig(BaseModel):
+    """Declares a pipeline that must run before this one."""
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    name: str = Field(description="Unique label for this dependency")
+    settings: str = Field(description="Path to dependency pipeline settings file")
+
+
+class CommencementGateConfig(BaseModel):
+    """Declares a go/no-go condition evaluated before the pipeline starts."""
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    name: str = Field(description="Unique label for this gate")
+    condition: str = Field(description="Expression evaluated against pre-flight context")
+    on_fail: Literal["abort"] = Field(
+        default="abort",
+        description="Action on failure (only 'abort' supported initially)",
+    )
+
+
+class CollectionProbeConfig(BaseModel):
+    """Declares a vector store collection to probe before gate evaluation."""
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    collection: str = Field(description="Collection name to probe")
+    provider: str = Field(description="Provider type (e.g., 'chroma')")
+    provider_config: dict[str, Any] = Field(
+        default_factory=dict,
+        description="Provider-specific connection config",
+    )
+
+
+@dataclass(frozen=True, slots=True)
+class DependencyRunResult:
+    """Result of a successful dependency pipeline run."""
+
+    name: str
+    run_id: str
+    settings_hash: str
+    duration_ms: int
+    indexed_at: str  # ISO 8601 timestamp
+
+
+@dataclass(frozen=True, slots=True)
+class GateResult:
+    """Result of a successful commencement gate evaluation."""
+
+    name: str
+    condition: str
+    result: bool
+    context_snapshot: Mapping[str, Any]
+
+    def __post_init__(self) -> None:
+        freeze_fields(self, "context_snapshot")
+```
+
+- [ ] **Step 4: Run tests to verify they pass**
+
+Run: `.venv/bin/python -m pytest tests/unit/core/test_dependency_config.py -v`
+Expected: PASS
+
+- [ ] **Step 5: Commit**
+
+```bash
+git add src/elspeth/core/dependency_config.py tests/unit/core/test_dependency_config.py
+git commit -m "feat: add DependencyConfig, CommencementGateConfig, CollectionProbeConfig, result dataclasses"
+```
+
+---
+
+### Task 2: `DependencyRunResult` and `GateResult` Tests
+
+**Files:**
+- Modify: `tests/unit/core/test_dependency_config.py`
+
+- [ ] **Step 1: Write tests for result dataclasses**
+
+```python
+# Append to tests/unit/core/test_dependency_config.py
+from types import MappingProxyType
+
+from elspeth.core.dependency_config import DependencyRunResult, GateResult
+
+
+class TestDependencyRunResult:
+    def test_construction(self) -> None:
+        result = DependencyRunResult(
+            name="index_corpus",
+            run_id="abc-123",
+            settings_hash="sha256:deadbeef",
+            duration_ms=4520,
+            indexed_at="2026-03-25T14:02:33Z",
+        )
+        assert result.name == "index_corpus"
+        assert result.run_id == "abc-123"
+        assert result.indexed_at == "2026-03-25T14:02:33Z"
+
+    def test_frozen(self) -> None:
+        result = DependencyRunResult(
+            name="x", run_id="y", settings_hash="z", duration_ms=0, indexed_at="t"
+        )
+        with pytest.raises(AttributeError):
+            result.name = "other"  # type: ignore[misc]
+
+
+class TestGateResult:
+    def test_construction(self) -> None:
+        snapshot = {"collections": {"test": {"count": 10, "reachable": True}}}
+        result = GateResult(
+            name="corpus_ready",
+            condition="collections['test']['count'] > 0",
+            result=True,
+            context_snapshot=snapshot,
+        )
+        assert result.name == "corpus_ready"
+        assert result.result is True
+
+    def test_context_snapshot_is_deep_frozen(self) -> None:
+        snapshot = {"collections": {"test": {"count": 10}}}
+        result = GateResult(
+            name="x", condition="True", result=True, context_snapshot=snapshot
+        )
+        assert isinstance(result.context_snapshot, MappingProxyType)
+        # Nested dict should also be frozen
+        assert isinstance(result.context_snapshot["collections"], MappingProxyType)
+
+    def test_frozen(self) -> None:
+        result = GateResult(
+            name="x", condition="True", result=True, context_snapshot={}
+        )
+        with pytest.raises(AttributeError):
+            result.name = "other"  # type: ignore[misc]
+```
+
+- [ ] **Step 2: Run tests**
+
+Run: `.venv/bin/python -m pytest tests/unit/core/test_dependency_config.py -v`
+Expected: PASS
+
+- [ ] **Step 3: Commit**
+
+```bash
+git add tests/unit/core/test_dependency_config.py
+git commit -m "test: add DependencyRunResult and GateResult dataclass tests"
+```
+
+---
+
+### Task 3: Add Fields to `ElspethSettings`
+
+**Files:**
+- Modify: `src/elspeth/core/config.py`
+
+- [ ] **Step 1: Run existing config tests to establish baseline**
+
+Run: `.venv/bin/python -m pytest tests/unit/core/ -v -q`
+Expected: PASS
+
+- [ ] **Step 2: Add new optional fields to `ElspethSettings`**
+
+In `src/elspeth/core/config.py`, after the `gates` field (around line 1267), add:
+
+```python
+from elspeth.core.dependency_config import (
+    CollectionProbeConfig,
+    CommencementGateConfig,
+    DependencyConfig,
+)
+
+# Inside ElspethSettings class, after gates field:
+depends_on: list[DependencyConfig] = Field(
+    default_factory=list,
+    max_length=20,
+    description="Pipeline dependencies — run these before the main pipeline",
+)
+commencement_gates: list[CommencementGateConfig] = Field(
+    default_factory=list,
+    max_length=20,
+    description="Go/no-go conditions evaluated after dependencies complete",
+)
+collection_probes: list[CollectionProbeConfig] = Field(
+    default_factory=list,
+    max_length=20,
+    description="Vector store collections to probe for gate context",
+)
+```
+
+- [ ] **Step 3: Run config tests to verify no regressions**
+
+Run: `.venv/bin/python -m pytest tests/unit/core/ -v -q`
+Expected: PASS (new fields are optional with defaults, so existing tests still pass)
+
+- [ ] **Step 4: Commit**
+
+```bash
+git add src/elspeth/core/config.py
+git commit -m "feat: add depends_on, commencement_gates, collection_probes to ElspethSettings"
+```
+
+---
+
+### Task 4: Dependency Resolver — Cycle Detection and Depth Limit
+
+**Files:**
+- Create: `src/elspeth/engine/dependency_resolver.py`
+- Create: `tests/unit/engine/test_dependency_resolver.py`
+
+- [ ] **Step 1: Write tests for cycle detection and depth limit**
+
+```python
+# tests/unit/engine/test_dependency_resolver.py
+"""Tests for pipeline dependency resolution."""
+
+from __future__ import annotations
+
+from pathlib import Path
+from typing import Any
+from unittest.mock import MagicMock, patch
+
+import pytest
+
+from elspeth.engine.dependency_resolver import (
+    detect_cycles,
+    resolve_dependencies,
+)
+from elspeth.contracts.errors import DependencyFailedError
+from elspeth.core.dependency_config import DependencyConfig
+
+
+class TestCycleDetection:
+    def test_no_cycle_returns_none(self, tmp_path: Path) -> None:
+        # A -> B, no cycle
+        a = tmp_path / "a.yaml"
+        b = tmp_path / "b.yaml"
+        b.write_text("source:\n  plugin: null_source\nsinks:\n  out:\n    plugin: json_sink\nlandscape:\n  url: sqlite:///test.db\n")
+        a.write_text(f"depends_on:\n  - name: b\n    settings: {b}\nsource:\n  plugin: null_source\nsinks:\n  out:\n    plugin: json_sink\nlandscape:\n  url: sqlite:///test.db\n")
+
+        # Should not raise
+        detect_cycles(a)
+
+    def test_self_loop_detected(self, tmp_path: Path) -> None:
+        a = tmp_path / "a.yaml"
+        a.write_text(f"depends_on:\n  - name: self\n    settings: {a}\nsource:\n  plugin: null_source\nsinks:\n  out:\n    plugin: json_sink\n")
+
+        with pytest.raises(ValueError, match="[Cc]ircular|[Cc]ycle"):
+            detect_cycles(a)
+
+    def test_two_hop_cycle_detected(self, tmp_path: Path) -> None:
+        a = tmp_path / "a.yaml"
+        b = tmp_path / "b.yaml"
+        a.write_text(f"depends_on:\n  - name: b\n    settings: {b}\nsource:\n  plugin: null_source\nsinks:\n  out:\n    plugin: json_sink\n")
+        b.write_text(f"depends_on:\n  - name: a\n    settings: {a}\nsource:\n  plugin: null_source\nsinks:\n  out:\n    plugin: json_sink\n")
+
+        with pytest.raises(ValueError, match="[Cc]ircular|[Cc]ycle"):
+            detect_cycles(a)
+
+    def test_three_hop_cycle_detected(self, tmp_path: Path) -> None:
+        a = tmp_path / "a.yaml"
+        b = tmp_path / "b.yaml"
+        c = tmp_path / "c.yaml"
+        a.write_text(f"depends_on:\n  - name: b\n    settings: {b}\nsource:\n  plugin: null_source\nsinks:\n  out:\n    plugin: json_sink\n")
+        b.write_text(f"depends_on:\n  - name: c\n    settings: {c}\nsource:\n  plugin: null_source\nsinks:\n  out:\n    plugin: json_sink\n")
+        c.write_text(f"depends_on:\n  - name: a\n    settings: {a}\nsource:\n  plugin: null_source\nsinks:\n  out:\n    plugin: json_sink\n")
+
+        with pytest.raises(ValueError, match="[Cc]ircular|[Cc]ycle"):
+            detect_cycles(a)
+
+    def test_depth_limit_exceeded(self, tmp_path: Path) -> None:
+        # Create a chain: a -> b -> c -> d (depth 4, exceeds limit of 3)
+        files = {}
+        for name in ["d", "c", "b", "a"]:
+            f = tmp_path / f"{name}.yaml"
+            files[name] = f
+
+        files["d"].write_text("source:\n  plugin: null_source\nsinks:\n  out:\n    plugin: json_sink\n")
+        files["c"].write_text(f"depends_on:\n  - name: d\n    settings: {files['d']}\nsource:\n  plugin: null_source\nsinks:\n  out:\n    plugin: json_sink\n")
+        files["b"].write_text(f"depends_on:\n  - name: c\n    settings: {files['c']}\nsource:\n  plugin: null_source\nsinks:\n  out:\n    plugin: json_sink\n")
+        files["a"].write_text(f"depends_on:\n  - name: b\n    settings: {files['b']}\nsource:\n  plugin: null_source\nsinks:\n  out:\n    plugin: json_sink\n")
+
+        with pytest.raises(ValueError, match="[Dd]epth"):
+            detect_cycles(files["a"], max_depth=3)
+
+    def test_uses_resolved_paths(self, tmp_path: Path) -> None:
+        """Symlinks resolve to the same canonical path."""
+        real = tmp_path / "real.yaml"
+        real.write_text("source:\n  plugin: null_source\nsinks:\n  out:\n    plugin: json_sink\n")
+        link = tmp_path / "link.yaml"
+        link.symlink_to(real)
+
+        main = tmp_path / "main.yaml"
+        main.write_text(f"depends_on:\n  - name: dep\n    settings: {link}\nsource:\n  plugin: null_source\nsinks:\n  out:\n    plugin: json_sink\n")
+
+        # Should not raise — link resolves to real, no cycle
+        detect_cycles(main)
+```
+
+- [ ] **Step 2: Run tests to verify they fail**
+
+Run: `.venv/bin/python -m pytest tests/unit/engine/test_dependency_resolver.py -v`
+Expected: FAIL — module not found
+
+- [ ] **Step 3: Implement cycle detection**
+
+```python
+# src/elspeth/engine/dependency_resolver.py
+"""Pipeline dependency resolution — cycle detection, depth limiting, and execution."""
+
+from __future__ import annotations
+
+from pathlib import Path
+from typing import Any
+
+import yaml
+
+
+def _load_depends_on(settings_path: Path) -> list[dict[str, str]]:
+    """Load only the depends_on key from a settings file."""
+    with settings_path.open() as f:
+        data = yaml.safe_load(f) or {}
+    return data.get("depends_on", [])
+
+
+def detect_cycles(
+    settings_path: Path,
+    *,
+    max_depth: int = 3,
+    _visited: set[str] | None = None,
+    _stack: list[str] | None = None,
+    _depth: int = 0,
+) -> None:
+    """Detect circular dependencies and enforce depth limit.
+
+    Uses DFS on canonicalized (resolved) paths.
+    Raises ValueError on cycle or depth limit violation.
+    """
+    canonical = str(settings_path.resolve())
+    visited = _visited if _visited is not None else set()
+    stack = _stack if _stack is not None else []
+
+    if _depth > max_depth:
+        raise ValueError(
+            f"Dependency depth limit exceeded ({max_depth}). "
+            f"Chain: {' -> '.join(stack)} -> {canonical}"
+        )
+
+    if canonical in stack:
+        cycle_start = stack.index(canonical)
+        cycle_path = stack[cycle_start:] + [canonical]
+        raise ValueError(
+            f"Circular dependency detected: {' -> '.join(cycle_path)}"
+        )
+
+    if canonical in visited:
+        return  # Already fully explored, no cycle through this node
+
+    stack.append(canonical)
+    deps = _load_depends_on(settings_path)
+
+    for dep in deps:
+        dep_path = (settings_path.parent / dep["settings"]).resolve()
+        detect_cycles(
+            Path(dep_path),
+            max_depth=max_depth,
+            _visited=visited,
+            _stack=stack,
+            _depth=_depth + 1,
+        )
+
+    stack.pop()
+    visited.add(canonical)
+```
+
+- [ ] **Step 4: Run tests to verify they pass**
+
+Run: `.venv/bin/python -m pytest tests/unit/engine/test_dependency_resolver.py -v`
+Expected: PASS
+
+- [ ] **Step 5: Commit**
+
+```bash
+git add src/elspeth/engine/dependency_resolver.py tests/unit/engine/test_dependency_resolver.py
+git commit -m "feat: add dependency cycle detection with depth limit and path canonicalization"
+```
+
+---
+
+### Task 5: `bootstrap_and_run()` Extraction
+
+**Files:**
+- Create: `src/elspeth/engine/bootstrap.py`
+- Modify: `src/elspeth/cli.py`
+
+This is the highest-risk task. The CLI's `_execute_pipeline_with_instances()` function (cli.py lines 923-1009) contains the full pipeline bootstrap sequence. We need to extract the core into a reusable function.
+
+- [ ] **Step 1: Run existing CLI and engine tests to establish baseline**
+
+Run: `.venv/bin/python -m pytest tests/unit/engine/ tests/integration/engine/ -v -q`
+Expected: PASS
+
+- [ ] **Step 2: Create `bootstrap_and_run()` in `src/elspeth/engine/bootstrap.py`**
+
+Read `cli.py` `_execute_pipeline_with_instances()` carefully (lines 923-1009). The function:
+1. Constructs `LandscapeDB.from_url()`
+2. Creates `FilesystemPayloadStore()`
+3. Calls `_orchestrator_context()` to get orchestrator + pipeline config
+4. Calls `orchestrator.run()`
+
+Extract the core sequence into `bootstrap_and_run(settings_path: Path) -> RunResult`. This function:
+- Loads settings from the path
+- Instantiates plugins via the same factory the CLI uses
+- Constructs LandscapeDB, PayloadStore, Orchestrator
+- Calls `orchestrator.run()`
+- Returns `RunResult`
+
+**Important:** Read the CLI code first. Don't guess at the construction sequence. The exact objects and their construction order matter.
+
+- [ ] **Step 3: Refactor CLI to call `bootstrap_and_run()`**
+
+Modify `_execute_pipeline_with_instances()` to delegate to `bootstrap_and_run()`. The CLI wrapper adds output formatting and error presentation that `bootstrap_and_run()` doesn't need.
+
+- [ ] **Step 4: Run all tests to verify no regressions**
+
+Run: `.venv/bin/python -m pytest tests/ -x -q`
+Expected: PASS
+
+- [ ] **Step 5: Commit**
+
+```bash
+git add src/elspeth/engine/bootstrap.py src/elspeth/cli.py
+git commit -m "refactor: extract bootstrap_and_run() from CLI for dependency resolution"
+```
+
+---
+
+### Task 6: Dependency Resolution Execution
+
+**Files:**
+- Modify: `src/elspeth/engine/dependency_resolver.py`
+- Modify: `tests/unit/engine/test_dependency_resolver.py`
+
+- [ ] **Step 1: Write tests for `resolve_dependencies()`**
+
+```python
+# Append to tests/unit/engine/test_dependency_resolver.py
+from unittest.mock import MagicMock, patch
+from elspeth.core.dependency_config import DependencyConfig, DependencyRunResult
+
+
+class TestResolveDependencies:
+    def test_single_dependency_success(self, tmp_path: Path) -> None:
+        dep = DependencyConfig(name="index", settings="./index.yaml")
+        parent_path = tmp_path / "query.yaml"
+
+        mock_result = MagicMock()
+        mock_result.status.name = "COMPLETED"
+        mock_result.run_id = "dep-run-123"
+
+        with patch("elspeth.engine.dependency_resolver.bootstrap_and_run") as mock_boot:
+            mock_boot.return_value = mock_result
+            results = resolve_dependencies(
+                depends_on=[dep],
+                parent_settings_path=parent_path,
+            )
+
+        assert len(results) == 1
+        assert results[0].name == "index"
+        assert results[0].run_id == "dep-run-123"
+
+    def test_dependency_failure_raises(self, tmp_path: Path) -> None:
+        dep = DependencyConfig(name="index", settings="./index.yaml")
+        parent_path = tmp_path / "query.yaml"
+
+        mock_result = MagicMock()
+        mock_result.status.name = "FAILED"
+        mock_result.run_id = "dep-run-fail"
+
+        with patch("elspeth.engine.dependency_resolver.bootstrap_and_run") as mock_boot:
+            mock_boot.return_value = mock_result
+            with pytest.raises(DependencyFailedError, match="index"):
+                resolve_dependencies(
+                    depends_on=[dep],
+                    parent_settings_path=parent_path,
+                )
+
+    def test_keyboard_interrupt_propagated(self, tmp_path: Path) -> None:
+        dep = DependencyConfig(name="index", settings="./index.yaml")
+        parent_path = tmp_path / "query.yaml"
+
+        with patch("elspeth.engine.dependency_resolver.bootstrap_and_run") as mock_boot:
+            mock_boot.side_effect = KeyboardInterrupt()
+            with pytest.raises(KeyboardInterrupt):
+                resolve_dependencies(
+                    depends_on=[dep],
+                    parent_settings_path=parent_path,
+                )
+
+    def test_multiple_dependencies_sequential(self, tmp_path: Path) -> None:
+        deps = [
+            DependencyConfig(name="first", settings="./first.yaml"),
+            DependencyConfig(name="second", settings="./second.yaml"),
+        ]
+        parent_path = tmp_path / "main.yaml"
+        call_order = []
+
+        def track_calls(path: Path) -> MagicMock:
+            call_order.append(path.name)
+            result = MagicMock()
+            result.status.name = "COMPLETED"
+            result.run_id = f"run-{path.name}"
+            return result
+
+        with patch("elspeth.engine.dependency_resolver.bootstrap_and_run") as mock_boot:
+            mock_boot.side_effect = track_calls
+            resolve_dependencies(depends_on=deps, parent_settings_path=parent_path)
+
+        assert call_order == ["first.yaml", "second.yaml"]
+```
+
+- [ ] **Step 2: Run tests to verify they fail**
+
+Run: `.venv/bin/python -m pytest tests/unit/engine/test_dependency_resolver.py::TestResolveDependencies -v`
+Expected: FAIL — `resolve_dependencies` not found
+
+- [ ] **Step 3: Implement `resolve_dependencies()`**
+
+Add to `src/elspeth/engine/dependency_resolver.py`:
+
+```python
+import time
+from datetime import datetime, timezone
+
+from elspeth.contracts.errors import DependencyFailedError
+from elspeth.core.canonical import canonical_json
+from elspeth.core.dependency_config import DependencyConfig, DependencyRunResult
+from elspeth.engine.bootstrap import bootstrap_and_run
+
+
+def resolve_dependencies(
+    *,
+    depends_on: list[DependencyConfig],
+    parent_settings_path: Path,
+) -> list[DependencyRunResult]:
+    """Run dependency pipelines sequentially. Raises on failure.
+
+    KeyboardInterrupt is propagated as-is (not wrapped in DependencyFailedError).
+    """
+    results = []
+    for dep in depends_on:
+        dep_path = (parent_settings_path.parent / dep.settings).resolve()
+
+        start_ms = time.monotonic_ns() // 1_000_000
+        run_result = bootstrap_and_run(dep_path)
+        duration_ms = (time.monotonic_ns() // 1_000_000) - start_ms
+
+        if run_result.status.name != "COMPLETED":
+            raise DependencyFailedError(
+                dependency_name=dep.name,
+                run_id=run_result.run_id,
+                reason=f"Dependency pipeline finished with status: {run_result.status.name}",
+            )
+
+        results.append(DependencyRunResult(
+            name=dep.name,
+            run_id=run_result.run_id,
+            settings_hash=_hash_settings_file(dep_path),
+            duration_ms=duration_ms,
+            indexed_at=datetime.now(timezone.utc).isoformat(),
+        ))
+    return results
+
+
+def _hash_settings_file(path: Path) -> str:
+    """SHA-256 hash of the canonical JSON representation of settings."""
+    import hashlib
+    with path.open() as f:
+        data = yaml.safe_load(f)
+    canonical = canonical_json(data)
+    return f"sha256:{hashlib.sha256(canonical.encode()).hexdigest()}"
+```
+
+- [ ] **Step 4: Run tests**
+
+Run: `.venv/bin/python -m pytest tests/unit/engine/test_dependency_resolver.py -v`
+Expected: PASS
+
+- [ ] **Step 5: Commit**
+
+```bash
+git add src/elspeth/engine/dependency_resolver.py tests/unit/engine/test_dependency_resolver.py
+git commit -m "feat: implement resolve_dependencies() with sequential execution and failure propagation"
+```
+
+---
+
+### Task 7: Commencement Gate Evaluation
+
+**Files:**
+- Create: `src/elspeth/engine/commencement.py`
+- Create: `tests/unit/engine/test_commencement.py`
+
+- [ ] **Step 1: Write gate evaluation tests**
+
+```python
+# tests/unit/engine/test_commencement.py
+"""Tests for commencement gate evaluation."""
+
+from __future__ import annotations
+
+from types import MappingProxyType
+
+import pytest
+
+from elspeth.contracts.errors import CommencementGateFailedError
+from elspeth.core.dependency_config import CommencementGateConfig, GateResult
+from elspeth.engine.commencement import (
+    build_preflight_context,
+    evaluate_commencement_gates,
+)
+
+
+class TestEvaluateCommencementGates:
+    def test_passing_gate(self) -> None:
+        gates = [
+            CommencementGateConfig(
+                name="ready",
+                condition="collections['test']['count'] > 0",
+            )
+        ]
+        context = {
+            "dependency_runs": {},
+            "collections": {"test": {"count": 10, "reachable": True}},
+            "env": {"HOME": "/home/user"},
+        }
+        results = evaluate_commencement_gates(gates, context)
+        assert len(results) == 1
+        assert results[0].result is True
+        assert results[0].name == "ready"
+
+    def test_failing_gate_raises(self) -> None:
+        gates = [
+            CommencementGateConfig(
+                name="ready",
+                condition="collections['test']['count'] > 0",
+            )
+        ]
+        context = {
+            "dependency_runs": {},
+            "collections": {"test": {"count": 0, "reachable": False}},
+            "env": {},
+        }
+        with pytest.raises(CommencementGateFailedError, match="ready"):
+            evaluate_commencement_gates(gates, context)
+
+    def test_expression_error_raises(self) -> None:
+        gates = [
+            CommencementGateConfig(
+                name="bad",
+                condition="collections['missing']['count'] > 0",
+            )
+        ]
+        context = {
+            "dependency_runs": {},
+            "collections": {},
+            "env": {},
+        }
+        with pytest.raises(CommencementGateFailedError, match="bad"):
+            evaluate_commencement_gates(gates, context)
+
+    def test_snapshot_excludes_env(self) -> None:
+        gates = [
+            CommencementGateConfig(
+                name="ready",
+                condition="collections['test']['count'] > 0",
+            )
+        ]
+        context = {
+            "dependency_runs": {},
+            "collections": {"test": {"count": 5, "reachable": True}},
+            "env": {"SECRET_KEY": "abc123"},
+        }
+        results = evaluate_commencement_gates(gates, context)
+        snapshot = results[0].context_snapshot
+        assert "env" not in snapshot
+        assert "SECRET_KEY" not in str(snapshot)
+
+    def test_snapshot_is_deep_frozen(self) -> None:
+        gates = [
+            CommencementGateConfig(
+                name="ready",
+                condition="collections['test']['count'] > 0",
+            )
+        ]
+        context = {
+            "dependency_runs": {},
+            "collections": {"test": {"count": 5, "reachable": True}},
+            "env": {},
+        }
+        results = evaluate_commencement_gates(gates, context)
+        assert isinstance(results[0].context_snapshot, MappingProxyType)
+
+
+class TestBuildPreflightContext:
+    def test_includes_all_sections(self) -> None:
+        context = build_preflight_context(
+            dependency_results={},
+            collection_probes={"test": {"count": 5, "reachable": True}},
+            env={"HOME": "/home"},
+        )
+        assert "dependency_runs" in context
+        assert "collections" in context
+        assert "env" in context
+```
+
+- [ ] **Step 2: Run tests to verify they fail**
+
+Run: `.venv/bin/python -m pytest tests/unit/engine/test_commencement.py -v`
+Expected: FAIL — module not found
+
+- [ ] **Step 3: Implement gate evaluation**
+
+```python
+# src/elspeth/engine/commencement.py
+"""Commencement gate evaluation — pre-flight go/no-go checks."""
+
+from __future__ import annotations
+
+import os
+from collections.abc import Mapping
+from typing import Any
+
+from elspeth.contracts.errors import CommencementGateFailedError
+from elspeth.contracts.freeze import deep_freeze
+from elspeth.core.dependency_config import CommencementGateConfig, GateResult
+from elspeth.core.expression_parser import ExpressionParser
+
+_GATE_ALLOWED_NAMES = ["collections", "dependency_runs", "env"]
+
+
+def build_preflight_context(
+    *,
+    dependency_results: dict[str, Any],
+    collection_probes: dict[str, Any],
+    env: dict[str, str] | None = None,
+) -> dict[str, Any]:
+    """Assemble the pre-flight context dict for gate expression evaluation."""
+    return {
+        "dependency_runs": dependency_results,
+        "collections": collection_probes,
+        "env": env if env is not None else dict(os.environ),
+    }
+
+
+def _build_audit_snapshot(context: dict[str, Any]) -> Mapping[str, Any]:
+    """Build a frozen context snapshot for audit, excluding env."""
+    snapshot = {
+        "dependency_runs": context["dependency_runs"],
+        "collections": context["collections"],
+    }
+    return deep_freeze(snapshot)
+
+
+def evaluate_commencement_gates(
+    gates: list[CommencementGateConfig],
+    context: dict[str, Any],
+) -> list[GateResult]:
+    """Evaluate gates sequentially. Raises CommencementGateFailedError on failure."""
+    frozen_context = deep_freeze(context)
+    audit_snapshot = _build_audit_snapshot(context)
+
+    results = []
+    for gate in gates:
+        try:
+            parser = ExpressionParser(
+                gate.condition,
+                allowed_names=_GATE_ALLOWED_NAMES,
+            )
+            passed = bool(parser.evaluate(frozen_context))
+        except CommencementGateFailedError:
+            raise
+        except Exception as exc:
+            raise CommencementGateFailedError(
+                gate_name=gate.name,
+                condition=gate.condition,
+                reason=f"Expression raised {type(exc).__name__}: {exc}",
+                context_snapshot=audit_snapshot,
+            ) from exc
+
+        if not passed:
+            raise CommencementGateFailedError(
+                gate_name=gate.name,
+                condition=gate.condition,
+                reason="Condition evaluated to falsy",
+                context_snapshot=audit_snapshot,
+            )
+
+        results.append(GateResult(
+            name=gate.name,
+            condition=gate.condition,
+            result=True,
+            context_snapshot=audit_snapshot,
+        ))
+    return results
+```
+
+- [ ] **Step 4: Run tests**
+
+Run: `.venv/bin/python -m pytest tests/unit/engine/test_commencement.py -v`
+Expected: PASS
+
+- [ ] **Step 5: Commit**
+
+```bash
+git add src/elspeth/engine/commencement.py tests/unit/engine/test_commencement.py
+git commit -m "feat: implement commencement gate evaluation with ExpressionParser and frozen snapshots"
+```
+
+---
+
+### Task 8: Collection Probe Factory
+
+**Files:**
+- Create: `src/elspeth/plugins/infrastructure/probe_factory.py`
+- Create: `tests/unit/plugins/infrastructure/test_probe_factory.py`
+
+- [ ] **Step 1: Write probe factory tests**
+
+```python
+# tests/unit/plugins/infrastructure/test_probe_factory.py
+"""Tests for collection probe factory."""
+
+from __future__ import annotations
+
+from unittest.mock import MagicMock, patch
+
+import pytest
+
+from elspeth.contracts.probes import CollectionProbe, CollectionReadinessResult
+from elspeth.core.dependency_config import CollectionProbeConfig
+from elspeth.plugins.infrastructure.probe_factory import build_collection_probes
+
+
+class TestBuildCollectionProbes:
+    def test_builds_chroma_probe(self) -> None:
+        configs = [
+            CollectionProbeConfig(
+                collection="test",
+                provider="chroma",
+                provider_config={"mode": "persistent", "persist_directory": "./data"},
+            )
+        ]
+        probes = build_collection_probes(configs)
+        assert len(probes) == 1
+        assert isinstance(probes[0], CollectionProbe)
+        assert probes[0].collection_name == "test"
+
+    def test_empty_configs_returns_empty(self) -> None:
+        assert build_collection_probes([]) == []
+
+    def test_unknown_provider_raises(self) -> None:
+        configs = [
+            CollectionProbeConfig(
+                collection="test",
+                provider="unknown_provider",
+                provider_config={},
+            )
+        ]
+        with pytest.raises(ValueError, match="unknown_provider"):
+            build_collection_probes(configs)
+```
+
+- [ ] **Step 2: Run tests to verify they fail**
+
+Run: `.venv/bin/python -m pytest tests/unit/plugins/infrastructure/test_probe_factory.py -v`
+Expected: FAIL — module not found
+
+- [ ] **Step 3: Implement probe factory**
+
+```python
+# src/elspeth/plugins/infrastructure/probe_factory.py
+"""Factory for constructing collection probes from explicit config declarations."""
+
+from __future__ import annotations
+
+from typing import Any
+
+from elspeth.contracts.probes import CollectionProbe, CollectionReadinessResult
+from elspeth.core.dependency_config import CollectionProbeConfig
+
+
+class ChromaCollectionProbe:
+    """Probes a ChromaDB collection for readiness."""
+
+    def __init__(self, collection: str, config: dict[str, Any]) -> None:
+        self.collection_name = collection
+        self._config = config
+
+    def probe(self) -> CollectionReadinessResult:
+        try:
+            import chromadb
+
+            mode = self._config.get("mode", "persistent")
+            if mode == "persistent":
+                client = chromadb.PersistentClient(
+                    path=self._config["persist_directory"]
+                )
+            else:
+                client = chromadb.HttpClient(
+                    host=self._config["host"],
+                    port=self._config.get("port", 8000),
+                    ssl=self._config.get("ssl", True),
+                )
+
+            try:
+                collection = client.get_collection(self.collection_name)
+                count = collection.count()
+                return CollectionReadinessResult(
+                    collection=self.collection_name,
+                    reachable=True,
+                    count=count,
+                    message=f"Collection '{self.collection_name}' has {count} documents"
+                    if count > 0
+                    else f"Collection '{self.collection_name}' is empty",
+                )
+            except Exception:
+                return CollectionReadinessResult(
+                    collection=self.collection_name,
+                    reachable=True,
+                    count=0,
+                    message=f"Collection '{self.collection_name}' not found",
+                )
+        except Exception:
+            return CollectionReadinessResult(
+                collection=self.collection_name,
+                reachable=False,
+                count=0,
+                message=f"Collection '{self.collection_name}' unreachable",
+            )
+
+
+_PROBE_REGISTRY: dict[str, type] = {
+    "chroma": ChromaCollectionProbe,
+}
+
+
+def build_collection_probes(
+    configs: list[CollectionProbeConfig],
+) -> list[CollectionProbe]:
+    """Construct probes from explicit config declarations."""
+    probes: list[CollectionProbe] = []
+    for config in configs:
+        probe_cls = _PROBE_REGISTRY.get(config.provider)
+        if probe_cls is None:
+            raise ValueError(
+                f"Unknown collection probe provider: {config.provider!r}. "
+                f"Available: {sorted(_PROBE_REGISTRY)}"
+            )
+        probes.append(probe_cls(config.collection, config.provider_config))
+    return probes
+```
+
+- [ ] **Step 4: Run tests**
+
+Run: `.venv/bin/python -m pytest tests/unit/plugins/infrastructure/test_probe_factory.py -v`
+Expected: PASS
+
+- [ ] **Step 5: Commit**
+
+```bash
+git add src/elspeth/plugins/infrastructure/probe_factory.py tests/unit/plugins/infrastructure/test_probe_factory.py
+git commit -m "feat: add collection probe factory with ChromaDB implementation"
+```
+
+---
+
+### Task 9: Orchestrator Integration — Wire Dependency + Gate Phases
+
+**Files:**
+- Modify: `src/elspeth/engine/orchestrator/core.py`
+
+This task wires the new phases into the orchestrator's `run()` method. The new phases execute **before** the existing database initialization phase.
+
+- [ ] **Step 1: Run full engine test suite to establish baseline**
+
+Run: `.venv/bin/python -m pytest tests/unit/engine/ tests/integration/engine/ -x -q`
+Expected: PASS
+
+- [ ] **Step 2: Add dependency + gate phases to orchestrator**
+
+In `src/elspeth/engine/orchestrator/core.py`, in the `run()` method (around line 1062), add a new phase before the database phase:
+
+```python
+# At the top of run(), before database initialization:
+from elspeth.engine.dependency_resolver import detect_cycles, resolve_dependencies
+from elspeth.engine.commencement import build_preflight_context, evaluate_commencement_gates
+from elspeth.plugins.infrastructure.probe_factory import build_collection_probes
+
+# Phase 0: Dependency resolution (if depends_on is configured)
+dependency_results = []
+if settings is not None and settings.depends_on:
+    # Cycle detection first (cheap, reads only depends_on keys)
+    detect_cycles(self._settings_path)
+
+    # Run dependencies sequentially
+    dependency_results = resolve_dependencies(
+        depends_on=settings.depends_on,
+        parent_settings_path=self._settings_path,
+    )
+
+# Phase 0.5: Commencement gates (if configured)
+gate_results = []
+if settings is not None and settings.commencement_gates:
+    # Assemble pre-flight context
+    probes = build_collection_probes(settings.collection_probes)
+    probe_results = {}
+    for probe in probes:
+        result = probe.probe()
+        probe_results[result.collection] = {
+            "reachable": result.reachable,
+            "count": result.count,
+        }
+
+    dep_run_dict = {
+        r.name: {"run_id": r.run_id, "duration_ms": r.duration_ms, "indexed_at": r.indexed_at}
+        for r in dependency_results
+    }
+
+    context = build_preflight_context(
+        dependency_results=dep_run_dict,
+        collection_probes=probe_results,
+    )
+    gate_results = evaluate_commencement_gates(settings.commencement_gates, context)
+
+# Include dependency/gate metadata in run record
+run_metadata = {}
+if dependency_results:
+    run_metadata["dependency_runs"] = [
+        {"name": r.name, "run_id": r.run_id, "settings_hash": r.settings_hash,
+         "duration_ms": r.duration_ms, "indexed_at": r.indexed_at}
+        for r in dependency_results
+    ]
+if gate_results:
+    run_metadata["commencement_gates"] = [
+        {"name": g.name, "condition": g.condition, "result": g.result,
+         "context_snapshot": dict(g.context_snapshot)}
+        for g in gate_results
+    ]
+```
+
+Read the existing `run()` method carefully to determine exactly where this code is inserted and how `run_metadata` flows into the run record. The existing `recorder.begin_run()` call likely accepts metadata — pass `run_metadata` there.
+
+**Note:** The orchestrator needs `self._settings_path` to resolve dependency paths. This may need to be threaded through from the CLI or stored during construction. Read the current code to determine the right approach.
+
+- [ ] **Step 3: Run all tests to verify no regressions**
+
+Run: `.venv/bin/python -m pytest tests/ -x -q`
+Expected: PASS
+
+- [ ] **Step 4: Commit**
+
+```bash
+git add src/elspeth/engine/orchestrator/core.py
+git commit -m "feat: wire dependency resolution and commencement gates into orchestrator run()"
+```
+
+---
+
+### Task 10: Type Checking, Linting, Full Verification
+
+**Files:** None new — verification only.
+
+- [ ] **Step 1: Run type checker on all new files**
+
+Run: `.venv/bin/python -m mypy src/elspeth/core/dependency_config.py src/elspeth/engine/dependency_resolver.py src/elspeth/engine/commencement.py src/elspeth/plugins/infrastructure/probe_factory.py`
+Expected: PASS
+
+- [ ] **Step 2: Run linter**
+
+Run: `.venv/bin/python -m ruff check src/elspeth/core/dependency_config.py src/elspeth/engine/dependency_resolver.py src/elspeth/engine/commencement.py src/elspeth/plugins/infrastructure/probe_factory.py`
+Expected: PASS
+
+- [ ] **Step 3: Run tier model enforcer**
+
+Run: `.venv/bin/python scripts/cicd/enforce_tier_model.py check --root src/elspeth --allowlist config/cicd/enforce_tier_model`
+Expected: PASS
+
+- [ ] **Step 4: Run full test suite**
+
+Run: `.venv/bin/python -m pytest tests/ -x -q`
+Expected: PASS
+
+- [ ] **Step 5: Commit if any fixes needed**
+
+```bash
+git add -A
+git commit -m "fix: address type/lint/tier issues in dependency and gate implementation"
+```
