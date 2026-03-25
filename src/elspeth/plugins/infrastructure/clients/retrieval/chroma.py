@@ -26,6 +26,7 @@ from pydantic import BaseModel, field_validator, model_validator
 
 from elspeth.contracts.call_data import RawCallPayload
 from elspeth.contracts.enums import CallStatus, CallType
+from elspeth.contracts.probes import CollectionReadinessResult
 from elspeth.plugins.infrastructure.clients.retrieval.base import RetrievalError
 from elspeth.plugins.infrastructure.clients.retrieval.connection import ChromaConnectionConfig
 from elspeth.plugins.infrastructure.clients.retrieval.types import RetrievalChunk
@@ -276,6 +277,34 @@ class ChromaSearchProvider:
             return 1.0 / (1.0 + distance)
         else:  # ip
             return max(0.0, min(1.0, 1.0 - distance))
+
+    def check_readiness(self) -> CollectionReadinessResult:
+        """Check that the ChromaDB collection exists and has documents.
+
+        Called during on_start() AFTER provider construction. self._collection
+        is always set by __init__ (which calls get_or_create_collection).
+        If __init__ fails, the provider doesn't exist and this method is
+        never called.
+        """
+        collection_name = self._config.collection
+
+        try:
+            count = self._collection.count()
+            return CollectionReadinessResult(
+                collection=collection_name,
+                reachable=True,
+                count=count,
+                message=(
+                    f"Collection '{collection_name}' has {count} documents" if count > 0 else f"Collection '{collection_name}' is empty"
+                ),
+            )
+        except Exception as exc:
+            return CollectionReadinessResult(
+                collection=collection_name,
+                reachable=False,
+                count=0,
+                message=f"Collection '{collection_name}' unreachable: {type(exc).__name__}: {exc}",
+            )
 
     def close(self) -> None:
         pass

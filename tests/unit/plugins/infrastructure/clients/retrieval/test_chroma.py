@@ -606,3 +606,67 @@ class TestDocTypeValidation:
             assert all(isinstance(c.content, str) for c in chunks)
             assert len(chunks) == 1
             assert chunks[0].content == "real doc"
+
+
+class TestChromaSearchProviderReadiness:
+    """Tests for ChromaSearchProvider.check_readiness()."""
+
+    def _make_provider(self, documents=None):
+        unique_name = f"tcr-{uuid.uuid4().hex[:12]}"
+        config = ChromaSearchProviderConfig(
+            collection=unique_name,
+            mode="ephemeral",
+            distance_function="cosine",
+        )
+        provider = ChromaSearchProvider(config=config)
+
+        if documents:
+            provider._collection.add(
+                documents=[d["content"] for d in documents],
+                ids=[d["id"] for d in documents],
+            )
+
+        return provider
+
+    def test_collection_with_documents_is_ready(self) -> None:
+        """Collection exists and has documents."""
+        from elspeth.contracts.probes import CollectionReadinessResult
+
+        provider = self._make_provider(
+            documents=[
+                {"id": "doc1", "content": "First document"},
+                {"id": "doc2", "content": "Second document"},
+            ]
+        )
+
+        result = provider.check_readiness()
+
+        assert isinstance(result, CollectionReadinessResult)
+        assert result.reachable is True
+        assert result.count == 2
+        assert "2 documents" in result.message
+
+    def test_empty_collection_is_not_ready(self) -> None:
+        """Collection exists but is empty."""
+        provider = self._make_provider()
+
+        result = provider.check_readiness()
+
+        assert result.reachable is True
+        assert result.count == 0
+        assert "empty" in result.message
+
+    def test_connection_error(self) -> None:
+        """ChromaDB count() fails — reports unreachable with error details."""
+        from unittest.mock import MagicMock
+
+        provider = self._make_provider()
+        mock_collection = MagicMock()
+        mock_collection.count.side_effect = Exception("Connection refused")
+        provider._collection = mock_collection
+
+        result = provider.check_readiness()
+
+        assert result.reachable is False
+        assert result.count == 0
+        assert "Connection refused" in result.message

@@ -300,12 +300,12 @@ allow_hits:
   reason: Optional ChromaDB provider registration — ImportError means chromadb is not installed ([rag] extra absent); provider is silently omitted from registry
   safety: Unknown provider raises ValueError at config validation time with list of available providers; no silent data loss
   expires: null
-- key: plugins/infrastructure/clients/retrieval/chroma.py:R1:ChromaSearchProvider:__init__:fp=ddbdc23899a3b4d5
+- key: plugins/infrastructure/clients/retrieval/chroma.py:R1:ChromaSearchProvider:__init__:fp=3b96c13fababf5b4
   owner: feature
   reason: ChromaDB collection metadata is persisted external data (Tier 3) — .get() safely detects distance_function mismatch on pre-existing collections without crashing on absent key
   safety: Missing key yields None (no mismatch detected — safe); present key with wrong value raises RetrievalError immediately
   expires: null
-- key: plugins/infrastructure/clients/retrieval/chroma.py:R5:ChromaSearchProvider:search:fp=520c9510a9f6861d
+- key: plugins/infrastructure/clients/retrieval/chroma.py:R5:ChromaSearchProvider:search:fp=2bdf19e04ce79d90
   owner: bugfix
   reason: Tier 3 boundary type check — ChromaDB SDK may return non-string documents from corrupt index; isinstance guards pipeline from non-string content
   safety: Non-string documents are skipped (continue); only validated str content enters pipeline as Tier 2
@@ -375,15 +375,20 @@ allow_hits:
   reason: Azure AI Search API response metadata coercion at Tier 3 boundary — isinstance check converts non-primitive types to str for JSON serializability
   safety: Non-serializable types coerced to str; RetrievalChunk validates metadata JSON-serializability at construction
   expires: null
-- key: plugins/infrastructure/clients/retrieval/chroma.py:R5:ChromaSearchProvider:search:fp=0628efa2bbd44166
+- key: plugins/infrastructure/clients/retrieval/chroma.py:R5:ChromaSearchProvider:search:fp=9c8adbd251d61ac3
   owner: bugfix
   reason: Offensive type guard — ChromaDB is our infrastructure, not external API; non-numeric distance indicates index corruption or SDK bug
   safety: Raises RetrievalError immediately (crash) — not silently skipped
   expires: null
-- key: plugins/infrastructure/clients/retrieval/chroma.py:R5:ChromaSearchProvider:search:fp=7970b57c19a1600f
+- key: plugins/infrastructure/clients/retrieval/chroma.py:R5:ChromaSearchProvider:search:fp=a36738ef1d0de1df
   owner: bugfix
   reason: Offensive type guard — rejects non-numeric distance types with crash; corrupt ChromaDB index must not produce silent wrong results
   safety: Raises RetrievalError immediately (crash) — not silently skipped
+  expires: null
+- key: plugins/infrastructure/clients/retrieval/chroma.py:R4:ChromaSearchProvider:check_readiness:fp=ed76d5041ad924b0
+  owner: feature
+  reason: Startup probe must report unreachable collection, not crash — any exception from count() is a valid probe result (connection refused, auth failure, etc.)
+  safety: Returns CollectionReadinessResult with reachable=False and exception details; caller (on_start) raises RetrievalNotReadyError
   expires: null
 - key: plugins/sinks/chroma_sink.py:R1:ChromaSink:write:fp=4c8d9f28ef5c70ba
   owner: feature
