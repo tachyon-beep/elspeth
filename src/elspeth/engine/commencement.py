@@ -8,7 +8,7 @@ from typing import Any
 
 from elspeth.contracts.errors import CommencementGateFailedError
 from elspeth.contracts.freeze import deep_freeze
-from elspeth.core.dependency_config import CommencementGateConfig, GateResult
+from elspeth.core.dependency_config import CommencementGateConfig, CommencementGateResult
 from elspeth.core.expression_parser import ExpressionParser
 
 _GATE_ALLOWED_NAMES = ["collections", "dependency_runs", "env"]
@@ -20,7 +20,13 @@ def build_preflight_context(
     collection_probes: dict[str, Any],
     env: dict[str, str] | None = None,
 ) -> dict[str, Any]:
-    """Assemble the pre-flight context dict for gate expression evaluation."""
+    """Assemble the pre-flight context dict for gate expression evaluation.
+
+    Returns a namespace dict with three keys accessible in gate expressions:
+    - ``dependency_runs``: {name: {run_id, duration_ms, indexed_at}} for each dependency
+    - ``collections``: {name: {reachable, count}} for each probed collection
+    - ``env``: operator environment variables (Tier 3 — defaults to os.environ)
+    """
     return {
         "dependency_runs": dependency_results,
         "collections": collection_probes,
@@ -47,7 +53,7 @@ def _build_audit_snapshot(context: dict[str, Any]) -> Mapping[str, Any]:
 def evaluate_commencement_gates(
     gates: list[CommencementGateConfig],
     context: dict[str, Any],
-) -> list[GateResult]:
+) -> list[CommencementGateResult]:
     """Evaluate gates sequentially. Raises CommencementGateFailedError on failure.
 
     Context must be a namespace dict with keys matching _GATE_ALLOWED_NAMES.
@@ -55,9 +61,10 @@ def evaluate_commencement_gates(
     """
     # Deep-freeze entire context for expression evaluation (Tier 3 boundary for env)
     frozen_context = deep_freeze(context)
-    audit_snapshot = _build_audit_snapshot(context)
+    # Build audit snapshot from frozen context — not mutable original (TOCTOU)
+    audit_snapshot = _build_audit_snapshot(frozen_context)
 
-    results: list[GateResult] = []
+    results: list[CommencementGateResult] = []
     for gate in gates:
         try:
             parser = ExpressionParser(
@@ -84,7 +91,7 @@ def evaluate_commencement_gates(
             )
 
         results.append(
-            GateResult(
+            CommencementGateResult(
                 name=gate.name,
                 condition=gate.condition,
                 result=True,

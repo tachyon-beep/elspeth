@@ -4,11 +4,11 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 from dataclasses import dataclass
-from typing import Any, Literal
+from typing import Any
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
-from elspeth.contracts.freeze import freeze_fields
+from elspeth.contracts.freeze import deep_freeze, freeze_fields
 
 
 class DependencyConfig(BaseModel):
@@ -16,8 +16,8 @@ class DependencyConfig(BaseModel):
 
     model_config = ConfigDict(frozen=True, extra="forbid")
 
-    name: str = Field(description="Unique label for this dependency")
-    settings: str = Field(description="Path to dependency pipeline settings file")
+    name: str = Field(min_length=1, description="Unique label for this dependency")
+    settings: str = Field(min_length=1, description="Path to dependency pipeline settings file")
 
 
 class CommencementGateConfig(BaseModel):
@@ -25,12 +25,8 @@ class CommencementGateConfig(BaseModel):
 
     model_config = ConfigDict(frozen=True, extra="forbid")
 
-    name: str = Field(description="Unique label for this gate")
-    condition: str = Field(description="Expression evaluated against pre-flight context")
-    on_fail: Literal["abort"] = Field(
-        default="abort",
-        description="Action on failure (only 'abort' supported initially)",
-    )
+    name: str = Field(min_length=1, description="Unique label for this gate")
+    condition: str = Field(min_length=1, description="Expression evaluated against pre-flight context")
 
 
 class CollectionProbeConfig(BaseModel):
@@ -38,12 +34,19 @@ class CollectionProbeConfig(BaseModel):
 
     model_config = ConfigDict(frozen=True, extra="forbid")
 
-    collection: str = Field(description="Collection name to probe")
-    provider: str = Field(description="Provider type (e.g., 'chroma')")
-    provider_config: dict[str, Any] = Field(
+    collection: str = Field(min_length=1, description="Collection name to probe")
+    provider: str = Field(min_length=1, description="Provider type (e.g., 'chroma')")
+    provider_config: Mapping[str, Any] = Field(
         default_factory=dict,
         description="Provider-specific connection config",
     )
+
+    @model_validator(mode="after")
+    def _freeze_provider_config(self) -> CollectionProbeConfig:
+        """Deep-freeze provider_config to enforce Pydantic frozen=True contract."""
+        if self.provider_config:
+            object.__setattr__(self, "provider_config", deep_freeze(self.provider_config))
+        return self
 
 
 @dataclass(frozen=True, slots=True)
@@ -58,7 +61,7 @@ class DependencyRunResult:
 
 
 @dataclass(frozen=True, slots=True)
-class GateResult:
+class CommencementGateResult:
     """Result of a successful commencement gate evaluation."""
 
     name: str

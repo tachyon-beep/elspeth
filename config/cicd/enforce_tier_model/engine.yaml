@@ -71,6 +71,16 @@ allow_hits:
   reason: 'Tier 3 boundary: reads raw YAML from operator-authored settings files for cycle detection. depends_on is optional — absence means no dependencies.'
   safety: Returns empty list on missing key; only used for lightweight cycle detection, not config validation
   expires: null
+- key: engine/dependency_resolver.py:R5:_load_depends_on:fp=0d7f361f01668931
+  owner: architecture
+  reason: 'Tier 3 validation: raw YAML from operator files — isinstance checks validate structure before use'
+  safety: Raises ValueError with file path and type info on malformed input
+  expires: null
+- key: engine/dependency_resolver.py:R5:_load_depends_on:fp=b03fcab973007e50
+  owner: architecture
+  reason: 'Tier 3 validation: raw YAML from operator files — isinstance checks validate each entry is a mapping'
+  safety: Raises ValueError with index and type info on malformed entry
+  expires: null
 - key: engine/executors/sink.py:R4:SinkExecutor:write:fp=45c1a6c9e0bdf4a9
   owner: architecture
   reason: 'Post-durability callbacks: checkpoint callback fails after durable sink write'

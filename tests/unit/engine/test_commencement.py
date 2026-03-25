@@ -76,7 +76,8 @@ class TestEvaluateCommencementGates:
         }
         results = evaluate_commencement_gates(gates, context)
         snapshot = results[0].context_snapshot
-        assert "env" not in snapshot
+        # Exact key set — only dependency_runs and collections, never env
+        assert set(snapshot.keys()) == {"dependency_runs", "collections"}
         assert "SECRET_KEY" not in str(snapshot)
 
     def test_snapshot_is_deep_frozen(self) -> None:

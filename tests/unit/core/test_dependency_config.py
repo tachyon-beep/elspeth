@@ -10,9 +10,9 @@ from pydantic import ValidationError
 from elspeth.core.dependency_config import (
     CollectionProbeConfig,
     CommencementGateConfig,
+    CommencementGateResult,
     DependencyConfig,
     DependencyRunResult,
-    GateResult,
 )
 
 
@@ -39,15 +39,14 @@ class TestCommencementGateConfig:
             condition="collections['test']['count'] > 0",
         )
         assert config.name == "corpus_ready"
-        assert config.on_fail == "abort"  # default
 
-    def test_on_fail_default_abort(self) -> None:
-        config = CommencementGateConfig(name="x", condition="True")
-        assert config.on_fail == "abort"
-
-    def test_rejects_invalid_on_fail(self) -> None:
+    def test_rejects_empty_name(self) -> None:
         with pytest.raises(ValidationError):
-            CommencementGateConfig(name="x", condition="True", on_fail="warn")  # type: ignore[arg-type]
+            CommencementGateConfig(name="", condition="True")
+
+    def test_rejects_empty_condition(self) -> None:
+        with pytest.raises(ValidationError):
+            CommencementGateConfig(name="x", condition="")
 
 
 class TestCollectionProbeConfig:
@@ -92,10 +91,10 @@ class TestDependencyRunResult:
             result.name = "other"  # type: ignore[misc]
 
 
-class TestGateResult:
+class TestCommencementGateResult:
     def test_construction(self) -> None:
         snapshot = {"collections": {"test": {"count": 10, "reachable": True}}}
-        result = GateResult(
+        result = CommencementGateResult(
             name="corpus_ready",
             condition="collections['test']['count'] > 0",
             result=True,
@@ -106,12 +105,12 @@ class TestGateResult:
 
     def test_context_snapshot_is_deep_frozen(self) -> None:
         snapshot = {"collections": {"test": {"count": 10}}}
-        result = GateResult(name="x", condition="True", result=True, context_snapshot=snapshot)
+        result = CommencementGateResult(name="x", condition="True", result=True, context_snapshot=snapshot)
         assert isinstance(result.context_snapshot, MappingProxyType)
         # Nested dict should also be frozen
         assert isinstance(result.context_snapshot["collections"], MappingProxyType)
 
     def test_frozen(self) -> None:
-        result = GateResult(name="x", condition="True", result=True, context_snapshot={})
+        result = CommencementGateResult(name="x", condition="True", result=True, context_snapshot={})
         with pytest.raises(AttributeError):
             result.name = "other"  # type: ignore[misc]

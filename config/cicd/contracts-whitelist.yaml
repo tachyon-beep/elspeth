@@ -17,7 +17,7 @@ allowed_external_types:
   # BufferEntry moved to contracts/engine.py — no longer an external type exception
   # Dependency/gate result types - used only by engine bootstrap and resolver
   - "core/dependency_config:DependencyRunResult"
-  - "core/dependency_config:GateResult"
+  - "core/dependency_config:CommencementGateResult"
 
 # dict[str, Any] patterns that are intentional
 # Format: "file_path:context:param_name"

@@ -21,12 +21,21 @@ def _load_depends_on(settings_path: Path) -> list[dict[str, str]]:
     This reads raw YAML (not Pydantic-validated config) specifically
     for cycle detection. The depends_on key is optional — absent means
     no dependencies, which is the common case for leaf pipelines.
+
+    Tier 3 boundary: validates structure of operator-authored YAML.
     """
     with settings_path.open() as f:
         data = yaml.safe_load(f) or {}
     # depends_on is optional in pipeline configs — absence means no dependencies.
     # This is a Tier 3 boundary (raw YAML from operator-authored files).
     deps: list[dict[str, str]] = data.get("depends_on", [])
+    if not isinstance(deps, list):
+        raise ValueError(f"depends_on in {settings_path} must be a list, got {type(deps).__name__}")
+    for i, dep in enumerate(deps):
+        if not isinstance(dep, dict):
+            raise ValueError(f"depends_on[{i}] in {settings_path} must be a mapping, got {type(dep).__name__}")
+        if "settings" not in dep:
+            raise ValueError(f"depends_on[{i}] in {settings_path} missing required key 'settings'")
     return deps
 
 

@@ -420,15 +420,10 @@ allow_hits:
   reason: 'Tier 3 boundary: operator-provided config dict. SSL is optional with secure default.'
   safety: Default True (secure by default)
   expires: null
-- key: plugins/infrastructure/probe_factory.py:R4:ChromaCollectionProbe:probe:fp=1610747f4c218add
+- key: plugins/infrastructure/probe_factory.py:R4:ChromaCollectionProbe:probe:fp=2722c29be863d1fd
   owner: feature
-  reason: 'Probe must report readiness, not crash — collection not found is a valid probe result'
-  safety: Returns CollectionReadinessResult with reachable=True, count=0 (collection absent, server reachable)
-  expires: null
-- key: plugins/infrastructure/probe_factory.py:R4:ChromaCollectionProbe:probe:fp=e182498190624e3e
-  owner: feature
-  reason: 'Probe must report unreachable server, not crash — connectivity failure is a valid probe result'
-  safety: Returns CollectionReadinessResult with reachable=False, count=0 (server down)
+  reason: 'Probe must report unreachable server, not crash — import failure, client construction, auth errors are valid probe results'
+  safety: Returns CollectionReadinessResult with reachable=False and exception details in message
   expires: null
 - key: plugins/infrastructure/probe_factory.py:R1:build_collection_probes:fp=379ee902c8a803d8
   owner: feature

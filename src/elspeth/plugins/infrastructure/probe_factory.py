@@ -48,19 +48,21 @@ class ChromaCollectionProbe:
                         else f"Collection '{self.collection_name}' is empty"
                     ),
                 )
-            except Exception:
+            except chromadb.errors.NotFoundError:
+                # Collection doesn't exist — server reachable, collection absent
                 return CollectionReadinessResult(
                     collection=self.collection_name,
                     reachable=True,
                     count=0,
                     message=f"Collection '{self.collection_name}' not found",
                 )
-        except Exception:
+        except Exception as exc:
+            # Import failed, client construction failed, auth error, etc.
             return CollectionReadinessResult(
                 collection=self.collection_name,
                 reachable=False,
                 count=0,
-                message=f"Collection '{self.collection_name}' unreachable",
+                message=f"Collection '{self.collection_name}' unreachable: {type(exc).__name__}: {exc}",
             )
 
 

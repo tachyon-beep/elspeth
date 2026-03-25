@@ -68,6 +68,7 @@ def bootstrap_and_run(settings_path: Path) -> RunResult:
     graph.validate()
 
     # Phase 3.5: Dependency resolution (if configured)
+    dependency_results = []
     if config.depends_on:
         from elspeth.engine.dependency_resolver import detect_cycles, resolve_dependencies
 
@@ -75,8 +76,11 @@ def bootstrap_and_run(settings_path: Path) -> RunResult:
         detect_cycles(settings_path)
 
         # Run dependencies sequentially — each calls bootstrap_and_run() recursively.
-        # Sub-pipelines inherit the parent process environment but NOT depends_on/gates.
-        resolve_dependencies(
+        # Design note: sub-pipelines that declare their own depends_on will also
+        # resolve their dependencies recursively. Cycle detection prevents infinite
+        # loops. Diamond dependencies (A→B, A→C, B→D, C→D) cause D to run twice —
+        # acceptable for correctness since each run produces its own audit trail.
+        dependency_results = resolve_dependencies(
             depends_on=config.depends_on,
             parent_settings_path=settings_path,
         )
@@ -96,8 +100,11 @@ def bootstrap_and_run(settings_path: Path) -> RunResult:
                 "count": result.count,
             }
 
+        # Convert dependency results to gate-accessible dict
+        dep_run_dict = {r.name: {"run_id": r.run_id, "duration_ms": r.duration_ms, "indexed_at": r.indexed_at} for r in dependency_results}
+
         context = build_preflight_context(
-            dependency_results={},
+            dependency_results=dep_run_dict,
             collection_probes=probe_results,
         )
         evaluate_commencement_gates(config.commencement_gates, context)
