@@ -103,6 +103,28 @@ class TestRecordPreflightResults:
 
         assert len(rows) == 0
 
+    def test_result_json_is_canonical(self, recorder) -> None:
+        """result_json must use canonical JSON (RFC 8785), not standard json.dumps.
+
+        Canonical JSON produces deterministic key ordering, which means the same
+        data always produces the same hash. Standard json.dumps does not guarantee
+        key order across Python versions.
+        """
+        rec, run_id, db = recorder
+        preflight = PreflightResult(
+            dependency_runs=(DependencyRunResult(name="dep", run_id="r", settings_hash="h", duration_ms=100, indexed_at="t"),),
+            gate_results=(),
+        )
+
+        rec.record_preflight_results(run_id=run_id, preflight=preflight)
+
+        with db.connection() as conn:
+            rows = conn.execute(preflight_results_table.select().where(preflight_results_table.c.run_id == run_id)).fetchall()
+
+        result_json = rows[0].result_json
+        # Canonical JSON (RFC 8785) sorts keys and uses no unnecessary whitespace
+        assert result_json == '{"duration_ms":100,"indexed_at":"t","run_id":"r","settings_hash":"h"}'
+
     def test_mixed_deps_and_gates(self, recorder) -> None:
         rec, run_id, db = recorder
         preflight = PreflightResult(
