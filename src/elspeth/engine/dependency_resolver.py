@@ -2,9 +2,17 @@
 
 from __future__ import annotations
 
+import hashlib
+import time
+from datetime import UTC, datetime
 from pathlib import Path
 
 import yaml
+
+from elspeth.contracts.errors import DependencyFailedError
+from elspeth.core.canonical import canonical_json
+from elspeth.core.dependency_config import DependencyConfig, DependencyRunResult
+from elspeth.engine.bootstrap import bootstrap_and_run
 
 
 def _load_depends_on(settings_path: Path) -> list[dict[str, str]]:
@@ -65,3 +73,47 @@ def detect_cycles(
 
     stack.pop()
     visited.add(canonical)
+
+
+def _hash_settings_file(path: Path) -> str:
+    """SHA-256 hash of the canonical JSON representation of settings."""
+    with path.open() as f:
+        data = yaml.safe_load(f)
+    canonical = canonical_json(data)
+    return f"sha256:{hashlib.sha256(canonical.encode()).hexdigest()}"
+
+
+def resolve_dependencies(
+    *,
+    depends_on: list[DependencyConfig],
+    parent_settings_path: Path,
+) -> list[DependencyRunResult]:
+    """Run dependency pipelines sequentially. Raises on failure.
+
+    KeyboardInterrupt is propagated as-is (not wrapped in DependencyFailedError).
+    """
+    results: list[DependencyRunResult] = []
+    for dep in depends_on:
+        dep_path = (parent_settings_path.parent / dep.settings).resolve()
+
+        start_ms = time.monotonic_ns() // 1_000_000
+        run_result = bootstrap_and_run(dep_path)
+        duration_ms = (time.monotonic_ns() // 1_000_000) - start_ms
+
+        if run_result.status.name != "COMPLETED":
+            raise DependencyFailedError(
+                dependency_name=dep.name,
+                run_id=run_result.run_id,
+                reason=f"Dependency pipeline finished with status: {run_result.status.name}",
+            )
+
+        results.append(
+            DependencyRunResult(
+                name=dep.name,
+                run_id=run_result.run_id,
+                settings_hash=_hash_settings_file(dep_path),
+                duration_ms=duration_ms,
+                indexed_at=datetime.now(UTC).isoformat(),
+            )
+        )
+    return results

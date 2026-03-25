@@ -3,10 +3,13 @@
 from __future__ import annotations
 
 from pathlib import Path
+from unittest.mock import MagicMock, patch
 
 import pytest
 
-from elspeth.engine.dependency_resolver import detect_cycles
+from elspeth.contracts.errors import DependencyFailedError
+from elspeth.core.dependency_config import DependencyConfig
+from elspeth.engine.dependency_resolver import detect_cycles, resolve_dependencies
 
 
 class TestCycleDetection:
@@ -120,3 +123,84 @@ class TestCycleDetection:
 
         # Should not raise — diamond is not a cycle
         detect_cycles(a)
+
+
+class TestResolveDependencies:
+    def test_single_dependency_success(self, tmp_path: Path) -> None:
+        dep = DependencyConfig(name="index", settings="./index.yaml")
+        parent_path = tmp_path / "query.yaml"
+
+        mock_result = MagicMock()
+        mock_result.status.name = "COMPLETED"
+        mock_result.run_id = "dep-run-123"
+
+        with (
+            patch("elspeth.engine.dependency_resolver.bootstrap_and_run") as mock_boot,
+            patch("elspeth.engine.dependency_resolver._hash_settings_file", return_value="sha256:abc"),
+        ):
+            mock_boot.return_value = mock_result
+            results = resolve_dependencies(
+                depends_on=[dep],
+                parent_settings_path=parent_path,
+            )
+
+        assert len(results) == 1
+        assert results[0].name == "index"
+        assert results[0].run_id == "dep-run-123"
+
+    def test_dependency_failure_raises(self, tmp_path: Path) -> None:
+        dep = DependencyConfig(name="index", settings="./index.yaml")
+        parent_path = tmp_path / "query.yaml"
+
+        mock_result = MagicMock()
+        mock_result.status.name = "FAILED"
+        mock_result.run_id = "dep-run-fail"
+
+        with patch("elspeth.engine.dependency_resolver.bootstrap_and_run") as mock_boot:
+            mock_boot.return_value = mock_result
+            with pytest.raises(DependencyFailedError, match="index"):
+                resolve_dependencies(
+                    depends_on=[dep],
+                    parent_settings_path=parent_path,
+                )
+
+    def test_keyboard_interrupt_propagated(self, tmp_path: Path) -> None:
+        dep = DependencyConfig(name="index", settings="./index.yaml")
+        parent_path = tmp_path / "query.yaml"
+
+        with patch("elspeth.engine.dependency_resolver.bootstrap_and_run") as mock_boot:
+            mock_boot.side_effect = KeyboardInterrupt()
+            with pytest.raises(KeyboardInterrupt):
+                resolve_dependencies(
+                    depends_on=[dep],
+                    parent_settings_path=parent_path,
+                )
+
+    def test_multiple_dependencies_sequential(self, tmp_path: Path) -> None:
+        deps = [
+            DependencyConfig(name="first", settings="./first.yaml"),
+            DependencyConfig(name="second", settings="./second.yaml"),
+        ]
+        parent_path = tmp_path / "main.yaml"
+        call_order: list[str] = []
+
+        def track_calls(path: Path) -> MagicMock:
+            call_order.append(path.name)
+            result = MagicMock()
+            result.status.name = "COMPLETED"
+            result.run_id = f"run-{path.name}"
+            return result
+
+        with (
+            patch("elspeth.engine.dependency_resolver.bootstrap_and_run") as mock_boot,
+            patch("elspeth.engine.dependency_resolver._hash_settings_file", return_value="sha256:abc"),
+        ):
+            mock_boot.side_effect = track_calls
+            resolve_dependencies(depends_on=deps, parent_settings_path=parent_path)
+
+        assert call_order == ["first.yaml", "second.yaml"]
+
+    def test_empty_depends_on_returns_empty(self, tmp_path: Path) -> None:
+        parent_path = tmp_path / "main.yaml"
+        results = resolve_dependencies(depends_on=[], parent_settings_path=parent_path)
+        assert results == []

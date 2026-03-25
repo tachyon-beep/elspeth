@@ -15,6 +15,9 @@ allowed_external_types:
   - "engine/orchestrator/types:AggregationFlushResult"
   - "engine/orchestrator/types:ExecutionCounters"
   # BufferEntry moved to contracts/engine.py — no longer an external type exception
+  # Dependency/gate result types - used only by engine bootstrap and resolver
+  - "core/dependency_config:DependencyRunResult"
+  - "core/dependency_config:GateResult"
 
 # dict[str, Any] patterns that are intentional
 # Format: "file_path:context:param_name"
@@ -402,3 +405,19 @@ allowed_dict_patterns:
 
   # OpenRouter batch LLM (async batch API)
   - "src/elspeth/plugins/transforms/llm/openrouter_batch.py:OpenRouterBatchLLMTransform.__init__:config"
+
+  # ═══════════════════════════════════════════════════════════════════════════
+  # PRE-FLIGHT CONTEXT (COMMENCEMENT GATES)
+  # Gate evaluation context is a namespace dict assembled from heterogeneous
+  # probe results and dependency metadata. ExpressionParser already accepts
+  # dict[str, Any] (whitelisted above). These are the assembly and evaluation
+  # functions that build and consume the context.
+  # ═══════════════════════════════════════════════════════════════════════════
+  - "src/elspeth/engine/commencement.py:build_preflight_context:dependency_results"
+  - "src/elspeth/engine/commencement.py:build_preflight_context:collection_probes"
+  - "src/elspeth/engine/commencement.py:build_preflight_context:return"
+  - "src/elspeth/engine/commencement.py:_build_audit_snapshot:context"
+  - "src/elspeth/engine/commencement.py:evaluate_commencement_gates:context"
+
+  # Probe factory — operator-provided config dict (Tier 3 boundary)
+  - "src/elspeth/plugins/infrastructure/probe_factory.py:ChromaCollectionProbe.__init__:config"

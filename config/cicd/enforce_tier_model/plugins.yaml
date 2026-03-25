@@ -405,3 +405,33 @@ allow_hits:
   reason: Offensive isinstance assertion — detects Pydantic validator bug if allowed_hosts is not list[str] after validation
   safety: Crashes immediately with descriptive error; better than silently iterating string characters as ip_network calls
   expires: null
+- key: plugins/infrastructure/probe_factory.py:R1:ChromaCollectionProbe:probe:fp=20c34d8879d1fec7
+  owner: feature
+  reason: 'Tier 3 boundary: operator-provided config dict for ChromaDB connection. Mode is optional with sensible default.'
+  safety: Default to persistent mode; explicit config keys (persist_directory, host) crash on missing
+  expires: null
+- key: plugins/infrastructure/probe_factory.py:R1:ChromaCollectionProbe:probe:fp=0d5c91ab622233fa
+  owner: feature
+  reason: 'Tier 3 boundary: operator-provided config dict. Port is optional with standard default.'
+  safety: Default 8000 is ChromaDB standard port
+  expires: null
+- key: plugins/infrastructure/probe_factory.py:R1:ChromaCollectionProbe:probe:fp=ea5f70eee43d9016
+  owner: feature
+  reason: 'Tier 3 boundary: operator-provided config dict. SSL is optional with secure default.'
+  safety: Default True (secure by default)
+  expires: null
+- key: plugins/infrastructure/probe_factory.py:R4:ChromaCollectionProbe:probe:fp=1610747f4c218add
+  owner: feature
+  reason: 'Probe must report readiness, not crash — collection not found is a valid probe result'
+  safety: Returns CollectionReadinessResult with reachable=True, count=0 (collection absent, server reachable)
+  expires: null
+- key: plugins/infrastructure/probe_factory.py:R4:ChromaCollectionProbe:probe:fp=e182498190624e3e
+  owner: feature
+  reason: 'Probe must report unreachable server, not crash — connectivity failure is a valid probe result'
+  safety: Returns CollectionReadinessResult with reachable=False, count=0 (server down)
+  expires: null
+- key: plugins/infrastructure/probe_factory.py:R1:build_collection_probes:fp=379ee902c8a803d8
+  owner: feature
+  reason: 'Registry lookup with explicit error on missing provider — dict.get() followed by ValueError raise'
+  safety: Raises ValueError with provider name and available providers listed
+  expires: null
