@@ -254,11 +254,11 @@ class TestExpressionParserSecurityRejections:
             ExpressionParser("list(x for x in range(10))")
 
     def test_reject_attribute_access_dunder(self) -> None:
-        with pytest.raises(ExpressionSecurityError, match="Forbidden row attribute"):
+        with pytest.raises(ExpressionSecurityError, match="Forbidden attribute"):
             ExpressionParser("row.__class__")
 
     def test_reject_attribute_access_arbitrary(self) -> None:
-        with pytest.raises(ExpressionSecurityError, match="Forbidden row attribute"):
+        with pytest.raises(ExpressionSecurityError, match="Forbidden attribute"):
             ExpressionParser("row.items()")
 
     def test_reject_assignment_expression(self) -> None:
@@ -274,7 +274,7 @@ class TestExpressionParserSecurityRejections:
             ExpressionParser("sorted(row)")
 
     def test_reject_method_call_not_get(self) -> None:
-        with pytest.raises(ExpressionSecurityError, match="Forbidden row attribute"):
+        with pytest.raises(ExpressionSecurityError, match="Forbidden attribute"):
             ExpressionParser("row.keys()")
 
     def test_reject_builtin_access(self) -> None:
@@ -1353,17 +1353,17 @@ class TestExpressionParserBugFixes:
 
     def test_reject_dict_literal_subscript(self) -> None:
         """Subscript on dict literal must be rejected."""
-        with pytest.raises(ExpressionSecurityError, match="only allowed on row data"):
+        with pytest.raises(ExpressionSecurityError, match="only allowed on allowed names"):
             ExpressionParser("{'a': 1}['a'] == 1")
 
     def test_reject_string_literal_subscript(self) -> None:
         """Subscript on string literal must be rejected."""
-        with pytest.raises(ExpressionSecurityError, match="only allowed on row data"):
+        with pytest.raises(ExpressionSecurityError, match="only allowed on allowed names"):
             ExpressionParser("'abc'[0] == 'a'")
 
     def test_reject_list_literal_subscript(self) -> None:
         """Subscript on list literal must be rejected."""
-        with pytest.raises(ExpressionSecurityError, match="only allowed on row data"):
+        with pytest.raises(ExpressionSecurityError, match="only allowed on allowed names"):
             ExpressionParser("[1, 2, 3][0] == 1")
 
     def test_allow_row_subscript(self) -> None:
@@ -1567,3 +1567,68 @@ class TestExpressionValidatorFailClosed:
         # If structural nodes were blocked, this would fail validation.
         parser = ExpressionParser("row['a'] == 1 and row['b'] != 2")
         assert parser.evaluate({"a": 1, "b": 3}) is True
+
+
+class TestExpressionParserDictContext:
+    """Tests for evaluating expressions against plain dict contexts.
+
+    Commencement gates use ExpressionParser with allowed_names=['collections',
+    'dependency_runs', 'env'] instead of the default ['row'].
+    """
+
+    def test_dict_subscript_access(self) -> None:
+        parser = ExpressionParser(
+            "collections['science-facts']['count'] > 0",
+            allowed_names=["collections", "dependency_runs", "env"],
+        )
+        context = {"collections": {"science-facts": {"count": 450, "reachable": True}}}
+        assert parser.evaluate(context) is True
+
+    def test_dict_subscript_zero_count(self) -> None:
+        parser = ExpressionParser(
+            "collections['science-facts']['count'] > 0",
+            allowed_names=["collections", "dependency_runs", "env"],
+        )
+        context = {"collections": {"science-facts": {"count": 0, "reachable": False}}}
+        assert parser.evaluate(context) is False
+
+    def test_nested_dict_boolean_logic(self) -> None:
+        parser = ExpressionParser(
+            "dependency_runs['index']['status'] == 'completed' and collections['test']['count'] > 10",
+            allowed_names=["collections", "dependency_runs", "env"],
+        )
+        context = {
+            "dependency_runs": {"index": {"status": "completed"}},
+            "collections": {"test": {"count": 50, "reachable": True}},
+        }
+        assert parser.evaluate(context) is True
+
+    def test_env_access(self) -> None:
+        parser = ExpressionParser(
+            "env['ENVIRONMENT'] == 'production'",
+            allowed_names=["collections", "dependency_runs", "env"],
+        )
+        context = {"env": {"ENVIRONMENT": "production"}}
+        assert parser.evaluate(context) is True
+
+    def test_missing_key_raises(self) -> None:
+        parser = ExpressionParser(
+            "collections['missing']['count'] > 0",
+            allowed_names=["collections"],
+        )
+        context: dict[str, object] = {"collections": {}}
+        with pytest.raises(ExpressionEvaluationError):
+            parser.evaluate(context)
+
+    def test_default_allowed_names_still_works(self) -> None:
+        """Backward compat: default allowed_names=['row'] still works."""
+        parser = ExpressionParser("row['x'] > 0")
+        assert parser.evaluate({"x": 5}) is True
+
+    def test_forbidden_name_rejected_even_with_custom_allowed(self) -> None:
+        """Names not in allowed_names are still rejected."""
+        with pytest.raises(ExpressionSecurityError):
+            ExpressionParser(
+                "os['path']",
+                allowed_names=["collections"],
+            )

@@ -28,8 +28,8 @@ allowed_dict_patterns:
 
   # Engine - row data handling
   - "src/elspeth/engine/tokens.py:TokenManager.expand_token:expanded_rows (list)"
-  - "src/elspeth/core/expression_parser.py:_ExpressionEvaluator.__init__:row"
-  - "src/elspeth/core/expression_parser.py:ExpressionParser.evaluate:row"
+  - "src/elspeth/core/expression_parser.py:_ExpressionEvaluator.__init__:context"
+  - "src/elspeth/core/expression_parser.py:ExpressionParser.evaluate:context"
 
 
   # Node state guard - row data is Tier 2 pipeline data

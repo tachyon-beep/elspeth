@@ -4,7 +4,7 @@ per_file_rules:
   - R5
   reason: AST-based expression parser requires isinstance() for node type dispatch
   expires: null
-  max_hits: 30
+  max_hits: 31
 - pattern: core/templates.py
   rules:
   - R5
