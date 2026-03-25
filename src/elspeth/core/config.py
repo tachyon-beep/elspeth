@@ -16,6 +16,7 @@ from pydantic import BaseModel, Field, field_validator, model_validator
 
 from elspeth.contracts.enums import OutputMode, RunMode
 from elspeth.contracts.security import SecretFingerprintError as SecretFingerprintError
+from elspeth.core.dependency_config import CollectionProbeConfig, CommencementGateConfig, DependencyConfig
 
 # Reserved edge labels that cannot be used as user-defined routing names.
 # "continue" is used for sequential edges, "fork" is a gate-only routing action,
@@ -1263,6 +1264,27 @@ class ElspethSettings(BaseModel):
         default_factory=list,
         max_length=100,
         description="Engine-level gates for config-driven routing (evaluated by ExpressionParser)",
+    )
+
+    # Optional - pipeline dependencies (run before this pipeline)
+    depends_on: list[DependencyConfig] = Field(
+        default_factory=list,
+        max_length=20,
+        description="Pipeline dependencies — run these before the main pipeline",
+    )
+
+    # Optional - commencement gates (go/no-go conditions before pipeline starts)
+    commencement_gates: list[CommencementGateConfig] = Field(
+        default_factory=list,
+        max_length=20,
+        description="Go/no-go conditions evaluated after dependencies complete",
+    )
+
+    # Optional - collection probes (vector store readiness checks for gate context)
+    collection_probes: list[CollectionProbeConfig] = Field(
+        default_factory=list,
+        max_length=20,
+        description="Vector store collections to probe for gate context",
     )
 
     # Optional - coalesce configuration (for merging fork paths)
