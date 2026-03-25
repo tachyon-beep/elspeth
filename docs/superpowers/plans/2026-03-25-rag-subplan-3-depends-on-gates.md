@@ -16,6 +16,29 @@
 
 ---
 
+## Review Notes from Sub-plan 1 (read before implementing)
+
+The following changes were made during sub-plan 1's 4-agent review that affect this plan:
+
+1. **ExpressionParser calling convention.** The parser now has two explicit modes controlled by `single_name_mode` (set automatically based on `allowed_names`):
+   - **Single-name mode** (`allowed_names=None` or `allowed_names=["row"]`): caller passes the value directly as `context` — e.g. `parser.evaluate({"x": 5})` where the dict IS the row.
+   - **Multi-name mode** (`allowed_names=["collections", "dependency_runs", "env"]`): caller passes a **namespace dict** where each key is an allowed name — e.g. `parser.evaluate({"collections": {...}, "dependency_runs": {...}, "env": {...}})`.
+
+   When building the commencement gate evaluator, **always use multi-name mode** with 2+ allowed names. Do NOT pass a single-element `allowed_names` list with a namespace dict — that would trigger single-name mode and silently misinterpret the context.
+
+2. **`env` namespace trust tier.** The `env` key in commencement gate expressions (e.g. `env['ENVIRONMENT'] == 'production'`) injects operator-supplied environment variables. This is a **Tier 3 trust boundary** inside system-owned code. The commencement gate implementation must:
+   - Document that `env` values are external data (operator-controlled, not ELSPETH-controlled)
+   - Deep-freeze the `env` dict before passing to `ExpressionParser.evaluate()` (the parser does not freeze its context)
+   - Deep-freeze the entire pre-flight context snapshot stored in `CommencementGateFailedError.context_snapshot` when raising
+
+3. **`CommencementGateFailedError.context_snapshot` is not auto-frozen.** The error class is a plain Exception (not a frozen dataclass), so the deep-freeze policy doesn't apply automatically. When constructing this error in the commencement gate, pass a `deep_freeze()`d copy of the context snapshot to prevent mutation between raise and Landscape serialization.
+
+4. **`row` is forbidden in commencement gate expressions.** If `allowed_names` does not include `"row"`, expressions referencing `row['x']` are rejected at parse time. This is verified by test. Commencement gates should use `allowed_names=["collections", "dependency_runs", "env"]` — `row` is intentionally excluded since gates run before row processing begins.
+
+5. **Empty `allowed_names` raises ValueError.** `ExpressionParser(expr, allowed_names=[])` now raises immediately rather than silently falling back to `["row"]`.
+
+---
+
 ## File Structure
 
 | Action | Path | Responsibility |

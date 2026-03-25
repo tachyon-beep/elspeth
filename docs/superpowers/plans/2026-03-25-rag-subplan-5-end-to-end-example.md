@@ -16,6 +16,12 @@
 
 ---
 
+## Review Notes from Sub-plan 1 (read before implementing)
+
+1. **ExpressionParser multi-name mode.** When writing commencement gate YAML expressions, the allowed names are `collections`, `dependency_runs`, and `env`. The expression `row['x']` is **not** valid in gate conditions — `row` is excluded from gate expressions by design (gates run before row processing). See sub-plan 3 review notes for the full calling convention.
+
+---
+
 ## File Structure
 
 | Action | Path | Responsibility |

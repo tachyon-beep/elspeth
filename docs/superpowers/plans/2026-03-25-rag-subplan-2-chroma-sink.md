@@ -14,6 +14,16 @@
 
 ---
 
+## Review Notes from Sub-plan 1 (read before implementing)
+
+The following changes were made during sub-plan 1's 4-agent review that affect this plan:
+
+1. **`ChromaConnectionConfig` composition pattern.** `ChromaSearchProviderConfig` currently composes `ChromaConnectionConfig` via *validation-by-construction* — it constructs a `ChromaConnectionConfig` in its model_validator and discards it. This was flagged as transitional duplication. When implementing `ChromaSinkConfig`, compose `ChromaConnectionConfig` as a **nested field** rather than duplicating its flat fields. This avoids the field-sync maintenance trap. If the sink config needs `ephemeral` mode, handle it as a separate concern — `ChromaConnectionConfig` deliberately excludes `ephemeral`.
+
+2. **`ChromaSearchProviderConfig.model_config` uses dict literal.** The existing provider config uses `model_config = {"extra": "forbid", "frozen": True}` while `ChromaConnectionConfig` uses `ConfigDict(frozen=True, extra="forbid")`. This inconsistency was noted but deferred. Use `ConfigDict` for the new sink config.
+
+---
+
 ## File Structure
 
 | Action | Path | Responsibility |

@@ -16,6 +16,16 @@
 
 ---
 
+## Review Notes from Sub-plan 1 (read before implementing)
+
+The following changes were made during sub-plan 1's 4-agent review that affect this plan:
+
+1. **`RetrievalNotReadyError` needs structured fields.** The error class was implemented as a bare `pass` class in sub-plan 1 (only a message string). The 4-agent review flagged this as an "Eroding Goals" archetype — `DependencyFailedError` and `CommencementGateFailedError` both have structured keyword fields, but `RetrievalNotReadyError` does not. When implementing the readiness contract, **add structured fields** to `RetrievalNotReadyError`: `collection_name: str`, `count: int | None`, `reachable: bool`. This aligns with `CollectionReadinessResult` and enables structured error queries from the Landscape.
+
+2. **`CollectionProbe` protocol attribute enforcement.** Python 3.12+ `runtime_checkable` protocols DO check non-callable attributes at `isinstance()` time. This means any implementation of `CollectionProbe` MUST have a `collection_name` instance attribute — class-level annotations alone are not sufficient. Tests confirm this. When implementing `check_readiness()` on `ChromaSearchProvider` and `AzureSearchProvider`, ensure `self.collection_name = config.collection` is set in `__init__`.
+
+---
+
 ## File Structure
 
 | Action | Path | Responsibility |
