@@ -70,3 +70,16 @@ class CommencementGateResult:
 
     def __post_init__(self) -> None:
         freeze_fields(self, "context_snapshot")
+
+
+@dataclass(frozen=True, slots=True)
+class PreflightResult:
+    """Combined pre-flight results for audit recording.
+
+    Carried from bootstrap_and_run() through orchestrator.run() to the
+    recorder, following the same deferred-recording pattern as secret
+    resolutions.
+    """
+
+    dependency_runs: tuple[DependencyRunResult, ...]
+    gate_results: tuple[CommencementGateResult, ...]

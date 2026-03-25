@@ -135,6 +135,7 @@ if TYPE_CHECKING:
     from elspeth.contracts.config.runtime import RuntimeCheckpointConfig, RuntimeConcurrencyConfig
     from elspeth.core.checkpoint import CheckpointManager
     from elspeth.core.config import ElspethSettings, GateSettings
+    from elspeth.core.dependency_config import PreflightResult
     from elspeth.core.rate_limit import RateLimitRegistry
     from elspeth.engine.clock import Clock
     from elspeth.engine.coalesce_executor import CoalesceExecutor
@@ -1068,6 +1069,7 @@ class Orchestrator:
         *,
         payload_store: PayloadStore,
         secret_resolutions: list[SecretResolutionInput] | None = None,
+        preflight_results: PreflightResult | None = None,
         shutdown_event: threading.Event | None = None,
     ) -> RunResult:
         """Execute a pipeline run.
@@ -1083,6 +1085,9 @@ class Orchestrator:
             payload_store: PayloadStore for persisting source row payloads.
             secret_resolutions: Optional secret resolution records from
                 load_secrets_from_config(). Recorded in audit trail after run creation.
+            preflight_results: Optional pre-flight results (dependency runs and
+                commencement gates) from bootstrap_and_run(). Recorded in audit
+                trail after run creation.
             shutdown_event: Optional pre-created shutdown event for testing.
                 Skips signal handler installation when provided.
 
@@ -1103,6 +1108,13 @@ class Orchestrator:
             payload_store,
             secret_resolutions,
         )
+
+        # Record pre-flight results (deferred from bootstrap_and_run)
+        if preflight_results is not None:
+            recorder.record_preflight_results(
+                run_id=run.run_id,
+                preflight=preflight_results,
+            )
 
         from elspeth.telemetry import RunFinished
 

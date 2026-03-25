@@ -23,6 +23,7 @@ from elspeth.contracts import (
 )
 from elspeth.contracts.errors import AuditIntegrityError
 from elspeth.core.canonical import canonical_json, stable_hash
+from elspeth.core.dependency_config import PreflightResult
 from elspeth.core.landscape._database_ops import DatabaseOps
 from elspeth.core.landscape._helpers import generate_id, now
 from elspeth.core.landscape.database import LandscapeDB
@@ -532,6 +533,74 @@ class RunLifecycleRepository:
             )
             for row in db_rows
         ]
+
+    def record_preflight_results(
+        self,
+        run_id: str,
+        preflight: PreflightResult,
+    ) -> None:
+        """Record pre-flight dependency and gate results in the audit trail.
+
+        Called by orchestrator after run is created. Pre-flight results were
+        captured during bootstrap_and_run() before the run existed.
+
+        All inserts are batched in a single transaction for atomicity.
+
+        Args:
+            run_id: The run ID to associate results with
+            preflight: Combined pre-flight results (dependencies + gates)
+        """
+        from elspeth.core.landscape.schema import preflight_results_table
+
+        rows_to_insert = []
+
+        for dep in preflight.dependency_runs:
+            rows_to_insert.append(
+                {
+                    "result_id": generate_id(),
+                    "run_id": run_id,
+                    "result_type": "dependency_run",
+                    "name": dep.name,
+                    "result_json": json.dumps(
+                        {
+                            "run_id": dep.run_id,
+                            "settings_hash": dep.settings_hash,
+                            "duration_ms": dep.duration_ms,
+                            "indexed_at": dep.indexed_at,
+                        }
+                    ),
+                    "created_at": now(),
+                }
+            )
+
+        for gate in preflight.gate_results:
+            rows_to_insert.append(
+                {
+                    "result_id": generate_id(),
+                    "run_id": run_id,
+                    "result_type": "commencement_gate",
+                    "name": gate.name,
+                    "result_json": json.dumps(
+                        {
+                            "condition": gate.condition,
+                            "result": gate.result,
+                            "context_snapshot": dict(gate.context_snapshot),
+                        }
+                    ),
+                    "created_at": now(),
+                }
+            )
+
+        if not rows_to_insert:
+            return
+
+        with self._db.connection() as conn:
+            for row_data in rows_to_insert:
+                result = conn.execute(preflight_results_table.insert().values(**row_data))
+                if result.rowcount == 0:
+                    raise AuditIntegrityError(
+                        f"Pre-flight result insert failed for run {run_id} — zero rows affected (audit write failure)"
+                    )
 
     def list_runs(self, *, status: RunStatus | None = None) -> list[Run]:
         """List all runs in the database.

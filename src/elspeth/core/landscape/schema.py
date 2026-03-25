@@ -527,3 +527,18 @@ secret_resolutions_table = Table(
 )
 
 Index("ix_secret_resolutions_run", secret_resolutions_table.c.run_id)
+
+# === Pre-flight Results (Pipeline Dependencies & Commencement Gates) ===
+
+preflight_results_table = Table(
+    "preflight_results",
+    metadata,
+    Column("result_id", String(64), primary_key=True),
+    Column("run_id", String(64), ForeignKey("runs.run_id"), nullable=False, index=True),
+    Column("result_type", String(32), nullable=False),  # 'dependency_run' or 'commencement_gate'
+    Column("name", String(256), nullable=False),  # Dependency name or gate name
+    Column("result_json", Text, nullable=False),  # Full result as canonical JSON
+    Column("created_at", DateTime(timezone=True), nullable=False),
+)
+
+Index("ix_preflight_results_run", preflight_results_table.c.run_id)

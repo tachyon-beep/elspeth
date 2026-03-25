@@ -25,6 +25,7 @@ from typing import TYPE_CHECKING, Any, Literal, overload
 
 from elspeth.contracts import CallType, Determinism, RunStatus
 from elspeth.contracts.errors import FrameworkBugError
+from elspeth.core.dependency_config import PreflightResult
 
 if TYPE_CHECKING:
     from elspeth.contracts import (
@@ -272,6 +273,14 @@ class LandscapeRecorder:
     ) -> None:
         """Record secret resolution events. Delegates to RunLifecycleRepository."""
         self._run_lifecycle.record_secret_resolutions(run_id, resolutions)
+
+    def record_preflight_results(
+        self,
+        run_id: str,
+        preflight: PreflightResult,
+    ) -> None:
+        """Record pre-flight dependency and gate results. Delegates to RunLifecycleRepository."""
+        self._run_lifecycle.record_preflight_results(run_id, preflight)
 
     def get_secret_resolutions_for_run(self, run_id: str) -> list[SecretResolution]:
         """Get secret resolutions for a run. Delegates to RunLifecycleRepository."""

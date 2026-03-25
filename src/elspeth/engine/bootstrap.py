@@ -5,6 +5,11 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Literal
 
+from elspeth.core.dependency_config import (
+    CommencementGateResult,
+    DependencyRunResult,
+    PreflightResult,
+)
 from elspeth.engine.orchestrator.types import RunResult
 
 
@@ -68,7 +73,8 @@ def bootstrap_and_run(settings_path: Path) -> RunResult:
     graph.validate()
 
     # Phase 3.5: Dependency resolution (if configured)
-    dependency_results = []
+    dependency_results: list[DependencyRunResult] = []
+    gate_results: list[CommencementGateResult] = []
     if config.depends_on:
         from elspeth.engine.dependency_resolver import detect_cycles, resolve_dependencies
 
@@ -115,9 +121,15 @@ def bootstrap_and_run(settings_path: Path) -> RunResult:
             dependency_results=dep_run_dict,
             collection_probes=probe_results,
         )
-        # TODO: gate_results should be recorded in Landscape audit trail
-        # (requires begin_run() metadata support — tracked as follow-up)
-        evaluate_commencement_gates(config.commencement_gates, context)
+        gate_results = evaluate_commencement_gates(config.commencement_gates, context)
+
+    # Build pre-flight result for audit recording (passed through to orchestrator)
+    preflight = None
+    if dependency_results or gate_results:
+        preflight = PreflightResult(
+            dependency_runs=tuple(dependency_results),
+            gate_results=tuple(gate_results),
+        )
 
     # Phase 4: Construct infrastructure and run
     db = LandscapeDB.from_url(
@@ -151,6 +163,7 @@ def bootstrap_and_run(settings_path: Path) -> RunResult:
                 graph=graph,
                 settings=config,
                 payload_store=payload_store,
+                preflight_results=preflight,
             )
     finally:
         db.close()

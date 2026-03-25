@@ -18,6 +18,7 @@ allowed_external_types:
   # Dependency/gate result types - used only by engine bootstrap and resolver
   - "core/dependency_config:DependencyRunResult"
   - "core/dependency_config:CommencementGateResult"
+  - "core/dependency_config:PreflightResult"
 
 # dict[str, Any] patterns that are intentional
 # Format: "file_path:context:param_name"
