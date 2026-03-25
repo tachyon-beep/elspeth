@@ -18,7 +18,7 @@ from typing import TYPE_CHECKING, Any, cast
 import structlog
 
 from elspeth.contracts import Determinism, TransformResult, propagate_contract
-from elspeth.contracts.errors import TransformErrorReason
+from elspeth.contracts.errors import RetrievalNotReadyError, TransformErrorReason
 from elspeth.contracts.schema_contract import PipelineRow
 from elspeth.plugins.infrastructure.base import BaseTransform
 from elspeth.plugins.infrastructure.clients.retrieval.base import RetrievalError
@@ -129,11 +129,11 @@ class RAGRetrievalTransform(BaseTransform):
             limiter=(ctx.rate_limit_registry.get_limiter(provider_name) if ctx.rate_limit_registry is not None else None),
         )
 
-        # Readiness check — refuse to start against empty/missing collection
+        # Readiness check — refuse to start against empty/missing collection.
+        # Two distinct failure modes: unreachable (infra problem) and empty
+        # (operator error). Both crash startup, but the message distinguishes them.
         readiness = self._provider.check_readiness()
-        if readiness.count == 0:
-            from elspeth.contracts.errors import RetrievalNotReadyError
-
+        if not readiness.reachable or readiness.count <= 0:
             raise RetrievalNotReadyError(
                 collection=readiness.collection,
                 reason=readiness.message,

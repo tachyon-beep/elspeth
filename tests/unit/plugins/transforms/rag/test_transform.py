@@ -383,6 +383,33 @@ class TestRAGTransformReadinessGuard:
         assert exc_info.value.collection == "my-vectors"
         assert "empty" in exc_info.value.reason.lower()
 
+    def test_count_one_passes(self) -> None:
+        """count=1 is the minimum passing value — boundary test."""
+        mock_provider = self._make_mock_provider(count=1)
+        transform = self._run_on_start_with_mock(mock_provider)
+
+        assert transform._provider is mock_provider
+
+    def test_negative_count_raises(self) -> None:
+        """count=-1 (corrupted response) must not pass the guard."""
+        from elspeth.contracts.errors import RetrievalNotReadyError
+
+        mock_provider = self._make_mock_provider(count=-1)
+        mock_config_cls = MagicMock(return_value=MagicMock())
+        mock_factory = MagicMock(return_value=mock_provider)
+
+        transform = _make_transform()
+        lifecycle_ctx = _mock_lifecycle_ctx()
+
+        with (
+            patch.dict(
+                "elspeth.plugins.transforms.rag.transform.PROVIDERS",
+                {"azure_search": (mock_config_cls, mock_factory)},
+            ),
+            pytest.raises(RetrievalNotReadyError),
+        ):
+            transform.on_start(lifecycle_ctx)
+
 
 def test_plugin_discoverable():
     """rag_retrieval is found by the plugin scanner."""

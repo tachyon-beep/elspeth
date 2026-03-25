@@ -446,3 +446,25 @@ class TestAzureSearchProviderReadiness:
         url = mock_get.call_args.args[0]
         assert "/indexes/test-index/docs/$count" in url
         assert "api-version=2024-07-01" in url
+
+    def test_non_integer_count_body(self) -> None:
+        """Malformed $count response distinguishable from network failure."""
+        provider = self._make_provider()
+
+        with patch("httpx.get", return_value=self._mock_response(text="not-a-number")):
+            result = provider.check_readiness()
+
+        # Reachable (HTTP 200) but unparseable — distinct from unreachable
+        assert result.reachable is True
+        assert result.count == 0
+        assert "non-integer" in result.message.lower()
+
+    def test_server_error_during_probe(self) -> None:
+        """HTTP 500 during readiness probe reports unreachable."""
+        provider = self._make_provider()
+
+        with patch("httpx.get", return_value=self._mock_response(status_code=500)):
+            result = provider.check_readiness()
+
+        assert result.reachable is False
+        assert result.count == 0

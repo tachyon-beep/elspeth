@@ -8,6 +8,7 @@ import re
 import urllib.parse
 from typing import TYPE_CHECKING, Any, Literal, Self, cast
 
+import httpx
 import structlog
 from pydantic import BaseModel, field_validator, model_validator
 
@@ -303,9 +304,15 @@ class AzureSearchProvider:
         Uses raw httpx (NOT AuditedHTTPClient) because this is a startup
         probe, not a row-level operation. There is no state_id or token_id
         available during on_start().
-        """
-        import httpx
 
+        Note: managed identity auth is not supported for the readiness probe.
+        When use_managed_identity=True, the probe sends an unauthenticated
+        request. Azure will return 401/403, caught by the outer handler and
+        reported as reachable=False with the HTTP error in the message. The
+        operator sees the auth failure clearly. Full managed identity support
+        for startup probes requires DefaultAzureCredential token acquisition,
+        which is tracked separately.
+        """
         index_name = self._config.index
 
         try:
@@ -325,7 +332,19 @@ class AzureSearchProvider:
                 )
 
             response.raise_for_status()
-            count = int(response.text)
+
+            # Tier 3 boundary: $count response body is external data.
+            # Parse defensively — malformed body should be distinguishable
+            # from a genuine network outage.
+            try:
+                count = int(response.text.strip())
+            except ValueError:
+                return CollectionReadinessResult(
+                    collection=index_name,
+                    reachable=True,
+                    count=0,
+                    message=f"Index '{index_name}' returned non-integer $count body: {response.text!r}",
+                )
 
             return CollectionReadinessResult(
                 collection=index_name,
