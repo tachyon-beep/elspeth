@@ -282,6 +282,26 @@ class LandscapeRecorder:
         """Record pre-flight dependency and gate results. Delegates to RunLifecycleRepository."""
         self._run_lifecycle.record_preflight_results(run_id, preflight)
 
+    def record_readiness_check(
+        self,
+        run_id: str,
+        *,
+        name: str,
+        collection: str,
+        reachable: bool,
+        count: int,
+        message: str,
+    ) -> None:
+        """Record a readiness check result. Delegates to RunLifecycleRepository."""
+        self._run_lifecycle.record_readiness_check(
+            run_id,
+            name=name,
+            collection=collection,
+            reachable=reachable,
+            count=count,
+            message=message,
+        )
+
     def get_secret_resolutions_for_run(self, run_id: str) -> list[SecretResolution]:
         """Get secret resolutions for a run. Delegates to RunLifecycleRepository."""
         return self._run_lifecycle.get_secret_resolutions_for_run(run_id)

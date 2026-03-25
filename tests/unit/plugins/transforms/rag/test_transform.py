@@ -315,6 +315,30 @@ class TestRAGTransformReadinessGuard:
         assert transform._provider is mock_provider
         mock_provider.check_readiness.assert_called_once()
 
+    def test_readiness_recorded_in_landscape(self) -> None:
+        """on_start() records the readiness check outcome in the audit trail."""
+        mock_provider = self._make_mock_provider(count=42, collection="my-index")
+        mock_config_cls = MagicMock(return_value=MagicMock())
+        mock_factory = MagicMock(return_value=mock_provider)
+
+        transform = _make_transform()
+        lifecycle_ctx = _mock_lifecycle_ctx()
+
+        with patch.dict(
+            "elspeth.plugins.transforms.rag.transform.PROVIDERS",
+            {"azure_search": (mock_config_cls, mock_factory)},
+        ):
+            transform.on_start(lifecycle_ctx)
+
+        lifecycle_ctx.landscape.record_readiness_check.assert_called_once_with(
+            run_id="run-1",
+            name="rag_retrieval",
+            collection="my-index",
+            reachable=True,
+            count=42,
+            message="Collection 'my-index' has 42 documents",
+        )
+
     def test_empty_collection_raises(self) -> None:
         """on_start() raises RetrievalNotReadyError for empty collection."""
         from elspeth.contracts.errors import RetrievalNotReadyError

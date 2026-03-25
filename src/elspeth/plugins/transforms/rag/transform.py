@@ -139,6 +139,19 @@ class RAGRetrievalTransform(BaseTransform):
                 reason=readiness.message,
             )
 
+        # Record readiness outcome in the Landscape audit trail.
+        # "If it's not recorded, it didn't happen" — an auditor can query
+        # what the collection state was when this pipeline started.
+        if ctx.landscape is not None:
+            ctx.landscape.record_readiness_check(
+                run_id=ctx.run_id,
+                name=self.name,
+                collection=readiness.collection,
+                reachable=readiness.reachable,
+                count=readiness.count,
+                message=readiness.message,
+            )
+
     def process(self, row: PipelineRow, ctx: TransformContext) -> TransformResult:
         """Process a single row: build query, search, format, attach."""
         if not self._on_start_called:

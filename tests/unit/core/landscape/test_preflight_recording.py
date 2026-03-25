@@ -151,6 +151,54 @@ class TestRecordPreflightResults:
         assert "gate1" in names
 
 
+class TestRecordReadinessCheck:
+    def test_readiness_check_recorded_and_readable(self, recorder) -> None:
+        """Readiness check result persists in the preflight_results table."""
+        rec, run_id, db = recorder
+
+        rec.record_readiness_check(
+            run_id=run_id,
+            name="rag_retrieval",
+            collection="test-index",
+            reachable=True,
+            count=42,
+            message="Collection 'test-index' has 42 documents",
+        )
+
+        with db.connection() as conn:
+            rows = conn.execute(preflight_results_table.select().where(preflight_results_table.c.run_id == run_id)).fetchall()
+
+        assert len(rows) == 1
+        row = rows[0]
+        assert row.result_type == "readiness_check"
+        assert row.name == "rag_retrieval"
+        data = json.loads(row.result_json)
+        assert data["collection"] == "test-index"
+        assert data["reachable"] is True
+        assert data["count"] == 42
+        assert "42 documents" in data["message"]
+
+    def test_readiness_json_is_canonical(self, recorder) -> None:
+        """result_json must use canonical JSON for deterministic hashing."""
+        rec, run_id, db = recorder
+
+        rec.record_readiness_check(
+            run_id=run_id,
+            name="rag",
+            collection="c",
+            reachable=True,
+            count=1,
+            message="m",
+        )
+
+        with db.connection() as conn:
+            rows = conn.execute(preflight_results_table.select().where(preflight_results_table.c.run_id == run_id)).fetchall()
+
+        result_json = rows[0].result_json
+        # Canonical JSON (RFC 8785) sorts keys
+        assert result_json == '{"collection":"c","count":1,"message":"m","reachable":true}'
+
+
 class TestPreflightResult:
     def test_construction(self) -> None:
         dep = DependencyRunResult(name="x", run_id="r", settings_hash="h", duration_ms=0, indexed_at="t")

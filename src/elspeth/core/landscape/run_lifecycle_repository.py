@@ -603,6 +603,43 @@ class RunLifecycleRepository:
                         f"Pre-flight result insert failed for run {run_id} — zero rows affected (audit write failure)"
                     )
 
+    def record_readiness_check(
+        self,
+        run_id: str,
+        *,
+        name: str,
+        collection: str,
+        reachable: bool,
+        count: int,
+        message: str,
+    ) -> None:
+        """Record a readiness check result in the audit trail.
+
+        Called by transforms during on_start() after a provider readiness
+        check passes. Records the collection state at startup time so
+        auditors can answer "what was the collection state when this ran?"
+        """
+        row_data = {
+            "result_id": generate_id(),
+            "run_id": run_id,
+            "result_type": "readiness_check",
+            "name": name,
+            "result_json": canonical_json(
+                {
+                    "collection": collection,
+                    "reachable": reachable,
+                    "count": count,
+                    "message": message,
+                }
+            ),
+            "created_at": now(),
+        }
+
+        with self._db.connection() as conn:
+            result = conn.execute(preflight_results_table.insert().values(**row_data))
+            if result.rowcount == 0:
+                raise AuditIntegrityError(f"Readiness check insert failed for run {run_id} — zero rows affected (audit write failure)")
+
     def list_runs(self, *, status: RunStatus | None = None) -> list[Run]:
         """List all runs in the database.
 

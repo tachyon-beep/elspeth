@@ -540,7 +540,7 @@ preflight_results_table = Table(
     Column("result_json", Text, nullable=False),  # Full result as canonical JSON
     Column("created_at", DateTime(timezone=True), nullable=False),
     CheckConstraint(
-        "result_type IN ('dependency_run', 'commencement_gate')",
+        "result_type IN ('dependency_run', 'commencement_gate', 'readiness_check')",
         name="ck_preflight_result_type",
     ),
 )
