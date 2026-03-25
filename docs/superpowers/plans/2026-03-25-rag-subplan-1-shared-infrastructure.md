@@ -700,7 +700,7 @@ class TestExpressionParserDictContext:
 
     def test_forbidden_name_rejected_even_with_custom_allowed(self) -> None:
         """Names not in allowed_names are still rejected."""
-        with pytest.raises(Exception):
+        with pytest.raises(ExpressionSecurityError):
             ExpressionParser(
                 "os['path']",
                 allowed_names=["collections"],
