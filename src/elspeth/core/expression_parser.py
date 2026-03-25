@@ -5,7 +5,7 @@ subset of Python. This is NOT eval() - it's a secure whitelist-based parser.
 
 The parser operates in two phases:
 1. Parse-time validation: Reject forbidden constructs at construction
-2. Evaluation: Safely execute the validated AST against row data
+2. Evaluation: Safely execute the validated AST against a context namespace
 
 Security model:
 - Plugins are system code (trusted), but config expressions could come from
@@ -38,7 +38,7 @@ class ExpressionEvaluationError(Exception):
     """Raised when expression evaluation fails at runtime.
 
     This wraps operational errors (KeyError, ZeroDivisionError, TypeError)
-    that occur when evaluating expressions against row data. Unlike
+    that occur when evaluating expressions against a context. Unlike
     ExpressionSecurityError (rejected at parse time) or ExpressionSyntaxError
     (invalid Python syntax), this occurs when the expression is valid but
     fails during evaluation.
@@ -596,10 +596,17 @@ class ExpressionParser:
     """Safe expression parser for gate conditions.
 
     Parses and validates expressions at construction time, then evaluates
-    them against row data. Only a restricted subset of Python is allowed.
+    them against a context namespace. Only a restricted subset of Python
+    is allowed.
+
+    The set of permitted top-level names is configurable via ``allowed_names``.
+    By default only ``"row"`` is allowed (gate conditions on pipeline rows).
+    Commencement gates pass ``["collections", "dependency_runs", "env"]``
+    for dict-context evaluation.
 
     Allowed operations:
-    - Field access: row['field'], row.get('field'), row.get('field', default)
+    - Subscript access: name['field'], name['key1']['key2']
+    - Method: name.get('field'), name.get('field', default)
     - Safe builtins: len(), str(), int(), float(), bool(), abs()
     - Comparisons: ==, !=, <, >, <=, >=
     - Boolean operators: and, or, not
@@ -611,18 +618,24 @@ class ExpressionParser:
     - Basic arithmetic: +, -, *, /, //, %
 
     Forbidden operations:
-    - Function calls (except row.get() and safe builtins)
+    - Function calls (except name.get() and safe builtins)
     - Lambda expressions
     - Comprehensions (list, dict, set, generator)
     - Assignment expressions (:=)
     - await, yield
     - f-strings with expressions
-    - Attribute access (except row.get)
-    - Names other than 'row', 'True', 'False', 'None'
+    - Attribute access (except name.get)
+    - Names not in allowed_names (and not True, False, None)
 
     Example:
         parser = ExpressionParser("row['confidence'] >= 0.85")
         result = parser.evaluate({"confidence": 0.9})  # Returns True
+
+        parser = ExpressionParser(
+            "collections['facts']['count'] > 0",
+            allowed_names=["collections"],
+        )
+        result = parser.evaluate({"collections": {"facts": {"count": 42}}})
     """
 
     def __init__(self, expression: str, *, allowed_names: list[str] | None = None) -> None:

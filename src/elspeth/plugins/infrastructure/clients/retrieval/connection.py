@@ -1,13 +1,14 @@
 """Shared ChromaDB connection configuration.
 
-Used by ChromaSinkConfig, ChromaSearchProviderConfig, and CollectionProbeConfig.
+Used by ChromaSearchProviderConfig and ChromaSinkConfig (via validation-by-construction).
 """
 
 from __future__ import annotations
 
+import re
 from typing import Literal
 
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 
 class ChromaConnectionConfig(BaseModel):
@@ -16,6 +17,19 @@ class ChromaConnectionConfig(BaseModel):
     model_config = ConfigDict(frozen=True, extra="forbid")
 
     collection: str = Field(description="ChromaDB collection name")
+
+    @field_validator("collection")
+    @classmethod
+    def validate_collection_name(cls, v: str) -> str:
+        if len(v) < 3:
+            raise ValueError(f"collection name must be at least 3 characters, got {len(v)}")
+        if not re.match(r"^[a-zA-Z0-9][a-zA-Z0-9_-]*[a-zA-Z0-9]$", v):
+            raise ValueError(
+                f"collection must contain only alphanumeric characters, hyphens, and underscores "
+                f"(and start/end with alphanumeric), got {v!r}."
+            )
+        return v
+
     mode: Literal["persistent", "client"] = Field(description="Connection mode: persistent (local disk) or client (remote HTTP)")
     persist_directory: str | None = Field(
         default=None,

@@ -1048,17 +1048,22 @@ class CommencementGateFailedError(Exception):
         reason: str,
         context_snapshot: Mapping[str, Any],
     ) -> None:
+        from elspeth.contracts.freeze import deep_freeze
+
         self.gate_name = gate_name
         self.condition = condition
         self.reason = reason
-        self.context_snapshot = context_snapshot
+        self.context_snapshot: Mapping[str, Any] = deep_freeze(context_snapshot)
         super().__init__(f"Commencement gate '{gate_name}' failed: {reason} (condition: {condition})")
 
 
 class RetrievalNotReadyError(Exception):
     """A retrieval provider's collection is empty or unreachable."""
 
-    pass
+    def __init__(self, *, collection: str, reason: str) -> None:
+        self.collection = collection
+        self.reason = reason
+        super().__init__(f"Collection {collection!r} not ready: {reason}")
 
 
 class DuplicateDocumentError(Exception):

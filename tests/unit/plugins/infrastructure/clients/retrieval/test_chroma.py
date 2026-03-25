@@ -90,6 +90,43 @@ class TestChromaSearchProviderConfig:
             )
 
 
+class TestToConnectionConfig:
+    """Tests for ChromaSearchProviderConfig.to_connection_config()."""
+
+    def test_ephemeral_raises_value_error(self) -> None:
+        config = ChromaSearchProviderConfig(collection="test-col", mode="ephemeral")
+        with pytest.raises(ValueError, match="ephemeral"):
+            config.to_connection_config()
+
+    def test_persistent_returns_correct_config(self) -> None:
+        config = ChromaSearchProviderConfig(
+            collection="test-col",
+            mode="persistent",
+            persist_directory="/tmp/chroma",
+            distance_function="l2",
+        )
+        conn = config.to_connection_config()
+        assert conn.collection == "test-col"
+        assert conn.mode == "persistent"
+        assert conn.persist_directory == "/tmp/chroma"
+        assert conn.distance_function == "l2"
+
+    def test_client_returns_correct_config(self) -> None:
+        config = ChromaSearchProviderConfig(
+            collection="test-col",
+            mode="client",
+            host="localhost",
+            port=9000,
+            ssl=False,
+        )
+        conn = config.to_connection_config()
+        assert conn.collection == "test-col"
+        assert conn.mode == "client"
+        assert conn.host == "localhost"
+        assert conn.port == 9000
+        assert conn.ssl is False
+
+
 class TestChromaSearchProvider:
     """Tests using real ephemeral ChromaDB — no mocks."""
 
