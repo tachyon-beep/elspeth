@@ -23,6 +23,99 @@ Bringing ingestion into ELSPETH as a proper pipeline closes this gap. Every docu
 - **The plugin doesn't know how the data got there.** The RAG transform's readiness check verifies the collection has data. It doesn't care whether that data came from a `depends_on` pipeline, a manual script, or an external indexer.
 - **Fail loudly at the earliest possible moment.** A pipeline that would produce a run full of zero-chunk retrievals should never start.
 
+## Implementation Staging
+
+The design is implemented across five sub-plans. Sub-plan 1 is the critical path — it unblocks sub-plans 2, 3, and 4, which can then proceed in parallel. Sub-plan 5 assembles the end-to-end example after the others merge.
+
+```
+Sub-plan 1: Shared Infrastructure
+    │
+    ├──► Sub-plan 2: ChromaSink          ──┐
+    ├──► Sub-plan 3: depends_on + Gates  ──┼──► Sub-plan 5: End-to-End Example
+    └──► Sub-plan 4: Readiness Contract  ──┘
+```
+
+### Sub-plan 1: Shared Infrastructure
+
+Foundation types and utilities that all other sub-plans depend on.
+
+| Deliverable | Layer | Description |
+|-------------|-------|-------------|
+| `CollectionReadinessResult` | L0 (`contracts/probes.py`) | Unified frozen dataclass for collection readiness — used by probes, providers, and transforms |
+| `CollectionProbe` protocol | L0 (`contracts/probes.py`) | Protocol for collection readiness probes |
+| `ChromaConnectionConfig` | L3 (`plugins/infrastructure/`) | Shared Pydantic model for ChromaDB connection fields — used by sink, provider, and probe configs |
+| `ExpressionParser` extension | L1 (`core/expression_parser.py`) | Extend existing AST-whitelist parser to accept plain dict contexts (currently only `PipelineRow`) |
+| Error types | L0 (`contracts/errors.py`) | `DependencyFailedError`, `CommencementGateFailedError`, `RetrievalNotReadyError` |
+
+**Risk:** Low. Small, self-contained changes. No engine modifications.
+**Review focus:** L0 type design, freeze guard decisions, `ExpressionParser` dict-context extension.
+
+### Sub-plan 2: ChromaSink Plugin
+
+New sink plugin that writes rows into ChromaDB collections.
+
+| Deliverable | Layer | Description |
+|-------------|-------|-------------|
+| `ChromaSinkConfig` | L3 (`plugins/sinks/`) | Pydantic config model composing `ChromaConnectionConfig` + field mapping |
+| `ChromaSink` | L3 (`plugins/sinks/chroma_sink.py`) | Sink implementation — lifecycle, write, audit recording |
+| Unit tests | — | Config validation, write modes, audit recording, `AuditIntegrityError` path |
+| Integration test | — | CSV → ChromaSink with real ephemeral ChromaDB, Landscape assertions |
+
+**Depends on:** Sub-plan 1 (`ChromaConnectionConfig`, `CollectionReadinessResult`).
+**Risk:** Medium. New plugin, but follows established sink patterns (database_sink.py as reference).
+**Review focus:** Tier model compliance, `allow_coercion=False`, content hashing before write, audit integrity.
+
+### Sub-plan 3: `depends_on` + Commencement Gates
+
+Engine-level orchestration primitives — the highest-complexity sub-plan.
+
+| Deliverable | Layer | Description |
+|-------------|-------|-------------|
+| `bootstrap_and_run()` | L2 (`engine/`) | Extract reusable pipeline bootstrap from CLI codepath |
+| `DependencyConfig`, `DependencyRunResult` | L1 (`core/config.py`) | Config model and result dataclass with `indexed_at` |
+| `CommencementGateConfig`, `GateResult` | L1 (`core/config.py`) | Config model and result dataclass with frozen `context_snapshot` |
+| `CollectionProbeConfig` | L1 (`core/config.py`) | Config model for explicit probe declarations |
+| Dependency resolution phase | L2 (`engine/orchestrator/`) | Sequential execution, cycle detection (DFS, `Path.resolve()`), 3-level depth limit |
+| Commencement gate phase | L2 (`engine/orchestrator/`) | Pre-flight context assembly, `ExpressionParser` evaluation, TOCTOU-safe freezing |
+| Collection probe assembly | L3 (`plugins/infrastructure/`) | `build_collection_probes()` from explicit config declarations |
+| Unit tests | — | Cycle detection (1/2/3-hop), depth limit, gate AST validation, Hypothesis property test, signal handling |
+| Integration tests | — | Two-pipeline dependency, gate evaluation, nested ordering, resume behaviour |
+
+**Depends on:** Sub-plan 1 (`CollectionReadinessResult`, `ExpressionParser`, error types).
+**Risk:** High. Modifies the orchestrator's `run()` method. `bootstrap_and_run()` extraction touches the CLI codepath. Needs careful review.
+**Review focus:** `bootstrap_and_run()` equivalence with CLI path, cycle detection correctness, TOCTOU closure, `KeyboardInterrupt` propagation.
+
+### Sub-plan 4: Readiness Contract
+
+Pre-condition check on the existing RAG retrieval transform.
+
+| Deliverable | Layer | Description |
+|-------------|-------|-------------|
+| `check_readiness()` on `RetrievalProvider` | L3 (`plugins/infrastructure/`) | Protocol extension returning `CollectionReadinessResult` |
+| `ChromaSearchProvider.check_readiness()` | L3 | Collection existence + count check |
+| `AzureSearchProvider.check_readiness()` | L3 | Index existence + document count via HTTP |
+| `RAGRetrievalTransform.on_start()` guard | L3 (`plugins/transforms/rag/`) | Readiness check after provider construction |
+| Unit tests | — | Ready/empty/missing/unreachable states |
+| Integration test | — | Transform against empty vs. populated collection |
+
+**Depends on:** Sub-plan 1 (`CollectionReadinessResult`).
+**Risk:** Medium-low. Small scope but modifies a `@runtime_checkable` Protocol — all existing test doubles and mocks of `RetrievalProvider` must be updated in the same commit.
+**Review focus:** Protocol evolution, `spec_set` on mocks, single-attempt semantics.
+
+### Sub-plan 5: End-to-End Example + Smoke Tests
+
+Final integration stage after all four sub-plans merge.
+
+| Deliverable | Description |
+|-------------|-------------|
+| `examples/chroma_rag_indexed/` | Indexing pipeline + query pipeline with `depends_on`, gates, and retrieval |
+| `documents.csv` | Sample reference corpus |
+| `questions.csv` | Sample questions |
+| Integration smoke test | Full pipeline sequence: dependency → gate → readiness → retrieval |
+
+**Depends on:** Sub-plans 2, 3, 4 (all merged).
+**Risk:** Low. Assembly and verification only — no new code beyond example configs and the smoke test.
+
 ## Architecture
 
 ### File Layout
