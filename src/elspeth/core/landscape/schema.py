@@ -534,7 +534,7 @@ preflight_results_table = Table(
     "preflight_results",
     metadata,
     Column("result_id", String(64), primary_key=True),
-    Column("run_id", String(64), ForeignKey("runs.run_id"), nullable=False, index=True),
+    Column("run_id", String(64), ForeignKey("runs.run_id"), nullable=False),
     Column("result_type", String(32), nullable=False),  # 'dependency_run' or 'commencement_gate'
     Column("name", String(256), nullable=False),  # Dependency name or gate name
     Column("result_json", Text, nullable=False),  # Full result as canonical JSON

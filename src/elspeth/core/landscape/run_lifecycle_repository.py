@@ -22,6 +22,7 @@ from elspeth.contracts import (
     SecretResolutionInput,
 )
 from elspeth.contracts.errors import AuditIntegrityError
+from elspeth.contracts.freeze import deep_thaw
 from elspeth.core.canonical import canonical_json, stable_hash
 from elspeth.core.dependency_config import PreflightResult
 from elspeth.core.landscape._database_ops import DatabaseOps
@@ -30,6 +31,7 @@ from elspeth.core.landscape.database import LandscapeDB
 from elspeth.core.landscape.model_loaders import RunLoader
 from elspeth.core.landscape.reproducibility import compute_grade
 from elspeth.core.landscape.schema import (
+    preflight_results_table,
     runs_table,
     secret_resolutions_table,
 )
@@ -544,14 +546,13 @@ class RunLifecycleRepository:
         Called by orchestrator after run is created. Pre-flight results were
         captured during bootstrap_and_run() before the run existed.
 
-        All inserts are batched in a single transaction for atomicity.
+        All inserts are batched in a single connection (db.connection() is a
+        transaction context manager).
 
         Args:
             run_id: The run ID to associate results with
             preflight: Combined pre-flight results (dependencies + gates)
         """
-        from elspeth.core.landscape.schema import preflight_results_table
-
         rows_to_insert = []
 
         for dep in preflight.dependency_runs:
@@ -561,7 +562,7 @@ class RunLifecycleRepository:
                     "run_id": run_id,
                     "result_type": "dependency_run",
                     "name": dep.name,
-                    "result_json": json.dumps(
+                    "result_json": canonical_json(
                         {
                             "run_id": dep.run_id,
                             "settings_hash": dep.settings_hash,
@@ -580,11 +581,11 @@ class RunLifecycleRepository:
                     "run_id": run_id,
                     "result_type": "commencement_gate",
                     "name": gate.name,
-                    "result_json": json.dumps(
+                    "result_json": canonical_json(
                         {
                             "condition": gate.condition,
                             "result": gate.result,
-                            "context_snapshot": dict(gate.context_snapshot),
+                            "context_snapshot": deep_thaw(gate.context_snapshot),
                         }
                     ),
                     "created_at": now(),
