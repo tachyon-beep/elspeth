@@ -155,7 +155,8 @@ class ChromaSink(BaseSink):
         fm = self._config.field_mapping
         ids = [row[fm.id] for row in rows]
         documents = [row[fm.document] for row in rows]
-        metadatas = [{field: row[field] for field in fm.metadata} for row in rows]
+        # ChromaDB rejects empty metadata dicts — pass None when no metadata fields configured
+        metadatas = [{field: row[field] for field in fm.metadata} for row in rows] if fm.metadata else None
 
         payload = canonical_json({"ids": ids, "documents": documents, "metadatas": metadatas})
         payload_bytes = payload.encode("utf-8")
@@ -175,10 +176,11 @@ class ChromaSink(BaseSink):
                 existing_ids = set(existing["ids"])
                 new_indices = [i for i, id_ in enumerate(ids) if id_ not in existing_ids]
                 if new_indices:
+                    new_metadatas = [metadatas[i] for i in new_indices] if metadatas is not None else None
                     collection.add(
                         ids=[ids[i] for i in new_indices],
                         documents=[documents[i] for i in new_indices],
-                        metadatas=[metadatas[i] for i in new_indices],
+                        metadatas=new_metadatas,  # type: ignore[arg-type]
                     )
             elif self._config.on_duplicate == "error":
                 existing = collection.get(ids=ids)
