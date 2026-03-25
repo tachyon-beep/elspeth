@@ -344,6 +344,9 @@ class TestElspethSettingsAlignment:
         "gates",  # Optional - config-driven routing
         "coalesce",  # Optional - fork path merging
         "aggregations",  # Optional - config-driven batching
+        "depends_on",  # Optional - pipeline dependencies
+        "commencement_gates",  # Optional - pre-flight go/no-go conditions
+        "collection_probes",  # Optional - vector store readiness checks
     }
 
     # Run mode fields (how to execute)

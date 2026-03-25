@@ -66,6 +66,11 @@ per_file_rules:
   expires: null
   max_hits: 2
 allow_hits:
+- key: engine/dependency_resolver.py:R1:_load_depends_on:fp=ae4677e0a23d19fd
+  owner: architecture
+  reason: 'Tier 3 boundary: reads raw YAML from operator-authored settings files for cycle detection. depends_on is optional — absence means no dependencies.'
+  safety: Returns empty list on missing key; only used for lightweight cycle detection, not config validation
+  expires: null
 - key: engine/executors/sink.py:R4:SinkExecutor:write:fp=45c1a6c9e0bdf4a9
   owner: architecture
   reason: 'Post-durability callbacks: checkpoint callback fails after durable sink write'
