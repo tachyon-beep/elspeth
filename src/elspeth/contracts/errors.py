@@ -1020,3 +1020,42 @@ def violations_to_error_reason(violations: list[ContractViolation]) -> dict[str,
         "count": len(violations),
         "violations": [v.to_error_reason() for v in violations],
     }
+
+
+# =============================================================================
+# RAG Ingestion Pipeline Errors
+# =============================================================================
+
+
+class DependencyFailedError(Exception):
+    """A pipeline dependency failed to complete successfully."""
+
+    def __init__(self, *, dependency_name: str, run_id: str, reason: str) -> None:
+        self.dependency_name = dependency_name
+        self.run_id = run_id
+        self.reason = reason
+        super().__init__(f"Dependency '{dependency_name}' failed (run_id={run_id}): {reason}")
+
+
+class CommencementGateFailedError(Exception):
+    """A commencement gate evaluated to falsy or raised an error."""
+
+    def __init__(
+        self,
+        *,
+        gate_name: str,
+        condition: str,
+        reason: str,
+        context_snapshot: Mapping[str, Any],
+    ) -> None:
+        self.gate_name = gate_name
+        self.condition = condition
+        self.reason = reason
+        self.context_snapshot = context_snapshot
+        super().__init__(f"Commencement gate '{gate_name}' failed: {reason} (condition: {condition})")
+
+
+class RetrievalNotReadyError(Exception):
+    """A retrieval provider's collection is empty or unreachable."""
+
+    pass
