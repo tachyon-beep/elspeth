@@ -27,6 +27,7 @@ from pydantic import BaseModel, field_validator, model_validator
 from elspeth.contracts.call_data import RawCallPayload
 from elspeth.contracts.enums import CallStatus, CallType
 from elspeth.plugins.infrastructure.clients.retrieval.base import RetrievalError
+from elspeth.plugins.infrastructure.clients.retrieval.connection import ChromaConnectionConfig
 from elspeth.plugins.infrastructure.clients.retrieval.types import RetrievalChunk
 
 if TYPE_CHECKING:
@@ -70,15 +71,40 @@ class ChromaSearchProviderConfig(BaseModel):
 
     @model_validator(mode="after")
     def validate_mode_requirements(self) -> Self:
-        if self.mode == "persistent" and not self.persist_directory:
-            raise ValueError("persistent mode requires persist_directory")
-        if self.mode == "client" and not self.host:
-            raise ValueError("client mode requires host")
-        if self.mode == "client" and self.host:
-            is_local = self.host in ("localhost", "127.0.0.1", "::1")
-            if not is_local and not self.ssl:
-                raise ValueError(f"Remote Chroma server {self.host!r} requires ssl=true. HTTP is only permitted for localhost.")
+        if self.mode in ("persistent", "client"):
+            # Delegate cross-field validation to ChromaConnectionConfig.
+            # Construction triggers its model_validator; we discard the
+            # instance — the provider config keeps its own flat fields.
+            ChromaConnectionConfig(
+                collection=self.collection,
+                mode=self.mode,
+                persist_directory=self.persist_directory,
+                host=self.host,
+                port=self.port,
+                ssl=self.ssl,
+                distance_function=self.distance_function,
+            )
         return self
+
+    def to_connection_config(self) -> ChromaConnectionConfig:
+        """Build a ChromaConnectionConfig from this provider config.
+
+        Only valid when mode is 'persistent' or 'client'. Raises
+        ValueError for ephemeral mode (no shared connection to configure).
+        """
+        if self.mode == "ephemeral":
+            raise ValueError(
+                "Cannot create ChromaConnectionConfig from ephemeral mode — ephemeral clients have no shared connection parameters"
+            )
+        return ChromaConnectionConfig(
+            collection=self.collection,
+            mode=self.mode,
+            persist_directory=self.persist_directory,
+            host=self.host,
+            port=self.port,
+            ssl=self.ssl,
+            distance_function=self.distance_function,
+        )
 
 
 class ChromaSearchProvider:
