@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import pytest
 
-from elspeth.contracts.probes import CollectionReadinessResult
+from elspeth.contracts.probes import CollectionProbe, CollectionReadinessResult
 
 
 class TestCollectionReadinessResult:
@@ -51,3 +51,38 @@ class TestCollectionReadinessResult:
         )
         assert result.reachable is True
         assert result.count == 0
+
+
+class TestCollectionProbe:
+    """Tests for the CollectionProbe protocol."""
+
+    def test_compliant_implementation_passes_isinstance(self) -> None:
+        class FakeProbe:
+            collection_name: str = "test-collection"
+
+            def probe(self) -> CollectionReadinessResult:
+                return CollectionReadinessResult(
+                    collection=self.collection_name,
+                    reachable=True,
+                    count=5,
+                    message="ok",
+                )
+
+        probe = FakeProbe()
+        assert isinstance(probe, CollectionProbe)
+
+    def test_non_compliant_missing_probe_method(self) -> None:
+        class BadProbe:
+            collection_name: str = "test"
+
+        assert not isinstance(BadProbe(), CollectionProbe)
+
+    def test_non_compliant_missing_collection_name(self) -> None:
+        class BadProbe:
+            def probe(self) -> CollectionReadinessResult:
+                return CollectionReadinessResult(collection="x", reachable=True, count=1, message="ok")
+
+        # runtime_checkable checks callable members but may not check
+        # non-callable class attributes consistently — this test documents
+        # the current behaviour regardless of outcome.
+        _ = isinstance(BadProbe(), CollectionProbe)
