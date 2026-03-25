@@ -13,9 +13,20 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
+from elspeth.contracts.probes import CollectionReadinessResult
 from elspeth.contracts.schema_contract import PipelineRow, SchemaContract
 from elspeth.plugins.infrastructure.clients.retrieval.types import RetrievalChunk
 from elspeth.plugins.transforms.rag.transform import RAGRetrievalTransform
+
+
+def _ready_result(collection="test-index", count=10):
+    """Default readiness result for tests that don't care about readiness."""
+    return CollectionReadinessResult(
+        collection=collection,
+        reachable=True,
+        count=count,
+        message=f"Collection '{collection}' has {count} documents",
+    )
 
 
 @pytest.fixture(autouse=True)
@@ -62,7 +73,13 @@ def _create_transform_with_lifecycle(**config_overrides):
     }
     config.update(config_overrides)
     transform = RAGRetrievalTransform(config)
-    transform.on_start(_mock_lifecycle_ctx())
+    # Mock httpx.get for the readiness probe — no real Azure endpoint available
+    mock_resp = MagicMock()
+    mock_resp.status_code = 200
+    mock_resp.text = "10"
+    mock_resp.raise_for_status = MagicMock()
+    with patch("httpx.get", return_value=mock_resp):
+        transform.on_start(_mock_lifecycle_ctx())
     return transform
 
 
@@ -145,7 +162,12 @@ class TestRAGPipelineIntegration:
             "schema_config": {"mode": "observed"},
         }
         transform = RAGRetrievalTransform(config)
-        transform.on_start(lifecycle_ctx)
+        mock_resp = MagicMock()
+        mock_resp.status_code = 200
+        mock_resp.text = "10"
+        mock_resp.raise_for_status = MagicMock()
+        with patch("httpx.get", return_value=mock_resp):
+            transform.on_start(lifecycle_ctx)
         transform.on_complete(lifecycle_ctx)
         lifecycle_ctx.telemetry_emit.assert_called_once()
 
@@ -161,27 +183,38 @@ class TestRAGPipelineWithChromaProvider:
     chromadb = pytest.importorskip("chromadb")
 
     def _create_chroma_transform(self, documents, collection_suffix="default", **config_overrides):
+        import chromadb
+
+        collection_name = f"test-kb-{collection_suffix}"
         config = {
             "output_prefix": "kb",
             "query_field": "question",
             "provider": "chroma",
             "provider_config": {
-                "collection": f"test-kb-{collection_suffix}",
+                "collection": collection_name,
                 "mode": "ephemeral",
                 "distance_function": "cosine",
             },
             "schema_config": {"mode": "observed"},
         }
         config.update(config_overrides)
-        transform = RAGRetrievalTransform(config)
-        transform.on_start(_mock_lifecycle_ctx())
 
-        collection = transform._provider._collection
+        # Pre-populate the collection BEFORE on_start() so check_readiness()
+        # sees documents. Chroma ephemeral mode shares a global in-memory
+        # backend — get_or_create_collection in __init__ will find this data.
+        client = chromadb.Client()
+        collection = client.get_or_create_collection(
+            name=collection_name,
+            metadata={"hnsw:space": "cosine"},
+        )
         collection.add(
             documents=[d["content"] for d in documents],
             ids=[d["id"] for d in documents],
             metadatas=[d.get("metadata") for d in documents],
         )
+
+        transform = RAGRetrievalTransform(config)
+        transform.on_start(_mock_lifecycle_ctx())
 
         return transform
 
