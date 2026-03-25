@@ -320,60 +320,70 @@ allow_hits:
   reason: Provider lookup — dict.get() with explicit None check and meaningful ValueError; this IS the guard that catches unknown providers at config load time rather than first-row execution
   safety: None result raises ValueError immediately with list of available providers; no silent pass-through
   expires: null
-- key: plugins/infrastructure/clients/retrieval/azure_search.py:R1:AzureSearchProvider:_parse_response:fp=ac3495bbb7ec9639
+- key: plugins/infrastructure/clients/retrieval/azure_search.py:R1:AzureSearchProvider:_parse_response:fp=b092a58d933c3cc8
   owner: feature
   reason: Azure AI Search API response parsing at Tier 3 boundary — @search.score is optional in malformed responses; absence recorded in skipped_items
   safety: Missing score causes item to be skipped and recorded; no silent data loss
   expires: null
-- key: plugins/infrastructure/clients/retrieval/azure_search.py:R1:AzureSearchProvider:_parse_response:fp=866a8f498d10e0fe
+- key: plugins/infrastructure/clients/retrieval/azure_search.py:R1:AzureSearchProvider:_parse_response:fp=53ab72529289d4a1
   owner: feature
   reason: Azure AI Search API Tier 3 — item.get("id") in skipped item record; ID may be absent on malformed items
   safety: Captured in skipped_items for audit; no data corruption
   expires: null
-- key: plugins/infrastructure/clients/retrieval/azure_search.py:R5:AzureSearchProvider:_parse_response:fp=83c83b73ebf0ae32
+- key: plugins/infrastructure/clients/retrieval/azure_search.py:R5:AzureSearchProvider:_parse_response:fp=648dde91f1f6e1f2
   owner: bugfix
   reason: Tier 3 boundary type validation — isinstance(raw_score, bool) guards against Python bool-is-int before arithmetic
   safety: Invalid score type causes item to be skipped and recorded in skipped_items as "invalid_score_type"
   expires: null
-- key: plugins/infrastructure/clients/retrieval/azure_search.py:R5:AzureSearchProvider:_parse_response:fp=cdec26776f3d3d1a
+- key: plugins/infrastructure/clients/retrieval/azure_search.py:R5:AzureSearchProvider:_parse_response:fp=9073fe169187dd04
   owner: bugfix
   reason: Tier 3 boundary type validation — rejects non-numeric score types (string, list, dict) before math.isfinite
   safety: Invalid score type causes item to be skipped and recorded; no crash
   expires: null
-- key: plugins/infrastructure/clients/retrieval/azure_search.py:R1:AzureSearchProvider:_parse_response:fp=d3ae8b449f567803
+- key: plugins/infrastructure/clients/retrieval/azure_search.py:R1:AzureSearchProvider:_parse_response:fp=93cb3c9df9676025
   owner: bugfix
   reason: Azure AI Search API Tier 3 — item.get("id") in skipped item record for invalid score type
   safety: Captured in skipped_items for audit; no data corruption
   expires: null
-- key: plugins/infrastructure/clients/retrieval/azure_search.py:R1:AzureSearchProvider:_parse_response:fp=f9be71eef8e59cb3
-  owner: feature
-  reason: Azure AI Search API Tier 3 — item.get("id") in skipped item record for missing content
-  safety: Captured in skipped_items for audit; no data corruption
-  expires: null
-- key: plugins/infrastructure/clients/retrieval/azure_search.py:R1:AzureSearchProvider:_parse_response:fp=1a56c5169fca221b
+- key: plugins/infrastructure/clients/retrieval/azure_search.py:R1:AzureSearchProvider:_parse_response:fp=df59513c12e2b7e6
   owner: feature
   reason: Azure AI Search API Tier 3 — content field may be absent in malformed responses
   safety: Missing content (None) causes item to be skipped and recorded in skipped_items as "missing_content"
   expires: null
-- key: plugins/infrastructure/clients/retrieval/azure_search.py:R1:AzureSearchProvider:_parse_response:fp=46bde1db12749de8
+- key: plugins/infrastructure/clients/retrieval/azure_search.py:R1:AzureSearchProvider:_parse_response:fp=99a8cad624e2b28c
+  owner: feature
+  reason: Azure AI Search API Tier 3 — item.get("id") in skipped item record for missing content
+  safety: Captured in skipped_items for audit; no data corruption
+  expires: null
+- key: plugins/infrastructure/clients/retrieval/azure_search.py:R1:AzureSearchProvider:_parse_response:fp=a67484a52d97c3c2
   owner: feature
   reason: Azure AI Search API Tier 3 — item.get("id") in skipped item record for empty content
   safety: Captured in skipped_items as "empty_content" for audit; no data corruption
   expires: null
-- key: plugins/infrastructure/clients/retrieval/azure_search.py:R1:AzureSearchProvider:_parse_response:fp=d1f5265e28000e0f
+- key: plugins/infrastructure/clients/retrieval/azure_search.py:R1:AzureSearchProvider:_parse_response:fp=fd2a9e8410d29fb1
   owner: feature
   reason: Azure AI Search API Tier 3 — source ID lookup chain (id then @search.documentId); items without any ID are skipped
   safety: No fabricated IDs; items without source_id skipped and recorded
   expires: null
-- key: plugins/infrastructure/clients/retrieval/azure_search.py:R1:AzureSearchProvider:_parse_response:fp=b60212fd103dba98
+- key: plugins/infrastructure/clients/retrieval/azure_search.py:R1:AzureSearchProvider:_parse_response:fp=8e4e8550226a8126
   owner: feature
   reason: Azure AI Search API Tier 3 — @search.documentId fallback in source ID chain
   safety: No fabricated IDs; items without source_id skipped and recorded
   expires: null
-- key: plugins/infrastructure/clients/retrieval/azure_search.py:R5:AzureSearchProvider:_parse_response:fp=f8dda98dc46281fe
+- key: plugins/infrastructure/clients/retrieval/azure_search.py:R5:AzureSearchProvider:_parse_response:fp=f9c0a2a2ce5ea2b8
   owner: feature
   reason: Azure AI Search API response metadata coercion at Tier 3 boundary — isinstance check converts non-primitive types to str for JSON serializability
   safety: Non-serializable types coerced to str; RetrievalChunk validates metadata JSON-serializability at construction
+  expires: null
+- key: plugins/infrastructure/clients/retrieval/azure_search.py:R1:AzureSearchProvider:check_readiness:fp=1c5bccace64d82d3
+  owner: feature
+  reason: httpx.get() method call for Azure Search $count endpoint — false positive from R1 rule matching .get( syntax
+  safety: This is the actual HTTP call, not a defensive dict access
+  expires: null
+- key: plugins/infrastructure/clients/retrieval/azure_search.py:R4:AzureSearchProvider:check_readiness:fp=397e0d53f614bcc1
+  owner: feature
+  reason: Startup probe must report unreachable index, not crash — any exception from httpx.get is a valid probe result
+  safety: Returns CollectionReadinessResult with reachable=False and exception details; caller raises RetrievalNotReadyError
   expires: null
 - key: plugins/infrastructure/clients/retrieval/chroma.py:R5:ChromaSearchProvider:search:fp=9c8adbd251d61ac3
   owner: bugfix

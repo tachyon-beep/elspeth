@@ -1,6 +1,6 @@
 """Tests for Azure AI Search provider."""
 
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock, PropertyMock, patch
 
 import pytest
 
@@ -345,3 +345,104 @@ class TestParseResponse:
         }
         chunks, _ = provider._parse_response(response, min_score=0.0)
         assert chunks[0].score >= chunks[1].score >= chunks[2].score
+
+
+class TestAzureSearchProviderReadiness:
+    """Tests for AzureSearchProvider.check_readiness()."""
+
+    def _make_provider(self):
+        config = AzureSearchProviderConfig(
+            endpoint="https://test.search.windows.net",
+            index="test-index",
+            api_key="test-key",
+        )
+        return AzureSearchProvider(
+            config=config,
+            recorder=MagicMock(),
+            run_id="run-1",
+            telemetry_emit=MagicMock(),
+        )
+
+    def _mock_response(self, *, status_code=200, text="0"):
+        resp = MagicMock()
+        type(resp).status_code = PropertyMock(return_value=status_code)
+        type(resp).text = PropertyMock(return_value=text)
+        resp.raise_for_status = MagicMock()
+        if status_code >= 400:
+            import httpx
+
+            resp.raise_for_status.side_effect = httpx.HTTPStatusError(
+                f"HTTP {status_code}",
+                request=MagicMock(),
+                response=resp,
+            )
+        return resp
+
+    def test_index_with_documents_is_ready(self) -> None:
+        """Index exists and has documents."""
+        from elspeth.contracts.probes import CollectionReadinessResult
+
+        provider = self._make_provider()
+
+        with patch("httpx.get", return_value=self._mock_response(text="42")):
+            result = provider.check_readiness()
+
+        assert isinstance(result, CollectionReadinessResult)
+        assert result.reachable is True
+        assert result.count == 42
+        assert "42 documents" in result.message
+
+    def test_empty_index_is_not_ready(self) -> None:
+        """Index exists but is empty."""
+        provider = self._make_provider()
+
+        with patch("httpx.get", return_value=self._mock_response(text="0")):
+            result = provider.check_readiness()
+
+        assert result.reachable is True
+        assert result.count == 0
+        assert "empty" in result.message
+
+    def test_index_not_found_404(self) -> None:
+        """Index does not exist — 404 response."""
+        provider = self._make_provider()
+
+        with patch("httpx.get", return_value=self._mock_response(status_code=404)):
+            result = provider.check_readiness()
+
+        assert result.reachable is True
+        assert result.count == 0
+        assert "not found" in result.message.lower()
+
+    def test_connection_error(self) -> None:
+        """Azure Search is unreachable."""
+        provider = self._make_provider()
+
+        with patch("httpx.get", side_effect=ConnectionError("Connection refused")):
+            result = provider.check_readiness()
+
+        assert result.reachable is False
+        assert result.count == 0
+        assert "Connection refused" in result.message
+
+    def test_auth_header_sent(self) -> None:
+        """API key is included in the readiness probe request."""
+        provider = self._make_provider()
+
+        with patch("httpx.get", return_value=self._mock_response(text="10")) as mock_get:
+            provider.check_readiness()
+
+        mock_get.assert_called_once()
+        call_kwargs = mock_get.call_args
+        assert call_kwargs.kwargs["headers"]["api-key"] == "test-key"
+
+    def test_count_url_format(self) -> None:
+        """Readiness probe uses the correct $count endpoint."""
+        provider = self._make_provider()
+
+        with patch("httpx.get", return_value=self._mock_response(text="5")) as mock_get:
+            provider.check_readiness()
+
+        url = mock_get.call_args.args[0]
+        assert "/indexes/test-index/docs/$count" in url
+        assert "api-version=2024-07-01" in url
