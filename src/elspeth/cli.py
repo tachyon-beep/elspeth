@@ -20,10 +20,17 @@ from pydantic import ValidationError
 
 from elspeth import __version__
 from elspeth.contracts import ExecutionResult, SecretResolutionInput
-from elspeth.contracts.errors import AuditIntegrityError, FrameworkBugError, GracefulShutdownError
+from elspeth.contracts.errors import (
+    AuditIntegrityError,
+    CommencementGateFailedError,
+    DependencyFailedError,
+    FrameworkBugError,
+    GracefulShutdownError,
+)
 from elspeth.contracts.types import AggregationName
 from elspeth.core.config import ElspethSettings, SourceSettings, load_settings, resolve_config
 from elspeth.core.dag import ExecutionGraph, GraphValidationError
+from elspeth.core.dependency_config import PreflightResult
 from elspeth.core.security.config_secrets import SecretLoadError, load_secrets_from_config
 
 if TYPE_CHECKING:
@@ -494,6 +501,27 @@ def run(
         typer.echo(f"Error: {e}", err=True)
         raise typer.Exit(1) from None
 
+    # Resolve dependencies and commencement gates before pipeline execution
+    from elspeth.engine.bootstrap import resolve_preflight
+
+    try:
+        preflight = resolve_preflight(config, settings_path)
+    except (DependencyFailedError, CommencementGateFailedError, ValueError) as e:
+        typer.echo(f"Pre-flight check failed: {e}", err=True)
+        raise typer.Exit(1) from None
+    except (FrameworkBugError, AuditIntegrityError) as e:
+        import traceback
+
+        typer.echo(f"\nFATAL — {type(e).__name__}: {e}", err=True)
+        typer.echo(traceback.format_exc(), err=True)
+        raise typer.Exit(4) from e
+    except Exception as e:
+        import traceback
+
+        typer.echo(f"Unexpected error during pre-flight: {e}", err=True)
+        typer.echo(traceback.format_exc(), err=True)
+        raise typer.Exit(1) from None
+
     # Execute pipeline with pre-instantiated plugins
     try:
         execution_result = _execute_pipeline_with_instances(
@@ -504,6 +532,7 @@ def run(
             output_format=output_format,
             secret_resolutions=secret_resolutions,
             passphrase=passphrase,
+            preflight_results=preflight,
         )
     except GracefulShutdownError as e:
         if output_format == "json":
@@ -928,6 +957,7 @@ def _execute_pipeline_with_instances(
     output_format: Literal["console", "json"] = "console",
     secret_resolutions: list[SecretResolutionInput] | None = None,
     passphrase: str | None = None,
+    preflight_results: PreflightResult | None = None,
 ) -> ExecutionResult:
     """Execute pipeline using pre-instantiated plugin instances.
 
@@ -940,6 +970,8 @@ def _execute_pipeline_with_instances(
         secret_resolutions: Optional list of secret resolution records from
             load_secrets_from_config(). Passed to orchestrator for audit recording.
         passphrase: Optional SQLCipher passphrase for encrypted audit DB
+        preflight_results: Optional PreflightResult from dependency resolution
+            and commencement gates. Passed to orchestrator for audit recording.
 
     Returns:
         ExecutionResult with run_id, status, rows_processed
@@ -998,6 +1030,7 @@ def _execute_pipeline_with_instances(
                 settings=config,
                 payload_store=payload_store,
                 secret_resolutions=secret_resolutions,
+                preflight_results=preflight_results,
             )
 
             return {

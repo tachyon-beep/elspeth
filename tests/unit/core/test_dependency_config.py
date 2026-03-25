@@ -98,6 +98,40 @@ class TestCollectionProbeConfig:
         with pytest.raises(TypeError):
             config.provider_config["new_key"] = "bad"  # type: ignore[index]
 
+    def test_model_dump_serializes_frozen_provider_config(self) -> None:
+        """model_dump() must produce plain dicts from deep-frozen MappingProxyType."""
+        config = CollectionProbeConfig(
+            collection="science-facts",
+            provider="chroma",
+            provider_config={"mode": "persistent", "nested": {"key": "val"}},
+        )
+        dumped = config.model_dump()
+        assert isinstance(dumped["provider_config"], dict)
+        assert isinstance(dumped["provider_config"]["nested"], dict)
+        assert dumped["provider_config"]["mode"] == "persistent"
+
+    def test_model_dump_json_succeeds(self) -> None:
+        """model_dump_json() must not raise on deep-frozen provider_config."""
+        config = CollectionProbeConfig(
+            collection="test",
+            provider="chroma",
+            provider_config={"mode": "persistent", "persist_directory": "./data"},
+        )
+        json_str = config.model_dump_json()
+        assert "persistent" in json_str
+
+    def test_model_dump_round_trip(self) -> None:
+        """model_dump() output must reconstruct an equivalent instance."""
+        original = CollectionProbeConfig(
+            collection="test",
+            provider="chroma",
+            provider_config={"mode": "persistent", "nested": {"a": 1}},
+        )
+        reconstructed = CollectionProbeConfig(**original.model_dump())
+        assert reconstructed.collection == original.collection
+        assert reconstructed.provider == original.provider
+        assert dict(reconstructed.provider_config) == dict(original.provider_config)
+
 
 class TestDependencyRunResult:
     def test_construction(self) -> None:

@@ -439,8 +439,13 @@ class TestRAGIndexedSmoke:
         lines = results_path.read_text().strip().split("\n")
         assert len(lines) == 5  # 5 questions
 
-    def test_landscape_records_dependency_metadata(self, example_dir: Path) -> None:
-        """Verify the Landscape records dependency_runs and commencement_gates."""
+    def test_landscape_records_preflight_results(self, example_dir: Path) -> None:
+        """Verify the Landscape records dependency_runs and commencement_gates.
+
+        Pre-flight results are stored in the ``preflight_results`` table
+        (not as a JSON blob on ``runs``).  Each result has its own row with
+        ``result_type``, ``name``, and ``result_json`` (canonical JSON).
+        """
         import json
         import sqlite3
 
@@ -449,38 +454,42 @@ class TestRAGIndexedSmoke:
         query_yaml = example_dir / "query_pipeline.yaml"
         result = bootstrap_and_run(query_yaml)
 
-        # Query the Landscape for run metadata
+        # Query the preflight_results table — linked to the run via run_id FK
         audit_db = example_dir / "runs" / "audit.db"
         conn = sqlite3.connect(str(audit_db))
         cursor = conn.execute(
-            "SELECT metadata FROM runs WHERE run_id = ?",
+            "SELECT result_type, name, result_json FROM preflight_results "
+            "WHERE run_id = ? ORDER BY created_at",
             (result.run_id,),
         )
-        row = cursor.fetchone()
+        rows = cursor.fetchall()
         conn.close()
 
-        assert row is not None
-        metadata = json.loads(row[0]) if isinstance(row[0], str) else row[0]
+        assert len(rows) >= 2  # At least one dependency + one gate
 
-        # dependency_runs recorded
-        assert "dependency_runs" in metadata
-        dep_runs = metadata["dependency_runs"]
-        assert len(dep_runs) == 1
-        assert dep_runs[0]["name"] == "index_corpus"
-        assert "run_id" in dep_runs[0]
-        assert "indexed_at" in dep_runs[0]
+        # --- dependency_run recorded ---
+        dep_rows = [(name, json.loads(rj)) for rt, name, rj in rows if rt == "dependency_run"]
+        assert len(dep_rows) == 1
+        dep_name, dep_data = dep_rows[0]
+        assert dep_name == "index_corpus"
+        assert "run_id" in dep_data
+        assert "settings_hash" in dep_data
+        assert "indexed_at" in dep_data
 
-        # commencement_gates recorded
-        assert "commencement_gates" in metadata
-        gates = metadata["commencement_gates"]
-        assert len(gates) == 1
-        assert gates[0]["name"] == "corpus_ready"
-        assert gates[0]["result"] is True
-        # env excluded from snapshot
-        assert "env" not in gates[0].get("context_snapshot", {})
+        # --- commencement_gate recorded ---
+        gate_rows = [(name, json.loads(rj)) for rt, name, rj in rows if rt == "commencement_gate"]
+        assert len(gate_rows) == 1
+        gate_name, gate_data = gate_rows[0]
+        assert gate_name == "corpus_ready"
+        assert gate_data["result"] is True
+        assert "condition" in gate_data
+        # env excluded from context_snapshot (Tier 3 data, not persisted)
+        assert "env" not in gate_data.get("context_snapshot", {})
+
+        # --- readiness_check recorded (from RAG transform on_start) ---
+        readiness_rows = [(name, json.loads(rj)) for rt, name, rj in rows if rt == "readiness_check"]
+        assert len(readiness_rows) >= 1  # At least one from the RAG transform
 ```
-
-**Note:** The Landscape metadata query assumes a `metadata` column on the `runs` table. Read the actual Landscape schema to verify the column name and format. Adjust the SQL query if needed.
 
 - [ ] **Step 2: Run the smoke test**
 

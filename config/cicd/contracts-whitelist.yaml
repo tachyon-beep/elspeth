@@ -420,5 +420,8 @@ allowed_dict_patterns:
   - "src/elspeth/engine/commencement.py:_build_audit_snapshot:context"
   - "src/elspeth/engine/commencement.py:evaluate_commencement_gates:context"
 
+  # Serializer thaws MappingProxyType back to dict for Pydantic JSON round-trip
+  - "src/elspeth/core/dependency_config.py:CollectionProbeConfig._serialize_provider_config:return"
+
   # Probe factory — operator-provided config dict (Tier 3 boundary)
   - "src/elspeth/plugins/infrastructure/probe_factory.py:ChromaCollectionProbe.__init__:config"
