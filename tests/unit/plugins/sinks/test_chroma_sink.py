@@ -227,6 +227,9 @@ class TestChromaSinkWriteSkip:
 
         # Audit call must include skip info
         call_kwargs = mock_ctx.record_call.call_args.kwargs
+        assert call_kwargs["request_data"]["row_count"] == 1  # Actual write, not full batch
+        assert call_kwargs["request_data"]["batch_size"] == 2  # Full batch size
+        assert call_kwargs["request_data"]["document_ids"] == ["d2"]  # Only written IDs
         assert call_kwargs["response_data"]["rows_written"] == 1
         assert call_kwargs["response_data"]["rows_skipped"] == 1
         assert call_kwargs["response_data"]["skipped_ids"] == ["d1"]

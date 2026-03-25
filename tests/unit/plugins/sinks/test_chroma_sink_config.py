@@ -71,9 +71,9 @@ class TestFieldMappingConfig:
                     "mode": "persistent",
                     "persist_directory": "./data",
                     "field_mapping": {
-                        "document": "text",
-                        "id": "id",
-                        "metadata": [],
+                        "document_field": "text",
+                        "id_field": "id",
+                        "metadata_fields": [],
                     },
                     "on_duplicate": "invalid",
                     "schema": {"mode": "fixed", "fields": ["id: str", "text: str"]},
@@ -81,16 +81,16 @@ class TestFieldMappingConfig:
             )
 
     def test_rejects_unknown_fields(self) -> None:
-        with pytest.raises(Exception, match="extra"):
+        with pytest.raises(PluginConfigError, match="extra"):
             ChromaSinkConfig.from_dict(
                 {
                     "collection": "test",
                     "mode": "persistent",
                     "persist_directory": "./data",
                     "field_mapping": {
-                        "document": "text",
-                        "id": "id",
-                        "metadata": [],
+                        "document_field": "text",
+                        "id_field": "id",
+                        "metadata_fields": [],
                     },
                     "unknown_extra": "value",
                     "schema": {"mode": "fixed", "fields": ["id: str", "text: str"]},

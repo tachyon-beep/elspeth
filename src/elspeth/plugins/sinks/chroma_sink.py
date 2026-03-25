@@ -6,7 +6,6 @@ document with ChromaDB's default embedding function.
 
 from __future__ import annotations
 
-import contextlib
 import hashlib
 import time
 from collections.abc import Callable
@@ -15,6 +14,7 @@ from typing import TYPE_CHECKING, Any, Literal
 import chromadb
 import chromadb.api
 import chromadb.errors
+import structlog
 from pydantic import BaseModel, Field, model_validator
 
 from elspeth.contracts.enums import CallStatus, CallType
@@ -28,6 +28,8 @@ from elspeth.plugins.infrastructure.clients.retrieval.connection import (
 )
 from elspeth.plugins.infrastructure.config_base import DataPluginConfig
 from elspeth.plugins.infrastructure.schema_factory import create_schema_from_config
+
+slog = structlog.get_logger(__name__)
 
 if TYPE_CHECKING:
     from elspeth.contracts.contexts import LifecycleContext, SinkContext
@@ -238,7 +240,7 @@ class ChromaSink(BaseSink):
             latency_ms = (time.perf_counter() - start_time) * 1000
         except (chromadb.errors.ChromaError, DuplicateDocumentError) as write_exc:
             latency_ms = (time.perf_counter() - start_time) * 1000
-            with contextlib.suppress(Exception):  # Preserve original — audit failure is secondary
+            try:
                 ctx.record_call(
                     call_type=CallType.VECTOR,
                     status=CallStatus.ERROR,
@@ -254,6 +256,12 @@ class ChromaSink(BaseSink):
                     latency_ms=latency_ms,
                     provider="chromadb",
                 )
+            except Exception:
+                slog.debug(
+                    "audit_record_call_failed_on_error_path",
+                    collection=self._config.collection,
+                    original_error=type(write_exc).__name__,
+                )
             raise
 
         # Hash the actual payload sent, not the full batch (critical for skip mode)
@@ -265,15 +273,19 @@ class ChromaSink(BaseSink):
                 response_data["rows_skipped"] = rows_skipped
                 response_data["skipped_ids"] = skipped_ids
 
+            request_data: dict[str, Any] = {
+                "operation": self._config.on_duplicate.upper(),
+                "collection": self._config.collection,
+                "row_count": rows_written,
+                "document_ids": write_ids,
+            }
+            if rows_skipped > 0:
+                request_data["batch_size"] = len(rows)
+
             ctx.record_call(
                 call_type=CallType.VECTOR,
                 status=CallStatus.SUCCESS,
-                request_data={
-                    "operation": self._config.on_duplicate.upper(),
-                    "collection": self._config.collection,
-                    "row_count": len(rows),
-                    "document_ids": write_ids,
-                },
+                request_data=request_data,
                 response_data=response_data,
                 latency_ms=latency_ms,
                 provider="chromadb",
