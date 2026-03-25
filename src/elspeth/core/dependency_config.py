@@ -44,8 +44,7 @@ class CollectionProbeConfig(BaseModel):
     @model_validator(mode="after")
     def _freeze_provider_config(self) -> CollectionProbeConfig:
         """Deep-freeze provider_config to enforce Pydantic frozen=True contract."""
-        if self.provider_config:
-            object.__setattr__(self, "provider_config", deep_freeze(self.provider_config))
+        object.__setattr__(self, "provider_config", deep_freeze(self.provider_config))
         return self
 
 

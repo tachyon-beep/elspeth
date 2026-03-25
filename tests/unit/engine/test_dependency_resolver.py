@@ -9,7 +9,47 @@ import pytest
 
 from elspeth.contracts.errors import DependencyFailedError
 from elspeth.core.dependency_config import DependencyConfig
-from elspeth.engine.dependency_resolver import detect_cycles, resolve_dependencies
+from elspeth.engine.dependency_resolver import _load_depends_on, detect_cycles, resolve_dependencies
+
+
+class TestLoadDependsOnValidation:
+    """Tests for Tier 3 validation in _load_depends_on (review finding #2)."""
+
+    def test_non_list_depends_on_raises(self, tmp_path: Path) -> None:
+        f = tmp_path / "bad.yaml"
+        f.write_text("depends_on: not_a_list\n")
+        with pytest.raises(ValueError, match="must be a list"):
+            _load_depends_on(f)
+
+    def test_non_dict_entry_raises(self, tmp_path: Path) -> None:
+        f = tmp_path / "bad.yaml"
+        f.write_text("depends_on:\n  - just_a_string\n")
+        with pytest.raises(ValueError, match="must be a mapping"):
+            _load_depends_on(f)
+
+    def test_missing_settings_key_raises(self, tmp_path: Path) -> None:
+        f = tmp_path / "bad.yaml"
+        f.write_text("depends_on:\n  - name: dep\n")
+        with pytest.raises(ValueError, match="missing required key 'settings'"):
+            _load_depends_on(f)
+
+    def test_missing_name_key_raises(self, tmp_path: Path) -> None:
+        f = tmp_path / "bad.yaml"
+        f.write_text("depends_on:\n  - settings: ./dep.yaml\n")
+        with pytest.raises(ValueError, match="missing required key 'name'"):
+            _load_depends_on(f)
+
+    def test_valid_entry_passes(self, tmp_path: Path) -> None:
+        f = tmp_path / "good.yaml"
+        f.write_text("depends_on:\n  - name: dep\n    settings: ./dep.yaml\n")
+        deps = _load_depends_on(f)
+        assert len(deps) == 1
+        assert deps[0]["name"] == "dep"
+
+    def test_absent_depends_on_returns_empty(self, tmp_path: Path) -> None:
+        f = tmp_path / "no_deps.yaml"
+        f.write_text("source:\n  plugin: null_source\n")
+        assert _load_depends_on(f) == []
 
 
 class TestCycleDetection:

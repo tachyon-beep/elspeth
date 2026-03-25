@@ -31,6 +31,14 @@ class TestDependencyConfig:
         with pytest.raises(ValidationError, match="extra"):
             DependencyConfig(name="x", settings="./x.yaml", extra="bad")  # type: ignore[call-arg]
 
+    def test_rejects_empty_name(self) -> None:
+        with pytest.raises(ValidationError):
+            DependencyConfig(name="", settings="./x.yaml")
+
+    def test_rejects_empty_settings(self) -> None:
+        with pytest.raises(ValidationError):
+            DependencyConfig(name="x", settings="")
+
 
 class TestCommencementGateConfig:
     def test_valid_config(self) -> None:
@@ -70,6 +78,25 @@ class TestCollectionProbeConfig:
                 provider_config={},
                 extra="bad",  # type: ignore[call-arg]
             )
+
+    def test_provider_config_is_frozen(self) -> None:
+        """provider_config must be deep-frozen (review finding #7)."""
+        config = CollectionProbeConfig(
+            collection="test",
+            provider="chroma",
+            provider_config={"mode": "persistent", "nested": {"key": "val"}},
+        )
+        with pytest.raises(TypeError):
+            config.provider_config["new_key"] = "bad"  # type: ignore[index]
+
+    def test_empty_provider_config_is_frozen(self) -> None:
+        """Empty dict must also be frozen (review finding #3 from fix review)."""
+        config = CollectionProbeConfig(
+            collection="test",
+            provider="chroma",
+        )
+        with pytest.raises(TypeError):
+            config.provider_config["new_key"] = "bad"  # type: ignore[index]
 
 
 class TestDependencyRunResult:

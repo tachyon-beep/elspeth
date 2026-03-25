@@ -34,6 +34,8 @@ def _load_depends_on(settings_path: Path) -> list[dict[str, str]]:
     for i, dep in enumerate(deps):
         if not isinstance(dep, dict):
             raise ValueError(f"depends_on[{i}] in {settings_path} must be a mapping, got {type(dep).__name__}")
+        if "name" not in dep:
+            raise ValueError(f"depends_on[{i}] in {settings_path} missing required key 'name'")
         if "settings" not in dep:
             raise ValueError(f"depends_on[{i}] in {settings_path} missing required key 'settings'")
     return deps

@@ -101,12 +101,22 @@ def bootstrap_and_run(settings_path: Path) -> RunResult:
             }
 
         # Convert dependency results to gate-accessible dict
-        dep_run_dict = {r.name: {"run_id": r.run_id, "duration_ms": r.duration_ms, "indexed_at": r.indexed_at} for r in dependency_results}
+        dep_run_dict = {
+            r.name: {
+                "run_id": r.run_id,
+                "settings_hash": r.settings_hash,
+                "duration_ms": r.duration_ms,
+                "indexed_at": r.indexed_at,
+            }
+            for r in dependency_results
+        }
 
         context = build_preflight_context(
             dependency_results=dep_run_dict,
             collection_probes=probe_results,
         )
+        # TODO: gate_results should be recorded in Landscape audit trail
+        # (requires begin_run() metadata support — tracked as follow-up)
         evaluate_commencement_gates(config.commencement_gates, context)
 
     # Phase 4: Construct infrastructure and run
