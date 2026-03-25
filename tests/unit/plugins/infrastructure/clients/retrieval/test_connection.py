@@ -62,6 +62,24 @@ class TestChromaConnectionConfig:
         assert config.host == "localhost"
         assert config.ssl is False
 
+    def test_client_mode_allows_no_ssl_for_127_0_0_1(self) -> None:
+        config = ChromaConnectionConfig(
+            collection="test",
+            mode="client",
+            host="127.0.0.1",
+            ssl=False,
+        )
+        assert config.host == "127.0.0.1"
+
+    def test_client_mode_allows_no_ssl_for_ipv6_loopback(self) -> None:
+        config = ChromaConnectionConfig(
+            collection="test",
+            mode="client",
+            host="::1",
+            ssl=False,
+        )
+        assert config.host == "::1"
+
     def test_persistent_mode_valid(self) -> None:
         config = ChromaConnectionConfig(
             collection="science-facts",

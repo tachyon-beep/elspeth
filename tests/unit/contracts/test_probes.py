@@ -82,7 +82,7 @@ class TestCollectionProbe:
             def probe(self) -> CollectionReadinessResult:
                 return CollectionReadinessResult(collection="x", reachable=True, count=1, message="ok")
 
-        # runtime_checkable checks callable members but may not check
-        # non-callable class attributes consistently — this test documents
-        # the current behaviour regardless of outcome.
-        _ = isinstance(BadProbe(), CollectionProbe)
+        # Python 3.12+ runtime_checkable checks non-callable protocol
+        # members as instance attributes. BadProbe has no collection_name
+        # instance attribute, so isinstance returns False.
+        assert not isinstance(BadProbe(), CollectionProbe)

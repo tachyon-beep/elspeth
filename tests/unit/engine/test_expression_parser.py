@@ -1632,3 +1632,34 @@ class TestExpressionParserDictContext:
                 "os['path']",
                 allowed_names=["collections"],
             )
+
+    def test_row_forbidden_in_custom_allowed_names(self) -> None:
+        """'row' is not implicitly allowed when custom allowed_names are set."""
+        with pytest.raises(ExpressionSecurityError, match="Forbidden name: 'row'"):
+            ExpressionParser(
+                "row['x'] > 0",
+                allowed_names=["collections", "dependency_runs", "env"],
+            )
+
+    def test_dict_context_get_method(self) -> None:
+        """`.get()` works on dict-context allowed names."""
+        parser = ExpressionParser(
+            "collections.get('missing') is None",
+            allowed_names=["collections", "env"],
+        )
+        context = {"collections": {"present": 42}, "env": {}}
+        assert parser.evaluate(context) is True
+
+    def test_dict_context_get_with_default(self) -> None:
+        """`.get(key, default)` works on dict-context allowed names."""
+        parser = ExpressionParser(
+            "collections.get('missing', 0) == 0",
+            allowed_names=["collections", "env"],
+        )
+        context = {"collections": {}, "env": {}}
+        assert parser.evaluate(context) is True
+
+    def test_empty_allowed_names_raises(self) -> None:
+        """Empty allowed_names list is rejected."""
+        with pytest.raises(ValueError, match="must not be empty"):
+            ExpressionParser("True", allowed_names=[])
