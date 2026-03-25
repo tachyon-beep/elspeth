@@ -129,6 +129,16 @@ class RAGRetrievalTransform(BaseTransform):
             limiter=(ctx.rate_limit_registry.get_limiter(provider_name) if ctx.rate_limit_registry is not None else None),
         )
 
+        # Readiness check — refuse to start against empty/missing collection
+        readiness = self._provider.check_readiness()
+        if readiness.count == 0:
+            from elspeth.contracts.errors import RetrievalNotReadyError
+
+            raise RetrievalNotReadyError(
+                collection=readiness.collection,
+                reason=readiness.message,
+            )
+
     def process(self, row: PipelineRow, ctx: TransformContext) -> TransformResult:
         """Process a single row: build query, search, format, attach."""
         if not self._on_start_called:
