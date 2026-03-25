@@ -1059,3 +1059,15 @@ class RetrievalNotReadyError(Exception):
     """A retrieval provider's collection is empty or unreachable."""
 
     pass
+
+
+class DuplicateDocumentError(Exception):
+    """Sink rejected a write because document IDs already exist in the collection.
+
+    Raised when on_duplicate='error' and pre-existing IDs are detected.
+    """
+
+    def __init__(self, *, collection: str, duplicate_ids: list[str]) -> None:
+        self.collection = collection
+        self.duplicate_ids = duplicate_ids
+        super().__init__(f"Duplicate document IDs in collection {collection!r}: {duplicate_ids}")
