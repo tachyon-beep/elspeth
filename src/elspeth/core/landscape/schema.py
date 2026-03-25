@@ -535,10 +535,14 @@ preflight_results_table = Table(
     metadata,
     Column("result_id", String(64), primary_key=True),
     Column("run_id", String(64), ForeignKey("runs.run_id"), nullable=False),
-    Column("result_type", String(32), nullable=False),  # 'dependency_run' or 'commencement_gate'
+    Column("result_type", String(32), nullable=False),
     Column("name", String(256), nullable=False),  # Dependency name or gate name
     Column("result_json", Text, nullable=False),  # Full result as canonical JSON
     Column("created_at", DateTime(timezone=True), nullable=False),
+    CheckConstraint(
+        "result_type IN ('dependency_run', 'commencement_gate')",
+        name="ck_preflight_result_type",
+    ),
 )
 
 Index("ix_preflight_results_run", preflight_results_table.c.run_id)
