@@ -89,6 +89,8 @@ allowed_dict_patterns:
   - "src/elspeth/plugins/infrastructure/config_base.py:PluginConfig.from_dict:config"
 
   # Plugin implementations - config input
+  - "src/elspeth/plugins/sinks/chroma_sink.py:ChromaSink.__init__:config"
+  - "src/elspeth/plugins/sinks/chroma_sink.py:ChromaSink.write:rows (list)"
   - "src/elspeth/plugins/sinks/database_sink.py:DatabaseSink.__init__:config"
   - "src/elspeth/plugins/sinks/csv_sink.py:CSVSink.__init__:config"
   - "src/elspeth/plugins/sinks/json_sink.py:JSONSink.__init__:config"

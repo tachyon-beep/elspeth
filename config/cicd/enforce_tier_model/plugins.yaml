@@ -385,6 +385,16 @@ allow_hits:
   reason: Offensive type guard — rejects non-numeric distance types with crash; corrupt ChromaDB index must not produce silent wrong results
   safety: Raises RetrievalError immediately (crash) — not silently skipped
   expires: null
+- key: plugins/sinks/chroma_sink.py:R1:ChromaSink:write:fp=45d0c9682892fa02
+  owner: feature
+  reason: Collection.get() is the ChromaDB SDK method for retrieving documents by ID, not dict.get() — false positive from R1 rule matching `.get(` syntax
+  safety: Returns GetResult dict with "ids" key; subscript access on result["ids"] crashes if ChromaDB SDK contract breaks
+  expires: null
+- key: plugins/sinks/chroma_sink.py:R1:ChromaSink:write:fp=7c045d92fdf2b08b
+  owner: feature
+  reason: Collection.get() is the ChromaDB SDK method for retrieving documents by ID, not dict.get() — false positive from R1 rule matching `.get(` syntax
+  safety: Returns GetResult dict with "ids" key; subscript access on result["ids"] crashes if ChromaDB SDK contract breaks
+  expires: null
 - key: plugins/transforms/web_scrape.py:R5:WebScrapeTransform:__init__:fp=189a33d2bccf7c9b
   owner: feature
   reason: Offensive isinstance assertion — detects Pydantic validator bug if allowed_hosts is not list[str] after validation
