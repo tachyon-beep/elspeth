@@ -14,11 +14,14 @@ def bootstrap_and_run(settings_path: Path) -> RunResult:
     This is the programmatic equivalent of ``elspeth run --execute``.
     Used by the dependency resolver to run sub-pipelines.
 
+    Handles dependency resolution and commencement gates if configured in
+    the pipeline settings. Dependency sub-pipelines are resolved recursively
+    (cycle detection runs first). Commencement gates evaluate after dependencies
+    complete and collection probes report.
+
     Does NOT handle:
     - Output formatting (no typer, no console messages)
     - Passphrase prompting (encrypted DBs not supported for dependency runs)
-    - Dependency resolution (caller handles this to avoid infinite recursion)
-    - Commencement gates (caller handles this — gates run once for the root pipeline)
     - Secret resolution (secrets are inherited from the parent process environment)
 
     Args:
@@ -63,6 +66,41 @@ def bootstrap_and_run(settings_path: Path) -> RunResult:
         coalesce_settings=list(config.coalesce) if config.coalesce else None,
     )
     graph.validate()
+
+    # Phase 3.5: Dependency resolution (if configured)
+    if config.depends_on:
+        from elspeth.engine.dependency_resolver import detect_cycles, resolve_dependencies
+
+        # Cycle detection first (cheap, reads only depends_on keys from YAML)
+        detect_cycles(settings_path)
+
+        # Run dependencies sequentially — each calls bootstrap_and_run() recursively.
+        # Sub-pipelines inherit the parent process environment but NOT depends_on/gates.
+        resolve_dependencies(
+            depends_on=config.depends_on,
+            parent_settings_path=settings_path,
+        )
+
+    # Phase 3.6: Commencement gates (if configured)
+    if config.commencement_gates:
+        from elspeth.engine.commencement import build_preflight_context, evaluate_commencement_gates
+        from elspeth.plugins.infrastructure.probe_factory import build_collection_probes
+
+        # Build probes and execute them
+        probes = build_collection_probes(config.collection_probes)
+        probe_results = {}
+        for probe in probes:
+            result = probe.probe()
+            probe_results[result.collection] = {
+                "reachable": result.reachable,
+                "count": result.count,
+            }
+
+        context = build_preflight_context(
+            dependency_results={},
+            collection_probes=probe_results,
+        )
+        evaluate_commencement_gates(config.commencement_gates, context)
 
     # Phase 4: Construct infrastructure and run
     db = LandscapeDB.from_url(
