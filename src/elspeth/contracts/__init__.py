@@ -133,6 +133,7 @@ from elspeth.contracts.data import (
     check_compatibility,
     validate_row,
 )
+from elspeth.contracts.diversion import RowDiversion, SinkWriteResult
 from elspeth.contracts.engine import BufferEntry, PendingOutcome, RetryPolicy
 from elspeth.contracts.enums import (
     BackpressureMode,
@@ -414,6 +415,9 @@ __all__ = [  # Grouped by category for readability
     "NodeID",
     "SinkName",
     "StepResolver",
+    # diversion
+    "RowDiversion",
+    "SinkWriteResult",
     # results (NOTE: AcceptResult deleted in aggregation structural cleanup)
     "ArtifactDescriptor",
     "ExceptionResult",
