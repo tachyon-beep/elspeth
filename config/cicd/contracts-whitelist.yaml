@@ -244,6 +244,9 @@ allowed_dict_patterns:
   # Pool work context (PooledExecutor row interface is dict[str, Any])
   - "src/elspeth/plugins/transforms/llm/transform.py:MultiQueryStrategy._process_fn:work"
 
+  # BaseSink diversion — row_data is the pipeline row dict (Tier 2 data) being diverted to failsink
+  - "src/elspeth/plugins/infrastructure/base.py:BaseSink._divert_row:row_data"
+
   # Plugin validation dispatcher — config is user YAML (Tier 3 boundary)
   - "src/elspeth/plugins/infrastructure/validation.py:PluginConfigValidator._get_transform_config_model:config"
 

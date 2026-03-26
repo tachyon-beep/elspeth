@@ -64,6 +64,7 @@ from elspeth.contracts import (
     TransformResult,
 )
 from elspeth.contracts.aggregation_checkpoint import AggregationCheckpointState
+from elspeth.contracts.diversion import SinkWriteResult
 from elspeth.contracts.enums import (
     BatchStatus,
     NodeStateStatus,
@@ -208,11 +209,13 @@ def _make_sink(
     sink.node_id = node_id
     sink.declared_required_fields = frozenset()
     sink.validate_input = False
-    sink.write.return_value = ArtifactDescriptor(
-        artifact_type="file",
-        path_or_uri="file:///output/test.csv",
-        content_hash="abc123",
-        size_bytes=100,
+    sink.write.return_value = SinkWriteResult(
+        artifact=ArtifactDescriptor(
+            artifact_type="file",
+            path_or_uri="file:///output/test.csv",
+            content_hash="abc123",
+            size_bytes=100,
+        )
     )
     return sink
 
@@ -3190,11 +3193,13 @@ class TestSinkExecutor:
         def capture_write(_rows, call_ctx):
             nonlocal captured_contract
             captured_contract = call_ctx.contract
-            return ArtifactDescriptor(
-                artifact_type="file",
-                path_or_uri="file:///output/test.csv",
-                content_hash="abc123",
-                size_bytes=100,
+            return SinkWriteResult(
+                artifact=ArtifactDescriptor(
+                    artifact_type="file",
+                    path_or_uri="file:///output/test.csv",
+                    content_hash="abc123",
+                    size_bytes=100,
+                )
             )
 
         sink = _make_sink()
@@ -3266,11 +3271,13 @@ class TestSinkExecutor:
         def capture_write(_rows, call_ctx):
             nonlocal captured_contract
             captured_contract = call_ctx.contract
-            return ArtifactDescriptor(
-                artifact_type="file",
-                path_or_uri="file:///output/test.csv",
-                content_hash="abc123",
-                size_bytes=100,
+            return SinkWriteResult(
+                artifact=ArtifactDescriptor(
+                    artifact_type="file",
+                    path_or_uri="file:///output/test.csv",
+                    content_hash="abc123",
+                    size_bytes=100,
+                )
             )
 
         sink = _make_sink()

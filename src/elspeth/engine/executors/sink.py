@@ -275,7 +275,8 @@ class SinkExecutor:
 
                 start = time.perf_counter()
                 try:
-                    artifact_info = sink.write(rows, ctx)
+                    write_result = sink.write(rows, ctx)
+                    artifact_info = write_result.artifact
                     duration_ms = (time.perf_counter() - start) * 1000
                 except (FrameworkBugError, AuditIntegrityError):
                     raise  # System bugs and audit corruption must crash immediately

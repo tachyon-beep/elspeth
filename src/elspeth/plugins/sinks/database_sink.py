@@ -24,6 +24,7 @@ from sqlalchemy.types import TypeEngine
 
 from elspeth.contracts import ArtifactDescriptor, CallStatus, CallType, PluginSchema
 from elspeth.contracts.contexts import SinkContext
+from elspeth.contracts.diversion import SinkWriteResult
 from elspeth.contracts.errors import AuditIntegrityError
 from elspeth.contracts.url import SanitizedDatabaseUrl
 from elspeth.core.canonical import canonical_json
@@ -442,7 +443,7 @@ class DatabaseSink(BaseSink):
         # Fallback (shouldn't happen with valid config): use row keys
         return [Column(key, Text) for key in row]
 
-    def write(self, rows: list[dict[str, Any]], ctx: SinkContext) -> ArtifactDescriptor:
+    def write(self, rows: list[dict[str, Any]], ctx: SinkContext) -> SinkWriteResult:
         """Write a batch of rows to the database.
 
         CRITICAL: Hashes the canonical JSON payload BEFORE insert.
@@ -471,12 +472,14 @@ class DatabaseSink(BaseSink):
 
         if not rows:
             # Empty batch - return descriptor without DB operations
-            return ArtifactDescriptor.for_database(
-                url=self._sanitized_url,
-                table=self._table_name,
-                content_hash=content_hash,
-                payload_size=payload_size,
-                row_count=0,
+            return SinkWriteResult(
+                artifact=ArtifactDescriptor.for_database(
+                    url=self._sanitized_url,
+                    table=self._table_name,
+                    content_hash=content_hash,
+                    payload_size=payload_size,
+                    row_count=0,
+                )
             )
 
         # Ensure table exists (infer from first row)
@@ -550,12 +553,14 @@ class DatabaseSink(BaseSink):
             )
             raise
 
-        return ArtifactDescriptor.for_database(
-            url=self._sanitized_url,
-            table=self._table_name,
-            content_hash=content_hash,
-            payload_size=payload_size,
-            row_count=len(rows),
+        return SinkWriteResult(
+            artifact=ArtifactDescriptor.for_database(
+                url=self._sanitized_url,
+                table=self._table_name,
+                content_hash=content_hash,
+                payload_size=payload_size,
+                row_count=len(rows),
+            )
         )
 
     def flush(self) -> None:

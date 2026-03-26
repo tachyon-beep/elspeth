@@ -15,6 +15,7 @@ from typing import IO, TYPE_CHECKING, Any, Literal
 from pydantic import model_validator
 
 from elspeth.contracts import ArtifactDescriptor, PluginSchema
+from elspeth.contracts.diversion import SinkWriteResult
 
 if TYPE_CHECKING:
     from elspeth.contracts.sink import OutputValidationResult
@@ -242,7 +243,7 @@ class JSONSink(BaseSink):
         self._file: IO[str] | None = None
         self._rows: list[dict[str, Any]] = []  # Buffer for json array format
 
-    def write(self, rows: list[dict[str, Any]], ctx: SinkContext) -> ArtifactDescriptor:
+    def write(self, rows: list[dict[str, Any]], ctx: SinkContext) -> SinkWriteResult:
         """Write a batch of rows to the JSON file.
 
         Args:
@@ -258,10 +259,12 @@ class JSONSink(BaseSink):
         """
         if not rows:
             # Empty batch - return descriptor for empty content
-            return ArtifactDescriptor.for_file(
-                path=str(self._path),
-                content_hash=hashlib.sha256(b"").hexdigest(),
-                size_bytes=0,
+            return SinkWriteResult(
+                artifact=ArtifactDescriptor.for_file(
+                    path=str(self._path),
+                    content_hash=hashlib.sha256(b"").hexdigest(),
+                    size_bytes=0,
+                )
             )
 
         # Lazy resolution of contract from context for headers: original mode
@@ -293,10 +296,12 @@ class JSONSink(BaseSink):
         content_hash = self._compute_file_hash()
         size_bytes = self._path.stat().st_size
 
-        return ArtifactDescriptor.for_file(
-            path=str(self._path),
-            content_hash=content_hash,
-            size_bytes=size_bytes,
+        return SinkWriteResult(
+            artifact=ArtifactDescriptor.for_file(
+                path=str(self._path),
+                content_hash=content_hash,
+                size_bytes=size_bytes,
+            )
         )
 
     def _write_jsonl_batch(self, rows: list[dict[str, Any]]) -> None:

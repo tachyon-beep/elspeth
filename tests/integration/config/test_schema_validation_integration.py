@@ -134,6 +134,7 @@ def test_static_schema_validation(plugin_manager: PluginManager) -> None:
     from typing import Any
 
     from elspeth.contracts import ArtifactDescriptor, PluginSchema, SourceRow
+    from elspeth.contracts.diversion import SinkWriteResult
     from elspeth.contracts.schema_contract import PipelineRow
     from elspeth.core.config import SourceSettings
     from elspeth.core.dag import ExecutionGraph
@@ -192,9 +193,9 @@ def test_static_schema_validation(plugin_manager: PluginManager) -> None:
             super().__init__()
             self.written: list[dict[str, Any]] = []
 
-        def write(self, rows: list[dict[str, Any]], ctx: Any) -> ArtifactDescriptor:
+        def write(self, rows: list[dict[str, Any]], ctx: Any) -> SinkWriteResult:
             self.written.extend(rows)
-            return ArtifactDescriptor.for_file(path="memory://test", size_bytes=0, content_hash="test")
+            return SinkWriteResult(artifact=ArtifactDescriptor.for_file(path="memory://test", size_bytes=0, content_hash="test"))
 
     # Build graph with static schema plugins
     source = StaticSchemaSource()

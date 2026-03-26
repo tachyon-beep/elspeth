@@ -119,10 +119,10 @@ class TestCSVSink:
         artifact = sink.write([{"id": "1", "name": "alice"}], ctx)
         sink.close()
 
-        assert isinstance(artifact, ArtifactDescriptor)
-        assert artifact.artifact_type == "file"
-        assert artifact.content_hash  # Non-empty
-        assert artifact.size_bytes > 0
+        assert isinstance(artifact.artifact, ArtifactDescriptor)
+        assert artifact.artifact.artifact_type == "file"
+        assert artifact.artifact.content_hash  # Non-empty
+        assert artifact.artifact.size_bytes > 0
 
     def test_batch_write_content_hash_is_sha256(self, tmp_path: Path, ctx: PluginContext) -> None:
         """content_hash is SHA-256 of file contents."""
@@ -138,7 +138,7 @@ class TestCSVSink:
         file_content = output_file.read_bytes()
         expected_hash = hashlib.sha256(file_content).hexdigest()
 
-        assert artifact.content_hash == expected_hash
+        assert artifact.artifact.content_hash == expected_hash
 
     def test_batch_write_multiple_rows(self, tmp_path: Path, ctx: PluginContext) -> None:
         """Batch write handles multiple rows."""
@@ -155,7 +155,7 @@ class TestCSVSink:
         artifact = sink.write(rows, ctx)
         sink.close()
 
-        assert artifact.size_bytes > 0
+        assert artifact.artifact.size_bytes > 0
 
         # Verify all rows written
         with open(output_file) as f:
@@ -174,10 +174,10 @@ class TestCSVSink:
         artifact = sink.write([], ctx)
         sink.close()
 
-        assert isinstance(artifact, ArtifactDescriptor)
-        assert artifact.size_bytes == 0
+        assert isinstance(artifact.artifact, ArtifactDescriptor)
+        assert artifact.artifact.size_bytes == 0
         # Empty write still has a hash (of empty content)
-        assert artifact.content_hash == hashlib.sha256(b"").hexdigest()
+        assert artifact.artifact.content_hash == hashlib.sha256(b"").hexdigest()
 
     def test_declared_required_fields_set_from_strict_schema(self, tmp_path: Path) -> None:
         """CSVSink populates declared_required_fields from fixed-mode schema.
@@ -253,7 +253,7 @@ class TestCSVSink:
 
         # First write
         artifact1 = sink.write([{"id": "1", "name": "alice"}], ctx)
-        hash_after_first = artifact1.content_hash
+        hash_after_first = artifact1.artifact.content_hash
 
         # Verify first hash matches file contents at this point
         file_content_after_first = output_file.read_bytes()
@@ -262,7 +262,7 @@ class TestCSVSink:
 
         # Second write
         artifact2 = sink.write([{"id": "2", "name": "bob"}], ctx)
-        hash_after_second = artifact2.content_hash
+        hash_after_second = artifact2.artifact.content_hash
 
         # Verify second hash matches cumulative file contents (not just new rows)
         file_content_after_second = output_file.read_bytes()
@@ -271,7 +271,7 @@ class TestCSVSink:
 
         # Third write
         artifact3 = sink.write([{"id": "3", "name": "carol"}], ctx)
-        hash_after_third = artifact3.content_hash
+        hash_after_third = artifact3.artifact.content_hash
 
         # Verify third hash matches full cumulative contents
         file_content_after_third = output_file.read_bytes()

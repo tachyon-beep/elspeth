@@ -236,10 +236,10 @@ class TestAzureBlobSinkWriteCSV:
         assert b"2,bob,200" in uploaded_content
 
         # Verify returns ArtifactDescriptor
-        assert isinstance(result, ArtifactDescriptor)
-        assert result.artifact_type == "file"
-        assert result.content_hash == hashlib.sha256(uploaded_content).hexdigest()
-        assert result.size_bytes == len(uploaded_content)
+        assert isinstance(result.artifact, ArtifactDescriptor)
+        assert result.artifact.artifact_type == "file"
+        assert result.artifact.content_hash == hashlib.sha256(uploaded_content).hexdigest()
+        assert result.artifact.size_bytes == len(uploaded_content)
 
     def test_csv_with_custom_delimiter(self, mock_container_client: MagicMock, ctx: PluginContext) -> None:
         """CSV with custom delimiter works correctly."""
@@ -381,8 +381,8 @@ class TestAzureBlobSinkWriteJSON:
         assert parsed == rows
 
         # Verify ArtifactDescriptor
-        assert isinstance(result, ArtifactDescriptor)
-        assert result.content_hash == hashlib.sha256(uploaded_content).hexdigest()
+        assert isinstance(result.artifact, ArtifactDescriptor)
+        assert result.artifact.content_hash == hashlib.sha256(uploaded_content).hexdigest()
 
     def test_json_display_headers(self, mock_container_client: MagicMock, ctx: PluginContext) -> None:
         """JSON display headers map field names in output."""
@@ -453,7 +453,7 @@ class TestAzureBlobSinkWriteJSONL:
         assert json.loads(lines[1]) == {"id": 2, "name": "bob"}
 
         # Verify ArtifactDescriptor
-        assert isinstance(result, ArtifactDescriptor)
+        assert isinstance(result.artifact, ArtifactDescriptor)
 
     def test_jsonl_display_headers(self, mock_container_client: MagicMock, ctx: PluginContext) -> None:
         """JSONL display headers map field names in output."""
@@ -517,7 +517,7 @@ class TestAzureBlobSinkPathTemplating:
         assert rendered_path == "results/test-run-123/output.csv"
 
         # Verify artifact descriptor uses rendered path
-        assert "test-run-123" in result.path_or_uri
+        assert "test-run-123" in result.artifact.path_or_uri
 
     def test_blob_path_with_timestamp_template(self, mock_container_client: MagicMock, ctx: PluginContext) -> None:
         """Blob path with {{ timestamp }} template renders correctly."""
@@ -570,7 +570,7 @@ class TestAzureBlobSinkOverwriteBehavior:
 
         # Should not raise
         result = sink.write(rows, ctx)
-        assert isinstance(result, ArtifactDescriptor)
+        assert isinstance(result.artifact, ArtifactDescriptor)
 
         # Should upload with overwrite=True
         mock_blob_client.upload_blob.assert_called_once()
@@ -617,7 +617,7 @@ class TestAzureBlobSinkOverwriteBehavior:
         rows = [{"id": 1, "name": "alice"}]
 
         result = sink.write(rows, ctx)
-        assert isinstance(result, ArtifactDescriptor)
+        assert isinstance(result.artifact, ArtifactDescriptor)
         # Verify upload_blob was called with overwrite=False
         mock_blob_client.upload_blob.assert_called_once()
         assert mock_blob_client.upload_blob.call_args[1]["overwrite"] is False
@@ -657,11 +657,11 @@ class TestAzureBlobSinkArtifactDescriptor:
         uploaded_content = mock_blob_client.upload_blob.call_args[0][0]
         expected_hash = hashlib.sha256(uploaded_content).hexdigest()
 
-        assert result.artifact_type == "file"
-        assert result.content_hash == expected_hash
-        assert result.size_bytes == len(uploaded_content)
-        assert "azure://" in result.path_or_uri
-        assert TEST_CONTAINER in result.path_or_uri
+        assert result.artifact.artifact_type == "file"
+        assert result.artifact.content_hash == expected_hash
+        assert result.artifact.size_bytes == len(uploaded_content)
+        assert "azure://" in result.artifact.path_or_uri
+        assert TEST_CONTAINER in result.artifact.path_or_uri
 
     def test_artifact_descriptor_contains_rendered_path(self, mock_container_client: MagicMock, ctx: PluginContext) -> None:
         """ArtifactDescriptor path_or_uri contains rendered blob path."""
@@ -676,8 +676,8 @@ class TestAzureBlobSinkArtifactDescriptor:
         result = sink.write(rows, ctx)
 
         # Should contain rendered path, not template
-        assert "{{ run_id }}" not in result.path_or_uri
-        assert "test-run-123" in result.path_or_uri
+        assert "{{ run_id }}" not in result.artifact.path_or_uri
+        assert "test-run-123" in result.artifact.path_or_uri
 
 
 class TestAzureBlobSinkEmptyRows:
@@ -693,9 +693,9 @@ class TestAzureBlobSinkEmptyRows:
         # Should return descriptor without uploading
         mock_container_client.assert_not_called()
 
-        assert isinstance(result, ArtifactDescriptor)
-        assert result.content_hash == hashlib.sha256(b"").hexdigest()
-        assert result.size_bytes == 0
+        assert isinstance(result.artifact, ArtifactDescriptor)
+        assert result.artifact.content_hash == hashlib.sha256(b"").hexdigest()
+        assert result.artifact.size_bytes == 0
 
 
 class TestAzureBlobSinkErrors:
@@ -737,7 +737,7 @@ class TestAzureBlobSinkErrors:
         assert sink._buffered_rows == []
 
         result = sink.write(rows, ctx)
-        assert isinstance(result, ArtifactDescriptor)
+        assert isinstance(result.artifact, ArtifactDescriptor)
         assert mock_blob_client.upload_blob.call_count == 2
 
         second_upload_lines = mock_blob_client.upload_blob.call_args_list[1][0][0].decode().strip().splitlines()
@@ -772,7 +772,7 @@ class TestAzureBlobSinkErrors:
         assert sink._buffered_rows == []
 
         result = sink.write(rows, ctx)
-        assert isinstance(result, ArtifactDescriptor)
+        assert isinstance(result.artifact, ArtifactDescriptor)
 
         assert mock_blob_client.upload_blob.call_count == 2
         assert mock_blob_client.upload_blob.call_args_list[0][1]["overwrite"] is False

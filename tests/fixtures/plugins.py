@@ -12,6 +12,7 @@ from typing import Any, ClassVar
 from pydantic import ConfigDict
 
 from elspeth.contracts import ArtifactDescriptor, PluginSchema, SourceRow
+from elspeth.contracts.diversion import SinkWriteResult
 from elspeth.plugins.infrastructure.base import BaseTransform
 from elspeth.plugins.infrastructure.results import TransformResult
 from tests.fixtures.base_classes import _TestSchema, _TestSinkBase, _TestSourceBase
@@ -76,13 +77,15 @@ class CollectSink(_TestSinkBase):
     def on_complete(self, ctx: Any) -> None:
         pass
 
-    def write(self, rows: Any, ctx: Any) -> ArtifactDescriptor:
+    def write(self, rows: Any, ctx: Any) -> SinkWriteResult:
         self.results.extend(rows)
         self._artifact_counter += 1
-        return ArtifactDescriptor.for_file(
-            path=f"memory://{self.name}_{self._artifact_counter}",
-            size_bytes=len(str(rows)),
-            content_hash=f"hash_{self._artifact_counter}",
+        return SinkWriteResult(
+            artifact=ArtifactDescriptor.for_file(
+                path=f"memory://{self.name}_{self._artifact_counter}",
+                size_bytes=len(str(rows)),
+                content_hash=f"hash_{self._artifact_counter}",
+            )
         )
 
     def close(self) -> None:
@@ -118,7 +121,7 @@ class FailingSink(_TestSinkBase):
     def on_complete(self, ctx: Any) -> None:
         pass
 
-    def write(self, rows: Any, ctx: Any) -> ArtifactDescriptor:
+    def write(self, rows: Any, ctx: Any) -> SinkWriteResult:
         raise RuntimeError(self._error_message)
 
     def close(self) -> None:

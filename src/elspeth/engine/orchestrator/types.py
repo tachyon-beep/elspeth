@@ -116,6 +116,7 @@ class AggregationFlushResult:
     rows_forked: int = 0
     rows_expanded: int = 0
     rows_buffered: int = 0
+    rows_diverted: int = 0
     routed_destinations: Mapping[str, int] = field(default_factory=lambda: MappingProxyType({}))
 
     def __post_init__(self) -> None:
@@ -134,6 +135,7 @@ class AggregationFlushResult:
             rows_forked=self.rows_forked + other.rows_forked,
             rows_expanded=self.rows_expanded + other.rows_expanded,
             rows_buffered=self.rows_buffered + other.rows_buffered,
+            rows_diverted=self.rows_diverted + other.rows_diverted,
             routed_destinations=MappingProxyType(dict(combined_destinations)),
         )
 
@@ -160,6 +162,7 @@ class ExecutionCounters:
     rows_coalesce_failed: int = 0
     rows_expanded: int = 0
     rows_buffered: int = 0
+    rows_diverted: int = 0
     routed_destinations: Counter[str] = field(default_factory=Counter)
 
     def accumulate_flush_result(self, result: AggregationFlushResult) -> None:
@@ -176,6 +179,7 @@ class ExecutionCounters:
         self.rows_forked += result.rows_forked
         self.rows_expanded += result.rows_expanded
         self.rows_buffered += result.rows_buffered
+        self.rows_diverted += result.rows_diverted
         for dest, count in result.routed_destinations.items():
             self.routed_destinations[dest] += count
 
@@ -193,6 +197,7 @@ class ExecutionCounters:
             rows_forked=self.rows_forked,
             rows_expanded=self.rows_expanded,
             rows_buffered=self.rows_buffered,
+            rows_diverted=self.rows_diverted,
             routed_destinations=dict(self.routed_destinations),
         )
 
@@ -216,6 +221,7 @@ class ExecutionCounters:
             rows_coalesce_failed=self.rows_coalesce_failed,
             rows_expanded=self.rows_expanded,
             rows_buffered=self.rows_buffered,
+            rows_diverted=self.rows_diverted,
             routed_destinations=dict(self.routed_destinations),
         )
 

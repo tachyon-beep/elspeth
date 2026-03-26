@@ -21,6 +21,7 @@ from hypothesis import strategies as st
 from sqlalchemy import text
 
 from elspeth.contracts import ArtifactDescriptor, SourceRow
+from elspeth.contracts.diversion import SinkWriteResult
 from elspeth.core.config import CoalesceSettings, ElspethSettings, GateSettings, SourceSettings
 from elspeth.core.dag import ExecutionGraph
 from elspeth.core.landscape import LandscapeDB
@@ -201,12 +202,14 @@ class _CollectSink(_TestSinkBase):
     def on_complete(self, ctx: Any) -> None:
         pass
 
-    def write(self, rows: Any, ctx: Any) -> ArtifactDescriptor:
+    def write(self, rows: Any, ctx: Any) -> SinkWriteResult:
         self.results.extend(rows)
-        return ArtifactDescriptor.for_file(
-            path=f"memory://{self.name}",
-            size_bytes=len(str(rows)),
-            content_hash="test_hash",
+        return SinkWriteResult(
+            artifact=ArtifactDescriptor.for_file(
+                path=f"memory://{self.name}",
+                size_bytes=len(str(rows)),
+                content_hash="test_hash",
+            )
         )
 
     def close(self) -> None:

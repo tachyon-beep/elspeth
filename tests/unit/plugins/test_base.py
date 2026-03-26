@@ -162,6 +162,7 @@ class TestBaseSink:
     def test_base_sink_implementation(self) -> None:
         from elspeth.contracts import ArtifactDescriptor, PluginSchema
         from elspeth.contracts.contexts import SinkContext
+        from elspeth.contracts.diversion import SinkWriteResult
         from elspeth.plugins.infrastructure.base import BaseSink
 
         class InputSchema(PluginSchema):
@@ -176,12 +177,14 @@ class TestBaseSink:
                 super().__init__(config)
                 self.rows: list[dict[str, Any]] = []
 
-            def write(self, rows: list[dict[str, Any]], ctx: SinkContext) -> ArtifactDescriptor:
+            def write(self, rows: list[dict[str, Any]], ctx: SinkContext) -> SinkWriteResult:
                 self.rows.extend(rows)
-                return ArtifactDescriptor.for_file(
-                    path="/tmp/memory",
-                    content_hash="test",
-                    size_bytes=len(str(rows)),
+                return SinkWriteResult(
+                    artifact=ArtifactDescriptor.for_file(
+                        path="/tmp/memory",
+                        content_hash="test",
+                        size_bytes=len(str(rows)),
+                    )
                 )
 
             def flush(self) -> None:
@@ -194,11 +197,11 @@ class TestBaseSink:
         recorder = make_recorder()
         ctx = make_context(landscape=recorder)
 
-        artifact = sink.write([{"value": 1}, {"value": 2}], ctx)
+        result = sink.write([{"value": 1}, {"value": 2}], ctx)
 
         assert len(sink.rows) == 2
         assert sink.rows[0] == {"value": 1}
-        assert isinstance(artifact, ArtifactDescriptor)
+        assert isinstance(result.artifact, ArtifactDescriptor)
 
     def test_base_sink_batch_write_signature(self) -> None:
         """BaseSink.write() accepts batch and returns ArtifactDescriptor."""
@@ -216,6 +219,7 @@ class TestBaseSink:
         """Test BaseSink subclass with batch write."""
         from elspeth.contracts import ArtifactDescriptor, PluginSchema
         from elspeth.contracts.contexts import SinkContext
+        from elspeth.contracts.diversion import SinkWriteResult
         from elspeth.plugins.infrastructure.base import BaseSink
 
         class InputSchema(PluginSchema):
@@ -230,12 +234,14 @@ class TestBaseSink:
                 super().__init__(config)
                 self.rows: list[dict[str, Any]] = []
 
-            def write(self, rows: list[dict[str, Any]], ctx: SinkContext) -> ArtifactDescriptor:
+            def write(self, rows: list[dict[str, Any]], ctx: SinkContext) -> SinkWriteResult:
                 self.rows.extend(rows)
-                return ArtifactDescriptor.for_file(
-                    path="/tmp/batch",
-                    content_hash="hash123",
-                    size_bytes=100,
+                return SinkWriteResult(
+                    artifact=ArtifactDescriptor.for_file(
+                        path="/tmp/batch",
+                        content_hash="hash123",
+                        size_bytes=100,
+                    )
                 )
 
             def flush(self) -> None:
@@ -248,11 +254,11 @@ class TestBaseSink:
         recorder = make_recorder()
         ctx = make_context(landscape=recorder)
 
-        artifact = sink.write([{"value": 1}, {"value": 2}, {"value": 3}], ctx)
+        result = sink.write([{"value": 1}, {"value": 2}, {"value": 3}], ctx)
 
         assert len(sink.rows) == 3
-        assert isinstance(artifact, ArtifactDescriptor)
-        assert artifact.content_hash == "hash123"
+        assert isinstance(result.artifact, ArtifactDescriptor)
+        assert result.artifact.content_hash == "hash123"
 
     def test_base_sink_has_io_write_determinism(self) -> None:
         """BaseSink should have IO_WRITE determinism by default."""

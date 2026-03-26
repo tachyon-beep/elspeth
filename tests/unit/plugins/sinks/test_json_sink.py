@@ -190,10 +190,10 @@ class TestJSONSink:
         artifact = sink.write([{"id": 1, "name": "alice"}], ctx)
         sink.close()
 
-        assert isinstance(artifact, ArtifactDescriptor)
-        assert artifact.artifact_type == "file"
-        assert artifact.content_hash  # Non-empty
-        assert artifact.size_bytes > 0
+        assert isinstance(artifact.artifact, ArtifactDescriptor)
+        assert artifact.artifact.artifact_type == "file"
+        assert artifact.artifact.content_hash  # Non-empty
+        assert artifact.artifact.size_bytes > 0
 
     def test_batch_write_content_hash_is_sha256(self, tmp_path: Path, ctx: PluginContext) -> None:
         """content_hash is SHA-256 of file contents."""
@@ -208,7 +208,7 @@ class TestJSONSink:
         file_content = output_file.read_bytes()
         expected_hash = hashlib.sha256(file_content).hexdigest()
 
-        assert artifact.content_hash == expected_hash
+        assert artifact.artifact.content_hash == expected_hash
 
     def test_batch_write_jsonl_content_hash(self, tmp_path: Path, ctx: PluginContext) -> None:
         """JSONL format also returns correct content hash."""
@@ -223,7 +223,7 @@ class TestJSONSink:
         file_content = output_file.read_bytes()
         expected_hash = hashlib.sha256(file_content).hexdigest()
 
-        assert artifact.content_hash == expected_hash
+        assert artifact.artifact.content_hash == expected_hash
 
     def test_batch_write_empty_list(self, tmp_path: Path, ctx: PluginContext) -> None:
         """Batch write with empty list returns descriptor with zero size."""
@@ -236,9 +236,9 @@ class TestJSONSink:
         artifact = sink.write([], ctx)
         sink.close()
 
-        assert isinstance(artifact, ArtifactDescriptor)
-        assert artifact.size_bytes == 0
-        assert artifact.content_hash == hashlib.sha256(b"").hexdigest()
+        assert isinstance(artifact.artifact, ArtifactDescriptor)
+        assert artifact.artifact.size_bytes == 0
+        assert artifact.artifact.content_hash == hashlib.sha256(b"").hexdigest()
 
     def test_has_plugin_version(self) -> None:
         """JSONSink has plugin_version attribute."""
@@ -265,15 +265,15 @@ class TestJSONSink:
         # First write
         artifact1 = sink.write([{"id": 1}], ctx)
         expected_hash1 = hashlib.sha256(output_file.read_bytes()).hexdigest()
-        assert artifact1.content_hash == expected_hash1
+        assert artifact1.artifact.content_hash == expected_hash1
 
         # Second write - hash should reflect cumulative contents
         artifact2 = sink.write([{"id": 2}], ctx)
         expected_hash2 = hashlib.sha256(output_file.read_bytes()).hexdigest()
-        assert artifact2.content_hash == expected_hash2
+        assert artifact2.artifact.content_hash == expected_hash2
 
         # Hashes should differ (file grew)
-        assert artifact1.content_hash != artifact2.content_hash
+        assert artifact1.artifact.content_hash != artifact2.artifact.content_hash
 
         sink.close()
 

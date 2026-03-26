@@ -164,24 +164,24 @@ allow_hits:
   owner: architecture
   reason: HTTP redirect Location header — external system boundary, header may be absent
   safety: Missing Location header breaks redirect loop naturally
-- key: plugins/sinks/database_sink.py:R1:DatabaseSink:__init__:fp=5565ae22ee269a37
+- key: plugins/sinks/database_sink.py:R1:DatabaseSink:__init__:fp=ded76dbbb1479f9c
   owner: architecture
   reason: os.environ.get() for optional env var at trust boundary — ELSPETH_ALLOW_RAW_SECRETS is genuinely optional with empty-string default
   safety: Empty string default is meaning-preserving (feature disabled); no data fabrication
   expires: '2026-05-02'
-- key: plugins/sinks/csv_sink.py:R1:CSVSink:validate_output_target:fp=c7d8579f470f2ef8
+- key: plugins/sinks/csv_sink.py:R1:CSVSink:validate_output_target:fp=5d6649996f9b8101
   owner: feature
   reason: Display header mapping - fields not in map keep original name (transform-added fields)
   safety: Intentional fallback to original field name, not bug hiding
-- key: plugins/sinks/csv_sink.py:R1:CSVSink:_open_file:fp=48e3e1cfb4ade393
+- key: plugins/sinks/csv_sink.py:R1:CSVSink:_open_file:fp=7779a935c35ef7a8
   owner: feature
   reason: Intentional fallback - reverse mapping may not contain all fields (transform-added)
   safety: Falls back to original field name - correct behavior for fields not in source
-- key: plugins/sinks/csv_sink.py:R1:CSVSink:_get_field_names_and_display:fp=4de1ab42b67c14e5
+- key: plugins/sinks/csv_sink.py:R1:CSVSink:_get_field_names_and_display:fp=0155f461a13bc0c9
   owner: feature
   reason: Intentional fallback - display mapping may not contain all fields (transform-added)
   safety: Falls back to normalized field name - correct behavior for fields not in source
-- key: plugins/sinks/json_sink.py:R1:JSONSink:validate_output_target:fp=6734d84d40b2178e
+- key: plugins/sinks/json_sink.py:R1:JSONSink:validate_output_target:fp=a96553acb6efa982
   owner: feature
   reason: Display header mapping - fields not in map keep original name (transform-added fields)
   safety: Intentional fallback to original field name, not bug hiding
@@ -270,7 +270,7 @@ allow_hits:
   reason: Worker thread can raise any exception type — must catch broadly to prevent buffer slot leak (FrameworkBugError/AuditIntegrityError re-raised before this catch)
   safety: Exception converted to TransformResult.error (row gets quarantined), buffer stays consistent; framework errors re-raised above
   expires: '2026-06-08'
-- key: plugins/sinks/azure_blob_sink.py:R5:AzureBlobSinkConfig:headers_mapping:fp=2ec56a095db42344
+- key: plugins/sinks/azure_blob_sink.py:R5:AzureBlobSinkConfig:headers_mapping:fp=7ca855f402cbaf42
   owner: refactor
   reason: isinstance(dict) check for config field type discrimination — same pattern as SinkPathConfig.headers_mapping
   safety: Config validated by Pydantic before this property runs; isinstance only distinguishes dict from str
@@ -390,17 +390,17 @@ allow_hits:
   reason: Offensive type guard — rejects non-numeric distance types with crash; corrupt ChromaDB index must not produce silent wrong results
   safety: Raises RetrievalError immediately (crash) — not silently skipped
   expires: null
-- key: plugins/sinks/chroma_sink.py:R1:ChromaSink:write:fp=f1e3973a400ee924
+- key: plugins/sinks/chroma_sink.py:R1:ChromaSink:write:fp=973792325f4c4b18
   owner: feature
   reason: Collection.get() is the ChromaDB SDK method for retrieving documents by ID, not dict.get() — false positive from R1 rule matching `.get(` syntax
   safety: Returns GetResult dict with "ids" key; subscript access on result["ids"] crashes if ChromaDB SDK contract breaks
   expires: null
-- key: plugins/sinks/chroma_sink.py:R1:ChromaSink:write:fp=250ebd2cfb0229a2
+- key: plugins/sinks/chroma_sink.py:R1:ChromaSink:write:fp=531894301354f657
   owner: feature
   reason: Collection.get() is the ChromaDB SDK method for retrieving documents by ID, not dict.get() — false positive from R1 rule matching `.get(` syntax
   safety: Returns GetResult dict with "ids" key; subscript access on result["ids"] crashes if ChromaDB SDK contract breaks
   expires: null
-- key: plugins/sinks/chroma_sink.py:R5:ChromaSink:write:fp=c29441e27ae8e6c8
+- key: plugins/sinks/chroma_sink.py:R5:ChromaSink:write:fp=426aff0f4512b0d3
   owner: feature
   reason: Tier 2→external trust boundary — validates metadata value types before sending to ChromaDB; isinstance check filters rows with non-scalar metadata (dict, list, datetime) so they go to audit trail instead of crashing the batch
   safety: Invalid rows filtered and recorded in audit response_data with per-row detail; valid rows written normally; no silent data loss

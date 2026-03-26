@@ -19,7 +19,8 @@ from elspeth.contracts.schema import SchemaConfig
 if TYPE_CHECKING:
     from elspeth.contracts.contexts import LifecycleContext, SinkContext, SourceContext, TransformContext
     from elspeth.contracts.data import PluginSchema
-    from elspeth.contracts.results import ArtifactDescriptor, SourceRow, TransformResult
+    from elspeth.contracts.diversion import SinkWriteResult
+    from elspeth.contracts.results import SourceRow, TransformResult
     from elspeth.contracts.schema_contract import PipelineRow
     from elspeth.contracts.sink import OutputValidationResult
 
@@ -408,13 +409,15 @@ class SinkProtocol(Protocol):
             input_schema = RowSchema
             idempotent = False  # Appends are not idempotent
 
-            def write(self, rows: list[dict], ctx: SinkContext) -> ArtifactDescriptor:
+            def write(self, rows: list[dict], ctx: SinkContext) -> SinkWriteResult:
                 for row in rows:
                     self._writer.writerow(row)
-                return ArtifactDescriptor.for_file(
-                    path=self._path,
-                    content_hash=self._compute_hash(),
-                    size_bytes=self._file.tell(),
+                return SinkWriteResult(
+                    artifact=ArtifactDescriptor.for_file(
+                        path=self._path,
+                        content_hash=self._compute_hash(),
+                        size_bytes=self._file.tell(),
+                    ),
                 )
 
             def flush(self) -> None:
@@ -452,7 +455,7 @@ class SinkProtocol(Protocol):
         self,
         rows: list[dict[str, Any]],
         ctx: "SinkContext",
-    ) -> "ArtifactDescriptor":
+    ) -> "SinkWriteResult":
         """Write a batch of rows to the sink.
 
         Args:
@@ -460,7 +463,7 @@ class SinkProtocol(Protocol):
             ctx: Sink context with run identity and recording methods
 
         Returns:
-            ArtifactDescriptor with content_hash and size_bytes (REQUIRED for audit)
+            SinkWriteResult with artifact descriptor and optional diversions
         """
         ...
 

@@ -109,6 +109,8 @@ def accumulate_row_outcomes(
             counters.rows_failed += 1
         elif result.outcome == RowOutcome.QUARANTINED:
             counters.rows_quarantined += 1
+        elif result.outcome == RowOutcome.DIVERTED:
+            counters.rows_diverted += 1
         elif result.outcome == RowOutcome.FORKED:
             counters.rows_forked += 1
             # Children are counted separately when they reach terminal state

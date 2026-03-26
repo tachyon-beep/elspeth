@@ -17,6 +17,7 @@ import chromadb.errors
 import structlog
 from pydantic import BaseModel, Field, model_validator
 
+from elspeth.contracts.diversion import SinkWriteResult
 from elspeth.contracts.enums import CallStatus, CallType
 from elspeth.contracts.errors import AuditIntegrityError, DuplicateDocumentError
 from elspeth.contracts.results import ArtifactDescriptor
@@ -161,19 +162,21 @@ class ChromaSink(BaseSink):
         payload_bytes = payload.encode("utf-8")
         return hashlib.sha256(payload_bytes).hexdigest(), len(payload_bytes)
 
-    def write(self, rows: list[dict[str, Any]], ctx: SinkContext) -> ArtifactDescriptor:
+    def write(self, rows: list[dict[str, Any]], ctx: SinkContext) -> SinkWriteResult:
         assert self._collection is not None, "write() called before on_start()"
         collection = self._collection
 
         chroma_url = SanitizedDatabaseUrl.from_raw_url(f"chromadb://{self._config.collection}")
 
         if not rows:
-            return ArtifactDescriptor.for_database(
-                url=chroma_url,
-                table=self._config.collection,
-                content_hash=hashlib.sha256(b"").hexdigest(),
-                payload_size=0,
-                row_count=0,
+            return SinkWriteResult(
+                artifact=ArtifactDescriptor.for_database(
+                    url=chroma_url,
+                    table=self._config.collection,
+                    content_hash=hashlib.sha256(b"").hexdigest(),
+                    payload_size=0,
+                    row_count=0,
+                )
             )
 
         fm = self._config.field_mapping
@@ -245,12 +248,14 @@ class ChromaSink(BaseSink):
                     f"Failed to record metadata-rejected ChromaDB write to audit trail "
                     f"(collection={self._config.collection!r}, rejected={rows_rejected_metadata})."
                 ) from exc
-            return ArtifactDescriptor.for_database(
-                url=chroma_url,
-                table=self._config.collection,
-                content_hash=content_hash,
-                payload_size=payload_size,
-                row_count=0,
+            return SinkWriteResult(
+                artifact=ArtifactDescriptor.for_database(
+                    url=chroma_url,
+                    table=self._config.collection,
+                    content_hash=content_hash,
+                    payload_size=payload_size,
+                    row_count=0,
+                )
             )
 
         # These will be updated for skip/error mode to reflect actual payload sent
@@ -373,12 +378,14 @@ class ChromaSink(BaseSink):
         self._total_written += rows_written
         self._total_bytes += payload_size
 
-        return ArtifactDescriptor.for_database(
-            url=chroma_url,
-            table=self._config.collection,
-            content_hash=content_hash,
-            payload_size=payload_size,
-            row_count=rows_written,
+        return SinkWriteResult(
+            artifact=ArtifactDescriptor.for_database(
+                url=chroma_url,
+                table=self._config.collection,
+                content_hash=content_hash,
+                payload_size=payload_size,
+                row_count=rows_written,
+            )
         )
 
     def flush(self) -> None:

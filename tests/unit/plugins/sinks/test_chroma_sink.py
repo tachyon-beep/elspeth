@@ -153,8 +153,8 @@ class TestChromaSinkWriteOverwrite:
         rows = [{"doc_id": "d1", "text": "Hello", "topic": "t"}]
         result = sink.write(rows, mock_ctx)
 
-        assert result.content_hash is not None
-        assert len(result.content_hash) == 64  # SHA-256 hex
+        assert result.artifact.content_hash is not None
+        assert len(result.artifact.content_hash) == 64  # SHA-256 hex
 
     def test_empty_rows_returns_empty_artifact(self) -> None:
         mock_collection = MagicMock()
@@ -165,8 +165,8 @@ class TestChromaSinkWriteOverwrite:
 
         result = sink.write([], mock_ctx)
 
-        assert result.metadata is not None
-        assert result.metadata["row_count"] == 0
+        assert result.artifact.metadata is not None
+        assert result.artifact.metadata["row_count"] == 0
         mock_collection.upsert.assert_not_called()
 
 
@@ -222,8 +222,8 @@ class TestChromaSinkWriteSkip:
         artifact = sink.write(rows, mock_ctx)
 
         # Artifact must reflect actual write, not full batch
-        assert artifact.metadata is not None
-        assert artifact.metadata["row_count"] == 1
+        assert artifact.artifact.metadata is not None
+        assert artifact.artifact.metadata["row_count"] == 1
 
         # Audit call must include skip info
         call_kwargs = mock_ctx.record_call.call_args.kwargs
@@ -253,7 +253,7 @@ class TestChromaSinkWriteSkip:
         mock_ctx2 = MagicMock()
         overwrite_artifact = sink2.write([{"doc_id": "d2", "text": "New", "topic": "t"}], mock_ctx2)
 
-        assert skip_artifact.content_hash == overwrite_artifact.content_hash
+        assert skip_artifact.artifact.content_hash == overwrite_artifact.artifact.content_hash
 
 
 class TestChromaSinkWriteError:
@@ -470,7 +470,7 @@ class TestChromaSinkMetadataTypeValidation:
         assert response["rows_written"] == 0
         assert response["rows_rejected_metadata"] == 2
 
-        assert result.metadata["row_count"] == 0
+        assert result.artifact.metadata["row_count"] == 0
 
     @pytest.mark.parametrize(
         "bad_value, expected_type_name",
