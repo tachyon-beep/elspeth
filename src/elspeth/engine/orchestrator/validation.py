@@ -19,7 +19,7 @@ Other imports use TYPE_CHECKING to avoid cycles.
 from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 # Import GateName at runtime - used in function body, not just type hints
 from elspeth.contracts import RouteDestination, RouteDestinationKind
@@ -162,3 +162,68 @@ def validate_source_quarantine_destination(
             f"Available sinks: {sorted(available_sinks)}. "
             f"Use 'discard' to drop invalid rows without routing."
         )
+
+
+_ALLOWED_FAILSINK_PLUGINS = frozenset({"csv", "json", "xml"})
+
+
+def validate_sink_failsink_destinations(
+    sink_configs: Mapping[str, Any],
+    available_sinks: set[str],
+    sink_plugins: Mapping[str, str],
+    allowed_failsink_plugins: frozenset[str] = _ALLOWED_FAILSINK_PLUGINS,
+) -> None:
+    """Validate all sink on_write_failure destinations.
+
+    Called at pipeline initialization, before any rows are processed.
+    Parallel to validate_transform_error_sinks() for transform on_error.
+
+    Rules:
+    1. 'discard' is always valid
+    2. Sink name must exist in available_sinks
+    3. Sink cannot reference itself
+    4. Target sink must use csv, json, or xml plugin type
+    5. Target sink must have on_write_failure='discard' (no chains)
+
+    Args:
+        sink_configs: Dict of sink_name -> config object with on_write_failure attr.
+        available_sinks: Set of all sink names in the pipeline.
+        sink_plugins: Dict of sink_name -> plugin type name (e.g., "csv", "chroma_sink").
+        allowed_failsink_plugins: Set of plugin types allowed as failsinks.
+
+    Raises:
+        RouteValidationError: If any sink's on_write_failure is invalid.
+    """
+    for sink_name, config in sink_configs.items():
+        dest = config.on_write_failure
+        if dest == "discard":
+            continue
+
+        # Rule 2: must exist
+        if dest not in available_sinks:
+            raise RouteValidationError(
+                f"Sink '{sink_name}' on_write_failure references unknown sink '{dest}'. Available sinks: {sorted(available_sinks)}."
+            )
+
+        # Rule 3: no self-reference
+        if dest == sink_name:
+            raise RouteValidationError(f"Sink '{sink_name}' on_write_failure references itself. A sink cannot be its own failsink.")
+
+        # Rule 4: must be a file sink
+        if dest in sink_plugins:
+            plugin_type = sink_plugins[dest]
+            if plugin_type not in allowed_failsink_plugins:
+                raise RouteValidationError(
+                    f"Sink '{sink_name}' on_write_failure references '{dest}' "
+                    f"(plugin='{plugin_type}'), but failsinks must use csv, json, or xml plugins."
+                )
+
+        # Rule 5: no chains — target must use 'discard'
+        if dest in sink_configs:
+            target_dest = sink_configs[dest].on_write_failure
+            if target_dest != "discard":
+                raise RouteValidationError(
+                    f"Sink '{sink_name}' on_write_failure references '{dest}', "
+                    f"but '{dest}' has on_write_failure='{target_dest}'. "
+                    f"Failsink targets must have on_write_failure='discard' (no chains)."
+                )
