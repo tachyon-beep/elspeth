@@ -447,6 +447,10 @@ class SinkProtocol(Protocol):
     # Defaults to False — only enabled via plugin config (validate_input: true).
     validate_input: bool
 
+    # Write failure routing — injected by cli_helpers from SinkSettings.
+    # "discard" = drop failed rows with audit record, else = failsink name.
+    _on_write_failure: str
+
     def __init__(self, config: dict[str, Any]) -> None:
         """Initialize with configuration."""
         ...

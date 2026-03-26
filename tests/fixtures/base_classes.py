@@ -141,6 +141,7 @@ class _TestSinkBase:
     plugin_version = "1.0.0"
     validate_input: bool = False
     declared_required_fields: frozenset[str] = frozenset()
+    _on_write_failure: str = "discard"
 
     def __init__(self) -> None:
         self.config: dict[str, Any] = {"schema": {"mode": "observed"}}

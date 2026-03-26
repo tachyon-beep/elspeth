@@ -762,6 +762,20 @@ def build_execution_graph(
                 mode=RoutingMode.DIVERT,
             )
 
+    # Sink failsink edges
+    for sink_name_key, sink_node_id in sink_ids.items():
+        sink_instance = sinks[str(sink_name_key)]
+        on_write_failure = sink_instance._on_write_failure
+        if on_write_failure is not None and on_write_failure != "discard":
+            failsink_name = SinkName(on_write_failure)
+            if failsink_name in sink_ids:
+                graph.add_edge(
+                    sink_node_id,
+                    sink_ids[failsink_name],
+                    label="__failsink__",
+                    mode=RoutingMode.DIVERT,
+                )
+
     # ===== PIPELINE ORDERING (TOPOLOGICAL) =====
     processing_node_ids: set[NodeID] = set()
     processing_node_ids.update(transform_ids_by_name.values())
