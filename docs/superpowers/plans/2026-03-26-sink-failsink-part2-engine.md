@@ -359,14 +359,17 @@ Add after `sinks[sink_name] = sink_cls(dict(sink_config.options))`:
 
 `_write_pending_to_sinks()` currently returns `None`. Change it to return `int` (total diversion count). Add `total_diversions = 0` at the top of the method, accumulate from each `write()` call, and `return total_diversions` at the end.
 
-At each call site in the orchestrator (search for `_write_pending_to_sinks(` — there are two: one in `_execute_run`, one in `_process_resumed_rows`), capture the return value and add it to counters:
+`_write_pending_to_sinks()` has exactly ONE call site: inside `_flush_and_write_sinks()` at line 1659. Both `_execute_run` and `_process_resumed_rows` call `_flush_and_write_sinks()`, which delegates to `_write_pending_to_sinks()`. Add the counter increment in `_flush_and_write_sinks()`:
 
 ```python
+# In _flush_and_write_sinks(), after _write_pending_to_sinks() returns:
 total_diversions = self._write_pending_to_sinks(...)
 loop_ctx.counters.rows_diverted += total_diversions
 ```
 
-In `src/elspeth/engine/orchestrator/core.py`, find `_write_pending_to_sinks()` (line 511). Inside the loop that calls `sink_executor.write()` (around line 575), resolve the failsink before calling write:
+(`counters` is already available in `_flush_and_write_sinks` as `loop_ctx.counters`.)
+
+In `src/elspeth/engine/orchestrator/core.py`, find `_write_pending_to_sinks()` (line 511). Inside the loop that calls `sink_executor.write()` (around line 575), resolve the failsink and its edge_id before calling write:
 
 Find:
 ```python
@@ -391,6 +394,7 @@ Replace with:
             # (class-level default None, overwritten by cli_helpers injection)
             failsink: SinkProtocol | None = None
             failsink_config_name: str | None = None
+            failsink_edge: str | None = None
             on_write_failure = sink._on_write_failure
             if on_write_failure is not None and on_write_failure != "discard":
                 # Validation already confirmed this sink exists at startup.
@@ -403,6 +407,11 @@ Replace with:
                     )
                 failsink = config.sinks[on_write_failure]
                 failsink_config_name = on_write_failure
+                # Resolve __failsink__ edge_id from the DAG edge_map
+                # edge_map is keyed by (from_node_id, label)
+                # _write_pending_to_sinks needs access to edge_map — pass it as a parameter
+                failsink_edge_key = (sink_node_id, "__failsink__")
+                failsink_edge = edge_map.get(failsink_edge_key)  # None if DAG has no edge (shouldn't happen)
 
             for pending_outcome, group in groupby(sorted_pairs, key=lambda x: x[1]):
                 group_tokens = [token for token, _ in group]
@@ -415,6 +424,7 @@ Replace with:
                     pending_outcome=pending_outcome,
                     failsink=failsink,
                     failsink_name=failsink_config_name,
+                    failsink_edge_id=failsink_edge,
                     on_token_written=on_token_written,
                 )
                 total_diversions += diversion_count
@@ -797,8 +807,9 @@ Add `failsink` parameter to `write()` signature (line 94):
         pending_outcome: PendingOutcome,
         failsink: SinkProtocol | None = None,
         failsink_name: str | None = None,
+        failsink_edge_id: str | None = None,
         on_token_written: Callable[[TokenInfo], None] | None = None,
-    ) -> Artifact | None:
+    ) -> tuple[Artifact | None, int]:
 ```
 
 **Revised flow (replaces the current begin→write→flush→complete→register→outcomes sequence):**
@@ -830,19 +841,32 @@ PHASE 2 — Partition and record primary tokens (outside track_operation):
 
 PHASE 3 — Handle diversions (outside track_operation):
   14. For DIVERTED tokens (if any):
-      a. Record routing_event per diverted token (mode=DIVERT, from=primary_node_id, to=failsink_node_id)
-      b. If failsink mode (not discard):
-         i. Reset failsink's diversion log
-         ii. Build enriched rows with __diversion_reason, __diverted_from, __diversion_timestamp
-         iii. Write to failsink: failsink.write(enriched_rows, ctx)
-         iv. Flush failsink
-      c. begin_node_state per diverted token at failsink's node_id (or discard: no node_state)
-         (with try/except for partial-open cleanup — if failsink begin_node_state fails,
+
+      **If failsink mode (on_write_failure is a sink name, not "discard"):**
+      a. Reset failsink's diversion log
+      b. Build enriched rows with __diversion_reason, __diverted_from, __diversion_timestamp
+      c. Write to failsink: failsink.write(enriched_rows, ctx)
+      d. Flush failsink
+      e. Assert failsink_write_result.diversions is empty (failsink must not produce diversions)
+      f. begin_node_state per diverted token at failsink's node_id
+         (with try/except for partial-open cleanup — if begin_node_state fails,
           complete opened failsink states as FAILED, do NOT touch primary states)
-      d. complete_node_state as COMPLETED at failsink (if failsink mode)
-      e. Register failsink artifact (anchored to first diverted token's failsink state)
-      f. record_token_outcome DIVERTED with error_hash and sink_name=failsink_name
-      g. Do NOT call on_token_written for diverted tokens
+      g. Record routing_event per diverted token AFTER its failsink state is opened:
+         state_id=failsink_state.state_id, edge_id=failsink_edge_id,
+         mode=RoutingMode.DIVERT, reason=RowDiversion.reason
+         (NOTE: state_id is the failsink state, not a primary state — diverted tokens
+          have no primary state. The routing_event is anchored to the destination.)
+      h. complete_node_state as COMPLETED at failsink
+      i. Register failsink artifact (anchored to first diverted token's failsink state)
+      j. record_token_outcome DIVERTED with error_hash and sink_name=failsink_name
+
+      **If discard mode (on_write_failure == "discard"):**
+      a. Do NOT record routing_event (no DAG edge exists for discard, no state_id to anchor to).
+         The DIVERTED token_outcome with error_hash is the sole audit record.
+      b. record_token_outcome DIVERTED with error_hash and sink_name="__discard__"
+
+      **Both modes:**
+      c. Do NOT call on_token_written for diverted tokens
 
 PHASE 4 — Increment diversion counter:
   15. Return (artifact, diversion_count) so _write_pending_to_sinks() can add to counters.rows_diverted
@@ -855,10 +879,10 @@ PHASE 4 — Increment diversion counter:
 - `sink._reset_diversion_log()` called at step 1, `failsink._reset_diversion_log()` called at step 14.b.i — both before their respective `write()` calls.
 - `failsink_name` (the config-level sink name) passed explicitly to `write()`, NOT derived from `failsink.name` (which is the plugin type name, not the pipeline sink name).
 - Failsink artifact registered via `self._recorder.register_artifact()` at step 14.e, anchored to first diverted token's failsink state_id.
-- **routing_event** recorded at step 14.a via `self._recorder.record_routing_event()`. Parameters: `state_id` (from the primary node — but diverted tokens have no primary state, so use the failsink state after step 14.c), `edge_id` (the `__failsink__` edge from the DAG edge_map — pass `edge_map` to `write()` or resolve in the orchestrator and pass as a parameter), `mode=RoutingMode.DIVERT`, `reason` (from `RowDiversion.reason`). For discard mode: record routing_event with `sink_name="__discard__"`.
+- **routing_event** recorded at step 14.g (failsink mode only, AFTER failsink state is opened) via `self._recorder.record_routing_event()`. Parameters: `state_id=failsink_state.state_id` (the failsink state, opened at step 14.f), `edge_id=failsink_edge_id` (the `__failsink__` DIVERT edge, resolved by the orchestrator and passed as `failsink_edge_id: str | None` parameter), `mode=RoutingMode.DIVERT`, `reason=RowDiversion.reason`. **For discard mode: NO routing_event** — there is no DAG edge and no state_id. The `DIVERTED` token_outcome with error_hash is the sole audit record. All `record_token_outcome` calls must use kwargs (not positional args) to maintain test assertion compatibility.
 - Error handling: if failsink write/flush raises at step 14.b, complete any opened failsink node_states as FAILED before re-raising. Primary states from Phase 2 remain COMPLETED (durable, cannot roll back).
 - `on_token_written` NOT called for diverted tokens — they didn't write to the primary sink. This means diverted tokens have no checkpoint records; see resume caveat below.
-- **Return type change:** `write()` returns `tuple[Artifact | None, int]` — the artifact and the number of diversions. `_write_pending_to_sinks()` accumulates the diversion count into `counters.rows_diverted`. This is how the counter reaches `RunResult` (N1 fix — `accumulate_row_outcomes()` DIVERTED branch is a guard, not the primary increment path).
+- **Return type change:** `write()` returns `tuple[Artifact | None, int]` — the artifact and the number of diversions. The existing empty-batch early return (`if not tokens: return None`) must change to `return None, 0`. `_write_pending_to_sinks()` accumulates the diversion count into `counters.rows_diverted`. This is how the counter reaches `RunResult` (N1 fix — `accumulate_row_outcomes()` DIVERTED branch is a guard, not the primary increment path).
 
 **Resume caveat (out of scope but documented):** Diverted tokens receive no `on_token_written` callback, so no checkpoint is created. On resume, these tokens will be replayed and re-diverted, producing duplicate `token_outcome=DIVERTED` records for the same `token_id` and duplicate rows in the failsink file. This is an **audit integrity issue** (duplicate terminal outcomes violate the exactly-once invariant) that must be tracked as a P1 follow-up, not a P3 resume UX improvement.
 
@@ -1261,6 +1285,10 @@ class TestFailsinkCleanup:
         completed_calls = [c for c in complete_calls if c.kwargs.get("status") == NodeStateStatus.COMPLETED]
         assert len(failed_calls) == 1
         assert len(completed_calls) == 0  # t0 was diverted, no primary state
+        # Verify the FAILED state was opened at the failsink node, not the primary
+        begin_calls = recorder.begin_node_state.call_args_list
+        assert len(begin_calls) == 1
+        assert begin_calls[0].kwargs["node_id"] == failsink.node_id
 
     def test_failsink_failure_does_not_affect_primary_states(self) -> None:
         """Primary COMPLETED states must remain intact when failsink fails.
@@ -1286,6 +1314,12 @@ class TestFailsinkCleanup:
         # t1: FAILED at failsink node_id (failsink write crashed)
         failed_calls = [c for c in complete_calls if c.kwargs.get("status") == NodeStateStatus.FAILED]
         assert len(failed_calls) == 1
+        # Verify node_id isolation: primary states at primary node, failsink states at failsink node
+        begin_calls = recorder.begin_node_state.call_args_list
+        primary_begins = [c for c in begin_calls if c.kwargs.get("node_id") == sink.node_id]
+        failsink_begins = [c for c in begin_calls if c.kwargs.get("node_id") == failsink.node_id]
+        assert len(primary_begins) == 1  # t0 at primary
+        assert len(failsink_begins) == 1  # t1 at failsink
 
     def test_failsink_flush_failure_crashes(self) -> None:
         """If failsink.flush() raises, crash after completing failsink states as FAILED."""
