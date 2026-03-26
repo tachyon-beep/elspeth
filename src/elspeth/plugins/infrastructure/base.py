@@ -39,6 +39,7 @@ from typing import TYPE_CHECKING, Any
 
 from elspeth.contracts import Determinism, PluginSchema, SourceRow
 from elspeth.contracts.diversion import RowDiversion, SinkWriteResult
+from elspeth.contracts.errors import FrameworkBugError
 from elspeth.contracts.schema_contract import PipelineRow
 
 if TYPE_CHECKING:
@@ -413,6 +414,10 @@ class BaseSink(ABC):
     # When True, executor validates input against input_schema before write().
     validate_input: bool = False
 
+    # Failsink infrastructure — set by orchestrator from SinkSettings.on_write_failure.
+    # None until injected at pipeline startup; "discard" or sink name at runtime.
+    _on_write_failure: str | None = None
+
     def configure_for_resume(self) -> None:
         """Configure sink for resume mode (append instead of truncate).
 
@@ -549,12 +554,30 @@ class BaseSink(ABC):
 
     # === Diversion Infrastructure ===
 
-    def _divert_row(self, row_index: int, reason: str, row_data: dict[str, Any]) -> None:
+    def _divert_row(self, row_data: dict[str, Any], *, row_index: int, reason: str) -> None:
         """Record a row diversion during write().
 
         Called by concrete sinks when an individual row fails at the
-        external system boundary (Tier 2 -> External).
+        external system boundary (Tier 2 -> External). Both "discard"
+        and failsink modes accumulate to _diversion_log. The executor
+        reads the log after write() returns and handles the actual
+        discard-vs-write decision.
+
+        Args:
+            row_data: The row dict that couldn't be written.
+            row_index: Index in the original batch (for token correlation).
+            reason: Human-readable reason for the diversion.
+
+        Raises:
+            FrameworkBugError: If _on_write_failure has not been set
+                (plugin bug — calling _divert_row before orchestrator injection).
         """
+        if self._on_write_failure is None:
+            raise FrameworkBugError(
+                f"Sink '{self.name}' called _divert_row() but _on_write_failure "
+                f"is not set. Configure on_write_failure in pipeline YAML or "
+                f"re-raise the exception to crash the pipeline."
+            )
         self._diversion_log.append(RowDiversion(row_index=row_index, reason=reason, row_data=row_data))
 
     def _reset_diversion_log(self) -> None:
