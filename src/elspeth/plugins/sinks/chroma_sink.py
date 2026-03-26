@@ -184,11 +184,80 @@ class ChromaSink(BaseSink):
             [{field: row[field] for field in fm.metadata_fields} for row in rows] if fm.metadata_fields else None
         )
 
-        # These will be updated for skip mode to reflect actual payload sent
+        # Trust boundary: validate metadata value types before sending to ChromaDB.
+        # ChromaDB accepts str|int|float|bool|None — anything else (dict, list,
+        # datetime) is a per-row data problem, not a plugin bug. Filter bad rows
+        # and record rejections in the audit trail (like skip mode for duplicates).
+        rejected_metadata: list[dict[str, Any]] = []
+        if metadatas is not None:
+            valid_indices: list[int] = []
+            for i, meta in enumerate(metadatas):
+                bad_fields = {
+                    key: type(value).__name__
+                    for key, value in meta.items()
+                    if value is not None and not isinstance(value, (str, int, float, bool))
+                }
+                if bad_fields:
+                    rejected_metadata.append(
+                        {
+                            "row_index": i,
+                            "document_id": ids[i],
+                            "invalid_fields": bad_fields,
+                        }
+                    )
+                else:
+                    valid_indices.append(i)
+
+            if rejected_metadata and valid_indices:
+                # Partial rejection — filter to valid rows only
+                ids = [ids[i] for i in valid_indices]
+                documents = [documents[i] for i in valid_indices]
+                metadatas = [metadatas[i] for i in valid_indices]
+            elif rejected_metadata:
+                # ALL rows rejected — nothing to write
+                ids, documents, metadatas = [], [], None
+
+        rows_rejected_metadata = len(rejected_metadata)
+
+        # Handle all-rejected case: record rejection, return zero-write artifact
+        if not ids:
+            content_hash, payload_size = self._compute_payload_hash([], [], None)
+            try:
+                ctx.record_call(
+                    call_type=CallType.VECTOR,
+                    status=CallStatus.SUCCESS,
+                    request_data={
+                        "operation": self._config.on_duplicate.upper(),
+                        "collection": self._config.collection,
+                        "row_count": 0,
+                        "batch_size": len(rows),
+                    },
+                    response_data={
+                        "rows_written": 0,
+                        "rows_rejected_metadata": rows_rejected_metadata,
+                        "rejected_metadata_detail": rejected_metadata,
+                    },
+                    latency_ms=0.0,
+                    provider="chromadb",
+                )
+            except Exception as exc:
+                raise AuditIntegrityError(
+                    f"Failed to record metadata-rejected ChromaDB write to audit trail "
+                    f"(collection={self._config.collection!r}, rejected={rows_rejected_metadata})."
+                ) from exc
+            return ArtifactDescriptor.for_database(
+                url=chroma_url,
+                table=self._config.collection,
+                content_hash=content_hash,
+                payload_size=payload_size,
+                row_count=0,
+            )
+
+        # These will be updated for skip/error mode to reflect actual payload sent
         write_ids = ids
         write_documents = documents
         write_metadatas = metadatas
-        rows_written = len(rows)
+        rows_written = len(ids)
         rows_skipped = 0
         skipped_ids: list[str] = []
 
@@ -273,6 +342,9 @@ class ChromaSink(BaseSink):
             if rows_skipped > 0:
                 response_data["rows_skipped"] = rows_skipped
                 response_data["skipped_ids"] = skipped_ids
+            if rows_rejected_metadata > 0:
+                response_data["rows_rejected_metadata"] = rows_rejected_metadata
+                response_data["rejected_metadata_detail"] = rejected_metadata
 
             request_data: dict[str, Any] = {
                 "operation": self._config.on_duplicate.upper(),
@@ -280,7 +352,7 @@ class ChromaSink(BaseSink):
                 "row_count": rows_written,
                 "document_ids": write_ids,
             }
-            if rows_skipped > 0:
+            if rows_skipped > 0 or rows_rejected_metadata > 0:
                 request_data["batch_size"] = len(rows)
 
             ctx.record_call(

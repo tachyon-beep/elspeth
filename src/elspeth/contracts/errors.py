@@ -1086,6 +1086,8 @@ class DuplicateDocumentError(Exception):
     """
 
     def __init__(self, *, collection: str, duplicate_ids: list[str]) -> None:
+        if not collection:
+            raise ValueError("collection must not be empty")
         if not duplicate_ids:
             raise ValueError("duplicate_ids must not be empty — DuplicateDocumentError requires at least one duplicate")
         self.collection = collection

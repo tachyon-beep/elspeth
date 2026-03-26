@@ -12,7 +12,7 @@ from dataclasses import dataclass, field
 from types import MappingProxyType
 
 from elspeth.contracts.enums import RunStatus
-from elspeth.contracts.freeze import freeze_fields
+from elspeth.contracts.freeze import freeze_fields, require_int
 
 
 @dataclass(frozen=True, slots=True)
@@ -34,4 +34,16 @@ class RunResult:
     routed_destinations: Mapping[str, int] = field(default_factory=lambda: MappingProxyType({}))
 
     def __post_init__(self) -> None:
+        if not self.run_id:
+            raise ValueError("run_id must not be empty")
+        require_int(self.rows_processed, "rows_processed", min_value=0)
+        require_int(self.rows_succeeded, "rows_succeeded", min_value=0)
+        require_int(self.rows_failed, "rows_failed", min_value=0)
+        require_int(self.rows_routed, "rows_routed", min_value=0)
+        require_int(self.rows_quarantined, "rows_quarantined", min_value=0)
+        require_int(self.rows_forked, "rows_forked", min_value=0)
+        require_int(self.rows_coalesced, "rows_coalesced", min_value=0)
+        require_int(self.rows_coalesce_failed, "rows_coalesce_failed", min_value=0)
+        require_int(self.rows_expanded, "rows_expanded", min_value=0)
+        require_int(self.rows_buffered, "rows_buffered", min_value=0)
         freeze_fields(self, "routed_destinations")

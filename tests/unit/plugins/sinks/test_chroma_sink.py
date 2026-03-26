@@ -384,3 +384,128 @@ class TestChromaSinkClose:
         assert sink._client is None
         assert sink._collection is None
         mock_client.clear_system_cache.assert_called_once()
+
+
+class TestChromaSinkMetadataTypeValidation:
+    """Metadata values must be str|int|float|bool|None — ChromaDB's constraint."""
+
+    def test_valid_scalar_types_pass(self) -> None:
+        """str, int, float, bool metadata values are accepted."""
+        mock_collection = MagicMock()
+        config = _make_config(
+            field_mapping={
+                "document_field": "text",
+                "id_field": "doc_id",
+                "metadata_fields": ["s", "i", "f", "b"],
+            },
+            schema={"mode": "flexible", "fields": ["doc_id: str", "text: str"]},
+        )
+        sink = ChromaSink(config)
+        sink._collection = mock_collection
+
+        mock_ctx = MagicMock()
+        rows = [{"doc_id": "d1", "text": "hi", "s": "val", "i": 42, "f": 3.14, "b": True}]
+        sink.write(rows, mock_ctx)
+
+        mock_collection.upsert.assert_called_once()
+
+    def test_none_metadata_value_passes(self) -> None:
+        """None is a valid ChromaDB metadata value."""
+        mock_collection = MagicMock()
+        sink = _make_sink_with_collection(mock_collection)
+
+        mock_ctx = MagicMock()
+        rows = [{"doc_id": "d1", "text": "hi", "topic": None}]
+        sink.write(rows, mock_ctx)
+
+        mock_collection.upsert.assert_called_once()
+
+    def test_invalid_type_filtered_and_audit_recorded(self) -> None:
+        """Rows with non-scalar metadata are filtered out, not sent to ChromaDB."""
+        mock_collection = MagicMock()
+        sink = _make_sink_with_collection(mock_collection)
+
+        mock_ctx = MagicMock()
+        rows = [
+            {"doc_id": "d1", "text": "good", "topic": "science"},
+            {"doc_id": "d2", "text": "bad", "topic": {"nested": "dict"}},
+            {"doc_id": "d3", "text": "good", "topic": "math"},
+        ]
+        result = sink.write(rows, mock_ctx)
+
+        # Only valid rows sent to ChromaDB
+        call_kwargs = mock_collection.upsert.call_args.kwargs
+        assert call_kwargs["ids"] == ["d1", "d3"]
+        assert call_kwargs["documents"] == ["good", "good"]
+
+        # Audit trail records the rejection
+        audit_kwargs = mock_ctx.record_call.call_args.kwargs
+        response = audit_kwargs["response_data"]
+        assert response["rows_written"] == 2
+        assert response["rows_rejected_metadata"] == 1
+        assert response["rejected_metadata_detail"][0]["document_id"] == "d2"
+        assert "topic" in response["rejected_metadata_detail"][0]["invalid_fields"]
+
+        assert result is not None
+
+    def test_all_rows_rejected_returns_zero_write(self) -> None:
+        """When ALL rows have bad metadata, return zero-write artifact."""
+        mock_collection = MagicMock()
+        sink = _make_sink_with_collection(mock_collection)
+
+        mock_ctx = MagicMock()
+        rows = [
+            {"doc_id": "d1", "text": "bad", "topic": ["a", "list"]},
+            {"doc_id": "d2", "text": "bad", "topic": {"nested": "dict"}},
+        ]
+        result = sink.write(rows, mock_ctx)
+
+        # Nothing sent to ChromaDB
+        mock_collection.upsert.assert_not_called()
+        mock_collection.add.assert_not_called()
+
+        # Audit trail records all rejections
+        audit_kwargs = mock_ctx.record_call.call_args.kwargs
+        response = audit_kwargs["response_data"]
+        assert response["rows_written"] == 0
+        assert response["rows_rejected_metadata"] == 2
+
+        assert result.metadata["row_count"] == 0
+
+    @pytest.mark.parametrize(
+        "bad_value, expected_type_name",
+        [
+            ({"nested": "dict"}, "dict"),
+            (["a", "list"], "list"),
+            ((1, 2), "tuple"),
+        ],
+        ids=["dict", "list", "tuple"],
+    )
+    def test_rejection_detail_includes_type_name(self, bad_value: Any, expected_type_name: str) -> None:
+        """Rejection detail records the actual type name for diagnosis."""
+        mock_collection = MagicMock()
+        sink = _make_sink_with_collection(mock_collection)
+
+        mock_ctx = MagicMock()
+        rows = [{"doc_id": "d1", "text": "hi", "topic": bad_value}]
+        sink.write(rows, mock_ctx)
+
+        audit_kwargs = mock_ctx.record_call.call_args.kwargs
+        detail = audit_kwargs["response_data"]["rejected_metadata_detail"][0]
+        assert detail["invalid_fields"]["topic"] == expected_type_name
+        assert detail["document_id"] == "d1"
+
+    def test_no_metadata_fields_skips_validation(self) -> None:
+        """When metadata_fields is empty, no validation needed (metadatas=None)."""
+        mock_collection = MagicMock()
+        config = _make_config(
+            field_mapping={"document_field": "text", "id_field": "doc_id", "metadata_fields": []},
+        )
+        sink = ChromaSink(config)
+        sink._collection = mock_collection
+
+        mock_ctx = MagicMock()
+        rows = [{"doc_id": "d1", "text": "hi"}]
+        sink.write(rows, mock_ctx)
+
+        mock_collection.upsert.assert_called_once()

@@ -6,6 +6,10 @@ from pathlib import Path
 from types import MappingProxyType
 from typing import TYPE_CHECKING
 
+import structlog
+
+slog = structlog.get_logger(__name__)
+
 if TYPE_CHECKING:
     from collections.abc import Mapping, Sequence
 
@@ -310,7 +314,10 @@ def bootstrap_and_run(settings_path: Path) -> "RunResult":
             import sys
 
             if sys.exc_info()[1] is not None:
-                pass  # Original exception takes precedence
+                slog.debug(
+                    "db.close() failed during exception cleanup — suppressed",
+                    close_error=str(sys.exc_info()[1]),
+                )
             else:
                 raise
 

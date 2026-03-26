@@ -87,8 +87,8 @@ def build_collection_probes(
     """Construct probes from explicit config declarations."""
     probes: list[CollectionProbe] = []
     for config in configs:
-        probe_cls = _PROBE_REGISTRY.get(config.provider)
-        if probe_cls is None:
+        if config.provider not in _PROBE_REGISTRY:
             raise ValueError(f"Unknown collection probe provider: {config.provider!r}. Available: {sorted(_PROBE_REGISTRY)}")
+        probe_cls = _PROBE_REGISTRY[config.provider]
         probes.append(probe_cls(config.collection, config.provider_config))
     return probes

@@ -15,7 +15,7 @@ Complete RAG ingestion story: ChromaSink for vector store population, pipeline `
 - **ChromaSink** — new sink plugin writing pipeline rows into ChromaDB collections. Three `on_duplicate` modes: `overwrite` (upsert), `skip` (pre-filter existing IDs), `error` (pre-check and reject). Canonical content hash computed before write for audit integrity.
 - **`FieldMappingConfig`** — explicit field mapping from row fields to ChromaDB concepts (`document_field`, `id_field`, `metadata_fields`). No convention-based defaults — operator declares exactly what goes where.
 - **`DuplicateDocumentError`** — structured exception with `collection` and `duplicate_ids` (stored as immutable tuple) for `on_duplicate: error` mode.
-- **ChromaDB metadata type validation** — `metadata_fields` must be `str`, `int`, `float`, or `bool` types, matching ChromaDB's constraint and ensuring canonical JSON hashing works.
+- **ChromaDB metadata type validation** — metadata field values are validated as `str`, `int`, `float`, `bool`, or `None` at write time, before sending to ChromaDB. Invalid types (e.g. `dict`, `datetime`) crash with a `TypeError` naming the exact field, type, row index, and document ID.
 
 #### Pipeline `depends_on` Mechanism
 

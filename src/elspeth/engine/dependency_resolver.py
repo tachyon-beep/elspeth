@@ -27,7 +27,9 @@ def _load_depends_on(settings_path: Path) -> list[dict[str, str]]:
     """
     with settings_path.open() as f:
         data = yaml.safe_load(f) or {}
-    # This is a Tier 3 boundary (raw YAML from operator-authored files).
+    # Tier 3 boundary: raw YAML from operator-authored files.
+    # Absent depends_on means "no dependencies" (not "unknown") — empty list
+    # is meaning-preserving, matching the common case for leaf pipelines.
     deps: list[dict[str, str]] = data.get("depends_on", [])
     if not isinstance(deps, list):
         raise ValueError(f"depends_on in {settings_path} must be a list, got {type(deps).__name__}")
