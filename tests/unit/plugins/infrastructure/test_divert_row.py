@@ -16,7 +16,7 @@ class StubSink(BaseSink):
 
     def write(self, rows, ctx):
         for i, row in enumerate(rows):
-            if row.get("bad"):
+            if row["should_divert"]:
                 self._divert_row(row, row_index=i, reason="bad value")
         return SinkWriteResult(
             artifact=self._null_artifact(),
