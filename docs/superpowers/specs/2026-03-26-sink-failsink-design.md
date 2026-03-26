@@ -70,7 +70,7 @@ The orchestrator doesn't pre-screen, doesn't split batches, and doesn't judge di
 - Orchestrator batch routing — still sends full batches to sinks
 - SinkExecutor node_state lifecycle — opens states, calls write, completes states
 - `write()` method signature — still `(rows: list[dict], ctx: SinkContext)`
-- Sinks without failsink configured — crash on any write failure (current behavior)
+- Sinks with `on_write_failure: discard` — drop failed rows with audit record (no failsink write)
 
 ## Detailed Design
 
@@ -119,29 +119,29 @@ class BaseSink(ABC):
         self._failsink = None
         self._diversion_log = []
 
+    # on_write_failure mode — set by orchestrator from SinkSettings (required field)
+    # "discard" = drop with audit, else = failsink name
+    _on_write_failure: str
+
     def _divert_row(self, row: dict[str, Any], row_index: int, reason: str) -> None:
-        """Divert a row to the failsink. Called by plugin write() on per-row failure.
+        """Divert a row to the failsink or discard it. Called by plugin write() on per-row failure.
 
         This is the sink-side equivalent of SourceRow.quarantined(). The plugin
         catches a per-row exception from the external system and calls this
         instead of re-raising.
 
+        Two modes (set by orchestrator from config, always present):
+        - _on_write_failure is "discard": row is dropped, recorded in diversion_log
+        - _on_write_failure is a sink name: row accumulated for failsink write
+
+        In both cases, the diversion is recorded in _diversion_log for the
+        executor to read. The executor handles the actual discard-vs-write decision.
+
         Args:
             row: The row dict that couldn't be written.
             row_index: Index in the original batch (for token correlation).
             reason: Human-readable reason for the diversion.
-
-        Raises:
-            FrameworkBugError: If no failsink is configured (plugin bug —
-                calling _divert_row without a failsink means the plugin
-                should have re-raised instead).
         """
-        if self._failsink is None:
-            raise FrameworkBugError(
-                f"Sink '{self.name}' called _divert_row() but no failsink is configured. "
-                f"Either configure on_write_failure in pipeline YAML or re-raise "
-                f"the exception to crash the pipeline."
-            )
         self._diversion_log.append(RowDiversion(
             row_index=row_index,
             reason=reason,
@@ -294,7 +294,7 @@ Note: `DIVERTED` tokens are NOT accumulated into `pending_tokens` — they were 
 sinks:
   chroma_output:
     plugin: chroma_sink
-    on_write_failure: csv_failsink
+    on_write_failure: csv_failsink       # divert failed rows to CSV
     options:
       collection: my_collection
       mode: persistent
@@ -304,8 +304,15 @@ sinks:
         id_field: doc_id
         metadata_fields: [topic, source, timestamp]
 
+  csv_output:
+    plugin: csv
+    on_write_failure: discard            # drop failed rows (audit-recorded)
+    options:
+      path: ./output/results.csv
+
   csv_failsink:
     plugin: csv
+    on_write_failure: discard            # failsinks use discard (no chains)
     options:
       path: ./output/failsink/chroma_rejects.csv
 ```
@@ -317,19 +324,37 @@ class SinkSettings(BaseModel):
 
     plugin: str = Field(description="Plugin name")
     options: dict[str, Any] = Field(default_factory=dict)
-    on_write_failure: str | None = Field(
-        default=None,
-        description="Failsink name for per-row write failures. Must be csv, json, or xml plugin. None = crash on any row failure (current behavior).",
+    on_write_failure: str = Field(
+        ...,  # Required — no default
+        description=(
+            "Per-row write failure handling. Required — pipeline author must decide:\n"
+            "- 'discard': drop the row, record the discard in the audit trail\n"
+            "- '<sink_name>': divert to named failsink (must be csv, json, or xml)"
+        ),
     )
 ```
+
+**Two-state model — mandatory field (parallel to source `on_validation_failure`):**
+
+`on_write_failure` is required on every sink. There is no "not set" state. The pipeline author must make an explicit choice:
+
+| `on_write_failure` | Behavior | Audit Record |
+|--------------------|----------|--------------|
+| `"discard"` | Drop row intentionally | `DIVERTED` outcome with `sink_name=__discard__`, routing_event with `reason`, logged at config time ("on_write_failure=discard configured for sink X") and at write time ("row 42 dropped per on_write_failure=discard: {reason}") |
+| `"csv_failsink"` | Divert to named failsink | `DIVERTED` outcome with `sink_name=csv_failsink`, full failsink write with artifact |
+
+Making this mandatory forces pipeline authors to think about what happens when a write fails — the same forcing function as requiring `on_validation_failure` on sources. "I didn't think about it" is not a valid configuration.
+
+The `"discard"` path is a deliberate operational decision. The operator is saying "I know some rows will fail here, and I choose to drop them." That choice is recorded in the audit trail at both config validation time and at each discard event — an auditor can always find "this row was discarded, and here's the config that authorized it."
 
 **Naming note:** This is structurally parallel to `TransformSettings.on_error` (per-row error routing to an alternative sink via DIVERT edge). The name `on_write_failure` was chosen over `on_error` to make the trigger point unambiguous: this fires when a sink's write operation fails for a specific row, not on a generic processing error.
 
 **Config validation (at pipeline load time):**
-1. `on_write_failure` must reference a sink defined in the same pipeline
-2. Referenced sink must use `csv`, `json`, or `xml` plugin type
-3. Referenced sink must NOT have its own `on_write_failure` (no chains)
-4. Circular reference check (redundant given no-chain rule, but defense in depth)
+1. `on_write_failure` is required on every sink (no default)
+2. Value must be `"discard"` or a sink name defined in the same pipeline
+3. If a sink name: referenced sink must use `csv`, `json`, or `xml` plugin type
+4. If a sink name: referenced sink must have `on_write_failure: discard` (no chains — failsinks are terminal)
+5. Circular reference check (redundant given rule 4, but defense in depth)
 
 This validation runs alongside existing `validate_transform_on_error_destinations()` in `orchestrator/validation.py`.
 
