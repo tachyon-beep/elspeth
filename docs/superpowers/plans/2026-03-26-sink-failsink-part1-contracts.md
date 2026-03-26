@@ -219,7 +219,7 @@ from __future__ import annotations
 
 import pytest
 
-from elspeth.contracts.enums import RowOutcome
+from elspeth.contracts.enums import RowOutcome, RunStatus
 from elspeth.contracts.run_result import RunResult
 
 
@@ -241,7 +241,7 @@ class TestRunResultDiverted:
     def test_rows_diverted_default_zero(self) -> None:
         result = RunResult(
             run_id="test-1",
-            status="completed",
+            status=RunStatus.COMPLETED,
             rows_processed=10,
             rows_succeeded=8,
             rows_failed=2,
@@ -252,7 +252,7 @@ class TestRunResultDiverted:
     def test_rows_diverted_explicit(self) -> None:
         result = RunResult(
             run_id="test-1",
-            status="completed",
+            status=RunStatus.COMPLETED,
             rows_processed=10,
             rows_succeeded=7,
             rows_failed=0,
@@ -265,7 +265,7 @@ class TestRunResultDiverted:
         with pytest.raises(ValueError, match="rows_diverted"):
             RunResult(
                 run_id="test-1",
-                status="completed",
+                status=RunStatus.COMPLETED,
                 rows_processed=10,
                 rows_succeeded=10,
                 rows_failed=0,
@@ -479,24 +479,20 @@ Verify that `field_validator` is imported from pydantic (it is — used by `Tran
 Run: `.venv/bin/python -m pytest tests/unit/core/test_sink_settings_on_write_failure.py -v`
 Expected: All 7 tests PASS.
 
-- [ ] **Step 5: Find and fix all broken SinkSettings usages**
+- [ ] **Step 5: Enumerate and fix all broken SinkSettings usages**
 
-The new required field will break every existing `SinkSettings(plugin=..., options=...)` call that doesn't include `on_write_failure`. Find them:
+The new required field will break every existing `SinkSettings(plugin=..., options=...)` call that doesn't include `on_write_failure`. Before running tests, enumerate the blast radius:
 
-Run: `.venv/bin/python -m pytest tests/ -x --tb=line -q 2>&1 | head -30`
+Run: `grep -rn "SinkSettings(" tests/ src/ --include="*.py" | grep -v "on_write_failure" | grep -v "test_sink_settings_on_write_failure"`
 
-This will show the first failure. Fix each by adding `on_write_failure="discard"`.
+This shows every `SinkSettings(` construction that is missing `on_write_failure`. Also search for YAML sink blocks:
 
-Common locations:
-- Test files that construct `SinkSettings` directly
-- YAML fixtures in `tests/` directories
-- Pipeline config construction in `tests/integration/`
+Run: `grep -rn "plugin:" tests/ examples/ --include="*.yaml" --include="*.yml" -B1 -A2 | grep -v "on_write_failure"`
 
-For YAML fixtures, add `on_write_failure: discard` to each sink block.
+For each Python call site: add `on_write_failure="discard"`.
+For each YAML sink block: add `on_write_failure: discard`.
 
-For Python test code, add `on_write_failure="discard"` to each `SinkSettings(...)` call.
-
-Repeat: run tests, find next failure, fix, until all pass.
+Treat this as a bounded checklist — every match from the grep must be fixed before running the test suite. Do not use an iterative "run tests, find next failure" loop.
 
 - [ ] **Step 6: Run full test suite — expect PASS**
 
@@ -543,7 +539,7 @@ class StubSink(BaseSink):
 
     def write(self, rows: list[dict[str, Any]], ctx: Any) -> SinkWriteResult:
         for i, row in enumerate(rows):
-            if row.get("__should_divert"):
+            if "__should_divert" in row and row["__should_divert"]:
                 self._divert_row(row, row_index=i, reason="test diversion")
         artifact = ArtifactDescriptor.for_file(
             path="/tmp/stub", content_hash="x" * 64, size_bytes=0,
@@ -1026,11 +1022,12 @@ class TestAccumulateDiverted:
 
     def test_diverted_in_run_result(self) -> None:
         """rows_diverted flows through to RunResult via to_run_result()."""
+        from elspeth.contracts.enums import RunStatus
         counters = ExecutionCounters()
         counters.rows_diverted = 5
         counters.rows_processed = 10
         counters.rows_succeeded = 5
-        result = counters.to_run_result(run_id="test-1", status="completed")
+        result = counters.to_run_result(run_id="test-1", status=RunStatus.COMPLETED)
         assert result.rows_diverted == 5
 ```
 
@@ -1087,6 +1084,8 @@ Add before the `BUFFERED` branch:
             # DIVERTED tokens are already written to failsink by SinkExecutor.
             # They are NOT appended to pending_tokens — no further routing needed.
 ```
+
+**IMPORTANT — Counter increment path:** In normal pipeline execution, the `DIVERTED` branch in `accumulate_row_outcomes()` will NOT fire — diversions are determined inside `SinkExecutor.write()`, after the processor has already emitted `COMPLETED` outcomes for those tokens. The `rows_diverted` counter is primarily incremented by `_write_pending_to_sinks()` in Part 2, which reads the diversion count from `SinkExecutor.write()`'s return value and adds it to `counters.rows_diverted`. The branch here exists as a guard for future code paths that might emit `DIVERTED` from the processor level, and to prevent `OrchestrationInvariantError` on unrecognised outcomes.
 
 - [ ] **Step 5: Run tests — expect PASS**
 

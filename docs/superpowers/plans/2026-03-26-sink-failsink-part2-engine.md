@@ -355,9 +355,18 @@ Add after `sinks[sink_name] = sink_cls(dict(sink_config.options))`:
         sinks[sink_name]._on_write_failure = sink_config.on_write_failure
 ```
 
-- [ ] **Step 2: Pass failsink to SinkExecutor.write() in _write_pending_to_sinks()**
+- [ ] **Step 2: Pass failsink to SinkExecutor.write() in _write_pending_to_sinks() and return diversion count**
 
-In `src/elspeth/engine/orchestrator/core.py`, find `_write_pending_to_sinks()` (line 514). Inside the loop that calls `sink_executor.write()` (around line 577), resolve the failsink before calling write:
+`_write_pending_to_sinks()` currently returns `None`. Change it to return `int` (total diversion count). Add `total_diversions = 0` at the top of the method, accumulate from each `write()` call, and `return total_diversions` at the end.
+
+At each call site in the orchestrator (search for `_write_pending_to_sinks(` — there are two: one in `_execute_run`, one in `_process_resumed_rows`), capture the return value and add it to counters:
+
+```python
+total_diversions = self._write_pending_to_sinks(...)
+loop_ctx.counters.rows_diverted += total_diversions
+```
+
+In `src/elspeth/engine/orchestrator/core.py`, find `_write_pending_to_sinks()` (line 511). Inside the loop that calls `sink_executor.write()` (around line 575), resolve the failsink before calling write:
 
 Find:
 ```python
@@ -381,14 +390,23 @@ Replace with:
             # Direct attribute access — _on_write_failure is always present on BaseSink
             # (class-level default None, overwritten by cli_helpers injection)
             failsink: SinkProtocol | None = None
+            failsink_config_name: str | None = None
             on_write_failure = sink._on_write_failure
             if on_write_failure is not None and on_write_failure != "discard":
-                if on_write_failure in config.sinks:
-                    failsink = config.sinks[on_write_failure]
+                # Validation already confirmed this sink exists at startup.
+                # If it's missing now, that's an orchestration bug — crash, don't silently degrade.
+                if on_write_failure not in config.sinks:
+                    raise OrchestrationInvariantError(
+                        f"Sink '{sink_name}' on_write_failure references '{on_write_failure}' "
+                        f"which passed validation but is not in config.sinks at runtime. "
+                        f"Available: {sorted(config.sinks.keys())}."
+                    )
+                failsink = config.sinks[on_write_failure]
+                failsink_config_name = on_write_failure
 
             for pending_outcome, group in groupby(sorted_pairs, key=lambda x: x[1]):
                 group_tokens = [token for token, _ in group]
-                sink_executor.write(
+                _, diversion_count = sink_executor.write(
                     sink=sink,
                     tokens=group_tokens,
                     ctx=ctx,
@@ -396,11 +414,13 @@ Replace with:
                     sink_name=sink_name,
                     pending_outcome=pending_outcome,
                     failsink=failsink,
+                    failsink_name=failsink_config_name,
                     on_token_written=on_token_written,
                 )
+                total_diversions += diversion_count
 ```
 
-Add `SinkProtocol` to the TYPE_CHECKING imports if not already present.
+Add `SinkProtocol` to the TYPE_CHECKING imports if not already present. Ensure `OrchestrationInvariantError` is imported from `elspeth.contracts.errors`.
 
 - [ ] **Step 3: Call validate_sink_failsink_destinations() at pipeline init**
 
@@ -408,9 +428,20 @@ Find `validate_source_quarantine_destination()` in `core.py` (lines 1431-1434). 
 
 Build a stub-like wrapper so the validation function can read `on_write_failure` from the instances:
 
-```python
-from elspeth.engine.orchestrator.validation import validate_sink_failsink_destinations
+Add `validate_sink_failsink_destinations` to the existing module-level import block (lines 124-128 of `core.py`):
 
+```python
+from elspeth.engine.orchestrator.validation import (
+    validate_route_destinations,
+    validate_sink_failsink_destinations,
+    validate_source_quarantine_destination,
+    validate_transform_error_sinks,
+)
+```
+
+Then at the call site (after `validate_source_quarantine_destination()` at line 1434):
+
+```python
 # Build validation inputs from instantiated sinks
 # Each sink instance has _on_write_failure (injected by cli_helpers)
 # and .name (the plugin type name)
@@ -772,39 +803,64 @@ Add `failsink` parameter to `write()` signature (line 94):
 
 **Revised flow (replaces the current begin→write→flush→complete→register→outcomes sequence):**
 
+The key structural change: `track_operation` wraps ONLY `sink.write()` + `sink.flush()` (external I/O). Node_states and outcomes are recorded OUTSIDE the `with` block, after the diversion set is known.
+
 ```
-1. Reset diversion log
-2. Merge contracts (unchanged)
-3. Call sink.write(rows, ctx) → SinkWriteResult
-4. Flush primary sink
-5. Build diverted_indices set from write_result.diversions
-6. Partition tokens: primary_tokens (not diverted), diverted_tokens (diverted)
-7. For PRIMARY tokens:
-   a. begin_node_state at primary sink's node_id
-   b. complete_node_state as COMPLETED
-   c. register_artifact for primary
-   d. record_token_outcome COMPLETED
-   e. on_token_written callback
-8. For DIVERTED tokens (if any):
-   a. Record routing_event (DIVERT, primary → failsink)
-   b. If failsink mode: write enriched rows to failsink, flush, register artifact
-   c. begin_node_state at failsink node_id (or __discard__ placeholder)
-   d. complete_node_state as COMPLETED (at failsink)
-   e. record_token_outcome DIVERTED with error_hash
-   f. Do NOT call on_token_written for diverted tokens
+PHASE 1 — External I/O (inside track_operation):
+  1. Reset primary sink's diversion log
+  2. Merge contracts (unchanged)
+  3. Clear ctx.state_id (unchanged — XOR constraint)
+  4. Enter track_operation context
+  5. Run centralized input validation (unchanged)
+  6. Call sink.write(rows, ctx) → SinkWriteResult
+  7. Extract artifact_info = write_result.artifact, diversions = write_result.diversions
+  8. Flush primary sink
+  9. Set handle.output_data from artifact_info
+  10. Exit track_operation context
+
+PHASE 2 — Partition and record primary tokens (outside track_operation):
+  11. Build diverted_indices = {d.row_index for d in diversions}
+  12. Partition: primary_pairs = [(token, idx) for non-diverted], diverted_pairs = [(token, idx) for diverted]
+  13. For PRIMARY tokens (if any):
+      a. begin_node_state at primary sink's node_id (with try/except for partial-open cleanup)
+      b. complete_node_state as COMPLETED with artifact reference
+      c. register_artifact for primary (anchored to first primary state)
+      d. record_token_outcome COMPLETED with pending_outcome
+      e. on_token_written callback per primary token
+
+PHASE 3 — Handle diversions (outside track_operation):
+  14. For DIVERTED tokens (if any):
+      a. Record routing_event per diverted token (mode=DIVERT, from=primary_node_id, to=failsink_node_id)
+      b. If failsink mode (not discard):
+         i. Reset failsink's diversion log
+         ii. Build enriched rows with __diversion_reason, __diverted_from, __diversion_timestamp
+         iii. Write to failsink: failsink.write(enriched_rows, ctx)
+         iv. Flush failsink
+      c. begin_node_state per diverted token at failsink's node_id (or discard: no node_state)
+         (with try/except for partial-open cleanup — if failsink begin_node_state fails,
+          complete opened failsink states as FAILED, do NOT touch primary states)
+      d. complete_node_state as COMPLETED at failsink (if failsink mode)
+      e. Register failsink artifact (anchored to first diverted token's failsink state)
+      f. record_token_outcome DIVERTED with error_hash and sink_name=failsink_name
+      g. Do NOT call on_token_written for diverted tokens
+
+PHASE 4 — Increment diversion counter:
+  15. Return (artifact, diversion_count) so _write_pending_to_sinks() can add to counters.rows_diverted
 ```
 
 **Key implementation notes:**
 
 - `write_result.artifact` and `write_result.diversions` accessed directly — NO isinstance check. All sinks return `SinkWriteResult` after Part 1 Task 6. No legacy compatibility shim (CLAUDE.md No Legacy Code Policy).
 - `sink._on_write_failure` accessed directly — NO getattr. Attribute always exists on BaseSink subclasses.
-- `sink._reset_diversion_log()` called BEFORE `sink.write()` to prevent stale diversions leaking across batches.
+- `sink._reset_diversion_log()` called at step 1, `failsink._reset_diversion_log()` called at step 14.b.i — both before their respective `write()` calls.
 - `failsink_name` (the config-level sink name) passed explicitly to `write()`, NOT derived from `failsink.name` (which is the plugin type name, not the pipeline sink name).
-- Failsink artifact registered via `self._recorder.register_artifact()` — same as primary.
-- Error handling: if failsink write/flush raises, complete opened failsink node_states as FAILED before re-raising. Primary states remain COMPLETED (durable, cannot roll back).
+- Failsink artifact registered via `self._recorder.register_artifact()` at step 14.e, anchored to first diverted token's failsink state_id.
+- **routing_event** recorded at step 14.a via `self._recorder.record_routing_event()`. Parameters: `state_id` (from the primary node — but diverted tokens have no primary state, so use the failsink state after step 14.c), `edge_id` (the `__failsink__` edge from the DAG edge_map — pass `edge_map` to `write()` or resolve in the orchestrator and pass as a parameter), `mode=RoutingMode.DIVERT`, `reason` (from `RowDiversion.reason`). For discard mode: record routing_event with `sink_name="__discard__"`.
+- Error handling: if failsink write/flush raises at step 14.b, complete any opened failsink node_states as FAILED before re-raising. Primary states from Phase 2 remain COMPLETED (durable, cannot roll back).
 - `on_token_written` NOT called for diverted tokens — they didn't write to the primary sink. This means diverted tokens have no checkpoint records; see resume caveat below.
+- **Return type change:** `write()` returns `tuple[Artifact | None, int]` — the artifact and the number of diversions. `_write_pending_to_sinks()` accumulates the diversion count into `counters.rows_diverted`. This is how the counter reaches `RunResult` (N1 fix — `accumulate_row_outcomes()` DIVERTED branch is a guard, not the primary increment path).
 
-**Resume caveat (out of scope but documented):** Diverted tokens receive no `on_token_written` callback, so no checkpoint is created. On resume, these tokens will be replayed and re-diverted, producing duplicate failsink entries. This is acceptable for CSV/JSON failsinks (append-only) but must be addressed in a future checkpoint/resume design.
+**Resume caveat (out of scope but documented):** Diverted tokens receive no `on_token_written` callback, so no checkpoint is created. On resume, these tokens will be replayed and re-diverted, producing duplicate `token_outcome=DIVERTED` records for the same `token_id` and duplicate rows in the failsink file. This is an **audit integrity issue** (duplicate terminal outcomes violate the exactly-once invariant) that must be tracked as a P1 follow-up, not a P3 resume UX improvement.
 
 - [ ] **Step 4: Run tests — expect PASS**
 
@@ -968,6 +1024,10 @@ git commit -m "feat(chroma): migrate inline metadata filtering to _divert_row() 
 
 These verify invariants that hold across ALL possible batch sizes and
 diversion patterns — not just the hand-crafted fixtures in unit tests.
+
+NOTE: These tests verify the single-run invariant only. On resume,
+diverted tokens may produce duplicate outcomes (see resume caveat
+in the spec). That is a known P1 follow-up, not a property violation.
 """
 from __future__ import annotations
 
@@ -976,15 +1036,57 @@ from unittest.mock import MagicMock
 
 from hypothesis import given, settings, strategies as st
 
-from elspeth.contracts import PendingOutcome, RowOutcome
+from elspeth.contracts import PendingOutcome, RowOutcome, TokenInfo
 from elspeth.contracts.diversion import RowDiversion, SinkWriteResult
-from elspeth.contracts.enums import NodeStateStatus
 from elspeth.contracts.results import ArtifactDescriptor
 from elspeth.engine.executors.sink import SinkExecutor
 
 
-# Reuse test helpers from unit tests (or inline here)
-# ... (same _make_token, _make_executor helpers as Task 4)
+def _make_token(token_id: str, row_data: dict | None = None) -> MagicMock:
+    token = MagicMock(spec=TokenInfo)
+    token.token_id = token_id
+    token.row_id = f"row-{token_id}"
+    mock_row = MagicMock()
+    mock_row.to_dict.return_value = row_data or {"field": "value"}
+    mock_row.contract = MagicMock()
+    mock_row.contract.merge.return_value = mock_row.contract
+    token.row_data = mock_row
+    return token
+
+
+def _make_executor() -> tuple[SinkExecutor, MagicMock]:
+    recorder = MagicMock()
+    state_counter = [0]
+    def _begin_state(**kwargs: Any) -> MagicMock:
+        state_counter[0] += 1
+        state = MagicMock()
+        state.state_id = f"state-{state_counter[0]}"
+        return state
+    recorder.begin_node_state.side_effect = _begin_state
+    recorder.allocate_operation_call_index = MagicMock(return_value=0)
+    spans = MagicMock()
+    spans.sink_span.return_value.__enter__ = MagicMock(return_value=None)
+    spans.sink_span.return_value.__exit__ = MagicMock(return_value=False)
+    return SinkExecutor(recorder, spans, "run-1"), recorder
+
+
+def _build_scenario(batch_size: int, diverted_indices: set[int]) -> tuple[list[MagicMock], MagicMock]:
+    """Build tokens and a sink mock for a given batch/diversion scenario."""
+    tokens = [_make_token(f"t{i}") for i in range(batch_size)]
+    diversions = tuple(
+        RowDiversion(row_index=i, reason=f"reason-{i}", row_data={"i": i})
+        for i in sorted(diverted_indices)
+    )
+    artifact = ArtifactDescriptor.for_file(path="/tmp/p", content_hash="a" * 64, size_bytes=0)
+    sink = MagicMock()
+    sink.name = "primary"
+    sink.node_id = "node-primary"
+    sink.validate_input = False
+    sink.declared_required_fields = frozenset()
+    sink._on_write_failure = "discard"
+    sink._reset_diversion_log = MagicMock()
+    sink.write.return_value = SinkWriteResult(artifact=artifact, diversions=diversions)
+    return tokens, sink
 
 
 @given(
@@ -993,12 +1095,28 @@ from elspeth.engine.executors.sink import SinkExecutor
 )
 @settings(max_examples=200)
 def test_partition_completeness(batch_size: int, diverted_indices_raw: list[int]) -> None:
-    """Every token gets exactly one outcome: primary COMPLETED + DIVERTED == total batch."""
-    diverted_indices = sorted(set(i for i in diverted_indices_raw if i < batch_size))
-    # Build tokens, diversions, sink mock, execute, count outcomes
-    # Assert: len(completed_outcomes) + len(diverted_outcomes) == batch_size
-    # Assert: no token_id appears in both sets
-    # Assert: every token_id appears in exactly one set
+    """Every token gets exactly one outcome: COMPLETED + DIVERTED == total batch."""
+    diverted_indices = {i for i in diverted_indices_raw if i < batch_size}
+    tokens, sink = _build_scenario(batch_size, diverted_indices)
+    executor, recorder = _make_executor()
+
+    executor.write(
+        sink=sink, tokens=tokens, ctx=MagicMock(run_id="run-1"),
+        step_in_pipeline=5, sink_name="primary",
+        pending_outcome=PendingOutcome(RowOutcome.COMPLETED),
+    )
+
+    outcome_calls = recorder.record_token_outcome.call_args_list
+    completed_ids = {c.kwargs["token_id"] for c in outcome_calls if c.kwargs["outcome"] == RowOutcome.COMPLETED}
+    diverted_ids = {c.kwargs["token_id"] for c in outcome_calls if c.kwargs["outcome"] == RowOutcome.DIVERTED}
+
+    # Partition completeness: every token accounted for
+    assert len(completed_ids) + len(diverted_ids) == batch_size
+    # Disjoint: no token in both sets
+    assert completed_ids & diverted_ids == set()
+    # All tokens present
+    all_token_ids = {t.token_id for t in tokens}
+    assert completed_ids | diverted_ids == all_token_ids
 
 
 @given(
@@ -1007,15 +1125,24 @@ def test_partition_completeness(batch_size: int, diverted_indices_raw: list[int]
 )
 @settings(max_examples=200)
 def test_exactly_once_terminal_state(batch_size: int, diverted_indices_raw: list[int]) -> None:
-    """Each token_id has exactly one record_token_outcome call."""
-    diverted_indices = sorted(set(i for i in diverted_indices_raw if i < batch_size))
-    # Build tokens, diversions, sink mock, execute
-    # Collect all token_ids from record_token_outcome calls
-    # Assert: no duplicates
-    # Assert: all input token_ids are present
-```
+    """Each token_id appears in exactly one record_token_outcome call."""
+    diverted_indices = {i for i in diverted_indices_raw if i < batch_size}
+    tokens, sink = _build_scenario(batch_size, diverted_indices)
+    executor, recorder = _make_executor()
 
-Note: These tests need the full `_make_token`, `_make_executor`, `_make_sink` helpers from Task 4's test file. Either import them or inline them.
+    executor.write(
+        sink=sink, tokens=tokens, ctx=MagicMock(run_id="run-1"),
+        step_in_pipeline=5, sink_name="primary",
+        pending_outcome=PendingOutcome(RowOutcome.COMPLETED),
+    )
+
+    outcome_calls = recorder.record_token_outcome.call_args_list
+    recorded_token_ids = [c.kwargs["token_id"] for c in outcome_calls]
+    # No duplicates
+    assert len(recorded_token_ids) == len(set(recorded_token_ids))
+    # All input tokens present
+    assert set(recorded_token_ids) == {t.token_id for t in tokens}
+```
 
 - [ ] **Step 2: Run property tests**
 
@@ -1040,36 +1167,54 @@ git commit -m "test(property): add Hypothesis partition-completeness and exactly
 
 This test uses `ExecutionGraph.from_plugin_instances()` and real plugin instances (not mocks). It wires a source → transform → ChromaSink (with `on_write_failure=csv_failsink`) → CSVSink failsink.
 
+This test requires real plugin instances wired through the actual graph construction and execution paths. Because integration test fixture patterns vary significantly across the existing `tests/integration/` suite (some use YAML configs, some use direct construction), the implementer must:
+
+1. **Find an existing integration test to use as a template.** Search for a test that uses `ExecutionGraph.from_plugin_instances()` with at least one sink:
+
+   Run: `grep -rn "from_plugin_instances" tests/integration/ --include="*.py" -l`
+
+   Read the first match to understand the fixture pattern (config construction, temp directory setup, landscape recorder initialization, how RunResult is obtained).
+
+2. **Build the test using that pattern.** The test needs:
+   - A CSV source with 3 rows, one of which has a metadata field containing a dict (e.g., `{"topic": {"nested": "value"}}`)
+   - A ChromaSink using `chromadb.EphemeralClient()` (no persistence needed) with `_on_write_failure = "csv_failsink"`
+   - A CSVSink as failsink with `_on_write_failure = "discard"`
+   - Both sinks wired through `ExecutionGraph.from_plugin_instances()` and `instantiate_plugins_from_config()` (or equivalent direct construction that the template test uses)
+
+3. **Assert these concrete outcomes:**
+
 ```python
-# tests/integration/plugins/sinks/test_failsink_e2e.py
-"""End-to-end integration test for failsink routing.
+def test_failsink_routes_diverted_row(tmp_path: Path) -> None:
+    """Full pipeline: ChromaSink diverts one row to CSV failsink."""
+    # ... (fixture setup from template pattern) ...
 
-Uses ExecutionGraph.from_plugin_instances() with real plugin instances.
-Verifies the full wiring path: config → injection → validation →
-DAG edge → SinkExecutor → audit trail → RunResult.
-"""
-from __future__ import annotations
+    # Run pipeline
+    result = orchestrator.run(...)  # or however the template executes
 
-# Use existing integration test patterns from tests/integration/
-# to construct a pipeline with:
-# - A CSV source with 3 rows (one with bad metadata for ChromaSink)
-# - A pass-through transform
-# - ChromaSink as primary sink (on_write_failure="csv_failsink")
-# - CSVSink as failsink (on_write_failure="discard")
-#
-# Assert:
-# 1. RunResult.rows_diverted == 1 (the bad metadata row)
-# 2. RunResult.rows_succeeded == 2 (the good rows)
-# 3. Landscape audit trail has:
-#    - routing_event with mode=DIVERT for the diverted token
-#    - node_state at csv_failsink node_id for the diverted token
-#    - token_outcome DIVERTED for the diverted token
-#    - token_outcome COMPLETED for the good tokens
-# 4. Failsink CSV file exists and contains the diverted row
-# 5. __failsink__ DIVERT edge exists in the DAG
+    # 1. RunResult counters
+    assert result.rows_diverted == 1
+    assert result.rows_succeeded == 2
+
+    # 2. Failsink CSV file exists and contains the diverted row
+    failsink_path = tmp_path / "failsink" / "chroma_rejects.csv"
+    assert failsink_path.exists()
+    import csv
+    with open(failsink_path) as f:
+        rows = list(csv.DictReader(f))
+    assert len(rows) == 1
+    assert "__diversion_reason" in rows[0]
+
+    # 3. Audit trail: query token_outcomes from the landscape recorder
+    # (exact query method depends on what the template test uses)
+    # Assert: one DIVERTED outcome, two COMPLETED outcomes
+
+    # 4. DAG has __failsink__ edge
+    edges = graph.get_edges()
+    failsink_edges = [e for e in edges if e.label == "__failsink__"]
+    assert len(failsink_edges) == 1
 ```
 
-Follow the existing integration test patterns in `tests/integration/` for fixture setup, temporary directories, and audit trail assertions.
+The exact fixture wiring, import paths, and landscape query methods must be adapted from whichever integration test template is found in step 1. Do NOT invent fixture patterns — copy from an existing working test.
 
 - [ ] **Step 2: Run integration test**
 
@@ -1095,7 +1240,8 @@ git commit -m "test(integration): add end-to-end failsink routing test"
 ```python
 class TestFailsinkCleanup:
     def test_failsink_write_failure_completes_failsink_states_as_failed(self) -> None:
-        """When failsink.write() raises, opened failsink node_states must be FAILED."""
+        """When failsink.write() raises, opened failsink node_states must be FAILED.
+        Batch: 1 token, 1 diversion. Expect exactly 1 FAILED state at failsink node."""
         executor, recorder = _make_executor()
         diversions = (RowDiversion(row_index=0, reason="bad", row_data={"x": 1}),)
         sink = _make_sink(diversions=diversions, on_write_failure="csv_failsink")
@@ -1109,13 +1255,17 @@ class TestFailsinkCleanup:
                 pending_outcome=PendingOutcome(RowOutcome.COMPLETED),
                 failsink=failsink, failsink_name="csv_failsink",
             )
-        # Verify failsink node_states completed as FAILED, not left OPEN
+        # Exactly 1 FAILED state (the failsink state for t0), 0 COMPLETED states
         complete_calls = recorder.complete_node_state.call_args_list
-        failed_statuses = [c for c in complete_calls if c.kwargs.get("status") == NodeStateStatus.FAILED]
-        assert len(failed_statuses) >= 1  # At least the diverted token's failsink state
+        failed_calls = [c for c in complete_calls if c.kwargs.get("status") == NodeStateStatus.FAILED]
+        completed_calls = [c for c in complete_calls if c.kwargs.get("status") == NodeStateStatus.COMPLETED]
+        assert len(failed_calls) == 1
+        assert len(completed_calls) == 0  # t0 was diverted, no primary state
 
     def test_failsink_failure_does_not_affect_primary_states(self) -> None:
-        """Primary COMPLETED states must remain intact when failsink fails."""
+        """Primary COMPLETED states must remain intact when failsink fails.
+        Batch: 2 tokens, 1 diversion at index 1.
+        Expect: t0 COMPLETED at primary, t1 FAILED at failsink."""
         executor, recorder = _make_executor()
         diversions = (RowDiversion(row_index=1, reason="bad", row_data={"x": 1}),)
         sink = _make_sink(diversions=diversions, on_write_failure="csv_failsink")
@@ -1129,17 +1279,38 @@ class TestFailsinkCleanup:
                 pending_outcome=PendingOutcome(RowOutcome.COMPLETED),
                 failsink=failsink, failsink_name="csv_failsink",
             )
-        # Primary token t0 should still be COMPLETED
         complete_calls = recorder.complete_node_state.call_args_list
-        completed_statuses = [c for c in complete_calls if c.kwargs.get("status") == NodeStateStatus.COMPLETED]
-        assert len(completed_statuses) >= 1  # t0's primary state
+        # t0: COMPLETED at primary node_id
+        completed_calls = [c for c in complete_calls if c.kwargs.get("status") == NodeStateStatus.COMPLETED]
+        assert len(completed_calls) == 1
+        # t1: FAILED at failsink node_id (failsink write crashed)
+        failed_calls = [c for c in complete_calls if c.kwargs.get("status") == NodeStateStatus.FAILED]
+        assert len(failed_calls) == 1
+
+    def test_failsink_flush_failure_crashes(self) -> None:
+        """If failsink.flush() raises, crash after completing failsink states as FAILED."""
+        executor, recorder = _make_executor()
+        diversions = (RowDiversion(row_index=0, reason="bad", row_data={"x": 1}),)
+        sink = _make_sink(diversions=diversions, on_write_failure="csv_failsink")
+        failsink = _make_failsink()
+        failsink.flush.side_effect = OSError("disk full")
+        tokens = [_make_token("t0")]
+        with pytest.raises(OSError, match="disk full"):
+            executor.write(
+                sink=sink, tokens=tokens, ctx=MagicMock(run_id="run-1"),
+                step_in_pipeline=5, sink_name="primary",
+                pending_outcome=PendingOutcome(RowOutcome.COMPLETED),
+                failsink=failsink, failsink_name="csv_failsink",
+            )
 ```
 
-- [ ] **Step 2: Add non-contiguous diversions test**
+- [ ] **Step 2: Add non-contiguous diversions test (keyed by token_id, not call order)**
 
 ```python
     def test_non_contiguous_diversions(self) -> None:
-        """Rows 0 and 2 diverted, row 1 primary. Outcomes correctly partitioned."""
+        """Rows 0 and 2 diverted, row 1 primary. Outcomes correctly partitioned.
+        Uses token_id keying, not call ordering — the executor may process
+        primary tokens before diverted tokens."""
         executor, recorder = _make_executor()
         diversions = (
             RowDiversion(row_index=0, reason="bad", row_data={"x": 1}),
@@ -1153,16 +1324,38 @@ class TestFailsinkCleanup:
             pending_outcome=PendingOutcome(RowOutcome.COMPLETED),
         )
         outcome_calls = recorder.record_token_outcome.call_args_list
-        assert outcome_calls[0].kwargs["outcome"] == RowOutcome.DIVERTED  # t0
-        assert outcome_calls[1].kwargs["outcome"] == RowOutcome.COMPLETED  # t1
-        assert outcome_calls[2].kwargs["outcome"] == RowOutcome.DIVERTED  # t2
+        outcomes_by_token = {c.kwargs["token_id"]: c.kwargs["outcome"] for c in outcome_calls}
+        assert outcomes_by_token["t0"] == RowOutcome.DIVERTED
+        assert outcomes_by_token["t1"] == RowOutcome.COMPLETED
+        assert outcomes_by_token["t2"] == RowOutcome.DIVERTED
 ```
 
-- [ ] **Step 3: Add on_token_written not called for diverted tokens test**
+- [ ] **Step 3: Add empty batch test**
 
 ```python
-    def test_on_token_written_not_called_for_diverted(self) -> None:
-        """on_token_written must not fire for diverted tokens."""
+class TestEmptyBatch:
+    def test_empty_batch_with_failsink_configured(self) -> None:
+        """Empty token list with failsink configured — no-op, no crash."""
+        executor, recorder = _make_executor()
+        sink = _make_sink(on_write_failure="csv_failsink")
+        failsink = _make_failsink()
+        result = executor.write(
+            sink=sink, tokens=[], ctx=MagicMock(run_id="run-1"),
+            step_in_pipeline=5, sink_name="primary",
+            pending_outcome=PendingOutcome(RowOutcome.COMPLETED),
+            failsink=failsink, failsink_name="csv_failsink",
+        )
+        assert result == (None, 0)  # No artifact, 0 diversions
+        failsink.write.assert_not_called()
+        recorder.record_token_outcome.assert_not_called()
+```
+
+- [ ] **Step 4: Add on_token_written tests for both discard and failsink modes**
+
+```python
+class TestOnTokenWrittenWithDiversions:
+    def test_on_token_written_not_called_for_diverted_discard_mode(self) -> None:
+        """on_token_written must not fire for diverted tokens (discard mode)."""
         executor, recorder = _make_executor()
         diversions = (RowDiversion(row_index=1, reason="bad", row_data={"x": 1}),)
         sink = _make_sink(diversions=diversions, on_write_failure="discard")
@@ -1175,6 +1368,25 @@ class TestFailsinkCleanup:
             on_token_written=callback,
         )
         # callback called once for t0 (primary), NOT for t1 (diverted)
+        assert callback.call_count == 1
+        assert callback.call_args[0][0].token_id == "t0"
+
+    def test_on_token_written_not_called_for_diverted_failsink_mode(self) -> None:
+        """on_token_written must not fire for diverted tokens (failsink mode)."""
+        executor, recorder = _make_executor()
+        diversions = (RowDiversion(row_index=1, reason="bad", row_data={"x": 1}),)
+        sink = _make_sink(diversions=diversions, on_write_failure="csv_failsink")
+        failsink = _make_failsink()
+        tokens = [_make_token("t0"), _make_token("t1")]
+        callback = MagicMock()
+        executor.write(
+            sink=sink, tokens=tokens, ctx=MagicMock(run_id="run-1"),
+            step_in_pipeline=5, sink_name="primary",
+            pending_outcome=PendingOutcome(RowOutcome.COMPLETED),
+            failsink=failsink, failsink_name="csv_failsink",
+            on_token_written=callback,
+        )
+        # callback called once for t0 (primary), NOT for t1 (diverted to failsink)
         assert callback.call_count == 1
         assert callback.call_args[0][0].token_id == "t0"
 ```
