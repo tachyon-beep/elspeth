@@ -5,6 +5,7 @@ from typing import Any
 
 from elspeth.contracts import ArtifactDescriptor
 from elspeth.contracts.contexts import SinkContext
+from elspeth.contracts.diversion import SinkWriteResult
 from elspeth.contracts.schema_contract import SchemaContract
 from elspeth.plugins.infrastructure.base import BaseSink
 from elspeth.testing import make_field
@@ -20,12 +21,14 @@ class StubSink(BaseSink):
         self,
         rows: list[dict[str, Any]],
         ctx: SinkContext,
-    ) -> ArtifactDescriptor:
-        return ArtifactDescriptor(
-            artifact_type="file",
-            path_or_uri="/test/output.csv",
-            content_hash="abc123",
-            size_bytes=0,
+    ) -> SinkWriteResult:
+        return SinkWriteResult(
+            artifact=ArtifactDescriptor(
+                artifact_type="file",
+                path_or_uri="/test/output.csv",
+                content_hash="abc123",
+                size_bytes=0,
+            )
         )
 
     def flush(self) -> None:
