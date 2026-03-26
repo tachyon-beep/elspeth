@@ -451,6 +451,10 @@ class SinkProtocol(Protocol):
     # "discard" = drop failed rows with audit record, else = failsink name.
     _on_write_failure: str
 
+    def _reset_diversion_log(self) -> None:
+        """Clear diversion log before each write() call."""
+        ...
+
     def __init__(self, config: dict[str, Any]) -> None:
         """Initialize with configuration."""
         ...

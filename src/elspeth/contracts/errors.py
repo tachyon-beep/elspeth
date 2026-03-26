@@ -549,11 +549,26 @@ class SourceQuarantineReason(TypedDict):
     quarantine_error: str
 
 
+class SinkDiversionReason(TypedDict):
+    """Reason for sink diversion routing.
+
+    Used when a sink's write() diverts a row to a failsink via a __failsink__
+    DIVERT edge. The diversion_reason field distinguishes this variant from
+    gate, transform, and quarantine reasons.
+
+    Required field:
+        diversion_reason: Description of why the external system rejected the row
+    """
+
+    diversion_reason: str
+
+
 # Discriminated union - field presence distinguishes variants:
 # - ConfigGateReason has "condition" and "result"
 # - TransformErrorReason has "reason" (error category string)
 # - SourceQuarantineReason has "quarantine_error"
-RoutingReason = ConfigGateReason | TransformErrorReason | SourceQuarantineReason
+# - SinkDiversionReason has "diversion_reason"
+RoutingReason = ConfigGateReason | TransformErrorReason | SourceQuarantineReason | SinkDiversionReason
 
 
 # =============================================================================

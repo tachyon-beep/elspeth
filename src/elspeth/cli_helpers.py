@@ -109,6 +109,7 @@ def instantiate_plugins_from_config(config: "ElspethSettings") -> PluginBundle:
     for sink_name, sink_config in config.sinks.items():
         sink_cls = manager.get_sink_by_name(sink_config.plugin)
         sinks[sink_name] = sink_cls(dict(sink_config.options))
+        sinks[sink_name]._on_write_failure = sink_config.on_write_failure
 
     return PluginBundle(
         source=source,
