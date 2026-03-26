@@ -31,6 +31,7 @@ class RunResult:
     rows_coalesce_failed: int = 0  # Coalesce failures (quorum_not_met, incomplete_branches)
     rows_expanded: int = 0  # Deaggregation parent tokens
     rows_buffered: int = 0  # Passthrough mode buffered tokens
+    rows_diverted: int = 0  # Rows diverted to failsink during sink write
     routed_destinations: Mapping[str, int] = field(default_factory=lambda: MappingProxyType({}))
 
     def __post_init__(self) -> None:
@@ -46,4 +47,5 @@ class RunResult:
         require_int(self.rows_coalesce_failed, "rows_coalesce_failed", min_value=0)
         require_int(self.rows_expanded, "rows_expanded", min_value=0)
         require_int(self.rows_buffered, "rows_buffered", min_value=0)
+        require_int(self.rows_diverted, "rows_diverted", min_value=0)
         freeze_fields(self, "routed_destinations")

@@ -157,6 +157,7 @@ class RowOutcome(StrEnum):
     - FORKED: Split into multiple parallel paths (parent token)
     - FAILED: Processing failed, not recoverable
     - QUARANTINED: Failed validation, stored for investigation
+    - DIVERTED: Sink write failed for this row, diverted to failsink
     - CONSUMED_IN_BATCH: Absorbed into aggregate (single/transform mode)
     - COALESCED: Merged in join from parallel paths
     - EXPANDED: Deaggregated into child tokens (parent token)
@@ -171,6 +172,7 @@ class RowOutcome(StrEnum):
     FORKED = "forked"
     FAILED = "failed"
     QUARANTINED = "quarantined"
+    DIVERTED = "diverted"
     CONSUMED_IN_BATCH = "consumed_in_batch"
     COALESCED = "coalesced"
     EXPANDED = "expanded"

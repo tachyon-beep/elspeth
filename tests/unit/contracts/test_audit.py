@@ -1701,6 +1701,7 @@ class TestEnumExhaustiveness:
             "FORKED",
             "FAILED",
             "QUARANTINED",
+            "DIVERTED",
             "CONSUMED_IN_BATCH",
             "COALESCED",
             "EXPANDED",
