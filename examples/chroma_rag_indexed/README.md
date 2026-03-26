@@ -23,6 +23,8 @@ The indexing pipeline runs as a dependency before the query pipeline starts.
 6. Questions from `questions.csv` are augmented with retrieved context
 7. Results written to `output/results.jsonl`
 
+If the commencement gate fails (e.g., indexing produced no documents), the query pipeline aborts with a `CommencementGateFailedError` before processing any questions.
+
 ## Files
 
 - `documents.csv` — Reference corpus (10 documents)

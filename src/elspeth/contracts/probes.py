@@ -28,6 +28,8 @@ class CollectionReadinessResult:
             raise ValueError("collection must not be empty")
         if self.count < 0:
             raise ValueError(f"count must be non-negative, got {self.count}")
+        if not self.reachable and self.count != 0:
+            raise ValueError(f"Contradictory state: reachable=False but count={self.count}. Unreachable collections must report count=0.")
 
 
 @runtime_checkable

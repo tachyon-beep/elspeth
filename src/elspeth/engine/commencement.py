@@ -58,7 +58,9 @@ def evaluate_commencement_gates(
 ) -> list[CommencementGateResult]:
     """Evaluate gates sequentially. Raises CommencementGateFailedError on failure.
 
-    Context must be a namespace dict with keys matching _GATE_ALLOWED_NAMES.
+    Context should be a namespace dict with keys from _GATE_ALLOWED_NAMES
+    (collections, dependency_runs, env). Unknown keys are not rejected here —
+    the ExpressionParser restricts name access during evaluation.
     The entire context dict (including Tier 3 env values) is deep-frozen before evaluation.
     """
     # Deep-freeze entire context for expression evaluation (Tier 3 boundary for env)

@@ -10,7 +10,7 @@ import pytest
 from elspeth.contracts.enums import RunStatus
 from elspeth.contracts.errors import DependencyFailedError
 from elspeth.core.dependency_config import DependencyConfig
-from elspeth.engine.dependency_resolver import _load_depends_on, detect_cycles, resolve_dependencies
+from elspeth.engine.dependency_resolver import _hash_settings_file, _load_depends_on, detect_cycles, resolve_dependencies
 
 
 class TestLoadDependsOnValidation:
@@ -314,3 +314,37 @@ class TestResolveDependencies:
         mock_runner = MagicMock()
         results = resolve_dependencies(depends_on=[], parent_settings_path=parent_path, runner=mock_runner)
         assert results == []
+
+
+class TestHashSettingsFile:
+    """End-to-end tests for _hash_settings_file with real YAML."""
+
+    def test_produces_sha256_prefixed_hash(self, tmp_path: Path) -> None:
+        settings = tmp_path / "pipeline.yaml"
+        settings.write_text("plugins:\n  source:\n    path: data.csv\n")
+        result = _hash_settings_file(settings)
+        assert result.startswith("sha256:")
+        assert len(result) == len("sha256:") + 64  # SHA-256 hex
+
+    def test_same_content_same_hash(self, tmp_path: Path) -> None:
+        a = tmp_path / "a.yaml"
+        b = tmp_path / "b.yaml"
+        content = "depends_on:\n  - name: index\n    settings: ./index.yaml\n"
+        a.write_text(content)
+        b.write_text(content)
+        assert _hash_settings_file(a) == _hash_settings_file(b)
+
+    def test_different_content_different_hash(self, tmp_path: Path) -> None:
+        a = tmp_path / "a.yaml"
+        b = tmp_path / "b.yaml"
+        a.write_text("key: value1\n")
+        b.write_text("key: value2\n")
+        assert _hash_settings_file(a) != _hash_settings_file(b)
+
+    def test_key_order_independent(self, tmp_path: Path) -> None:
+        """Canonical JSON normalises key order — reordered YAML produces same hash."""
+        a = tmp_path / "a.yaml"
+        b = tmp_path / "b.yaml"
+        a.write_text("alpha: 1\nbeta: 2\n")
+        b.write_text("beta: 2\nalpha: 1\n")
+        assert _hash_settings_file(a) == _hash_settings_file(b)

@@ -749,6 +749,8 @@ class ExpressionParser:
             raise
         except (FrameworkBugError, AuditIntegrityError):
             raise  # Framework bugs must not be wrapped as evaluation errors
+        except (TypeError, AttributeError, KeyError, NameError, AssertionError, RecursionError):
+            raise  # Programming errors in the evaluator must crash through
         except Exception as exc:
             raise ExpressionEvaluationError(
                 f"Unexpected error evaluating expression {self._expression!r}: {type(exc).__name__}: {exc}"

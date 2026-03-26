@@ -43,7 +43,7 @@ class CollectionProbeConfig(BaseModel):
 
     @model_validator(mode="after")
     def _freeze_provider_config(self) -> CollectionProbeConfig:
-        """Deep-freeze provider_config to enforce Pydantic frozen=True contract."""
+        """Deep-freeze provider_config contents — Pydantic frozen=True prevents reassignment but not mutation of mutable containers."""
         object.__setattr__(self, "provider_config", deep_freeze(self.provider_config))
         return self
 
@@ -84,7 +84,13 @@ class DependencyRunResult:
 
 @dataclass(frozen=True, slots=True)
 class CommencementGateResult:
-    """Result of a successful commencement gate evaluation."""
+    """Result of a successful commencement gate evaluation.
+
+    The ``result`` field is always ``True`` — gate failures raise
+    ``CommencementGateFailedError`` instead of returning ``result=False``.
+    The field exists so the audit trail records an explicit pass verdict,
+    not just the absence of a failure.
+    """
 
     name: str
     condition: str
@@ -96,6 +102,10 @@ class CommencementGateResult:
             raise ValueError("name must not be empty")
         if not self.condition:
             raise ValueError("condition must not be empty")
+        if not self.result:
+            raise ValueError(
+                "CommencementGateResult.result must be True — gate failures raise CommencementGateFailedError, not result=False"
+            )
         freeze_fields(self, "context_snapshot")
 
 
