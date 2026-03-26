@@ -20,7 +20,7 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from elspeth.contracts import CallStatus
-from elspeth.contracts.results import ArtifactDescriptor
+from elspeth.contracts.diversion import SinkWriteResult
 from elspeth.plugins.infrastructure.clients.dataverse import (
     DataverseClient,
     DataverseClientError,
@@ -448,9 +448,10 @@ class TestDataverseSinkUpsert:
 
         ctx = FakeSinkContext()
         rows = [{"email": "alice@test.com", "name": "Alice"}]
-        descriptor = sink.write(rows, ctx)
+        result = sink.write(rows, ctx)
 
-        assert isinstance(descriptor, ArtifactDescriptor)
+        assert isinstance(result, SinkWriteResult)
+        descriptor = result.artifact
         assert descriptor.artifact_type == "webhook"
         assert "contact" in descriptor.path_or_uri
         assert descriptor.metadata["row_count"] == 1
@@ -497,9 +498,9 @@ class TestDataverseSinkUpsert:
             {"email": "bob@test.com", "name": "Bob"},
             {"email": "charlie@test.com", "name": "Charlie"},
         ]
-        descriptor = sink.write(rows, ctx)
+        result = sink.write(rows, ctx)
 
-        assert descriptor.metadata["row_count"] == 3
+        assert result.artifact.metadata["row_count"] == 3
         assert mock_client.upsert.call_count == 3
         assert len(ctx.calls) == 3  # One audit record per row
 
@@ -633,8 +634,8 @@ class TestDataverseSinkEmptyBatch:
         sink._client = mock_client
 
         ctx = FakeSinkContext()
-        descriptor = sink.write([], ctx)
+        result = sink.write([], ctx)
 
-        assert isinstance(descriptor, ArtifactDescriptor)
-        assert descriptor.metadata["row_count"] == 0
-        assert descriptor.content_hash == hashlib.sha256(b"").hexdigest()
+        assert isinstance(result, SinkWriteResult)
+        assert result.artifact.metadata["row_count"] == 0
+        assert result.artifact.content_hash == hashlib.sha256(b"").hexdigest()

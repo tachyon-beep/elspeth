@@ -63,16 +63,16 @@ class TestDatabaseSinkProperties:
                 operation_type="sink_write",
             )
 
-            descriptor = sink.write(rows, ctx)
+            result = sink.write(rows, ctx)
             sink.close()
 
             expected_hash = stable_hash(rows)
             expected_size = len(canonical_json(rows).encode("utf-8"))
 
-            assert descriptor.content_hash == expected_hash
-            assert descriptor.size_bytes == expected_size
-            assert descriptor.metadata is not None
-            assert descriptor.metadata["row_count"] == len(rows)
+            assert result.artifact.content_hash == expected_hash
+            assert result.artifact.size_bytes == expected_size
+            assert result.artifact.metadata is not None
+            assert result.artifact.metadata["row_count"] == len(rows)
 
             engine = create_engine(url)
             with engine.connect() as conn:

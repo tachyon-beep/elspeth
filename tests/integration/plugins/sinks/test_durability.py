@@ -98,6 +98,7 @@ class TestSinkDurability:
     def mock_sink(self, tmp_path: Path) -> Mock:
         """Create a mock sink that simulates writes."""
         from elspeth.contracts import ArtifactDescriptor
+        from elspeth.contracts.diversion import SinkWriteResult
 
         sink = Mock()
         sink.name = "csv"
@@ -107,13 +108,14 @@ class TestSinkDurability:
         sink.validate_input = False
         sink.declared_required_fields = frozenset()
 
-        # Mock write() to return artifact descriptor
+        # Mock write() to return SinkWriteResult wrapping artifact descriptor
         def mock_write(rows, ctx):
-            return ArtifactDescriptor.for_file(
+            artifact = ArtifactDescriptor.for_file(
                 path=str(tmp_path / "output.csv"),
                 content_hash="abc123",
                 size_bytes=100,
             )
+            return SinkWriteResult(artifact=artifact)
 
         sink.write = Mock(side_effect=mock_write)
         sink.flush = Mock()  # Default: successful flush

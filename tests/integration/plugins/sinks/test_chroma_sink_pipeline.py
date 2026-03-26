@@ -72,13 +72,13 @@ class TestChromaSinkIntegration:
         write_ctx.run_id = "integration-test-run"
         write_ctx.record_call = MagicMock()
 
-        artifact = sink.write(rows, write_ctx)
+        result = sink.write(rows, write_ctx)
 
         # Verify artifact
-        assert artifact.content_hash is not None
-        assert len(artifact.content_hash) == 64
-        assert artifact.metadata is not None
-        assert artifact.metadata["row_count"] == 3
+        assert result.artifact.content_hash is not None
+        assert len(result.artifact.content_hash) == 64
+        assert result.artifact.metadata is not None
+        assert result.artifact.metadata["row_count"] == 3
 
         # Verify audit call was recorded
         write_ctx.record_call.assert_called_once()
@@ -197,8 +197,8 @@ class TestChromaSinkIntegration:
             write_ctx.run_id = "hash-run"
 
             try:
-                artifact = sink.write(rows, write_ctx)
-                hashes.append(artifact.content_hash)
+                result = sink.write(rows, write_ctx)
+                hashes.append(result.artifact.content_hash)
             except DuplicateDocumentError:
                 pass  # Expected on second run of error mode
             sink.close()
@@ -228,7 +228,7 @@ class TestChromaSinkIntegration:
         sink.on_start(ctx)
         write_ctx = MagicMock()
         write_ctx.run_id = "run-1"
-        artifact1 = sink.write([{"id": "d1", "text": "Hello"}, {"id": "d2", "text": "World"}], write_ctx)
+        result1 = sink.write([{"id": "d1", "text": "Hello"}, {"id": "d2", "text": "World"}], write_ctx)
         sink.close()
 
         # Second write: d1 already exists, only d3 is new
@@ -239,11 +239,11 @@ class TestChromaSinkIntegration:
         sink2.on_start(ctx2)
         write_ctx2 = MagicMock()
         write_ctx2.run_id = "run-2"
-        artifact2 = sink2.write([{"id": "d1", "text": "Hello"}, {"id": "d3", "text": "New"}], write_ctx2)
+        result2 = sink2.write([{"id": "d1", "text": "Hello"}, {"id": "d3", "text": "New"}], write_ctx2)
         sink2.close()
 
         # Different actual payloads → different hashes
-        assert artifact1.content_hash != artifact2.content_hash
+        assert result1.artifact.content_hash != result2.artifact.content_hash
         # Second write only wrote d3
-        assert artifact2.metadata is not None
-        assert artifact2.metadata["row_count"] == 1
+        assert result2.artifact.metadata is not None
+        assert result2.artifact.metadata["row_count"] == 1
