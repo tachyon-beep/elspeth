@@ -22,6 +22,7 @@ gates:
 sinks:
   output:
     plugin: csv
+    on_write_failure: discard
     options:
       path: examples/large_scale_test/output/normal.csv
       schema:
@@ -34,6 +35,7 @@ sinks:
         - 'timestamp: str'
   high_value:
     plugin: csv
+    on_write_failure: discard
     options:
       path: examples/large_scale_test/output/high_value.csv
       schema:

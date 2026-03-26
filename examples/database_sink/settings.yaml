@@ -34,6 +34,7 @@ gates:
 sinks:
   high_value_db:
     plugin: database
+    on_write_failure: discard
     options:
       url: sqlite:///examples/database_sink/output/deals.db
       table: high_value_deals
@@ -48,6 +49,7 @@ sinks:
       if_exists: replace
   standard:
     plugin: csv
+    on_write_failure: discard
     options:
       path: examples/database_sink/output/standard_deals.csv
       schema:

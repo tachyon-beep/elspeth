@@ -42,6 +42,7 @@ def _source(**kwargs) -> SourceSettings:
 def _sink(**kwargs) -> SinkSettings:
     defaults = {
         "plugin": "json",
+        "on_write_failure": "discard",
         "options": {"path": "output.json", "schema": {"mode": "observed"}},
     }
     defaults.update(kwargs)

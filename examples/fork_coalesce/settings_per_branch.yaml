@@ -93,6 +93,7 @@ coalesce:
 sinks:
   output:
     plugin: json
+    on_write_failure: discard
     options:
       path: examples/fork_coalesce/output/per_branch_results.json
       schema:

@@ -1024,7 +1024,11 @@ class TestExecutionGraphFromConfig:
                     "schema": {"mode": "observed"},
                 },
             ),
-            sinks={"output": SinkSettings(plugin="json", options={"path": "output.json", "schema": {"mode": "observed"}})},
+            sinks={
+                "output": SinkSettings(
+                    plugin="json", on_write_failure="discard", options={"path": "output.json", "schema": {"mode": "observed"}}
+                )
+            },
         )
 
         plugins = instantiate_plugins_from_config(config)
@@ -1062,7 +1066,11 @@ class TestExecutionGraphFromConfig:
                     "schema": {"mode": "observed"},
                 },
             ),
-            sinks={"output": SinkSettings(plugin="json", options={"path": "output.json", "schema": {"mode": "observed"}})},
+            sinks={
+                "output": SinkSettings(
+                    plugin="json", on_write_failure="discard", options={"path": "output.json", "schema": {"mode": "observed"}}
+                )
+            },
         )
 
         plugins = instantiate_plugins_from_config(config)
@@ -1099,7 +1107,11 @@ class TestExecutionGraphFromConfig:
                     "schema": {"mode": "observed"},
                 },
             ),
-            sinks={"output": SinkSettings(plugin="json", options={"path": "output.json", "schema": {"mode": "observed"}})},
+            sinks={
+                "output": SinkSettings(
+                    plugin="json", on_write_failure="discard", options={"path": "output.json", "schema": {"mode": "observed"}}
+                )
+            },
             transforms=[
                 _transform_settings(
                     TransformSettings,
@@ -1180,7 +1192,9 @@ class TestExecutionGraphFromConfig:
                 },
             ),
             sinks={
-                "output": SinkSettings(plugin="json", options={"path": "output.json", "schema": {"mode": "observed"}}),
+                "output": SinkSettings(
+                    plugin="json", on_write_failure="discard", options={"path": "output.json", "schema": {"mode": "observed"}}
+                ),
             },
             transforms=[
                 _transform_settings(
@@ -1230,7 +1244,9 @@ class TestExecutionGraphFromConfig:
                 },
             ),
             sinks={
-                "output": SinkSettings(plugin="json", options={"path": "output.json", "schema": {"mode": "observed"}}),
+                "output": SinkSettings(
+                    plugin="json", on_write_failure="discard", options={"path": "output.json", "schema": {"mode": "observed"}}
+                ),
             },
             transforms=[
                 _transform_settings(
@@ -1271,7 +1287,9 @@ class TestExecutionGraphFromConfig:
                 },
             ),
             sinks={
-                "output": SinkSettings(plugin="json", options={"path": "output.json", "schema": {"mode": "observed"}}),
+                "output": SinkSettings(
+                    plugin="json", on_write_failure="discard", options={"path": "output.json", "schema": {"mode": "observed"}}
+                ),
             },
             transforms=[
                 _transform_settings(
@@ -1312,7 +1330,9 @@ class TestExecutionGraphFromConfig:
                 },
             ),
             sinks={
-                "output": SinkSettings(plugin="json", options={"path": "output.json", "schema": {"mode": "observed"}}),
+                "output": SinkSettings(
+                    plugin="json", on_write_failure="discard", options={"path": "output.json", "schema": {"mode": "observed"}}
+                ),
             },
             transforms=[
                 _transform_settings(
@@ -1367,7 +1387,11 @@ class TestExecutionGraphFromConfig:
                     "schema": {"mode": "observed"},
                 },
             ),
-            sinks={"output": SinkSettings(plugin="json", options={"path": "output.json", "schema": {"mode": "observed"}})},
+            sinks={
+                "output": SinkSettings(
+                    plugin="json", on_write_failure="discard", options={"path": "output.json", "schema": {"mode": "observed"}}
+                )
+            },
             transforms=[
                 _transform_settings(
                     TransformSettings,
@@ -1424,8 +1448,12 @@ class TestExecutionGraphFromConfig:
                 },
             ),
             sinks={
-                "results": SinkSettings(plugin="json", options={"path": "results.json", "schema": {"mode": "observed"}}),
-                "flagged": SinkSettings(plugin="json", options={"path": "flagged.json", "schema": {"mode": "observed"}}),
+                "results": SinkSettings(
+                    plugin="json", on_write_failure="discard", options={"path": "results.json", "schema": {"mode": "observed"}}
+                ),
+                "flagged": SinkSettings(
+                    plugin="json", on_write_failure="discard", options={"path": "flagged.json", "schema": {"mode": "observed"}}
+                ),
             },
             gates=[
                 _gate_settings(
@@ -1473,7 +1501,11 @@ class TestExecutionGraphFromConfig:
                     "schema": {"mode": "observed"},
                 },
             ),
-            sinks={"output": SinkSettings(plugin="json", options={"path": "output.json", "schema": {"mode": "observed"}})},
+            sinks={
+                "output": SinkSettings(
+                    plugin="json", on_write_failure="discard", options={"path": "output.json", "schema": {"mode": "observed"}}
+                )
+            },
             gates=[
                 _gate_settings(
                     GateSettings,
@@ -1518,8 +1550,12 @@ class TestExecutionGraphFromConfig:
                 },
             ),
             sinks={
-                "results": SinkSettings(plugin="json", options={"path": "results.json", "schema": {"mode": "observed"}}),
-                "flagged": SinkSettings(plugin="json", options={"path": "flagged.json", "schema": {"mode": "observed"}}),
+                "results": SinkSettings(
+                    plugin="json", on_write_failure="discard", options={"path": "results.json", "schema": {"mode": "observed"}}
+                ),
+                "flagged": SinkSettings(
+                    plugin="json", on_write_failure="discard", options={"path": "flagged.json", "schema": {"mode": "observed"}}
+                ),
             },
         )
 
@@ -1559,7 +1595,11 @@ class TestExecutionGraphFromConfig:
                     "schema": {"mode": "observed"},
                 },
             ),
-            sinks={"output": SinkSettings(plugin="json", options={"path": "output.json", "schema": {"mode": "observed"}})},
+            sinks={
+                "output": SinkSettings(
+                    plugin="json", on_write_failure="discard", options={"path": "output.json", "schema": {"mode": "observed"}}
+                )
+            },
             transforms=[
                 _transform_settings(
                     TransformSettings,
@@ -1614,7 +1654,11 @@ class TestExecutionGraphFromConfig:
                     "schema": {"mode": "observed"},
                 },
             ),
-            sinks={"output": SinkSettings(plugin="json", options={"path": "output.json", "schema": {"mode": "observed"}})},
+            sinks={
+                "output": SinkSettings(
+                    plugin="json", on_write_failure="discard", options={"path": "output.json", "schema": {"mode": "observed"}}
+                )
+            },
             transforms=[
                 _transform_settings(
                     TransformSettings,
@@ -1698,8 +1742,12 @@ class TestExecutionGraphFromConfig:
                 _gate_settings(GateSettings, name="g2", input="g2_in", condition="True", routes={"true": "output", "false": "output"}),
             ],
             sinks={
-                "output": SinkSettings(plugin="json", options={"path": "output.json", "schema": {"mode": "observed"}}),
-                "flagged": SinkSettings(plugin="json", options={"path": "flagged.json", "schema": {"mode": "observed"}}),
+                "output": SinkSettings(
+                    plugin="json", on_write_failure="discard", options={"path": "output.json", "schema": {"mode": "observed"}}
+                ),
+                "flagged": SinkSettings(
+                    plugin="json", on_write_failure="discard", options={"path": "flagged.json", "schema": {"mode": "observed"}}
+                ),
             },
         )
 
@@ -1766,8 +1814,12 @@ class TestExecutionGraphFromConfig:
                 },
             ),
             sinks={
-                "results": SinkSettings(plugin="json", options={"path": "results.json", "schema": {"mode": "observed"}}),
-                "flagged": SinkSettings(plugin="json", options={"path": "flagged.json", "schema": {"mode": "observed"}}),
+                "results": SinkSettings(
+                    plugin="json", on_write_failure="discard", options={"path": "results.json", "schema": {"mode": "observed"}}
+                ),
+                "flagged": SinkSettings(
+                    plugin="json", on_write_failure="discard", options={"path": "flagged.json", "schema": {"mode": "observed"}}
+                ),
             },
         )
 
@@ -1798,7 +1850,9 @@ class TestExecutionGraphFromConfig:
                 },
             ),
             sinks={
-                "results": SinkSettings(plugin="json", options={"path": "results.json", "schema": {"mode": "observed"}}),
+                "results": SinkSettings(
+                    plugin="json", on_write_failure="discard", options={"path": "results.json", "schema": {"mode": "observed"}}
+                ),
             },
         )
         bad_plugins = instantiate_plugins_from_config_raw(bad_config)
@@ -1854,8 +1908,12 @@ class TestGateConnectionRouteMaterialization:
                 ),
             ],
             sinks={
-                "output": SinkSettings(plugin="json", options={"path": "output.json", "schema": {"mode": "observed"}}),
-                "flagged": SinkSettings(plugin="json", options={"path": "flagged.json", "schema": {"mode": "observed"}}),
+                "output": SinkSettings(
+                    plugin="json", on_write_failure="discard", options={"path": "output.json", "schema": {"mode": "observed"}}
+                ),
+                "flagged": SinkSettings(
+                    plugin="json", on_write_failure="discard", options={"path": "flagged.json", "schema": {"mode": "observed"}}
+                ),
             },
         )
 
@@ -1917,7 +1975,9 @@ class TestGateConnectionRouteMaterialization:
                 ),
             ],
             sinks={
-                "output": SinkSettings(plugin="json", options={"path": "output.json", "schema": {"mode": "observed"}}),
+                "output": SinkSettings(
+                    plugin="json", on_write_failure="discard", options={"path": "output.json", "schema": {"mode": "observed"}}
+                ),
             },
         )
 
@@ -1984,8 +2044,12 @@ class TestGateConnectionRouteMaterialization:
                 ),
             ],
             sinks={
-                "output": SinkSettings(plugin="json", options={"path": "output.json", "schema": {"mode": "observed"}}),
-                "flagged": SinkSettings(plugin="json", options={"path": "flagged.json", "schema": {"mode": "observed"}}),
+                "output": SinkSettings(
+                    plugin="json", on_write_failure="discard", options={"path": "output.json", "schema": {"mode": "observed"}}
+                ),
+                "flagged": SinkSettings(
+                    plugin="json", on_write_failure="discard", options={"path": "flagged.json", "schema": {"mode": "observed"}}
+                ),
             },
         )
 
@@ -2041,7 +2105,9 @@ class TestGateConnectionRouteMaterialization:
                 ),
             ],
             sinks={
-                "output": SinkSettings(plugin="json", options={"path": "output.json", "schema": {"mode": "observed"}}),
+                "output": SinkSettings(
+                    plugin="json", on_write_failure="discard", options={"path": "output.json", "schema": {"mode": "observed"}}
+                ),
             },
         )
 
@@ -2081,8 +2147,12 @@ class TestExecutionGraphRouteMapping:
                 },
             ),
             sinks={
-                "results": SinkSettings(plugin="json", options={"path": "results.json", "schema": {"mode": "observed"}}),
-                "flagged": SinkSettings(plugin="json", options={"path": "flagged.json", "schema": {"mode": "observed"}}),
+                "results": SinkSettings(
+                    plugin="json", on_write_failure="discard", options={"path": "results.json", "schema": {"mode": "observed"}}
+                ),
+                "flagged": SinkSettings(
+                    plugin="json", on_write_failure="discard", options={"path": "flagged.json", "schema": {"mode": "observed"}}
+                ),
             },
             gates=[
                 _gate_settings(
@@ -2133,8 +2203,12 @@ class TestExecutionGraphRouteMapping:
                 },
             ),
             sinks={
-                "results": SinkSettings(plugin="json", options={"path": "results.json", "schema": {"mode": "observed"}}),
-                "flagged": SinkSettings(plugin="json", options={"path": "flagged.json", "schema": {"mode": "observed"}}),
+                "results": SinkSettings(
+                    plugin="json", on_write_failure="discard", options={"path": "results.json", "schema": {"mode": "observed"}}
+                ),
+                "flagged": SinkSettings(
+                    plugin="json", on_write_failure="discard", options={"path": "flagged.json", "schema": {"mode": "observed"}}
+                ),
             },
             gates=[
                 _gate_settings(
@@ -2193,8 +2267,12 @@ class TestExecutionGraphRouteMapping:
                 },
             ),
             sinks={
-                "output-sink": SinkSettings(plugin="json", options={"path": "output.json", "schema": {"mode": "observed"}}),
-                "quarantine-bucket": SinkSettings(plugin="json", options={"path": "quarantine.json", "schema": {"mode": "observed"}}),
+                "output-sink": SinkSettings(
+                    plugin="json", on_write_failure="discard", options={"path": "output.json", "schema": {"mode": "observed"}}
+                ),
+                "quarantine-bucket": SinkSettings(
+                    plugin="json", on_write_failure="discard", options={"path": "quarantine.json", "schema": {"mode": "observed"}}
+                ),
             },
             gates=[
                 _gate_settings(
@@ -2294,8 +2372,12 @@ class TestExecutionGraphRouteMapping:
                 },
             ),
             sinks={
-                "clean": SinkSettings(plugin="json", options={"path": "clean.json", "schema": {"mode": "observed"}}),
-                "quarantine": SinkSettings(plugin="json", options={"path": "quarantine.json", "schema": {"mode": "observed"}}),
+                "clean": SinkSettings(
+                    plugin="json", on_write_failure="discard", options={"path": "clean.json", "schema": {"mode": "observed"}}
+                ),
+                "quarantine": SinkSettings(
+                    plugin="json", on_write_failure="discard", options={"path": "quarantine.json", "schema": {"mode": "observed"}}
+                ),
             },
             gates=[
                 _gate_settings(
@@ -2438,9 +2520,15 @@ class TestMultiEdgeScenarios:
                 },
             ),
             sinks={
-                "output": SinkSettings(plugin="json", options={"path": "output.json", "schema": {"mode": "observed"}}),
-                "path_a": SinkSettings(plugin="json", options={"path": "path_a.json", "schema": {"mode": "observed"}}),
-                "path_b": SinkSettings(plugin="json", options={"path": "path_b.json", "schema": {"mode": "observed"}}),
+                "output": SinkSettings(
+                    plugin="json", on_write_failure="discard", options={"path": "output.json", "schema": {"mode": "observed"}}
+                ),
+                "path_a": SinkSettings(
+                    plugin="json", on_write_failure="discard", options={"path": "path_a.json", "schema": {"mode": "observed"}}
+                ),
+                "path_b": SinkSettings(
+                    plugin="json", on_write_failure="discard", options={"path": "path_b.json", "schema": {"mode": "observed"}}
+                ),
             },
             gates=[
                 _gate_settings(
@@ -2527,7 +2615,9 @@ class TestCoalesceNodes:
                 },
             ),
             sinks={
-                "output": SinkSettings(plugin="json", options={"path": "out.json", "schema": {"mode": "observed"}}),
+                "output": SinkSettings(
+                    plugin="json", on_write_failure="discard", options={"path": "out.json", "schema": {"mode": "observed"}}
+                ),
             },
             gates=[
                 _gate_settings(
@@ -2591,7 +2681,9 @@ class TestCoalesceNodes:
                 },
             ),
             sinks={
-                "output": SinkSettings(plugin="json", options={"path": "output.json", "schema": {"mode": "observed"}}),
+                "output": SinkSettings(
+                    plugin="json", on_write_failure="discard", options={"path": "output.json", "schema": {"mode": "observed"}}
+                ),
             },
             gates=[
                 _gate_settings(
@@ -2653,8 +2745,12 @@ class TestCoalesceNodes:
                 },
             ),
             sinks={
-                "output": SinkSettings(plugin="json", options={"path": "output.json", "schema": {"mode": "observed"}}),
-                "path_a": SinkSettings(plugin="json", options={"path": "path_a.json", "schema": {"mode": "observed"}}),
+                "output": SinkSettings(
+                    plugin="json", on_write_failure="discard", options={"path": "output.json", "schema": {"mode": "observed"}}
+                ),
+                "path_a": SinkSettings(
+                    plugin="json", on_write_failure="discard", options={"path": "path_a.json", "schema": {"mode": "observed"}}
+                ),
             },
             gates=[
                 _gate_settings(
@@ -2705,8 +2801,12 @@ class TestCoalesceNodes:
                 },
             ),
             sinks={
-                "output": SinkSettings(plugin="json", options={"path": "output.json", "schema": {"mode": "observed"}}),
-                "path_c": SinkSettings(plugin="json", options={"path": "path_c.json", "schema": {"mode": "observed"}}),
+                "output": SinkSettings(
+                    plugin="json", on_write_failure="discard", options={"path": "output.json", "schema": {"mode": "observed"}}
+                ),
+                "path_c": SinkSettings(
+                    plugin="json", on_write_failure="discard", options={"path": "path_c.json", "schema": {"mode": "observed"}}
+                ),
             },
             gates=[
                 _gate_settings(
@@ -2777,7 +2877,9 @@ class TestCoalesceNodes:
                 },
             ),
             sinks={
-                "output": SinkSettings(plugin="json", options={"path": "output.json", "schema": {"mode": "observed"}}),
+                "output": SinkSettings(
+                    plugin="json", on_write_failure="discard", options={"path": "output.json", "schema": {"mode": "observed"}}
+                ),
             },
             gates=[
                 _gate_settings(
@@ -2849,7 +2951,9 @@ class TestCoalesceNodes:
                 },
             ),
             sinks={
-                "output": SinkSettings(plugin="json", options={"path": "output.json", "schema": {"mode": "observed"}}),
+                "output": SinkSettings(
+                    plugin="json", on_write_failure="discard", options={"path": "output.json", "schema": {"mode": "observed"}}
+                ),
             },
             gates=[
                 _gate_settings(
@@ -2916,7 +3020,9 @@ class TestCoalesceNodes:
                 },
             ),
             sinks={
-                "output": SinkSettings(plugin="json", options={"path": "output.json", "schema": {"mode": "observed"}}),
+                "output": SinkSettings(
+                    plugin="json", on_write_failure="discard", options={"path": "output.json", "schema": {"mode": "observed"}}
+                ),
             },
             gates=[
                 _gate_settings(
@@ -2981,7 +3087,9 @@ class TestCoalesceNodes:
                 },
             ),
             sinks={
-                "output": SinkSettings(plugin="json", options={"path": "output.json", "schema": {"mode": "observed"}}),
+                "output": SinkSettings(
+                    plugin="json", on_write_failure="discard", options={"path": "output.json", "schema": {"mode": "observed"}}
+                ),
             },
             gates=[
                 _gate_settings(
@@ -3045,7 +3153,9 @@ class TestCoalesceNodes:
                     },
                 ),
                 sinks={
-                    "output": SinkSettings(plugin="json", options={"path": "output.json", "schema": {"mode": "observed"}}),
+                    "output": SinkSettings(
+                        plugin="json", on_write_failure="discard", options={"path": "output.json", "schema": {"mode": "observed"}}
+                    ),
                 },
                 coalesce=[
                     CoalesceSettings(
@@ -3078,8 +3188,12 @@ class TestCoalesceNodes:
                 },
             ),
             sinks={
-                "output": SinkSettings(plugin="json", options={"path": "output.json", "schema": {"mode": "observed"}}),
-                "path_b": SinkSettings(plugin="json", options={"path": "path_b.json", "schema": {"mode": "observed"}}),
+                "output": SinkSettings(
+                    plugin="json", on_write_failure="discard", options={"path": "output.json", "schema": {"mode": "observed"}}
+                ),
+                "path_b": SinkSettings(
+                    plugin="json", on_write_failure="discard", options={"path": "path_b.json", "schema": {"mode": "observed"}}
+                ),
             },
             gates=[
                 _gate_settings(
@@ -3140,7 +3254,9 @@ class TestCoalesceNodes:
                 },
             ),
             sinks={
-                "output": SinkSettings(plugin="json", options={"path": "output.json", "schema": {"mode": "observed"}}),
+                "output": SinkSettings(
+                    plugin="json", on_write_failure="discard", options={"path": "output.json", "schema": {"mode": "observed"}}
+                ),
             },
             transforms=[
                 _transform_settings(
@@ -3224,7 +3340,9 @@ class TestCoalesceNodes:
                 },
             ),
             sinks={
-                "output": SinkSettings(plugin="json", options={"path": "output.json", "schema": {"mode": "observed"}}),
+                "output": SinkSettings(
+                    plugin="json", on_write_failure="discard", options={"path": "output.json", "schema": {"mode": "observed"}}
+                ),
             },
             gates=[
                 _gate_settings(
@@ -3289,7 +3407,9 @@ class TestCoalesceNodes:
                 },
             ),
             sinks={
-                "output": SinkSettings(plugin="json", options={"path": "output.json", "schema": {"mode": "observed"}}),
+                "output": SinkSettings(
+                    plugin="json", on_write_failure="discard", options={"path": "output.json", "schema": {"mode": "observed"}}
+                ),
             },
             gates=[
                 _gate_settings(
@@ -3361,7 +3481,9 @@ class TestCoalesceNodes:
                 },
             ),
             sinks={
-                "output": SinkSettings(plugin="json", options={"path": "output.json", "schema": {"mode": "observed"}}),
+                "output": SinkSettings(
+                    plugin="json", on_write_failure="discard", options={"path": "output.json", "schema": {"mode": "observed"}}
+                ),
             },
             gates=[
                 _gate_settings(
@@ -3431,7 +3553,9 @@ class TestCoalesceNodes:
                 },
             ),
             sinks={
-                "output": SinkSettings(plugin="json", options={"path": "output.json", "schema": {"mode": "observed"}}),
+                "output": SinkSettings(
+                    plugin="json", on_write_failure="discard", options={"path": "output.json", "schema": {"mode": "observed"}}
+                ),
             },
             gates=[
                 _gate_settings(
@@ -3665,8 +3789,12 @@ class TestSchemaValidation:
                 },
             ),
             sinks={
-                "output": SinkSettings(plugin="json", options={"path": "output.json", "schema": {"mode": "observed"}}),
-                "flagged": SinkSettings(plugin="json", options={"path": "flagged.json", "schema": {"mode": "observed"}}),
+                "output": SinkSettings(
+                    plugin="json", on_write_failure="discard", options={"path": "output.json", "schema": {"mode": "observed"}}
+                ),
+                "flagged": SinkSettings(
+                    plugin="json", on_write_failure="discard", options={"path": "flagged.json", "schema": {"mode": "observed"}}
+                ),
             },
             gates=[
                 _gate_settings(
@@ -4262,6 +4390,7 @@ transforms:
 sinks:
   output:
     plugin: csv
+    on_write_failure: discard
     options:
       path: output.csv
       schema:
@@ -4337,6 +4466,7 @@ transforms:
 sinks:
   output:
     plugin: csv
+    on_write_failure: discard
     options:
       path: output.csv
       schema:
@@ -4613,7 +4743,9 @@ class TestDeterministicNodeIDs:
                     options={"schema": {"mode": "observed"}},
                 )
             ],
-            sinks={"out": SinkSettings(plugin="json", options={"path": "out.json", "schema": {"mode": "observed"}})},
+            sinks={
+                "out": SinkSettings(plugin="json", on_write_failure="discard", options={"path": "out.json", "schema": {"mode": "observed"}})
+            },
         )
 
         # Build graph twice with same config
@@ -4663,7 +4795,9 @@ class TestDeterministicNodeIDs:
                 },
             ),
             transforms=[],
-            sinks={"out": SinkSettings(plugin="json", options={"path": "out.json", "schema": {"mode": "observed"}})},
+            sinks={
+                "out": SinkSettings(plugin="json", on_write_failure="discard", options={"path": "out.json", "schema": {"mode": "observed"}})
+            },
         )
 
         config2 = ElspethSettings(
@@ -4677,7 +4811,9 @@ class TestDeterministicNodeIDs:
                 },
             ),
             transforms=[],
-            sinks={"out": SinkSettings(plugin="json", options={"path": "out.json", "schema": {"mode": "observed"}})},
+            sinks={
+                "out": SinkSettings(plugin="json", on_write_failure="discard", options={"path": "out.json", "schema": {"mode": "observed"}})
+            },
         )
 
         plugins1 = instantiate_plugins_from_config(config1)
@@ -4755,7 +4891,11 @@ class TestBranchGateMap:
                     fork_to=["branch_a", "branch_b"],
                 ),
             ],
-            sinks={"output": SinkSettings(plugin="json", options={"path": "/tmp/test.json", "schema": {"mode": "observed"}})},
+            sinks={
+                "output": SinkSettings(
+                    plugin="json", on_write_failure="discard", options={"path": "/tmp/test.json", "schema": {"mode": "observed"}}
+                )
+            },
             coalesce=[
                 CoalesceSettings(
                     name="merge_branches",
@@ -4798,7 +4938,11 @@ class TestBranchGateMap:
 
         settings = ElspethSettings(
             source=_source_settings(SourceSettings, plugin="null"),
-            sinks={"output": SinkSettings(plugin="json", options={"path": "/tmp/test.json", "schema": {"mode": "observed"}})},
+            sinks={
+                "output": SinkSettings(
+                    plugin="json", on_write_failure="discard", options={"path": "/tmp/test.json", "schema": {"mode": "observed"}}
+                )
+            },
         )
 
         plugins = instantiate_plugins_from_config(settings)
@@ -4854,8 +4998,12 @@ class TestDivertEdges:
                 },
             ),
             sinks={
-                "default": SinkSettings(plugin="json", options={"path": "out.json", "schema": {"mode": "observed"}}),
-                "quarantine": SinkSettings(plugin="json", options={"path": "quar.json", "schema": {"mode": "observed"}}),
+                "default": SinkSettings(
+                    plugin="json", on_write_failure="discard", options={"path": "out.json", "schema": {"mode": "observed"}}
+                ),
+                "quarantine": SinkSettings(
+                    plugin="json", on_write_failure="discard", options={"path": "quar.json", "schema": {"mode": "observed"}}
+                ),
             },
         )
         graph = self._build_graph(settings)
@@ -4881,7 +5029,11 @@ class TestDivertEdges:
                     "schema": {"mode": "observed"},
                 },
             ),
-            sinks={"default": SinkSettings(plugin="json", options={"path": "out.json", "schema": {"mode": "observed"}})},
+            sinks={
+                "default": SinkSettings(
+                    plugin="json", on_write_failure="discard", options={"path": "out.json", "schema": {"mode": "observed"}}
+                )
+            },
         )
         graph = self._build_graph(settings)
         graph.validate()
@@ -4920,8 +5072,12 @@ class TestDivertEdges:
                 ),
             ],
             sinks={
-                "default": SinkSettings(plugin="json", options={"path": "out.json", "schema": {"mode": "observed"}}),
-                "errors": SinkSettings(plugin="json", options={"path": "err.json", "schema": {"mode": "observed"}}),
+                "default": SinkSettings(
+                    plugin="json", on_write_failure="discard", options={"path": "out.json", "schema": {"mode": "observed"}}
+                ),
+                "errors": SinkSettings(
+                    plugin="json", on_write_failure="discard", options={"path": "err.json", "schema": {"mode": "observed"}}
+                ),
             },
         )
         graph = self._build_graph(settings)
@@ -4962,9 +5118,15 @@ class TestDivertEdges:
                 ),
             ],
             sinks={
-                "default": SinkSettings(plugin="json", options={"path": "out.json", "schema": {"mode": "observed"}}),
-                "quarantine": SinkSettings(plugin="json", options={"path": "quar.json", "schema": {"mode": "observed"}}),
-                "errors": SinkSettings(plugin="json", options={"path": "err.json", "schema": {"mode": "observed"}}),
+                "default": SinkSettings(
+                    plugin="json", on_write_failure="discard", options={"path": "out.json", "schema": {"mode": "observed"}}
+                ),
+                "quarantine": SinkSettings(
+                    plugin="json", on_write_failure="discard", options={"path": "quar.json", "schema": {"mode": "observed"}}
+                ),
+                "errors": SinkSettings(
+                    plugin="json", on_write_failure="discard", options={"path": "err.json", "schema": {"mode": "observed"}}
+                ),
             },
         )
         graph = self._build_graph(settings)
@@ -4993,7 +5155,11 @@ class TestDivertEdges:
                     "schema": {"mode": "observed"},
                 },
             ),
-            sinks={"default": SinkSettings(plugin="json", options={"path": "out.json", "schema": {"mode": "observed"}})},
+            sinks={
+                "default": SinkSettings(
+                    plugin="json", on_write_failure="discard", options={"path": "out.json", "schema": {"mode": "observed"}}
+                )
+            },
         )
         graph = self._build_graph(settings)
         graph.validate()
@@ -5044,8 +5210,12 @@ class TestDivertEdges:
                 ),
             ],
             sinks={
-                "default": SinkSettings(plugin="json", options={"path": "out.json", "schema": {"mode": "observed"}}),
-                "errors": SinkSettings(plugin="json", options={"path": "err.json", "schema": {"mode": "observed"}}),
+                "default": SinkSettings(
+                    plugin="json", on_write_failure="discard", options={"path": "out.json", "schema": {"mode": "observed"}}
+                ),
+                "errors": SinkSettings(
+                    plugin="json", on_write_failure="discard", options={"path": "err.json", "schema": {"mode": "observed"}}
+                ),
             },
         )
         graph = self._build_graph(settings)
@@ -5086,6 +5256,7 @@ class TestTerminalGateRouteValidation:
             sinks={
                 "output": SinkSettings(
                     plugin="json",
+                    on_write_failure="discard",
                     options={"path": "output.json", "schema": {"mode": "observed"}},
                 ),
             },
@@ -5139,10 +5310,12 @@ class TestTerminalGateRouteValidation:
             sinks={
                 "output": SinkSettings(
                     plugin="json",
+                    on_write_failure="discard",
                     options={"path": "output.json", "schema": {"mode": "observed"}},
                 ),
                 "flagged": SinkSettings(
                     plugin="json",
+                    on_write_failure="discard",
                     options={"path": "flagged.json", "schema": {"mode": "observed"}},
                 ),
             },
@@ -5211,6 +5384,7 @@ class TestTerminalGateRouteValidation:
             sinks={
                 "output": SinkSettings(
                     plugin="json",
+                    on_write_failure="discard",
                     options={"path": "output.json", "schema": {"mode": "observed"}},
                 ),
             },
@@ -5278,6 +5452,7 @@ class TestAggregationOnSuccessValidation:
             sinks={
                 "output": SinkSettings(
                     plugin="json",
+                    on_write_failure="discard",
                     options={"path": "output.json", "schema": {"mode": "observed"}},
                 ),
             },
@@ -5334,6 +5509,7 @@ class TestAggregationOnSuccessValidation:
             sinks={
                 "output": SinkSettings(
                     plugin="json",
+                    on_write_failure="discard",
                     options={"path": "output.json", "schema": {"mode": "observed"}},
                 ),
             },
@@ -5394,6 +5570,7 @@ class TestAggregationOnSuccessValidation:
             sinks={
                 "output": SinkSettings(
                     plugin="json",
+                    on_write_failure="discard",
                     options={"path": "output.json", "schema": {"mode": "observed"}},
                 ),
             },
@@ -5477,6 +5654,7 @@ class TestCoalesceOnSuccessValidation:
             sinks={
                 "output": SinkSettings(
                     plugin="json",
+                    on_write_failure="discard",
                     options={"path": "output.json", "schema": {"mode": "observed"}},
                 ),
             },
@@ -5541,6 +5719,7 @@ class TestCoalesceOnSuccessValidation:
             sinks={
                 "output": SinkSettings(
                     plugin="json",
+                    on_write_failure="discard",
                     options={"path": "output.json", "schema": {"mode": "observed"}},
                 ),
             },
@@ -5602,6 +5781,7 @@ class TestCoalesceOnSuccessValidation:
             sinks={
                 "output": SinkSettings(
                     plugin="json",
+                    on_write_failure="discard",
                     options={"path": "output.json", "schema": {"mode": "observed"}},
                 ),
             },
@@ -5665,7 +5845,9 @@ class TestNodeInfoImmutability:
                 },
             ),
             sinks={
-                "output": SinkSettings(plugin="json", options={"path": "out.json", "schema": {"mode": "observed"}}),
+                "output": SinkSettings(
+                    plugin="json", on_write_failure="discard", options={"path": "out.json", "schema": {"mode": "observed"}}
+                ),
             },
         )
         plugins = instantiate_plugins_from_config(config)

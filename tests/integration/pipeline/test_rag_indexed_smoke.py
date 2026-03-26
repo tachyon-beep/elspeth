@@ -61,6 +61,7 @@ source:
 sinks:
   output:
     plugin: chroma_sink
+    on_write_failure: discard
     options:
       collection: smoke-test-facts
       mode: persistent
@@ -144,6 +145,7 @@ transforms:
 sinks:
   output:
     plugin: json
+    on_write_failure: discard
     options:
       path: {example_dst / "output" / "results.jsonl"}
       schema:
@@ -151,6 +153,7 @@ sinks:
       format: jsonl
   quarantine:
     plugin: json
+    on_write_failure: discard
     options:
       path: {example_dst / "output" / "quarantined.jsonl"}
       schema:

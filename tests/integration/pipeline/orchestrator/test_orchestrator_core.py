@@ -248,7 +248,10 @@ class TestOrchestrator:
 
         settings = ElspethSettings(
             source={"plugin": "test", "on_success": "source_out", "options": {}},
-            sinks={"output": {"plugin": "test"}, "source_sink": {"plugin": "test"}},
+            sinks={
+                "output": {"plugin": "test", "on_write_failure": "discard"},
+                "source_sink": {"plugin": "test", "on_write_failure": "discard"},
+            },
             gates=[fork_gate, terminal_gate],
             coalesce=[coalesce],
         )
@@ -477,7 +480,11 @@ class TestOrchestratorAcceptsGraph:
                     "schema": {"mode": "observed"},
                 },
             ),
-            sinks={"output": SinkSettings(plugin="json", options={"path": "output.json", "schema": {"mode": "observed"}})},
+            sinks={
+                "output": SinkSettings(
+                    plugin="json", on_write_failure="discard", options={"path": "output.json", "schema": {"mode": "observed"}}
+                )
+            },
         )
         plugins = instantiate_plugins_from_config(settings)
 
@@ -558,8 +565,12 @@ class TestOrchestratorAcceptsGraph:
                 },
             ),
             sinks={
-                "output_a": SinkSettings(plugin="json", options={"path": "a.json", "schema": {"mode": "observed"}}),
-                "output_b": SinkSettings(plugin="json", options={"path": "b.json", "schema": {"mode": "observed"}}),
+                "output_a": SinkSettings(
+                    plugin="json", on_write_failure="discard", options={"path": "a.json", "schema": {"mode": "observed"}}
+                ),
+                "output_b": SinkSettings(
+                    plugin="json", on_write_failure="discard", options={"path": "b.json", "schema": {"mode": "observed"}}
+                ),
             },
         )
         plugins = instantiate_plugins_from_config(settings)

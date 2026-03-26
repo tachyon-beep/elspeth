@@ -293,12 +293,14 @@ transforms:
 sinks:
   results:
     plugin: csv
+    on_write_failure: discard
     options:
       path: examples/multi_query_assessment/output/results.csv
       schema:
         mode: observed
   quarantine:
     plugin: json
+    on_write_failure: discard
     options:
       path: examples/multi_query_assessment/output/quarantine.json
       schema:

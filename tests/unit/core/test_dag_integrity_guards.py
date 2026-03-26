@@ -83,8 +83,12 @@ class TestForkBranchIntegrity:
                 },
             ),
             sinks={
-                "output": SinkSettings(plugin="json", options={"path": "output.json", "schema": {"mode": "observed"}}),
-                "path_a": SinkSettings(plugin="json", options={"path": "path_a.json", "schema": {"mode": "observed"}}),
+                "output": SinkSettings(
+                    plugin="json", on_write_failure="discard", options={"path": "output.json", "schema": {"mode": "observed"}}
+                ),
+                "path_a": SinkSettings(
+                    plugin="json", on_write_failure="discard", options={"path": "path_a.json", "schema": {"mode": "observed"}}
+                ),
             },
             gates=[
                 GateSettings(

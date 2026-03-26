@@ -36,6 +36,7 @@ transforms:
 sinks:
   output:
     plugin: csv
+    on_write_failure: discard
     options:
       path: output.csv
       schema:
@@ -79,6 +80,7 @@ transforms:
 sinks:
   output:
     plugin: csv
+    on_write_failure: discard
     options:
       path: output.csv
       schema:
@@ -122,6 +124,7 @@ transforms:
 sinks:
   output:
     plugin: csv
+    on_write_failure: discard
     options:
       path: output.csv
       schema:
@@ -196,6 +199,7 @@ transforms:
 sinks:
   output:
     plugin: csv
+    on_write_failure: discard
     options:
       path: output.csv
       schema:
@@ -235,7 +239,7 @@ def test_instantiate_plugins_raises_on_invalid_plugin():
 
     config_dict = {
         "source": {"plugin": "nonexistent", "on_success": "out", "options": {}},
-        "sinks": {"out": {"plugin": "csv", "options": {"path": "o.csv"}}},
+        "sinks": {"out": {"plugin": "csv", "on_write_failure": "discard", "options": {"path": "o.csv"}}},
     }
 
     adapter = TypeAdapter(ElspethSettings)
@@ -278,6 +282,7 @@ aggregations:
 sinks:
   output:
     plugin: csv
+    on_write_failure: discard
     options:
       path: output.csv
       schema:
@@ -333,6 +338,7 @@ aggregations:
 sinks:
   output:
     plugin: csv
+    on_write_failure: discard
     options:
       path: output.csv
       schema:
@@ -391,7 +397,7 @@ def test_aggregation_rejects_transform_without_is_batch_aware_attribute():
                 "trigger": {"count": 5},
             }
         ],
-        "sinks": {"out": {"plugin": "csv", "options": {"path": "o.csv"}}},
+        "sinks": {"out": {"plugin": "csv", "on_write_failure": "discard", "options": {"path": "o.csv"}}},
     }
 
     adapter = TypeAdapter(ElspethSettings)

@@ -454,7 +454,10 @@ class TestForkJoinRuntimeBalance:
         # Settings needed for fork execution
         settings_obj = ElspethSettings(
             source={"plugin": "test", "on_success": "sink_a", "options": {}},
-            sinks={"sink_a": {"plugin": "test"}, "sink_b": {"plugin": "test"}},
+            sinks={
+                "sink_a": {"plugin": "test", "on_write_failure": "discard"},
+                "sink_b": {"plugin": "test", "on_write_failure": "discard"},
+            },
             gates=[gate],
         )
 
@@ -574,7 +577,10 @@ class TestForkJoinEdgeCases:
 
         settings_obj = ElspethSettings(
             source={"plugin": "test", "on_success": "sink_a", "options": {}},
-            sinks={"sink_a": {"plugin": "test"}, "sink_b": {"plugin": "test"}},
+            sinks={
+                "sink_a": {"plugin": "test", "on_write_failure": "discard"},
+                "sink_b": {"plugin": "test", "on_write_failure": "discard"},
+            },
             gates=[gate],
         )
 
@@ -647,7 +653,10 @@ class TestForkRecoveryInvariant:
 
         settings_obj = ElspethSettings(
             source={"plugin": "test", "on_success": "sink_a", "options": {}},
-            sinks={"sink_a": {"plugin": "test"}, "sink_b": {"plugin": "test"}},
+            sinks={
+                "sink_a": {"plugin": "test", "on_write_failure": "discard"},
+                "sink_b": {"plugin": "test", "on_write_failure": "discard"},
+            },
             gates=[gate],
         )
 

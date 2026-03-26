@@ -40,6 +40,7 @@ transforms:
 sinks:
   output:
     plugin: json
+    on_write_failure: discard
     options:
       path: examples/openrouter_sentiment/output/results_pooled.json
       schema:

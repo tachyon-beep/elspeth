@@ -213,6 +213,7 @@ class TestConnectionNameRejection:
                 sinks={
                     name: SinkSettings(
                         plugin="json",
+                        on_write_failure="discard",
                         options={"path": "output.json", "schema": {"mode": "observed"}},
                     ),
                 },
@@ -324,6 +325,7 @@ class TestConnectionNameRoundtrip:
             sinks={
                 "output": SinkSettings(
                     plugin="json",
+                    on_write_failure="discard",
                     options={"path": "output.json", "schema": {"mode": "observed"}},
                 ),
             },
@@ -378,6 +380,7 @@ class TestConnectionNameRoundtrip:
             sinks={
                 "output": SinkSettings(
                     plugin="json",
+                    on_write_failure="discard",
                     options={"path": "output.json", "schema": {"mode": "observed"}},
                 ),
             },

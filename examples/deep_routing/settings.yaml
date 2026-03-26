@@ -137,6 +137,7 @@ gates:
 sinks:
   quarantine:
     plugin: csv
+    on_write_failure: discard
     options:
       path: examples/deep_routing/output/quarantine.csv
       schema:
@@ -151,6 +152,7 @@ sinks:
         - 'notes: str'
   micro_loans:
     plugin: csv
+    on_write_failure: discard
     options:
       path: examples/deep_routing/output/micro_loans.csv
       schema:
@@ -165,6 +167,7 @@ sinks:
         - 'notes: str'
   approved_other:
     plugin: csv
+    on_write_failure: discard
     options:
       path: examples/deep_routing/output/approved_other.csv
       schema:
@@ -179,6 +182,7 @@ sinks:
         - 'notes: str'
   long_term_mortgages:
     plugin: csv
+    on_write_failure: discard
     options:
       path: examples/deep_routing/output/long_term_mortgages.csv
       schema:
@@ -193,6 +197,7 @@ sinks:
         - 'notes: str'
   short_term_mortgages:
     plugin: csv
+    on_write_failure: discard
     options:
       path: examples/deep_routing/output/short_term_mortgages.csv
       schema:
@@ -207,6 +212,7 @@ sinks:
         - 'notes: str'
   high_risk:
     plugin: csv
+    on_write_failure: discard
     options:
       path: examples/deep_routing/output/high_risk.csv
       schema:
@@ -221,6 +227,7 @@ sinks:
         - 'notes: str'
   manual_review:
     plugin: csv
+    on_write_failure: discard
     options:
       path: examples/deep_routing/output/manual_review.csv
       schema:

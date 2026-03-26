@@ -80,6 +80,7 @@ gates:
 sinks:
   enterprise:
     plugin: csv
+    on_write_failure: discard
     options:
       path: examples/error_routing/output/enterprise_deals.csv
       schema:
@@ -92,6 +93,7 @@ sinks:
         - 'notes: str'
   commercial:
     plugin: csv
+    on_write_failure: discard
     options:
       path: examples/error_routing/output/commercial_deals.csv
       schema:
@@ -104,6 +106,7 @@ sinks:
         - 'notes: str'
   standard:
     plugin: csv
+    on_write_failure: discard
     options:
       path: examples/error_routing/output/standard_deals.csv
       schema:
@@ -116,6 +119,7 @@ sinks:
         - 'notes: str'
   quarantine:
     plugin: csv
+    on_write_failure: discard
     options:
       path: examples/error_routing/output/quarantine.csv
       schema:

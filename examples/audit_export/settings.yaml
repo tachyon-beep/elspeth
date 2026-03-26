@@ -21,6 +21,7 @@ gates:
 sinks:
   non_corporate:
     plugin: csv
+    on_write_failure: discard
     options:
       path: examples/audit_export/output/non_corporate.csv
       schema:
@@ -32,6 +33,7 @@ sinks:
         - 'category: str'
   corporate:
     plugin: csv
+    on_write_failure: discard
     options:
       path: examples/audit_export/output/corporate.csv
       schema:
@@ -43,6 +45,7 @@ sinks:
         - 'category: str'
   audit_export:
     plugin: json
+    on_write_failure: discard
     options:
       path: examples/audit_export/output/audit_trail.json
       schema:

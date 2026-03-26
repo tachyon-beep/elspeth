@@ -69,6 +69,7 @@ source:
 sinks:
   default:
     plugin: json
+    on_write_failure: discard
     options:
       path: output.json
 """
@@ -103,6 +104,7 @@ source:
 sinks:
   default:
     plugin: json
+    on_write_failure: discard
     options:
       path: output.json
 """
@@ -146,6 +148,7 @@ source:
 sinks:
   default:
     plugin: json
+    on_write_failure: discard
     options:
       path: output.json
 landscape:
@@ -188,6 +191,7 @@ source:
 sinks:
   default:
     plugin: json
+    on_write_failure: discard
     options:
       path: output.json
 landscape:
@@ -330,6 +334,7 @@ class TestBuildResumeGraphs:
             sinks={
                 "output": SinkSettings(
                     plugin="json",
+                    on_write_failure="discard",
                     options={"path": "output.json", "schema": {"mode": "observed"}},
                 ),
             },
@@ -361,6 +366,7 @@ class TestBuildResumeGraphs:
             sinks={
                 "output": SinkSettings(
                     plugin="json",
+                    on_write_failure="discard",
                     options={"path": "output.json", "schema": {"mode": "observed"}},
                 ),
             },

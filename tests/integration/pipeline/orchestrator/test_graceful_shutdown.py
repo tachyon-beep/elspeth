@@ -281,7 +281,7 @@ def _build_interruptible_coalesce_config(
     )
     settings = ElspethSettings(
         source={"plugin": source.name, "on_success": "fork_input", "options": {}},
-        sinks={"output": {"plugin": "test"}},
+        sinks={"output": {"plugin": "test", "on_write_failure": "discard"}},
         gates=[fork_gate],
         coalesce=[coalesce],
     )

@@ -39,7 +39,7 @@ def _make_export_enabled_settings() -> ElspethSettings:
     """Create minimal settings with export enabled to the default sink."""
     return ElspethSettings(
         source=SourceSettings(plugin="list_source", on_success="default", options={}),
-        sinks={"default": SinkSettings(plugin="collect", options={})},
+        sinks={"default": SinkSettings(plugin="collect", on_write_failure="discard", options={})},
         landscape={"export": {"enabled": True, "sink": "default", "format": "json"}},
     )
 

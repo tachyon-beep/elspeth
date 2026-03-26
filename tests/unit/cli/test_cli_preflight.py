@@ -26,7 +26,7 @@ def _make_minimal_config_yaml(tmp_path: Path, *, with_depends_on: bool = False) 
     config = {
         "source": {"plugin": "csv", "options": {"path": str(tmp_path / "input.csv")}},
         "transforms": [],
-        "sinks": {"output": {"plugin": "csv", "options": {"path": str(tmp_path / "output.csv")}}},
+        "sinks": {"output": {"plugin": "csv", "on_write_failure": "discard", "options": {"path": str(tmp_path / "output.csv")}}},
     }
     if with_depends_on:
         config["depends_on"] = [{"name": "indexer", "settings": "./index.yaml"}]

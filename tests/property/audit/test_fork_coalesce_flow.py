@@ -292,7 +292,7 @@ class TestForkCoalesceFlow:
 
         settings_obj = ElspethSettings(
             source={"plugin": "test", "on_success": "default", "options": {}},
-            sinks={"default": {"plugin": "test"}},
+            sinks={"default": {"plugin": "test", "on_write_failure": "discard"}},
             gates=[gate],
             coalesce=[coalesce],
         )
@@ -387,7 +387,7 @@ class TestForkCoalesceFlow:
 
         settings_obj = ElspethSettings(
             source={"plugin": "test", "on_success": "default", "options": {}},
-            sinks={"default": {"plugin": "test"}},
+            sinks={"default": {"plugin": "test", "on_write_failure": "discard"}},
             gates=[gate],
             coalesce=[coalesce],
         )
@@ -457,7 +457,7 @@ class TestForkCoalesceFlow:
 
         settings_obj = ElspethSettings(
             source={"plugin": "test", "on_success": "default", "options": {}},
-            sinks={"default": {"plugin": "test"}},
+            sinks={"default": {"plugin": "test", "on_write_failure": "discard"}},
             gates=[gate],
             coalesce=[coalesce],
         )
@@ -524,7 +524,7 @@ class TestForkCoalesceEdgeCases:
 
         settings_obj = ElspethSettings(
             source={"plugin": "test", "on_success": "default", "options": {}},
-            sinks={"default": {"plugin": "test"}},
+            sinks={"default": {"plugin": "test", "on_write_failure": "discard"}},
             gates=[gate],
             coalesce=[coalesce],
         )
@@ -585,7 +585,7 @@ class TestForkCoalesceEdgeCases:
 
         settings_obj = ElspethSettings(
             source={"plugin": "test", "on_success": "default", "options": {}},
-            sinks={"default": {"plugin": "test"}},
+            sinks={"default": {"plugin": "test", "on_write_failure": "discard"}},
             gates=[gate],
             coalesce=[coalesce],
         )

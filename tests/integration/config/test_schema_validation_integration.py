@@ -68,6 +68,7 @@ def test_schema_validation_end_to_end(tmp_path: Path, plugin_manager: PluginMana
         sinks={
             "output": SinkSettings(
                 plugin="json",
+                on_write_failure="discard",
                 options={
                     "path": str(tmp_path / "output.json"),
                     "schema": {"mode": "observed"},

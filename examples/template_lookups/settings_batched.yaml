@@ -50,6 +50,7 @@ aggregations:
 sinks:
   output:
     plugin: json
+    on_write_failure: discard
     options:
       path: examples/template_lookups/output/results_batched.json
       schema:

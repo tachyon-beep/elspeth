@@ -50,6 +50,7 @@ source:
 sinks:
   output:
     plugin: csv
+    on_write_failure: discard
     options:
       path: output.csv
 """)
@@ -74,6 +75,7 @@ source:
 sinks:
   output:
     plugin: csv
+    on_write_failure: discard
     options:
       path: output.csv
 """)
@@ -102,6 +104,7 @@ source:
 sinks:
   output:
     plugin: csv
+    on_write_failure: discard
     options:
       path: output.csv
 """)
@@ -137,6 +140,7 @@ source:
 sinks:
   output:
     plugin: csv
+    on_write_failure: discard
     options:
       path: output.csv
 """)

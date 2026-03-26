@@ -43,6 +43,7 @@ gates:
 sinks:
   active:
     plugin: csv
+    on_write_failure: discard
     options:
       path: examples/checkpoint_resume/output/active_customers.csv
       schema:
@@ -54,6 +55,7 @@ sinks:
         - 'status: str'
   other:
     plugin: csv
+    on_write_failure: discard
     options:
       path: examples/checkpoint_resume/output/other_customers.csv
       schema:

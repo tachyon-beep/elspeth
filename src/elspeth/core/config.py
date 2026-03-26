@@ -923,6 +923,25 @@ class SinkSettings(BaseModel):
         default_factory=dict,
         description="Plugin-specific configuration options",
     )
+    on_write_failure: str = Field(
+        ...,  # Required — no default
+        description=(
+            "Per-row write failure handling. Required — pipeline author must decide: "
+            "'discard' to drop with audit record, or a sink name to divert to failsink "
+            "(must be csv, json, or xml plugin)."
+        ),
+    )
+
+    @field_validator("on_write_failure")
+    @classmethod
+    def validate_on_write_failure(cls, v: str) -> str:
+        """Ensure on_write_failure is not empty."""
+        if not v or not v.strip():
+            raise ValueError("on_write_failure must be a sink name or 'discard'")
+        value = v.strip()
+        if value == "discard":
+            return value
+        return _validate_connection_or_sink_name(value, field_label="Sink on_write_failure sink name")
 
 
 class LandscapeExportSettings(BaseModel):

@@ -15,6 +15,7 @@ source:
 sinks:
   output:
     plugin: chroma_sink
+    on_write_failure: discard
     options:
       collection: science-facts-indexed
       mode: persistent

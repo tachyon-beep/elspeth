@@ -60,6 +60,7 @@ def _observed_sink(**kwargs: Any) -> SinkSettings:
     """Minimal sink settings with observed schema."""
     defaults = {
         "plugin": "json",
+        "on_write_failure": "discard",
         "options": {"path": "output.json", "schema": {"mode": "observed"}},
     }
     defaults.update(kwargs)

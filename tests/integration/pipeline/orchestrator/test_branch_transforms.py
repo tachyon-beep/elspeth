@@ -148,7 +148,7 @@ def _build_branch_pipeline(
 
     settings = ElspethSettings(
         source=SourceSettings(plugin="list_source", on_success="gate_in", options={}),
-        sinks={name: SinkSettings(plugin="collect", options={}) for name in sinks},
+        sinks={name: SinkSettings(plugin="collect", on_write_failure="discard", options={}) for name in sinks},
         gates=[gate],
         coalesce=[coalesce],
     )
