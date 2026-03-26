@@ -7,8 +7,9 @@ recording.
 
 from collections.abc import Mapping
 from dataclasses import dataclass
-from types import MappingProxyType
 from typing import TYPE_CHECKING, Any, Literal, NotRequired, TypedDict
+
+from elspeth.contracts.freeze import deep_freeze
 
 if TYPE_CHECKING:
     from elspeth.contracts.batch_checkpoint import BatchCheckpointState
@@ -672,9 +673,7 @@ class GracefulShutdownError(Exception):
         self.rows_failed = rows_failed
         self.rows_quarantined = rows_quarantined
         self.rows_routed = rows_routed
-        self.routed_destinations: Mapping[str, int] = (
-            MappingProxyType(dict(routed_destinations)) if routed_destinations is not None else MappingProxyType({})
-        )
+        self.routed_destinations: Mapping[str, int] = deep_freeze(dict(routed_destinations) if routed_destinations is not None else {})
         super().__init__(
             f"Pipeline interrupted after {rows_processed} rows (run_id={run_id}). Resume with: elspeth resume {run_id} --execute"
         )
@@ -1031,6 +1030,12 @@ class DependencyFailedError(Exception):
     """A pipeline dependency failed to complete successfully."""
 
     def __init__(self, *, dependency_name: str, run_id: str, reason: str) -> None:
+        if not dependency_name:
+            raise ValueError("dependency_name must not be empty")
+        if not run_id:
+            raise ValueError("run_id must not be empty")
+        if not reason:
+            raise ValueError("reason must not be empty")
         self.dependency_name = dependency_name
         self.run_id = run_id
         self.reason = reason
@@ -1048,8 +1053,12 @@ class CommencementGateFailedError(Exception):
         reason: str,
         context_snapshot: Mapping[str, Any],
     ) -> None:
-        from elspeth.contracts.freeze import deep_freeze
-
+        if not gate_name:
+            raise ValueError("gate_name must not be empty")
+        if not condition:
+            raise ValueError("condition must not be empty")
+        if not reason:
+            raise ValueError("reason must not be empty")
         self.gate_name = gate_name
         self.condition = condition
         self.reason = reason
@@ -1061,6 +1070,10 @@ class RetrievalNotReadyError(Exception):
     """A retrieval provider's collection is empty or unreachable."""
 
     def __init__(self, *, collection: str, reason: str) -> None:
+        if not collection:
+            raise ValueError("collection must not be empty")
+        if not reason:
+            raise ValueError("reason must not be empty")
         self.collection = collection
         self.reason = reason
         super().__init__(f"Collection {collection!r} not ready: {reason}")

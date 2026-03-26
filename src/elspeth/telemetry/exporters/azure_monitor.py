@@ -134,8 +134,14 @@ class AzureMonitorExporter:
             )
         self._batch_size = batch_size
 
-        # Validate and extract service_name
-        service_name = config.get("service_name", "elspeth")
+        # Validate and extract service_name (required — distinguishes this
+        # pipeline in Application Insights)
+        if "service_name" not in config:
+            raise TelemetryExporterError(
+                self._name,
+                "Azure Monitor exporter requires 'service_name' in config",
+            )
+        service_name = config["service_name"]
         if not isinstance(service_name, str):
             raise TelemetryExporterError(
                 self._name,

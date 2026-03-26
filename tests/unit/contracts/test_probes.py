@@ -52,6 +52,24 @@ class TestCollectionReadinessResult:
         assert result.reachable is True
         assert result.count == 0
 
+    def test_empty_collection_raises(self) -> None:
+        with pytest.raises(ValueError, match="collection must not be empty"):
+            CollectionReadinessResult(collection="", reachable=True, count=0, message="ok")
+
+    def test_negative_count_raises(self) -> None:
+        with pytest.raises(ValueError, match="count must be non-negative"):
+            CollectionReadinessResult(collection="test", reachable=True, count=-1, message="ok")
+
+    def test_valid_construction(self) -> None:
+        result = CollectionReadinessResult(
+            collection="my-collection",
+            reachable=True,
+            count=0,
+            message="ok",
+        )
+        assert result.collection == "my-collection"
+        assert result.count == 0
+
 
 class TestCollectionProbe:
     """Tests for the CollectionProbe protocol."""

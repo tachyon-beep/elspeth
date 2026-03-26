@@ -7,6 +7,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
+from elspeth.contracts.enums import RunStatus
 from elspeth.contracts.errors import DependencyFailedError
 from elspeth.core.dependency_config import DependencyConfig
 from elspeth.engine.dependency_resolver import _load_depends_on, detect_cycles, resolve_dependencies
@@ -171,17 +172,16 @@ class TestResolveDependencies:
         parent_path = tmp_path / "query.yaml"
 
         mock_result = MagicMock()
-        mock_result.status.name = "COMPLETED"
+        mock_result.status = RunStatus.COMPLETED
         mock_result.run_id = "dep-run-123"
 
-        with (
-            patch("elspeth.engine.dependency_resolver.bootstrap_and_run") as mock_boot,
-            patch("elspeth.engine.dependency_resolver._hash_settings_file", return_value="sha256:abc"),
-        ):
-            mock_boot.return_value = mock_result
+        mock_runner = MagicMock(return_value=mock_result)
+
+        with patch("elspeth.engine.dependency_resolver._hash_settings_file", return_value="sha256:abc"):
             results = resolve_dependencies(
                 depends_on=[dep],
                 parent_settings_path=parent_path,
+                runner=mock_runner,
             )
 
         assert len(results) == 1
@@ -193,28 +193,99 @@ class TestResolveDependencies:
         parent_path = tmp_path / "query.yaml"
 
         mock_result = MagicMock()
-        mock_result.status.name = "FAILED"
+        mock_result.status = RunStatus.FAILED
         mock_result.run_id = "dep-run-fail"
 
-        with patch("elspeth.engine.dependency_resolver.bootstrap_and_run") as mock_boot:
-            mock_boot.return_value = mock_result
-            with pytest.raises(DependencyFailedError, match="index"):
-                resolve_dependencies(
-                    depends_on=[dep],
-                    parent_settings_path=parent_path,
-                )
+        mock_runner = MagicMock(return_value=mock_result)
+
+        with pytest.raises(DependencyFailedError, match="index"):
+            resolve_dependencies(
+                depends_on=[dep],
+                parent_settings_path=parent_path,
+                runner=mock_runner,
+            )
 
     def test_keyboard_interrupt_propagated(self, tmp_path: Path) -> None:
         dep = DependencyConfig(name="index", settings="./index.yaml")
         parent_path = tmp_path / "query.yaml"
 
-        with patch("elspeth.engine.dependency_resolver.bootstrap_and_run") as mock_boot:
-            mock_boot.side_effect = KeyboardInterrupt()
-            with pytest.raises(KeyboardInterrupt):
-                resolve_dependencies(
-                    depends_on=[dep],
-                    parent_settings_path=parent_path,
-                )
+        mock_runner = MagicMock(side_effect=KeyboardInterrupt())
+
+        with pytest.raises(KeyboardInterrupt):
+            resolve_dependencies(
+                depends_on=[dep],
+                parent_settings_path=parent_path,
+                runner=mock_runner,
+            )
+
+    def test_runner_exception_wrapped_in_dependency_failed_error(self, tmp_path: Path) -> None:
+        """Runner exceptions (other than KeyboardInterrupt) are wrapped in DependencyFailedError."""
+        dep = DependencyConfig(name="index", settings="./index.yaml")
+        parent_path = tmp_path / "query.yaml"
+
+        mock_runner = MagicMock(side_effect=RuntimeError("config loading failed"))
+
+        with pytest.raises(DependencyFailedError, match="RuntimeError") as exc_info:
+            resolve_dependencies(
+                depends_on=[dep],
+                parent_settings_path=parent_path,
+                runner=mock_runner,
+            )
+
+        assert exc_info.value.__cause__ is not None
+        assert isinstance(exc_info.value.__cause__, RuntimeError)
+
+    def test_framework_bug_error_propagates_unwrapped(self, tmp_path: Path) -> None:
+        """FrameworkBugError must NOT be wrapped in DependencyFailedError."""
+        from elspeth.contracts.errors import FrameworkBugError
+
+        dep = DependencyConfig(name="index", settings="./index.yaml")
+        parent_path = tmp_path / "query.yaml"
+
+        mock_runner = MagicMock(side_effect=FrameworkBugError("invariant violated"))
+
+        with pytest.raises(FrameworkBugError, match="invariant violated"):
+            resolve_dependencies(
+                depends_on=[dep],
+                parent_settings_path=parent_path,
+                runner=mock_runner,
+            )
+
+    def test_audit_integrity_error_propagates_unwrapped(self, tmp_path: Path) -> None:
+        """AuditIntegrityError must NOT be wrapped in DependencyFailedError."""
+        from elspeth.contracts.errors import AuditIntegrityError
+
+        dep = DependencyConfig(name="index", settings="./index.yaml")
+        parent_path = tmp_path / "query.yaml"
+
+        mock_runner = MagicMock(side_effect=AuditIntegrityError("corrupt audit trail"))
+
+        with pytest.raises(AuditIntegrityError, match="corrupt audit trail"):
+            resolve_dependencies(
+                depends_on=[dep],
+                parent_settings_path=parent_path,
+                runner=mock_runner,
+            )
+
+    def test_type_error_crashes_through(self, tmp_path: Path) -> None:
+        """TypeError from code bug must NOT be wrapped in DependencyFailedError."""
+        dep = DependencyConfig(name="index", settings="./index.yaml")
+        parent_path = tmp_path / "query.yaml"
+
+        mock_runner = MagicMock(side_effect=TypeError("bad argument"))
+
+        with pytest.raises(TypeError, match="bad argument"):
+            resolve_dependencies(depends_on=[dep], parent_settings_path=parent_path, runner=mock_runner)
+
+    def test_attribute_error_crashes_through(self, tmp_path: Path) -> None:
+        """AttributeError from code bug must NOT be wrapped in DependencyFailedError."""
+        dep = DependencyConfig(name="index", settings="./index.yaml")
+        parent_path = tmp_path / "query.yaml"
+
+        mock_runner = MagicMock(side_effect=AttributeError("no such attr"))
+
+        with pytest.raises(AttributeError, match="no such attr"):
+            resolve_dependencies(depends_on=[dep], parent_settings_path=parent_path, runner=mock_runner)
 
     def test_multiple_dependencies_sequential(self, tmp_path: Path) -> None:
         deps = [
@@ -227,20 +298,19 @@ class TestResolveDependencies:
         def track_calls(path: Path) -> MagicMock:
             call_order.append(path.name)
             result = MagicMock()
-            result.status.name = "COMPLETED"
+            result.status = RunStatus.COMPLETED
             result.run_id = f"run-{path.name}"
             return result
 
-        with (
-            patch("elspeth.engine.dependency_resolver.bootstrap_and_run") as mock_boot,
-            patch("elspeth.engine.dependency_resolver._hash_settings_file", return_value="sha256:abc"),
-        ):
-            mock_boot.side_effect = track_calls
-            resolve_dependencies(depends_on=deps, parent_settings_path=parent_path)
+        mock_runner = MagicMock(side_effect=track_calls)
+
+        with patch("elspeth.engine.dependency_resolver._hash_settings_file", return_value="sha256:abc"):
+            resolve_dependencies(depends_on=deps, parent_settings_path=parent_path, runner=mock_runner)
 
         assert call_order == ["first.yaml", "second.yaml"]
 
     def test_empty_depends_on_returns_empty(self, tmp_path: Path) -> None:
         parent_path = tmp_path / "main.yaml"
-        results = resolve_dependencies(depends_on=[], parent_settings_path=parent_path)
+        mock_runner = MagicMock()
+        results = resolve_dependencies(depends_on=[], parent_settings_path=parent_path, runner=mock_runner)
         assert results == []

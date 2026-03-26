@@ -133,15 +133,10 @@ class RAGRetrievalTransform(BaseTransform):
         # Two distinct failure modes: unreachable (infra problem) and empty
         # (operator error). Both crash startup, but the message distinguishes them.
         readiness = self._provider.check_readiness()
-        if not readiness.reachable or readiness.count <= 0:
-            raise RetrievalNotReadyError(
-                collection=readiness.collection,
-                reason=readiness.message,
-            )
 
-        # Record readiness outcome in the Landscape audit trail.
+        # Record first — the readiness result is an auditable fact regardless of outcome.
         # "If it's not recorded, it didn't happen" — an auditor can query
-        # what the collection state was when this pipeline started.
+        # what the collection state was when this pipeline started, including failures.
         if ctx.landscape is not None:
             ctx.landscape.record_readiness_check(
                 run_id=ctx.run_id,
@@ -150,6 +145,13 @@ class RAGRetrievalTransform(BaseTransform):
                 reachable=readiness.reachable,
                 count=readiness.count,
                 message=readiness.message,
+            )
+
+        # Then guard on the result
+        if not readiness.reachable or readiness.count <= 0:
+            raise RetrievalNotReadyError(
+                collection=readiness.collection,
+                reason=readiness.message,
             )
 
     def process(self, row: PipelineRow, ctx: TransformContext) -> TransformResult:

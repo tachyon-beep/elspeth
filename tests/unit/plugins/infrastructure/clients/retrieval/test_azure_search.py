@@ -468,3 +468,13 @@ class TestAzureSearchProviderReadiness:
 
         assert result.reachable is False
         assert result.count == 0
+
+    def test_uncaught_exception_crashes_through(self) -> None:
+        """Programming errors (e.g. TypeError) must NOT be caught by check_readiness."""
+        provider = self._make_provider()
+
+        with (
+            patch("httpx.get", side_effect=TypeError("unexpected type")),
+            pytest.raises(TypeError, match="unexpected type"),
+        ):
+            provider.check_readiness()

@@ -352,7 +352,7 @@ class AzureSearchProvider:
                 count=count,
                 message=(f"Index '{index_name}' has {count} documents" if count > 0 else f"Index '{index_name}' is empty"),
             )
-        except Exception as exc:
+        except (httpx.HTTPError, ConnectionError, OSError) as exc:
             return CollectionReadinessResult(
                 collection=index_name,
                 reachable=False,

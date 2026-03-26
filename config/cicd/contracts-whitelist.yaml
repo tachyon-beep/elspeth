@@ -11,7 +11,6 @@ allowed_external_types:
   - "core/security/web:SSRFSafeRequest"
   # Engine types used in testing factories - test infrastructure wraps these for convenience
   - "engine/orchestrator/types:PipelineConfig"
-  - "engine/orchestrator/types:RunResult"
   - "engine/orchestrator/types:AggregationFlushResult"
   - "engine/orchestrator/types:ExecutionCounters"
   # BufferEntry moved to contracts/engine.py — no longer an external type exception
@@ -417,11 +416,7 @@ allowed_dict_patterns:
   - "src/elspeth/engine/commencement.py:build_preflight_context:dependency_results"
   - "src/elspeth/engine/commencement.py:build_preflight_context:collection_probes"
   - "src/elspeth/engine/commencement.py:build_preflight_context:return"
-  - "src/elspeth/engine/commencement.py:_build_audit_snapshot:context"
   - "src/elspeth/engine/commencement.py:evaluate_commencement_gates:context"
 
   # Serializer thaws MappingProxyType back to dict for Pydantic JSON round-trip
   - "src/elspeth/core/dependency_config.py:CollectionProbeConfig._serialize_provider_config:return"
-
-  # Probe factory — operator-provided config dict (Tier 3 boundary)
-  - "src/elspeth/plugins/infrastructure/probe_factory.py:ChromaCollectionProbe.__init__:config"

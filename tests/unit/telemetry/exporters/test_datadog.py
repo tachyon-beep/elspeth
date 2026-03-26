@@ -26,6 +26,14 @@ from elspeth.contracts.events import (
 from elspeth.telemetry.errors import TelemetryExporterError
 from elspeth.telemetry.exporters.datadog import DatadogExporter
 
+# All required fields for a valid Datadog exporter config
+_VALID_CONFIG: dict[str, object] = {
+    "service_name": "test-service",
+    "env": "test",
+    "agent_host": "localhost",
+    "agent_port": 8126,
+}
+
 
 def create_mock_ddtrace_module() -> tuple[MagicMock, MagicMock, MagicMock]:
     """Create a mock ddtrace module with tracer.
@@ -52,13 +60,19 @@ class TestDatadogExporterConfiguration:
         exporter = DatadogExporter()
         assert exporter.name == "datadog"
 
-    def test_default_configuration(self) -> None:
-        """Default configuration uses sensible defaults without global env mutation."""
+    def test_empty_config_rejects_missing_required_fields(self) -> None:
+        """Empty config crashes — all fields are required."""
+        exporter = DatadogExporter()
+        with pytest.raises(TelemetryExporterError, match="service_name"):
+            exporter.configure({})
+
+    def test_valid_configuration_no_env_mutation(self) -> None:
+        """Valid configuration does not mutate global env vars."""
         mock_module, _mock_tracer, _ = create_mock_ddtrace_module()
 
         with patch.dict(sys.modules, {"ddtrace": mock_module}), patch.dict("os.environ", {}, clear=False):
             exporter = DatadogExporter()
-            exporter.configure({})
+            exporter.configure(dict(_VALID_CONFIG))
 
             # Env vars are set transiently for ddtrace init, then restored
             import os
@@ -74,6 +88,7 @@ class TestDatadogExporterConfiguration:
             exporter = DatadogExporter()
             exporter.configure(
                 {
+                    **_VALID_CONFIG,
                     "agent_host": "datadog-agent.internal",
                     "agent_port": 9126,
                 }
@@ -92,39 +107,67 @@ class TestDatadogExporterConfiguration:
         pre_existing = {"DD_AGENT_HOST": "original-host", "DD_TRACE_AGENT_PORT": "9999"}
         with patch.dict(sys.modules, {"ddtrace": mock_module}), patch.dict("os.environ", pre_existing, clear=False):
             exporter = DatadogExporter()
-            exporter.configure({"agent_host": "new-host", "agent_port": 1234})
+            exporter.configure({**_VALID_CONFIG, "agent_host": "new-host", "agent_port": 1234})
 
             import os
 
             assert os.environ.get("DD_AGENT_HOST") == "original-host"
             assert os.environ.get("DD_TRACE_AGENT_PORT") == "9999"
 
+    def test_missing_service_name_raises(self) -> None:
+        """Missing service_name raises TelemetryExporterError."""
+        exporter = DatadogExporter()
+        config = {k: v for k, v in _VALID_CONFIG.items() if k != "service_name"}
+        with pytest.raises(TelemetryExporterError, match="service_name"):
+            exporter.configure(config)
+
+    def test_missing_env_raises(self) -> None:
+        """Missing env raises TelemetryExporterError."""
+        exporter = DatadogExporter()
+        config = {k: v for k, v in _VALID_CONFIG.items() if k != "env"}
+        with pytest.raises(TelemetryExporterError, match="env"):
+            exporter.configure(config)
+
+    def test_missing_agent_host_raises(self) -> None:
+        """Missing agent_host raises TelemetryExporterError."""
+        exporter = DatadogExporter()
+        config = {k: v for k, v in _VALID_CONFIG.items() if k != "agent_host"}
+        with pytest.raises(TelemetryExporterError, match="agent_host"):
+            exporter.configure(config)
+
+    def test_missing_agent_port_raises(self) -> None:
+        """Missing agent_port raises TelemetryExporterError."""
+        exporter = DatadogExporter()
+        config = {k: v for k, v in _VALID_CONFIG.items() if k != "agent_port"}
+        with pytest.raises(TelemetryExporterError, match="agent_port"):
+            exporter.configure(config)
+
     def test_invalid_port_zero_raises(self) -> None:
         """Port 0 raises TelemetryExporterError."""
         exporter = DatadogExporter()
         with pytest.raises(TelemetryExporterError) as exc_info:
-            exporter.configure({"agent_port": 0})
+            exporter.configure({**_VALID_CONFIG, "agent_port": 0})
         assert "agent_port" in str(exc_info.value)
 
     def test_invalid_port_negative_raises(self) -> None:
         """Negative port raises TelemetryExporterError."""
         exporter = DatadogExporter()
         with pytest.raises(TelemetryExporterError) as exc_info:
-            exporter.configure({"agent_port": -1})
+            exporter.configure({**_VALID_CONFIG, "agent_port": -1})
         assert "agent_port" in str(exc_info.value)
 
     def test_invalid_port_too_high_raises(self) -> None:
         """Port > 65535 raises TelemetryExporterError."""
         exporter = DatadogExporter()
         with pytest.raises(TelemetryExporterError) as exc_info:
-            exporter.configure({"agent_port": 65536})
+            exporter.configure({**_VALID_CONFIG, "agent_port": 65536})
         assert "agent_port" in str(exc_info.value)
 
     def test_invalid_port_string_raises(self) -> None:
         """String port raises TelemetryExporterError."""
         exporter = DatadogExporter()
         with pytest.raises(TelemetryExporterError) as exc_info:
-            exporter.configure({"agent_port": "8126"})
+            exporter.configure({**_VALID_CONFIG, "agent_port": "8126"})
         assert "'agent_port' must be an integer" in str(exc_info.value)
         assert "str" in str(exc_info.value)
 
@@ -132,7 +175,7 @@ class TestDatadogExporterConfiguration:
         """Non-string service_name raises TelemetryExporterError."""
         exporter = DatadogExporter()
         with pytest.raises(TelemetryExporterError) as exc_info:
-            exporter.configure({"service_name": 123})
+            exporter.configure({**_VALID_CONFIG, "service_name": 123})
         assert "'service_name' must be a string" in str(exc_info.value)
         assert "int" in str(exc_info.value)
 
@@ -140,7 +183,7 @@ class TestDatadogExporterConfiguration:
         """Non-string env raises TelemetryExporterError."""
         exporter = DatadogExporter()
         with pytest.raises(TelemetryExporterError) as exc_info:
-            exporter.configure({"env": ["production"]})
+            exporter.configure({**_VALID_CONFIG, "env": ["production"]})
         assert "'env' must be a string" in str(exc_info.value)
         assert "list" in str(exc_info.value)
 
@@ -148,7 +191,7 @@ class TestDatadogExporterConfiguration:
         """Non-string agent_host raises TelemetryExporterError."""
         exporter = DatadogExporter()
         with pytest.raises(TelemetryExporterError) as exc_info:
-            exporter.configure({"agent_host": {"host": "localhost"}})
+            exporter.configure({**_VALID_CONFIG, "agent_host": {"host": "localhost"}})
         assert "'agent_host' must be a string" in str(exc_info.value)
         assert "dict" in str(exc_info.value)
 
@@ -156,7 +199,7 @@ class TestDatadogExporterConfiguration:
         """Non-string version raises TelemetryExporterError."""
         exporter = DatadogExporter()
         with pytest.raises(TelemetryExporterError) as exc_info:
-            exporter.configure({"version": 1.2})
+            exporter.configure({**_VALID_CONFIG, "version": 1.2})
         assert "'version' must be a string" in str(exc_info.value)
         assert "float" in str(exc_info.value)
 
@@ -166,7 +209,7 @@ class TestDatadogExporterConfiguration:
 
         with patch.dict(sys.modules, {"ddtrace": mock_module}):
             exporter = DatadogExporter()
-            exporter.configure({"version": None})
+            exporter.configure({**_VALID_CONFIG, "version": None})
             assert exporter._version is None
 
     def test_service_name_configuration(self) -> None:
@@ -175,7 +218,7 @@ class TestDatadogExporterConfiguration:
 
         with patch.dict(sys.modules, {"ddtrace": mock_module}):
             exporter = DatadogExporter()
-            exporter.configure({"service_name": "my-pipeline"})
+            exporter.configure({**_VALID_CONFIG, "service_name": "my-pipeline"})
             assert exporter._service_name == "my-pipeline"
 
     def test_env_configuration(self) -> None:
@@ -184,7 +227,7 @@ class TestDatadogExporterConfiguration:
 
         with patch.dict(sys.modules, {"ddtrace": mock_module}):
             exporter = DatadogExporter()
-            exporter.configure({"env": "staging"})
+            exporter.configure({**_VALID_CONFIG, "env": "staging"})
             assert exporter._env == "staging"
 
     def test_version_configuration(self) -> None:
@@ -193,7 +236,7 @@ class TestDatadogExporterConfiguration:
 
         with patch.dict(sys.modules, {"ddtrace": mock_module}):
             exporter = DatadogExporter()
-            exporter.configure({"version": "1.2.3"})
+            exporter.configure({**_VALID_CONFIG, "version": "1.2.3"})
             assert exporter._version == "1.2.3"
 
     def test_api_key_is_rejected(self) -> None:
@@ -203,7 +246,7 @@ class TestDatadogExporterConfiguration:
         with patch.dict(sys.modules, {"ddtrace": mock_module}):
             exporter = DatadogExporter()
             with pytest.raises(TelemetryExporterError) as exc_info:
-                exporter.configure({"api_key": "dd-api-key"})
+                exporter.configure({**_VALID_CONFIG, "api_key": "dd-api-key"})
             assert "does not support 'api_key'" in str(exc_info.value)
 
     def test_ddtrace_not_installed_raises(self) -> None:
@@ -213,7 +256,7 @@ class TestDatadogExporterConfiguration:
         # Remove ddtrace from sys.modules if present and make import fail
         with patch.dict(sys.modules, {"ddtrace": None}):
             with pytest.raises(TelemetryExporterError) as exc_info:
-                exporter.configure({})
+                exporter.configure(dict(_VALID_CONFIG))
             assert "ddtrace" in str(exc_info.value).lower()
 
 
@@ -230,12 +273,7 @@ class TestDatadogExporterSpanCreation:
 
         with patch.dict(sys.modules, {"ddtrace": mock_module}):
             exporter = DatadogExporter()
-            exporter.configure(
-                {
-                    "service_name": "test-service",
-                    "env": "test",
-                }
-            )
+            exporter.configure(dict(_VALID_CONFIG))
 
         return exporter, mock_tracer, mock_span
 
@@ -254,7 +292,7 @@ class TestDatadogExporterSpanCreation:
 
         with patch.dict(sys.modules, {"ddtrace": mock_module}):
             exporter = DatadogExporter()
-            exporter.configure({"service_name": "test-service"})
+            exporter.configure(dict(_VALID_CONFIG))
 
         # Create event with a known timestamp in the past
         event_timestamp = datetime(2024, 1, 15, 10, 30, 0, tzinfo=UTC)
@@ -353,7 +391,7 @@ class TestDatadogExporterSpanCreation:
 
         with patch.dict(sys.modules, {"ddtrace": mock_module}):
             exporter = DatadogExporter()
-            exporter.configure({"version": "1.0.0"})
+            exporter.configure({**_VALID_CONFIG, "version": "1.0.0"})
 
         event = RunStarted(
             timestamp=datetime.now(UTC),
@@ -407,7 +445,7 @@ class TestDatadogExporterTagSerialization:
 
         with patch.dict(sys.modules, {"ddtrace": mock_module}):
             exporter = DatadogExporter()
-            exporter.configure({})
+            exporter.configure(dict(_VALID_CONFIG))
 
         return exporter, mock_tracer, mock_span
 
@@ -602,7 +640,7 @@ class TestDatadogExporterLifecycle:
 
         with patch.dict(sys.modules, {"ddtrace": mock_module}):
             exporter = DatadogExporter()
-            exporter.configure({})
+            exporter.configure(dict(_VALID_CONFIG))
 
         return exporter, mock_tracer, mock_span
 

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from typing import Any
 
 from elspeth.contracts.probes import CollectionProbe, CollectionReadinessResult
@@ -11,53 +12,62 @@ from elspeth.core.dependency_config import CollectionProbeConfig
 class ChromaCollectionProbe:
     """Probes a ChromaDB collection for readiness.
 
-    Provider config is Tier 3 data (operator-authored YAML), so .get()
-    with defaults is appropriate for optional fields like mode and port.
+    Provider config is Tier 3 data (operator-authored YAML). Required fields
+    use direct access (KeyError crashes through on missing keys). The operator
+    must explicitly declare mode, and for http mode, host/port/ssl.
     """
 
-    def __init__(self, collection: str, config: dict[str, Any]) -> None:
+    def __init__(self, collection: str, config: Mapping[str, Any]) -> None:
         self.collection_name = collection
         self._config = config
 
     def probe(self) -> CollectionReadinessResult:
         """Check collection existence and document count."""
-        try:
-            import chromadb
+        import chromadb  # ImportError crashes — missing package is a config bug, not "unreachable"
 
-            # Tier 3 boundary — operator-provided config values
-            mode = self._config.get("mode", "persistent")
+        # Tier 3 boundary — operator-provided config values.
+        # All fields use direct access: mode determines deployment topology,
+        # port/ssl are infrastructure addressing. KeyError crashes through
+        # on missing keys — the operator must be explicit.
+        mode = self._config["mode"]
+
+        try:
+            # Client construction CAN fail for infrastructure reasons (server down,
+            # TLS errors, path permissions) — caught below as "unreachable".
+            # Config KeyError from missing required keys crashes through —
+            # KeyError is not in the catch list.
             if mode == "persistent":
                 client = chromadb.PersistentClient(path=self._config["persist_directory"])
             else:
                 client = chromadb.HttpClient(
                     host=self._config["host"],
-                    port=self._config.get("port", 8000),
-                    ssl=self._config.get("ssl", True),
+                    port=self._config["port"],
+                    ssl=self._config["ssl"],
                 )
 
-            try:
-                collection = client.get_collection(self.collection_name)
-                count = collection.count()
-                return CollectionReadinessResult(
-                    collection=self.collection_name,
-                    reachable=True,
-                    count=count,
-                    message=(
-                        f"Collection '{self.collection_name}' has {count} documents"
-                        if count > 0
-                        else f"Collection '{self.collection_name}' is empty"
-                    ),
-                )
-            except chromadb.errors.NotFoundError:
-                # Collection doesn't exist — server reachable, collection absent
-                return CollectionReadinessResult(
-                    collection=self.collection_name,
-                    reachable=True,
-                    count=0,
-                    message=f"Collection '{self.collection_name}' not found",
-                )
-        except Exception as exc:
-            # Import failed, client construction failed, auth error, etc.
+            collection = client.get_collection(self.collection_name)
+            count = collection.count()
+            return CollectionReadinessResult(
+                collection=self.collection_name,
+                reachable=True,
+                count=count,
+                message=(
+                    f"Collection '{self.collection_name}' has {count} documents"
+                    if count > 0
+                    else f"Collection '{self.collection_name}' is empty"
+                ),
+            )
+        except chromadb.errors.NotFoundError:
+            # Collection doesn't exist — server reachable, collection absent
+            return CollectionReadinessResult(
+                collection=self.collection_name,
+                reachable=True,
+                count=0,
+                message=f"Collection '{self.collection_name}' not found",
+            )
+        except (chromadb.errors.ChromaError, ConnectionError, OSError) as exc:
+            # Infrastructure failures: server down, auth errors, TLS failures,
+            # path permission errors, connection refused, etc.
             return CollectionReadinessResult(
                 collection=self.collection_name,
                 reachable=False,

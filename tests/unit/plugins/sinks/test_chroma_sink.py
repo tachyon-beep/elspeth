@@ -343,8 +343,8 @@ class TestChromaSinkAuditIntegrity:
         assert exc_info.value.__cause__ is not None
         assert isinstance(exc_info.value.__cause__, RuntimeError)
 
-    def test_error_path_audit_failure_preserves_original_exception(self) -> None:
-        """If error-path record_call also fails, the original ChromaDB error propagates."""
+    def test_error_path_audit_failure_raises_audit_integrity_error(self) -> None:
+        """If error-path record_call also fails, AuditIntegrityError is raised."""
         import chromadb.errors
 
         mock_collection = MagicMock()
@@ -354,8 +354,12 @@ class TestChromaSinkAuditIntegrity:
         mock_ctx = MagicMock()
         mock_ctx.record_call.side_effect = RuntimeError("audit also broken")
 
-        with pytest.raises(chromadb.errors.ChromaError, match="write failed"):
+        with pytest.raises(AuditIntegrityError, match="audit") as exc_info:
             sink.write([{"doc_id": "d1", "text": "A", "topic": "t"}], mock_ctx)
+
+        # Exception chain preserved — audit_exc is the cause
+        assert exc_info.value.__cause__ is not None
+        assert isinstance(exc_info.value.__cause__, RuntimeError)
 
 
 class TestChromaSinkFlush:

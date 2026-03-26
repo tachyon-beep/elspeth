@@ -65,7 +65,7 @@ class ChromaSinkConfig(DataPluginConfig):
     mode: Literal["persistent", "client"] = Field(description="Connection mode")
     persist_directory: str | None = Field(default=None)
     host: str | None = Field(default=None)
-    port: int = Field(default=8000)
+    port: int = Field(default=8000, ge=1, le=65535)
     ssl: bool = Field(default=True)
     distance_function: Literal["cosine", "l2", "ip"] = Field(default="cosine")
 
@@ -97,10 +97,11 @@ class ChromaSink(BaseSink):
     Content is hashed (canonical JSON of the actual payload sent) before
     write for audit integrity.
 
-    Trust boundary: ChromaDB is our infrastructure (Tier 2 — types are
-    trustworthy from upstream validation). ChromaDB SDK errors are caught
-    as chromadb.errors.ChromaError; other exceptions crash through as
-    plugin bugs per CLAUDE.md plugin ownership rules.
+    Trust boundary: Row data arriving at this sink is Tier 2 (types validated
+    upstream). ChromaDB itself is an external system — SDK errors
+    (chromadb.errors.ChromaError) are caught as infrastructure failures;
+    other exceptions crash through as plugin bugs per CLAUDE.md plugin
+    ownership rules.
     """
 
     name = "chroma_sink"
@@ -256,12 +257,12 @@ class ChromaSink(BaseSink):
                     latency_ms=latency_ms,
                     provider="chromadb",
                 )
-            except Exception:
-                slog.debug(
-                    "audit_record_call_failed_on_error_path",
-                    collection=self._config.collection,
-                    original_error=type(write_exc).__name__,
-                )
+            except Exception as audit_exc:
+                raise AuditIntegrityError(
+                    f"Failed to record failed ChromaDB write to audit trail "
+                    f"(collection={self._config.collection!r}, original_error={type(write_exc).__name__}). "
+                    f"Write failed AND audit record is missing."
+                ) from audit_exc
             raise
 
         # Hash the actual payload sent, not the full batch (critical for skip mode)
@@ -309,7 +310,7 @@ class ChromaSink(BaseSink):
         )
 
     def flush(self) -> None:
-        pass
+        """ChromaDB writes are synchronous in write() — no pending data to flush."""
 
     def on_complete(self, ctx: LifecycleContext) -> None:
         if self._telemetry_emit is not None:

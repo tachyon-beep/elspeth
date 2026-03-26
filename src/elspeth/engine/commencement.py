@@ -23,7 +23,7 @@ def build_preflight_context(
     """Assemble the pre-flight context dict for gate expression evaluation.
 
     Returns a namespace dict with three keys accessible in gate expressions:
-    - ``dependency_runs``: {name: {run_id, duration_ms, indexed_at}} for each dependency
+    - ``dependency_runs``: {name: {run_id, settings_hash, duration_ms, indexed_at}} for each dependency
     - ``collections``: {name: {reachable, count}} for each probed collection
     - ``env``: operator environment variables (Tier 3 — defaults to os.environ)
     """
@@ -34,19 +34,21 @@ def build_preflight_context(
     }
 
 
-def _build_audit_snapshot(context: dict[str, Any]) -> Mapping[str, Any]:
-    """Build a frozen context snapshot for audit, excluding env.
+def _build_audit_snapshot(context: Mapping[str, Any]) -> Mapping[str, Any]:
+    """Build a frozen context snapshot for audit, excluding env values.
 
-    Env is excluded because it may contain secrets (API keys, tokens).
-    The audit snapshot records what the gate saw for traceability,
-    but env values are operator-controlled Tier 3 data that shouldn't
-    be persisted in the audit trail.
+    Env values are excluded because they may contain secrets (API keys, tokens).
+    Env key names are included so auditors know which variables were available
+    during gate evaluation without exposing their values.
     """
-    snapshot = {
-        "dependency_runs": context["dependency_runs"],
-        "collections": context["collections"],
-    }
-    frozen: Mapping[str, Any] = deep_freeze(snapshot)
+    env = context["env"]
+    frozen: Mapping[str, Any] = deep_freeze(
+        {
+            "dependency_runs": context["dependency_runs"],
+            "collections": context["collections"],
+            "env_keys": sorted(env.keys()),
+        }
+    )
     return frozen
 
 
@@ -57,11 +59,11 @@ def evaluate_commencement_gates(
     """Evaluate gates sequentially. Raises CommencementGateFailedError on failure.
 
     Context must be a namespace dict with keys matching _GATE_ALLOWED_NAMES.
-    The env dict is deep-frozen before passing to ExpressionParser (Tier 3 boundary).
+    The entire context dict (including Tier 3 env values) is deep-frozen before evaluation.
     """
     # Deep-freeze entire context for expression evaluation (Tier 3 boundary for env)
     frozen_context = deep_freeze(context)
-    # Build audit snapshot from frozen context — not mutable original (TOCTOU)
+    # Build audit snapshot from the frozen context (same object used for evaluation) to ensure the snapshot reflects exactly what the gate saw.
     audit_snapshot = _build_audit_snapshot(frozen_context)
 
     results: list[CommencementGateResult] = []
@@ -73,6 +75,10 @@ def evaluate_commencement_gates(
             )
             passed = bool(parser.evaluate(frozen_context))
         except CommencementGateFailedError:
+            raise
+        except (TypeError, AttributeError, AssertionError, NameError, KeyError, RecursionError):
+            # Programming errors crash through — these indicate bugs
+            # in the expression parser, not operator expression issues.
             raise
         except Exception as exc:
             raise CommencementGateFailedError(

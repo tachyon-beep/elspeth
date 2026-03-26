@@ -55,11 +55,17 @@ def mock_azure_exporter():
         }
 
 
+_VALID_CONFIG: dict[str, object] = {
+    "connection_string": "InstrumentationKey=test-key",
+    "service_name": "test-service",
+}
+
+
 @pytest.fixture
 def configured_exporter(mock_azure_exporter):
     """Create a configured exporter with mocked Azure SDK."""
     exporter = AzureMonitorExporter()
-    exporter.configure({"connection_string": "InstrumentationKey=test-key"})
+    exporter.configure(dict(_VALID_CONFIG))
     return exporter
 
 
@@ -110,20 +116,20 @@ class TestAzureMonitorExporterConfiguration:
         """Configuration fails if batch_size is not an integer."""
         exporter = AzureMonitorExporter()
         with pytest.raises(TelemetryExporterError) as exc_info:
-            exporter.configure({"connection_string": "test", "batch_size": "100"})
+            exporter.configure({**_VALID_CONFIG, "connection_string": "test", "batch_size": "100"})
         assert "must be an integer" in str(exc_info.value)
 
     def test_configure_validates_batch_size_positive(self) -> None:
         """Configuration fails if batch_size < 1."""
         exporter = AzureMonitorExporter()
         with pytest.raises(TelemetryExporterError) as exc_info:
-            exporter.configure({"connection_string": "test", "batch_size": 0})
+            exporter.configure({**_VALID_CONFIG, "connection_string": "test", "batch_size": 0})
         assert "must be >= 1" in str(exc_info.value)
 
     def test_configure_success_with_valid_config(self, mock_azure_exporter) -> None:
         """Configuration succeeds with valid connection_string."""
         exporter = AzureMonitorExporter()
-        exporter.configure({"connection_string": "InstrumentationKey=test-key"})
+        exporter.configure(dict(_VALID_CONFIG))
 
         mock_azure_exporter["class"].assert_called_once()
         assert exporter._configured is True
@@ -131,7 +137,7 @@ class TestAzureMonitorExporterConfiguration:
     def test_configure_passes_connection_string_to_sdk(self, mock_azure_exporter) -> None:
         """Connection string and tracer_provider are passed to Azure SDK."""
         exporter = AzureMonitorExporter()
-        exporter.configure({"connection_string": "InstrumentationKey=my-key-123"})
+        exporter.configure({**_VALID_CONFIG, "connection_string": "InstrumentationKey=my-key-123"})
 
         # Verify connection_string was passed
         call_kwargs = mock_azure_exporter["class"].call_args.kwargs
@@ -144,21 +150,21 @@ class TestAzureMonitorExporterConfiguration:
         """service_name must be a string if provided."""
         exporter = AzureMonitorExporter()
         with pytest.raises(TelemetryExporterError) as exc_info:
-            exporter.configure({"connection_string": "test", "service_name": 123})
+            exporter.configure({**_VALID_CONFIG, "connection_string": "test", "service_name": 123})
         assert "'service_name' must be a string" in str(exc_info.value)
 
     def test_configure_validates_service_version_type(self, mock_azure_exporter) -> None:
         """service_version must be a string or None if provided."""
         exporter = AzureMonitorExporter()
         with pytest.raises(TelemetryExporterError) as exc_info:
-            exporter.configure({"connection_string": "test", "service_version": 123})
+            exporter.configure({**_VALID_CONFIG, "connection_string": "test", "service_version": 123})
         assert "'service_version' must be a string or null" in str(exc_info.value)
 
     def test_configure_validates_deployment_environment_type(self, mock_azure_exporter) -> None:
         """deployment_environment must be a string or None if provided."""
         exporter = AzureMonitorExporter()
         with pytest.raises(TelemetryExporterError) as exc_info:
-            exporter.configure({"connection_string": "test", "deployment_environment": 123})
+            exporter.configure({**_VALID_CONFIG, "connection_string": "test", "deployment_environment": 123})
         assert "'deployment_environment' must be a string or null" in str(exc_info.value)
 
     def test_configure_with_service_metadata(self, mock_azure_exporter) -> None:
@@ -187,16 +193,11 @@ class TestAzureMonitorExporterConfiguration:
         assert resource_attrs["service.version"] == "2.0.0"
         assert resource_attrs["deployment.environment"] == "staging"
 
-    def test_configure_default_service_name(self, mock_azure_exporter) -> None:
-        """Default service name is 'elspeth' when not specified."""
-        from opentelemetry.sdk.resources import SERVICE_NAME
-
+    def test_missing_service_name_raises(self) -> None:
+        """Missing service_name raises TelemetryExporterError."""
         exporter = AzureMonitorExporter()
-        exporter.configure({"connection_string": "InstrumentationKey=test-key"})
-
-        call_kwargs = mock_azure_exporter["class"].call_args.kwargs
-        tracer_provider = call_kwargs["tracer_provider"]
-        assert tracer_provider.resource.attributes[SERVICE_NAME] == "elspeth"
+        with pytest.raises(TelemetryExporterError, match="service_name"):
+            exporter.configure({"connection_string": "InstrumentationKey=test-key"})
 
 
 class TestAzureMonitorExporterBuffering:
@@ -216,7 +217,7 @@ class TestAzureMonitorExporterBuffering:
         exporter = AzureMonitorExporter()
         exporter.configure(
             {
-                "connection_string": "InstrumentationKey=test-key",
+                **_VALID_CONFIG,
                 "batch_size": 2,
             }
         )

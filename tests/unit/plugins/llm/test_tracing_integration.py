@@ -124,6 +124,7 @@ class TestLangfuseIntegration:
                 "provider": "langfuse",
                 "public_key": "pk-test",
                 "secret_key": "sk-test",
+                "host": "https://langfuse.example.com",
             }
         )
         transform = LLMTransform(config)
@@ -195,6 +196,7 @@ class TestLangfuseIntegration:
                 "provider": "langfuse",
                 "public_key": "pk-test",
                 "secret_key": "sk-test",
+                "host": "https://langfuse.example.com",
             }
         )
         transform = LLMTransform(config)
@@ -240,6 +242,7 @@ class TestGracefulDegradation:
                     "provider": "langfuse",
                     "public_key": "pk-test",
                     "secret_key": "sk-test",
+                    "host": "https://langfuse.example.com",
                 }
             )
             LLMTransform(config)
@@ -269,6 +272,7 @@ class TestGracefulDegradation:
                     "provider": "langfuse",
                     "public_key": "pk-test",
                     "secret_key": "sk-test",
+                    "host": "https://langfuse.example.com",
                 }
             )
             LLMTransform(config)
@@ -439,6 +443,7 @@ class TestTracingProviderValidation:
                 "provider": "langfusee",
                 "public_key": "pk-test",
                 "secret_key": "sk-test",
+                "host": "https://langfuse.example.com",
             }
         )
         with pytest.raises(ValueError, match="Unknown tracing provider"):
@@ -488,6 +493,7 @@ class TestOpenRouterMissingTracingKeys:
         config = _make_openrouter_config(
             tracing={
                 "provider": "langfuse",
+                "host": "https://langfuse.example.com",
                 # Missing public_key and secret_key
             }
         )
@@ -512,6 +518,7 @@ class TestMultiQueryLangfuseTracingViaStrategy:
                 "provider": "langfuse",
                 "public_key": "pk-xxx",
                 "secret_key": "sk-xxx",
+                "host": "https://langfuse.example.com",
             }
         )
         transform = LLMTransform(config)

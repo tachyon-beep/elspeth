@@ -55,9 +55,11 @@ class TestCLIRunCallsResolvePreflight:
             patch("elspeth.cli_helpers.resolve_audit_passphrase", return_value=None),
             patch("elspeth.engine.bootstrap.resolve_preflight") as mock_preflight,
             patch("elspeth.cli._execute_pipeline_with_instances") as mock_execute,
+            patch("elspeth.plugins.infrastructure.probe_factory.build_collection_probes", return_value=[]),
         ):
             mock_config = MagicMock()
             mock_config.depends_on = [MagicMock()]
+            mock_config.collection_probes = [MagicMock()]
             mock_config.gates = []
             mock_config.coalesce = []
             mock_config.landscape.export.enabled = False
@@ -112,9 +114,11 @@ class TestCLIRunCallsResolvePreflight:
             patch("elspeth.cli_helpers.resolve_audit_passphrase", return_value=None),
             patch("elspeth.engine.bootstrap.resolve_preflight", return_value=None) as mock_preflight,
             patch("elspeth.cli._execute_pipeline_with_instances") as mock_execute,
+            patch("elspeth.plugins.infrastructure.probe_factory.build_collection_probes", return_value=[]),
         ):
             mock_config = MagicMock()
             mock_config.depends_on = []
+            mock_config.collection_probes = []
             mock_config.gates = []
             mock_config.coalesce = []
             mock_config.landscape.export.enabled = False
@@ -151,9 +155,11 @@ class TestCLIRunCallsResolvePreflight:
                 side_effect=ValueError("Circular dependency detected: A -> B -> A"),
             ),
             patch("elspeth.cli._execute_pipeline_with_instances") as mock_execute,
+            patch("elspeth.plugins.infrastructure.probe_factory.build_collection_probes", return_value=[]),
         ):
             mock_config = MagicMock()
             mock_config.depends_on = [MagicMock()]
+            mock_config.collection_probes = [MagicMock()]
             mock_config.gates = []
             mock_config.coalesce = []
             mock_config.landscape.export.enabled = False

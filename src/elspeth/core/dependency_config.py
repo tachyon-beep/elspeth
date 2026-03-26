@@ -69,6 +69,18 @@ class DependencyRunResult:
     duration_ms: int
     indexed_at: str  # ISO 8601 timestamp
 
+    def __post_init__(self) -> None:
+        if not self.name:
+            raise ValueError("name must not be empty")
+        if not self.run_id:
+            raise ValueError("run_id must not be empty")
+        if not self.settings_hash:
+            raise ValueError("settings_hash must not be empty")
+        if not self.indexed_at:
+            raise ValueError("indexed_at must not be empty")
+        if self.duration_ms < 0:
+            raise ValueError(f"duration_ms must be non-negative, got {self.duration_ms}")
+
 
 @dataclass(frozen=True, slots=True)
 class CommencementGateResult:
@@ -80,6 +92,10 @@ class CommencementGateResult:
     context_snapshot: Mapping[str, Any]
 
     def __post_init__(self) -> None:
+        if not self.name:
+            raise ValueError("name must not be empty")
+        if not self.condition:
+            raise ValueError("condition must not be empty")
         freeze_fields(self, "context_snapshot")
 
 
@@ -88,9 +104,10 @@ class PreflightResult:
     """Combined pre-flight results for audit recording.
 
     Produced by ``resolve_preflight()`` and carried through the orchestrator
-    to the Landscape recorder, following the same deferred-recording pattern
-    as secret resolutions. Both the CLI path and ``bootstrap_and_run()``
-    (sub-pipeline execution) produce this via the shared ``resolve_preflight()``.
+    to the Landscape recorder. Recording is deferred until orchestrator.run()
+    begins, so the audit trail captures preflight results alongside the run
+    record. Both the CLI path and ``bootstrap_and_run()`` (sub-pipeline
+    execution) produce this via the shared ``resolve_preflight()``.
     """
 
     dependency_runs: tuple[DependencyRunResult, ...]

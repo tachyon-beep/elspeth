@@ -9,10 +9,11 @@ from pathlib import Path
 
 import yaml
 
-from elspeth.contracts.errors import DependencyFailedError
+from elspeth.contracts.enums import RunStatus
+from elspeth.contracts.errors import AuditIntegrityError, DependencyFailedError, FrameworkBugError
+from elspeth.contracts.pipeline_runner import PipelineRunner
 from elspeth.core.canonical import canonical_json
 from elspeth.core.dependency_config import DependencyConfig, DependencyRunResult
-from elspeth.engine.bootstrap import bootstrap_and_run
 
 
 def _load_depends_on(settings_path: Path) -> list[dict[str, str]]:
@@ -26,7 +27,6 @@ def _load_depends_on(settings_path: Path) -> list[dict[str, str]]:
     """
     with settings_path.open() as f:
         data = yaml.safe_load(f) or {}
-    # depends_on is optional in pipeline configs — absence means no dependencies.
     # This is a Tier 3 boundary (raw YAML from operator-authored files).
     deps: list[dict[str, str]] = data.get("depends_on", [])
     if not isinstance(deps, list):
@@ -98,6 +98,7 @@ def resolve_dependencies(
     *,
     depends_on: list[DependencyConfig],
     parent_settings_path: Path,
+    runner: PipelineRunner,
 ) -> list[DependencyRunResult]:
     """Run dependency pipelines sequentially. Raises on failure.
 
@@ -108,10 +109,28 @@ def resolve_dependencies(
         dep_path = (parent_settings_path.parent / dep.settings).resolve()
 
         start_ms = time.monotonic_ns() // 1_000_000
-        run_result = bootstrap_and_run(dep_path)
+        try:
+            run_result = runner(dep_path)
+        except KeyboardInterrupt:
+            raise
+        except (FrameworkBugError, AuditIntegrityError):
+            # Fatal errors propagate unwrapped — the CLI's fatal-error
+            # handler must see these at their original severity, not
+            # downgraded to an ordinary DependencyFailedError.
+            raise
+        except (TypeError, AttributeError, NotImplementedError, AssertionError, NameError, KeyError, RecursionError):
+            # Programming errors crash through — these indicate bugs
+            # in the runner or its callees, not operational failures.
+            raise
+        except Exception as exc:
+            raise DependencyFailedError(
+                dependency_name=dep.name,
+                run_id="pre-run",
+                reason=f"Dependency pipeline failed before generating a run ID: {type(exc).__name__}: {exc}",
+            ) from exc
         duration_ms = (time.monotonic_ns() // 1_000_000) - start_ms
 
-        if run_result.status.name != "COMPLETED":
+        if run_result.status != RunStatus.COMPLETED:
             raise DependencyFailedError(
                 dependency_name=dep.name,
                 run_id=run_result.run_id,

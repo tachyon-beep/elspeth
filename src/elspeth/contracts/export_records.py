@@ -7,11 +7,11 @@ so that mypy can verify field names and types at construction sites.
 
 from __future__ import annotations
 
-from typing import Any, TypedDict
+from typing import Any, Literal, TypedDict
 
 
 class RunExportRecord(TypedDict):
-    record_type: str
+    record_type: Literal["run"]
     run_id: str
     status: str
     started_at: str | None
@@ -23,7 +23,7 @@ class RunExportRecord(TypedDict):
 
 
 class SecretResolutionExportRecord(TypedDict):
-    record_type: str
+    record_type: Literal["secret_resolution"]
     run_id: str
     resolution_id: str
     timestamp: float  # Epoch seconds — not ISO-formatted, stored raw
@@ -36,7 +36,7 @@ class SecretResolutionExportRecord(TypedDict):
 
 
 class NodeExportRecord(TypedDict):
-    record_type: str
+    record_type: Literal["node"]
     run_id: str
     node_id: str
     plugin_name: str
@@ -52,7 +52,7 @@ class NodeExportRecord(TypedDict):
 
 
 class EdgeExportRecord(TypedDict):
-    record_type: str
+    record_type: Literal["edge"]
     run_id: str
     edge_id: str
     from_node_id: str
@@ -62,7 +62,7 @@ class EdgeExportRecord(TypedDict):
 
 
 class OperationExportRecord(TypedDict):
-    record_type: str
+    record_type: Literal["operation"]
     run_id: str
     operation_id: str
     node_id: str
@@ -84,7 +84,7 @@ class CallExportRecord(TypedDict):
     Exactly one of ``state_id`` and ``operation_id`` is non-None per record.
     """
 
-    record_type: str
+    record_type: Literal["call"]
     run_id: str
     call_id: str
     state_id: str | None
@@ -102,7 +102,7 @@ class CallExportRecord(TypedDict):
 
 
 class RowExportRecord(TypedDict):
-    record_type: str
+    record_type: Literal["row"]
     run_id: str
     row_id: str
     row_index: int
@@ -111,7 +111,7 @@ class RowExportRecord(TypedDict):
 
 
 class TokenExportRecord(TypedDict):
-    record_type: str
+    record_type: Literal["token"]
     run_id: str
     token_id: str
     row_id: str
@@ -123,7 +123,7 @@ class TokenExportRecord(TypedDict):
 
 
 class TokenParentExportRecord(TypedDict):
-    record_type: str
+    record_type: Literal["token_parent"]
     run_id: str
     token_id: str
     parent_token_id: str
@@ -131,7 +131,7 @@ class TokenParentExportRecord(TypedDict):
 
 
 class TokenOutcomeExportRecord(TypedDict):
-    record_type: str
+    record_type: Literal["token_outcome"]
     run_id: str
     outcome_id: str
     token_id: str
@@ -151,11 +151,12 @@ class TokenOutcomeExportRecord(TypedDict):
 class NodeStateExportRecord(TypedDict):
     """Processing record for a token passing through a node.
 
-    The four discriminated union variants (Open, Pending, Completed, Failed)
-    all yield this same shape; fields absent from a given variant are ``None``.
+    The underlying NodeState type has four variants (Open, Pending, Completed,
+    Failed). This export record flattens them into a single shape; fields that
+    only apply to certain variants are None for others.
     """
 
-    record_type: str
+    record_type: Literal["node_state"]
     run_id: str
     state_id: str
     token_id: str
@@ -175,7 +176,7 @@ class NodeStateExportRecord(TypedDict):
 
 
 class RoutingEventExportRecord(TypedDict):
-    record_type: str
+    record_type: Literal["routing_event"]
     run_id: str
     event_id: str
     state_id: str
@@ -189,7 +190,7 @@ class RoutingEventExportRecord(TypedDict):
 
 
 class BatchExportRecord(TypedDict):
-    record_type: str
+    record_type: Literal["batch"]
     run_id: str
     batch_id: str
     aggregation_node_id: str
@@ -202,7 +203,7 @@ class BatchExportRecord(TypedDict):
 
 
 class BatchMemberExportRecord(TypedDict):
-    record_type: str
+    record_type: Literal["batch_member"]
     run_id: str
     batch_id: str
     token_id: str
@@ -210,7 +211,7 @@ class BatchMemberExportRecord(TypedDict):
 
 
 class ArtifactExportRecord(TypedDict):
-    record_type: str
+    record_type: Literal["artifact"]
     run_id: str
     artifact_id: str
     sink_node_id: str

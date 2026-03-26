@@ -2,8 +2,8 @@
 
 C4 model documentation for the ELSPETH auditable pipeline framework.
 
-**Last Updated:** 2026-03-01 (synchronized with RC-3.3 branch)
-**Framework Version:** 0.3.3 (RC-3.3)
+**Last Updated:** 2026-03-26 (synchronized with RC-4.1 branch)
+**Framework Version:** 0.4.1 (RC-4.1)
 **Architecture Grade:** A- (Production Ready)
 
 ---
@@ -908,7 +908,7 @@ ELSPETH uses ADRs to document significant architectural choices.
 
 ## Quality Assessment
 
-Based on comprehensive analysis (2026-03-01, RC-3.3), ELSPETH demonstrates exceptional architectural quality.
+Based on comprehensive analysis (2026-03-26, RC-4.1), ELSPETH demonstrates exceptional architectural quality.
 
 ### Quality Scores
 

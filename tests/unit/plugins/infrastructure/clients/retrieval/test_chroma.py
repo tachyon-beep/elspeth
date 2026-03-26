@@ -662,7 +662,7 @@ class TestChromaSearchProviderReadiness:
 
         provider = self._make_provider()
         mock_collection = MagicMock()
-        mock_collection.count.side_effect = Exception("Connection refused")
+        mock_collection.count.side_effect = ConnectionError("Connection refused")
         provider._collection = mock_collection
 
         result = provider.check_readiness()
@@ -670,3 +670,15 @@ class TestChromaSearchProviderReadiness:
         assert result.reachable is False
         assert result.count == 0
         assert "Connection refused" in result.message
+
+    def test_uncaught_exception_crashes_through(self) -> None:
+        """Programming errors (e.g. TypeError) must NOT be caught by check_readiness."""
+        from unittest.mock import MagicMock
+
+        provider = self._make_provider()
+        mock_collection = MagicMock()
+        mock_collection.count.side_effect = TypeError("unexpected type")
+        provider._collection = mock_collection
+
+        with pytest.raises(TypeError, match="unexpected type"):
+            provider.check_readiness()

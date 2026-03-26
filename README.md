@@ -4,7 +4,7 @@
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 [![Python 3.12+](https://img.shields.io/badge/python-3.12+-blue.svg)](https://www.python.org/downloads/)
-![Status: RC-3.3](https://img.shields.io/badge/status-RC--3.3-yellow.svg)
+![Status: RC-4.1](https://img.shields.io/badge/status-RC--4.1-yellow.svg)
 
 Auditable Sense/Decide/Act pipelines for high-stakes data processing. Every decision traceable to its source.
 
@@ -21,9 +21,6 @@ Auditable Sense/Decide/Act pipelines for high-stakes data processing. Every deci
   - [Running Pipelines](#running-pipelines)
   - [Explaining Decisions](#explaining-decisions)
   - [Audit Trail Export](#audit-trail-export)
-- [Chaos Testing](#chaos-testing)
-  - [ChaosLLM](#chaosllm)
-  - [ChaosWeb](#chaosweb)
 - [Landscape MCP Server](#landscape-mcp-server)
 - [Configuration](#configuration)
 - [Docker](#docker)
@@ -41,13 +38,15 @@ Auditable Sense/Decide/Act pipelines for high-stakes data processing. Every deci
 - **Explain Any Decision** - `elspeth explain --run latest --row 42 --database <path/to/audit.db>` launches TUI to explore why any row reached its destination
 - **Declarative DAG Wiring** - Every edge is explicitly named and validated at construction time — no implicit routing
 - **Conditional Routing** - Gates route rows to different sinks based on config-driven expressions (AST-parsed, no eval)
+- **Pipeline Sequencing** - `depends_on` for multi-pipeline workflows with cycle detection, commencement gates for pre-flight go/no-go checks
+- **RAG Retrieval** - ChromaDB and Azure AI Search providers with readiness contracts, score normalization, and audited external calls
+- **Dataverse Integration** - Microsoft Dataverse source and sink via OData v4 with pagination, SSRF validation, and rate limiting
 - **Plugin Architecture** - Extensible sources, transforms, and sinks via pluggy with dynamic discovery
 - **Encryption at Rest** - SQLCipher encryption for the Landscape audit database via passphrase or environment variable
 - **Resilient Execution** - Checkpointing for crash recovery, retry logic with backoff, rate limiting, payload retention policies
 - **Signed Exports** - HMAC-signed audit exports for legal-grade integrity verification with manifest hash chains
 - **LLM Integration** - Azure OpenAI and OpenRouter support with pooled execution, batch processing, and multi-query
 - **Landscape MCP Server** - Read-only MCP analysis server for debugging pipeline failures against the audit database
-- **Chaos Testing** - ChaosLLM (fake LLM) and ChaosWeb (fake web server) for load/stress testing with error injection, latency simulation, and metrics
 
 ---
 
@@ -224,56 +223,6 @@ landscape:
   # Include request/response payloads for LLM/HTTP calls
   dump_to_jsonl_include_payloads: true
 ```
-
----
-
-## Chaos Testing
-
-ELSPETH includes chaos testing servers for load and stress testing without real external calls.
-
-### ChaosLLM
-
-Fake LLM server compatible with OpenAI and Azure OpenAI chat completion endpoints.
-
-- Error injection: rate limits (429), server errors (5xx), timeouts, disconnects, malformed JSON
-- Latency simulation and burst patterns for AIMD testing
-- Response modes: random, template (Jinja2), echo, preset bank (JSONL)
-- SQLite metrics with MCP analysis tools
-
-```bash
-# Start server with stress testing preset
-chaosllm serve --preset=stress_aimd
-
-# Run on custom port with 20% rate limit errors
-chaosllm serve --port=9000 --rate-limit-pct=20
-
-# Analyze metrics
-chaosllm-mcp --database ./chaosllm-metrics.db
-```
-
-See `docs/reference/chaosllm.md` for complete configuration and usage.
-
-### ChaosWeb
-
-Fake web server for testing the `web_scrape` transform with configurable failure modes.
-
-- HTTP error injection: 4xx/5xx codes, timeouts, connection resets, slow responses
-- Content generation: HTML pages with configurable structure and encoding
-- Preset profiles: `gentle`, `realistic`, `silent`, `stress_scraping`, `stress_extreme`
-- Request metrics and failure tracking
-
-```bash
-# Start with realistic failure profile
-chaosweb serve --preset=realistic
-
-# Custom error rate and port
-chaosweb serve --port=9001 --error-rate=30
-
-# Use in pipeline settings
-# source.options.base_url: http://localhost:9001
-```
-
-See `examples/chaosweb/` for a complete pipeline example.
 
 ---
 
@@ -508,7 +457,7 @@ docker run --rm \
   -v $(pwd)/input:/app/input:ro \
   -v $(pwd)/output:/app/output \
   -v $(pwd)/state:/app/state \
-  ghcr.io/johnm-dta/elspeth:v0.3.3 \
+  ghcr.io/johnm-dta/elspeth:v0.4.1 \
   run --settings /app/config/pipeline.yaml --execute
 
 # Health check

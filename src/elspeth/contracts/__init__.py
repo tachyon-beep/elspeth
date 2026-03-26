@@ -220,6 +220,7 @@ from elspeth.contracts.node_state_context import (
     QueryOrderEntry,
 )
 from elspeth.contracts.payload_store import IntegrityError, PayloadNotFoundError, PayloadStore
+from elspeth.contracts.pipeline_runner import PipelineRunner
 from elspeth.contracts.plugin_context import (
     PluginContext,
     TransformErrorToken,
@@ -500,6 +501,7 @@ __all__ = [  # Grouped by category for readability
     "map_schema_mode",
     "normalize_type_for_contract",
     "PipelineRow",
+    "PipelineRunner",
     "SchemaContract",
     # Schema contracts — audit trail records
     "ContractAuditRecord",

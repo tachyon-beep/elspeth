@@ -10,6 +10,7 @@ if TYPE_CHECKING:
     from collections.abc import Mapping, Sequence
 
     from elspeth.contracts import SinkProtocol, SourceProtocol, TransformProtocol
+    from elspeth.contracts.run_result import RunResult
     from elspeth.core.config import AggregationSettings, ElspethSettings, LandscapeSettings, SourceSettings
     from elspeth.core.dag import WiredTransform
     from elspeth.core.landscape.recorder import LandscapeRecorder
@@ -196,6 +197,122 @@ def resolve_run_id(run_id: str, recorder: "LandscapeRecorder") -> str | None:
     if run_id.lower() == "latest":
         return resolve_latest_run_id(recorder)
     return run_id
+
+
+def bootstrap_and_run(settings_path: Path) -> "RunResult":
+    """Load config, instantiate plugins, build graph, run pipeline.
+
+    This is the programmatic equivalent of ``elspeth run --execute``.
+    Used by the dependency resolver to run sub-pipelines.
+
+    Delegates dependency resolution and commencement gates to
+    ``resolve_preflight()`` if configured in the pipeline settings.
+
+    Handles:
+    - Secret resolution (Key Vault secrets injected via ``_load_settings_with_secrets()``)
+    - SQLCipher passphrase resolution for encrypted audit databases
+    - Collection probe construction for commencement gates
+
+    Args:
+        settings_path: Absolute or relative path to pipeline settings YAML.
+
+    Returns:
+        RunResult from orchestrator.run()
+
+    Raises:
+        Any exception from config loading, plugin instantiation, graph validation,
+        or pipeline execution. Caller is responsible for error handling.
+    """
+    from elspeth.cli import _load_settings_with_secrets, _orchestrator_context
+    from elspeth.core.dag import ExecutionGraph
+    from elspeth.core.landscape import LandscapeDB
+    from elspeth.core.payload_store import FilesystemPayloadStore
+    from elspeth.engine.bootstrap import resolve_preflight
+    from elspeth.plugins.infrastructure.probe_factory import build_collection_probes
+
+    # Phase 1: Load and validate config with secret resolution
+    config, secret_resolutions = _load_settings_with_secrets(settings_path)
+
+    # Phase 2: Instantiate plugins
+    plugins = instantiate_plugins_from_config(config)
+
+    # Phase 3: Build and validate execution graph
+    # Exclude export sink from graph (same logic as CLI)
+    execution_sinks = plugins.sinks
+    if config.landscape.export.enabled and config.landscape.export.sink:
+        export_sink_name = config.landscape.export.sink
+        execution_sinks = {k: v for k, v in plugins.sinks.items() if k != export_sink_name}
+
+    graph = ExecutionGraph.from_plugin_instances(
+        source=plugins.source,
+        source_settings=plugins.source_settings,
+        transforms=plugins.transforms,
+        sinks=execution_sinks,
+        aggregations=plugins.aggregations,
+        gates=list(config.gates),
+        coalesce_settings=list(config.coalesce) if config.coalesce else None,
+    )
+    graph.validate()
+
+    probes = build_collection_probes(config.collection_probes) if config.collection_probes else []
+    preflight = resolve_preflight(config, settings_path, probes=probes, runner=bootstrap_and_run)
+
+    # Ensure output directories exist before opening DB/payload store
+    from elspeth.cli import _ensure_output_directories
+
+    dir_errors = _ensure_output_directories(config)
+    if dir_errors:
+        raise ValueError(f"Failed to create output directories: {'; '.join(dir_errors)}")
+
+    # Phase 4: Construct infrastructure and run
+    passphrase = resolve_audit_passphrase(config.landscape)
+    db = LandscapeDB.from_url(
+        config.landscape.url,
+        passphrase=passphrase,
+        dump_to_jsonl=config.landscape.dump_to_jsonl,
+        dump_to_jsonl_path=config.landscape.dump_to_jsonl_path,
+        dump_to_jsonl_fail_on_error=config.landscape.dump_to_jsonl_fail_on_error,
+        dump_to_jsonl_include_payloads=config.landscape.dump_to_jsonl_include_payloads,
+        dump_to_jsonl_payload_base_path=(
+            str(config.payload_store.base_path)
+            if config.landscape.dump_to_jsonl_payload_base_path is None
+            else config.landscape.dump_to_jsonl_payload_base_path
+        ),
+    )
+
+    if config.payload_store.backend != "filesystem":
+        raise ValueError(f"Unsupported payload store backend '{config.payload_store.backend}'. Only 'filesystem' is currently supported.")
+    payload_store = FilesystemPayloadStore(config.payload_store.base_path)
+
+    try:
+        with _orchestrator_context(
+            config,
+            graph,
+            plugins,
+            db=db,
+            output_format="json",
+        ) as ctx:
+            return ctx.orchestrator.run(
+                ctx.pipeline_config,
+                graph=graph,
+                settings=config,
+                payload_store=payload_store,
+                preflight_results=preflight,
+                secret_resolutions=secret_resolutions,
+            )
+    finally:
+        try:
+            db.close()
+        except Exception:
+            # db.close() failure must not mask the original pipeline exception.
+            # The pipeline error is operationally more important than a cleanup
+            # failure. If there is no pipeline error, close() failure propagates.
+            import sys
+
+            if sys.exc_info()[1] is not None:
+                pass  # Original exception takes precedence
+            else:
+                raise
 
 
 def resolve_audit_passphrase(

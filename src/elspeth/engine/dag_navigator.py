@@ -266,7 +266,8 @@ class DAGNavigator:
             # a fork gate (the node that created the fork children). Non-fork
             # continuations (deaggregation, aggregation flush) are already
             # mid-branch and must advance forward via resolve_next_node.
-            is_fork_origin = isinstance(self._node_to_plugin.get(current_node_id), GateSettings)
+            plugin = self.resolve_plugin_for_node(current_node_id)
+            is_fork_origin = isinstance(plugin, GateSettings)
 
             if is_fork_origin:
                 # Fresh fork child — route to the first node in the branch.

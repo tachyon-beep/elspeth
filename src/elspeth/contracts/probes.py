@@ -14,13 +14,20 @@ from typing import Protocol, runtime_checkable
 class CollectionReadinessResult:
     """Result of a collection readiness check.
 
-    All fields are scalars — no __post_init__ freeze guard needed.
+    All fields are scalars — no freeze guard needed. Validates non-empty collection
+    and non-negative count.
     """
 
     collection: str
     reachable: bool
     count: int
     message: str
+
+    def __post_init__(self) -> None:
+        if not self.collection:
+            raise ValueError("collection must not be empty")
+        if self.count < 0:
+            raise ValueError(f"count must be non-negative, got {self.count}")
 
 
 @runtime_checkable

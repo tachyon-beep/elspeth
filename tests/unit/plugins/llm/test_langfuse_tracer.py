@@ -73,6 +73,7 @@ class TestCreateLangfuseTracer:
         config = LangfuseTracingConfig(
             public_key="pk-test",
             secret_key="sk-test",
+            host="https://test.langfuse.com",
         )
 
         real_import = builtins.__import__

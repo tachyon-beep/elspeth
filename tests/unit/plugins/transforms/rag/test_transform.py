@@ -407,18 +407,11 @@ class TestRAGTransformReadinessGuard:
         assert exc_info.value.collection == "my-vectors"
         assert "empty" in exc_info.value.reason.lower()
 
-    def test_count_one_passes(self) -> None:
-        """count=1 is the minimum passing value — boundary test."""
-        mock_provider = self._make_mock_provider(count=1)
-        transform = self._run_on_start_with_mock(mock_provider)
-
-        assert transform._provider is mock_provider
-
-    def test_negative_count_raises(self) -> None:
-        """count=-1 (corrupted response) must not pass the guard."""
+    def test_failed_readiness_still_recorded_in_landscape(self) -> None:
+        """record_readiness_check is called even when the check fails (audit before raise)."""
         from elspeth.contracts.errors import RetrievalNotReadyError
 
-        mock_provider = self._make_mock_provider(count=-1)
+        mock_provider = self._make_mock_provider(count=0, reachable=True, collection="empty-col")
         mock_config_cls = MagicMock(return_value=MagicMock())
         mock_factory = MagicMock(return_value=mock_provider)
 
@@ -433,6 +426,36 @@ class TestRAGTransformReadinessGuard:
             pytest.raises(RetrievalNotReadyError),
         ):
             transform.on_start(lifecycle_ctx)
+
+        # Even though RetrievalNotReadyError was raised, the readiness check
+        # must have been recorded BEFORE the raise — audit gap fix.
+        lifecycle_ctx.landscape.record_readiness_check.assert_called_once_with(
+            run_id="run-1",
+            name="rag_retrieval",
+            collection="empty-col",
+            reachable=True,
+            count=0,
+            message="Collection 'empty-col' is empty",
+        )
+
+    def test_count_one_passes(self) -> None:
+        """count=1 is the minimum passing value — boundary test."""
+        mock_provider = self._make_mock_provider(count=1)
+        transform = self._run_on_start_with_mock(mock_provider)
+
+        assert transform._provider is mock_provider
+
+    def test_negative_count_raises(self) -> None:
+        """count=-1 (corrupted response) is rejected at CollectionReadinessResult construction."""
+        from elspeth.contracts.probes import CollectionReadinessResult
+
+        with pytest.raises(ValueError, match="count must be non-negative"):
+            CollectionReadinessResult(
+                collection="test-index",
+                reachable=True,
+                count=-1,
+                message="corrupted",
+            )
 
 
 def test_plugin_discoverable():

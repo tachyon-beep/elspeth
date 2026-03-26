@@ -502,10 +502,13 @@ def run(
         raise typer.Exit(1) from None
 
     # Resolve dependencies and commencement gates before pipeline execution
+    from elspeth.cli_helpers import bootstrap_and_run
     from elspeth.engine.bootstrap import resolve_preflight
+    from elspeth.plugins.infrastructure.probe_factory import build_collection_probes
 
     try:
-        preflight = resolve_preflight(config, settings_path)
+        probes = build_collection_probes(config.collection_probes) if config.collection_probes else []
+        preflight = resolve_preflight(config, settings_path, probes=probes, runner=bootstrap_and_run)
     except (DependencyFailedError, CommencementGateFailedError, ValueError) as e:
         typer.echo(f"Pre-flight check failed: {e}", err=True)
         raise typer.Exit(1) from None
@@ -518,9 +521,9 @@ def run(
     except Exception as e:
         import traceback
 
-        typer.echo(f"Unexpected error during pre-flight: {e}", err=True)
+        typer.echo(f"\nFATAL — Unexpected pre-flight error ({type(e).__name__}): {e}", err=True)
         typer.echo(traceback.format_exc(), err=True)
-        raise typer.Exit(1) from None
+        raise typer.Exit(4) from e
 
     # Execute pipeline with pre-instantiated plugins
     try:

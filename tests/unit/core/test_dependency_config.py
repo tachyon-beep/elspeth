@@ -151,6 +151,22 @@ class TestDependencyRunResult:
         with pytest.raises(AttributeError):
             result.name = "other"  # type: ignore[misc]
 
+    def test_empty_name_raises(self) -> None:
+        with pytest.raises(ValueError, match="name must not be empty"):
+            DependencyRunResult(name="", run_id="y", settings_hash="z", duration_ms=0, indexed_at="t")
+
+    def test_empty_run_id_raises(self) -> None:
+        with pytest.raises(ValueError, match="run_id must not be empty"):
+            DependencyRunResult(name="x", run_id="", settings_hash="z", duration_ms=0, indexed_at="t")
+
+    def test_empty_settings_hash_raises(self) -> None:
+        with pytest.raises(ValueError, match="settings_hash must not be empty"):
+            DependencyRunResult(name="x", run_id="y", settings_hash="", duration_ms=0, indexed_at="t")
+
+    def test_negative_duration_ms_raises(self) -> None:
+        with pytest.raises(ValueError, match="duration_ms must be non-negative"):
+            DependencyRunResult(name="x", run_id="y", settings_hash="z", duration_ms=-1, indexed_at="t")
+
 
 class TestCommencementGateResult:
     def test_construction(self) -> None:
@@ -175,3 +191,11 @@ class TestCommencementGateResult:
         result = CommencementGateResult(name="x", condition="True", result=True, context_snapshot={})
         with pytest.raises(AttributeError):
             result.name = "other"  # type: ignore[misc]
+
+    def test_empty_name_raises(self) -> None:
+        with pytest.raises(ValueError, match="name must not be empty"):
+            CommencementGateResult(name="", condition="True", result=True, context_snapshot={})
+
+    def test_empty_condition_raises(self) -> None:
+        with pytest.raises(ValueError, match="condition must not be empty"):
+            CommencementGateResult(name="x", condition="", result=True, context_snapshot={})

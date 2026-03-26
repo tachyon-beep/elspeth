@@ -487,6 +487,7 @@ class TestTracerWiring:
                     "provider": "langfuse",
                     "public_key": "pk-test",
                     "secret_key": "sk-test",
+                    "host": "https://langfuse.example.com",
                 },
             )
             transform = LLMTransform(config)
@@ -2451,7 +2452,7 @@ class TestAzureAITracingOnStart:
 
         config = _make_config(
             provider="azure",
-            tracing={"provider": "langfuse", "public_key": "pk", "secret_key": "sk"},
+            tracing={"provider": "langfuse", "public_key": "pk", "secret_key": "sk", "host": "https://langfuse.example.com"},
         )
         # Langfuse client creation will fail (no real server), but we mock the tracer
         with patch("elspeth.plugins.transforms.llm.transform.create_langfuse_tracer"):

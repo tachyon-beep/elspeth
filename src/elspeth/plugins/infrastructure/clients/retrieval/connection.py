@@ -1,6 +1,8 @@
 """Shared ChromaDB connection configuration.
 
-Used by ChromaSearchProviderConfig and ChromaSinkConfig (via validation-by-construction).
+Used by ChromaSearchProviderConfig and ChromaSinkConfig, which validate their
+connection fields by constructing a ChromaConnectionConfig (triggering its
+validators) and discarding the instance.
 """
 
 from __future__ import annotations
@@ -39,7 +41,7 @@ class ChromaConnectionConfig(BaseModel):
         default=None,
         description="ChromaDB server hostname (client mode only)",
     )
-    port: int = Field(default=8000, description="ChromaDB server port")
+    port: int = Field(default=8000, ge=1, le=65535, description="ChromaDB server port")
     ssl: bool = Field(default=True, description="Use HTTPS for client connections")
     distance_function: Literal["cosine", "l2", "ip"] = Field(
         default="cosine",

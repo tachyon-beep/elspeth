@@ -110,6 +110,24 @@ class TestChromaConnectionConfig:
         with pytest.raises(ValidationError):
             config.collection = "other"  # type: ignore[misc]
 
+    def test_rejects_port_zero(self) -> None:
+        with pytest.raises(ValidationError, match="greater than or equal to 1"):
+            ChromaConnectionConfig(
+                collection="test",
+                mode="client",
+                host="localhost",
+                port=0,
+            )
+
+    def test_rejects_port_above_65535(self) -> None:
+        with pytest.raises(ValidationError, match="less than or equal to 65535"):
+            ChromaConnectionConfig(
+                collection="test",
+                mode="client",
+                host="localhost",
+                port=70000,
+            )
+
     def test_rejects_unknown_fields(self) -> None:
         with pytest.raises(ValidationError, match="extra"):
             ChromaConnectionConfig(

@@ -123,9 +123,7 @@ class _ExpressionValidator(ast.NodeVisitor):
 
     def _is_none_constant(self, node: ast.expr) -> bool:
         """Check if node is a None literal (ast.Constant or ast.Name)."""
-        if isinstance(node, ast.Constant) and node.value is None:
-            return True
-        return isinstance(node, ast.Name) and node.id == "None"
+        return (isinstance(node, ast.Constant) and node.value is None) or (isinstance(node, ast.Name) and node.id == "None")
 
     def _is_allowed_derived(self, node: ast.expr) -> bool:
         """Check if node is an allowed name or derived from allowed name access.

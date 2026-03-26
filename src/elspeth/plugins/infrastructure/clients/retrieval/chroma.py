@@ -298,7 +298,7 @@ class ChromaSearchProvider:
                     f"Collection '{collection_name}' has {count} documents" if count > 0 else f"Collection '{collection_name}' is empty"
                 ),
             )
-        except Exception as exc:
+        except (chromadb.errors.ChromaError, ConnectionError, OSError) as exc:
             return CollectionReadinessResult(
                 collection=collection_name,
                 reachable=False,

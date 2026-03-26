@@ -380,11 +380,6 @@ allow_hits:
   reason: httpx.get() method call for Azure Search $count endpoint — false positive from R1 rule matching .get( syntax
   safety: This is the actual HTTP call, not a defensive dict access
   expires: null
-- key: plugins/infrastructure/clients/retrieval/azure_search.py:R4:AzureSearchProvider:check_readiness:fp=fbbd038788321000
-  owner: feature
-  reason: Startup probe must report unreachable index, not crash — any exception from httpx.get is a valid probe result
-  safety: Returns CollectionReadinessResult with reachable=False and exception details; caller raises RetrievalNotReadyError
-  expires: null
 - key: plugins/infrastructure/clients/retrieval/chroma.py:R5:ChromaSearchProvider:search:fp=9c8adbd251d61ac3
   owner: bugfix
   reason: Offensive type guard — ChromaDB is our infrastructure, not external API; non-numeric distance indicates index corruption or SDK bug
@@ -394,11 +389,6 @@ allow_hits:
   owner: bugfix
   reason: Offensive type guard — rejects non-numeric distance types with crash; corrupt ChromaDB index must not produce silent wrong results
   safety: Raises RetrievalError immediately (crash) — not silently skipped
-  expires: null
-- key: plugins/infrastructure/clients/retrieval/chroma.py:R4:ChromaSearchProvider:check_readiness:fp=ed76d5041ad924b0
-  owner: feature
-  reason: Startup probe must report unreachable collection, not crash — any exception from count() is a valid probe result (connection refused, auth failure, etc.)
-  safety: Returns CollectionReadinessResult with reachable=False and exception details; caller (on_start) raises RetrievalNotReadyError
   expires: null
 - key: plugins/sinks/chroma_sink.py:R1:ChromaSink:write:fp=4c8d9f28ef5c70ba
   owner: feature
@@ -410,37 +400,12 @@ allow_hits:
   reason: Collection.get() is the ChromaDB SDK method for retrieving documents by ID, not dict.get() — false positive from R1 rule matching `.get(` syntax
   safety: Returns GetResult dict with "ids" key; subscript access on result["ids"] crashes if ChromaDB SDK contract breaks
   expires: null
-- key: plugins/sinks/chroma_sink.py:R4:ChromaSink:write:fp=3957b6511b2caa92
-  owner: feature
-  reason: Error-path audit recording must not replace the original ChromaError/DuplicateDocumentError — broad except preserves the original exception; failure logged via slog.debug per logging policy
-  safety: Original exception always re-raised; audit failure logged at debug level then swallowed
-  expires: null
 - key: plugins/transforms/web_scrape.py:R5:WebScrapeTransform:__init__:fp=189a33d2bccf7c9b
   owner: feature
   reason: Offensive isinstance assertion — detects Pydantic validator bug if allowed_hosts is not list[str] after validation
   safety: Crashes immediately with descriptive error; better than silently iterating string characters as ip_network calls
   expires: null
-- key: plugins/infrastructure/probe_factory.py:R1:ChromaCollectionProbe:probe:fp=20c34d8879d1fec7
-  owner: feature
-  reason: 'Tier 3 boundary: operator-provided config dict for ChromaDB connection. Mode is optional with sensible default.'
-  safety: Default to persistent mode; explicit config keys (persist_directory, host) crash on missing
-  expires: null
-- key: plugins/infrastructure/probe_factory.py:R1:ChromaCollectionProbe:probe:fp=0d5c91ab622233fa
-  owner: feature
-  reason: 'Tier 3 boundary: operator-provided config dict. Port is optional with standard default.'
-  safety: Default 8000 is ChromaDB standard port
-  expires: null
-- key: plugins/infrastructure/probe_factory.py:R1:ChromaCollectionProbe:probe:fp=ea5f70eee43d9016
-  owner: feature
-  reason: 'Tier 3 boundary: operator-provided config dict. SSL is optional with secure default.'
-  safety: Default True (secure by default)
-  expires: null
-- key: plugins/infrastructure/probe_factory.py:R4:ChromaCollectionProbe:probe:fp=2722c29be863d1fd
-  owner: feature
-  reason: 'Probe must report unreachable server, not crash — import failure, client construction, auth errors are valid probe results'
-  safety: Returns CollectionReadinessResult with reachable=False and exception details in message
-  expires: null
-- key: plugins/infrastructure/probe_factory.py:R1:build_collection_probes:fp=379ee902c8a803d8
+- key: plugins/infrastructure/probe_factory.py:R1:build_collection_probes:fp=d5da3c34b5a7f0d5
   owner: feature
   reason: 'Registry lookup with explicit error on missing provider — dict.get() followed by ValueError raise'
   safety: Raises ValueError with provider name and available providers listed

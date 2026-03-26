@@ -181,7 +181,7 @@ class TestTracingConfigValidation:
         configs = {
             "none": {"provider": "none"},
             "azure_ai": {"provider": "azure_ai", "connection_string": "InstrumentationKey=test"},
-            "langfuse": {"provider": "langfuse", "public_key": "pk-test", "secret_key": "sk-test"},
+            "langfuse": {"provider": "langfuse", "public_key": "pk-test", "secret_key": "sk-test", "host": "https://langfuse.example.com"},
         }
         for provider, config in configs.items():
             result = parse_tracing_config(config)
