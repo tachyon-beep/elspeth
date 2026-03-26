@@ -4,7 +4,7 @@
 
 **Goal:** Wire the failsink infrastructure from Part 1 into the engine: SinkExecutor handles diversions, config validation enforces failsink rules, DAG builder creates DIVERT edges, orchestrator injects `_on_write_failure` and resolves failsink references, and ChromaSink migrates its inline filtering to `_divert_row()`.
 
-**Architecture:** SinkExecutor reads `SinkWriteResult.diversions` after `write()`, writes diverted rows to the failsink (or records discard), and records per-token `DIVERTED` outcomes. The orchestrator resolves failsink references at graph-build time and passes them to the executor. ChromaSink's inline metadata filtering is replaced with `_divert_row()` calls.
+**Architecture:** SinkExecutor reads `SinkWriteResult.diversions` after `write()`, writes diverted rows to the failsink (or records discard), and records per-token `DIVERTED` outcomes. The orchestrator resolves failsink references at write time (inside `_write_pending_to_sinks()`, from `config.sinks`) and passes them to the executor. ChromaSink's inline metadata filtering is replaced with `_divert_row()` calls.
 
 **Tech Stack:** Python, SQLAlchemy Core (audit trail), pytest, Hypothesis (property tests).
 
@@ -355,19 +355,97 @@ Add after `sinks[sink_name] = sink_cls(dict(sink_config.options))`:
         sinks[sink_name]._on_write_failure = sink_config.on_write_failure
 ```
 
-- [ ] **Step 2: Pass failsink to SinkExecutor.write() in _write_pending_to_sinks() and return diversion count**
+- [ ] **Step 2: Thread `edge_map` through the call chain and resolve failsink**
 
-`_write_pending_to_sinks()` currently returns `None`. Change it to return `int` (total diversion count). Add `total_diversions = 0` at the top of the method, accumulate from each `write()` call, and `return total_diversions` at the end.
+**Background (from design spike):** The `edge_map` (`Mapping[tuple[NodeID, str], str]`) already exists in `GraphArtifacts` (built at ~line 1393 of `core.py`). It is available at both call sites of `_flush_and_write_sinks()` via `artifacts.edge_map`. The quarantine system (line 1788) uses the exact same pattern: `edge_map[(node_id, "__quarantine__")]` with a `KeyError → OrchestrationInvariantError` crash guard. Mirror that pattern — do NOT use `.get()`.
 
-`_write_pending_to_sinks()` has exactly ONE call site: inside `_flush_and_write_sinks()` at line 1659. Both `_execute_run` and `_process_resumed_rows` call `_flush_and_write_sinks()`, which delegates to `_write_pending_to_sinks()`. Add the counter increment in `_flush_and_write_sinks()`:
+**2a. Add `edge_map` parameter to `_flush_and_write_sinks()` signature** (line 1636):
 
 ```python
-# In _flush_and_write_sinks(), after _write_pending_to_sinks() returns:
-total_diversions = self._write_pending_to_sinks(...)
+def _flush_and_write_sinks(
+    self,
+    recorder: LandscapeRecorder,
+    run_id: str,
+    loop_ctx: LoopContext,
+    sink_id_map: Mapping[SinkName, NodeID],
+    edge_map: Mapping[tuple[NodeID, str], str],  # NEW — from GraphArtifacts
+    interrupted_by_shutdown: bool,
+    *,
+    on_token_written_factory: _CheckpointFactory | None = None,
+    shutdown_checkpoint_source_id: NodeID | None = None,
+) -> None:
+```
+
+**2b. Update both call sites of `_flush_and_write_sinks()`** to pass `edge_map`:
+
+Call site 1 — `_execute_run()` (~line 2464):
+```python
+self._flush_and_write_sinks(
+    recorder,
+    run_id,
+    loop_ctx,
+    artifacts.sink_id_map,
+    artifacts.edge_map,          # NEW
+    loop_result.interrupted,
+    on_token_written_factory=...,
+    shutdown_checkpoint_source_id=artifacts.source_id,
+)
+```
+
+Call site 2 — `_process_resumed_rows()` (~line 2804):
+```python
+self._flush_and_write_sinks(
+    recorder,
+    run_id,
+    loop_ctx,
+    artifacts.sink_id_map,
+    artifacts.edge_map,          # NEW
+    interrupted,
+    on_token_written_factory=...,
+    shutdown_checkpoint_source_id=artifacts.source_id,
+)
+```
+
+**2c. Add `edge_map` parameter to `_write_pending_to_sinks()` signature** (line 511):
+
+```python
+def _write_pending_to_sinks(
+    self,
+    recorder: LandscapeRecorder,
+    run_id: str,
+    config: PipelineConfig,
+    ctx: PluginContext,
+    pending_tokens: PendingTokenMap,
+    sink_id_map: dict[SinkName, NodeID],
+    edge_map: Mapping[tuple[NodeID, str], str],  # NEW
+    sink_step: int,
+    *,
+    on_token_written_factory: Callable[[str], Callable[[TokenInfo], None]] | None = None,
+) -> int:  # NEW return type — total diversion count
+```
+
+Change the return type from `None` to `int`. Add `total_diversions = 0` at the top of the method body. Return `total_diversions` at the end.
+
+**2d. Update the call from `_flush_and_write_sinks()` to `_write_pending_to_sinks()`** (~line 1659):
+
+```python
+total_diversions = self._write_pending_to_sinks(
+    recorder=recorder,
+    run_id=run_id,
+    config=loop_ctx.config,
+    ctx=loop_ctx.ctx,
+    pending_tokens=loop_ctx.pending_tokens,
+    sink_id_map=dict(sink_id_map),
+    edge_map=edge_map,              # NEW
+    sink_step=loop_ctx.processor.resolve_sink_step(),
+    on_token_written_factory=on_token_written_factory,
+)
 loop_ctx.counters.rows_diverted += total_diversions
 ```
 
 (`counters` is already available in `_flush_and_write_sinks` as `loop_ctx.counters`.)
+
+**2e. Resolve failsink inside `_write_pending_to_sinks()`.**
 
 In `src/elspeth/engine/orchestrator/core.py`, find `_write_pending_to_sinks()` (line 511). Inside the loop that calls `sink_executor.write()` (around line 575), resolve the failsink and its edge_id before calling write:
 
@@ -394,7 +472,7 @@ Replace with:
             # (class-level default None, overwritten by cli_helpers injection)
             failsink: SinkProtocol | None = None
             failsink_config_name: str | None = None
-            failsink_edge: str | None = None
+            failsink_edge_id: str | None = None
             on_write_failure = sink._on_write_failure
             if on_write_failure is not None and on_write_failure != "discard":
                 # Validation already confirmed this sink exists at startup.
@@ -407,11 +485,19 @@ Replace with:
                     )
                 failsink = config.sinks[on_write_failure]
                 failsink_config_name = on_write_failure
-                # Resolve __failsink__ edge_id from the DAG edge_map
-                # edge_map is keyed by (from_node_id, label)
-                # _write_pending_to_sinks needs access to edge_map — pass it as a parameter
+                # Resolve __failsink__ edge_id from the DAG edge_map.
+                # Mirrors the quarantine pattern at line 1788: crash guard, not .get().
+                # edge_map is keyed by (from_node_id, label).
                 failsink_edge_key = (sink_node_id, "__failsink__")
-                failsink_edge = edge_map.get(failsink_edge_key)  # None if DAG has no edge (shouldn't happen)
+                try:
+                    failsink_edge_id = edge_map[failsink_edge_key]
+                except KeyError as exc:
+                    raise OrchestrationInvariantError(
+                        f"Sink '{sink_name}' on_write_failure='{on_write_failure}' "
+                        f"but no __failsink__ DIVERT edge exists in DAG for node '{sink_node_id}'. "
+                        f"This is a DAG construction bug — on_write_failure should have "
+                        f"created a DIVERT edge in from_plugin_instances()."
+                    ) from exc
 
             for pending_outcome, group in groupby(sorted_pairs, key=lambda x: x[1]):
                 group_tokens = [token for token, _ in group]
@@ -424,7 +510,7 @@ Replace with:
                     pending_outcome=pending_outcome,
                     failsink=failsink,
                     failsink_name=failsink_config_name,
-                    failsink_edge_id=failsink_edge,
+                    failsink_edge_id=failsink_edge_id,
                     on_token_written=on_token_written,
                 )
                 total_diversions += diversion_count
@@ -785,6 +871,12 @@ Expected: FAIL — SinkExecutor doesn't handle SinkWriteResult diversions yet.
 
 **The fix:** Defer `begin_node_state` for diverted tokens. Call `sink.write()` first, determine the diversion set, THEN open node_states only for non-diverted tokens at the primary node_id. For diverted tokens, record a routing_event and open node_states at the failsink's node_id.
 
+**Design spike findings (safe to proceed):** In the current code, `begin_node_state()` calls are already OUTSIDE the `with track_operation()` block (lines 151-164 are before the `with` at line 218). The `with` block wraps only the sink I/O (`write()` + `flush()` + `handle.output_data` assignment). `complete_node_state()`, `register_artifact()`, and `record_token_outcome()` are also already OUTSIDE the `with` block (lines 325-375). The only thing that MUST stay inside the `with` block is `handle.output_data = {...}` (line 320), because the context manager's `finally` block reads it on exit via `recorder.complete_operation()`.
+
+Moving `begin_node_state` from *before* the `with` block to *after* it (Phase 2 below) is safe — it doesn't interact with the operation context. The `ctx.state_id = None` clear (line 212, required for the XOR constraint on the `calls` table) must stay before the `with` block — it ensures sink external calls use `operation_id`, not `state_id`, as their parent.
+
+**Simplified error path:** In the current code, if `sink.write()` throws, `_complete_states_failed()` cleans up already-opened states. In the new flow, primary states aren't opened until after `write()` succeeds (Phase 2), so there's nothing to clean up on primary write failure — the error path is simpler. Cleanup complexity shifts to Phase 3 (failsink write), where opened failsink states need `_complete_states_failed()` if the failsink write fails.
+
 In `src/elspeth/engine/executors/sink.py`:
 
 Add imports at top:
@@ -814,20 +906,22 @@ Add `failsink` parameter to `write()` signature (line 94):
 
 **Revised flow (replaces the current begin→write→flush→complete→register→outcomes sequence):**
 
-The key structural change: `track_operation` wraps ONLY `sink.write()` + `sink.flush()` (external I/O). Node_states and outcomes are recorded OUTSIDE the `with` block, after the diversion set is known.
+The key structural change: `track_operation` wraps ONLY `sink.write()` + `sink.flush()` (external I/O). Node_states and outcomes are recorded OUTSIDE the `with` block, after the diversion set is known. This matches the existing code structure — `begin_node_state` and `complete_node_state` are already outside the `with` block in the current implementation.
 
 ```
 PHASE 1 — External I/O (inside track_operation):
   1. Reset primary sink's diversion log
   2. Merge contracts (unchanged)
-  3. Clear ctx.state_id (unchanged — XOR constraint)
+  3. Clear ctx.state_id (unchanged — XOR constraint, must stay BEFORE the with block)
   4. Enter track_operation context
   5. Run centralized input validation (unchanged)
   6. Call sink.write(rows, ctx) → SinkWriteResult
   7. Extract artifact_info = write_result.artifact, diversions = write_result.diversions
   8. Flush primary sink
   9. Set handle.output_data from artifact_info
-  10. Exit track_operation context
+     *** handle.output_data MUST be assigned inside the with block — the context
+         manager's finally reads it on exit via recorder.complete_operation() ***
+  10. Exit track_operation context (finally block runs here, reads handle.output_data)
 
 PHASE 2 — Partition and record primary tokens (outside track_operation):
   11. Build diverted_indices = {d.row_index for d in diversions}
@@ -984,6 +1078,8 @@ Replace with:
                     if value is not None and not isinstance(value, (str, int, float, bool))
                 }
                 if bad_fields:
+                    # _divert_row signature: (row_data: dict, *, row_index: int, reason: str)
+                    # First arg is positional (named row_data in BaseSink), rest are keyword-only.
                     self._divert_row(
                         rows[i],
                         row_index=i,

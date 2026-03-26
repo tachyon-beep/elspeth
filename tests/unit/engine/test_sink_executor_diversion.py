@@ -14,6 +14,7 @@ import pytest
 
 from elspeth.contracts import PendingOutcome, RowOutcome, TokenInfo
 from elspeth.contracts.diversion import RowDiversion, SinkWriteResult
+from elspeth.contracts.enums import NodeStateStatus
 from elspeth.contracts.results import ArtifactDescriptor
 from elspeth.engine.executors.sink import SinkExecutor
 
@@ -305,3 +306,206 @@ class TestFailsinkErrorHandling:
                 failsink_name="csv_failsink",
                 failsink_edge_id="edge-failsink-1",
             )
+
+
+class TestFailsinkCleanup:
+    """Verify node_state recording when failsink write/flush fails."""
+
+    def test_failsink_write_failure_completes_failsink_states_as_failed(self) -> None:
+        """When failsink.write() raises, no failsink node_states are opened.
+
+        Batch: 1 token, 1 diversion. The failsink write crashes before
+        begin_node_state is called for failsink states, so complete_node_state
+        is never called with FAILED for the failsink node.
+        """
+        executor, recorder = _make_executor()
+        diversions = (RowDiversion(row_index=0, reason="bad", row_data={"x": 1}),)
+        sink = _make_sink(diversions=diversions, on_write_failure="csv_failsink")
+        failsink = _make_failsink()
+        failsink.write.side_effect = OSError("disk full")
+        tokens = [_make_token("t0")]
+        with pytest.raises(OSError):
+            executor.write(
+                sink=sink,
+                tokens=tokens,
+                ctx=MagicMock(run_id="run-1"),
+                step_in_pipeline=5,
+                sink_name="primary",
+                pending_outcome=PendingOutcome(RowOutcome.COMPLETED),
+                failsink=failsink,
+                failsink_name="csv_failsink",
+                failsink_edge_id="edge-failsink-1",
+            )
+        # t0 was diverted so no primary states opened; failsink write crashes
+        # before failsink states are opened. No complete_node_state calls at all.
+        complete_calls = recorder.complete_node_state.call_args_list
+        failed_calls = [c for c in complete_calls if c.kwargs.get("status") == NodeStateStatus.FAILED]
+        completed_calls = [c for c in complete_calls if c.kwargs.get("status") == NodeStateStatus.COMPLETED]
+        assert len(failed_calls) == 0
+        assert len(completed_calls) == 0
+        # No begin_node_state calls for failsink because write crashed first
+        begin_calls = recorder.begin_node_state.call_args_list
+        failsink_begins = [c for c in begin_calls if c.kwargs.get("node_id") == failsink.node_id]
+        assert len(failsink_begins) == 0
+
+    def test_failsink_failure_does_not_affect_primary_states(self) -> None:
+        """Primary COMPLETED states remain intact when failsink fails.
+
+        Batch: 2 tokens, 1 diversion at index 1.
+        Expect: t0 COMPLETED at primary, t1 gets no failsink state (write crashes).
+        """
+        executor, recorder = _make_executor()
+        diversions = (RowDiversion(row_index=1, reason="bad", row_data={"x": 1}),)
+        sink = _make_sink(diversions=diversions, on_write_failure="csv_failsink")
+        failsink = _make_failsink()
+        failsink.write.side_effect = OSError("disk full")
+        tokens = [_make_token("t0"), _make_token("t1")]
+        with pytest.raises(OSError):
+            executor.write(
+                sink=sink,
+                tokens=tokens,
+                ctx=MagicMock(run_id="run-1"),
+                step_in_pipeline=5,
+                sink_name="primary",
+                pending_outcome=PendingOutcome(RowOutcome.COMPLETED),
+                failsink=failsink,
+                failsink_name="csv_failsink",
+                failsink_edge_id="edge-failsink-1",
+            )
+        complete_calls = recorder.complete_node_state.call_args_list
+        # t0: COMPLETED at primary node_id (Phase 2 completed before failsink)
+        completed_calls = [c for c in complete_calls if c.kwargs.get("status") == NodeStateStatus.COMPLETED]
+        assert len(completed_calls) == 1
+        # No failsink states opened (write crashed before begin_node_state)
+        failed_calls = [c for c in complete_calls if c.kwargs.get("status") == NodeStateStatus.FAILED]
+        assert len(failed_calls) == 0
+        # Verify node_id isolation: primary states at primary node, no failsink states
+        begin_calls = recorder.begin_node_state.call_args_list
+        primary_begins = [c for c in begin_calls if c.kwargs.get("node_id") == sink.node_id]
+        failsink_begins = [c for c in begin_calls if c.kwargs.get("node_id") == failsink.node_id]
+        assert len(primary_begins) == 1  # t0 at primary
+        assert len(failsink_begins) == 0  # t1 never reached failsink states
+
+    def test_failsink_flush_failure_crashes(self) -> None:
+        """If failsink.flush() raises, crash — it's the last resort."""
+        executor, _recorder = _make_executor()
+        diversions = (RowDiversion(row_index=0, reason="bad", row_data={"x": 1}),)
+        sink = _make_sink(diversions=diversions, on_write_failure="csv_failsink")
+        failsink = _make_failsink()
+        failsink.flush.side_effect = OSError("disk full")
+        tokens = [_make_token("t0")]
+        with pytest.raises(OSError, match="disk full"):
+            executor.write(
+                sink=sink,
+                tokens=tokens,
+                ctx=MagicMock(run_id="run-1"),
+                step_in_pipeline=5,
+                sink_name="primary",
+                pending_outcome=PendingOutcome(RowOutcome.COMPLETED),
+                failsink=failsink,
+                failsink_name="csv_failsink",
+                failsink_edge_id="edge-failsink-1",
+            )
+
+
+class TestNonContiguousDiversions:
+    """Verify correct partitioning when diverted rows are non-contiguous."""
+
+    def test_non_contiguous_diversions(self) -> None:
+        """Rows 0 and 2 diverted, row 1 primary. Outcomes correctly partitioned.
+
+        Uses token_id keying, not call ordering -- the executor may process
+        primary tokens before diverted tokens.
+        """
+        executor, recorder = _make_executor()
+        diversions = (
+            RowDiversion(row_index=0, reason="bad", row_data={"x": 1}),
+            RowDiversion(row_index=2, reason="bad", row_data={"x": 3}),
+        )
+        sink = _make_sink(diversions=diversions, on_write_failure="discard")
+        tokens = [_make_token("t0"), _make_token("t1"), _make_token("t2")]
+        executor.write(
+            sink=sink,
+            tokens=tokens,
+            ctx=MagicMock(run_id="run-1"),
+            step_in_pipeline=5,
+            sink_name="primary",
+            pending_outcome=PendingOutcome(RowOutcome.COMPLETED),
+        )
+        outcome_calls = recorder.record_token_outcome.call_args_list
+        outcomes_by_token = {c.kwargs["token_id"]: c.kwargs["outcome"] for c in outcome_calls}
+        assert outcomes_by_token["t0"] == RowOutcome.DIVERTED
+        assert outcomes_by_token["t1"] == RowOutcome.COMPLETED
+        assert outcomes_by_token["t2"] == RowOutcome.DIVERTED
+
+
+class TestEmptyBatch:
+    """Verify behavior when no tokens are provided."""
+
+    def test_empty_batch_with_failsink_configured(self) -> None:
+        """Empty token list with failsink configured -- no-op, no crash."""
+        executor, recorder = _make_executor()
+        sink = _make_sink(on_write_failure="csv_failsink")
+        failsink = _make_failsink()
+        result = executor.write(
+            sink=sink,
+            tokens=[],
+            ctx=MagicMock(run_id="run-1"),
+            step_in_pipeline=5,
+            sink_name="primary",
+            pending_outcome=PendingOutcome(RowOutcome.COMPLETED),
+            failsink=failsink,
+            failsink_name="csv_failsink",
+            failsink_edge_id="edge-failsink-1",
+        )
+        assert result == (None, 0)
+        failsink.write.assert_not_called()
+        recorder.record_token_outcome.assert_not_called()
+
+
+class TestOnTokenWrittenWithDiversions:
+    """Verify on_token_written callback is NOT called for diverted tokens."""
+
+    def test_on_token_written_not_called_for_diverted_discard_mode(self) -> None:
+        """on_token_written must not fire for diverted tokens (discard mode)."""
+        executor, _recorder = _make_executor()
+        diversions = (RowDiversion(row_index=1, reason="bad", row_data={"x": 1}),)
+        sink = _make_sink(diversions=diversions, on_write_failure="discard")
+        tokens = [_make_token("t0"), _make_token("t1")]
+        callback = MagicMock()
+        executor.write(
+            sink=sink,
+            tokens=tokens,
+            ctx=MagicMock(run_id="run-1"),
+            step_in_pipeline=5,
+            sink_name="primary",
+            pending_outcome=PendingOutcome(RowOutcome.COMPLETED),
+            on_token_written=callback,
+        )
+        # callback called once for t0 (primary), NOT for t1 (diverted)
+        assert callback.call_count == 1
+        assert callback.call_args[0][0].token_id == "t0"
+
+    def test_on_token_written_not_called_for_diverted_failsink_mode(self) -> None:
+        """on_token_written must not fire for diverted tokens (failsink mode)."""
+        executor, _recorder = _make_executor()
+        diversions = (RowDiversion(row_index=1, reason="bad", row_data={"x": 1}),)
+        sink = _make_sink(diversions=diversions, on_write_failure="csv_failsink")
+        failsink = _make_failsink()
+        tokens = [_make_token("t0"), _make_token("t1")]
+        callback = MagicMock()
+        executor.write(
+            sink=sink,
+            tokens=tokens,
+            ctx=MagicMock(run_id="run-1"),
+            step_in_pipeline=5,
+            sink_name="primary",
+            pending_outcome=PendingOutcome(RowOutcome.COMPLETED),
+            failsink=failsink,
+            failsink_name="csv_failsink",
+            failsink_edge_id="edge-failsink-1",
+            on_token_written=callback,
+        )
+        # callback called once for t0 (primary), NOT for t1 (diverted to failsink)
+        assert callback.call_count == 1
+        assert callback.call_args[0][0].token_id == "t0"

@@ -390,17 +390,17 @@ allow_hits:
   reason: Offensive type guard — rejects non-numeric distance types with crash; corrupt ChromaDB index must not produce silent wrong results
   safety: Raises RetrievalError immediately (crash) — not silently skipped
   expires: null
-- key: plugins/sinks/chroma_sink.py:R1:ChromaSink:write:fp=973792325f4c4b18
+- key: plugins/sinks/chroma_sink.py:R1:ChromaSink:write:fp=d1779337faf12320
   owner: feature
   reason: Collection.get() is the ChromaDB SDK method for retrieving documents by ID, not dict.get() — false positive from R1 rule matching `.get(` syntax
   safety: Returns GetResult dict with "ids" key; subscript access on result["ids"] crashes if ChromaDB SDK contract breaks
   expires: null
-- key: plugins/sinks/chroma_sink.py:R1:ChromaSink:write:fp=531894301354f657
+- key: plugins/sinks/chroma_sink.py:R1:ChromaSink:write:fp=e6eb1dc6525d9e5b
   owner: feature
   reason: Collection.get() is the ChromaDB SDK method for retrieving documents by ID, not dict.get() — false positive from R1 rule matching `.get(` syntax
   safety: Returns GetResult dict with "ids" key; subscript access on result["ids"] crashes if ChromaDB SDK contract breaks
   expires: null
-- key: plugins/sinks/chroma_sink.py:R5:ChromaSink:write:fp=426aff0f4512b0d3
+- key: plugins/sinks/chroma_sink.py:R5:ChromaSink:write:fp=d0ba09d93d53663d
   owner: feature
   reason: Tier 2→external trust boundary — validates metadata value types before sending to ChromaDB; isinstance check filters rows with non-scalar metadata (dict, list, datetime) so they go to audit trail instead of crashing the batch
   safety: Invalid rows filtered and recorded in audit response_data with per-row detail; valid rows written normally; no silent data loss

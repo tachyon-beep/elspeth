@@ -189,9 +189,8 @@ class ChromaSink(BaseSink):
 
         # Trust boundary: validate metadata value types before sending to ChromaDB.
         # ChromaDB accepts str|int|float|bool|None — anything else (dict, list,
-        # datetime) is a per-row data problem, not a plugin bug. Filter bad rows
-        # and record rejections in the audit trail (like skip mode for duplicates).
-        rejected_metadata: list[dict[str, Any]] = []
+        # datetime) is a per-row data problem, not a plugin bug. Divert bad rows
+        # via _divert_row() for failsink handling.
         if metadatas is not None:
             valid_indices: list[int] = []
             for i, meta in enumerate(metadatas):
@@ -201,28 +200,25 @@ class ChromaSink(BaseSink):
                     if value is not None and not isinstance(value, (str, int, float, bool))
                 }
                 if bad_fields:
-                    rejected_metadata.append(
-                        {
-                            "row_index": i,
-                            "document_id": ids[i],
-                            "invalid_fields": bad_fields,
-                        }
+                    self._divert_row(
+                        rows[i],
+                        row_index=i,
+                        reason=f"Invalid ChromaDB metadata types: {bad_fields}",
                     )
                 else:
                     valid_indices.append(i)
 
-            if rejected_metadata and valid_indices:
-                # Partial rejection — filter to valid rows only
-                ids = [ids[i] for i in valid_indices]
-                documents = [documents[i] for i in valid_indices]
-                metadatas = [metadatas[i] for i in valid_indices]
-            elif rejected_metadata:
-                # ALL rows rejected — nothing to write
-                ids, documents, metadatas = [], [], None
+            if len(valid_indices) < len(metadatas):
+                if valid_indices:
+                    # Partial rejection — filter to valid rows only
+                    ids = [ids[i] for i in valid_indices]
+                    documents = [documents[i] for i in valid_indices]
+                    metadatas = [metadatas[i] for i in valid_indices]
+                else:
+                    # ALL rows rejected — nothing to write
+                    ids, documents, metadatas = [], [], None
 
-        rows_rejected_metadata = len(rejected_metadata)
-
-        # Handle all-rejected case: record rejection, return zero-write artifact
+        # Handle all-rejected case: nothing to write, return zero-write artifact
         if not ids:
             content_hash, payload_size = self._compute_payload_hash([], [], None)
             try:
@@ -237,16 +233,13 @@ class ChromaSink(BaseSink):
                     },
                     response_data={
                         "rows_written": 0,
-                        "rows_rejected_metadata": rows_rejected_metadata,
-                        "rejected_metadata_detail": rejected_metadata,
                     },
                     latency_ms=0.0,
                     provider="chromadb",
                 )
             except Exception as exc:
                 raise AuditIntegrityError(
-                    f"Failed to record metadata-rejected ChromaDB write to audit trail "
-                    f"(collection={self._config.collection!r}, rejected={rows_rejected_metadata})."
+                    f"Failed to record metadata-rejected ChromaDB write to audit trail (collection={self._config.collection!r})."
                 ) from exc
             return SinkWriteResult(
                 artifact=ArtifactDescriptor.for_database(
@@ -255,7 +248,8 @@ class ChromaSink(BaseSink):
                     content_hash=content_hash,
                     payload_size=payload_size,
                     row_count=0,
-                )
+                ),
+                diversions=self._get_diversions(),
             )
 
         # These will be updated for skip/error mode to reflect actual payload sent
@@ -342,14 +336,13 @@ class ChromaSink(BaseSink):
         # Hash the actual payload sent, not the full batch (critical for skip mode)
         content_hash, payload_size = self._compute_payload_hash(write_ids, write_documents, write_metadatas)
 
+        diversions = self._get_diversions()
+
         try:
             response_data: dict[str, Any] = {"rows_written": rows_written}
             if rows_skipped > 0:
                 response_data["rows_skipped"] = rows_skipped
                 response_data["skipped_ids"] = skipped_ids
-            if rows_rejected_metadata > 0:
-                response_data["rows_rejected_metadata"] = rows_rejected_metadata
-                response_data["rejected_metadata_detail"] = rejected_metadata
 
             request_data: dict[str, Any] = {
                 "operation": self._config.on_duplicate.upper(),
@@ -357,7 +350,7 @@ class ChromaSink(BaseSink):
                 "row_count": rows_written,
                 "document_ids": write_ids,
             }
-            if rows_skipped > 0 or rows_rejected_metadata > 0:
+            if rows_skipped > 0 or diversions:
                 request_data["batch_size"] = len(rows)
 
             ctx.record_call(
@@ -385,7 +378,8 @@ class ChromaSink(BaseSink):
                 content_hash=content_hash,
                 payload_size=payload_size,
                 row_count=rows_written,
-            )
+            ),
+            diversions=diversions,
         )
 
     def flush(self) -> None:

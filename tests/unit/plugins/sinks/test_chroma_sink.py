@@ -420,10 +420,11 @@ class TestChromaSinkMetadataTypeValidation:
 
         mock_collection.upsert.assert_called_once()
 
-    def test_invalid_type_filtered_and_audit_recorded(self) -> None:
-        """Rows with non-scalar metadata are filtered out, not sent to ChromaDB."""
+    def test_invalid_type_filtered_and_diverted(self) -> None:
+        """Rows with non-scalar metadata are diverted, not sent to ChromaDB."""
         mock_collection = MagicMock()
         sink = _make_sink_with_collection(mock_collection)
+        sink._on_write_failure = "csv_failsink"
 
         mock_ctx = MagicMock()
         rows = [
@@ -438,20 +439,17 @@ class TestChromaSinkMetadataTypeValidation:
         assert call_kwargs["ids"] == ["d1", "d3"]
         assert call_kwargs["documents"] == ["good", "good"]
 
-        # Audit trail records the rejection
-        audit_kwargs = mock_ctx.record_call.call_args.kwargs
-        response = audit_kwargs["response_data"]
-        assert response["rows_written"] == 2
-        assert response["rows_rejected_metadata"] == 1
-        assert response["rejected_metadata_detail"][0]["document_id"] == "d2"
-        assert "topic" in response["rejected_metadata_detail"][0]["invalid_fields"]
-
-        assert result is not None
+        # Diversion records the rejection
+        assert len(result.diversions) == 1
+        assert result.diversions[0].row_index == 1
+        assert "topic" in result.diversions[0].reason
+        assert result.diversions[0].row_data["doc_id"] == "d2"
 
     def test_all_rows_rejected_returns_zero_write(self) -> None:
-        """When ALL rows have bad metadata, return zero-write artifact."""
+        """When ALL rows have bad metadata, return zero-write artifact with diversions."""
         mock_collection = MagicMock()
         sink = _make_sink_with_collection(mock_collection)
+        sink._on_write_failure = "csv_failsink"
 
         mock_ctx = MagicMock()
         rows = [
@@ -464,11 +462,10 @@ class TestChromaSinkMetadataTypeValidation:
         mock_collection.upsert.assert_not_called()
         mock_collection.add.assert_not_called()
 
-        # Audit trail records all rejections
-        audit_kwargs = mock_ctx.record_call.call_args.kwargs
-        response = audit_kwargs["response_data"]
-        assert response["rows_written"] == 0
-        assert response["rows_rejected_metadata"] == 2
+        # Diversions capture all rejections
+        assert len(result.diversions) == 2
+        assert result.diversions[0].row_index == 0
+        assert result.diversions[1].row_index == 1
 
         assert result.artifact.metadata["row_count"] == 0
 
@@ -481,19 +478,19 @@ class TestChromaSinkMetadataTypeValidation:
         ],
         ids=["dict", "list", "tuple"],
     )
-    def test_rejection_detail_includes_type_name(self, bad_value: Any, expected_type_name: str) -> None:
-        """Rejection detail records the actual type name for diagnosis."""
+    def test_diversion_reason_includes_type_name(self, bad_value: Any, expected_type_name: str) -> None:
+        """Diversion reason records the actual type name for diagnosis."""
         mock_collection = MagicMock()
         sink = _make_sink_with_collection(mock_collection)
+        sink._on_write_failure = "csv_failsink"
 
         mock_ctx = MagicMock()
         rows = [{"doc_id": "d1", "text": "hi", "topic": bad_value}]
-        sink.write(rows, mock_ctx)
+        result = sink.write(rows, mock_ctx)
 
-        audit_kwargs = mock_ctx.record_call.call_args.kwargs
-        detail = audit_kwargs["response_data"]["rejected_metadata_detail"][0]
-        assert detail["invalid_fields"]["topic"] == expected_type_name
-        assert detail["document_id"] == "d1"
+        assert len(result.diversions) == 1
+        assert expected_type_name in result.diversions[0].reason
+        assert "topic" in result.diversions[0].reason
 
     def test_no_metadata_fields_skips_validation(self) -> None:
         """When metadata_fields is empty, no validation needed (metadatas=None)."""
@@ -509,3 +506,74 @@ class TestChromaSinkMetadataTypeValidation:
         sink.write(rows, mock_ctx)
 
         mock_collection.upsert.assert_called_once()
+
+
+class TestChromaSinkDivertRow:
+    """Tests for _divert_row() integration with metadata validation."""
+
+    def test_invalid_metadata_diverted(self) -> None:
+        """Rows with non-primitive metadata types are diverted via _divert_row()."""
+        mock_collection = MagicMock()
+        sink = _make_sink_with_collection(mock_collection)
+        sink._on_write_failure = "csv_failsink"
+
+        mock_ctx = MagicMock()
+        rows = [
+            {"doc_id": "d1", "text": "good", "topic": "science"},
+            {"doc_id": "d2", "text": "bad", "topic": {"nested": "dict"}},
+            {"doc_id": "d3", "text": "also bad", "topic": [1, 2, 3]},
+        ]
+        result = sink.write(rows, mock_ctx)
+
+        # Only the valid row is written
+        call_kwargs = mock_collection.upsert.call_args.kwargs
+        assert call_kwargs["ids"] == ["d1"]
+
+        # Two rows diverted
+        assert len(result.diversions) == 2
+        assert result.diversions[0].row_index == 1
+        assert result.diversions[0].row_data["doc_id"] == "d2"
+        assert "Invalid ChromaDB metadata types" in result.diversions[0].reason
+        assert result.diversions[1].row_index == 2
+        assert result.diversions[1].row_data["doc_id"] == "d3"
+
+    def test_all_valid_no_diversions(self) -> None:
+        """When all rows have valid metadata, no diversions are recorded."""
+        mock_collection = MagicMock()
+        sink = _make_sink_with_collection(mock_collection)
+        sink._on_write_failure = "csv_failsink"
+
+        mock_ctx = MagicMock()
+        rows = [
+            {"doc_id": "d1", "text": "hello", "topic": "greeting"},
+            {"doc_id": "d2", "text": "goodbye", "topic": "farewell"},
+        ]
+        result = sink.write(rows, mock_ctx)
+
+        assert len(result.diversions) == 0
+        mock_collection.upsert.assert_called_once()
+
+    def test_all_invalid_all_diverted(self) -> None:
+        """When all rows have bad metadata, all are diverted and nothing written."""
+        mock_collection = MagicMock()
+        sink = _make_sink_with_collection(mock_collection)
+        sink._on_write_failure = "csv_failsink"
+
+        mock_ctx = MagicMock()
+        rows = [
+            {"doc_id": "d1", "text": "bad1", "topic": {"nested": True}},
+            {"doc_id": "d2", "text": "bad2", "topic": [1, 2]},
+            {"doc_id": "d3", "text": "bad3", "topic": (1, 2)},
+        ]
+        result = sink.write(rows, mock_ctx)
+
+        # Nothing written to ChromaDB
+        mock_collection.upsert.assert_not_called()
+        mock_collection.add.assert_not_called()
+
+        # All rows diverted
+        assert len(result.diversions) == 3
+        assert result.diversions[0].row_index == 0
+        assert result.diversions[1].row_index == 1
+        assert result.diversions[2].row_index == 2
+        assert result.artifact.metadata["row_count"] == 0
