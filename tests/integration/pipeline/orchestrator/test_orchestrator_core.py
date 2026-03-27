@@ -519,6 +519,8 @@ class TestOrchestratorAcceptsGraph:
         mock_sink.name = "csv"
         mock_sink.determinism = Determinism.IO_WRITE
         mock_sink.plugin_version = "1.0.0"
+        mock_sink._on_write_failure = "discard"
+        mock_sink._reset_diversion_log = MagicMock()
 
         sink_node_id_setter = PropertyMock()
         type(mock_sink).node_id = sink_node_id_setter

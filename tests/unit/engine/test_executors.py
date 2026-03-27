@@ -210,6 +210,8 @@ def _make_sink(
     sink.node_id = node_id
     sink.declared_required_fields = frozenset()
     sink.validate_input = False
+    sink._on_write_failure = "discard"
+    sink._reset_diversion_log = MagicMock()
     sink.write.return_value = SinkWriteResult(
         artifact=ArtifactDescriptor(
             artifact_type="file",
