@@ -19,7 +19,11 @@ from pydantic import BaseModel, Field, model_validator
 
 from elspeth.contracts.diversion import SinkWriteResult
 from elspeth.contracts.enums import CallStatus, CallType
-from elspeth.contracts.errors import AuditIntegrityError, DuplicateDocumentError
+from elspeth.contracts.errors import (
+    AuditIntegrityError,
+    DuplicateDocumentError,
+    FrameworkBugError,
+)
 from elspeth.contracts.results import ArtifactDescriptor
 from elspeth.contracts.url import SanitizedDatabaseUrl
 from elspeth.core.canonical import canonical_json
@@ -132,13 +136,20 @@ class ChromaSink(BaseSink):
 
         if self._config.mode == "persistent":
             # Validated by ChromaConnectionConfig: persist_directory is not None
-            assert self._config.persist_directory is not None
+            if self._config.persist_directory is None:
+                raise FrameworkBugError(
+                    "ChromaSinkConfig.persist_directory is None in 'persistent' mode "
+                    "— ChromaConnectionConfig validation should have rejected this"
+                )
             self._client = chromadb.PersistentClient(
                 path=self._config.persist_directory,
             )
         else:
             # Validated by ChromaConnectionConfig: host is not None
-            assert self._config.host is not None
+            if self._config.host is None:
+                raise FrameworkBugError(
+                    "ChromaSinkConfig.host is None in 'client' mode — ChromaConnectionConfig validation should have rejected this"
+                )
             self._client = chromadb.HttpClient(
                 host=self._config.host,
                 port=self._config.port,
@@ -163,7 +174,8 @@ class ChromaSink(BaseSink):
         return hashlib.sha256(payload_bytes).hexdigest(), len(payload_bytes)
 
     def write(self, rows: list[dict[str, Any]], ctx: SinkContext) -> SinkWriteResult:
-        assert self._collection is not None, "write() called before on_start()"
+        if self._collection is None:
+            raise FrameworkBugError("ChromaSink._collection is None — on_start() was not called before write()")
         collection = self._collection
 
         chroma_url = SanitizedDatabaseUrl.from_raw_url(f"chromadb://{self._config.collection}")

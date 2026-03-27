@@ -1,10 +1,18 @@
-"""Tests for accumulate_row_outcomes DIVERTED branch."""
+"""Tests for accumulate_row_outcomes DIVERTED invariant.
+
+DIVERTED outcomes are counted in SinkExecutor (via _write_pending_to_sinks
+return value), NOT in the processing loop. If a DIVERTED outcome appears
+in processing results, that's an orchestration bug.
+"""
 
 from __future__ import annotations
 
 from unittest.mock import Mock
 
-from elspeth.contracts import PendingOutcome, RowOutcome, TokenInfo
+import pytest
+
+from elspeth.contracts import RowOutcome, TokenInfo
+from elspeth.contracts.errors import OrchestrationInvariantError
 from elspeth.engine.orchestrator.outcomes import accumulate_row_outcomes
 from elspeth.engine.orchestrator.types import ExecutionCounters
 from elspeth.testing import make_token_info
@@ -24,41 +32,26 @@ def _make_result(
     return result
 
 
-def _make_pending() -> dict[str, list[tuple[TokenInfo, PendingOutcome | None]]]:
+def _make_pending() -> dict[str, list]:
     return {"sink1": [], "sink2": []}
 
 
 class TestAccumulateDiverted:
-    def test_diverted_increments_rows_diverted(self) -> None:
-        counters = ExecutionCounters()
-        pending = _make_pending()
-        results = [
-            _make_result(RowOutcome.COMPLETED, sink_name="sink1"),
-            _make_result(RowOutcome.DIVERTED, sink_name="sink1"),
-            _make_result(RowOutcome.DIVERTED, sink_name="sink1"),
-        ]
-        accumulate_row_outcomes(results, counters, {"sink1": Mock(), "sink2": Mock()}, pending)
-        assert counters.rows_diverted == 2
-
-    def test_diverted_does_not_increment_rows_succeeded(self) -> None:
-        """DIVERTED rows failed their primary sink write -- they are not 'succeeded'."""
+    def test_diverted_raises_invariant_error(self) -> None:
+        """DIVERTED in processing results is an orchestration bug."""
         counters = ExecutionCounters()
         pending = _make_pending()
         results = [_make_result(RowOutcome.DIVERTED, sink_name="sink1")]
-        accumulate_row_outcomes(results, counters, {"sink1": Mock(), "sink2": Mock()}, pending)
-        assert counters.rows_diverted == 1
-        assert counters.rows_succeeded == 0
+        with pytest.raises(OrchestrationInvariantError, match="DIVERTED outcome should not appear"):
+            accumulate_row_outcomes(results, counters, {"sink1": Mock()}, pending)
 
-    def test_diverted_mixed_with_other_outcomes(self) -> None:
+    def test_diverted_after_completed_still_raises(self) -> None:
+        """Even mixed with valid outcomes, DIVERTED crashes."""
         counters = ExecutionCounters()
         pending = _make_pending()
         results = [
             _make_result(RowOutcome.COMPLETED, sink_name="sink1"),
             _make_result(RowOutcome.DIVERTED, sink_name="sink1"),
-            _make_result(RowOutcome.QUARANTINED),
-            _make_result(RowOutcome.DIVERTED, sink_name="sink2"),
         ]
-        accumulate_row_outcomes(results, counters, {"sink1": Mock(), "sink2": Mock()}, pending)
-        assert counters.rows_succeeded == 1
-        assert counters.rows_diverted == 2
-        assert counters.rows_quarantined == 1
+        with pytest.raises(OrchestrationInvariantError, match="DIVERTED outcome should not appear"):
+            accumulate_row_outcomes(results, counters, {"sink1": Mock(), "sink2": Mock()}, pending)

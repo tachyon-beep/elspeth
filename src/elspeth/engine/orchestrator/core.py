@@ -26,6 +26,7 @@ from collections.abc import Callable, Iterator, Mapping, Sequence
 from contextlib import contextmanager, nullcontext
 from dataclasses import replace
 from datetime import UTC, datetime
+from types import SimpleNamespace
 from typing import TYPE_CHECKING, Any
 
 import structlog
@@ -1469,7 +1470,6 @@ class Orchestrator:
             )
 
             # Validate sink failsink destinations
-            from types import SimpleNamespace
 
             sink_validation_stubs = {name: SimpleNamespace(on_write_failure=sink._on_write_failure) for name, sink in config.sinks.items()}
             sink_plugins = {name: sink.name for name, sink in config.sinks.items()}
@@ -1671,8 +1671,6 @@ class Orchestrator:
         )
 
         # Validate sink failsink destinations
-        from types import SimpleNamespace
-
         sink_validation_stubs = {name: SimpleNamespace(on_write_failure=sink._on_write_failure) for name, sink in config.sinks.items()}
         sink_plugins = {name: sink.name for name, sink in config.sinks.items()}
         validate_sink_failsink_destinations(

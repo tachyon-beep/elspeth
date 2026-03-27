@@ -14,7 +14,7 @@ import pytest
 
 from elspeth.contracts import PendingOutcome, RowOutcome, TokenInfo
 from elspeth.contracts.diversion import RowDiversion, SinkWriteResult
-from elspeth.contracts.enums import NodeStateStatus
+from elspeth.contracts.enums import NodeStateStatus, RoutingMode
 from elspeth.contracts.results import ArtifactDescriptor
 from elspeth.engine.executors.sink import SinkExecutor
 
@@ -228,6 +228,7 @@ class TestFailsinkMode:
         assert "__diversion_reason" in failsink_rows[0]
         assert failsink_rows[0]["__diversion_reason"] == "invalid metadata"
         assert failsink_rows[0]["__diverted_from"] == "primary"
+        assert "__diversion_timestamp" in failsink_rows[0]
 
     def test_failsink_flush_called(self) -> None:
         executor, _recorder = _make_executor()
@@ -283,6 +284,76 @@ class TestFailsinkMode:
         )
         outcome_calls = recorder.record_token_outcome.call_args_list
         assert outcome_calls[0].kwargs["sink_name"] == "csv_failsink"
+
+    def test_routing_event_recorded_for_diverted_tokens(self) -> None:
+        """Failsink mode must record routing_event linking primary -> failsink."""
+        executor, recorder = _make_executor()
+        diversions = (RowDiversion(row_index=0, reason="bad metadata", row_data={"x": 1}),)
+        sink = _make_sink(diversions=diversions, on_write_failure="csv_failsink")
+        failsink = _make_failsink()
+        tokens = [_make_token("t0")]
+        executor.write(
+            sink=sink,
+            tokens=tokens,
+            ctx=MagicMock(run_id="run-1"),
+            step_in_pipeline=5,
+            sink_name="primary",
+            pending_outcome=PendingOutcome(RowOutcome.COMPLETED),
+            failsink=failsink,
+            failsink_name="csv_failsink",
+            failsink_edge_id="edge-failsink-1",
+        )
+        # routing_event must be called with DIVERT mode and the failsink edge
+        recorder.record_routing_event.assert_called_once()
+        call_kwargs = recorder.record_routing_event.call_args.kwargs
+        assert call_kwargs["edge_id"] == "edge-failsink-1"
+        assert call_kwargs["mode"] == RoutingMode.DIVERT
+        assert "bad metadata" in call_kwargs["reason"]["diversion_reason"]
+
+    def test_both_artifacts_registered_in_mixed_batch(self) -> None:
+        """Mixed batch: primary artifact + failsink artifact both registered."""
+        executor, recorder = _make_executor()
+        diversions = (RowDiversion(row_index=1, reason="bad", row_data={"x": 1}),)
+        sink = _make_sink(diversions=diversions, on_write_failure="csv_failsink")
+        failsink = _make_failsink()
+        tokens = [_make_token("t0"), _make_token("t1")]
+        executor.write(
+            sink=sink,
+            tokens=tokens,
+            ctx=MagicMock(run_id="run-1"),
+            step_in_pipeline=5,
+            sink_name="primary",
+            pending_outcome=PendingOutcome(RowOutcome.COMPLETED),
+            failsink=failsink,
+            failsink_name="csv_failsink",
+            failsink_edge_id="edge-failsink-1",
+        )
+        # Both primary and failsink artifacts should be registered
+        assert recorder.register_artifact.call_count == 2
+
+    def test_node_states_opened_at_correct_nodes(self) -> None:
+        """Primary tokens get states at primary node, diverted at failsink node."""
+        executor, recorder = _make_executor()
+        diversions = (RowDiversion(row_index=1, reason="bad", row_data={"x": 1}),)
+        sink = _make_sink(diversions=diversions, on_write_failure="csv_failsink")
+        failsink = _make_failsink()
+        tokens = [_make_token("t0"), _make_token("t1")]
+        executor.write(
+            sink=sink,
+            tokens=tokens,
+            ctx=MagicMock(run_id="run-1"),
+            step_in_pipeline=5,
+            sink_name="primary",
+            pending_outcome=PendingOutcome(RowOutcome.COMPLETED),
+            failsink=failsink,
+            failsink_name="csv_failsink",
+            failsink_edge_id="edge-failsink-1",
+        )
+        begin_calls = recorder.begin_node_state.call_args_list
+        assert len(begin_calls) == 2
+        node_ids = [c.kwargs["node_id"] for c in begin_calls]
+        assert "node-primary" in node_ids
+        assert "node-failsink" in node_ids
 
 
 class TestFailsinkErrorHandling:

@@ -192,52 +192,36 @@ class SinkExecutor:
                 token_ids=sink_token_ids,
             ):
                 # Centralized input validation (before sink.write)
-                try:
-                    if sink.validate_input:
-                        from pydantic import ValidationError
+                if sink.validate_input:
+                    from pydantic import ValidationError
 
-                        for row in rows:
-                            try:
-                                sink.input_schema.model_validate(row)
-                            except ValidationError as e:
-                                raise PluginContractViolation(
-                                    f"Sink '{sink.name}' input validation failed: {e}. "
-                                    f"This indicates an upstream transform/source schema bug."
-                                ) from e
+                    for row in rows:
+                        try:
+                            sink.input_schema.model_validate(row)
+                        except ValidationError as e:
+                            raise PluginContractViolation(
+                                f"Sink '{sink.name}' input validation failed: {e}. This indicates an upstream transform/source schema bug."
+                            ) from e
 
-                    if sink.declared_required_fields:
-                        for row_index, row in enumerate(rows):
-                            missing = sorted(f for f in sink.declared_required_fields if f not in row)
-                            if missing:
-                                raise PluginContractViolation(
-                                    f"Sink '{sink.name}' row {row_index} is missing required fields "
-                                    f"{missing}. This indicates an upstream transform/schema bug."
-                                )
-                except (FrameworkBugError, AuditIntegrityError):
-                    raise
-                except Exception:
-                    raise
+                if sink.declared_required_fields:
+                    for row_index, row in enumerate(rows):
+                        missing = sorted(f for f in sink.declared_required_fields if f not in row)
+                        if missing:
+                            raise PluginContractViolation(
+                                f"Sink '{sink.name}' row {row_index} is missing required fields "
+                                f"{missing}. This indicates an upstream transform/schema bug."
+                            )
 
                 # Reset diversion log and call sink.write()
                 sink._reset_diversion_log()
                 start = time.perf_counter()
-                try:
-                    write_result: SinkWriteResult = sink.write(rows, ctx)
-                    artifact_info = write_result.artifact
-                    diversions = write_result.diversions
-                    duration_ms = (time.perf_counter() - start) * 1000
-                except (FrameworkBugError, AuditIntegrityError):
-                    raise
-                except Exception:
-                    raise
+                write_result: SinkWriteResult = sink.write(rows, ctx)
+                artifact_info = write_result.artifact
+                diversions = write_result.diversions
+                duration_ms = (time.perf_counter() - start) * 1000
 
             # Flush primary sink for durability
-            try:
-                sink.flush()
-            except (FrameworkBugError, AuditIntegrityError):
-                raise
-            except Exception:
-                raise
+            sink.flush()
 
             # Set output data on operation handle for audit trail
             handle.output_data = {
@@ -345,9 +329,7 @@ class SinkExecutor:
             # Build diversion lookup by row_index
             diversion_by_index = {d.row_index: d for d in diversions}
 
-            on_write_failure = sink._on_write_failure
-
-            if on_write_failure != "discard" and failsink is not None:
+            if failsink is not None:
                 # Failsink mode: write enriched rows to failsink
                 if failsink.node_id is None:
                     raise OrchestrationInvariantError(f"Failsink '{failsink.name}' executed without node_id - orchestrator bug")
@@ -368,13 +350,14 @@ class SinkExecutor:
 
                 # Write to failsink
                 failsink._reset_diversion_log()
-                try:
-                    failsink_write_result = failsink.write(enriched_rows, ctx)
-                    failsink.flush()
-                except (FrameworkBugError, AuditIntegrityError):
-                    raise
-                except Exception:
-                    raise
+                failsink_write_result = failsink.write(enriched_rows, ctx)
+                failsink.flush()
+
+                if failsink_write_result.diversions:
+                    raise FrameworkBugError(
+                        f"Failsink '{failsink_name}' produced {len(failsink_write_result.diversions)} "
+                        f"diversions during failsink write — failsinks must not divert rows."
+                    )
 
                 failsink_artifact_info = failsink_write_result.artifact
 

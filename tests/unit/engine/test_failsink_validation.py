@@ -6,6 +6,7 @@ from types import SimpleNamespace
 
 import pytest
 
+from elspeth.contracts.errors import OrchestrationInvariantError
 from elspeth.engine.orchestrator.types import RouteValidationError
 from elspeth.engine.orchestrator.validation import validate_sink_failsink_destinations
 
@@ -120,13 +121,14 @@ class TestValidateSinkFailsinkDestinations:
             sink_plugins={"chroma_out": "chroma_sink", "db_out": "database", "csv_fail": "csv"},
         )  # No error raised
 
-    def test_none_on_write_failure_skipped(self) -> None:
-        """on_write_failure=None (pre-injection default) is silently skipped."""
-        validate_sink_failsink_destinations(
-            sink_configs={"output": _stub(None)},
-            available_sinks={"output"},
-            sink_plugins={"output": "chroma_sink"},
-        )  # No error raised
+    def test_none_on_write_failure_raises(self) -> None:
+        """on_write_failure=None (pre-injection default) is a framework bug."""
+        with pytest.raises(OrchestrationInvariantError, match="injection was skipped"):
+            validate_sink_failsink_destinations(
+                sink_configs={"output": _stub(None)},
+                available_sinks={"output"},
+                sink_plugins={"output": "chroma_sink"},
+            )
 
     def test_all_discard(self) -> None:
         """All sinks using discard — valid."""

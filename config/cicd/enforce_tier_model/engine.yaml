@@ -121,37 +121,37 @@ allow_hits:
   reason: dict.get() correct - not all branch names have coalesce point mapping
   safety: Crashes on type mismatch - no silent fallback
   expires: '2026-05-12'
-- key: engine/orchestrator/core.py:R4:Orchestrator:_cleanup_plugins:fp=978ce16eec87ec86
+- key: engine/orchestrator/core.py:R4:Orchestrator:_cleanup_plugins:fp=870dbff31b21a3e6
   owner: architecture
   reason: Plugin cleanup must attempt all closures; broad catch collects errors then raises
   safety: Code reviewed - collects all cleanup errors into list, raises ExceptionGroup after all attempted
   expires: '2026-05-02'
-- key: engine/orchestrator/core.py:R4:Orchestrator:_cleanup_plugins:fp=d752bed13d8d623c
+- key: engine/orchestrator/core.py:R4:Orchestrator:_cleanup_plugins:fp=37d49a544759841a
   owner: architecture
   reason: Plugin cleanup must attempt all closures; broad catch collects errors then raises
   safety: Code reviewed - collects all cleanup errors into list, raises ExceptionGroup after all attempted
   expires: '2026-05-02'
-- key: engine/orchestrator/core.py:R4:Orchestrator:_cleanup_plugins:fp=f7a9a29193c998e6
+- key: engine/orchestrator/core.py:R4:Orchestrator:_cleanup_plugins:fp=7eb27acca6f19d96
   owner: architecture
   reason: Plugin cleanup must attempt all closures; broad catch collects errors then raises
   safety: Code reviewed - collects all cleanup errors into list, raises ExceptionGroup after all attempted
   expires: '2026-05-02'
-- key: engine/orchestrator/core.py:R4:Orchestrator:_cleanup_plugins:fp=d8052b508d4214c3
+- key: engine/orchestrator/core.py:R4:Orchestrator:_cleanup_plugins:fp=b9180a5b428a74ab
   owner: architecture
   reason: Plugin cleanup must attempt all closures; broad catch collects errors then raises
   safety: Code reviewed - collects all cleanup errors into list, raises ExceptionGroup after all attempted
   expires: '2026-05-02'
-- key: engine/orchestrator/core.py:R4:Orchestrator:_cleanup_plugins:fp=174dced7d417d548
+- key: engine/orchestrator/core.py:R4:Orchestrator:_cleanup_plugins:fp=dc6aa3758e234f6d
   owner: architecture
   reason: Plugin cleanup must attempt all closures; broad catch collects errors then raises
   safety: Code reviewed - collects all cleanup errors into list, raises ExceptionGroup after all attempted
   expires: '2026-05-02'
-- key: engine/orchestrator/core.py:R4:Orchestrator:_cleanup_plugins:fp=00a7c3bce0b72aca
+- key: engine/orchestrator/core.py:R4:Orchestrator:_cleanup_plugins:fp=1bc906e98ce5e29b
   owner: architecture
   reason: Plugin cleanup must attempt all closures; broad catch collects errors then raises
   safety: Code reviewed - collects all cleanup errors into list, raises ExceptionGroup after all attempted
   expires: '2026-05-02'
-- key: engine/orchestrator/core.py:R6:Orchestrator:_handle_quarantine_row:fp=60ffec009f61ba02
+- key: engine/orchestrator/core.py:R6:Orchestrator:_handle_quarantine_row:fp=821570d6dc26dd67
   owner: bugfix
   reason: Tier-3 boundary — quarantined row data may contain NaN/Infinity that stable_hash rejects
   safety: Falls back to repr_hash with debug logging; audit trail uses separate hashing path

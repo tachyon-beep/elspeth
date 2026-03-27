@@ -197,7 +197,9 @@ def validate_sink_failsink_destinations(
     for sink_name, config in sink_configs.items():
         dest = config.on_write_failure
         if dest is None:
-            continue  # Not yet injected — skip validation (pre-injection sinks default to None)
+            raise OrchestrationInvariantError(
+                f"Sink '{sink_name}' has _on_write_failure=None — injection was skipped. This is a framework bug."
+            )
         if dest == "discard":
             continue
 
