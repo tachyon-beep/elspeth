@@ -518,6 +518,37 @@ NodeSpec entries where node_type is "aggregation" are emitted under the
 `aggregations` key as a YAML list. Each entry includes `name`, `plugin`,
 `input`, `on_success`, `on_error` (if set), and `options`.
 
+### Frozen Field Unwrapping (R4)
+
+CompositionState and all nested *Spec types use `freeze_fields()` in their
+`__post_init__` methods. This converts `dict` to `MappingProxyType` and `list`
+to `tuple` recursively (see the Immutability Contract section above). PyYAML's
+default Dumper does not know how to represent `MappingProxyType` and will raise
+`RepresenterError` if it encounters one.
+
+`generate_yaml()` must unwrap all frozen dataclass fields to plain Python types
+before passing them to `yaml.dump()`. Specifically:
+
+- **CompositionState.to_dict()**: Add a `to_dict()` method to CompositionState
+  that performs recursive unwrapping of frozen containers back to plain Python
+  types: `MappingProxyType` to `dict`, `tuple` to `list`. This can delegate to
+  a `deep_unfreeze()` utility or perform manual recursion. The method returns a
+  plain `dict` suitable for both `yaml.dump()` and JSON serialisation.
+
+- **generate_yaml() calls to_dict()**: The generator calls
+  `state.to_dict()` and passes the resulting plain dict to `yaml.dump()`, not
+  the frozen CompositionState directly.
+
+- **Alternative (not recommended)**: A custom YAML representer could be
+  registered: `yaml.add_representer(MappingProxyType, lambda dumper, data:
+  dumper.represent_dict(data))`. This solves the YAML case but does not help
+  with API serialisation, so it is not the recommended approach.
+
+The `to_dict()` approach is recommended because it is also needed at the API
+serialisation boundary -- Sub-Spec 2's `CompositionStateResponse` Pydantic
+schema (in `sessions/schemas.py`) must convert CompositionState to a JSON-safe
+dict, and `to_dict()` serves both use cases.
+
 ---
 
 ## API Integration
@@ -652,6 +683,10 @@ the conversation history on subsequent turns.
 14. All frozen dataclasses with container fields pass the enforce_freeze_guards.py
     CI check.
 
-15. Tests that mock CatalogService must use real PluginSummary and
+15. `generate_yaml()` correctly serialises CompositionState objects that have
+    been through `freeze_fields()` -- no `RepresenterError` from PyYAML on
+    `MappingProxyType` or `tuple` fields.
+
+16. Tests that mock CatalogService must use real PluginSummary and
     PluginSchemaInfo instances, not plain dicts. Mock return types must match
     the CatalogService protocol.

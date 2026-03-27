@@ -185,7 +185,7 @@ future `PipelineArtifact.composition_state` binding point.
 |-------|------|-------|
 | run_id | FK(Run) | |
 | timestamp | datetime | |
-| event_type | enum | progress, error, completed |
+| event_type | enum | progress, error, completed, cancelled |
 | data | JSON | `{rows_processed, rows_failed}` or exception detail |
 
 RunEvent is the WebSocket payload model. Same shape whether forwarded in-process

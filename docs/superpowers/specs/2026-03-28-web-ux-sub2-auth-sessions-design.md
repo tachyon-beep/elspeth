@@ -446,9 +446,9 @@ File: `src/elspeth/web/sessions/protocol.py`
 | get_state | async (state_id: UUID) -> CompositionStateRecord | CompositionStateRecord |
 | get_state_versions | async (session_id: UUID) -> list[CompositionStateRecord] | list[CompositionStateRecord] |
 | set_active_state | async (session_id: UUID, state_id: UUID) -> CompositionStateRecord | CompositionStateRecord |
-| create_run | async (session_id: UUID, state_id: UUID) -> RunRecord | RunRecord |
+| create_run | async (session_id: UUID, state_id: UUID, pipeline_yaml: str or None = None) -> RunRecord | RunRecord |
 | get_run | async (run_id: UUID) -> RunRecord | RunRecord |
-| update_run_status | async (run_id: UUID, status: str, error: str or None = None) -> None | None |
+| update_run_status | async (run_id: UUID, status: str, error: str or None = None, landscape_run_id: str or None = None, rows_processed: int or None = None, rows_failed: int or None = None) -> None | None |
 | get_active_run | async (session_id: UUID) -> RunRecord or None | RunRecord or None |
 
 `SessionRecord`, `ChatMessageRecord`, `CompositionStateRecord`, and `RunRecord` are frozen
@@ -477,9 +477,9 @@ within a single transaction.
 - `get_state`: selects a composition_states row by its primary key (id). Raises ValueError if not found.
 - `get_state_versions`: selects all composition_states for the session, ordered by version ascending.
 - `set_active_state`: creates a new version record that is a copy of the specified prior version (looked up by state_id). The new record gets version = max(existing) + 1. This means "revert" always creates a new version, preserving full history. Execute and validate always use the latest version (from `get_current_state`). Raises ValueError if state_id not found or does not belong to the session.
-- `create_run`: inserts a new runs row with status="pending", linking to the specified session and state. Enforces one-active-run per session (raises RunAlreadyActiveError if a pending or running run exists). The check-and-insert runs within a single transaction.
+- `create_run`: inserts a new runs row with status="pending", linking to the specified session and state. If `pipeline_yaml` is provided, stores the generated YAML at creation time. Enforces one-active-run per session (raises RunAlreadyActiveError if a pending or running run exists). The check-and-insert runs within a single transaction.
 - `get_run`: selects a runs row by id. Raises ValueError if not found.
-- `update_run_status`: updates the status (and optionally error) of a run. Sets finished_at to utcnow when status transitions to "completed", "failed", or "cancelled". Raises ValueError if run not found.
+- `update_run_status`: updates the status (and optionally error, landscape_run_id, rows_processed, rows_failed) of a run. The optional parameters only update the column when not None. Sets finished_at to utcnow when status transitions to "completed", "failed", or "cancelled". Raises ValueError if run not found.
 - `get_active_run`: selects the runs row for the session where status IN ("pending", "running"). Returns None if no active run exists.
 
 ---
@@ -601,6 +601,33 @@ Response (200): composition state object, or null if no state exists.
 Returns all composition state versions for a session. IDOR-protected.
 
 Response (200): list of composition state objects, ordered by version ascending.
+
+**POST /api/sessions/{id}/state/revert**
+
+Reverts the pipeline to a prior composition state version. Creates a new version
+that is a copy of the specified prior state (history is never rewritten).
+IDOR-protected.
+
+Request body:
+
+| Field | Type | Required | Notes |
+|-------|------|----------|-------|
+| state_id | str (UUID) | Yes | ID of the prior CompositionState version to revert to |
+
+Behavior:
+
+1. Calls `session_service.set_active_state(session_id, state_id)` to create a
+   new version that copies the specified prior state.
+2. Injects a system message via
+   `session_service.add_message(session_id, role="system", content="Pipeline reverted to version N.")`
+   where N is the version number of the original state being reverted to.
+
+Response (200): the new CompositionStateRecord (the copy at the new version
+number). Same shape as `GET /api/sessions/{id}/state`.
+
+Error responses:
+- 404 if session not found or belongs to another user (IDOR protection).
+- 404 if state_id not found or does not belong to this session.
 
 **POST /api/sessions/{id}/upload**
 

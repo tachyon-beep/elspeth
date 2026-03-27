@@ -101,6 +101,7 @@ Renders a single `ChatMessage`. Styling varies by role:
 
 - **User messages:** Right-aligned, distinct background colour (e.g., blue-tinted). Shows message text only.
 - **Assistant messages:** Left-aligned, neutral background. Shows message text. If the message has associated `tool_calls`, they are rendered as a collapsible "Tool calls" section below the text showing tool names and summaries.
+- **System messages:** Centre-aligned, full-width banner style. Rendered with reduced opacity / muted colour to be visually distinct from user and assistant bubbles. Text is italic. No sender label is displayed. Used for system-injected messages such as "Pipeline reverted to version N." These messages are part of the chronological message list but are not interactive -- they serve as audit markers in the conversation history.
 
 Messages are rendered in chronological order. The list auto-scrolls to the bottom when new messages arrive. If the user has scrolled up (reviewing history), auto-scroll is suppressed until they scroll back to the bottom.
 
@@ -221,7 +222,14 @@ When a run is in progress, the Runs tab displays a live progress view:
 - **Recent exceptions:** A scrollable list showing the most recent exceptions, newest first. Limited to the last 50 entries to avoid memory growth.
 - **Cancel button:** Calls `POST /api/runs/{id}/cancel`. Disabled once the run has reached a terminal state.
 
-Progress data streams over the WebSocket connection. The `executionStore` receives `RunEvent` payloads and updates the progress state reactively. The `RunEvent` `event_type` union includes: `progress`, `completed`, `failed`, and `cancelled`. When the store receives a `cancelled` event, it updates the run status to "cancelled", closes the WebSocket connection, and the ProgressView displays "Pipeline execution was cancelled."
+Progress data streams over the WebSocket connection. The `executionStore` receives `RunEvent` payloads and updates the progress state reactively. The `RunEvent` `event_type` union includes: `progress`, `error`, `completed`, and `cancelled`. These have distinct terminal semantics:
+
+- **`progress`** -- non-terminal. Row count update; the pipeline is still running.
+- **`error`** -- non-terminal. A per-row exception occurred but the pipeline continues processing. The frontend appends the error to the recent exceptions list in the ProgressView; it does NOT stop the progress view or close the WebSocket.
+- **`completed`** -- terminal. The pipeline finished successfully. The frontend updates the run status to "completed", closes the WebSocket connection, and switches the progress bar to a static "complete" state.
+- **`cancelled`** -- terminal. The pipeline was cancelled. The frontend updates the run status to "cancelled", closes the WebSocket connection, and the ProgressView displays "Pipeline execution was cancelled."
+
+Note: `"failed"` is a Run status (set on the Run model when the pipeline aborts), not a RunEvent type. The WebSocket stream never sends a `"failed"` event -- if the pipeline aborts, the WebSocket connection closes and the frontend fetches the final Run status via the REST API.
 
 ---
 

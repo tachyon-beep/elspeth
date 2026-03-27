@@ -64,6 +64,7 @@ All fields on `WebSettings`, a Pydantic `BaseModel`.
 | `payload_store_path` | `Path \| None` | `None` | Directory for payload blob storage. When `None`, resolves to `{data_dir}/payloads/` via `get_payload_store_path()` (B3 fix) |
 | `oidc_issuer` | `str \| None` | `None` | OIDC issuer URL (required when `auth_provider="oidc"`) |
 | `oidc_audience` | `str \| None` | `None` | OIDC audience claim (required when `auth_provider="oidc"`) |
+| `oidc_client_id` | `str \| None` | `None` | OIDC/Entra client ID (used by auth config endpoint and frontend OIDC redirect construction). Note: in OIDC, the audience claim is typically the client ID. `oidc_audience` is used for token validation; `oidc_client_id` is used for the auth config endpoint response and frontend redirect URL construction. They may have the same value but serve different purposes. |
 | `entra_tenant_id` | `str \| None` | `None` | Azure Entra tenant ID (required when `auth_provider="entra"`) |
 | `session_db_url` | `str \| None` | `None` | SQLAlchemy URL for the session database (sessions, messages, composition states, runs). When `None`, resolves to `sqlite:///{data_dir}/sessions.db` via `get_session_db_url()`. Separate from `landscape_url` (audit DB) |
 
