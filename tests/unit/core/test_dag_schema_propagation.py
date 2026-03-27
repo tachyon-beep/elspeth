@@ -81,6 +81,10 @@ class MockSink:
     name = "mock_sink"
     input_schema = None
     config: ClassVar[dict[str, Any]] = {}
+    _on_write_failure: str = "discard"
+
+    def _reset_diversion_log(self) -> None:
+        pass
 
 
 class TestOutputSchemaConfigPropagation:

@@ -212,6 +212,10 @@ def test_edge_validation_timing_from_plugin_instances() -> None:
         name: ClassVar[str] = "test_sink"
         config: ClassVar[dict[str, Any]] = {}
         input_schema: ClassVar[type[PluginSchema]] = ConsumerSchema  # Needs: id, name, email
+        _on_write_failure: str = "discard"
+
+        def _reset_diversion_log(self) -> None:
+            pass
 
     # Set on_success on source for explicit routing
     source = as_source(MockSource())
