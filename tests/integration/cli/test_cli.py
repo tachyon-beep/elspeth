@@ -300,6 +300,7 @@ class TestTransformErrorSinkRouting:
                     },
                 },
             },
+            "landscape": {"url": f"sqlite:///{tmp_path / 'landscape.db'}"},
         }
 
         config_path = tmp_path / "settings.yaml"

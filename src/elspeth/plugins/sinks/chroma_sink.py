@@ -203,43 +203,74 @@ class ChromaSink(BaseSink):
             )
 
         fm = self._config.field_mapping
-        ids = [row[fm.id_field] for row in rows]
-        documents = [row[fm.document_field] for row in rows]
-        # ChromaDB rejects empty metadata dicts — pass None when no metadata fields configured
-        metadatas: list[dict[str, Any]] | None = (
-            [{field: row[field] for field in fm.metadata_fields} for row in rows] if fm.metadata_fields else None
-        )
 
-        # Trust boundary: validate metadata value types before sending to ChromaDB.
-        # ChromaDB accepts str|int|float|bool|None — anything else (dict, list,
-        # datetime) is a per-row data problem, not a plugin bug. Divert bad rows
-        # via _divert_row() for failsink handling.
-        if metadatas is not None:
-            valid_indices: list[int] = []
-            for i, meta in enumerate(metadatas):
-                bad_fields = {
-                    key: type(value).__name__
-                    for key, value in meta.items()
-                    if value is not None and not isinstance(value, (str, int, float, bool))
-                }
+        # Per-row extraction of required fields (id, document) and optional metadata.
+        # Missing or non-string required fields are per-row data problems — divert
+        # the row rather than aborting the entire batch.
+        ids: list[str] = []
+        documents: list[str] = []
+        metadatas_list: list[dict[str, Any]] = []
+        valid_indices: list[int] = []
+
+        for i, row in enumerate(rows):
+            # Required fields: id and document must be present and string-typed.
+            try:
+                raw_id = row[fm.id_field]
+                raw_doc = row[fm.document_field]
+            except KeyError as exc:
+                self._divert_row(
+                    row,
+                    row_index=i,
+                    reason=f"Missing required field: {exc}",
+                )
+                continue
+
+            if not isinstance(raw_id, str):
+                self._divert_row(
+                    row,
+                    row_index=i,
+                    reason=f"Field '{fm.id_field}' must be str, got {type(raw_id).__name__}",
+                )
+                continue
+            if not isinstance(raw_doc, str):
+                self._divert_row(
+                    row,
+                    row_index=i,
+                    reason=f"Field '{fm.document_field}' must be str, got {type(raw_doc).__name__}",
+                )
+                continue
+
+            # Optional metadata fields — extract if configured, validate types.
+            # ChromaDB accepts str|int|float|bool|None — anything else is a per-row
+            # data problem, not a plugin bug.
+            if fm.metadata_fields:
+                meta = {}
+                bad_fields: dict[str, str] = {}
+                for field in fm.metadata_fields:
+                    try:
+                        value = row[field]
+                    except KeyError:
+                        # Missing metadata field — skip it (metadata is optional per-field)
+                        continue
+                    if value is not None and not isinstance(value, (str, int, float, bool)):
+                        bad_fields[field] = type(value).__name__
+                    else:
+                        meta[field] = value
                 if bad_fields:
                     self._divert_row(
-                        rows[i],
+                        row,
                         row_index=i,
                         reason=f"Invalid ChromaDB metadata types: {bad_fields}",
                     )
-                else:
-                    valid_indices.append(i)
+                    continue
+                metadatas_list.append(meta)
 
-            if len(valid_indices) < len(metadatas):
-                if valid_indices:
-                    # Partial rejection — filter to valid rows only
-                    ids = [ids[i] for i in valid_indices]
-                    documents = [documents[i] for i in valid_indices]
-                    metadatas = [metadatas[i] for i in valid_indices]
-                else:
-                    # ALL rows rejected — nothing to write
-                    ids, documents, metadatas = [], [], None
+            ids.append(raw_id)
+            documents.append(raw_doc)
+            valid_indices.append(i)
+
+        # ChromaDB rejects empty metadata dicts — pass None when no metadata fields configured
+        metadatas: list[dict[str, Any]] | None = metadatas_list if fm.metadata_fields else None
 
         # Handle all-rejected case: nothing to write, return zero-write artifact
         if not ids:

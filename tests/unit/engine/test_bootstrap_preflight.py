@@ -9,6 +9,7 @@ import pytest
 
 from elspeth.contracts.errors import CommencementGateFailedError
 from elspeth.core.dependency_config import (
+    CommencementGateConfig,
     CommencementGateResult,
     DependencyRunResult,
 )
@@ -66,7 +67,7 @@ class TestBootstrapDependencyResultsFlow:
 
         mock_config = MagicMock()
         mock_config.depends_on = [DependencyConfig(name="indexer", settings="./index.yaml")]
-        mock_config.commencement_gates = [MagicMock()]
+        mock_config.commencement_gates = [CommencementGateConfig(name="test_gate", condition="True")]
         mock_config.collection_probes = []
         mock_config.gates = []
         mock_config.coalesce = []
@@ -159,7 +160,7 @@ class TestBootstrapCommencementGateDispatch:
         """When a gate fails, CommencementGateFailedError propagates through bootstrap."""
         mock_config = MagicMock()
         mock_config.depends_on = []
-        mock_config.commencement_gates = [MagicMock()]  # Non-empty triggers gate eval
+        mock_config.commencement_gates = [CommencementGateConfig(name="test_gate", condition="True")]  # Non-empty triggers gate eval
         mock_config.collection_probes = []
         mock_config.gates = []
         mock_config.coalesce = []
@@ -169,6 +170,7 @@ class TestBootstrapCommencementGateDispatch:
             patch("elspeth.cli._load_settings_with_secrets", return_value=(mock_config, [])),
             patch("elspeth.cli_helpers.instantiate_plugins_from_config") as mock_plugins,
             patch("elspeth.core.dag.ExecutionGraph") as mock_graph_cls,
+            patch("elspeth.cli._ensure_output_directories", return_value=[]),
             patch(
                 "elspeth.engine.commencement.evaluate_commencement_gates",
                 side_effect=CommencementGateFailedError(
@@ -240,7 +242,7 @@ class TestResolvePreflightDirect:
 
         mock_config = MagicMock()
         mock_config.depends_on = []
-        mock_config.commencement_gates = [MagicMock()]
+        mock_config.commencement_gates = [CommencementGateConfig(name="test_gate", condition="True")]
 
         gate_result = CommencementGateResult(
             name="corpus_ready",
@@ -269,7 +271,7 @@ class TestResolvePreflightDirect:
 
         mock_config = MagicMock()
         mock_config.depends_on = [DependencyConfig(name="indexer", settings="./index.yaml")]
-        mock_config.commencement_gates = [MagicMock()]
+        mock_config.commencement_gates = [CommencementGateConfig(name="test_gate", condition="True")]
 
         dep_result = DependencyRunResult(
             name="indexer",
@@ -305,7 +307,7 @@ class TestResolvePreflightDirect:
 
         mock_config = MagicMock()
         mock_config.depends_on = []
-        mock_config.commencement_gates = [MagicMock()]
+        mock_config.commencement_gates = [CommencementGateConfig(name="test_gate", condition="True")]
 
         mock_probes: list = []
 
@@ -343,7 +345,7 @@ class TestResolvePreflightDirect:
 
         mock_config = MagicMock()
         mock_config.depends_on = []
-        mock_config.commencement_gates = [MagicMock()]
+        mock_config.commencement_gates = [CommencementGateConfig(name="test_gate", condition="True")]
 
         with pytest.raises(FrameworkBugError, match="probes is required"):
             resolve_preflight(mock_config, Path("/fake/pipeline.yaml"), probes=None)
@@ -362,7 +364,7 @@ class TestResolvePreflightDirect:
             DependencyConfig(name="indexer", settings="./a.yaml"),
             DependencyConfig(name="indexer", settings="./b.yaml"),
         ]
-        mock_config.commencement_gates = [MagicMock()]
+        mock_config.commencement_gates = [CommencementGateConfig(name="test_gate", condition="True")]
 
         dep_results = [
             DependencyRunResult(name="indexer", run_id="r1", settings_hash="h1", duration_ms=100, indexed_at="2026-01-01T00:00:00Z"),

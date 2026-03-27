@@ -45,6 +45,15 @@ def resolve_preflight(
     dependency_results: list[DependencyRunResult] = []
     gate_results: list[CommencementGateResult] = []
 
+    # Validate gate expressions early — before any dependency resolution.
+    # ExpressionParser validates syntax and security at construction time.
+    # If a gate condition is malformed, we reject it here rather than after
+    # dependency pipelines have already run and mutated external state.
+    if config.commencement_gates:
+        from elspeth.engine.commencement import validate_gate_expressions
+
+        validate_gate_expressions(config.commencement_gates)
+
     # Dependency resolution (if configured)
     if config.depends_on:
         from elspeth.engine.dependency_resolver import detect_cycles, resolve_dependencies

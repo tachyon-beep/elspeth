@@ -261,15 +261,16 @@ def bootstrap_and_run(settings_path: Path) -> "RunResult":
     )
     graph.validate()
 
-    probes = build_collection_probes(config.collection_probes) if config.collection_probes else []
-    preflight = resolve_preflight(config, settings_path, probes=probes, runner=bootstrap_and_run)
-
-    # Ensure output directories exist before opening DB/payload store
+    # Ensure output directories exist before preflight — dependency pipelines
+    # can mutate external state, so reject unwritable paths before running them.
     from elspeth.cli import _ensure_output_directories
 
     dir_errors = _ensure_output_directories(config)
     if dir_errors:
         raise ValueError(f"Failed to create output directories: {'; '.join(dir_errors)}")
+
+    probes = build_collection_probes(config.collection_probes) if config.collection_probes else []
+    preflight = resolve_preflight(config, settings_path, probes=probes, runner=bootstrap_and_run)
 
     # Phase 4: Construct infrastructure and run
     passphrase = resolve_audit_passphrase(config.landscape)

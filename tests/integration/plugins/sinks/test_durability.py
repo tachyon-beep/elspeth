@@ -9,11 +9,12 @@ These tests verify that:
 
 from pathlib import Path
 from typing import Any
-from unittest.mock import Mock, patch
+from unittest.mock import Mock
 
 import pytest
 
 from elspeth.contracts import Determinism, NodeType, PendingOutcome, RowOutcome, TokenInfo
+from elspeth.contracts.errors import AuditIntegrityError
 from elspeth.core.checkpoint import CheckpointManager
 from elspeth.core.dag import ExecutionGraph
 from elspeth.core.landscape.database import LandscapeDB
@@ -217,24 +218,23 @@ class TestSinkDurability:
         mock_sink.write.assert_called_once()
         mock_sink.flush.assert_called_once()
 
-    def test_checkpoint_failure_logged_after_successful_flush(
+    def test_checkpoint_failure_raises_after_successful_flush(
         self,
         test_env: dict[str, Any],
         mock_graph: ExecutionGraph,
         mock_sink: Mock,
     ) -> None:
-        """Verify sink write persists even if checkpoint creation fails.
+        """Verify checkpoint failure after durable write raises AuditIntegrityError.
 
         Scenario:
         1. Sink write() succeeds
         2. Sink flush() succeeds (data is durable)
         3. Checkpoint creation fails (database error)
-        4. Artifact should still be registered
-        5. Error should be logged (not raised)
+        4. AuditIntegrityError is raised — the audit trail is inconsistent
 
-        This is Bug #10: checkpoint failure after durable flush cannot
-        be rolled back, so we log the error and continue. Resume will
-        replay the row (duplicate write - acceptable for RC-1).
+        Checkpoint failure after durable flush means the sink artifact exists
+        but no checkpoint record was created. Silently continuing would cause
+        duplicate writes on resume — crashing is the correct response.
         """
         recorder = test_env["recorder"]
         db = test_env["db"]
@@ -277,13 +277,10 @@ class TestSinkDurability:
         def failing_checkpoint_callback(token_info):
             raise RuntimeError("Database connection lost - checkpoint failed")
 
-        # Execute sink write with failing checkpoint callback
-        # This should NOT raise - error should be logged
         tokens = [token]
 
-        # Patch logger to capture error log
-        with patch("elspeth.engine.executors.sink.logger") as mock_logger:
-            artifact = sink_executor.write(
+        with pytest.raises(AuditIntegrityError, match="Checkpoint failed after durable sink write"):
+            sink_executor.write(
                 sink=mock_sink,
                 tokens=tokens,
                 ctx=ctx,
@@ -292,23 +289,6 @@ class TestSinkDurability:
                 pending_outcome=PendingOutcome(RowOutcome.COMPLETED),
                 on_token_written=failing_checkpoint_callback,
             )
-
-            # Verify: Sink write completed successfully
-            assert artifact is not None
-            mock_sink.write.assert_called_once()
-            mock_sink.flush.assert_called_once()
-
-            # Verify: Error was logged (not raised)
-            assert mock_logger.error.called
-            error_call = mock_logger.error.call_args
-            assert "Checkpoint failed after durable sink write" in error_call[0][0]
-            assert token.token_id in error_call[0]
-
-        # Verify: Artifact was registered in database
-        artifacts = recorder.get_artifacts(run.run_id)
-        assert len(artifacts) == 1
-        # path_or_uri is a file:// URI, so check it ends with the expected path
-        assert artifacts[0].path_or_uri.endswith(str(test_env["tmp_path"] / "output.csv"))
 
     def test_flush_called_before_checkpoint_callback(
         self,

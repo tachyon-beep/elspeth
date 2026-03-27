@@ -52,6 +52,21 @@ def _build_audit_snapshot(context: Mapping[str, Any]) -> Mapping[str, Any]:
     return frozen
 
 
+def validate_gate_expressions(gates: list[CommencementGateConfig]) -> None:
+    """Validate all gate expressions at config time, before any side effects.
+
+    ExpressionParser validates syntax and security at construction time.
+    Calling this before dependency resolution ensures malformed expressions
+    are rejected before sub-pipelines run and mutate external state.
+
+    Raises:
+        ExpressionSecurityError: If expression contains forbidden constructs
+        ExpressionSyntaxError: If expression is not valid Python syntax
+    """
+    for gate in gates:
+        ExpressionParser(gate.condition, allowed_names=_GATE_ALLOWED_NAMES)
+
+
 def evaluate_commencement_gates(
     gates: list[CommencementGateConfig],
     context: dict[str, Any],

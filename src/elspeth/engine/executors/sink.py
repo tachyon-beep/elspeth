@@ -401,10 +401,13 @@ class SinkExecutor:
                     raise OrchestrationInvariantError("failsink_name is None but failsink is not None — orchestrator bug")
                 failsink_node_id: str = failsink.node_id
 
-                # Build enriched rows
+                # Build enriched rows — keyed by token_id so failsink node states
+                # can record the enriched payload (what was actually written), not
+                # the original row data.
                 iso_ts = datetime.now(UTC).isoformat()
-                enriched_rows = []
-                for _token, idx, _state in primary_divert_states:
+                enriched_rows: list[dict[str, object]] = []
+                enriched_by_token: dict[str, dict[str, object]] = {}
+                for token, idx, _state in primary_divert_states:
                     diversion = diversion_by_index[idx]
                     enriched_row = {
                         **diversion.row_data,
@@ -413,6 +416,7 @@ class SinkExecutor:
                         "__diversion_timestamp": iso_ts,
                     }
                     enriched_rows.append(enriched_row)
+                    enriched_by_token[token.token_id] = enriched_row
 
                 # Write to failsink — if this fails, complete primary divert
                 # states as FAILED before re-raising (they're already open).
@@ -443,11 +447,13 @@ class SinkExecutor:
 
                 failsink_artifact_info = failsink_write_result.artifact
 
-                # Open node_states at failsink node (destination)
+                # Open node_states at failsink node (destination).
+                # Use the enriched payload (what was actually written to the failsink),
+                # not the original row data — the audit trail must reflect the persisted data.
                 failsink_states: list[tuple[TokenInfo, NodeStateOpen]] = []
                 try:
                     for token, _idx, _primary_state in primary_divert_states:
-                        input_dict = token.row_data.to_dict()
+                        input_dict = enriched_by_token[token.token_id]
                         state = self._recorder.begin_node_state(
                             token_id=token.token_id,
                             node_id=failsink_node_id,
@@ -522,9 +528,10 @@ class SinkExecutor:
                         )
                         completed_primary_indices.add(loop_idx)
 
-                        # Complete failsink state (token written to failsink)
+                        # Complete failsink state (token written to failsink).
+                        # Use enriched row — that's what was actually persisted.
                         failsink_output = {
-                            "row": token.row_data.to_dict(),
+                            "row": enriched_by_token[token.token_id],
                             "artifact_path": failsink_artifact_info.path_or_uri,
                             "content_hash": failsink_artifact_info.content_hash,
                         }
