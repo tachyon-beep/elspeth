@@ -511,11 +511,16 @@ class TestSinkProtocol:
             supports_resume = False  # Required by SinkProtocol
             validate_input: bool = False  # Centralized in executor
             declared_required_fields: frozenset[str] = frozenset()  # Centralized in executor
+            _on_write_failure: str | None = "discard"
             rows: ClassVar[list[dict[str, Any]]] = []
 
             def __init__(self, config: dict[str, Any]) -> None:
                 self.instance_rows: list[dict[str, Any]] = []
                 self.config = config
+                self._diversion_log: list[Any] = []
+
+            def _reset_diversion_log(self) -> None:
+                self._diversion_log = []
 
             def write(self, rows: list[dict[str, Any]], ctx: PluginContext) -> SinkWriteResult:
                 self.rows.extend(rows)
