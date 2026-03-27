@@ -229,14 +229,21 @@ for local-only auth flows.
 | GET | `/api/sessions/{id}/messages` | Chat history |
 | GET | `/api/sessions/{id}/state` | Current composition state |
 | GET | `/api/sessions/{id}/state/versions` | State version history |
+| POST | `/api/sessions/{id}/upload` | Upload source file to user scratch dir |
 
 `POST /api/sessions/{id}/messages` is the primary interaction endpoint. It:
 
 1. Persists the user message
 2. Forwards to ComposerService with current composition state
-3. Runs the LLM tool-use loop (may take several seconds)
+3. Runs the LLM tool-use loop (may take several seconds — the frontend shows
+   a "composing" indicator during this time)
 4. Persists the assistant response and any new composition state version
 5. Returns `{message: ChatMessage, state: CompositionState | null}`
+
+`POST /api/sessions/{id}/upload` accepts a multipart file upload. The file is
+saved to the user's scratch directory (`{data_dir}/uploads/{user_id}/`) and the
+response returns the server-side path. The user can then reference this path in
+the chat, or the LLM composer can use it directly when configuring a source.
 
 ### Catalog
 
@@ -417,6 +424,14 @@ Three-panel layout:
 1. **Sessions sidebar** (left, 200px) — session list, new session button
 2. **Chat panel** (centre, flex) — conversation with the LLM composer
 3. **Inspector panel** (right, 320px) — tabbed view of the current pipeline
+
+### Composing Indicator
+
+While the backend is running the LLM tool-use loop, the chat panel shows a
+visual "composing" indicator (typing dots animation or spinner with "ELSPETH is
+thinking..." label). The send button is disabled during this time. This prevents
+the user from sending overlapping requests and makes it clear the system is
+working.
 
 ### Inspector Tabs
 
@@ -613,22 +628,22 @@ This spec implements a subset of the Semi-Autonomous Platform
 
 ## Open Questions
 
-These are genuine design choices. The listed defaults are viable starting points
-that don't block implementation — revisit before shipping if needed.
+These questions were resolved during design review.
 
-1. **Streaming assistant responses.** Should the chat panel stream the LLM's text
-   response token-by-token (SSE), or wait for the full tool-use loop to complete?
-   Streaming is better UX for long responses but adds complexity when tool calls
-   are interleaved with text. **Default: wait for full response in v1.**
+1. **Streaming assistant responses.** Wait for the full tool-use loop to complete.
+   The chat panel shows a visual "composing" indicator (typing animation or
+   spinner) while the backend processes the LLM loop, so the user knows the
+   system is working. No token-by-token streaming in v1.
 
-2. **Session sharing.** Can multiple team members see/edit the same session, or are
-   sessions user-scoped? User-scoped is simpler for v1 but limits collaboration.
-   **Default: user-scoped in v1.**
+2. **Session sharing.** Sessions are user-scoped in v1. Each user sees only their
+   own sessions.
 
-3. **Source file upload.** For CSV/JSON sources, how does the user provide the file?
-   Upload through the web UI, or reference a server-accessible path? Upload adds
-   file storage concerns. **Default: server-accessible path reference in v1.**
+3. **Source file upload.** Both modes supported: reference a server-accessible path,
+   or upload a file through the web UI. Uploads go to a per-user scratch directory
+   on the server (`{data_dir}/uploads/{user_id}/`). The scratch directory is
+   managed by the SessionService. The source plugin receives the resolved server
+   path regardless of how the file was provided.
 
-4. **Concurrent executions.** Can a session have multiple active runs, or one at a
-   time? One-at-a-time is simpler and avoids resource contention.
-   **Default: one active run per session in v1.**
+4. **Concurrent executions.** One active run per session. If higher concurrency is
+   needed, deploy additional instances per user rather than multiplexing runs
+   within a single session.
