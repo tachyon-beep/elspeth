@@ -299,10 +299,15 @@ class TestWebSettingsDefaults:
         settings = WebSettings()
         assert settings.oidc_issuer is None
         assert settings.oidc_audience is None
+        assert settings.oidc_client_id is None
 
     def test_entra_tenant_id_default_none(self) -> None:
         settings = WebSettings()
         assert settings.entra_tenant_id is None
+
+    def test_session_db_url_default_is_none(self) -> None:
+        settings = WebSettings()
+        assert settings.session_db_url is None
 
 
 class TestWebSettingsCustomValues:
@@ -381,6 +386,22 @@ class TestWebSettingsDerivedAccessors:
         settings = WebSettings()
         path = settings.get_payload_store_path()
         assert path == Path("data") / "payloads"
+
+    def test_get_session_db_url_default_derives_from_data_dir(self) -> None:
+        settings = WebSettings(data_dir=Path("/app/data"))
+        url = settings.get_session_db_url()
+        assert url == "sqlite:////app/data/sessions.db"
+
+    def test_get_session_db_url_explicit_value_returned(self) -> None:
+        settings = WebSettings(session_db_url="postgresql://db/sessions")
+        url = settings.get_session_db_url()
+        assert url == "postgresql://db/sessions"
+
+    def test_default_data_dir_session_db_url(self) -> None:
+        """Default data_dir='data' produces a relative sqlite path."""
+        settings = WebSettings()
+        url = settings.get_session_db_url()
+        assert url == f"sqlite:///{Path('data') / 'sessions.db'}"
 ```
 
 - [ ] **Step 2: Run tests -- verify they fail**
@@ -441,7 +462,12 @@ class WebSettings(BaseModel):
     # OIDC / Entra-specific (optional)
     oidc_issuer: str | None = None
     oidc_audience: str | None = None
+    oidc_client_id: str | None = None
     entra_tenant_id: str | None = None
+
+    # Session database (sessions, messages, composition states, runs)
+    # Separate from landscape_url (audit DB)
+    session_db_url: str | None = None
 
     def get_landscape_url(self) -> str:
         """Resolve landscape DB URL, defaulting to data_dir-relative path."""
@@ -455,6 +481,13 @@ class WebSettings(BaseModel):
         if self.payload_store_path is not None:
             return self.payload_store_path
         return self.data_dir / "payloads"
+
+    def get_session_db_url(self) -> str:
+        """Resolve session DB URL, defaulting to data_dir-relative path."""
+        if self.session_db_url is not None:
+            return self.session_db_url
+        db_path = self.data_dir / "sessions.db"
+        return f"sqlite:///{db_path}"
 ```
 
 - [ ] **Step 4: Run tests -- verify they pass**
@@ -582,10 +615,30 @@ Expected: `ModuleNotFoundError: No module named 'elspeth.web.app'`
 
 from __future__ import annotations
 
+from contextlib import asynccontextmanager
+from typing import AsyncIterator
+
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from elspeth.web.config import WebSettings
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI) -> AsyncIterator[None]:
+    """Async lifespan context manager for the FastAPI application.
+
+    Services that require a running event loop must be constructed here,
+    not in the synchronous create_app() function.
+
+    Phase 1: stub -- no async services yet.
+    Phase 5 will construct ProgressBroadcaster here using
+    asyncio.get_running_loop().
+    """
+    # Phase 5 will add:
+    #   app.state.broadcaster = ProgressBroadcaster(asyncio.get_running_loop())
+    yield
+    # Shutdown: clean up async services here.
 
 
 def create_app(settings: WebSettings | None = None) -> FastAPI:
@@ -600,7 +653,7 @@ def create_app(settings: WebSettings | None = None) -> FastAPI:
     if settings is None:
         settings = WebSettings()
 
-    app = FastAPI(title="ELSPETH Web", version="0.1.0")
+    app = FastAPI(title="ELSPETH Web", version="0.1.0", lifespan=lifespan)
 
     app.add_middleware(
         CORSMiddleware,
@@ -811,10 +864,11 @@ Before marking this sub-plan as complete, verify every item:
 - [ ] **Singleton extraction:** `get_shared_plugin_manager()` exists in `manager.py` and returns the same instance on repeated calls
 - [ ] **CLI decoupled:** `cli_helpers.py` no longer imports anything from `cli.py`
 - [ ] **Dead code removed:** `_get_plugin_manager()` and `_plugin_manager_cache` do not exist in `cli.py`
-- [ ] **WebSettings complete:** All 16 fields present (host, port, auth_provider, cors_origins, data_dir, composer_model, composer_max_turns, composer_timeout_seconds, secret_key, max_upload_bytes, landscape_url, payload_store_path, oidc_issuer, oidc_audience, entra_tenant_id)
+- [ ] **WebSettings complete:** All 18 fields present (host, port, auth_provider, cors_origins, data_dir, composer_model, composer_max_turns, composer_timeout_seconds, secret_key, max_upload_bytes, landscape_url, payload_store_path, oidc_issuer, oidc_audience, oidc_client_id, entra_tenant_id, session_db_url)
 - [ ] **No `validate_auth_provider`:** `auth_provider` uses `Literal["local", "oidc", "entra"]` -- Pydantic handles validation, no manual `@field_validator`
-- [ ] **Derived accessors work:** `get_landscape_url()` and `get_payload_store_path()` return data-dir-relative defaults when fields are `None`, and return explicit values when set
-- [ ] **App factory correct:** `create_app()` returns a `FastAPI` with `title="ELSPETH Web"`, `version="0.1.0"`, CORS middleware, and `/api/health` endpoint
+- [ ] **Derived accessors work:** `get_landscape_url()`, `get_payload_store_path()`, and `get_session_db_url()` return data-dir-relative defaults when fields are `None`, and return explicit values when set
+- [ ] **App factory correct:** `create_app()` returns a `FastAPI` with `title="ELSPETH Web"`, `version="0.1.0"`, CORS middleware, lifespan context manager, and `/api/health` endpoint
+- [ ] **Lifespan stub present:** `lifespan()` async context manager exists in `app.py`, passed to `FastAPI(lifespan=lifespan)`, with Phase 5 `ProgressBroadcaster` comments
 - [ ] **No lazy imports in `create_app()`:** All imports are at the top of `app.py`, not inside the function body
 - [ ] **dependencies.py exists:** `get_settings()` reads from `request.app.state.settings`
 - [ ] **`[webui]` extra in pyproject.toml:** Contains fastapi, uvicorn[standard], python-jose[cryptography], python-multipart, websockets, httpx

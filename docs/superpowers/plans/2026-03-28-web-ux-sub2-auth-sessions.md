@@ -25,12 +25,12 @@
 | Create | `src/elspeth/web/auth/oidc.py` | OIDCAuthProvider -- JWKS discovery via httpx, token validation |
 | Create | `src/elspeth/web/auth/entra.py` | EntraAuthProvider -- tenant validation, group claims |
 | Create | `src/elspeth/web/auth/middleware.py` | get_current_user FastAPI dependency |
-| Create | `src/elspeth/web/auth/routes.py` | /api/auth/login, /api/auth/token, /api/auth/me |
+| Create | `src/elspeth/web/auth/routes.py` | /api/auth/login, /api/auth/token, /api/auth/config, /api/auth/me |
 | Create | `src/elspeth/web/sessions/__init__.py` | Module init |
 | Create | `src/elspeth/web/sessions/protocol.py` | SessionServiceProtocol |
 | Create | `src/elspeth/web/sessions/models.py` | SQLAlchemy Core table definitions (sessions, chat_messages, composition_states, runs, run_events) |
 | Create | `src/elspeth/web/sessions/service.py` | SessionServiceImpl -- CRUD, state versioning, active run check |
-| Create | `src/elspeth/web/sessions/routes.py` | /api/sessions/* endpoints with IDOR protection |
+| Create | `src/elspeth/web/sessions/routes.py` | /api/sessions/* endpoints with IDOR protection, including state revert |
 | Create | `src/elspeth/web/sessions/schemas.py` | Pydantic request/response models for all session endpoints |
 | Modify | `src/elspeth/web/app.py` | Register auth and session routers, create session DB engine, call metadata.create_all on startup |
 | Modify | `src/elspeth/web/dependencies.py` | Add get_current_user, get_session_service, get_auth_provider dependencies |
@@ -41,7 +41,7 @@
 | Create | `tests/unit/web/auth/test_oidc_provider.py` | OIDCAuthProvider tests |
 | Create | `tests/unit/web/auth/test_entra_provider.py` | EntraAuthProvider tests |
 | Create | `tests/unit/web/auth/test_middleware.py` | Auth middleware tests |
-| Create | `tests/unit/web/auth/test_routes.py` | Auth route tests |
+| Create | `tests/unit/web/auth/test_routes.py` | Auth route tests including /api/auth/config |
 | Create | `tests/unit/web/sessions/__init__.py` | Test package |
 | Create | `tests/unit/web/sessions/test_models.py` | Table schema tests |
 | Create | `tests/unit/web/sessions/test_service.py` | SessionService CRUD tests |
@@ -1665,6 +1665,54 @@ class TestMeEndpoint:
 
         response = client.get("/api/auth/me")
         assert response.status_code == 401
+
+
+class TestAuthConfigEndpoint:
+    """Tests for GET /api/auth/config (S9/D5)."""
+
+    def test_local_provider_returns_null_oidc_fields(self, tmp_path) -> None:
+        provider = LocalAuthProvider(
+            db_path=tmp_path / "auth.db",
+            secret_key="test-key",
+        )
+        app = _create_test_app(provider, auth_provider_type="local")
+        # Add OIDC fields to fake settings
+        app.state.settings.oidc_issuer = None
+        app.state.settings.oidc_client_id = None
+        client = TestClient(app)
+
+        response = client.get("/api/auth/config")
+        assert response.status_code == 200
+        body = response.json()
+        assert body["provider"] == "local"
+        assert body["oidc_issuer"] is None
+        assert body["oidc_client_id"] is None
+
+    def test_oidc_provider_returns_issuer_and_client_id(self, tmp_path) -> None:
+        provider = AsyncMock()
+        app = _create_test_app(provider, auth_provider_type="oidc")
+        app.state.settings.oidc_issuer = "https://login.example.com"
+        app.state.settings.oidc_client_id = "my-client-id"
+        client = TestClient(app)
+
+        response = client.get("/api/auth/config")
+        assert response.status_code == 200
+        body = response.json()
+        assert body["provider"] == "oidc"
+        assert body["oidc_issuer"] == "https://login.example.com"
+        assert body["oidc_client_id"] == "my-client-id"
+
+    def test_config_endpoint_is_unauthenticated(self, tmp_path) -> None:
+        """GET /api/auth/config must not require a Bearer token."""
+        provider = AsyncMock()
+        app = _create_test_app(provider, auth_provider_type="local")
+        app.state.settings.oidc_issuer = None
+        app.state.settings.oidc_client_id = None
+        client = TestClient(app)
+
+        # No Authorization header -- should still return 200
+        response = client.get("/api/auth/config")
+        assert response.status_code == 200
 ```
 
 - [ ] **Step 2: Run tests -- verify they fail**
@@ -1679,10 +1727,11 @@ Expected: `ModuleNotFoundError: No module named 'elspeth.web.auth.routes'`
 
 ```python
 # src/elspeth/web/auth/routes.py
-"""Auth API routes -- /api/auth/login, /api/auth/token, /api/auth/me.
+"""Auth API routes -- /api/auth/login, /api/auth/token, /api/auth/config, /api/auth/me.
 
 POST /login is only available when auth_provider is "local".
 POST /token re-issues a JWT from a valid existing token (local only).
+GET /config returns auth configuration for frontend discovery (unauthenticated).
 GET /me returns the full UserProfile for any auth provider.
 """
 
@@ -1717,6 +1766,14 @@ class UserProfileResponse(BaseModel):
     display_name: str
     email: str | None = None
     groups: list[str] = []
+
+
+class AuthConfigResponse(BaseModel):
+    """Response for GET /api/auth/config."""
+
+    provider: str
+    oidc_issuer: str | None = None
+    oidc_client_id: str | None = None
 
 
 def create_auth_router() -> APIRouter:
@@ -1762,6 +1819,20 @@ def create_auth_router() -> APIRouter:
         new_token = jwt.encode(payload, provider._secret_key, algorithm="HS256")
         return TokenResponse(access_token=new_token)
 
+    @router.get("/config", response_model=AuthConfigResponse)
+    async def auth_config(request: Request) -> AuthConfigResponse:
+        """Return auth configuration for frontend discovery.
+
+        This endpoint is unauthenticated -- the frontend needs it
+        before any login flow.
+        """
+        settings = request.app.state.settings
+        return AuthConfigResponse(
+            provider=settings.auth_provider,
+            oidc_issuer=getattr(settings, "oidc_issuer", None),
+            oidc_client_id=getattr(settings, "oidc_client_id", None),
+        )
+
     @router.get("/me", response_model=UserProfileResponse)
     async def me(request: Request, user: UserIdentity = Depends(get_current_user)):
         """Return the full profile of the authenticated user."""
@@ -1791,7 +1862,7 @@ def create_auth_router() -> APIRouter:
 .venv/bin/python -m pytest tests/unit/web/auth/test_routes.py -v
 ```
 
-Expected: all 7 tests pass.
+Expected: all 10 tests pass.
 
 - [ ] **Step 5: Run all auth tests**
 
@@ -2252,6 +2323,26 @@ class CompositionStateRecord:
             freeze_fields(self, *fields_to_freeze)
 
 
+@dataclass(frozen=True, slots=True)
+class RunRecord:
+    """Represents a row from the runs table.
+
+    All fields are scalars, datetime, or None -- no freeze guard needed.
+    """
+
+    id: UUID
+    session_id: UUID
+    state_id: UUID
+    status: str
+    started_at: datetime
+    finished_at: datetime | None
+    rows_processed: int
+    rows_failed: int
+    error: str | None
+    landscape_run_id: str | None
+    pipeline_yaml: str | None
+
+
 class RunAlreadyActiveError(Exception):
     """Raised when attempting to create a run while one is already active."""
 
@@ -2296,9 +2387,38 @@ class SessionServiceProtocol(Protocol):
         self, session_id: UUID,
     ) -> CompositionStateRecord | None: ...
 
+    async def get_state(self, state_id: UUID) -> CompositionStateRecord: ...
+
     async def get_state_versions(
         self, session_id: UUID,
     ) -> list[CompositionStateRecord]: ...
+
+    async def set_active_state(
+        self, session_id: UUID, state_id: UUID,
+    ) -> CompositionStateRecord: ...
+
+    async def create_run(
+        self,
+        session_id: UUID,
+        state_id: UUID,
+        pipeline_yaml: str | None = None,
+    ) -> RunRecord: ...
+
+    async def get_run(self, run_id: UUID) -> RunRecord: ...
+
+    async def update_run_status(
+        self,
+        run_id: UUID,
+        status: str,
+        error: str | None = None,
+        landscape_run_id: str | None = None,
+        rows_processed: int | None = None,
+        rows_failed: int | None = None,
+    ) -> None: ...
+
+    async def get_active_run(
+        self, session_id: UUID,
+    ) -> RunRecord | None: ...
 ```
 
 - [ ] **Step 2: Commit**
@@ -2338,6 +2458,7 @@ from elspeth.web.sessions.models import (
 from elspeth.web.sessions.protocol import (
     CompositionStateData,
     RunAlreadyActiveError,
+    RunRecord,
     SessionRecord,
     ChatMessageRecord,
     CompositionStateRecord,
@@ -2571,6 +2692,30 @@ class TestOneActiveRunEnforcement:
             await service.create_run(session.id, state.id)
 
     @pytest.mark.asyncio
+    async def test_create_run_returns_run_record(self, service) -> None:
+        session = await service.create_session("alice", "Pipeline")
+        state = await service.save_composition_state(
+            session.id, CompositionStateData(is_valid=True),
+        )
+        run = await service.create_run(session.id, state.id)
+        assert isinstance(run, RunRecord)
+        assert run.status == "pending"
+        assert run.session_id == session.id
+        assert run.state_id == state.id
+        assert run.pipeline_yaml is None
+
+    @pytest.mark.asyncio
+    async def test_create_run_with_pipeline_yaml(self, service) -> None:
+        session = await service.create_session("alice", "Pipeline")
+        state = await service.save_composition_state(
+            session.id, CompositionStateData(is_valid=True),
+        )
+        run = await service.create_run(
+            session.id, state.id, pipeline_yaml="source:\n  type: csv",
+        )
+        assert run.pipeline_yaml == "source:\n  type: csv"
+
+    @pytest.mark.asyncio
     async def test_completed_run_allows_new_run(self, service) -> None:
         session = await service.create_session("alice", "Pipeline")
         state = await service.save_composition_state(
@@ -2578,10 +2723,10 @@ class TestOneActiveRunEnforcement:
         )
         run = await service.create_run(session.id, state.id)
         # Mark the run as completed
-        await service.update_run_status(run["id"], "completed")
+        await service.update_run_status(run.id, "completed")
         # New run should succeed
         run2 = await service.create_run(session.id, state.id)
-        assert run2["status"] == "pending"
+        assert run2.status == "pending"
 
     @pytest.mark.asyncio
     async def test_failed_run_allows_new_run(self, service) -> None:
@@ -2590,9 +2735,9 @@ class TestOneActiveRunEnforcement:
             session.id, CompositionStateData(is_valid=True),
         )
         run = await service.create_run(session.id, state.id)
-        await service.update_run_status(run["id"], "failed")
+        await service.update_run_status(run.id, "failed")
         run2 = await service.create_run(session.id, state.id)
-        assert run2["status"] == "pending"
+        assert run2.status == "pending"
 
     @pytest.mark.asyncio
     async def test_running_run_blocks_new_run(self, service) -> None:
@@ -2601,9 +2746,178 @@ class TestOneActiveRunEnforcement:
             session.id, CompositionStateData(is_valid=True),
         )
         run = await service.create_run(session.id, state.id)
-        await service.update_run_status(run["id"], "running")
+        await service.update_run_status(run.id, "running")
         with pytest.raises(RunAlreadyActiveError):
             await service.create_run(session.id, state.id)
+
+
+class TestGetState:
+    """Tests for get_state -- fetch a specific CompositionStateRecord by UUID."""
+
+    @pytest.mark.asyncio
+    async def test_get_state_by_id(self, service) -> None:
+        session = await service.create_session("alice", "Pipeline")
+        saved = await service.save_composition_state(
+            session.id,
+            CompositionStateData(
+                source={"type": "csv"}, is_valid=True,
+            ),
+        )
+        fetched = await service.get_state(saved.id)
+        assert fetched.id == saved.id
+        assert fetched.version == saved.version
+
+    @pytest.mark.asyncio
+    async def test_get_state_not_found_raises(self, service) -> None:
+        with pytest.raises(ValueError, match="not found"):
+            await service.get_state(uuid.uuid4())
+
+
+class TestSetActiveState:
+    """Tests for set_active_state -- revert by copying a prior version."""
+
+    @pytest.mark.asyncio
+    async def test_revert_creates_new_version(self, service) -> None:
+        session = await service.create_session("alice", "Pipeline")
+        v1 = await service.save_composition_state(
+            session.id,
+            CompositionStateData(source={"type": "csv"}, is_valid=True),
+        )
+        v2 = await service.save_composition_state(
+            session.id,
+            CompositionStateData(source={"type": "api"}, is_valid=True),
+        )
+        # Revert to v1 -- should create v3 as a copy of v1
+        reverted = await service.set_active_state(session.id, v1.id)
+        assert reverted.version == 3
+        # Content should match v1, not v2
+        assert reverted.source == v1.source
+
+    @pytest.mark.asyncio
+    async def test_revert_preserves_history(self, service) -> None:
+        session = await service.create_session("alice", "Pipeline")
+        await service.save_composition_state(
+            session.id, CompositionStateData(is_valid=False),
+        )
+        v2 = await service.save_composition_state(
+            session.id, CompositionStateData(is_valid=True),
+        )
+        await service.set_active_state(session.id, v2.id)
+        versions = await service.get_state_versions(session.id)
+        # All three versions should exist (v1, v2, v3)
+        assert len(versions) == 3
+        assert [v.version for v in versions] == [1, 2, 3]
+
+    @pytest.mark.asyncio
+    async def test_revert_state_not_found_raises(self, service) -> None:
+        session = await service.create_session("alice", "Pipeline")
+        with pytest.raises(ValueError, match="not found"):
+            await service.set_active_state(session.id, uuid.uuid4())
+
+    @pytest.mark.asyncio
+    async def test_revert_state_wrong_session_raises(self, service) -> None:
+        s1 = await service.create_session("alice", "Session 1")
+        s2 = await service.create_session("alice", "Session 2")
+        state = await service.save_composition_state(
+            s1.id, CompositionStateData(is_valid=True),
+        )
+        with pytest.raises(ValueError, match="does not belong"):
+            await service.set_active_state(s2.id, state.id)
+
+
+class TestGetRun:
+    """Tests for get_run -- fetch a RunRecord by UUID."""
+
+    @pytest.mark.asyncio
+    async def test_get_run_returns_record(self, service) -> None:
+        session = await service.create_session("alice", "Pipeline")
+        state = await service.save_composition_state(
+            session.id, CompositionStateData(is_valid=True),
+        )
+        created = await service.create_run(session.id, state.id)
+        fetched = await service.get_run(created.id)
+        assert isinstance(fetched, RunRecord)
+        assert fetched.id == created.id
+        assert fetched.status == "pending"
+
+    @pytest.mark.asyncio
+    async def test_get_run_not_found_raises(self, service) -> None:
+        with pytest.raises(ValueError, match="not found"):
+            await service.get_run(uuid.uuid4())
+
+
+class TestGetActiveRun:
+    """Tests for get_active_run -- pending/running run for a session."""
+
+    @pytest.mark.asyncio
+    async def test_returns_active_run(self, service) -> None:
+        session = await service.create_session("alice", "Pipeline")
+        state = await service.save_composition_state(
+            session.id, CompositionStateData(is_valid=True),
+        )
+        run = await service.create_run(session.id, state.id)
+        active = await service.get_active_run(session.id)
+        assert active is not None
+        assert active.id == run.id
+
+    @pytest.mark.asyncio
+    async def test_returns_none_when_no_active_run(self, service) -> None:
+        session = await service.create_session("alice", "Pipeline")
+        active = await service.get_active_run(session.id)
+        assert active is None
+
+    @pytest.mark.asyncio
+    async def test_returns_none_after_completion(self, service) -> None:
+        session = await service.create_session("alice", "Pipeline")
+        state = await service.save_composition_state(
+            session.id, CompositionStateData(is_valid=True),
+        )
+        run = await service.create_run(session.id, state.id)
+        await service.update_run_status(run.id, "completed")
+        active = await service.get_active_run(session.id)
+        assert active is None
+
+
+class TestUpdateRunStatusExpanded:
+    """Tests for expanded update_run_status signature (R6)."""
+
+    @pytest.mark.asyncio
+    async def test_update_with_error(self, service) -> None:
+        session = await service.create_session("alice", "Pipeline")
+        state = await service.save_composition_state(
+            session.id, CompositionStateData(is_valid=True),
+        )
+        run = await service.create_run(session.id, state.id)
+        await service.update_run_status(
+            run.id, "failed", error="Source file not found",
+        )
+        fetched = await service.get_run(run.id)
+        assert fetched.status == "failed"
+        assert fetched.error == "Source file not found"
+        assert fetched.finished_at is not None
+
+    @pytest.mark.asyncio
+    async def test_update_with_landscape_run_id(self, service) -> None:
+        session = await service.create_session("alice", "Pipeline")
+        state = await service.save_composition_state(
+            session.id, CompositionStateData(is_valid=True),
+        )
+        run = await service.create_run(session.id, state.id)
+        await service.update_run_status(
+            run.id, "completed",
+            landscape_run_id="lscp-abc-123",
+            rows_processed=100,
+            rows_failed=3,
+        )
+        fetched = await service.get_run(run.id)
+        assert fetched.landscape_run_id == "lscp-abc-123"
+        assert fetched.rows_processed == 100
+        assert fetched.rows_failed == 3
+
+    @pytest.mark.asyncio
+    async def test_update_not_found_raises(self, service) -> None:
+        with pytest.raises(ValueError, match="not found"):
+            await service.update_run_status(uuid.uuid4(), "completed")
 ```
 
 - [ ] **Step 2: Run tests -- verify they fail**
@@ -2645,6 +2959,7 @@ from elspeth.web.sessions.protocol import (
     CompositionStateData,
     CompositionStateRecord,
     RunAlreadyActiveError,
+    RunRecord,
     SessionRecord,
 )
 
@@ -2935,12 +3250,16 @@ class SessionServiceImpl:
         )
 
     async def create_run(
-        self, session_id: UUID, state_id: UUID,
-    ) -> dict[str, Any]:
+        self,
+        session_id: UUID,
+        state_id: UUID,
+        pipeline_yaml: str | None = None,
+    ) -> RunRecord:
         """Create a new pending run, enforcing one active run per session (B6).
 
         The check-and-set runs within the same database transaction.
         Raises RunAlreadyActiveError if a pending or running run exists.
+        If pipeline_yaml is provided, stores the generated YAML at creation time.
         """
         run_id = uuid.uuid4()
         now = self._now()
@@ -2967,32 +3286,189 @@ class SessionServiceImpl:
                     started_at=now,
                     rows_processed=0,
                     rows_failed=0,
+                    pipeline_yaml=pipeline_yaml,
                 )
             )
 
-        return {
-            "id": str(run_id),
-            "session_id": sid,
-            "state_id": str(state_id),
-            "status": "pending",
-            "started_at": now.isoformat(),
-        }
+        return RunRecord(
+            id=run_id,
+            session_id=session_id,
+            state_id=state_id,
+            status="pending",
+            started_at=now,
+            finished_at=None,
+            rows_processed=0,
+            rows_failed=0,
+            error=None,
+            landscape_run_id=None,
+            pipeline_yaml=pipeline_yaml,
+        )
+
+    async def get_run(self, run_id: UUID) -> RunRecord:
+        """Fetch a run by ID. Raises ValueError if not found."""
+        with self._engine.begin() as conn:
+            row = conn.execute(
+                select(runs_table).where(
+                    runs_table.c.id == str(run_id)
+                )
+            ).fetchone()
+
+        if row is None:
+            raise ValueError(f"Run not found: {run_id}")
+
+        return self._row_to_run_record(row)
 
     async def update_run_status(
-        self, run_id: str, status: str,
+        self,
+        run_id: UUID,
+        status: str,
+        error: str | None = None,
+        landscape_run_id: str | None = None,
+        rows_processed: int | None = None,
+        rows_failed: int | None = None,
     ) -> None:
-        """Update a run's status. Sets finished_at for terminal states."""
+        """Update a run's status and optional fields.
+
+        Sets finished_at for terminal states (completed, failed, cancelled).
+        Optional parameters only update the column when not None.
+        Raises ValueError if run not found.
+        """
         now = self._now()
         values: dict[str, Any] = {"status": status}
         if status in ("completed", "failed", "cancelled"):
             values["finished_at"] = now
+        if error is not None:
+            values["error"] = error
+        if landscape_run_id is not None:
+            values["landscape_run_id"] = landscape_run_id
+        if rows_processed is not None:
+            values["rows_processed"] = rows_processed
+        if rows_failed is not None:
+            values["rows_failed"] = rows_failed
 
         with self._engine.begin() as conn:
-            conn.execute(
+            result = conn.execute(
                 update(runs_table)
-                .where(runs_table.c.id == run_id)
+                .where(runs_table.c.id == str(run_id))
                 .values(**values)
             )
+            if result.rowcount == 0:
+                raise ValueError(f"Run not found: {run_id}")
+
+    async def get_active_run(
+        self, session_id: UUID,
+    ) -> RunRecord | None:
+        """Return the pending/running run for a session, or None."""
+        with self._engine.begin() as conn:
+            row = conn.execute(
+                select(runs_table).where(
+                    runs_table.c.session_id == str(session_id),
+                    runs_table.c.status.in_(["pending", "running"]),
+                )
+            ).fetchone()
+
+        if row is None:
+            return None
+
+        return self._row_to_run_record(row)
+
+    async def get_state(self, state_id: UUID) -> CompositionStateRecord:
+        """Fetch a composition state by its primary key. Raises ValueError if not found."""
+        with self._engine.begin() as conn:
+            row = conn.execute(
+                select(composition_states_table).where(
+                    composition_states_table.c.id == str(state_id)
+                )
+            ).fetchone()
+
+        if row is None:
+            raise ValueError(f"State not found: {state_id}")
+
+        return self._row_to_state_record(row)
+
+    async def set_active_state(
+        self, session_id: UUID, state_id: UUID,
+    ) -> CompositionStateRecord:
+        """Revert to a prior state by copying it as a new version.
+
+        Creates a new version record that is a copy of the specified prior
+        version (looked up by state_id). The new record gets
+        version = max(existing) + 1. Raises ValueError if state_id not
+        found or does not belong to the session.
+        """
+        sid = str(session_id)
+
+        with self._engine.begin() as conn:
+            # Look up the prior state
+            prior_row = conn.execute(
+                select(composition_states_table).where(
+                    composition_states_table.c.id == str(state_id)
+                )
+            ).fetchone()
+
+            if prior_row is None:
+                raise ValueError(f"State not found: {state_id}")
+            if prior_row.session_id != sid:
+                raise ValueError(
+                    f"State {state_id} does not belong to session {session_id}"
+                )
+
+            # Get next version number
+            max_version = conn.execute(
+                select(func.max(composition_states_table.c.version)).where(
+                    composition_states_table.c.session_id == sid
+                )
+            ).scalar()
+            new_version = (max_version or 0) + 1
+
+            new_state_id = uuid.uuid4()
+            now = self._now()
+
+            conn.execute(
+                insert(composition_states_table).values(
+                    id=str(new_state_id),
+                    session_id=sid,
+                    version=new_version,
+                    source=prior_row.source,
+                    nodes=prior_row.nodes,
+                    edges=prior_row.edges,
+                    outputs=prior_row.outputs,
+                    metadata_=prior_row.metadata_,
+                    is_valid=prior_row.is_valid,
+                    validation_errors=prior_row.validation_errors,
+                    created_at=now,
+                )
+            )
+
+        return CompositionStateRecord(
+            id=new_state_id,
+            session_id=session_id,
+            version=new_version,
+            source=prior_row.source,
+            nodes=prior_row.nodes,
+            edges=prior_row.edges,
+            outputs=prior_row.outputs,
+            metadata_=prior_row.metadata_,
+            is_valid=prior_row.is_valid,
+            validation_errors=prior_row.validation_errors,
+            created_at=now,
+        )
+
+    def _row_to_run_record(self, row: Any) -> RunRecord:
+        """Convert a SQLAlchemy row to a RunRecord."""
+        return RunRecord(
+            id=UUID(row.id),
+            session_id=UUID(row.session_id),
+            state_id=UUID(row.state_id),
+            status=row.status,
+            started_at=row.started_at,
+            finished_at=row.finished_at,
+            rows_processed=row.rows_processed,
+            rows_failed=row.rows_failed,
+            error=row.error,
+            landscape_run_id=row.landscape_run_id,
+            pipeline_yaml=row.pipeline_yaml,
+        )
 ```
 
 - [ ] **Step 4: Run tests -- verify they pass**
@@ -3001,7 +3477,7 @@ class SessionServiceImpl:
 .venv/bin/python -m pytest tests/unit/web/sessions/test_service.py -v
 ```
 
-Expected: all 20 tests pass.
+Expected: all 36 tests pass.
 
 - [ ] **Step 5: Commit**
 
@@ -3090,6 +3566,12 @@ class CompositionStateResponse(BaseModel):
     is_valid: bool
     validation_errors: list[str] | None = None
     created_at: datetime
+
+
+class RevertStateRequest(BaseModel):
+    """Request body for POST /api/sessions/{id}/state/revert."""
+
+    state_id: str
 
 
 class UploadResponse(BaseModel):
@@ -3340,6 +3822,13 @@ class TestIDORProtection:
         resp = bob_client.get(f"/api/sessions/{session_id}/state/versions")
         assert resp.status_code == 404
 
+        # Bob tries to revert state -- should be 404
+        resp = bob_client.post(
+            f"/api/sessions/{session_id}/state/revert",
+            json={"state_id": str(uuid.uuid4())},
+        )
+        assert resp.status_code == 404
+
         # Alice can still access her own session
         resp = alice_client.get(f"/api/sessions/{session_id}")
         assert resp.status_code == 200
@@ -3415,6 +3904,157 @@ class TestStateRoutes:
         )
         assert versions_resp.status_code == 200
         assert versions_resp.json() == []
+
+
+class TestRevertEndpoint:
+    """Tests for POST /api/sessions/{id}/state/revert (R1)."""
+
+    def test_revert_creates_new_version(self, tmp_path) -> None:
+        app, service = _make_app(tmp_path)
+        client = TestClient(app)
+
+        # Create session and two state versions via the service
+        import asyncio
+        loop = asyncio.new_event_loop()
+        session = loop.run_until_complete(
+            service.create_session("alice", "Pipeline"),
+        )
+        from elspeth.web.sessions.protocol import CompositionStateData
+        v1 = loop.run_until_complete(
+            service.save_composition_state(
+                session.id,
+                CompositionStateData(source={"type": "csv"}, is_valid=True),
+            ),
+        )
+        v2 = loop.run_until_complete(
+            service.save_composition_state(
+                session.id,
+                CompositionStateData(source={"type": "api"}, is_valid=True),
+            ),
+        )
+        loop.close()
+
+        # Revert to v1
+        resp = client.post(
+            f"/api/sessions/{session.id}/state/revert",
+            json={"state_id": str(v1.id)},
+        )
+        assert resp.status_code == 200
+        body = resp.json()
+        assert body["version"] == 3
+        # Should match v1's source, not v2's
+        assert body["source"] == {"type": "csv"}
+
+    def test_revert_injects_system_message(self, tmp_path) -> None:
+        app, service = _make_app(tmp_path)
+        client = TestClient(app)
+
+        import asyncio
+        loop = asyncio.new_event_loop()
+        session = loop.run_until_complete(
+            service.create_session("alice", "Pipeline"),
+        )
+        from elspeth.web.sessions.protocol import CompositionStateData
+        v1 = loop.run_until_complete(
+            service.save_composition_state(
+                session.id,
+                CompositionStateData(is_valid=True),
+            ),
+        )
+        loop.run_until_complete(
+            service.save_composition_state(
+                session.id,
+                CompositionStateData(is_valid=True),
+            ),
+        )
+        loop.close()
+
+        client.post(
+            f"/api/sessions/{session.id}/state/revert",
+            json={"state_id": str(v1.id)},
+        )
+
+        # Check that a system message was injected
+        msgs_resp = client.get(f"/api/sessions/{session.id}/messages")
+        messages = msgs_resp.json()
+        system_msgs = [m for m in messages if m["role"] == "system"]
+        assert len(system_msgs) == 1
+        assert "reverted to version 1" in system_msgs[0]["content"].lower()
+
+    def test_revert_idor_protection(self, tmp_path) -> None:
+        """Revert to a state in another user's session returns 404."""
+        from sqlalchemy import create_engine as _ce
+        engine = _ce("sqlite:///:memory:")
+        metadata.create_all(engine)
+        service = SessionServiceImpl(engine)
+
+        def make_app_for_user(uid: str) -> FastAPI:
+            app = FastAPI()
+            identity = UserIdentity(user_id=uid, username=uid)
+            async def mock_user():
+                return identity
+            app.dependency_overrides[get_current_user] = mock_user
+            app.state.session_service = service
+            app.state.settings = type(
+                "S", (), {"data_dir": tmp_path, "max_upload_bytes": 10_000_000},
+            )()
+            app.include_router(create_session_router())
+            return app
+
+        alice_app = make_app_for_user("alice")
+        bob_app = make_app_for_user("bob")
+
+        alice_client = TestClient(alice_app)
+        bob_client = TestClient(bob_app)
+
+        # Alice creates a session with a state
+        import asyncio
+        loop = asyncio.new_event_loop()
+        session = loop.run_until_complete(
+            service.create_session("alice", "Alice Only"),
+        )
+        from elspeth.web.sessions.protocol import CompositionStateData
+        v1 = loop.run_until_complete(
+            service.save_composition_state(
+                session.id, CompositionStateData(is_valid=True),
+            ),
+        )
+        loop.close()
+
+        # Bob tries to revert -- should be 404
+        resp = bob_client.post(
+            f"/api/sessions/{session.id}/state/revert",
+            json={"state_id": str(v1.id)},
+        )
+        assert resp.status_code == 404
+
+    def test_revert_state_not_belonging_to_session(self, tmp_path) -> None:
+        """Revert with a state_id from a different session returns 404."""
+        app, service = _make_app(tmp_path)
+        client = TestClient(app)
+
+        import asyncio
+        loop = asyncio.new_event_loop()
+        s1 = loop.run_until_complete(
+            service.create_session("alice", "Session 1"),
+        )
+        s2 = loop.run_until_complete(
+            service.create_session("alice", "Session 2"),
+        )
+        from elspeth.web.sessions.protocol import CompositionStateData
+        v1_s2 = loop.run_until_complete(
+            service.save_composition_state(
+                s2.id, CompositionStateData(is_valid=True),
+            ),
+        )
+        loop.close()
+
+        # Try to revert s1 using s2's state -- should fail
+        resp = client.post(
+            f"/api/sessions/{s1.id}/state/revert",
+            json={"state_id": str(v1_s2.id)},
+        )
+        assert resp.status_code == 404
 
 
 class TestUploadRoute:
@@ -3561,6 +4201,7 @@ from elspeth.web.sessions.schemas import (
     CompositionStateResponse,
     CreateSessionRequest,
     MessageWithStateResponse,
+    RevertStateRequest,
     SendMessageRequest,
     SessionResponse,
     UploadResponse,
@@ -3752,6 +4393,55 @@ def create_session_router() -> APIRouter:
             for v in versions
         ]
 
+    @router.post(
+        "/{session_id}/state/revert",
+        response_model=CompositionStateResponse,
+    )
+    async def revert_state(
+        session_id: str,
+        body: RevertStateRequest,
+        request: Request,
+        user: UserIdentity = Depends(get_current_user),
+    ) -> CompositionStateResponse:
+        """Revert the pipeline to a prior composition state version (R1).
+
+        Creates a new version that is a copy of the specified prior state.
+        Injects a system message recording the revert.
+        """
+        session = await _verify_session_ownership(session_id, user, request)
+        service = request.app.state.session_service
+
+        try:
+            new_state = await service.set_active_state(
+                session.id, UUID(body.state_id),
+            )
+        except ValueError:
+            raise HTTPException(
+                status_code=404, detail="State not found",
+            ) from None
+
+        # Look up the original version number for the system message
+        original_state = await service.get_state(UUID(body.state_id))
+        await service.add_message(
+            session.id,
+            role="system",
+            content=f"Pipeline reverted to version {original_state.version}.",
+        )
+
+        return CompositionStateResponse(
+            id=str(new_state.id),
+            session_id=str(new_state.session_id),
+            version=new_state.version,
+            source=new_state.source,
+            nodes=new_state.nodes,
+            edges=new_state.edges,
+            outputs=new_state.outputs,
+            metadata=new_state.metadata_,
+            is_valid=new_state.is_valid,
+            validation_errors=new_state.validation_errors,
+            created_at=new_state.created_at,
+        )
+
     @router.post("/{session_id}/upload", response_model=UploadResponse)
     async def upload_file(
         session_id: str,
@@ -3813,7 +4503,7 @@ def create_session_router() -> APIRouter:
 .venv/bin/python -m pytest tests/unit/web/sessions/test_routes.py -v
 ```
 
-Expected: all 16 tests pass.
+Expected: all 20 tests pass.
 
 - [ ] **Step 5: Run all session tests**
 
@@ -3887,10 +4577,9 @@ Inside `create_app()`, after the existing CORS and health setup, add:
             "Using default secret_key -- change this for production!"
         )
 
-    # --- Session database setup (W6) ---
-    session_db_path = settings.data_dir / "sessions.db"
-    session_db_path.parent.mkdir(parents=True, exist_ok=True)
-    session_engine = create_engine(f"sqlite:///{session_db_path}")
+    # --- Session database setup (W6, S14) ---
+    session_db_url = settings.get_session_db_url()
+    session_engine = create_engine(session_db_url)
     session_metadata.create_all(session_engine)
 
     session_service = SessionServiceImpl(session_engine)

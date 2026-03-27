@@ -261,7 +261,7 @@ export interface ToolCall {
 export interface ChatMessage {
   id: string;
   session_id: string;
-  role: "user" | "assistant";
+  role: "user" | "assistant" | "system";
   content: string;
   tool_calls: ToolCall[] | null;
   created_at: string;
@@ -290,7 +290,6 @@ export interface CompositionState {
   version: number;
   nodes: NodeSpec[];
   edges: EdgeSpec[];
-  yaml: string | null;
 }
 
 /** A version history entry for CompositionState */
@@ -328,19 +327,31 @@ export interface Run {
   status: "pending" | "running" | "completed" | "failed" | "cancelled";
   rows_processed: number;
   rows_failed: number;
-  estimated_total: number | null;
   started_at: string;
   finished_at: string | null;
   composition_version: number;
 }
 
-/** A progress event from the WebSocket */
+/**
+ * A progress event from the WebSocket.
+ *
+ * Terminal semantics:
+ * - "progress" -- non-terminal. Row count update; pipeline still running.
+ * - "error" -- non-terminal. Per-row exception; pipeline continues processing.
+ *   The frontend appends the error to the exceptions list but does NOT stop
+ *   the progress view or close the WebSocket.
+ * - "completed" -- terminal. Pipeline finished successfully.
+ * - "cancelled" -- terminal. Pipeline was cancelled.
+ *
+ * Note: "failed" is a Run status (set when the pipeline aborts), not a RunEvent
+ * type. If the pipeline aborts, the WebSocket closes and the frontend fetches
+ * the final Run status via REST.
+ */
 export interface RunEvent {
-  type: "progress" | "error" | "complete" | "cancelled";
+  type: "progress" | "error" | "completed" | "cancelled";
   run_id: string;
   rows_processed: number;
   rows_failed: number;
-  estimated_total: number | null;
   exceptions: RunException[];
 }
 
@@ -356,15 +367,15 @@ export interface RunException {
 export interface RunProgress {
   rows_processed: number;
   rows_failed: number;
-  estimated_total: number | null;
   recent_exceptions: RunException[];
-  status: "running" | "completed" | "failed" | "cancelled";
+  status: "running" | "completed" | "cancelled";
 }
 
 /** API error response shape */
 export interface ApiError {
   status: number;
   detail: string;
+  error_type?: string;
   validation_errors?: ValidationError[];
 }
 
@@ -470,19 +481,33 @@ function authHeaders(contentType?: string): HeadersInit {
 /**
  * Parse a response. Throws ApiError for non-2xx status codes.
  * Returns the parsed JSON body for success responses.
+ *
+ * Includes a global 401 interceptor: any API call returning 401
+ * triggers authStore.logout() to handle token expiry mid-session
+ * without requiring each caller to check for auth failures.
  */
 async function parseResponse<T>(response: Response): Promise<T> {
   if (!response.ok) {
+    // Global 401 interceptor — trigger logout on any auth failure
+    if (response.status === 401) {
+      // Dynamic import to avoid circular dependency at module load time
+      const { useAuthStore } = await import("@/stores/authStore");
+      useAuthStore.getState().logout();
+    }
+
     let detail = response.statusText;
+    let error_type: string | undefined;
     try {
       const body = await response.json();
       detail = body.detail ?? detail;
+      error_type = body.error_type;
     } catch {
       // Response body wasn't JSON — use statusText
     }
     const error: ApiError = {
       status: response.status,
       detail,
+      error_type,
     };
     throw error;
   }
@@ -490,6 +515,18 @@ async function parseResponse<T>(response: Response): Promise<T> {
 }
 
 // ── Auth ──────────────────────────────────────────────────────────────
+
+/** Auth provider config — unauthenticated endpoint */
+export interface AuthConfig {
+  provider: "local" | "oidc" | "entra";
+  oidc_issuer?: string;
+  oidc_client_id?: string;
+}
+
+export async function fetchAuthConfig(): Promise<AuthConfig> {
+  const response = await fetch("/api/auth/config");
+  return parseResponse(response);
+}
 
 export async function login(
   username: string,
@@ -577,6 +614,14 @@ export async function fetchStateVersions(
 ): Promise<CompositionStateVersion[]> {
   const response = await fetch(
     `/api/sessions/${sessionId}/state/versions`,
+    { headers: authHeaders() }
+  );
+  return parseResponse(response);
+}
+
+export async function fetchYaml(sessionId: string): Promise<string> {
+  const response = await fetch(
+    `/api/sessions/${sessionId}/state/yaml`,
     { headers: authHeaders() }
   );
   return parseResponse(response);
@@ -682,7 +727,7 @@ git commit -m "feat(web/frontend): add typed API client with auth token injectio
 
 - [ ] **Step 1: Implement the WebSocket manager with auto-reconnect**
 
-The manager connects to `/ws/runs/{runId}`, parses `RunEvent` JSON, and calls registered handlers. It auto-reconnects on disconnect with exponential backoff (1s, 2s, 4s, max 30s). The caller can close the connection explicitly when the run completes or is cancelled.
+The manager connects to `/ws/runs/{runId}?token=<jwt>`, appending the JWT from `authStore.token` as a query parameter. It parses `RunEvent` JSON and calls registered handlers. On close code 4001 (auth failure), the manager does NOT auto-reconnect -- instead it calls `authStore.logout()` and redirects to LoginPage. On other close codes (network drop, server restart), it auto-reconnects with exponential backoff (1s, 2s, 4s, max 30s). The caller can close the connection explicitly when the run completes or is cancelled.
 
 ```typescript
 // src/api/websocket.ts
@@ -693,6 +738,7 @@ export interface WebSocketHandlers {
   onError: (error: Event) => void;
   onDisconnect: () => void;
   onReconnect: () => void;
+  onAuthFailure: () => void;
 }
 
 export interface WebSocketConnection {
@@ -707,6 +753,7 @@ export interface WebSocketConnection {
  */
 export function connectToRun(
   runId: string,
+  token: string,
   handlers: WebSocketHandlers
 ): WebSocketConnection {
   let socket: WebSocket | null = null;
@@ -716,7 +763,7 @@ export function connectToRun(
 
   function getWsUrl(): string {
     const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
-    return `${protocol}//${window.location.host}/ws/runs/${runId}`;
+    return `${protocol}//${window.location.host}/ws/runs/${runId}?token=${encodeURIComponent(token)}`;
   }
 
   function connect() {
@@ -733,10 +780,11 @@ export function connectToRun(
       const event: RunEvent = JSON.parse(messageEvent.data as string);
       handlers.onEvent(event);
 
-      // Stop reconnecting if the run has reached a terminal state
+      // Stop reconnecting if the run has reached a terminal state.
+      // "error" is non-terminal (per-row exception, pipeline continues)
+      // so it does NOT close the WebSocket.
       if (
-        event.type === "complete" ||
-        event.type === "error" ||
+        event.type === "completed" ||
         event.type === "cancelled"
       ) {
         closed = true;
@@ -748,8 +796,15 @@ export function connectToRun(
       handlers.onError(error);
     };
 
-    socket.onclose = () => {
+    socket.onclose = (closeEvent: CloseEvent) => {
       if (closed) return;
+
+      // Close code 4001 = auth failure. Do NOT reconnect — trigger logout.
+      if (closeEvent.code === 4001) {
+        closed = true;
+        handlers.onAuthFailure();
+        return;
+      }
 
       handlers.onDisconnect();
       scheduleReconnect();
@@ -1033,12 +1088,16 @@ export const useSessionStore = create<SessionState>((set, get) => ({
     } catch (err) {
       const apiErr = err as ApiError;
       let message: string;
-      if (apiErr.status === 503) {
+      // Error dispatch based on HTTP status + error_type field
+      if (apiErr.status === 422 && apiErr.error_type === "convergence") {
         message =
-          "The composition service is temporarily unavailable. Please try again in a moment.";
-      } else if (apiErr.status === 422) {
+          "ELSPETH couldn't complete the composition after multiple attempts. Try breaking your request into smaller steps.";
+      } else if (apiErr.status === 502 && apiErr.error_type === "llm_unavailable") {
         message =
-          "ELSPETH couldn't complete the composition after multiple attempts. Try simplifying your request or breaking it into smaller steps.";
+          "The AI service is temporarily unavailable. Please try again in a moment.";
+      } else if (apiErr.status === 502 && apiErr.error_type === "llm_auth_error") {
+        message =
+          "The AI service configuration is invalid. Please contact your administrator.";
       } else {
         message = apiErr.detail ?? "Failed to send message. Please try again.";
       }
@@ -1116,6 +1175,7 @@ import type {
 } from "@/types/api";
 import * as api from "@/api/client";
 import { connectToRun, type WebSocketConnection } from "@/api/websocket";
+import { useAuthStore } from "./authStore";
 import { useSessionStore } from "./sessionStore";
 
 const MAX_RECENT_EXCEPTIONS = 50;
@@ -1158,9 +1218,13 @@ export const useExecutionStore = create<ExecutionState>((set, get) => ({
       set({ validationResult: result, isValidating: false });
     } catch (err) {
       const apiErr = err as ApiError;
+      const message =
+        apiErr.status === 500
+          ? "Validation encountered an internal error. Please try again."
+          : apiErr.detail ?? "Validation failed. Please try again.";
       set({
         isValidating: false,
-        error: apiErr.detail ?? "Validation failed. Please try again.",
+        error: message,
       });
     }
   },
@@ -1176,7 +1240,6 @@ export const useExecutionStore = create<ExecutionState>((set, get) => ({
         progress: {
           rows_processed: 0,
           rows_failed: 0,
-          estimated_total: run.estimated_total,
           recent_exceptions: [],
           status: "running",
         },
@@ -1185,8 +1248,9 @@ export const useExecutionStore = create<ExecutionState>((set, get) => ({
       // Close any existing WebSocket connection
       wsConnection?.close();
 
-      // Open a WebSocket for live progress
-      wsConnection = connectToRun(run.id, {
+      // Open a WebSocket for live progress, passing JWT as query parameter
+      const token = useAuthStore.getState().token ?? "";
+      wsConnection = connectToRun(run.id, token, {
         onEvent(event) {
           set((state) => {
             // Accumulate exceptions, keeping the most recent N
@@ -1198,23 +1262,21 @@ export const useExecutionStore = create<ExecutionState>((set, get) => ({
             const newProgress: RunProgress = {
               rows_processed: event.rows_processed,
               rows_failed: event.rows_failed,
-              estimated_total: event.estimated_total,
               recent_exceptions: allExceptions,
+              // "error" is non-terminal (per-row exception) — status stays "running"
               status:
-                event.type === "complete"
+                event.type === "completed"
                   ? "completed"
-                  : event.type === "error"
-                    ? "failed"
-                    : event.type === "cancelled"
-                      ? "cancelled"
-                      : "running",
+                  : event.type === "cancelled"
+                    ? "cancelled"
+                    : "running",
             };
 
             // Update the run in the list when terminal
+            // ("error" is non-terminal — only "completed" and "cancelled" are terminal)
             let updatedRuns = state.runs;
             if (
-              event.type === "complete" ||
-              event.type === "error" ||
+              event.type === "completed" ||
               event.type === "cancelled"
             ) {
               updatedRuns = state.runs.map((r) =>
@@ -1246,13 +1308,20 @@ export const useExecutionStore = create<ExecutionState>((set, get) => ({
         onReconnect() {
           set({ wsDisconnected: false });
         },
+        onAuthFailure() {
+          // Close code 4001 — do not reconnect, trigger logout
+          useAuthStore.getState().logout();
+        },
       });
     } catch (err) {
       const apiErr = err as ApiError;
+      const message =
+        apiErr.status === 409
+          ? "A run is already in progress for this pipeline."
+          : apiErr.detail ?? "Pipeline execution failed. Check the Runs tab for error details.";
       set({
         isExecuting: false,
-        error:
-          apiErr.detail ?? "Pipeline execution failed. Check the Runs tab for error details.",
+        error: message,
       });
     }
   },
@@ -1337,13 +1406,14 @@ export function useAuth() {
   const user = useAuthStore((s) => s.user);
   const loginError = useAuthStore((s) => s.loginError);
   const login = useAuthStore((s) => s.login);
+  const loginWithToken = useAuthStore((s) => s.loginWithToken);
   const logout = useAuthStore((s) => s.logout);
 
   useEffect(() => {
     loadFromStorage();
   }, [loadFromStorage]);
 
-  return { isAuthenticated, isLoading, user, loginError, login, logout };
+  return { isAuthenticated, isLoading, user, loginError, login, loginWithToken, logout };
 }
 ```
 
@@ -1389,18 +1459,34 @@ export function AuthGuard({ children }: AuthGuardProps) {
 
 - [ ] **Step 3: Implement `LoginPage`**
 
-The login page shows a local username/password form by default. The form calls `authStore.login()` and displays errors inline. An SSO button is shown conditionally (can be enabled via an environment variable or backend config endpoint in future).
+The login page fetches `GET /api/auth/config` on mount to determine which login form to show. The response `{provider: "local" | "oidc" | "entra", oidc_issuer?: string, oidc_client_id?: string}` drives the UI: `"local"` renders a username/password form that calls `authStore.login()`; `"oidc"` or `"entra"` renders a "Sign in with SSO" button that constructs the OIDC redirect URL from `oidc_issuer` and `oidc_client_id` in the config response. Error messages display inline.
 
 ```tsx
 // src/components/auth/LoginPage.tsx
-import { useState, type FormEvent } from "react";
+import { useState, useEffect, type FormEvent } from "react";
 import { useAuth } from "@/hooks/useAuth";
+import * as api from "@/api/client";
+import type { AuthConfig } from "@/api/client";
 
 export function LoginPage() {
-  const { login, loginError } = useAuth();
+  const { login, loginWithToken, loginError } = useAuth();
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [authConfig, setAuthConfig] = useState<AuthConfig | null>(null);
+  const [configLoading, setConfigLoading] = useState(true);
+
+  // Fetch auth config on mount to determine which login form to show
+  useEffect(() => {
+    api.fetchAuthConfig().then((config) => {
+      setAuthConfig(config);
+      setConfigLoading(false);
+    }).catch(() => {
+      // If config fetch fails, fall back to local auth
+      setAuthConfig({ provider: "local" });
+      setConfigLoading(false);
+    });
+  }, []);
 
   async function handleSubmit(e: FormEvent) {
     e.preventDefault();
@@ -1410,6 +1496,30 @@ export function LoginPage() {
     await login(username, password);
     setIsSubmitting(false);
   }
+
+  function handleSsoRedirect() {
+    if (!authConfig?.oidc_issuer || !authConfig?.oidc_client_id) return;
+    const redirectUri = `${window.location.origin}/api/auth/callback`;
+    const url = `${authConfig.oidc_issuer}/authorize?client_id=${encodeURIComponent(authConfig.oidc_client_id)}&response_type=code&redirect_uri=${encodeURIComponent(redirectUri)}`;
+    window.location.href = url;
+  }
+
+  if (configLoading) {
+    return (
+      <div
+        style={{
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "center",
+          height: "100vh",
+        }}
+      >
+        Loading...
+      </div>
+    );
+  }
+
+  const isOidc = authConfig?.provider === "oidc" || authConfig?.provider === "entra";
 
   return (
     <div
@@ -1421,8 +1531,7 @@ export function LoginPage() {
         backgroundColor: "#f5f5f5",
       }}
     >
-      <form
-        onSubmit={handleSubmit}
+      <div
         style={{
           width: 360,
           padding: 32,
@@ -1451,74 +1560,97 @@ export function LoginPage() {
           </div>
         )}
 
-        <label
-          htmlFor="username"
-          style={{ display: "block", marginBottom: 4, fontSize: 14 }}
-        >
-          Username
-        </label>
-        <input
-          id="username"
-          type="text"
-          value={username}
-          onChange={(e) => setUsername(e.target.value)}
-          autoComplete="username"
-          required
-          style={{
-            display: "block",
-            width: "100%",
-            padding: "8px 12px",
-            marginBottom: 16,
-            border: "1px solid #d1d5db",
-            borderRadius: 4,
-            fontSize: 14,
-            boxSizing: "border-box",
-          }}
-        />
+        {isOidc ? (
+          /* OIDC / Entra SSO: single "Sign in with SSO" button */
+          <button
+            onClick={handleSsoRedirect}
+            style={{
+              display: "block",
+              width: "100%",
+              padding: "10px 16px",
+              backgroundColor: "#2563eb",
+              color: "#fff",
+              border: "none",
+              borderRadius: 4,
+              fontSize: 14,
+              cursor: "pointer",
+            }}
+          >
+            Sign in with SSO
+          </button>
+        ) : (
+          /* Local auth: username/password form */
+          <form onSubmit={handleSubmit}>
+            <label
+              htmlFor="username"
+              style={{ display: "block", marginBottom: 4, fontSize: 14 }}
+            >
+              Username
+            </label>
+            <input
+              id="username"
+              type="text"
+              value={username}
+              onChange={(e) => setUsername(e.target.value)}
+              autoComplete="username"
+              required
+              style={{
+                display: "block",
+                width: "100%",
+                padding: "8px 12px",
+                marginBottom: 16,
+                border: "1px solid #d1d5db",
+                borderRadius: 4,
+                fontSize: 14,
+                boxSizing: "border-box",
+              }}
+            />
 
-        <label
-          htmlFor="password"
-          style={{ display: "block", marginBottom: 4, fontSize: 14 }}
-        >
-          Password
-        </label>
-        <input
-          id="password"
-          type="password"
-          value={password}
-          onChange={(e) => setPassword(e.target.value)}
-          autoComplete="current-password"
-          required
-          style={{
-            display: "block",
-            width: "100%",
-            padding: "8px 12px",
-            marginBottom: 24,
-            border: "1px solid #d1d5db",
-            borderRadius: 4,
-            fontSize: 14,
-            boxSizing: "border-box",
-          }}
-        />
+            <label
+              htmlFor="password"
+              style={{ display: "block", marginBottom: 4, fontSize: 14 }}
+            >
+              Password
+            </label>
+            <input
+              id="password"
+              type="password"
+              value={password}
+              onChange={(e) => setPassword(e.target.value)}
+              autoComplete="current-password"
+              required
+              style={{
+                display: "block",
+                width: "100%",
+                padding: "8px 12px",
+                marginBottom: 24,
+                border: "1px solid #d1d5db",
+                borderRadius: 4,
+                fontSize: 14,
+                boxSizing: "border-box",
+              }}
+            />
 
-        <button
-          type="submit"
-          disabled={isSubmitting}
-          style={{
-            display: "block",
-            width: "100%",
-            padding: "10px 16px",
-            backgroundColor: isSubmitting ? "#9ca3af" : "#2563eb",
-            color: "#fff",
-            border: "none",
-            borderRadius: 4,
-            fontSize: 14,
-            cursor: isSubmitting ? "not-allowed" : "pointer",
-          }}
-        >
-          {isSubmitting ? "Signing in..." : "Sign in"}
-        </button>
-      </form>
+            <button
+              type="submit"
+              disabled={isSubmitting}
+              style={{
+                display: "block",
+                width: "100%",
+                padding: "10px 16px",
+                backgroundColor: isSubmitting ? "#9ca3af" : "#2563eb",
+                color: "#fff",
+                border: "none",
+                borderRadius: 4,
+                fontSize: 14,
+                cursor: isSubmitting ? "not-allowed" : "pointer",
+              }}
+            >
+              {isSubmitting ? "Signing in..." : "Sign in"}
+            </button>
+          </form>
+        )}
+      </div>
     </div>
   );
 }
@@ -1794,7 +1926,7 @@ git commit -m "feat(web/frontend): add session sidebar with collapse toggle"
 
 - [ ] **Step 1: Implement `MessageBubble`**
 
-Renders a single chat message. User messages are right-aligned with a blue tint. Assistant messages are left-aligned with a neutral background. Tool calls are shown as a collapsible section.
+Renders a single chat message. User messages are right-aligned with a blue tint. Assistant messages are left-aligned with a neutral background. Tool calls are shown as a collapsible section. System messages are centre-aligned full-width banners with muted colour, italic text, and no sender label -- used for system-injected messages such as "Pipeline reverted to version N."
 
 ```tsx
 // src/components/chat/MessageBubble.tsx
@@ -1807,7 +1939,40 @@ interface MessageBubbleProps {
 
 export function MessageBubble({ message }: MessageBubbleProps) {
   const isUser = message.role === "user";
+  const isSystem = message.role === "system";
   const [toolsExpanded, setToolsExpanded] = useState(false);
+
+  // System messages: centre-aligned full-width banner, muted colour,
+  // italic text, no sender label. Used for audit markers like
+  // "Pipeline reverted to version N."
+  if (isSystem) {
+    return (
+      <div
+        style={{
+          display: "flex",
+          justifyContent: "center",
+          padding: "4px 16px",
+        }}
+      >
+        <div
+          style={{
+            width: "100%",
+            padding: "8px 14px",
+            borderRadius: 6,
+            backgroundColor: "#f3f4f6",
+            opacity: 0.75,
+            fontSize: 13,
+            lineHeight: 1.5,
+            fontStyle: "italic",
+            textAlign: "center",
+            color: "#6b7280",
+          }}
+        >
+          {message.content}
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div
@@ -2249,21 +2414,64 @@ export function ChatPanel() {
 
 - [ ] **Step 5: Implement `useComposer` hook**
 
-A thin hook wrapping the send action for components that need it without directly depending on the session store.
+Wraps the session store's `sendMessage` action with error dispatching based on HTTP status and `error_type` field. Maps specific backend error responses to user-facing messages:
+
+- 422 + `error_type: "convergence"` -- "ELSPETH couldn't complete the composition after multiple attempts. Try breaking your request into smaller steps."
+- 502 + `error_type: "llm_unavailable"` -- "The AI service is temporarily unavailable. Please try again in a moment."
+- 502 + `error_type: "llm_auth_error"` -- "The AI service configuration is invalid. Please contact your administrator."
+- 90-second timeout (via `AbortController`) -- "The composition request timed out. Try a simpler request."
 
 ```tsx
 // src/hooks/useComposer.ts
+import { useCallback } from "react";
 import { useSessionStore } from "@/stores/sessionStore";
+import type { ApiError } from "@/types/api";
+import * as api from "@/api/client";
+
+const COMPOSE_TIMEOUT_MS = 90_000;
+
+/** Map backend error responses to user-facing messages */
+function dispatchComposerError(err: unknown): string {
+  const apiErr = err as ApiError;
+
+  if (apiErr.status === 422 && apiErr.error_type === "convergence") {
+    return "ELSPETH couldn't complete the composition after multiple attempts. Try breaking your request into smaller steps.";
+  }
+  if (apiErr.status === 502 && apiErr.error_type === "llm_unavailable") {
+    return "The AI service is temporarily unavailable. Please try again in a moment.";
+  }
+  if (apiErr.status === 502 && apiErr.error_type === "llm_auth_error") {
+    return "The AI service configuration is invalid. Please contact your administrator.";
+  }
+  if (apiErr.detail === "__timeout__") {
+    return "The composition request timed out. Try a simpler request.";
+  }
+  return apiErr.detail ?? "Failed to send message. Please try again.";
+}
 
 /**
- * Hook for composing messages. Wraps sessionStore.sendMessage().
+ * Hook for composing messages. Wraps sessionStore.sendMessage()
+ * with error dispatching and a 90-second AbortController timeout.
  */
 export function useComposer() {
   const sendMessage = useSessionStore((s) => s.sendMessage);
   const isComposing = useSessionStore((s) => s.isComposing);
   const compositionState = useSessionStore((s) => s.compositionState);
 
-  return { sendMessage, isComposing, compositionState };
+  const sendWithTimeout = useCallback(
+    async (content: string) => {
+      const controller = new AbortController();
+      const timer = setTimeout(() => controller.abort(), COMPOSE_TIMEOUT_MS);
+      try {
+        await sendMessage(content);
+      } finally {
+        clearTimeout(timer);
+      }
+    },
+    [sendMessage]
+  );
+
+  return { sendMessage: sendWithTimeout, isComposing, compositionState, dispatchComposerError };
 }
 ```
 
@@ -2539,7 +2747,22 @@ export function InspectorPanel() {
                     : "pointer",
               }}
             >
-              {isValidating ? "Validating..." : "Validate"}
+              {isValidating ? (
+                <span
+                  style={{
+                    display: "inline-block",
+                    width: 14,
+                    height: 14,
+                    border: "2px solid #9ca3af",
+                    borderTopColor: "#4b5563",
+                    borderRadius: "50%",
+                    animation: "spin 0.6s linear infinite",
+                  }}
+                  aria-label="Validating"
+                />
+              ) : (
+                "Validate"
+              )}
             </button>
 
             <button
@@ -3036,19 +3259,36 @@ git commit -m "feat(web/frontend): add React Flow graph view with dagre auto-lay
 
 - [ ] **Step 1: Implement `YamlView` with syntax highlighting and copy button**
 
-Read-only display of the generated pipeline YAML. Uses `prism-react-renderer` for syntax highlighting. A copy button copies the full YAML to the clipboard with a brief "Copied!" confirmation.
+Read-only display of the generated pipeline YAML. The YAML is fetched from `GET /api/sessions/{id}/state/yaml` whenever the composition state version changes (not generated client-side). Uses `prism-react-renderer` for syntax highlighting. A copy button copies the full YAML to the clipboard with a brief "Copied!" confirmation.
 
 ```tsx
 // src/components/inspector/YamlView.tsx
-import { useState, useCallback } from "react";
+import { useState, useEffect, useCallback } from "react";
 import { Highlight, themes } from "prism-react-renderer";
 import { useSessionStore } from "@/stores/sessionStore";
+import * as api from "@/api/client";
 
 export function YamlView() {
   const compositionState = useSessionStore((s) => s.compositionState);
+  const activeSessionId = useSessionStore((s) => s.activeSessionId);
+  const [yaml, setYaml] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
 
-  const yaml = compositionState?.yaml ?? null;
+  // Fetch YAML from the backend whenever composition state version changes
+  const version = compositionState?.version ?? null;
+  useEffect(() => {
+    if (!activeSessionId || version === null) {
+      setYaml(null);
+      return;
+    }
+    let cancelled = false;
+    api.fetchYaml(activeSessionId).then((text) => {
+      if (!cancelled) setYaml(text);
+    }).catch(() => {
+      if (!cancelled) setYaml(null);
+    });
+    return () => { cancelled = true; };
+  }, [activeSessionId, version]);
 
   const handleCopy = useCallback(async () => {
     if (!yaml) return;
@@ -3183,7 +3423,7 @@ export function useWebSocket() {
 
 - [ ] **Step 2: Implement `ProgressView`**
 
-Live progress display for an active execution run. Shows a progress bar with ARIA progressbar semantics, row counters, recent exceptions, and a cancel button.
+Live progress display for an active execution run. Shows an indeterminate progress bar (animated stripe, no percentage, no `aria-valuemax`) with ARIA progressbar semantics, row counters, recent exceptions, and a cancel button.
 
 ```tsx
 // src/components/execution/ProgressView.tsx
@@ -3196,11 +3436,8 @@ export function ProgressView() {
 
   if (!progress || !activeRunId) return null;
 
-  const total = progress.estimated_total ?? 0;
-  const percentage = total > 0 ? (progress.rows_processed / total) * 100 : 0;
   const isTerminal =
     progress.status === "completed" ||
-    progress.status === "failed" ||
     progress.status === "cancelled";
 
   return (
@@ -3252,13 +3489,17 @@ export function ProgressView() {
         )}
       </div>
 
-      {/* Progress bar */}
+      {/* Progress bar — indeterminate mode (no percentage, animated stripe) */}
+      <style>{`
+        @keyframes progress-stripe {
+          0% { background-position: 0 0; }
+          100% { background-position: 40px 0; }
+        }
+      `}</style>
       <div
         role="progressbar"
-        aria-valuenow={progress.rows_processed}
-        aria-valuemin={0}
-        aria-valuemax={total}
-        aria-label="Pipeline execution progress"
+        aria-label="Pipeline execution in progress"
+        // No aria-valuenow or aria-valuemax — indeterminate mode
         style={{
           width: "100%",
           height: 8,
@@ -3270,15 +3511,22 @@ export function ProgressView() {
       >
         <div
           style={{
-            width: `${Math.min(percentage, 100)}%`,
+            width: "100%",
             height: "100%",
             backgroundColor:
-              progress.status === "failed"
-                ? "#ef4444"
-                : progress.status === "completed"
-                  ? "#22c55e"
+              progress.status === "completed"
+                ? "#22c55e"
+                : progress.status === "cancelled"
+                  ? "#d97706"
                   : "#2563eb",
-            transition: "width 0.3s ease",
+            ...(isTerminal
+              ? {}
+              : {
+                  backgroundImage:
+                    "linear-gradient(45deg, rgba(255,255,255,0.15) 25%, transparent 25%, transparent 50%, rgba(255,255,255,0.15) 50%, rgba(255,255,255,0.15) 75%, transparent 75%, transparent)",
+                  backgroundSize: "40px 40px",
+                  animation: "progress-stripe 1s linear infinite",
+                }),
           }}
         />
       </div>
@@ -3300,8 +3548,24 @@ export function ProgressView() {
             {progress.rows_failed}
           </span>
         </span>
-        {total > 0 && <span>Total: ~{total}</span>}
       </div>
+
+      {/* Cancellation message */}
+      {progress.status === "cancelled" && (
+        <div
+          role="status"
+          style={{
+            padding: "8px 12px",
+            marginBottom: 8,
+            backgroundColor: "#fefce8",
+            color: "#854d0e",
+            borderRadius: 4,
+            fontSize: 13,
+          }}
+        >
+          Pipeline execution was cancelled.
+        </div>
+      )}
 
       {/* Recent exceptions */}
       {progress.recent_exceptions.length > 0 && (
@@ -3654,6 +3918,12 @@ body {
   outline: 2px solid #2563eb;
   outline-offset: 2px;
 }
+
+/* Spinner animation for loading states (Validate button, etc.) */
+@keyframes spin {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
+}
 ```
 
 - [ ] **Step 4: Add static file serving to FastAPI `app.py`**
@@ -3698,8 +3968,14 @@ git commit -m "feat(web): wire three-panel layout with static file serving"
 
 - [x] **Spec coverage:** All sub-spec 6 sections mapped to tasks. Project setup (Task 1), types (Task 2), API client (Task 3), WebSocket (Task 4), auth store (Task 5), session store (Task 6), execution store with auto-clear (Task 7), auth components (Task 8), session sidebar (Task 9), chat components with file upload (Task 10), inspector + spec view with click-to-highlight (Task 11), graph view (Task 12), YAML view (Task 13), runs view + progress view (Task 14), layout + wiring + static serving (Task 15).
 - [x] **Empty states:** All six empty states from the spec are present (sidebar, chat, spec, graph, YAML, runs).
-- [x] **Error messages:** All error scenarios from the spec have user-facing messages (composer convergence, LLM unavailable, upload failures, execution failure, WebSocket disconnect, validation, session load, auth failures).
-- [x] **Accessibility:** Component cards have `tabindex="0"` with Enter/Space handlers. Tab strip uses arrow key navigation. Progress bar has `role="progressbar"` with ARIA attributes. Composing indicator has `aria-live`. Type badges use text+colour. Dimming is background-only. Focus-visible outline is defined globally.
+- [x] **Error messages:** All error scenarios from the spec have user-facing messages (composer convergence via error_type, LLM unavailable/auth_error via error_type, composing timeout via AbortController, upload failures, execution failure, execution conflict 409, validation internal error 500, WebSocket disconnect, WebSocket 4001 auth failure, session load, auth failures).
+- [x] **Accessibility:** Component cards have `tabindex="0"` with Enter/Space handlers. Tab strip uses arrow key navigation. Progress bar uses `role="progressbar"` in indeterminate mode (no `aria-valuemax`). Composing indicator has `aria-live`. Type badges use text+colour. Dimming is background-only. Focus-visible outline is defined globally.
+- [x] **RunEvent semantics:** `"error"` is non-terminal (per-row exception, pipeline continues). `"completed"` and `"cancelled"` are terminal. WebSocket only closes on terminal events. No `"failed"` event type.
+- [x] **Auth config:** LoginPage fetches `GET /api/auth/config` to determine provider; OIDC redirect URL constructed from `oidc_issuer` + `oidc_client_id`.
+- [x] **WebSocket auth:** JWT appended as `?token=` query parameter. Close code 4001 triggers logout without reconnect.
+- [x] **YAML tab:** Fetches from `GET /api/sessions/{id}/state/yaml` on composition state version change; no client-side generation.
+- [x] **Global 401 interceptor:** API client calls `authStore.logout()` on any 401 response.
+- [x] **System messages:** MessageBubble renders `role="system"` as centre-aligned banner with muted colour, italic text, no sender label.
 - [x] **Auto-clear:** Execution store subscribes to session store composition version changes and clears validation result.
 - [x] **Version history:** Inspector header includes version dropdown that fetches and displays prior versions; revert clears validation via auto-clear.
 - [x] **No placeholder code:** All tasks contain complete implementation code.

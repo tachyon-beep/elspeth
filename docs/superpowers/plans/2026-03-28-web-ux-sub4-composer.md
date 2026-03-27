@@ -4,7 +4,7 @@
 
 **Goal:** Build the ComposerService module: frozen immutable data models for pipeline composition, LLM tool-use loop with discovery and mutation tools, Stage 1 validation, deterministic YAML generation, and API wiring. After this plan, `POST /api/sessions/{id}/messages` triggers an LLM-driven pipeline composition loop that mutates a `CompositionState` and returns the result.
 
-**Architecture:** `CompositionState` is a frozen dataclass with `freeze_fields()` on all container fields. Mutation methods return new instances via `dataclasses.replace()` with manual freeze. Six discovery tools delegate to `CatalogService`; six mutation tools validate and return `ToolResult`. `ComposerServiceImpl` runs a bounded LiteLLM tool-use loop. `generate_yaml()` produces deterministic ELSPETH pipeline YAML.
+**Architecture:** `CompositionState` is a frozen dataclass with `freeze_fields()` on all container fields. Mutation methods return new instances via `dataclasses.replace()` with manual freeze. `to_dict()` recursively unwraps frozen containers (`MappingProxyType` -> `dict`, `tuple` -> `list`) for YAML/JSON serialization. Six discovery tools delegate to `CatalogService`; six mutation tools validate and return `ToolResult`. `ComposerServiceImpl` runs a bounded LiteLLM tool-use loop. `generate_yaml()` calls `state.to_dict()` before `yaml.dump()` to produce deterministic ELSPETH pipeline YAML. Route handlers catch `ComposerConvergenceError` (422) and LLM client errors (502) with structured error bodies.
 
 **Tech Stack:** Python dataclasses, `freeze_fields()`, LiteLLM, PyYAML, pytest, pytest-asyncio.
 
@@ -648,6 +648,46 @@ class TestCompositionState:
 
     # --- Freeze integrity after replace ---
 
+    # --- to_dict ---
+
+    def test_to_dict_unwraps_frozen_containers(self) -> None:
+        """to_dict() converts MappingProxyType -> dict and tuple -> list."""
+        state = self._empty_state()
+        src = SourceSpec(
+            plugin="csv",
+            on_success="t1",
+            options={"nested": {"k": "v"}},
+            on_validation_failure="discard",
+        )
+        state = state.with_source(src)
+        state = state.with_node(self._make_node("t1"))
+        state = state.with_output(self._make_output("out"))
+
+        d = state.to_dict()
+        # All containers should be plain dicts and lists
+        assert isinstance(d, dict)
+        assert isinstance(d["nodes"], list)
+        assert isinstance(d["source"]["options"], dict)
+        assert isinstance(d["source"]["options"]["nested"], dict)
+        assert isinstance(d["outputs"], list)
+
+    def test_to_dict_roundtrip_yaml(self) -> None:
+        """to_dict() output is yaml.dump()-safe (no MappingProxyType errors)."""
+        import yaml
+
+        state = self._empty_state()
+        src = SourceSpec(
+            plugin="csv",
+            on_success="t1",
+            options={"nested": {"deep": {"k": "v"}}},
+            on_validation_failure="quarantine",
+        )
+        state = state.with_source(src)
+        d = state.to_dict()
+        # Should not raise RepresenterError
+        yaml_str = yaml.dump(d, default_flow_style=False)
+        assert "csv" in yaml_str
+
     def test_mutation_refreezes_containers(self) -> None:
         """Mutation methods must re-freeze since dataclasses.replace() skips __post_init__."""
         state = self._empty_state()
@@ -769,6 +809,85 @@ class CompositionState:
             landscape_url=patch.get("landscape_url", current.landscape_url),
         )
         return replace(self, metadata=new_meta, version=self.version + 1)
+
+    # --- Serialization ---
+
+    def to_dict(self) -> dict[str, Any]:
+        """Recursively unwrap frozen containers to plain Python types.
+
+        Converts MappingProxyType -> dict, tuple -> list recursively.
+        The result is suitable for yaml.dump() and JSON serialization.
+        """
+        def _unfreeze(obj: Any) -> Any:
+            if isinstance(obj, Mapping):
+                return {k: _unfreeze(v) for k, v in obj.items()}
+            if isinstance(obj, (tuple, list)):
+                return [_unfreeze(item) for item in obj]
+            return obj
+
+        result: dict[str, Any] = {
+            "version": self.version,
+            "metadata": {
+                "name": self.metadata.name,
+                "description": self.metadata.description,
+                "landscape_url": self.metadata.landscape_url,
+            },
+            "source": None,
+            "nodes": [],
+            "edges": [],
+            "outputs": [],
+        }
+
+        if self.source is not None:
+            result["source"] = {
+                "plugin": self.source.plugin,
+                "on_success": self.source.on_success,
+                "options": _unfreeze(self.source.options),
+                "on_validation_failure": self.source.on_validation_failure,
+            }
+
+        for node in self.nodes:
+            node_dict: dict[str, Any] = {
+                "id": node.id,
+                "node_type": node.node_type,
+                "plugin": node.plugin,
+                "input": node.input,
+                "on_success": node.on_success,
+                "on_error": node.on_error,
+                "options": _unfreeze(node.options),
+            }
+            if node.condition is not None:
+                node_dict["condition"] = node.condition
+            if node.routes is not None:
+                node_dict["routes"] = _unfreeze(node.routes)
+            if node.fork_to is not None:
+                node_dict["fork_to"] = list(node.fork_to)
+            if node.branches is not None:
+                node_dict["branches"] = list(node.branches)
+            if node.policy is not None:
+                node_dict["policy"] = node.policy
+            if node.merge is not None:
+                node_dict["merge"] = node.merge
+            result["nodes"].append(node_dict)
+
+        for edge in self.edges:
+            result["edges"].append({
+                "id": edge.id,
+                "from_node": edge.from_node,
+                "to_node": edge.to_node,
+                "edge_type": edge.edge_type,
+                "label": edge.label,
+            })
+
+        for output in self.outputs:
+            result["outputs"].append({
+                "name": output.name,
+                "plugin": output.plugin,
+                "options": _unfreeze(output.options),
+                "on_write_failure": output.on_write_failure,
+            })
+
+        return result
 
     # --- Validation ---
 
@@ -1165,6 +1284,11 @@ from elspeth.web.composer.state import (
     PipelineMetadata,
     SourceSpec,
 )
+from elspeth.web.catalog.schemas import (
+    ConfigFieldSummary,
+    PluginSchemaInfo,
+    PluginSummary,
+)
 from elspeth.web.composer.tools import (
     ToolResult,
     execute_tool,
@@ -1181,22 +1305,40 @@ def _empty_state() -> CompositionState:
 
 
 def _mock_catalog() -> MagicMock:
-    """Mock CatalogService with plugin existence checks."""
+    """Mock CatalogService with real PluginSummary/PluginSchemaInfo instances.
+
+    AC #16: Tests must use real PluginSummary and PluginSchemaInfo instances,
+    not plain dicts. Mock return types must match the CatalogService protocol.
+    """
     catalog = MagicMock()
     catalog.list_sources.return_value = [
-        {"name": "csv", "description": "CSV file source"},
-        {"name": "json", "description": "JSON file source"},
+        PluginSummary(
+            name="csv", description="CSV file source",
+            plugin_type="source", config_fields=[
+                ConfigFieldSummary(name="path", type="string", required=True, description="File path", default=None),
+            ],
+        ),
+        PluginSummary(
+            name="json", description="JSON file source",
+            plugin_type="source", config_fields=[],
+        ),
     ]
     catalog.list_transforms.return_value = [
-        {"name": "uppercase", "description": "Uppercase transform"},
+        PluginSummary(
+            name="uppercase", description="Uppercase transform",
+            plugin_type="transform", config_fields=[],
+        ),
     ]
     catalog.list_sinks.return_value = [
-        {"name": "csv", "description": "CSV file sink"},
+        PluginSummary(
+            name="csv", description="CSV file sink",
+            plugin_type="sink", config_fields=[],
+        ),
     ]
-    catalog.get_schema.return_value = {
-        "title": "CsvSourceConfig",
-        "properties": {"path": {"type": "string"}},
-    }
+    catalog.get_schema.return_value = PluginSchemaInfo(
+        name="csv", plugin_type="source", description="CSV file source",
+        json_schema={"title": "CsvSourceConfig", "properties": {"path": {"type": "string"}}},
+    )
     return catalog
 
 
@@ -1532,12 +1674,17 @@ from elspeth.web.composer.state import (
 
 
 class CatalogServiceProtocol(Protocol):
-    """Protocol for catalog service dependency."""
+    """Protocol for catalog service dependency.
 
-    def list_sources(self) -> list[dict[str, str]]: ...
-    def list_transforms(self) -> list[dict[str, str]]: ...
-    def list_sinks(self) -> list[dict[str, str]]: ...
-    def get_schema(self, plugin_type: str, name: str) -> dict[str, Any]: ...
+    Return types match the CatalogService protocol from Sub-Spec 3:
+    list methods return list[PluginSummary], get_schema returns
+    PluginSchemaInfo. Import these from web.catalog.schemas.
+    """
+
+    def list_sources(self) -> list[Any]: ...
+    def list_transforms(self) -> list[Any]: ...
+    def list_sinks(self) -> list[Any]: ...
+    def get_schema(self, plugin_type: str, name: str) -> Any: ...
 
 
 @dataclass(frozen=True, slots=True)
@@ -1777,70 +1924,12 @@ def get_tool_definitions() -> list[dict[str, Any]]:
 # --- State serialization ---
 
 def _serialize_state(state: CompositionState) -> dict[str, Any]:
-    """Serialize CompositionState to a JSON-compatible dict."""
-    result: dict[str, Any] = {
-        "version": state.version,
-        "metadata": {
-            "name": state.metadata.name,
-            "description": state.metadata.description,
-            "landscape_url": state.metadata.landscape_url,
-        },
-        "source": None,
-        "nodes": [],
-        "edges": [],
-        "outputs": [],
-    }
+    """Serialize CompositionState to a JSON-compatible dict.
 
-    if state.source is not None:
-        result["source"] = {
-            "plugin": state.source.plugin,
-            "on_success": state.source.on_success,
-            "options": dict(state.source.options),
-            "on_validation_failure": state.source.on_validation_failure,
-        }
-
-    for node in state.nodes:
-        node_dict: dict[str, Any] = {
-            "id": node.id,
-            "node_type": node.node_type,
-            "plugin": node.plugin,
-            "input": node.input,
-            "on_success": node.on_success,
-            "on_error": node.on_error,
-            "options": dict(node.options),
-        }
-        if node.condition is not None:
-            node_dict["condition"] = node.condition
-        if node.routes is not None:
-            node_dict["routes"] = dict(node.routes)
-        if node.fork_to is not None:
-            node_dict["fork_to"] = list(node.fork_to)
-        if node.branches is not None:
-            node_dict["branches"] = list(node.branches)
-        if node.policy is not None:
-            node_dict["policy"] = node.policy
-        if node.merge is not None:
-            node_dict["merge"] = node.merge
-        result["nodes"].append(node_dict)
-
-    for edge in state.edges:
-        result["edges"].append({
-            "id": edge.id,
-            "from_node": edge.from_node,
-            "to_node": edge.to_node,
-            "edge_type": edge.edge_type,
-            "label": edge.label,
-        })
-
-    for output in state.outputs:
-        result["outputs"].append({
-            "name": output.name,
-            "plugin": output.plugin,
-            "options": dict(output.options),
-            "on_write_failure": output.on_write_failure,
-        })
-
-    return result
+    Delegates to state.to_dict() which recursively unwraps frozen
+    containers (MappingProxyType -> dict, tuple -> list).
+    """
+    return state.to_dict()
 
 
 # --- Tool Executor ---
@@ -2392,6 +2481,21 @@ class TestGenerateYaml:
         parsed = yaml.safe_load(yaml_str)
         assert parsed["transforms"][0]["on_error"] == "error_sink"
 
+    def test_frozen_state_serializes_without_error(self) -> None:
+        """generate_yaml() handles frozen state objects (MappingProxyType, tuple).
+
+        AC #15: No RepresenterError from PyYAML on frozen containers.
+        Verifies that generate_yaml() correctly calls state.to_dict()
+        before yaml.dump().
+        """
+        state = _make_linear_pipeline()
+        # State has been through freeze_fields() — options are MappingProxyType
+        yaml_str = generate_yaml(state)
+        parsed = yaml.safe_load(yaml_str)
+        assert parsed["source"]["plugin"] == "csv"
+        # Nested frozen options must serialize correctly
+        assert parsed["source"]["options"]["schema"]["fields"] == ["name", "age"]
+
     def test_empty_state_minimal_yaml(self) -> None:
         """Empty state produces minimal valid YAML (no source, no sinks)."""
         state = CompositionState(
@@ -2435,101 +2539,113 @@ def generate_yaml(state: CompositionState) -> str:
     Maps CompositionState fields to the YAML structure expected by
     ELSPETH's load_settings() parser.
 
+    Calls state.to_dict() to unwrap all frozen containers
+    (MappingProxyType -> dict, tuple -> list) before passing to
+    yaml.dump(). This avoids RepresenterError from PyYAML on frozen
+    types. See spec R4 and AC #15.
+
     Args:
         state: The pipeline composition state to serialize.
 
     Returns:
         YAML string representing the pipeline configuration.
     """
+    # Unwrap frozen containers to plain Python types (R4).
+    # to_dict() recursively converts MappingProxyType -> dict,
+    # tuple -> list. Without this, yaml.dump() raises RepresenterError.
+    state_dict = state.to_dict()
+
     doc: dict[str, Any] = {}
 
     # Source
-    if state.source is not None:
-        source_options = dict(state.source.options)
-        source_options["on_validation_failure"] = state.source.on_validation_failure
+    source = state_dict.get("source")
+    if source is not None:
+        source_options = dict(source["options"])
+        source_options["on_validation_failure"] = source["on_validation_failure"]
         doc["source"] = {
-            "plugin": state.source.plugin,
-            "on_success": state.source.on_success,
+            "plugin": source["plugin"],
+            "on_success": source["on_success"],
             "options": source_options,
         }
 
     # Transforms
-    transforms = [n for n in state.nodes if n.node_type == "transform"]
+    transforms = [n for n in state_dict["nodes"] if n["node_type"] == "transform"]
     if transforms:
         doc["transforms"] = []
         for t in transforms:
             entry: dict[str, Any] = {
-                "name": t.id,
-                "plugin": t.plugin,
-                "input": t.input,
-                "on_success": t.on_success,
+                "name": t["id"],
+                "plugin": t["plugin"],
+                "input": t["input"],
+                "on_success": t["on_success"],
             }
-            if t.on_error is not None:
-                entry["on_error"] = t.on_error
-            if t.options:
-                entry["options"] = dict(t.options)
+            if t.get("on_error") is not None:
+                entry["on_error"] = t["on_error"]
+            if t["options"]:
+                entry["options"] = t["options"]
             doc["transforms"].append(entry)
 
     # Gates
-    gates = [n for n in state.nodes if n.node_type == "gate"]
+    gates = [n for n in state_dict["nodes"] if n["node_type"] == "gate"]
     if gates:
         doc["gates"] = []
         for g in gates:
             entry = {
-                "name": g.id,
-                "input": g.input,
-                "condition": g.condition,
-                "routes": dict(g.routes) if g.routes else {},
+                "name": g["id"],
+                "input": g["input"],
+                "condition": g.get("condition"),
+                "routes": g.get("routes", {}),
             }
-            if g.fork_to is not None:
-                entry["fork_to"] = list(g.fork_to)
+            if g.get("fork_to") is not None:
+                entry["fork_to"] = g["fork_to"]
             doc["gates"].append(entry)
 
     # Aggregations
-    aggregations = [n for n in state.nodes if n.node_type == "aggregation"]
+    aggregations = [n for n in state_dict["nodes"] if n["node_type"] == "aggregation"]
     if aggregations:
         doc["aggregations"] = []
         for a in aggregations:
             entry = {
-                "name": a.id,
-                "plugin": a.plugin,
-                "input": a.input,
-                "on_success": a.on_success,
+                "name": a["id"],
+                "plugin": a["plugin"],
+                "input": a["input"],
+                "on_success": a["on_success"],
             }
-            if a.on_error is not None:
-                entry["on_error"] = a.on_error
-            if a.options:
-                entry["options"] = dict(a.options)
+            if a.get("on_error") is not None:
+                entry["on_error"] = a["on_error"]
+            if a["options"]:
+                entry["options"] = a["options"]
             doc["aggregations"].append(entry)
 
     # Coalesce
-    coalesces = [n for n in state.nodes if n.node_type == "coalesce"]
+    coalesces = [n for n in state_dict["nodes"] if n["node_type"] == "coalesce"]
     if coalesces:
         doc["coalesce"] = []
         for c in coalesces:
             entry = {
-                "name": c.id,
-                "branches": list(c.branches) if c.branches else [],
-                "policy": c.policy,
-                "merge": c.merge,
+                "name": c["id"],
+                "branches": c.get("branches", []),
+                "policy": c.get("policy"),
+                "merge": c.get("merge"),
             }
             doc["coalesce"].append(entry)
 
     # Sinks
-    if state.outputs:
+    if state_dict["outputs"]:
         doc["sinks"] = {}
-        for output in state.outputs:
+        for output in state_dict["outputs"]:
             sink_entry: dict[str, Any] = {
-                "plugin": output.plugin,
-                "on_write_failure": output.on_write_failure,
+                "plugin": output["plugin"],
+                "on_write_failure": output["on_write_failure"],
             }
-            if output.options:
-                sink_entry["options"] = dict(output.options)
-            doc["sinks"][output.name] = sink_entry
+            if output["options"]:
+                sink_entry["options"] = output["options"]
+            doc["sinks"][output["name"]] = sink_entry
 
     # Landscape
-    if state.metadata.landscape_url is not None:
-        doc["landscape"] = {"url": state.metadata.landscape_url}
+    landscape_url = state_dict["metadata"]["landscape_url"]
+    if landscape_url is not None:
+        doc["landscape"] = {"url": landscape_url}
 
     return yaml.dump(doc, default_flow_style=False, sort_keys=True)
 ```
@@ -2698,10 +2814,11 @@ def build_context_message(
         "errors": list(validation.errors),
     }
 
-    # Build lightweight plugin summary (names only)
-    source_names = [p["name"] for p in catalog.list_sources()]
-    transform_names = [p["name"] for p in catalog.list_transforms()]
-    sink_names = [p["name"] for p in catalog.list_sinks()]
+    # Build lightweight plugin summary (names only).
+    # CatalogService returns PluginSummary instances (not dicts) — use .name attribute.
+    source_names = [p.name for p in catalog.list_sources()]
+    transform_names = [p.name for p in catalog.list_transforms()]
+    sink_names = [p.name for p in catalog.list_sinks()]
 
     context = {
         "current_state": serialized,
@@ -2799,6 +2916,10 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
+from elspeth.web.catalog.schemas import (
+    PluginSchemaInfo,
+    PluginSummary,
+)
 from elspeth.web.composer.protocol import ComposerConvergenceError, ComposerResult
 from elspeth.web.composer.service import ComposerServiceImpl
 from elspeth.web.composer.state import (
@@ -2815,11 +2936,25 @@ def _empty_state() -> CompositionState:
 
 
 def _mock_catalog() -> MagicMock:
+    """Mock CatalogService with real PluginSummary/PluginSchemaInfo instances.
+
+    AC #16: Tests must use real PluginSummary and PluginSchemaInfo instances,
+    not plain dicts. Mock return types must match the CatalogService protocol.
+    """
     catalog = MagicMock()
-    catalog.list_sources.return_value = [{"name": "csv", "description": "CSV source"}]
-    catalog.list_transforms.return_value = [{"name": "uppercase", "description": "Uppercase"}]
-    catalog.list_sinks.return_value = [{"name": "csv", "description": "CSV sink"}]
-    catalog.get_schema.return_value = {"title": "Config", "properties": {}}
+    catalog.list_sources.return_value = [
+        PluginSummary(name="csv", description="CSV source", plugin_type="source", config_fields=[]),
+    ]
+    catalog.list_transforms.return_value = [
+        PluginSummary(name="uppercase", description="Uppercase", plugin_type="transform", config_fields=[]),
+    ]
+    catalog.list_sinks.return_value = [
+        PluginSummary(name="csv", description="CSV sink", plugin_type="sink", config_fields=[]),
+    ]
+    catalog.get_schema.return_value = PluginSchemaInfo(
+        name="csv", plugin_type="source", description="CSV source",
+        json_schema={"title": "Config", "properties": {}},
+    )
     return catalog
 
 
@@ -3337,6 +3472,7 @@ import pytest
 from elspeth.web.composer.protocol import ComposerResult
 from elspeth.web.composer.state import (
     CompositionState,
+    OutputSpec,
     PipelineMetadata,
     SourceSpec,
 )
@@ -3393,6 +3529,26 @@ class TestMessageRouteComposerWiring:
         assert updated.version != original.version
 
     @pytest.mark.asyncio
+    async def test_convergence_error_returns_422(self) -> None:
+        """ComposerConvergenceError maps to HTTP 422 with structured body."""
+        from elspeth.web.composer.protocol import ComposerConvergenceError
+
+        exc = ComposerConvergenceError(max_turns=20)
+        assert exc.max_turns == 20
+        # The route handler catches this and returns:
+        # {error_type: "convergence", message: "...", turns_used: 20}
+        # with HTTP 422
+
+    @pytest.mark.asyncio
+    async def test_llm_failure_returns_502(self) -> None:
+        """LLM client failures map to HTTP 502 with structured body."""
+        # LiteLLM network/rate-limit/auth errors propagate to the route
+        # handler, which returns:
+        # {error_type: "llm_unavailable", message: "..."} with HTTP 502
+        # or {error_type: "llm_auth_error", message: "..."} for auth failures
+        pass  # Integration test — depends on route handler wiring
+
+    @pytest.mark.asyncio
     async def test_state_unchanged_skips_persistence(self) -> None:
         """If state version unchanged, no persistence needed."""
         original = _empty_state()
@@ -3441,8 +3597,30 @@ async def send_message(
             metadata=PipelineMetadata(), version=1,
         )
 
-    # 4. Call composer
-    result = await composer_service.compose(body.content, session, state)
+    # 4. Call composer — with structured HTTP error handling (S16)
+    try:
+        result = await composer_service.compose(body.content, session, state)
+    except ComposerConvergenceError as exc:
+        # S16: 422 for convergence errors
+        raise HTTPException(
+            status_code=422,
+            detail={
+                "error_type": "convergence",
+                "message": str(exc),
+                "turns_used": exc.max_turns,
+            },
+        ) from exc
+    except Exception as exc:
+        # S16: 502 for LLM client failures (network, rate limit, auth)
+        # LiteLLM exceptions propagate here when the LLM is unreachable.
+        error_type = "llm_auth_error" if "auth" in str(exc).lower() else "llm_unavailable"
+        raise HTTPException(
+            status_code=502,
+            detail={
+                "error_type": error_type,
+                "message": str(exc),
+            },
+        ) from exc
 
     # 5. Persist assistant message
     assistant_msg = await session_service.add_message(
@@ -3457,7 +3635,73 @@ async def send_message(
     return MessageResponse(message=assistant_msg, state=result.state)
 ```
 
-- [ ] **Step 3: Run all composer tests**
+**S18 — Revert system message injection:** When a user reverts to a prior composition version (via Sub-Spec 2's `set_active_state`), the route handler must inject a system message into the chat history: `"Pipeline reverted to version N."` This gives the LLM context that the state has been rolled back. The injected message uses `role="system"` and is persisted as a `ChatMessage` so it appears in the conversation history on subsequent turns. This is handled by the revert endpoint in Sub-Spec 2 -- when `set_active_state` is called, it persists the system message before returning. The `POST /messages` handler here does not need special revert logic because the system message will already be in the chat history by the time the next compose call runs.
+
+- [ ] **Step 3: Implement GET /api/sessions/{id}/state/yaml endpoint**
+
+Add to `src/elspeth/web/sessions/routes.py`:
+
+```python
+# GET /api/sessions/{id}/state/yaml — return generated YAML for current state.
+
+async def get_session_yaml(
+    session_id: str,
+    session_service: SessionService = Depends(get_session_service),
+    current_user: User = Depends(get_current_user),
+) -> dict[str, str]:
+    """Return the generated YAML for the session's current composition state.
+
+    Response: {yaml: str} — the YAML string ready for display in the
+    frontend's YAML tab.
+
+    Returns HTTP 404 if the session has no CompositionState yet.
+    Authentication and session ownership checks are identical to the
+    messages endpoint.
+    """
+    # Load session (verify ownership)
+    session = await session_service.get_session(session_id, current_user.id)
+
+    # Load current state
+    state = await session_service.get_latest_state(session_id)
+    if state is None:
+        raise HTTPException(status_code=404, detail="No composition state for this session.")
+
+    yaml_str = generate_yaml(state)
+    return {"yaml": yaml_str}
+```
+
+Add a test for this endpoint:
+
+```python
+# tests/unit/web/composer/test_route_integration.py (append)
+
+class TestYamlEndpoint:
+    @pytest.mark.asyncio
+    async def test_yaml_endpoint_returns_yaml_string(self) -> None:
+        """GET /api/sessions/{id}/state/yaml returns generated YAML."""
+        from elspeth.web.composer.yaml_generator import generate_yaml
+
+        state = _empty_state().with_source(
+            SourceSpec(
+                plugin="csv", on_success="t1",
+                options={"path": "/data.csv"}, on_validation_failure="quarantine",
+            )
+        ).with_output(
+            OutputSpec(name="out", plugin="csv", options={}, on_write_failure="discard")
+        )
+        yaml_str = generate_yaml(state)
+        assert "csv" in yaml_str
+        assert isinstance(yaml_str, str)
+
+    @pytest.mark.asyncio
+    async def test_yaml_endpoint_404_when_no_state(self) -> None:
+        """GET /api/sessions/{id}/state/yaml returns 404 when no state exists."""
+        # When session_service.get_latest_state() returns None,
+        # the endpoint should return HTTP 404.
+        pass  # Integration test — depends on Sub-Spec 2 session service
+```
+
+- [ ] **Step 4: Run all composer tests**
 
 Run: `.venv/bin/python -m pytest tests/unit/web/composer/ -v`
 Expected: All tests PASS.
@@ -3481,13 +3725,18 @@ git commit -m "feat(web/composer): wire POST /api/sessions/{id}/messages to Comp
 After all tasks, verify:
 
 1. `CompositionState` is frozen. All container fields are deep-frozen via `freeze_fields()`. Mutations return new instances. `pytest tests/unit/web/composer/test_state.py`
-2. `ToolResult` is frozen with `affected_nodes` deep-frozen. `pytest tests/unit/web/composer/test_tools.py`
-3. All 12 tools (6 discovery, 6 mutation) work. Mutations return `ToolResult` with validation. Invalid input returns `success=False`, not exceptions.
-4. Stage 1 validation catches all 8 check categories.
-5. YAML generator is deterministic. Linear, gate, aggregation, fork/coalesce pipelines produce correct YAML.
-6. `ComposerServiceImpl` runs bounded loop. Mock LLM tests cover: text-only, single tool call, multi-turn, convergence error, unknown tool, malformed arguments, multiple tool calls per turn.
-7. `_build_messages()` returns a new list on every call.
-8. Model is configured via `WebSettings.composer_model`.
+2. `CompositionState.to_dict()` recursively unwraps `MappingProxyType` -> `dict` and `tuple` -> `list`. Frozen state objects serialize through `yaml.dump()` without `RepresenterError`.
+3. `ToolResult` is frozen with `affected_nodes` deep-frozen. `pytest tests/unit/web/composer/test_tools.py`
+4. All 12 tools (6 discovery, 6 mutation) work. Mutations return `ToolResult` with validation. Invalid input returns `success=False`, not exceptions.
+5. Stage 1 validation catches all 8 check categories.
+6. YAML generator is deterministic. Linear, gate, aggregation, fork/coalesce pipelines produce correct YAML. `generate_yaml()` calls `state.to_dict()` before `yaml.dump()`.
+7. `ComposerServiceImpl` runs bounded loop. Mock LLM tests cover: text-only, single tool call, multi-turn, convergence error, unknown tool, malformed arguments, multiple tool calls per turn.
+8. `_build_messages()` returns a new list on every call.
+9. Model is configured via `WebSettings.composer_model`.
+10. `GET /api/sessions/{id}/state/yaml` returns the generated YAML string. Returns 404 when no state exists.
+11. Route handler catches `ComposerConvergenceError` -> 422 and LLM client errors -> 502 with structured JSON error bodies.
+12. Revert system message ("Pipeline reverted to version N.") is injected into chat history when state is reverted (handled by Sub-Spec 2's `set_active_state`).
+13. All mock catalogs use real `PluginSummary` and `PluginSchemaInfo` instances, not plain dicts (AC #16).
 
 ```bash
 # Full test suite

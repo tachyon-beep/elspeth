@@ -4,7 +4,7 @@
 
 **Goal:** Add read-only plugin catalog browsing to the web application. Wrap `PluginManager` behind a `CatalogService` protocol, expose four REST endpoints, and serialize Pydantic config schemas to JSON.
 
-**Architecture:** `CatalogServiceImpl` wraps the existing `PluginManager` singleton from `get_shared_plugin_manager()` (Phase 0 extraction). Schema resolution delegates to `PluginConfigValidator` to avoid duplicating the name-to-config-class mapping. All endpoints are read-only. Cache populated once at startup.
+**Architecture:** `CatalogServiceImpl` receives an already-initialized `PluginManager` via constructor injection (the shared singleton from `get_shared_plugin_manager()`). It does NOT call `register_builtin_plugins()` itself -- the singleton factory handles initialization. Schema resolution delegates to `PluginConfigValidator` to avoid duplicating the name-to-config-class mapping. All endpoints are read-only. Cache populated once at startup.
 
 **Tech Stack:** FastAPI, Pydantic v2 (response models + `model_json_schema()`), pluggy (via PluginManager)
 
@@ -351,6 +351,10 @@ _VALID_TYPES = frozenset({"sources", "transforms", "sinks"})
 
 class CatalogServiceImpl:
     """Read-only catalog backed by PluginManager.
+
+    Receives an already-initialized PluginManager via constructor injection.
+    Does NOT call register_builtin_plugins() -- the shared singleton factory
+    (get_shared_plugin_manager) handles initialization before injection.
 
     Caches plugin class lists once at construction. The plugin set is
     fixed for the lifetime of the process.
@@ -758,7 +762,12 @@ from elspeth.web.catalog.service import CatalogServiceImpl
 
 
 def create_catalog_service() -> CatalogServiceImpl:
-    """Create CatalogService backed by the shared PluginManager singleton."""
+    """Create CatalogService backed by the shared PluginManager singleton.
+
+    get_shared_plugin_manager() returns an already-initialized manager
+    (with register_builtin_plugins() called). CatalogServiceImpl does
+    not re-initialize -- it caches the existing plugin lists.
+    """
     return CatalogServiceImpl(get_shared_plugin_manager())
 ```
 

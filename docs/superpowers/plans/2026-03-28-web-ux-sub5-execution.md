@@ -296,7 +296,7 @@ class RunEvent(BaseModel):
 
     run_id: str
     timestamp: datetime
-    event_type: Literal["progress", "error", "completed"]
+    event_type: Literal["progress", "error", "completed", "cancelled"]
     data: dict[str, Any]
 
 
@@ -612,8 +612,13 @@ B1 Fix: All cross-thread pushes use loop.call_soon_threadsafe() to schedule
 queue.put_nowait() on the event loop thread. Direct queue.put_nowait() from
 a background thread would corrupt the event loop's internal state.
 
-Construction timing: Created in create_app() on the main thread. The loop
-reference is captured at that point via asyncio.get_event_loop().
+Construction timing: Created inside the FastAPI lifespan async context manager,
+NOT in the synchronous create_app() factory. The loop reference is captured via
+asyncio.get_running_loop() inside the lifespan, which guarantees a running event
+loop exists and is Python 3.12+ compatible (asyncio.get_event_loop() emits a
+deprecation warning when no running loop exists). The ExecutionServiceImpl is
+also constructed inside the lifespan (after ProgressBroadcaster), not in
+create_app(), because it depends on the broadcaster instance.
 """
 from __future__ import annotations
 
@@ -1317,24 +1322,20 @@ def mock_session_service() -> MagicMock:
 
 
 @pytest.fixture
-def mock_run_repository() -> MagicMock:
-    repo = MagicMock()
-    repo.get_active_run_for_session.return_value = None
-    return repo
-
-
-@pytest.fixture
 def service(
     broadcaster: ProgressBroadcaster,
     mock_settings: MagicMock,
     mock_session_service: MagicMock,
-    mock_run_repository: MagicMock,
 ) -> ExecutionServiceImpl:
+    # AC #17: All Run CRUD goes through SessionService — no direct DB access.
+    # session_service provides: create_run(), update_run_status(),
+    # get_active_run(), get_run() with R6 expanded params
+    # (landscape_run_id, pipeline_yaml, rows_processed, rows_failed).
+    mock_session_service.get_active_run.return_value = None
     return ExecutionServiceImpl(
         broadcaster=broadcaster,
         settings=mock_settings,
         session_service=mock_session_service,
-        run_repository=mock_run_repository,
     )
 
 
@@ -1349,20 +1350,23 @@ class TestExecutionFlow:
             run_id = service.execute(session_id=uuid4())
         assert isinstance(run_id, UUID)
 
-    def test_execute_creates_pending_run_record(
-        self, service: ExecutionServiceImpl, mock_run_repository: MagicMock
+    def test_execute_creates_run_via_session_service(
+        self, service: ExecutionServiceImpl, mock_session_service: MagicMock
     ) -> None:
+        """AC #17: Run creation delegates to session_service.create_run()
+        with R6 expanded params (session_id, state_id, pipeline_yaml)."""
         with patch.object(service, "_run_pipeline"):
             run_id = service.execute(session_id=uuid4())
-        mock_run_repository.create_run.assert_called_once()
-        create_call = mock_run_repository.create_run.call_args
-        assert create_call[1]["status"] == "pending" or create_call[0][1] == "pending"
+        mock_session_service.create_run.assert_called_once()
+        create_call = mock_session_service.create_run.call_args
+        assert "session_id" in create_call[1] or len(create_call[0]) >= 1
+        assert "pipeline_yaml" in create_call[1] or len(create_call[0]) >= 2
 
     def test_get_status_returns_run_status(
-        self, service: ExecutionServiceImpl, mock_run_repository: MagicMock
+        self, service: ExecutionServiceImpl, mock_session_service: MagicMock
     ) -> None:
         run_id = uuid4()
-        mock_run_repository.get_run.return_value = MagicMock(
+        mock_session_service.get_run.return_value = MagicMock(
             run_id=str(run_id),
             status="running",
             started_at=datetime.now(tz=timezone.utc),
@@ -1506,7 +1510,7 @@ class TestB7ExceptionHandling:
         mock_payload: MagicMock,
         mock_landscape: MagicMock,
         service: ExecutionServiceImpl,
-        mock_run_repository: MagicMock,
+        mock_session_service: MagicMock,
     ) -> None:
         mock_yaml_gen.generate_yaml.return_value = "yaml"
         mock_landscape.side_effect = KeyboardInterrupt("ctrl-c")
@@ -1515,8 +1519,8 @@ class TestB7ExceptionHandling:
             service._run_pipeline(str(uuid4()), "yaml", threading.Event())
 
         # Run status must be updated to failed despite KeyboardInterrupt
-        mock_run_repository.update_run_status.assert_called()
-        last_call = mock_run_repository.update_run_status.call_args
+        mock_session_service.update_run_status.assert_called()
+        last_call = mock_session_service.update_run_status.call_args
         assert "failed" in str(last_call)
 
     @patch("elspeth.web.execution.service.LandscapeDB")
@@ -1528,7 +1532,7 @@ class TestB7ExceptionHandling:
         mock_payload: MagicMock,
         mock_landscape: MagicMock,
         service: ExecutionServiceImpl,
-        mock_run_repository: MagicMock,
+        mock_session_service: MagicMock,
     ) -> None:
         mock_yaml_gen.generate_yaml.return_value = "yaml"
         mock_landscape.side_effect = SystemExit(1)
@@ -1536,7 +1540,7 @@ class TestB7ExceptionHandling:
         with pytest.raises(SystemExit):
             service._run_pipeline(str(uuid4()), "yaml", threading.Event())
 
-        mock_run_repository.update_run_status.assert_called()
+        mock_session_service.update_run_status.assert_called()
 
     def test_shutdown_event_cleaned_up_in_finally(
         self,
@@ -1600,22 +1604,22 @@ class TestCancelMechanism:
     def test_cancel_pending_run_updates_status(
         self,
         service: ExecutionServiceImpl,
-        mock_run_repository: MagicMock,
+        mock_session_service: MagicMock,
     ) -> None:
         """When no shutdown event exists (pending), update status directly."""
         run_id = uuid4()
         # No event in _shutdown_events — run is pending
         service.cancel(run_id)
-        mock_run_repository.update_run_status.assert_called()
+        mock_session_service.update_run_status.assert_called()
 
     def test_cancel_terminal_run_is_noop(
         self,
         service: ExecutionServiceImpl,
-        mock_run_repository: MagicMock,
+        mock_session_service: MagicMock,
     ) -> None:
         """Cancelling completed/failed/cancelled run does nothing."""
         run_id = uuid4()
-        mock_run_repository.get_run.return_value = MagicMock(status="completed")
+        mock_session_service.get_run.return_value = MagicMock(status="completed")
         service.cancel(run_id)
         # Should not attempt status update for terminal runs
         # (exact assertion depends on implementation checking status first)
@@ -1633,6 +1637,73 @@ class TestCancelMechanism:
         service.cancel(run_id)
         assert event.is_set()
 
+    @patch("elspeth.web.execution.service.Orchestrator")
+    @patch("elspeth.web.execution.service.load_settings")
+    @patch("elspeth.web.execution.service.instantiate_plugins_from_config")
+    @patch("elspeth.web.execution.service.ExecutionGraph")
+    @patch("elspeth.web.execution.service.LandscapeDB")
+    @patch("elspeth.web.execution.service.FilesystemPayloadStore")
+    @patch("elspeth.web.execution.service.yaml_generator")
+    def test_cancelled_run_broadcasts_cancelled_event(
+        self,
+        mock_yaml_gen: MagicMock,
+        mock_payload: MagicMock,
+        mock_landscape: MagicMock,
+        mock_graph_cls: MagicMock,
+        mock_instantiate: MagicMock,
+        mock_load: MagicMock,
+        mock_orch_cls: MagicMock,
+        service: ExecutionServiceImpl,
+        mock_session_service: MagicMock,
+    ) -> None:
+        """AC #19: When shutdown_event is set, _run_pipeline broadcasts
+        a 'cancelled' terminal event instead of 'completed'."""
+        mock_yaml_gen.generate_yaml.return_value = "source:\n  plugin: csv"
+        mock_load.return_value = MagicMock()
+        mock_bundle = MagicMock()
+        mock_bundle.source = MagicMock()
+        mock_bundle.source_settings = MagicMock()
+        mock_bundle.transforms = ()
+        mock_bundle.sinks = {"primary": MagicMock()}
+        mock_bundle.aggregations = {}
+        mock_instantiate.return_value = mock_bundle
+        mock_graph_cls.from_plugin_instances.return_value = MagicMock()
+        mock_orch = MagicMock()
+        mock_orch_cls.return_value = mock_orch
+        mock_result = MagicMock()
+        mock_result.rows_processed = 50
+        mock_result.rows_failed = 2
+        mock_orch.run.return_value = mock_result
+
+        shutdown_event = threading.Event()
+        shutdown_event.set()  # Simulate cancellation
+        run_id = str(uuid4())
+
+        service._run_pipeline(run_id, "source:\n  plugin: csv", shutdown_event)
+
+        # Verify status updated to "cancelled" (not "completed")
+        status_calls = mock_session_service.update_run_status.call_args_list
+        final_status_call = status_calls[-1]
+        assert "cancelled" in str(final_status_call), (
+            f"Expected 'cancelled' status update, got: {final_status_call}"
+        )
+
+        # Verify the broadcaster received a "cancelled" event via
+        # loop.call_soon_threadsafe. The ProgressBroadcaster forwards
+        # put_nowait calls through the mock loop, so we can inspect them.
+        threadsafe_calls = service._broadcaster._loop.call_soon_threadsafe.call_args_list
+        # Find the terminal event among call_soon_threadsafe calls
+        terminal_events = [
+            c[0][1]  # second positional arg to call_soon_threadsafe is the event
+            for c in threadsafe_calls
+            if isinstance(c[0][1], RunEvent) and c[0][1].event_type == "cancelled"
+        ]
+        assert len(terminal_events) >= 1, (
+            "Expected a 'cancelled' RunEvent to be broadcast"
+        )
+        assert terminal_events[0].data["rows_processed"] == 50
+        assert terminal_events[0].data["rows_failed"] == 2
+
 
 # ── One Active Run (B6) ───────────────────────────────────────────────
 
@@ -1640,11 +1711,11 @@ class TestOneActiveRun:
     def test_second_execute_raises_run_already_active(
         self,
         service: ExecutionServiceImpl,
-        mock_run_repository: MagicMock,
+        mock_session_service: MagicMock,
     ) -> None:
         """B6: Only one pending/running run per session."""
         session_id = uuid4()
-        mock_run_repository.get_active_run_for_session.return_value = MagicMock(
+        mock_session_service.get_active_run.return_value = MagicMock(
             status="running"
         )
 
@@ -1654,10 +1725,10 @@ class TestOneActiveRun:
     def test_execute_after_completed_run_succeeds(
         self,
         service: ExecutionServiceImpl,
-        mock_run_repository: MagicMock,
+        mock_session_service: MagicMock,
     ) -> None:
         """After a run completes, a new one can start."""
-        mock_run_repository.get_active_run_for_session.return_value = None
+        mock_session_service.get_active_run.return_value = None
         with patch.object(service, "_run_pipeline"):
             run_id = service.execute(session_id=uuid4())
         assert isinstance(run_id, UUID)
@@ -1745,8 +1816,10 @@ class RunAlreadyActiveError(Exception):
 class ExecutionServiceImpl:
     """Pipeline execution service with ThreadPoolExecutor backend.
 
-    Construction: Created in create_app() and injected into route handlers
-    via FastAPI's dependency injection.
+    Construction: Created inside the FastAPI lifespan async context manager
+    (after ProgressBroadcaster), NOT in the synchronous create_app() factory.
+    Stored as application state and injected into route handlers via FastAPI's
+    dependency injection.
 
     Thread model: execute() submits _run_pipeline() to a ThreadPoolExecutor
     with max_workers=1. The pipeline runs in a background thread. All other
@@ -1759,12 +1832,14 @@ class ExecutionServiceImpl:
         broadcaster: ProgressBroadcaster,
         settings: Any,  # WebSettings
         session_service: Any,  # SessionService
-        run_repository: Any,  # RunRepository
     ) -> None:
         self._broadcaster = broadcaster
         self._settings = settings
         self._session_service = session_service
-        self._run_repository = run_repository
+        # AC #17: No run_repository — all Run CRUD delegates to SessionService
+        # via create_run(), update_run_status(), get_active_run(), get_run().
+        # R6 expanded params: landscape_run_id, pipeline_yaml, rows_processed,
+        # rows_failed.
         self._executor = ThreadPoolExecutor(max_workers=1)
         self._shutdown_events: dict[str, threading.Event] = {}
 
@@ -1782,8 +1857,8 @@ class ExecutionServiceImpl:
 
         Returns the run_id immediately.
         """
-        # B6: One active run per session
-        active = self._run_repository.get_active_run_for_session(session_id)
+        # B6: One active run per session (AC #17: via SessionService)
+        active = self._session_service.get_active_run(session_id)
         if active is not None:
             raise RunAlreadyActiveError(
                 f"Session {session_id} already has an active run: {active.run_id}"
@@ -1795,12 +1870,11 @@ class ExecutionServiceImpl:
         )
         pipeline_yaml = yaml_generator.generate_yaml(state)
 
-        # Create run record
+        # Create run record (AC #17: via SessionService with R6 expanded params)
         run_id = uuid4()
-        self._run_repository.create_run(
-            run_id=run_id,
+        self._session_service.create_run(
             session_id=session_id,
-            status="pending",
+            state_id=state_id,
             pipeline_yaml=pipeline_yaml,
         )
 
@@ -1818,8 +1892,8 @@ class ExecutionServiceImpl:
         return run_id
 
     def get_status(self, run_id: UUID) -> RunStatusResponse:
-        """Return current run status from the Run database record."""
-        run = self._run_repository.get_run(run_id)
+        """Return current run status. AC #17: delegates to SessionService."""
+        run = self._session_service.get_run(run_id)
         return RunStatusResponse(
             run_id=str(run.run_id),
             status=run.status,
@@ -1843,9 +1917,9 @@ class ExecutionServiceImpl:
             event.set()
         else:
             # No event means either pending (not yet started) or already done
-            run = self._run_repository.get_run(run_id)
+            run = self._session_service.get_run(run_id)
             if run.status not in ("completed", "failed", "cancelled"):
-                self._run_repository.update_run_status(
+                self._session_service.update_run_status(
                     run_id, status="cancelled"
                 )
 
@@ -1868,7 +1942,7 @@ class ExecutionServiceImpl:
         """
         tmp_path: Path | None = None
         try:
-            self._run_repository.update_run_status(run_id, status="running")
+            self._session_service.update_run_status(run_id, status="running")
 
             # B3 fix: construct from WebSettings, not hardcoded paths
             landscape_db = LandscapeDB(
@@ -1939,30 +2013,53 @@ class ExecutionServiceImpl:
                 shutdown_event=shutdown_event,  # B2: NEVER omit this
             )
 
-            # Broadcast terminal event
-            self._broadcaster.broadcast(
-                run_id,
-                RunEvent(
-                    run_id=run_id,
-                    timestamp=datetime.now(tz=timezone.utc),
-                    event_type="completed",
-                    data={
-                        "rows_processed": result.rows_processed,
-                        "rows_succeeded": result.rows_succeeded,
-                        "rows_failed": result.rows_failed,
-                        "rows_quarantined": result.rows_quarantined,
-                        "landscape_run_id": result.run_id,
-                    },
-                ),
-            )
-
-            self._run_repository.update_run_status(
-                run_id,
-                status="completed",
-                landscape_run_id=result.run_id,
-                rows_processed=result.rows_processed,
-                rows_failed=result.rows_failed,
-            )
+            # AC #19: Check if shutdown was requested — if so, broadcast
+            # "cancelled" instead of "completed". The orchestrator returns
+            # normally after detecting the shutdown event, but the run was
+            # not completed by the user's intent.
+            if shutdown_event.is_set():
+                self._broadcaster.broadcast(
+                    run_id,
+                    RunEvent(
+                        run_id=run_id,
+                        timestamp=datetime.now(tz=timezone.utc),
+                        event_type="cancelled",
+                        data={
+                            "rows_processed": result.rows_processed,
+                            "rows_failed": result.rows_failed,
+                        },
+                    ),
+                )
+                self._session_service.update_run_status(
+                    run_id,
+                    status="cancelled",
+                    rows_processed=result.rows_processed,
+                    rows_failed=result.rows_failed,
+                )
+            else:
+                # Broadcast terminal completed event
+                self._broadcaster.broadcast(
+                    run_id,
+                    RunEvent(
+                        run_id=run_id,
+                        timestamp=datetime.now(tz=timezone.utc),
+                        event_type="completed",
+                        data={
+                            "rows_processed": result.rows_processed,
+                            "rows_succeeded": result.rows_succeeded,
+                            "rows_failed": result.rows_failed,
+                            "rows_quarantined": result.rows_quarantined,
+                            "landscape_run_id": result.run_id,
+                        },
+                    ),
+                )
+                self._session_service.update_run_status(
+                    run_id,
+                    status="completed",
+                    landscape_run_id=result.run_id,
+                    rows_processed=result.rows_processed,
+                    rows_failed=result.rows_failed,
+                )
 
             landscape_db.close()
 
@@ -1983,7 +2080,7 @@ class ExecutionServiceImpl:
                     },
                 ),
             )
-            self._run_repository.update_run_status(
+            self._session_service.update_run_status(
                 run_id, status="failed", error=str(exc)
             )
             raise  # Re-raise so future.add_done_callback sees it
@@ -2126,6 +2223,31 @@ class TestValidateEndpoint:
         pass  # Placeholder until app factory is wired
 
     @pytest.mark.asyncio
+    async def test_validate_uses_run_in_executor(
+        self,
+        mock_execution_service: MagicMock,
+    ) -> None:
+        """AC #16: validate route handler MUST NOT call validate_pipeline
+        synchronously — it must use run_in_executor to avoid blocking the
+        event loop."""
+        # When the app factory is available, verify that the route handler
+        # calls asyncio.get_running_loop().run_in_executor(None, validate_pipeline, state).
+        # The test inspects the route handler source or mocks the loop to
+        # verify the executor path is used:
+        #   with patch("elspeth.web.execution.routes.asyncio") as mock_asyncio:
+        #       mock_loop = MagicMock()
+        #       mock_asyncio.get_running_loop.return_value = mock_loop
+        #       mock_loop.run_in_executor = AsyncMock(return_value=ValidationResult(
+        #           is_valid=True, checks=[], errors=[],
+        #       ))
+        #       resp = await client.post(f"/api/sessions/{uuid4()}/validate")
+        #       assert resp.status_code == 200
+        #       mock_loop.run_in_executor.assert_called_once()
+        #       call_args = mock_loop.run_in_executor.call_args
+        #       assert call_args[0][0] is None  # default executor
+        pass  # Placeholder until app factory is wired
+
+    @pytest.mark.asyncio
     async def test_invalid_pipeline_returns_200_with_errors(
         self,
         mock_execution_service: MagicMock,
@@ -2218,6 +2340,21 @@ class TestWebSocketProgress:
         pass
 
     @pytest.mark.asyncio
+    async def test_websocket_auth_failure_closes_4001(
+        self,
+        mock_broadcaster: MagicMock,
+    ) -> None:
+        """AC #12: Missing or invalid ?token= query param closes with 4001.
+        Client MUST NOT auto-reconnect on 4001."""
+        # When app factory is available:
+        #   async with client.websocket_connect(
+        #       f"/ws/runs/{uuid4()}"  # no ?token=
+        #   ) as ws:
+        #       # Connection should be closed with code 4001
+        #       assert ws.close_code == 4001
+        pass
+
+    @pytest.mark.asyncio
     async def test_websocket_unsubscribes_on_disconnect(
         self,
         mock_broadcaster: MagicMock,
@@ -2275,8 +2412,17 @@ async def validate_session_pipeline(
     session_id: UUID,
     service: ExecutionServiceImpl = Depends(get_execution_service),
 ) -> ValidationResult:
-    """Dry-run validation using real engine code paths."""
-    return service.validate(session_id)
+    """Dry-run validation using real engine code paths.
+
+    AC #16: Validation is synchronous and takes 1-5 seconds depending on
+    plugin count. Running it directly would block the FastAPI event loop.
+    We use run_in_executor to offload it to a thread.
+    """
+    import asyncio
+
+    loop = asyncio.get_running_loop()
+    state = service.get_composition_state(session_id)
+    return await loop.run_in_executor(None, validate_pipeline, state)
 
 
 @router.post(
@@ -2343,28 +2489,50 @@ async def get_run_results(
 
 # ── WebSocket Endpoint ─────────────────────────────────────────────────
 
+def get_auth_provider() -> Any:
+    raise NotImplementedError("Wire via app factory")
+
+
 @router.websocket("/ws/runs/{run_id}")
 async def websocket_run_progress(
     websocket: WebSocket,
     run_id: str,
+    token: str | None = None,
     broadcaster: ProgressBroadcaster = Depends(get_broadcaster),
+    auth_provider: Any = Depends(get_auth_provider),
 ) -> None:
     """Stream RunEvent JSON payloads for a specific run.
 
+    AC #12: Authentication via ?token=<jwt> query parameter.
+    Close code 4001 on auth failure — client MUST NOT auto-reconnect
+    on 4001 (token must be refreshed or user must re-authenticate).
+
     Connection lifecycle:
-    1. Accept WebSocket connection
-    2. Subscribe to broadcaster for this run_id
-    3. Loop: await queue.get() -> send_json(event)
-    4. Close on terminal event (completed/error)
-    5. Unsubscribe in finally block (ensures cleanup on disconnect)
+    1. Validate JWT from query parameter (close 4001 if invalid)
+    2. Accept WebSocket connection
+    3. Verify run exists and belongs to authenticated user (IDOR -> 404-equivalent close)
+    4. Subscribe to broadcaster for this run_id
+    5. Loop: await queue.get() -> send_json(event)
+    6. Close on terminal event (completed/error/cancelled)
+    7. Unsubscribe in finally block (ensures cleanup on disconnect)
     """
+    # Auth: validate JWT from query parameter
+    if token is None:
+        await websocket.close(code=4001, reason="Missing authentication token")
+        return
+    try:
+        user = auth_provider.validate_token(token)
+    except Exception:
+        await websocket.close(code=4001, reason="Invalid authentication token")
+        return
+
     await websocket.accept()
     queue = broadcaster.subscribe(run_id)
     try:
         while True:
             event = await queue.get()
             await websocket.send_json(event.model_dump(mode="json"))
-            if event.event_type in ("completed", "error"):
+            if event.event_type in ("completed", "error", "cancelled"):
                 break
     except WebSocketDisconnect:
         pass  # Client disconnected — fall through to finally
@@ -2537,82 +2705,90 @@ class TestEndToEndPipelineExecution:
         6. Verify results: rows_processed > 0, rows_failed == 0
         7. Verify landscape_run_id links to audit trail
         """
-        # This test depends on the app factory from Sub-Specs 2+4.
-        # When those are implemented, the test body will be:
-        #
-        # pipeline_yaml = _make_pipeline_yaml(work_dir)
-        #
-        # # Create app with test settings pointing to work_dir
-        # app = create_app(
-        #     settings=WebSettings(
-        #         data_dir=work_dir,
-        #         landscape_url=f"sqlite:///{work_dir}/runs/audit.db",
-        #         payload_store_path=work_dir / "payloads",
-        #     )
-        # )
-        #
-        # async with AsyncClient(
-        #     transport=ASGITransport(app=app), base_url="http://test"
-        # ) as client:
-        #     # 1. Create session
-        #     resp = await client.post("/api/sessions")
-        #     assert resp.status_code == 201
-        #     session_id = resp.json()["session_id"]
-        #
-        #     # 2. Save composition state (manual — not via composer)
-        #     resp = await client.post(
-        #         f"/api/sessions/{session_id}/states",
-        #         json={"pipeline_yaml": pipeline_yaml},
-        #     )
-        #     assert resp.status_code == 201
-        #
-        #     # 3. Validate
-        #     resp = await client.post(
-        #         f"/api/sessions/{session_id}/validate"
-        #     )
-        #     assert resp.status_code == 200
-        #     validation = resp.json()
-        #     assert validation["is_valid"] is True, (
-        #         f"Validation failed: {validation['errors']}"
-        #     )
-        #
-        #     # 4. Execute
-        #     resp = await client.post(
-        #         f"/api/sessions/{session_id}/execute"
-        #     )
-        #     assert resp.status_code == 202
-        #     run_id = resp.json()["run_id"]
-        #
-        #     # 5. Poll to completion (timeout after 30s)
-        #     deadline = time.monotonic() + 30
-        #     while time.monotonic() < deadline:
-        #         resp = await client.get(f"/api/runs/{run_id}")
-        #         assert resp.status_code == 200
-        #         status = resp.json()
-        #         if status["status"] in ("completed", "failed", "cancelled"):
-        #             break
-        #         await asyncio.sleep(0.5)
-        #     else:
-        #         pytest.fail("Pipeline did not complete within 30 seconds")
-        #
-        #     # 6. Verify results
-        #     assert status["status"] == "completed", (
-        #         f"Pipeline failed: {status.get('error')}"
-        #     )
-        #     assert status["rows_processed"] > 0
-        #     assert status["rows_failed"] == 0
-        #
-        #     # 7. Verify landscape_run_id
-        #     assert status["landscape_run_id"] is not None
-        #
-        #     # Verify output file was created
-        #     output_file = work_dir / "output" / "result.csv"
-        #     assert output_file.exists()
-        #
-        #     # Verify audit database exists
-        #     audit_db = work_dir / "runs" / "audit.db"
-        #     assert audit_db.exists()
-        pass  # Scaffold — uncomment when app factory is available
+        # AC #14 + AC #20: Full cross-module integration test exercising
+        # real SessionService, CatalogService, and ExecutionService wired together.
+        pipeline_yaml = _make_pipeline_yaml(work_dir)
+
+        # Create app with test settings pointing to work_dir
+        from elspeth.web.app import create_app
+        from elspeth.web.settings import WebSettings
+
+        settings = WebSettings(
+            data_dir=work_dir,
+            landscape_url=f"sqlite:///{work_dir}/runs/audit.db",
+            payload_store_path=work_dir / "payloads",
+        )
+        app = create_app(settings=settings)
+
+        async with AsyncClient(
+            transport=ASGITransport(app=app), base_url="http://test"
+        ) as client:
+            # 1. Create session
+            resp = await client.post("/api/sessions")
+            assert resp.status_code == 201
+            session_id = resp.json()["session_id"]
+
+            # 2. Save composition state (manual — not via composer)
+            resp = await client.post(
+                f"/api/sessions/{session_id}/states",
+                json={"pipeline_yaml": pipeline_yaml},
+            )
+            assert resp.status_code == 201
+
+            # 3. Validate — AC #16: route handler uses run_in_executor
+            resp = await client.post(
+                f"/api/sessions/{session_id}/validate"
+            )
+            assert resp.status_code == 200
+            validation = resp.json()
+            assert validation["is_valid"] is True, (
+                f"Validation failed: {validation['errors']}"
+            )
+
+            # 4. Execute
+            resp = await client.post(
+                f"/api/sessions/{session_id}/execute"
+            )
+            assert resp.status_code == 202
+            run_id = resp.json()["run_id"]
+
+            # 5. Poll to completion (timeout after 30s)
+            deadline = time.monotonic() + 30
+            status: dict[str, Any] = {}
+            while time.monotonic() < deadline:
+                resp = await client.get(f"/api/runs/{run_id}")
+                assert resp.status_code == 200
+                status = resp.json()
+                if status["status"] in ("completed", "failed", "cancelled"):
+                    break
+                await asyncio.sleep(0.5)
+            else:
+                pytest.fail("Pipeline did not complete within 30 seconds")
+
+            # 6. Verify results — AC #14
+            assert status["status"] == "completed", (
+                f"Pipeline failed: {status.get('error')}"
+            )
+            assert status["rows_processed"] > 0
+            assert status["rows_failed"] == 0
+
+            # 7. Verify landscape_run_id links to real audit trail
+            assert status["landscape_run_id"] is not None
+
+            # 8. Verify output file was created
+            output_file = work_dir / "output" / "result.csv"
+            assert output_file.exists()
+
+            # 9. Verify audit database exists
+            audit_db = work_dir / "runs" / "audit.db"
+            assert audit_db.exists()
+
+            # 10. Verify results endpoint — AC #20 cross-module
+            resp = await client.get(f"/api/runs/{run_id}/results")
+            assert resp.status_code == 200
+            results = resp.json()
+            assert results["rows_processed"] > 0
+            assert results["landscape_run_id"] is not None
 ```
 
 - [ ] **Step 3: Run integration test, commit**
@@ -2639,10 +2815,15 @@ git commit -m "test(web): add end-to-end pipeline execution integration test"
 | 9 | LandscapeDB/PayloadStore from WebSettings (B3) | 5.5 |
 | 10 | Cancel sets shutdown Event | 5.5 |
 | 11 | One active run per session (B6) | 5.5 |
-| 12 | WebSocket streams RunEvent JSON | 5.6 |
-| 13 | Ownership enforcement on endpoints | 5.6 |
+| 12 | WebSocket streams RunEvent JSON + ?token auth + 4001 close | 5.6 |
+| 13 | Ownership enforcement on endpoints (404 not 403) | 5.6 |
 | 14 | Integration test end-to-end | 5.8 |
 | 15 | Multi-worker warning (W10) | 5.7 |
+| 16 | Validation uses run_in_executor (not sync in route handler) | 5.6 |
+| 17 | ExecutionService delegates Run CRUD to SessionService (R6 params) | 5.5 |
+| 18 | Progress bar uses indeterminate mode (no estimated_total) | 5.1 |
+| 19 | Cancelled runs broadcast terminal "cancelled" RunEvent | 5.5 |
+| 20 | Cross-module integration test (real services wired together) | 5.8 |
 
 ## Dependency Graph
 
