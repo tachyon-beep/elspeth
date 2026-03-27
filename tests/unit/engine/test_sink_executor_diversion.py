@@ -165,6 +165,32 @@ class TestDiscardMode:
         assert outcomes_by_token["t1"]["error_hash"] is not None
         assert outcomes_by_token["t1"]["sink_name"] == "__discard__"
 
+    def test_discard_mode_opens_primary_state_for_diverted_tokens(self) -> None:
+        """Discard-mode diverted tokens get a FAILED node_state at the primary sink."""
+        executor, recorder = _make_executor()
+        diversions = (RowDiversion(row_index=0, reason="bad metadata", row_data={"x": 1}),)
+        sink = _make_sink(diversions=diversions, on_write_failure="discard")
+        tokens = [_make_token("t0")]
+        executor.write(
+            sink=sink,
+            tokens=tokens,
+            ctx=MagicMock(run_id="run-1"),
+            step_in_pipeline=5,
+            sink_name="primary",
+            pending_outcome=PendingOutcome(RowOutcome.COMPLETED),
+        )
+        # Diverted token should get a begin_node_state at the primary sink
+        begin_calls = recorder.begin_node_state.call_args_list
+        assert len(begin_calls) == 1
+        assert begin_calls[0].kwargs["node_id"] == "node-primary"
+        assert begin_calls[0].kwargs["token_id"] == "t0"
+        # And a complete_node_state with FAILED status (row didn't reach destination)
+        complete_calls = recorder.complete_node_state.call_args_list
+        assert len(complete_calls) == 1
+        assert complete_calls[0].kwargs["status"] == NodeStateStatus.FAILED
+        assert complete_calls[0].kwargs["output_data"]["discarded"] is True
+        assert "bad metadata" in complete_calls[0].kwargs["output_data"]["reason"]
+
     def test_all_diverted_all_get_diverted(self) -> None:
         executor, recorder = _make_executor()
         diversions = (
@@ -303,12 +329,17 @@ class TestFailsinkMode:
             failsink_name="csv_failsink",
             failsink_edge_id="edge-failsink-1",
         )
-        # routing_event must be called with DIVERT mode and the failsink edge
+        # routing_event must be anchored to the PRIMARY sink state (the routing
+        # decision point), NOT the failsink state. This is the critical invariant:
+        # routing events live at the node that made the routing decision.
         recorder.record_routing_event.assert_called_once()
         call_kwargs = recorder.record_routing_event.call_args.kwargs
         assert call_kwargs["edge_id"] == "edge-failsink-1"
         assert call_kwargs["mode"] == RoutingMode.DIVERT
         assert "bad metadata" in call_kwargs["reason"]["diversion_reason"]
+        # state-1 is the primary divert state for t0 (first begin_node_state call).
+        # If this were anchored to the failsink state (state-2), the old bug is back.
+        assert call_kwargs["state_id"] == "state-1"
 
     def test_both_artifacts_registered_in_mixed_batch(self) -> None:
         """Mixed batch: primary artifact + failsink artifact both registered."""

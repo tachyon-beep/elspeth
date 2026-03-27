@@ -41,10 +41,11 @@ class SinkExecutor:
     3. Route diverted tokens to failsink or discard with audit trail
     4. Register artifacts and emit OpenTelemetry span
 
-    CRITICAL: Every token reaching a sink gets a node_state — at the primary
-    sink for accepted rows, or at the failsink for diverted rows. Discard-mode
-    tokens get a DIVERTED outcome but no node_state (audit trade-off documented
-    in spec).
+    CRITICAL: Every token reaching a sink gets a node_state at the primary
+    sink. Accepted rows get COMPLETED; diverted rows get FAILED (the row
+    didn't reach its destination). Failsink-mode diverted tokens also get
+    a second node_state at the failsink (COMPLETED — the row was written
+    there). Discard-mode diverted tokens have only the primary FAILED state.
 
     Note: Unlike TransformExecutor/GateExecutor/AggregationExecutor, SinkExecutor
     does NOT use StepResolver. Sinks are not DAG processing nodes — their step is
@@ -89,6 +90,8 @@ class SinkExecutor:
         error: ExecutionError,
     ) -> None:
         """Complete all opened sink states as FAILED."""
+        if not states:
+            return
         per_token_ms = duration_ms / len(states)
         for _, state in states:
             self._recorder.complete_node_state(
@@ -438,55 +441,106 @@ class SinkExecutor:
                 except (FrameworkBugError, AuditIntegrityError):
                     raise
                 except Exception as e:
+                    begin_error = ExecutionError(
+                        exception=str(e),
+                        exception_type=type(e).__name__,
+                        phase="begin_node_state_failsink",
+                    )
+                    # Close any partially-opened failsink states
                     if failsink_states:
-                        begin_error = ExecutionError(
-                            exception=str(e),
-                            exception_type=type(e).__name__,
-                            phase="begin_node_state_failsink",
-                        )
                         self._complete_states_failed(
                             states=failsink_states,
                             duration_ms=0.0,
                             error=begin_error,
                         )
+                    # Also close the already-open primary divert states —
+                    # they were opened before the failsink write and are still OPEN.
+                    self._complete_states_failed(
+                        states=[(t, s) for t, _, s in primary_divert_states],
+                        duration_ms=0.0,
+                        error=begin_error,
+                    )
                     raise
 
                 # Record routing_event anchored to PRIMARY sink state (the routing node),
-                # complete primary state, then complete failsink state.
+                # complete primary state as FAILED, then complete failsink state.
                 # This matches the quarantine pattern: routing_event lives at the
                 # node that made the routing decision.
-                for (token, idx, primary_state), (_, fs_state) in zip(primary_divert_states, failsink_states, strict=True):
-                    diversion = diversion_by_index[idx]
-                    reason: SinkDiversionReason = {"diversion_reason": diversion.reason}
+                #
+                # Wrapped in try/except to clean up any remaining OPEN states
+                # if a recorder call fails mid-loop (F3 fix from review).
+                completed_primary_indices: set[int] = set()
+                completed_failsink_indices: set[int] = set()
+                try:
+                    for loop_idx, ((token, idx, primary_state), (_, fs_state)) in enumerate(
+                        zip(primary_divert_states, failsink_states, strict=True)
+                    ):
+                        diversion = diversion_by_index[idx]
+                        reason: SinkDiversionReason = {"diversion_reason": diversion.reason}
 
-                    # Routing event anchored to primary sink state
-                    self._recorder.record_routing_event(
-                        state_id=primary_state.state_id,
-                        edge_id=failsink_edge_id,
-                        mode=RoutingMode.DIVERT,
-                        reason=reason,
-                    )
+                        # Routing event anchored to primary sink state
+                        self._recorder.record_routing_event(
+                            state_id=primary_state.state_id,
+                            edge_id=failsink_edge_id,
+                            mode=RoutingMode.DIVERT,
+                            reason=reason,
+                        )
 
-                    # Complete primary state (token reached this sink, was diverted)
-                    self._recorder.complete_node_state(
-                        state_id=primary_state.state_id,
-                        status=NodeStateStatus.COMPLETED,
-                        output_data={"diverted_to": failsink_name, "reason": diversion.reason},
-                        duration_ms=0.0,
-                    )
+                        # Complete primary state as FAILED — the row didn't get where
+                        # it was going. FAILED is a row state, not a system state:
+                        # the pipeline is healthy, the row failed at this stop.
+                        # Matches the quarantine pattern (core.py:1835).
+                        divert_error = ExecutionError(
+                            exception=diversion.reason,
+                            exception_type="SinkDiversion",
+                            phase="write",
+                        )
+                        self._recorder.complete_node_state(
+                            state_id=primary_state.state_id,
+                            status=NodeStateStatus.FAILED,
+                            output_data={"diverted_to": failsink_name, "reason": diversion.reason},
+                            duration_ms=0.0,
+                            error=divert_error,
+                        )
+                        completed_primary_indices.add(loop_idx)
 
-                    # Complete failsink state (token written to failsink)
-                    failsink_output = {
-                        "row": token.row_data.to_dict(),
-                        "artifact_path": failsink_artifact_info.path_or_uri,
-                        "content_hash": failsink_artifact_info.content_hash,
-                    }
-                    self._recorder.complete_node_state(
-                        state_id=fs_state.state_id,
-                        status=NodeStateStatus.COMPLETED,
-                        output_data=failsink_output,
-                        duration_ms=0.0,
+                        # Complete failsink state (token written to failsink)
+                        failsink_output = {
+                            "row": token.row_data.to_dict(),
+                            "artifact_path": failsink_artifact_info.path_or_uri,
+                            "content_hash": failsink_artifact_info.content_hash,
+                        }
+                        self._recorder.complete_node_state(
+                            state_id=fs_state.state_id,
+                            status=NodeStateStatus.COMPLETED,
+                            output_data=failsink_output,
+                            duration_ms=0.0,
+                        )
+                        completed_failsink_indices.add(loop_idx)
+                except (FrameworkBugError, AuditIntegrityError):
+                    raise  # System bugs crash immediately — no cleanup possible
+                except Exception as e:
+                    # Close any remaining OPEN states from tokens not yet processed.
+                    loop_error = ExecutionError(
+                        exception=str(e),
+                        exception_type=type(e).__name__,
+                        phase="failsink_audit_recording",
                     )
+                    remaining_primary = [(t, s) for i, (t, _, s) in enumerate(primary_divert_states) if i not in completed_primary_indices]
+                    remaining_failsink = [(t, s) for i, (t, s) in enumerate(failsink_states) if i not in completed_failsink_indices]
+                    if remaining_primary:
+                        self._complete_states_failed(
+                            states=remaining_primary,
+                            duration_ms=0.0,
+                            error=loop_error,
+                        )
+                    if remaining_failsink:
+                        self._complete_states_failed(
+                            states=remaining_failsink,
+                            duration_ms=0.0,
+                            error=loop_error,
+                        )
+                    raise
 
                 # Register failsink artifact
                 first_fs_state = failsink_states[0][1]
@@ -518,11 +572,18 @@ class SinkExecutor:
                 for token, idx, primary_state in primary_divert_states:
                     diversion = diversion_by_index[idx]
 
+                    # FAILED — the row didn't reach its destination (discarded).
+                    discard_error = ExecutionError(
+                        exception=diversion.reason,
+                        exception_type="SinkDiscard",
+                        phase="write",
+                    )
                     self._recorder.complete_node_state(
                         state_id=primary_state.state_id,
-                        status=NodeStateStatus.COMPLETED,
+                        status=NodeStateStatus.FAILED,
                         output_data={"discarded": True, "reason": diversion.reason},
                         duration_ms=0.0,
+                        error=discard_error,
                     )
 
                     error_hash = hashlib.sha256(diversion.reason.encode()).hexdigest()[:16]
