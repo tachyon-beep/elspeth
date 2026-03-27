@@ -127,3 +127,91 @@ def test_exactly_once_terminal_state(batch_size: int, diverted_indices_raw: list
     assert len(recorded_token_ids) == len(set(recorded_token_ids))
     # All input tokens present
     assert set(recorded_token_ids) == {t.token_id for t in tokens}
+
+
+# =============================================================================
+# Failsink mode property tests
+# =============================================================================
+
+
+def _build_failsink_scenario(batch_size: int, diverted_indices: set[int]) -> tuple[list[MagicMock], MagicMock, MagicMock]:
+    """Build tokens, primary sink, and failsink for a failsink-mode scenario."""
+    tokens = [_make_token(f"t{i}") for i in range(batch_size)]
+    diversions = tuple(RowDiversion(row_index=i, reason=f"reason-{i}", row_data={"i": i}) for i in sorted(diverted_indices))
+    artifact = ArtifactDescriptor.for_file(path="/tmp/p", content_hash="a" * 64, size_bytes=0)
+    failsink_artifact = ArtifactDescriptor.for_file(path="/tmp/f", content_hash="b" * 64, size_bytes=0)
+    sink = MagicMock()
+    sink.name = "primary"
+    sink.node_id = "node-primary"
+    sink.validate_input = False
+    sink.declared_required_fields = frozenset()
+    sink._on_write_failure = "csv_failsink"
+    sink._reset_diversion_log = MagicMock()
+    sink.write.return_value = SinkWriteResult(artifact=artifact, diversions=diversions)
+    failsink = MagicMock()
+    failsink.name = "csv_failsink"
+    failsink.node_id = "node-failsink"
+    failsink.write.return_value = SinkWriteResult(artifact=failsink_artifact)
+    failsink._reset_diversion_log = MagicMock()
+    return tokens, sink, failsink
+
+
+@given(
+    batch_size=st.integers(min_value=1, max_value=30),
+    diverted_indices_raw=st.lists(st.integers(min_value=0, max_value=29), max_size=30),
+)
+@settings(max_examples=200)
+def test_failsink_partition_completeness(batch_size: int, diverted_indices_raw: list[int]) -> None:
+    """Failsink mode: every token gets exactly one outcome (COMPLETED or DIVERTED)."""
+    diverted_indices = {i for i in diverted_indices_raw if i < batch_size}
+    tokens, sink, failsink = _build_failsink_scenario(batch_size, diverted_indices)
+    executor, recorder = _make_executor()
+
+    executor.write(
+        sink=sink,
+        tokens=tokens,
+        ctx=MagicMock(run_id="run-1"),
+        step_in_pipeline=5,
+        sink_name="primary",
+        pending_outcome=PendingOutcome(RowOutcome.COMPLETED),
+        failsink=failsink,
+        failsink_name="csv_failsink",
+        failsink_edge_id="edge-failsink-1",
+    )
+
+    outcome_calls = recorder.record_token_outcome.call_args_list
+    completed_ids = {c.kwargs["token_id"] for c in outcome_calls if c.kwargs["outcome"] == RowOutcome.COMPLETED}
+    diverted_ids = {c.kwargs["token_id"] for c in outcome_calls if c.kwargs["outcome"] == RowOutcome.DIVERTED}
+
+    assert len(completed_ids) + len(diverted_ids) == batch_size
+    assert completed_ids & diverted_ids == set()
+    assert completed_ids | diverted_ids == {t.token_id for t in tokens}
+
+
+@given(
+    batch_size=st.integers(min_value=1, max_value=30),
+    diverted_indices_raw=st.lists(st.integers(min_value=0, max_value=29), max_size=30),
+)
+@settings(max_examples=200)
+def test_failsink_exactly_once_terminal_state(batch_size: int, diverted_indices_raw: list[int]) -> None:
+    """Failsink mode: each token_id appears in exactly one record_token_outcome call."""
+    diverted_indices = {i for i in diverted_indices_raw if i < batch_size}
+    tokens, sink, failsink = _build_failsink_scenario(batch_size, diverted_indices)
+    executor, recorder = _make_executor()
+
+    executor.write(
+        sink=sink,
+        tokens=tokens,
+        ctx=MagicMock(run_id="run-1"),
+        step_in_pipeline=5,
+        sink_name="primary",
+        pending_outcome=PendingOutcome(RowOutcome.COMPLETED),
+        failsink=failsink,
+        failsink_name="csv_failsink",
+        failsink_edge_id="edge-failsink-1",
+    )
+
+    outcome_calls = recorder.record_token_outcome.call_args_list
+    recorded_token_ids = [c.kwargs["token_id"] for c in outcome_calls]
+    assert len(recorded_token_ids) == len(set(recorded_token_ids))
+    assert set(recorded_token_ids) == {t.token_id for t in tokens}

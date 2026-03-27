@@ -84,6 +84,20 @@ def resolve_preflight(
                 "count": result.count,
             }
 
+        # Validate dependency name uniqueness before building the gate context.
+        # DependencyConfig.name is documented as a unique label. Without this check,
+        # the dict comprehension silently overwrites earlier entries when two deps
+        # share the same name, so gates would evaluate against incomplete data.
+        dep_names = [r.name for r in dependency_results]
+        seen: set[str] = set()
+        duplicates: list[str] = []
+        for name in dep_names:
+            if name in seen:
+                duplicates.append(name)
+            seen.add(name)
+        if duplicates:
+            raise ValueError(f"Duplicate dependency names: {duplicates}. Each depends_on entry must have a unique name.")
+
         # Convert dependency results to gate-accessible dict
         dep_run_dict = {
             r.name: {

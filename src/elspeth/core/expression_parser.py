@@ -654,9 +654,11 @@ class ExpressionParser:
         if allowed_names is not None and len(allowed_names) == 0:
             raise ValueError("allowed_names must not be empty")
         self._allowed_names = frozenset(allowed_names) if allowed_names is not None else frozenset({"row"})
-        # Single-name mode: caller passes the value directly as context.
-        # Multi-name mode: caller passes a namespace dict keyed by allowed names.
-        self._single_name_mode = allowed_names is None or len(allowed_names) == 1
+        # Single-name mode: default (allowed_names=None) — the caller passes the
+        # row value directly as context. This is the standard gate condition path.
+        # Namespace mode: caller explicitly passes allowed_names and provides a
+        # namespace dict keyed by those names (even if only one name is allowed).
+        self._single_name_mode = allowed_names is None
 
         # Phase 1: Parse the expression
         try:

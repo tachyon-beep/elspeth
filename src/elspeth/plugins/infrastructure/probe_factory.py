@@ -5,21 +5,37 @@ from __future__ import annotations
 from collections.abc import Mapping
 from typing import Any
 
+from pydantic import ValidationError
+
 from elspeth.contracts.probes import CollectionProbe, CollectionReadinessResult
 from elspeth.core.dependency_config import CollectionProbeConfig
+from elspeth.plugins.infrastructure.clients.retrieval.connection import ChromaConnectionConfig
 
 
 class ChromaCollectionProbe:
     """Probes a ChromaDB collection for readiness.
 
-    Provider config is Tier 3 data (operator-authored YAML). Required fields
-    use direct access (KeyError crashes through on missing keys). The operator
-    must explicitly declare mode, and for http mode, host/port/ssl.
+    Provider config is Tier 3 data (operator-authored YAML). Connection fields
+    are validated at construction time by delegating to ChromaConnectionConfig
+    (the same pattern used by ChromaSinkConfig and ChromaSearchProviderConfig).
+    This ensures config errors surface as clear validation failures, not as raw
+    KeyErrors during probe().
     """
 
     def __init__(self, collection: str, config: Mapping[str, Any]) -> None:
         self.collection_name = collection
         self._config = config
+
+        # Validate connection config at construction time. Construct-and-discard
+        # pattern: ChromaConnectionConfig's model_validator checks cross-field
+        # constraints (persistent requires persist_directory, client requires host).
+        try:
+            ChromaConnectionConfig(collection=collection, **config)
+        except ValidationError as exc:
+            # Re-raise as ValueError so callers see a clean config error, not a
+            # Pydantic internal. First error message is the most specific.
+            first_error = exc.errors()[0]["msg"]
+            raise ValueError(f"Invalid provider_config for collection {collection!r}: {first_error}") from exc
 
     def probe(self) -> CollectionReadinessResult:
         """Check collection existence and document count."""

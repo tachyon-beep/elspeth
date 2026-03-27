@@ -1659,6 +1659,30 @@ class TestExpressionParserDictContext:
         context = {"collections": {}, "env": {}}
         assert parser.evaluate(context) is True
 
+    def test_single_allowed_name_uses_namespace_mode(self) -> None:
+        """Single custom allowed_name must still use namespace mode, not single-name mode.
+
+        Regression: when allowed_names has exactly one entry, single_name_mode
+        was incorrectly set to True, making the evaluator treat the whole context
+        dict as the value instead of looking up the name in the namespace.
+        """
+        parser = ExpressionParser(
+            "collections['facts']['count'] > 0",
+            allowed_names=["collections"],
+        )
+        context = {"collections": {"facts": {"count": 42}}}
+        assert parser.evaluate(context) is True
+
+    def test_single_allowed_name_missing_key_raises(self) -> None:
+        """Single-name namespace mode still raises on missing nested keys."""
+        parser = ExpressionParser(
+            "collections['missing']['count'] > 0",
+            allowed_names=["collections"],
+        )
+        context: dict[str, object] = {"collections": {}}
+        with pytest.raises(ExpressionEvaluationError, match="'missing' not found"):
+            parser.evaluate(context)
+
     def test_empty_allowed_names_raises(self) -> None:
         """Empty allowed_names list is rejected."""
         with pytest.raises(ValueError, match="must not be empty"):

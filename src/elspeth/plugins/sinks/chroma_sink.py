@@ -36,6 +36,17 @@ from elspeth.plugins.infrastructure.schema_factory import create_schema_from_con
 
 slog = structlog.get_logger(__name__)
 
+
+class _ChromaPayloadRejection(Exception):
+    """Chroma API rejected the payload with ValueError.
+
+    Wraps ValueError from Chroma write calls (upsert/add) so the error handler
+    can distinguish "Chroma rejected our data" (Tier 3) from "bug in our code"
+    (framework error). Without this, a broad ValueError catch would suppress
+    framework bugs in the surrounding code.
+    """
+
+
 if TYPE_CHECKING:
     from elspeth.contracts.contexts import LifecycleContext, SinkContext
     from elspeth.contracts.data import PluginSchema
@@ -275,11 +286,14 @@ class ChromaSink(BaseSink):
         start_time = time.perf_counter()
         try:
             if self._config.on_duplicate == "overwrite":
-                collection.upsert(
-                    ids=ids,
-                    documents=documents,
-                    metadatas=metadatas,  # type: ignore[arg-type]  # chromadb stub Metadata vs dict[str, Any]
-                )
+                try:
+                    collection.upsert(
+                        ids=ids,
+                        documents=documents,
+                        metadatas=metadatas,  # type: ignore[arg-type]  # chromadb stub Metadata vs dict[str, Any]
+                    )
+                except ValueError as ve:
+                    raise _ChromaPayloadRejection(str(ve)) from ve
             elif self._config.on_duplicate == "skip":
                 existing = collection.get(ids=ids)
                 existing_ids = set(existing["ids"])
@@ -293,11 +307,14 @@ class ChromaSink(BaseSink):
                     write_documents = [documents[i] for i in new_indices]
                     write_metadatas = [metadatas[i] for i in new_indices] if metadatas is not None else None
                     rows_written = len(new_indices)
-                    collection.add(
-                        ids=write_ids,
-                        documents=write_documents,
-                        metadatas=write_metadatas,  # type: ignore[arg-type]  # chromadb stub Metadata vs dict[str, Any]
-                    )
+                    try:
+                        collection.add(
+                            ids=write_ids,
+                            documents=write_documents,
+                            metadatas=write_metadatas,  # type: ignore[arg-type]  # chromadb stub Metadata vs dict[str, Any]
+                        )
+                    except ValueError as ve:
+                        raise _ChromaPayloadRejection(str(ve)) from ve
                 else:
                     write_ids = []
                     write_documents = []
@@ -312,14 +329,17 @@ class ChromaSink(BaseSink):
                         collection=self._config.collection,
                         duplicate_ids=duplicates,
                     )
-                collection.add(
-                    ids=ids,
-                    documents=documents,
-                    metadatas=metadatas,  # type: ignore[arg-type]  # chromadb stub Metadata vs dict[str, Any]
-                )
+                try:
+                    collection.add(
+                        ids=ids,
+                        documents=documents,
+                        metadatas=metadatas,  # type: ignore[arg-type]  # chromadb stub Metadata vs dict[str, Any]
+                    )
+                except ValueError as ve:
+                    raise _ChromaPayloadRejection(str(ve)) from ve
 
             latency_ms = (time.perf_counter() - start_time) * 1000
-        except (chromadb.errors.ChromaError, DuplicateDocumentError) as write_exc:
+        except (chromadb.errors.ChromaError, DuplicateDocumentError, _ChromaPayloadRejection) as write_exc:
             latency_ms = (time.perf_counter() - start_time) * 1000
             try:
                 ctx.record_call(

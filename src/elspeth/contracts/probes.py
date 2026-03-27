@@ -9,6 +9,8 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Protocol, runtime_checkable
 
+from elspeth.contracts.freeze import require_int
+
 
 @dataclass(frozen=True, slots=True)
 class CollectionReadinessResult:
@@ -26,8 +28,7 @@ class CollectionReadinessResult:
     def __post_init__(self) -> None:
         if not self.collection:
             raise ValueError("collection must not be empty")
-        if self.count < 0:
-            raise ValueError(f"count must be non-negative, got {self.count}")
+        require_int(self.count, "count", min_value=0)
         if not self.reachable and self.count != 0:
             raise ValueError(f"Contradictory state: reachable=False but count={self.count}. Unreachable collections must report count=0.")
 

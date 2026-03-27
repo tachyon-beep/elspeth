@@ -570,10 +570,15 @@ class TestEmptyBatch:
 
 
 class TestOnTokenWrittenWithDiversions:
-    """Verify on_token_written callback is NOT called for diverted tokens."""
+    """Verify on_token_written is called for ALL tokens after their path completes.
 
-    def test_on_token_written_not_called_for_diverted_discard_mode(self) -> None:
-        """on_token_written must not fire for diverted tokens (discard mode)."""
+    Primary tokens are checkpointed after Phase 2 (sink write durable).
+    Diverted tokens are checkpointed after Phase 3 (failsink/discard durable).
+    Both must be checkpointed to prevent duplicate writes on resume.
+    """
+
+    def test_on_token_written_called_for_all_tokens_discard_mode(self) -> None:
+        """Both primary and diverted tokens must be checkpointed (discard mode)."""
         executor, _recorder = _make_executor()
         diversions = (RowDiversion(row_index=1, reason="bad", row_data={"x": 1}),)
         sink = _make_sink(diversions=diversions, on_write_failure="discard")
@@ -588,12 +593,13 @@ class TestOnTokenWrittenWithDiversions:
             pending_outcome=PendingOutcome(RowOutcome.COMPLETED),
             on_token_written=callback,
         )
-        # callback called once for t0 (primary), NOT for t1 (diverted)
-        assert callback.call_count == 1
-        assert callback.call_args[0][0].token_id == "t0"
+        # Both tokens checkpointed: t0 after primary write, t1 after discard
+        assert callback.call_count == 2
+        checkpointed_ids = {c[0][0].token_id for c in callback.call_args_list}
+        assert checkpointed_ids == {"t0", "t1"}
 
-    def test_on_token_written_not_called_for_diverted_failsink_mode(self) -> None:
-        """on_token_written must not fire for diverted tokens (failsink mode)."""
+    def test_on_token_written_called_for_all_tokens_failsink_mode(self) -> None:
+        """Both primary and diverted tokens must be checkpointed (failsink mode)."""
         executor, _recorder = _make_executor()
         diversions = (RowDiversion(row_index=1, reason="bad", row_data={"x": 1}),)
         sink = _make_sink(diversions=diversions, on_write_failure="csv_failsink")
@@ -612,6 +618,92 @@ class TestOnTokenWrittenWithDiversions:
             failsink_edge_id="edge-failsink-1",
             on_token_written=callback,
         )
-        # callback called once for t0 (primary), NOT for t1 (diverted to failsink)
-        assert callback.call_count == 1
-        assert callback.call_args[0][0].token_id == "t0"
+        # Both tokens checkpointed: t0 after primary write, t1 after failsink write
+        assert callback.call_count == 2
+        checkpointed_ids = {c[0][0].token_id for c in callback.call_args_list}
+        assert checkpointed_ids == {"t0", "t1"}
+
+    def test_primary_tokens_checkpointed_before_diverted(self) -> None:
+        """Primary tokens are checkpointed in Phase 2, diverted in Phase 3."""
+        executor, _recorder = _make_executor()
+        diversions = (RowDiversion(row_index=1, reason="bad", row_data={"x": 1}),)
+        sink = _make_sink(diversions=diversions, on_write_failure="discard")
+        tokens = [_make_token("t0"), _make_token("t1")]
+        callback = MagicMock()
+        executor.write(
+            sink=sink,
+            tokens=tokens,
+            ctx=MagicMock(run_id="run-1"),
+            step_in_pipeline=5,
+            sink_name="primary",
+            pending_outcome=PendingOutcome(RowOutcome.COMPLETED),
+            on_token_written=callback,
+        )
+        # t0 (primary) checkpointed first, t1 (diverted) checkpointed second
+        assert callback.call_count == 2
+        assert callback.call_args_list[0][0][0].token_id == "t0"
+        assert callback.call_args_list[1][0][0].token_id == "t1"
+
+
+class TestMidLoopAuditRecordingCleanup:
+    """Tests for the completed_primary_indices/completed_failsink_indices cleanup.
+
+    When recorder calls fail mid-loop during failsink diversion recording,
+    remaining OPEN states must be completed as FAILED (not left permanently OPEN).
+    """
+
+    def test_recorder_failure_mid_loop_cleans_remaining_states(self) -> None:
+        """2 diversions, recorder fails on 2nd routing_event → 2nd token's states cleaned up.
+
+        After successfully recording token 0's routing_event + primary FAILED +
+        failsink COMPLETED, the recorder fails on token 1's routing_event.
+        Token 1's primary and failsink states must be completed as FAILED.
+        """
+        executor, recorder = _make_executor()
+
+        diversions = (
+            RowDiversion(row_index=0, reason="bad0", row_data={"x": 0}),
+            RowDiversion(row_index=1, reason="bad1", row_data={"x": 1}),
+        )
+        sink = _make_sink(diversions=diversions, on_write_failure="csv_failsink")
+        failsink = _make_failsink()
+        tokens = [_make_token("t0"), _make_token("t1")]
+
+        # record_routing_event succeeds on first call, fails on second
+        call_count = [0]
+
+        def routing_event_side_effect(**kwargs: Any) -> None:
+            call_count[0] += 1
+            if call_count[0] == 2:
+                raise RuntimeError("DB connection lost mid-loop")
+
+        recorder.record_routing_event.side_effect = routing_event_side_effect
+
+        with pytest.raises(RuntimeError, match="DB connection lost"):
+            executor.write(
+                sink=sink,
+                tokens=tokens,
+                ctx=MagicMock(run_id="run-1"),
+                step_in_pipeline=5,
+                sink_name="primary",
+                pending_outcome=PendingOutcome(RowOutcome.COMPLETED),
+                failsink=failsink,
+                failsink_name="csv_failsink",
+                failsink_edge_id="edge-failsink-1",
+            )
+
+        # Token 0: fully recorded (primary FAILED + failsink COMPLETED)
+        # Token 1: cleanup marked both states as FAILED
+        complete_calls = recorder.complete_node_state.call_args_list
+        failed_state_ids = {c.kwargs["state_id"] for c in complete_calls if c.kwargs.get("status") == NodeStateStatus.FAILED}
+        completed_state_ids = {c.kwargs["state_id"] for c in complete_calls if c.kwargs.get("status") == NodeStateStatus.COMPLETED}
+
+        # Assert by state_id sets rather than raw counts — resilient to call ordering
+        # Token 0 got states 1 (primary-divert), 3 (failsink) — 2 was the primary write state
+        # Token 1 got states 4 (primary-divert), 5 (failsink) — opened but never completed normally
+        # FAILED: tok0-primary-divert + tok1-primary-divert + tok1-failsink (3 states)
+        # COMPLETED: tok0-failsink (1 state)
+        assert len(failed_state_ids) == 3
+        assert len(completed_state_ids) == 1
+        # No overlap between FAILED and COMPLETED
+        assert failed_state_ids & completed_state_ids == set()

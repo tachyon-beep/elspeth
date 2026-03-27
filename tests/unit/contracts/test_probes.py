@@ -57,8 +57,13 @@ class TestCollectionReadinessResult:
             CollectionReadinessResult(collection="", reachable=True, count=0, message="ok")
 
     def test_negative_count_raises(self) -> None:
-        with pytest.raises(ValueError, match="count must be non-negative"):
+        with pytest.raises(ValueError, match="count must be >= 0"):
             CollectionReadinessResult(collection="test", reachable=True, count=-1, message="ok")
+
+    def test_bool_count_rejected(self) -> None:
+        """bool is a subclass of int in Python — require_int rejects it."""
+        with pytest.raises(TypeError, match="count must be int"):
+            CollectionReadinessResult(collection="test", reachable=True, count=True, message="ok")  # type: ignore[arg-type]
 
     def test_valid_construction(self) -> None:
         result = CollectionReadinessResult(

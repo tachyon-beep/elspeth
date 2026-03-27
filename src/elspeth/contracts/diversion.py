@@ -14,7 +14,7 @@ from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import Any
 
-from elspeth.contracts.freeze import freeze_fields
+from elspeth.contracts.freeze import freeze_fields, require_int
 from elspeth.contracts.results import ArtifactDescriptor
 
 
@@ -36,6 +36,7 @@ class RowDiversion:
     row_data: Mapping[str, Any]
 
     def __post_init__(self) -> None:
+        require_int(self.row_index, "row_index", min_value=0)
         freeze_fields(self, "row_data")
 
 

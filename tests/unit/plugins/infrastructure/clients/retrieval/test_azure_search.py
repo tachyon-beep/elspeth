@@ -469,6 +469,42 @@ class TestAzureSearchProviderReadiness:
         assert result.reachable is False
         assert result.count == 0
 
+    def test_managed_identity_sends_bearer_token(self) -> None:
+        """Managed identity readiness probe acquires a Bearer token via DefaultAzureCredential."""
+        config = AzureSearchProviderConfig(
+            endpoint="https://test.search.windows.net",
+            index="test-index",
+            use_managed_identity=True,
+        )
+        provider = AzureSearchProvider(
+            config=config,
+            recorder=MagicMock(),
+            run_id="run-1",
+            telemetry_emit=MagicMock(),
+        )
+
+        mock_token = MagicMock()
+        mock_token.token = "managed-identity-token-123"
+        mock_credential = MagicMock()
+        mock_credential.get_token.return_value = mock_token
+
+        with (
+            patch("httpx.get", return_value=self._mock_response(text="10")) as mock_get,
+            patch(
+                "azure.identity.DefaultAzureCredential",
+                return_value=mock_credential,
+            ),
+        ):
+            result = provider.check_readiness()
+
+        assert result.reachable is True
+        assert result.count == 10
+        # Bearer token must be in headers, NOT api-key
+        call_headers = mock_get.call_args.kwargs["headers"]
+        assert "Authorization" in call_headers
+        assert call_headers["Authorization"] == "Bearer managed-identity-token-123"
+        assert "api-key" not in call_headers
+
     def test_uncaught_exception_crashes_through(self) -> None:
         """Programming errors (e.g. TypeError) must NOT be caught by check_readiness."""
         provider = self._make_provider()

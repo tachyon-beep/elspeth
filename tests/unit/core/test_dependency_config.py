@@ -13,6 +13,7 @@ from elspeth.core.dependency_config import (
     CommencementGateResult,
     DependencyConfig,
     DependencyRunResult,
+    PreflightResult,
 )
 
 
@@ -164,8 +165,13 @@ class TestDependencyRunResult:
             DependencyRunResult(name="x", run_id="y", settings_hash="", duration_ms=0, indexed_at="t")
 
     def test_negative_duration_ms_raises(self) -> None:
-        with pytest.raises(ValueError, match="duration_ms must be non-negative"):
+        with pytest.raises(ValueError, match="duration_ms must be >= 0"):
             DependencyRunResult(name="x", run_id="y", settings_hash="z", duration_ms=-1, indexed_at="t")
+
+    def test_bool_duration_ms_rejected(self) -> None:
+        """bool is a subclass of int — require_int rejects it."""
+        with pytest.raises(TypeError, match="duration_ms must be int"):
+            DependencyRunResult(name="x", run_id="y", settings_hash="z", duration_ms=True, indexed_at="t")  # type: ignore[arg-type]
 
 
 class TestCommencementGateResult:
@@ -199,3 +205,24 @@ class TestCommencementGateResult:
     def test_empty_condition_raises(self) -> None:
         with pytest.raises(ValueError, match="condition must not be empty"):
             CommencementGateResult(name="x", condition="", result=True, context_snapshot={})
+
+
+class TestPreflightResult:
+    def test_construction_with_empty_tuples(self) -> None:
+        result = PreflightResult(dependency_runs=(), gate_results=())
+        assert result.dependency_runs == ()
+        assert result.gate_results == ()
+
+    def test_list_coerced_to_tuple(self) -> None:
+        """freeze_fields converts lists to tuples for immutability."""
+        result = PreflightResult(
+            dependency_runs=[],  # type: ignore[arg-type]
+            gate_results=[],  # type: ignore[arg-type]
+        )
+        assert isinstance(result.dependency_runs, tuple)
+        assert isinstance(result.gate_results, tuple)
+
+    def test_frozen(self) -> None:
+        result = PreflightResult(dependency_runs=(), gate_results=())
+        with pytest.raises(AttributeError):
+            result.dependency_runs = ()  # type: ignore[misc]

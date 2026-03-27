@@ -8,6 +8,8 @@ from typing import TYPE_CHECKING
 
 import structlog
 
+from elspeth.contracts.errors import AuditIntegrityError, FrameworkBugError
+
 slog = structlog.get_logger(__name__)
 
 if TYPE_CHECKING:
@@ -308,16 +310,18 @@ def bootstrap_and_run(settings_path: Path) -> "RunResult":
     finally:
         try:
             db.close()
-        except Exception:
+        except (FrameworkBugError, AuditIntegrityError):
+            raise  # System bugs always crash through
+        except Exception as close_exc:
             # db.close() failure must not mask the original pipeline exception.
             # The pipeline error is operationally more important than a cleanup
             # failure. If there is no pipeline error, close() failure propagates.
             import sys
 
             if sys.exc_info()[1] is not None:
-                slog.debug(
+                slog.warning(
                     "db.close() failed during exception cleanup — suppressed",
-                    close_error=str(sys.exc_info()[1]),
+                    close_error=f"{type(close_exc).__name__}: {close_exc}",
                 )
             else:
                 raise

@@ -143,8 +143,9 @@ class SinkExecutor:
             failsink: Resolved failsink instance (or None for discard mode)
             failsink_name: Config-level name of the failsink (for outcome recording)
             failsink_edge_id: Edge ID of the __failsink__ DIVERT edge in the DAG
-            on_token_written: Optional callback called for each PRIMARY token after
-                             successful write. NOT called for diverted tokens.
+            on_token_written: Optional callback called for each token after its
+                             path completes durably. Primary tokens are checkpointed
+                             after Phase 2, diverted tokens after Phase 3.
 
         Returns:
             Tuple of (Artifact if tokens were written else None, diversion count)
@@ -270,11 +271,19 @@ class SinkExecutor:
                         exception_type=type(e).__name__,
                         phase="begin_node_state",
                     )
-                    self._complete_states_failed(
-                        states=primary_states,
-                        duration_ms=0.0,
-                        error=begin_error,
-                    )
+                    try:
+                        self._complete_states_failed(
+                            states=primary_states,
+                            duration_ms=0.0,
+                            error=begin_error,
+                        )
+                    except Exception as cleanup_exc:
+                        logger.warning(
+                            "Cleanup of %d OPEN primary states also failed — original error preserved. Cleanup error: %s: %s",
+                            len(primary_states),
+                            type(cleanup_exc).__name__,
+                            cleanup_exc,
+                        )
                 raise
 
             # Amortize batch write time across ALL tokens (including diverted)
@@ -316,23 +325,24 @@ class SinkExecutor:
                     sink_name=sink_name,
                 )
 
-            # Checkpoint callback — only for primary tokens
+            # Checkpoint callback — only for primary tokens.
+            # Failures crash with AuditIntegrityError: the sink write is durable
+            # but the checkpoint record is missing, leaving the audit trail
+            # inconsistent. Logging-and-continuing would silently cause duplicate
+            # writes on resume — a worse outcome than crashing.
             if on_token_written is not None:
                 for token, _ in primary_tokens:
                     try:
                         on_token_written(token)
                     except (FrameworkBugError, AuditIntegrityError):
                         raise
-                    except Exception as e:
-                        logger.error(
-                            "Checkpoint failed after durable sink write for token %s. "
-                            "Sink artifact exists but no checkpoint record created. "
-                            "Resume will replay this row (duplicate write). "
-                            "Manual cleanup may be required. Error: %s",
-                            token.token_id,
-                            e,
-                            exc_info=True,
-                        )
+                    except Exception as exc:
+                        raise AuditIntegrityError(
+                            f"Checkpoint failed after durable sink write for token {token.token_id}. "
+                            f"Sink artifact exists but no checkpoint record created — "
+                            f"audit trail is inconsistent. "
+                            f"Original error: {type(exc).__name__}: {exc}"
+                        ) from exc
 
         # ── PHASE 3: Handle diversions ──
         # Every diverted token gets a node_state at the PRIMARY sink (the routing
@@ -366,11 +376,19 @@ class SinkExecutor:
                         exception_type=type(e).__name__,
                         phase="begin_node_state_divert",
                     )
-                    self._complete_states_failed(
-                        states=[(t, s) for t, _, s in primary_divert_states],
-                        duration_ms=0.0,
-                        error=begin_error,
-                    )
+                    try:
+                        self._complete_states_failed(
+                            states=[(t, s) for t, _, s in primary_divert_states],
+                            duration_ms=0.0,
+                            error=begin_error,
+                        )
+                    except Exception as cleanup_exc:
+                        logger.warning(
+                            "Cleanup of %d OPEN divert states also failed — original error preserved. Cleanup error: %s: %s",
+                            len(primary_divert_states),
+                            type(cleanup_exc).__name__,
+                            cleanup_exc,
+                        )
                 raise
 
             if failsink is not None:
@@ -566,6 +584,24 @@ class SinkExecutor:
                         sink_name=failsink_name,
                     )
 
+                # Checkpoint diverted tokens — failsink write is now durable.
+                # Without this, a crash after failsink write but before the next
+                # primary checkpoint leaves diverted tokens uncheckpointed,
+                # causing duplicate failsink writes on resume.
+                if on_token_written is not None:
+                    for token, _idx, _state in primary_divert_states:
+                        try:
+                            on_token_written(token)
+                        except (FrameworkBugError, AuditIntegrityError):
+                            raise
+                        except Exception as exc:
+                            raise AuditIntegrityError(
+                                f"Checkpoint failed after durable failsink write for diverted token {token.token_id}. "
+                                f"Failsink artifact exists but no checkpoint record created — "
+                                f"audit trail is inconsistent. "
+                                f"Original error: {type(exc).__name__}: {exc}"
+                            ) from exc
+
             else:
                 # Discard mode: complete primary states and record DIVERTED outcomes.
                 # No routing_event (no DAG edge for discard), no failsink write.
@@ -594,5 +630,19 @@ class SinkExecutor:
                         error_hash=error_hash,
                         sink_name="__discard__",
                     )
+
+                # Checkpoint diverted tokens — discard recording is now durable.
+                # Discard is idempotent, but checkpointing keeps resume state consistent.
+                if on_token_written is not None:
+                    for token, _idx, _state in primary_divert_states:
+                        try:
+                            on_token_written(token)
+                        except (FrameworkBugError, AuditIntegrityError):
+                            raise
+                        except Exception as exc:
+                            raise AuditIntegrityError(
+                                f"Checkpoint failed after discard recording for diverted token {token.token_id}. "
+                                f"Original error: {type(exc).__name__}: {exc}"
+                            ) from exc
 
         return artifact, diversion_count

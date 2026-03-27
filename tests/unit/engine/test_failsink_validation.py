@@ -130,6 +130,24 @@ class TestValidateSinkFailsinkDestinations:
                 sink_plugins={"output": "chroma_sink"},
             )
 
+    def test_sink_plugins_missing_key_crashes(self) -> None:
+        """If sink_plugins is missing a key that available_sinks has, it's a framework bug.
+
+        Rule 2 guarantees dest exists in available_sinks. Rule 4 must use direct
+        access into sink_plugins — defensive `if dest in sink_plugins` would silently
+        skip the plugin type check on map inconsistency.
+        """
+        with pytest.raises(KeyError, match="csv_failsink"):
+            validate_sink_failsink_destinations(
+                sink_configs={
+                    "output": _stub("csv_failsink"),
+                    "csv_failsink": _stub("discard"),
+                },
+                available_sinks={"output", "csv_failsink"},
+                # Bug: csv_failsink missing from sink_plugins
+                sink_plugins={"output": "chroma_sink"},
+            )
+
     def test_all_discard(self) -> None:
         """All sinks using discard — valid."""
         validate_sink_failsink_destinations(

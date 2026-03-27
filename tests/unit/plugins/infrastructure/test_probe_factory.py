@@ -42,20 +42,20 @@ class TestBuildCollectionProbes:
     def test_multiple_probes(self) -> None:
         configs = [
             CollectionProbeConfig(
-                collection="a",
+                collection="alpha",
                 provider="chroma",
                 provider_config={"mode": "persistent", "persist_directory": "./a"},
             ),
             CollectionProbeConfig(
-                collection="b",
+                collection="bravo",
                 provider="chroma",
                 provider_config={"mode": "persistent", "persist_directory": "./b"},
             ),
         ]
         probes = build_collection_probes(configs)
         assert len(probes) == 2
-        assert probes[0].collection_name == "a"
-        assert probes[1].collection_name == "b"
+        assert probes[0].collection_name == "alpha"
+        assert probes[1].collection_name == "bravo"
 
 
 class TestChromaCollectionProbeBehavior:
@@ -148,7 +148,7 @@ class TestChromaCollectionProbeBehavior:
 
     def test_client_mode_uses_http_client(self) -> None:
         """Client mode should use HttpClient instead of PersistentClient."""
-        probe = ChromaCollectionProbe("remote", {"mode": "client", "host": "chroma.local", "port": 8000, "ssl": False})
+        probe = ChromaCollectionProbe("remote", {"mode": "client", "host": "chroma.local", "port": 8000, "ssl": True})
 
         mock_collection = MagicMock()
         mock_collection.count.return_value = 5
@@ -159,9 +159,41 @@ class TestChromaCollectionProbeBehavior:
         with patch("chromadb.HttpClient", return_value=mock_client) as mock_http_cls:
             result = probe.probe()
 
-        mock_http_cls.assert_called_once_with(host="chroma.local", port=8000, ssl=False)
+        mock_http_cls.assert_called_once_with(host="chroma.local", port=8000, ssl=True)
         assert result.reachable is True
         assert result.count == 5
+
+
+class TestChromaCollectionProbeConfigValidation:
+    """Verify that invalid provider_config is rejected at construction time, not at probe()."""
+
+    def test_missing_persist_directory_for_persistent_mode(self) -> None:
+        """mode='persistent' without persist_directory must fail at construction, not at probe()."""
+        with pytest.raises(ValueError, match="persist_directory is required"):
+            ChromaCollectionProbe("test-col", {"mode": "persistent"})
+
+    def test_missing_host_for_client_mode(self) -> None:
+        """mode='client' without host must fail at construction, not at probe()."""
+        with pytest.raises(ValueError, match="host is required"):
+            ChromaCollectionProbe("test-col", {"mode": "client"})
+
+    def test_client_mode_with_persist_directory_rejected(self) -> None:
+        """persist_directory must not be set when mode='client'."""
+        with pytest.raises(ValueError, match="persist_directory must not be set"):
+            ChromaCollectionProbe(
+                "test-col",
+                {"mode": "client", "host": "localhost", "persist_directory": "./data"},
+            )
+
+    def test_valid_persistent_config_accepted(self) -> None:
+        """Valid persistent config should construct successfully."""
+        probe = ChromaCollectionProbe("test-col", {"mode": "persistent", "persist_directory": "./data"})
+        assert probe.collection_name == "test-col"
+
+    def test_valid_client_config_accepted(self) -> None:
+        """Valid client config should construct successfully."""
+        probe = ChromaCollectionProbe("test-col", {"mode": "client", "host": "chroma.local"})
+        assert probe.collection_name == "test-col"
 
 
 class TestChromaCollectionProbeCrashThrough:
@@ -193,9 +225,7 @@ class TestChromaCollectionProbeCrashThrough:
         ):
             probe.probe()
 
-    def test_key_error_in_config_crashes_through(self) -> None:
-        """KeyError from missing config key (e.g. missing persist_directory) must crash."""
-        probe = ChromaCollectionProbe("test", {"mode": "persistent"})
-
-        with pytest.raises(KeyError, match="persist_directory"):
-            probe.probe()
+    def test_missing_config_key_rejected_at_construction(self) -> None:
+        """Missing config keys now fail at construction (ValueError), not at probe() (KeyError)."""
+        with pytest.raises(ValueError, match="persist_directory is required"):
+            ChromaCollectionProbe("test", {"mode": "persistent"})

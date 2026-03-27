@@ -8,7 +8,7 @@ from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field, field_serializer, model_validator
 
-from elspeth.contracts.freeze import deep_freeze, deep_thaw, freeze_fields
+from elspeth.contracts.freeze import deep_freeze, deep_thaw, freeze_fields, require_int
 
 
 class DependencyConfig(BaseModel):
@@ -78,8 +78,7 @@ class DependencyRunResult:
             raise ValueError("settings_hash must not be empty")
         if not self.indexed_at:
             raise ValueError("indexed_at must not be empty")
-        if self.duration_ms < 0:
-            raise ValueError(f"duration_ms must be non-negative, got {self.duration_ms}")
+        require_int(self.duration_ms, "duration_ms", min_value=0)
 
 
 @dataclass(frozen=True, slots=True)
@@ -122,3 +121,6 @@ class PreflightResult:
 
     dependency_runs: tuple[DependencyRunResult, ...]
     gate_results: tuple[CommencementGateResult, ...]
+
+    def __post_init__(self) -> None:
+        freeze_fields(self, "dependency_runs", "gate_results")

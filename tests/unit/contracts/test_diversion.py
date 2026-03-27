@@ -32,6 +32,15 @@ class TestRowDiversion:
         with pytest.raises(TypeError):
             d.row_data["a"]["new_key"] = 99  # type: ignore[index]
 
+    def test_negative_row_index_rejected(self) -> None:
+        with pytest.raises(ValueError, match="row_index must be >= 0"):
+            RowDiversion(row_index=-1, reason="test", row_data={})
+
+    def test_bool_row_index_rejected(self) -> None:
+        """bool is a subclass of int — require_int rejects it."""
+        with pytest.raises(TypeError, match="row_index must be int"):
+            RowDiversion(row_index=True, reason="test", row_data={})  # type: ignore[arg-type]
+
 
 class TestSinkWriteResult:
     def _make_artifact(self) -> ArtifactDescriptor:

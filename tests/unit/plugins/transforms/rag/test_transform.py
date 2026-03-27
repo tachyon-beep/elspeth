@@ -449,7 +449,7 @@ class TestRAGTransformReadinessGuard:
         """count=-1 (corrupted response) is rejected at CollectionReadinessResult construction."""
         from elspeth.contracts.probes import CollectionReadinessResult
 
-        with pytest.raises(ValueError, match="count must be non-negative"):
+        with pytest.raises(ValueError, match="count must be >= 0"):
             CollectionReadinessResult(
                 collection="test-index",
                 reachable=True,

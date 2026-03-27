@@ -305,13 +305,9 @@ class AzureSearchProvider:
         probe, not a row-level operation. There is no state_id or token_id
         available during on_start().
 
-        Note: managed identity auth is not supported for the readiness probe.
-        When use_managed_identity=True, the probe sends an unauthenticated
-        request. Azure will return 401/403, caught by the outer handler and
-        reported as reachable=False with the HTTP error in the message. The
-        operator sees the auth failure clearly. Full managed identity support
-        for startup probes requires DefaultAzureCredential token acquisition,
-        which is tracked separately.
+        Auth modes:
+        - api_key: sends api-key header
+        - use_managed_identity: acquires a Bearer token via DefaultAzureCredential
         """
         index_name = self._config.index
 
@@ -320,6 +316,12 @@ class AzureSearchProvider:
             headers: dict[str, str] = {}
             if self._config.api_key:
                 headers["api-key"] = self._config.api_key
+            elif self._config.use_managed_identity:
+                from azure.identity import DefaultAzureCredential
+
+                credential = DefaultAzureCredential()
+                token = credential.get_token("https://search.azure.com/.default")
+                headers["Authorization"] = f"Bearer {token.token}"
 
             response = httpx.get(count_url, headers=headers, timeout=10.0)
 

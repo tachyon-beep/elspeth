@@ -27,7 +27,7 @@ metadata = MetaData()
 # Explicit SQLite schema epoch for pre-1.0 compatibility policy.
 # Stored in PRAGMA user_version so future releases can distinguish
 # "intentionally old schema, needs migration" from "runtime-required field".
-SQLITE_SCHEMA_EPOCH = 1
+SQLITE_SCHEMA_EPOCH = 2
 
 # Column width for node_id across all tables. Referenced by dag.py
 # for validation — changing this value requires an Alembic migration.

@@ -347,3 +347,33 @@ class TestResolvePreflightDirect:
 
         with pytest.raises(FrameworkBugError, match="probes is required"):
             resolve_preflight(mock_config, Path("/fake/pipeline.yaml"), probes=None)
+
+    def test_duplicate_dependency_names_rejected(self) -> None:
+        """Duplicate dependency names must raise before building gate context.
+
+        Without this check, the dict comprehension silently overwrites earlier
+        entries, so gates would evaluate against incomplete dependency data.
+        """
+        from elspeth.core.dependency_config import DependencyConfig
+        from elspeth.engine.bootstrap import resolve_preflight
+
+        mock_config = MagicMock()
+        mock_config.depends_on = [
+            DependencyConfig(name="indexer", settings="./a.yaml"),
+            DependencyConfig(name="indexer", settings="./b.yaml"),
+        ]
+        mock_config.commencement_gates = [MagicMock()]
+
+        dep_results = [
+            DependencyRunResult(name="indexer", run_id="r1", settings_hash="h1", duration_ms=100, indexed_at="2026-01-01T00:00:00Z"),
+            DependencyRunResult(name="indexer", run_id="r2", settings_hash="h2", duration_ms=200, indexed_at="2026-01-01T00:00:00Z"),
+        ]
+
+        mock_runner = MagicMock()
+
+        with (
+            patch("elspeth.engine.dependency_resolver.detect_cycles"),
+            patch("elspeth.engine.dependency_resolver.resolve_dependencies", return_value=dep_results),
+            pytest.raises(ValueError, match=r"Duplicate dependency names.*indexer"),
+        ):
+            resolve_preflight(mock_config, Path("/fake/pipeline.yaml"), runner=mock_runner, probes=[])

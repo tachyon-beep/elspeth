@@ -213,14 +213,16 @@ def validate_sink_failsink_destinations(
         if dest == sink_name:
             raise RouteValidationError(f"Sink '{sink_name}' on_write_failure references itself. A sink cannot be its own failsink.")
 
-        # Rule 4: must be a file sink
-        if dest in sink_plugins:
-            plugin_type = sink_plugins[dest]
-            if plugin_type not in allowed_failsink_plugins:
-                raise RouteValidationError(
-                    f"Sink '{sink_name}' on_write_failure references '{dest}' "
-                    f"(plugin='{plugin_type}'), but failsinks must use csv, json, or xml plugins."
-                )
+        # Rule 4: must be a file sink.
+        # Direct access — Rule 2 guarantees dest exists in available_sinks,
+        # so it must also exist in sink_plugins. If the maps are inconsistent,
+        # the KeyError crashes through as a framework bug.
+        plugin_type = sink_plugins[dest]
+        if plugin_type not in allowed_failsink_plugins:
+            raise RouteValidationError(
+                f"Sink '{sink_name}' on_write_failure references '{dest}' "
+                f"(plugin='{plugin_type}'), but failsinks must use csv, json, or xml plugins."
+            )
 
         # Rule 5: no chains — target must use 'discard'
         if dest in sink_configs:

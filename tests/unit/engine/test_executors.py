@@ -2899,8 +2899,14 @@ class TestSinkExecutor:
         assert "t1" in callback_token_ids
         assert "t2" in callback_token_ids
 
-    def test_on_token_written_failure_logged_not_raised(self) -> None:
-        """Callback failure is logged but does not raise (sink already durable)."""
+    def test_on_token_written_failure_raises_audit_integrity_error(self) -> None:
+        """Callback failure must crash with AuditIntegrityError.
+
+        The checkpoint callback is system-owned code. A failure means the sink
+        write is durable but the checkpoint record is missing — audit trail
+        inconsistency. Logging and continuing would cause silent duplicate
+        writes on resume.
+        """
         recorder = _make_recorder()
         executor = SinkExecutor(recorder, _make_span_factory(), run_id="test-run")
         token = _make_token()
@@ -2909,18 +2915,19 @@ class TestSinkExecutor:
         pending = PendingOutcome(outcome=RowOutcome.COMPLETED)
         callback = MagicMock(side_effect=RuntimeError("checkpoint failed"))
 
-        # Should not raise
-        artifact = executor.write(
-            sink,
-            [token],
-            ctx,
-            step_in_pipeline=5,
-            sink_name="out",
-            pending_outcome=pending,
-            on_token_written=callback,
-        )
+        with pytest.raises(AuditIntegrityError, match="checkpoint") as exc_info:
+            executor.write(
+                sink,
+                [token],
+                ctx,
+                step_in_pipeline=5,
+                sink_name="out",
+                pending_outcome=pending,
+                on_token_written=callback,
+            )
 
-        assert artifact is not None  # Write succeeded despite callback failure
+        # Exception chain preserved
+        assert isinstance(exc_info.value.__cause__, RuntimeError)
 
     # --- PendingOutcome ---
 
@@ -4013,6 +4020,58 @@ class TestSinkExecutorTerminality:
         assert len(failed_calls) == 2
         failed_state_ids = {c[1]["state_id"] for c in failed_calls}
         assert failed_state_ids == {"state_001", "state_002"}
+
+    def test_cleanup_failure_does_not_mask_original_error(self) -> None:
+        """If _complete_states_failed raises during cleanup, original error propagates.
+
+        Without the try/except guard, the cleanup exception would mask the
+        original begin_node_state error — a violation of the "crash with the
+        most informative error" principle.
+        """
+        recorder = _make_recorder()
+
+        state_1 = Mock(state_id="state_001")
+        recorder.begin_node_state.side_effect = [state_1, RuntimeError("DB down")]
+        # Make cleanup also fail
+        recorder.complete_node_state.side_effect = RuntimeError("cleanup also broken")
+
+        executor = SinkExecutor(recorder, _make_span_factory(), run_id="test-run")
+        contract = _make_contract()
+        tokens = [
+            _make_token(data={"value": "a"}, token_id="t1", contract=contract),
+            _make_token(data={"value": "b"}, token_id="t2", contract=contract),
+        ]
+        sink = _make_sink()
+        ctx = make_context()
+        pending = PendingOutcome(outcome=RowOutcome.COMPLETED)
+
+        # Original error ("DB down") must propagate, NOT the cleanup error
+        with pytest.raises(RuntimeError, match="DB down"):
+            executor.write(
+                sink,
+                tokens,
+                ctx,
+                step_in_pipeline=5,
+                sink_name="out",
+                pending_outcome=pending,
+            )
+
+    def test_complete_states_failed_empty_list_no_division_error(self) -> None:
+        """_complete_states_failed must return early on empty states list.
+
+        Without the guard, duration_ms / len(states) raises ZeroDivisionError.
+        """
+        from elspeth.contracts.errors import ExecutionError
+
+        recorder = _make_recorder()
+        executor = SinkExecutor(recorder, _make_span_factory(), run_id="test-run")
+        error = ExecutionError(exception="test", exception_type="RuntimeError", phase="test")
+
+        # Must not raise ZeroDivisionError
+        executor._complete_states_failed(states=[], duration_ms=100.0, error=error)
+
+        # No recorder calls made
+        recorder.complete_node_state.assert_not_called()
 
 
 # =============================================================================

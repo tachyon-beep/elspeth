@@ -343,6 +343,31 @@ class TestChromaSinkAuditIntegrity:
         assert exc_info.value.__cause__ is not None
         assert isinstance(exc_info.value.__cause__, RuntimeError)
 
+    def test_value_error_from_chroma_gets_audit_record(self) -> None:
+        """Chroma raises ValueError for invalid payloads (e.g. nested dict in metadata).
+
+        ValueError from Chroma API calls is wrapped as _ChromaPayloadRejection
+        so it can be distinguished from ValueError in our own code (which should
+        crash as a framework bug). The audit record captures the original error.
+        """
+        from elspeth.plugins.sinks.chroma_sink import _ChromaPayloadRejection
+
+        mock_collection = MagicMock()
+        mock_collection.upsert.side_effect = ValueError("Expected str, int, float or bool, got dict")
+        sink = _make_sink_with_collection(mock_collection)
+
+        mock_ctx = MagicMock()
+        mock_ctx.run_id = "test-run"
+
+        with pytest.raises(_ChromaPayloadRejection, match="Expected str"):
+            sink.write([{"doc_id": "d1", "text": "A", "topic": "t"}], mock_ctx)
+
+        # Audit record must have been written before re-raising
+        mock_ctx.record_call.assert_called_once()
+        call_kwargs = mock_ctx.record_call.call_args.kwargs
+        assert call_kwargs["status"] is CallStatus.ERROR
+        assert call_kwargs["error"]["type"] == "_ChromaPayloadRejection"
+
     def test_error_path_audit_failure_raises_audit_integrity_error(self) -> None:
         """If error-path record_call also fails, AuditIntegrityError is raised."""
         import chromadb.errors
