@@ -5,7 +5,7 @@ subset of Python. This is NOT eval() - it's a secure whitelist-based parser.
 
 The parser operates in two phases:
 1. Parse-time validation: Reject forbidden constructs at construction
-2. Evaluation: Safely execute the validated AST against row data
+2. Evaluation: Safely execute the validated AST against a context namespace
 
 Security model:
 - Plugins are system code (trusted), but config expressions could come from
@@ -38,7 +38,7 @@ class ExpressionEvaluationError(Exception):
     """Raised when expression evaluation fails at runtime.
 
     This wraps operational errors (KeyError, ZeroDivisionError, TypeError)
-    that occur when evaluating expressions against row data. Unlike
+    that occur when evaluating expressions against a context. Unlike
     ExpressionSecurityError (rejected at parse time) or ExpressionSyntaxError
     (invalid Python syntax), this occurs when the expression is valid but
     fails during evaluation.
@@ -107,54 +107,57 @@ _SAFE_BUILTINS: MappingProxyType[str, Any] = MappingProxyType(
 )
 
 
+_SAFE_CONSTANTS: frozenset[str] = frozenset({"True", "False", "None"})
+
+
 class _ExpressionValidator(ast.NodeVisitor):
     """AST visitor that validates expressions for security.
 
     Raises ExpressionSecurityError if any forbidden construct is found.
     """
 
-    def __init__(self) -> None:
+    def __init__(self, *, allowed_names: frozenset[str] = frozenset({"row"})) -> None:
         self.errors: list[str] = []
         self._in_call_func: bool = False  # Track if currently visiting a Call's func
+        self._allowed_names = allowed_names
 
     def _is_none_constant(self, node: ast.expr) -> bool:
         """Check if node is a None literal (ast.Constant or ast.Name)."""
-        if isinstance(node, ast.Constant) and node.value is None:
-            return True
-        return isinstance(node, ast.Name) and node.id == "None"
+        return (isinstance(node, ast.Constant) and node.value is None) or (isinstance(node, ast.Name) and node.id == "None")
 
-    def _is_row_derived(self, node: ast.expr) -> bool:
-        """Check if node is 'row' or derived from row access.
+    def _is_allowed_derived(self, node: ast.expr) -> bool:
+        """Check if node is an allowed name or derived from allowed name access.
 
-        Handles: row, row['x'], row['x']['y'], row.get('x')['y']
+        Handles: row, row['x'], row['x']['y'], row.get('x')['y'],
+        and any name in self._allowed_names with subscript chains.
         """
-        if isinstance(node, ast.Name) and node.id == "row":
+        if isinstance(node, ast.Name) and node.id in self._allowed_names:
             return True
         if isinstance(node, ast.Subscript):
-            return self._is_row_derived(node.value)
+            return self._is_allowed_derived(node.value)
         # row.get(...) calls return row-derived data
         return (
             isinstance(node, ast.Call)
             and isinstance(node.func, ast.Attribute)
             and isinstance(node.func.value, ast.Name)
-            and node.func.value.id == "row"
+            and node.func.value.id in self._allowed_names
             and node.func.attr == "get"
         )
 
     def visit_Name(self, node: ast.Name) -> None:
-        """Allow only 'row', boolean/None literals, and safe builtin names."""
-        if node.id not in ("row", "True", "False", "None") and node.id not in _SAFE_BUILTINS:
+        """Allow only allowed names, boolean/None literals, and safe builtin names."""
+        if node.id not in self._allowed_names and node.id not in _SAFE_CONSTANTS and node.id not in _SAFE_BUILTINS:
             self.errors.append(f"Forbidden name: {node.id!r}")
         self.generic_visit(node)
 
     def visit_Subscript(self, node: ast.Subscript) -> None:
-        """Allow row['field'] subscript access on row-derived data only."""
+        """Allow subscript access on allowed-name-derived data only."""
         # Reject slice syntax (defense-in-depth, also caught by visit_Slice)
         if isinstance(node.slice, ast.Slice):
             self.errors.append("Slice syntax (e.g., [1:3]) is forbidden")
-        # Restrict subscript to row-derived data
-        if not self._is_row_derived(node.value):
-            self.errors.append(f"Subscript access is only allowed on row data; got subscript on {ast.dump(node.value)}")
+        # Restrict subscript to allowed-name-derived data
+        if not self._is_allowed_derived(node.value):
+            self.errors.append(f"Subscript access is only allowed on allowed names; got subscript on {ast.dump(node.value)}")
         self.generic_visit(node)
 
     def visit_Slice(self, node: ast.Slice) -> None:
@@ -162,30 +165,33 @@ class _ExpressionValidator(ast.NodeVisitor):
         self.errors.append("Slice syntax (e.g., [1:3]) is forbidden")
 
     def visit_Attribute(self, node: ast.Attribute) -> None:
-        """Allow only row.get method access when called."""
-        if isinstance(node.value, ast.Name) and node.value.id == "row":
+        """Allow only .get method access on allowed names when called."""
+        if isinstance(node.value, ast.Name) and node.value.id in self._allowed_names:
             if node.attr != "get":
-                self.errors.append(f"Forbidden row attribute: {node.attr!r} (only 'get' is allowed)")
+                self.errors.append(f"Forbidden attribute: {node.attr!r} (only 'get' is allowed)")
             elif not self._in_call_func:
-                # row.get without a call is forbidden - returns method object
-                self.errors.append("Bare 'row.get' is forbidden; use 'row.get(key)' or 'row.get(key, default)'")
+                # name.get without a call is forbidden - returns method object
+                self.errors.append(
+                    f"Bare '{node.value.id}.get' is forbidden; use '{node.value.id}.get(key)' or '{node.value.id}.get(key, default)'"
+                )
         else:
             self.errors.append(f"Forbidden attribute access: {node.attr!r}")
         self.generic_visit(node)
 
     def visit_Call(self, node: ast.Call) -> None:
-        """Allow row.get() calls and safe builtin calls."""
-        # Allow row.get() with 1 or 2 arguments
+        """Allow .get() calls on allowed names and safe builtin calls."""
+        # Allow name.get() with 1 or 2 arguments (for any allowed name)
         if (
             isinstance(node.func, ast.Attribute)
             and isinstance(node.func.value, ast.Name)
-            and node.func.value.id == "row"
+            and node.func.value.id in self._allowed_names
             and node.func.attr == "get"
         ):
+            caller_name = node.func.value.id
             if len(node.args) < 1 or len(node.args) > 2:
-                self.errors.append(f"row.get() requires 1 or 2 arguments, got {len(node.args)}")
+                self.errors.append(f"{caller_name}.get() requires 1 or 2 arguments, got {len(node.args)}")
             if node.keywords:
-                self.errors.append("row.get() does not accept keyword arguments")
+                self.errors.append(f"{caller_name}.get() does not accept keyword arguments")
             # Visit func with context flag set to allow row.get attribute
             self._in_call_func = True
             self.visit(node.func)
@@ -386,8 +392,19 @@ class _ExpressionValidator(ast.NodeVisitor):
 class _ExpressionEvaluator(ast.NodeVisitor):
     """AST visitor that evaluates validated expressions."""
 
-    def __init__(self, row: dict[str, Any] | PipelineRow) -> None:
-        self._row = row
+    def __init__(
+        self,
+        context: dict[str, Any] | PipelineRow,
+        *,
+        allowed_names: frozenset[str] = frozenset({"row"}),
+        single_name_mode: bool = True,
+    ) -> None:
+        self._context = context
+        self._allowed_names = allowed_names
+        # In single-name mode the context IS the value (e.g. row={"x": 5}).
+        # In multi-name mode the context is a namespace dict where each
+        # allowed name maps to its value (e.g. {"collections": {...}, "env": {...}}).
+        self._single_name_mode = single_name_mode
 
     def visit_Expression(self, node: ast.Expression) -> Any:
         """Evaluate the top-level expression."""
@@ -395,8 +412,12 @@ class _ExpressionEvaluator(ast.NodeVisitor):
 
     def visit_Name(self, node: ast.Name) -> Any:
         """Evaluate name references."""
-        if node.id == "row":
-            return self._row
+        if node.id in self._allowed_names:
+            if self._single_name_mode:
+                # Context IS the value (e.g. evaluate({"x": 5}) for row['x'])
+                return self._context
+            # Namespace mode: look up name in context dict
+            return self._context[node.id]
         if node.id == "True":
             return True
         if node.id == "False":
@@ -437,10 +458,15 @@ class _ExpressionEvaluator(ast.NodeVisitor):
             raise ExpressionEvaluationError(msg) from e
 
     def visit_Attribute(self, node: ast.Attribute) -> Any:
-        """Evaluate attribute access (only row.get allowed)."""
+        """Evaluate attribute access (only .get on allowed-name values)."""
         value = self.visit(node.value)
-        if value is self._row and node.attr == "get":
-            return value.get
+        if node.attr == "get":
+            if self._single_name_mode and value is self._context:
+                # Single-name mode: context is the row/dict itself
+                return value.get
+            if not self._single_name_mode and isinstance(node.value, ast.Name) and node.value.id in self._allowed_names:
+                # Namespace mode: .get() on a top-level allowed name
+                return value.get
         msg = f"Forbidden attribute access: {node.attr}"
         raise ExpressionSecurityError(msg)
 
@@ -568,10 +594,17 @@ class ExpressionParser:
     """Safe expression parser for gate conditions.
 
     Parses and validates expressions at construction time, then evaluates
-    them against row data. Only a restricted subset of Python is allowed.
+    them against a context namespace. Only a restricted subset of Python
+    is allowed.
+
+    The set of permitted top-level names is configurable via ``allowed_names``.
+    By default only ``"row"`` is allowed (gate conditions on pipeline rows).
+    Commencement gates pass ``["collections", "dependency_runs", "env"]``
+    for dict-context evaluation.
 
     Allowed operations:
-    - Field access: row['field'], row.get('field'), row.get('field', default)
+    - Subscript access: name['field'], name['key1']['key2']
+    - Method: name.get('field'), name.get('field', default)
     - Safe builtins: len(), str(), int(), float(), bool(), abs()
     - Comparisons: ==, !=, <, >, <=, >=
     - Boolean operators: and, or, not
@@ -583,31 +616,49 @@ class ExpressionParser:
     - Basic arithmetic: +, -, *, /, //, %
 
     Forbidden operations:
-    - Function calls (except row.get() and safe builtins)
+    - Function calls (except name.get() and safe builtins)
     - Lambda expressions
     - Comprehensions (list, dict, set, generator)
     - Assignment expressions (:=)
     - await, yield
     - f-strings with expressions
-    - Attribute access (except row.get)
-    - Names other than 'row', 'True', 'False', 'None'
+    - Attribute access (except name.get)
+    - Names not in allowed_names (and not True, False, None)
 
     Example:
         parser = ExpressionParser("row['confidence'] >= 0.85")
         result = parser.evaluate({"confidence": 0.9})  # Returns True
+
+        parser = ExpressionParser(
+            "collections['facts']['count'] > 0",
+            allowed_names=["collections"],
+        )
+        result = parser.evaluate({"collections": {"facts": {"count": 42}}})
     """
 
-    def __init__(self, expression: str) -> None:
+    def __init__(self, expression: str, *, allowed_names: list[str] | None = None) -> None:
         """Parse and validate expression at construction time.
 
         Args:
             expression: The expression string to parse
+            allowed_names: Top-level names permitted in the expression.
+                Defaults to ["row"] for gate conditions evaluated against
+                row data. Commencement gates use ["collections",
+                "dependency_runs", "env"] for dict-context evaluation.
 
         Raises:
             ExpressionSecurityError: If expression contains forbidden constructs
             ExpressionSyntaxError: If expression is not valid Python syntax
         """
         self._expression = expression
+        if allowed_names is not None and len(allowed_names) == 0:
+            raise ValueError("allowed_names must not be empty")
+        self._allowed_names = frozenset(allowed_names) if allowed_names is not None else frozenset({"row"})
+        # Single-name mode: default (allowed_names=None) — the caller passes the
+        # row value directly as context. This is the standard gate condition path.
+        # Namespace mode: caller explicitly passes allowed_names and provides a
+        # namespace dict keyed by those names (even if only one name is allowed).
+        self._single_name_mode = allowed_names is None
 
         # Phase 1: Parse the expression
         try:
@@ -617,7 +668,7 @@ class ExpressionParser:
             raise ExpressionSyntaxError(msg) from e
 
         # Phase 2: Validate for security
-        validator = _ExpressionValidator()
+        validator = _ExpressionValidator(allowed_names=self._allowed_names)
         validator.visit(self._ast)
 
         if validator.errors:
@@ -679,22 +730,29 @@ class ExpressionParser:
         # Everything else (field access, arithmetic, etc.) is not guaranteed boolean
         return False
 
-    def evaluate(self, row: dict[str, Any] | PipelineRow) -> Any:
-        """Evaluate expression against row data.
+    def evaluate(self, context: dict[str, Any] | PipelineRow) -> Any:
+        """Evaluate expression against context data.
 
         Args:
-            row: Row data dictionary or PipelineRow (which implements __getitem__ and .get())
+            context: Row data dictionary, PipelineRow, or dict namespace
+                when using custom allowed_names.
 
         Returns:
             Result of expression evaluation (typically bool for gate conditions)
         """
-        evaluator = _ExpressionEvaluator(row)
+        evaluator = _ExpressionEvaluator(
+            context,
+            allowed_names=self._allowed_names,
+            single_name_mode=self._single_name_mode,
+        )
         try:
             return evaluator.visit(self._ast)
         except (ExpressionEvaluationError, ExpressionSecurityError):
             raise
         except (FrameworkBugError, AuditIntegrityError):
             raise  # Framework bugs must not be wrapped as evaluation errors
+        except (TypeError, AttributeError, KeyError, NameError, AssertionError, RecursionError):
+            raise  # Programming errors in the evaluator must crash through
         except Exception as exc:
             raise ExpressionEvaluationError(
                 f"Unexpected error evaluating expression {self._expression!r}: {type(exc).__name__}: {exc}"

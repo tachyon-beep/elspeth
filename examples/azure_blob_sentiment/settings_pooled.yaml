@@ -47,6 +47,7 @@ transforms:
 sinks:
   output:
     plugin: azure_blob
+    on_write_failure: discard
     options:
       sas_token: ${AZURE_STORAGE_SAS_TOKEN}
       account_url: ${AZURE_STORAGE_ACCOUNT_URL}

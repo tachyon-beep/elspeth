@@ -64,6 +64,7 @@ from elspeth.contracts import (
     TransformResult,
 )
 from elspeth.contracts.aggregation_checkpoint import AggregationCheckpointState
+from elspeth.contracts.diversion import SinkWriteResult
 from elspeth.contracts.enums import (
     BatchStatus,
     NodeStateStatus,
@@ -75,6 +76,7 @@ from elspeth.contracts.enums import (
 from elspeth.contracts.errors import (
     AuditIntegrityError,
     ContractMergeError,
+    FrameworkBugError,
     OrchestrationInvariantError,
     PluginContractViolation,
     TransformErrorReason,
@@ -208,11 +210,15 @@ def _make_sink(
     sink.node_id = node_id
     sink.declared_required_fields = frozenset()
     sink.validate_input = False
-    sink.write.return_value = ArtifactDescriptor(
-        artifact_type="file",
-        path_or_uri="file:///output/test.csv",
-        content_hash="abc123",
-        size_bytes=100,
+    sink._on_write_failure = "discard"
+    sink._reset_diversion_log = MagicMock()
+    sink.write.return_value = SinkWriteResult(
+        artifact=ArtifactDescriptor(
+            artifact_type="file",
+            path_or_uri="file:///output/test.csv",
+            content_hash="abc123",
+            size_bytes=100,
+        )
     )
     return sink
 
@@ -2569,7 +2575,7 @@ class TestSinkExecutor:
             pending_outcome=pending,
         )
 
-        assert result is None
+        assert result == (None, 0)
         sink.write.assert_not_called()
 
     # --- No node_id ---
@@ -2756,8 +2762,12 @@ class TestSinkExecutor:
 
     # --- Write exception ---
 
-    def test_contract_merge_exception_marks_all_states_failed_and_reraises(self) -> None:
-        """Contract merge failure marks opened sink states FAILED and re-raises."""
+    def test_contract_merge_exception_crashes_before_write(self) -> None:
+        """Contract merge failure crashes before sink.write() is called.
+
+        In the restructured flow, contract merge happens before track_operation.
+        No node_states are opened, so none need cleanup.
+        """
         recorder = _make_recorder()
         executor = SinkExecutor(recorder, _make_span_factory(), run_id="test-run")
         contract_a = _make_contract()
@@ -2782,7 +2792,7 @@ class TestSinkExecutor:
         ctx = make_context()
         pending = PendingOutcome(outcome=RowOutcome.COMPLETED)
 
-        with pytest.raises(ContractMergeError):
+        with pytest.raises((ContractMergeError, FrameworkBugError)):
             executor.write(
                 sink,
                 tokens,
@@ -2792,18 +2802,16 @@ class TestSinkExecutor:
                 pending_outcome=pending,
             )
 
-        failed_calls = [c for c in recorder.complete_node_state.call_args_list if c[1].get("status") == NodeStateStatus.FAILED]
-        assert len(failed_calls) == 2
-        for call in failed_calls:
-            error = call[1]["error"]
-            assert error.phase == "contract_merge"
-
         sink.write.assert_not_called()
         sink.flush.assert_not_called()
         recorder.record_token_outcome.assert_not_called()
 
-    def test_write_exception_marks_all_states_failed_and_reraises(self) -> None:
-        """Exception from sink.write() marks all states FAILED and re-raises."""
+    def test_write_exception_reraises_without_states(self) -> None:
+        """Exception from sink.write() re-raises. No node_states were opened.
+
+        In the restructured flow, node_states are opened AFTER write() returns.
+        If write() throws, no states exist to clean up — simpler error path.
+        """
         recorder = _make_recorder()
         executor = SinkExecutor(recorder, _make_span_factory(), run_id="test-run")
         contract = _make_contract()
@@ -2826,14 +2834,18 @@ class TestSinkExecutor:
                 pending_outcome=pending,
             )
 
-        # All states should be FAILED
-        failed_calls = [c for c in recorder.complete_node_state.call_args_list if c[1].get("status") == NodeStateStatus.FAILED]
-        assert len(failed_calls) == 2
+        # No states were opened before write, so no states to mark FAILED
+        recorder.begin_node_state.assert_not_called()
+        recorder.complete_node_state.assert_not_called()
 
     # --- Flush exception ---
 
-    def test_flush_exception_marks_all_states_failed_and_reraises(self) -> None:
-        """Exception from sink.flush() marks all states FAILED and re-raises."""
+    def test_flush_exception_reraises_without_states(self) -> None:
+        """Exception from sink.flush() re-raises. No node_states were opened.
+
+        In the restructured flow, node_states are opened AFTER flush() succeeds.
+        If flush() throws, no states exist to clean up.
+        """
         recorder = _make_recorder()
         executor = SinkExecutor(recorder, _make_span_factory(), run_id="test-run")
         tokens = [_make_token()]
@@ -2852,8 +2864,9 @@ class TestSinkExecutor:
                 pending_outcome=pending,
             )
 
-        failed_calls = [c for c in recorder.complete_node_state.call_args_list if c[1].get("status") == NodeStateStatus.FAILED]
-        assert len(failed_calls) == 1
+        # No states were opened before flush, so no states to mark FAILED
+        recorder.begin_node_state.assert_not_called()
+        recorder.complete_node_state.assert_not_called()
 
     # --- Callback ---
 
@@ -2886,8 +2899,14 @@ class TestSinkExecutor:
         assert "t1" in callback_token_ids
         assert "t2" in callback_token_ids
 
-    def test_on_token_written_failure_logged_not_raised(self) -> None:
-        """Callback failure is logged but does not raise (sink already durable)."""
+    def test_on_token_written_failure_raises_audit_integrity_error(self) -> None:
+        """Callback failure must crash with AuditIntegrityError.
+
+        The checkpoint callback is system-owned code. A failure means the sink
+        write is durable but the checkpoint record is missing — audit trail
+        inconsistency. Logging and continuing would cause silent duplicate
+        writes on resume.
+        """
         recorder = _make_recorder()
         executor = SinkExecutor(recorder, _make_span_factory(), run_id="test-run")
         token = _make_token()
@@ -2896,18 +2915,19 @@ class TestSinkExecutor:
         pending = PendingOutcome(outcome=RowOutcome.COMPLETED)
         callback = MagicMock(side_effect=RuntimeError("checkpoint failed"))
 
-        # Should not raise
-        artifact = executor.write(
-            sink,
-            [token],
-            ctx,
-            step_in_pipeline=5,
-            sink_name="out",
-            pending_outcome=pending,
-            on_token_written=callback,
-        )
+        with pytest.raises(AuditIntegrityError, match="checkpoint") as exc_info:
+            executor.write(
+                sink,
+                [token],
+                ctx,
+                step_in_pipeline=5,
+                sink_name="out",
+                pending_outcome=pending,
+                on_token_written=callback,
+            )
 
-        assert artifact is not None  # Write succeeded despite callback failure
+        # Exception chain preserved
+        assert isinstance(exc_info.value.__cause__, RuntimeError)
 
     # --- PendingOutcome ---
 
@@ -3003,8 +3023,8 @@ class TestSinkExecutor:
         total_reconstructed = sum(durations)
         assert durations[0] == pytest.approx(total_reconstructed / 3)
 
-    def test_duration_amortized_across_tokens_on_write_failure(self) -> None:
-        """Write failure: each token gets amortized duration, not full batch time."""
+    def test_write_failure_opens_no_states(self) -> None:
+        """Write failure: no node_states opened (deferred to post-write)."""
         recorder = _make_recorder()
         executor = SinkExecutor(recorder, _make_span_factory(), run_id="test-run")
         contract = _make_contract()
@@ -3027,14 +3047,10 @@ class TestSinkExecutor:
                 pending_outcome=pending,
             )
 
-        failed_calls = [c for c in recorder.complete_node_state.call_args_list if c[1].get("status") == NodeStateStatus.FAILED]
-        assert len(failed_calls) == 2
-        durations = [c[1]["duration_ms"] for c in failed_calls]
-        assert durations[0] == durations[1]
-        assert durations[0] == pytest.approx(sum(durations) / 2)
+        recorder.begin_node_state.assert_not_called()
 
-    def test_duration_amortized_across_tokens_on_flush_failure(self) -> None:
-        """Flush failure: each token gets amortized duration, not full batch time."""
+    def test_flush_failure_opens_no_states(self) -> None:
+        """Flush failure: no node_states opened (deferred to post-flush)."""
         recorder = _make_recorder()
         executor = SinkExecutor(recorder, _make_span_factory(), run_id="test-run")
         contract = _make_contract()
@@ -3057,11 +3073,7 @@ class TestSinkExecutor:
                 pending_outcome=pending,
             )
 
-        failed_calls = [c for c in recorder.complete_node_state.call_args_list if c[1].get("status") == NodeStateStatus.FAILED]
-        assert len(failed_calls) == 2
-        durations = [c[1]["duration_ms"] for c in failed_calls]
-        assert durations[0] == durations[1]
-        assert durations[0] == pytest.approx(sum(durations) / 2)
+        recorder.begin_node_state.assert_not_called()
 
     def test_single_token_duration_unchanged(self) -> None:
         """Single-token write: duration_ms is total (N/N = total)."""
@@ -3190,11 +3202,13 @@ class TestSinkExecutor:
         def capture_write(_rows, call_ctx):
             nonlocal captured_contract
             captured_contract = call_ctx.contract
-            return ArtifactDescriptor(
-                artifact_type="file",
-                path_or_uri="file:///output/test.csv",
-                content_hash="abc123",
-                size_bytes=100,
+            return SinkWriteResult(
+                artifact=ArtifactDescriptor(
+                    artifact_type="file",
+                    path_or_uri="file:///output/test.csv",
+                    content_hash="abc123",
+                    size_bytes=100,
+                )
             )
 
         sink = _make_sink()
@@ -3266,11 +3280,13 @@ class TestSinkExecutor:
         def capture_write(_rows, call_ctx):
             nonlocal captured_contract
             captured_contract = call_ctx.contract
-            return ArtifactDescriptor(
-                artifact_type="file",
-                path_or_uri="file:///output/test.csv",
-                content_hash="abc123",
-                size_bytes=100,
+            return SinkWriteResult(
+                artifact=ArtifactDescriptor(
+                    artifact_type="file",
+                    path_or_uri="file:///output/test.csv",
+                    content_hash="abc123",
+                    size_bytes=100,
+                )
             )
 
         sink = _make_sink()
@@ -3899,8 +3915,9 @@ class TestSinkExecutorTerminality:
     def test_begin_node_state_mid_batch_failure_completes_opened_states(self) -> None:
         """begin_node_state failing on 2nd token → 1st state completed as FAILED.
 
-        Regression: B3 — the state-opening loop had no try/except, so a
-        failure after opening some states left them orphaned OPEN.
+        In the restructured flow, begin_node_state happens AFTER write+flush.
+        But the cleanup logic is preserved: if begin_node_state fails mid-batch,
+        already-opened states are completed as FAILED.
         """
         recorder = _make_recorder()
 
@@ -3928,20 +3945,19 @@ class TestSinkExecutorTerminality:
                 pending_outcome=pending,
             )
 
+        # Sink write IS called (happens before state opening in restructured flow)
+        sink.write.assert_called_once()
+
         # First state must be completed as FAILED (not left OPEN)
         failed_calls = [c for c in recorder.complete_node_state.call_args_list if c[1].get("status") == NodeStateStatus.FAILED]
         assert len(failed_calls) == 1
         assert failed_calls[0][1]["state_id"] == "state_001"
         assert failed_calls[0][1]["error"].phase == "begin_node_state"
 
-        # Sink write should NOT have been called (failure happened before write)
-        sink.write.assert_not_called()
-
     def test_begin_node_state_first_token_failure_no_states_to_clean(self) -> None:
         """begin_node_state failing on 1st token → no states to clean up.
 
-        When the first begin_node_state fails, there are no opened states
-        to complete.  The exception should propagate cleanly.
+        Write+flush have already completed when begin_node_state is called.
         """
         recorder = _make_recorder()
         recorder.begin_node_state.side_effect = RuntimeError("DB down from start")
@@ -3964,7 +3980,8 @@ class TestSinkExecutorTerminality:
 
         # No states were opened, so no cleanup needed
         recorder.complete_node_state.assert_not_called()
-        sink.write.assert_not_called()
+        # But write WAS called (happens before state opening)
+        sink.write.assert_called_once()
 
     def test_begin_node_state_third_of_three_fails(self) -> None:
         """begin_node_state failing on 3rd of 3 tokens → first 2 states FAILED.
@@ -4003,6 +4020,58 @@ class TestSinkExecutorTerminality:
         assert len(failed_calls) == 2
         failed_state_ids = {c[1]["state_id"] for c in failed_calls}
         assert failed_state_ids == {"state_001", "state_002"}
+
+    def test_cleanup_failure_does_not_mask_original_error(self) -> None:
+        """If _complete_states_failed raises during cleanup, original error propagates.
+
+        Without the try/except guard, the cleanup exception would mask the
+        original begin_node_state error — a violation of the "crash with the
+        most informative error" principle.
+        """
+        recorder = _make_recorder()
+
+        state_1 = Mock(state_id="state_001")
+        recorder.begin_node_state.side_effect = [state_1, RuntimeError("DB down")]
+        # Make cleanup also fail
+        recorder.complete_node_state.side_effect = RuntimeError("cleanup also broken")
+
+        executor = SinkExecutor(recorder, _make_span_factory(), run_id="test-run")
+        contract = _make_contract()
+        tokens = [
+            _make_token(data={"value": "a"}, token_id="t1", contract=contract),
+            _make_token(data={"value": "b"}, token_id="t2", contract=contract),
+        ]
+        sink = _make_sink()
+        ctx = make_context()
+        pending = PendingOutcome(outcome=RowOutcome.COMPLETED)
+
+        # Original error ("DB down") must propagate, NOT the cleanup error
+        with pytest.raises(RuntimeError, match="DB down"):
+            executor.write(
+                sink,
+                tokens,
+                ctx,
+                step_in_pipeline=5,
+                sink_name="out",
+                pending_outcome=pending,
+            )
+
+    def test_complete_states_failed_empty_list_no_division_error(self) -> None:
+        """_complete_states_failed must return early on empty states list.
+
+        Without the guard, duration_ms / len(states) raises ZeroDivisionError.
+        """
+        from elspeth.contracts.errors import ExecutionError
+
+        recorder = _make_recorder()
+        executor = SinkExecutor(recorder, _make_span_factory(), run_id="test-run")
+        error = ExecutionError(exception="test", exception_type="RuntimeError", phase="test")
+
+        # Must not raise ZeroDivisionError
+        executor._complete_states_failed(states=[], duration_ms=100.0, error=error)
+
+        # No recorder calls made
+        recorder.complete_node_state.assert_not_called()
 
 
 # =============================================================================

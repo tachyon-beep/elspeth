@@ -184,8 +184,15 @@ class TestFingerprintCollisionResistanceProperties:
 
         This is the key sensitivity property - changing the HMAC key
         completely changes the output. Critical for key rotation scenarios.
+
+        Note: HMAC (RFC 2104) right-pads keys shorter than the hash block
+        size (64 bytes for SHA-256) with 0x00, so keys that differ only by
+        trailing null bytes are HMAC-equivalent and produce identical output.
+        This is correct HMAC behavior, not a bug.
         """
-        assume(key1 != key2)
+        # Filter HMAC-equivalent key pairs: after right-padding to block
+        # size (64 bytes), these keys become identical internally.
+        assume(key1.ljust(64, b"\x00") != key2.ljust(64, b"\x00"))
 
         fp1 = secret_fingerprint(secret, key=key1)
         fp2 = secret_fingerprint(secret, key=key2)

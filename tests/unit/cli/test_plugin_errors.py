@@ -26,6 +26,7 @@ source:
 sinks:
   output:
     plugin: csv
+    on_write_failure: discard
     options:
       path: out.csv
       schema:
@@ -61,7 +62,13 @@ def test_unknown_transform_plugin_error():
         "transforms": [
             {"plugin": "nonexistent_transform", "name": "t0", "input": "t0_in", "on_success": "out", "on_error": "discard", "options": {}}
         ],
-        "sinks": {"out": {"plugin": "csv", "options": {"path": "out.csv", "schema": {"mode": "fixed", "fields": ["data: str"]}}}},
+        "sinks": {
+            "out": {
+                "plugin": "csv",
+                "on_write_failure": "discard",
+                "options": {"path": "out.csv", "schema": {"mode": "fixed", "fields": ["data: str"]}},
+            }
+        },
     }
 
     adapter = TypeAdapter(ElspethSettings)
@@ -91,6 +98,7 @@ source:
 sinks:
   output:
     plugin: csv
+    on_write_failure: discard
     options:
       path: out.csv
       schema:
@@ -134,7 +142,13 @@ def test_schema_extraction_from_instance():
                 "on_validation_failure": "discard",
             },
         },
-        "sinks": {"out": {"plugin": "csv", "options": {"path": "out.csv", "schema": {"mode": "fixed", "fields": ["value: float"]}}}},
+        "sinks": {
+            "out": {
+                "plugin": "csv",
+                "on_write_failure": "discard",
+                "options": {"path": "out.csv", "schema": {"mode": "fixed", "fields": ["value: float"]}},
+            }
+        },
     }
 
     adapter = TypeAdapter(ElspethSettings)
@@ -188,6 +202,7 @@ coalesce:
 sinks:
   output:
     plugin: csv
+    on_write_failure: discard
     options:
       path: output.csv
       schema:
@@ -196,6 +211,7 @@ sinks:
           - "value: float"
   low_values:
     plugin: csv
+    on_write_failure: discard
     options:
       path: low.csv
       schema:
@@ -257,6 +273,7 @@ gates:
 sinks:
   high_values:
     plugin: csv
+    on_write_failure: discard
     options:
       path: high.csv
       schema:
@@ -265,6 +282,7 @@ sinks:
           - "value: float"
   low_values:
     plugin: csv
+    on_write_failure: discard
     options:
       path: low.csv
       schema:
@@ -273,6 +291,7 @@ sinks:
           - "value: float"
   output:
     plugin: csv
+    on_write_failure: discard
     options:
       path: output.csv
       schema:
@@ -359,6 +378,7 @@ coalesce:
 sinks:
   output:
     plugin: csv
+    on_write_failure: discard
     options:
       path: output.csv
       schema:
@@ -408,6 +428,7 @@ source:
 sinks:
   output:
     plugin: csv
+    on_write_failure: discard
     options:
       path: output.csv
       schema:
@@ -455,6 +476,7 @@ transforms:
 sinks:
   output:
     plugin: csv
+    on_write_failure: discard
     options:
       path: output.csv
       schema:

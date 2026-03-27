@@ -399,19 +399,20 @@ class TestSinkProtocol:
         assert "rows" in params, "write() should accept 'rows' (batch), not 'row'"
         assert "row" not in params, "write() should NOT have 'row' parameter"
 
-        # Return annotation should be ArtifactDescriptor (may be forward ref string)
+        # Return annotation should be SinkWriteResult (may be forward ref string)
         return_annotation = sig.return_annotation
         # Handle both string forward reference and actual class
         if isinstance(return_annotation, str):
-            assert return_annotation == "ArtifactDescriptor"
+            assert return_annotation == "SinkWriteResult"
         else:
-            from elspeth.contracts import ArtifactDescriptor
+            from elspeth.contracts.diversion import SinkWriteResult
 
-            assert return_annotation == ArtifactDescriptor
+            assert return_annotation == SinkWriteResult
 
     def test_batch_sink_implementation(self) -> None:
-        """Test sink with batch write returning ArtifactDescriptor."""
+        """Test sink with batch write returning SinkWriteResult."""
         from elspeth.contracts import ArtifactDescriptor, Determinism, PluginSchema, SinkProtocol
+        from elspeth.contracts.diversion import SinkWriteResult
         from elspeth.contracts.plugin_context import PluginContext
         from elspeth.contracts.sink import OutputValidationResult
 
@@ -429,17 +430,24 @@ class TestSinkProtocol:
             supports_resume = False  # Required by SinkProtocol
             validate_input: bool = False  # Centralized in executor
             declared_required_fields: frozenset[str] = frozenset()  # Centralized in executor
+            _on_write_failure: str | None = "discard"
 
             def __init__(self, config: dict[str, Any]) -> None:
                 self.config = config
                 self.rows: list[dict[str, Any]] = []
+                self._diversion_log: list[Any] = []
 
-            def write(self, rows: list[dict[str, Any]], ctx: PluginContext) -> ArtifactDescriptor:
+            def _reset_diversion_log(self) -> None:
+                self._diversion_log = []
+
+            def write(self, rows: list[dict[str, Any]], ctx: PluginContext) -> SinkWriteResult:
                 self.rows.extend(rows)
-                return ArtifactDescriptor.for_file(
-                    path="/tmp/test.json",
-                    content_hash="abc123",
-                    size_bytes=len(str(rows)),
+                return SinkWriteResult(
+                    artifact=ArtifactDescriptor.for_file(
+                        path="/tmp/test.json",
+                        content_hash="abc123",
+                        size_bytes=len(str(rows)),
+                    )
                 )
 
             def flush(self) -> None:
@@ -474,16 +482,17 @@ class TestSinkProtocol:
 
         recorder = make_recorder()
         ctx = make_context(landscape=recorder)
-        artifact = sink.write([{"value": 1}, {"value": 2}], ctx)
+        result = sink.write([{"value": 1}, {"value": 2}], ctx)
 
-        assert isinstance(artifact, ArtifactDescriptor)
-        assert artifact.content_hash == "abc123"
+        assert isinstance(result.artifact, ArtifactDescriptor)
+        assert result.artifact.content_hash == "abc123"
         assert len(sink.rows) == 2
 
     def test_sink_implementation(self) -> None:
         """Test sink conforming to updated batch protocol."""
 
         from elspeth.contracts import ArtifactDescriptor, Determinism, PluginSchema, SinkProtocol
+        from elspeth.contracts.diversion import SinkWriteResult
         from elspeth.contracts.plugin_context import PluginContext
         from elspeth.contracts.sink import OutputValidationResult
 
@@ -502,18 +511,25 @@ class TestSinkProtocol:
             supports_resume = False  # Required by SinkProtocol
             validate_input: bool = False  # Centralized in executor
             declared_required_fields: frozenset[str] = frozenset()  # Centralized in executor
+            _on_write_failure: str | None = "discard"
             rows: ClassVar[list[dict[str, Any]]] = []
 
             def __init__(self, config: dict[str, Any]) -> None:
                 self.instance_rows: list[dict[str, Any]] = []
                 self.config = config
+                self._diversion_log: list[Any] = []
 
-            def write(self, rows: list[dict[str, Any]], ctx: PluginContext) -> ArtifactDescriptor:
+            def _reset_diversion_log(self) -> None:
+                self._diversion_log = []
+
+            def write(self, rows: list[dict[str, Any]], ctx: PluginContext) -> SinkWriteResult:
                 self.rows.extend(rows)
-                return ArtifactDescriptor.for_file(
-                    path="/tmp/memory",
-                    content_hash="test",
-                    size_bytes=len(str(rows)),
+                return SinkWriteResult(
+                    artifact=ArtifactDescriptor.for_file(
+                        path="/tmp/memory",
+                        content_hash="test",
+                        size_bytes=len(str(rows)),
+                    )
                 )
 
             def flush(self) -> None:
@@ -551,11 +567,11 @@ class TestSinkProtocol:
         ctx = make_context(landscape=recorder)
 
         # Batch write
-        artifact = sink.write([{"value": 1}, {"value": 2}], ctx)
+        result = sink.write([{"value": 1}, {"value": 2}], ctx)
 
         assert len(sink.rows) == 2
         assert sink.rows[0] == {"value": 1}
-        assert isinstance(artifact, ArtifactDescriptor)
+        assert isinstance(result.artifact, ArtifactDescriptor)
 
     def test_sink_has_idempotency_support(self) -> None:
         """Sinks should support idempotency keys."""

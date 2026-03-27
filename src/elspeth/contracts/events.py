@@ -23,6 +23,7 @@ from elspeth.contracts.enums import (
     RowOutcome,
     RunStatus,
 )
+from elspeth.contracts.freeze import require_int
 from elspeth.contracts.token_usage import TokenUsage
 
 
@@ -139,6 +140,14 @@ class RunSummary:
     exit_code: int  # 0=success, 1=partial failure, 2=total failure
     routed: int = 0  # Rows routed to non-default sinks
     routed_destinations: tuple[tuple[str, int], ...] = ()  # (sink_name, count) pairs
+
+    def __post_init__(self) -> None:
+        require_int(self.total_rows, "total_rows", min_value=0)
+        require_int(self.succeeded, "succeeded", min_value=0)
+        require_int(self.failed, "failed", min_value=0)
+        require_int(self.quarantined, "quarantined", min_value=0)
+        require_int(self.exit_code, "exit_code", min_value=0)
+        require_int(self.routed, "routed", min_value=0)
 
 
 # =============================================================================
@@ -270,6 +279,9 @@ class RunFinished(TelemetryEvent):
     row_count: int
     duration_ms: float
 
+    def __post_init__(self) -> None:
+        require_int(self.row_count, "row_count", min_value=0)
+
 
 @dataclass(frozen=True, slots=True)
 class PhaseChanged(TelemetryEvent):
@@ -310,6 +322,7 @@ class FieldResolutionApplied(TelemetryEvent):
 
     def __post_init__(self) -> None:
         """Snapshot + freeze: always copy to decouple from caller's dict."""
+        require_int(self.field_count, "field_count", min_value=0)
         object.__setattr__(self, "resolution_mapping", MappingProxyType(dict(self.resolution_mapping)))
 
 

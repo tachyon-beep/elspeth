@@ -90,6 +90,43 @@ class TestChromaSearchProviderConfig:
             )
 
 
+class TestToConnectionConfig:
+    """Tests for ChromaSearchProviderConfig.to_connection_config()."""
+
+    def test_ephemeral_raises_value_error(self) -> None:
+        config = ChromaSearchProviderConfig(collection="test-col", mode="ephemeral")
+        with pytest.raises(ValueError, match="ephemeral"):
+            config.to_connection_config()
+
+    def test_persistent_returns_correct_config(self) -> None:
+        config = ChromaSearchProviderConfig(
+            collection="test-col",
+            mode="persistent",
+            persist_directory="/tmp/chroma",
+            distance_function="l2",
+        )
+        conn = config.to_connection_config()
+        assert conn.collection == "test-col"
+        assert conn.mode == "persistent"
+        assert conn.persist_directory == "/tmp/chroma"
+        assert conn.distance_function == "l2"
+
+    def test_client_returns_correct_config(self) -> None:
+        config = ChromaSearchProviderConfig(
+            collection="test-col",
+            mode="client",
+            host="localhost",
+            port=9000,
+            ssl=False,
+        )
+        conn = config.to_connection_config()
+        assert conn.collection == "test-col"
+        assert conn.mode == "client"
+        assert conn.host == "localhost"
+        assert conn.port == 9000
+        assert conn.ssl is False
+
+
 class TestChromaSearchProvider:
     """Tests using real ephemeral ChromaDB — no mocks."""
 
@@ -569,3 +606,79 @@ class TestDocTypeValidation:
             assert all(isinstance(c.content, str) for c in chunks)
             assert len(chunks) == 1
             assert chunks[0].content == "real doc"
+
+
+class TestChromaSearchProviderReadiness:
+    """Tests for ChromaSearchProvider.check_readiness()."""
+
+    def _make_provider(self, documents=None):
+        unique_name = f"tcr-{uuid.uuid4().hex[:12]}"
+        config = ChromaSearchProviderConfig(
+            collection=unique_name,
+            mode="ephemeral",
+            distance_function="cosine",
+        )
+        provider = ChromaSearchProvider(config=config)
+
+        if documents:
+            provider._collection.add(
+                documents=[d["content"] for d in documents],
+                ids=[d["id"] for d in documents],
+            )
+
+        return provider
+
+    def test_collection_with_documents_is_ready(self) -> None:
+        """Collection exists and has documents."""
+        from elspeth.contracts.probes import CollectionReadinessResult
+
+        provider = self._make_provider(
+            documents=[
+                {"id": "doc1", "content": "First document"},
+                {"id": "doc2", "content": "Second document"},
+            ]
+        )
+
+        result = provider.check_readiness()
+
+        assert isinstance(result, CollectionReadinessResult)
+        assert result.reachable is True
+        assert result.count == 2
+        assert "2 documents" in result.message
+
+    def test_empty_collection_is_not_ready(self) -> None:
+        """Collection exists but is empty."""
+        provider = self._make_provider()
+
+        result = provider.check_readiness()
+
+        assert result.reachable is True
+        assert result.count == 0
+        assert "empty" in result.message
+
+    def test_connection_error(self) -> None:
+        """ChromaDB count() fails — reports unreachable with error details."""
+        from unittest.mock import MagicMock
+
+        provider = self._make_provider()
+        mock_collection = MagicMock()
+        mock_collection.count.side_effect = ConnectionError("Connection refused")
+        provider._collection = mock_collection
+
+        result = provider.check_readiness()
+
+        assert result.reachable is False
+        assert result.count == 0
+        assert "Connection refused" in result.message
+
+    def test_uncaught_exception_crashes_through(self) -> None:
+        """Programming errors (e.g. TypeError) must NOT be caught by check_readiness."""
+        from unittest.mock import MagicMock
+
+        provider = self._make_provider()
+        mock_collection = MagicMock()
+        mock_collection.count.side_effect = TypeError("unexpected type")
+        provider._collection = mock_collection
+
+        with pytest.raises(TypeError, match="unexpected type"):
+            provider.check_readiness()

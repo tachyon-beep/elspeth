@@ -87,6 +87,7 @@ class TestDeaggregationPipeline:
             "sinks": {
                 "output": {
                     "plugin": "json",
+                    "on_write_failure": "discard",
                     "options": {
                         "path": str(output_dir / "order_items.json"),
                         "schema": {"mode": "observed"},
@@ -219,6 +220,7 @@ class TestDeaggregationAuditTrail:
             "sinks": {
                 "output": {
                     "plugin": "json",
+                    "on_write_failure": "discard",
                     "options": {
                         "path": str(output_dir / "order_items.json"),
                         "schema": {"mode": "observed"},
@@ -388,6 +390,7 @@ class TestSourceSchemaValidation:
             "sinks": {
                 "output": {
                     "plugin": "json",
+                    "on_write_failure": "discard",
                     "options": {
                         "path": str(output_dir / "order_items.json"),
                         "schema": {"mode": "observed"},

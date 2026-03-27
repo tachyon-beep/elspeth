@@ -7,8 +7,9 @@ recording.
 
 from collections.abc import Mapping
 from dataclasses import dataclass
-from types import MappingProxyType
 from typing import TYPE_CHECKING, Any, Literal, NotRequired, TypedDict
+
+from elspeth.contracts.freeze import deep_freeze
 
 if TYPE_CHECKING:
     from elspeth.contracts.batch_checkpoint import BatchCheckpointState
@@ -138,6 +139,10 @@ TransformActionCategory = Literal[
     "passthrough",  # No changes made (intentional)
     "skipped",  # Processing skipped (e.g., data already present)
     "cached",  # Result retrieved from cache
+    # Plugin-specific actions
+    "query_completed",  # LLM single-query completion
+    "multi_query_enriched",  # LLM multi-query execution completed
+    "rag_retrieval",  # RAG retrieval pipeline completed
 ]
 
 
@@ -340,6 +345,10 @@ TransformErrorCategory = Literal[
     # Batch processing
     "empty_batch",
     "all_non_finite",  # All values in batch were NaN/Inf — no real data to aggregate
+    # Transport/network (batch processing)
+    "transport_exception",  # HTTP transport error during batch retrieval
+    # Replication errors
+    "invalid_copies",  # Invalid copies value in batch_replicate transform
 ]
 
 
@@ -540,11 +549,26 @@ class SourceQuarantineReason(TypedDict):
     quarantine_error: str
 
 
+class SinkDiversionReason(TypedDict):
+    """Reason for sink diversion routing.
+
+    Used when a sink's write() diverts a row to a failsink via a __failsink__
+    DIVERT edge. The diversion_reason field distinguishes this variant from
+    gate, transform, and quarantine reasons.
+
+    Required field:
+        diversion_reason: Description of why the external system rejected the row
+    """
+
+    diversion_reason: str
+
+
 # Discriminated union - field presence distinguishes variants:
 # - ConfigGateReason has "condition" and "result"
 # - TransformErrorReason has "reason" (error category string)
 # - SourceQuarantineReason has "quarantine_error"
-RoutingReason = ConfigGateReason | TransformErrorReason | SourceQuarantineReason
+# - SinkDiversionReason has "diversion_reason"
+RoutingReason = ConfigGateReason | TransformErrorReason | SourceQuarantineReason | SinkDiversionReason
 
 
 # =============================================================================
@@ -664,9 +688,7 @@ class GracefulShutdownError(Exception):
         self.rows_failed = rows_failed
         self.rows_quarantined = rows_quarantined
         self.rows_routed = rows_routed
-        self.routed_destinations: Mapping[str, int] = (
-            MappingProxyType(dict(routed_destinations)) if routed_destinations is not None else MappingProxyType({})
-        )
+        self.routed_destinations: Mapping[str, int] = deep_freeze(dict(routed_destinations) if routed_destinations is not None else {})
         super().__init__(
             f"Pipeline interrupted after {rows_processed} rows (run_id={run_id}). Resume with: elspeth resume {run_id} --execute"
         )
@@ -1012,3 +1034,77 @@ def violations_to_error_reason(violations: list[ContractViolation]) -> dict[str,
         "count": len(violations),
         "violations": [v.to_error_reason() for v in violations],
     }
+
+
+# =============================================================================
+# RAG Ingestion Pipeline Errors
+# =============================================================================
+
+
+class DependencyFailedError(Exception):
+    """A pipeline dependency failed to complete successfully."""
+
+    def __init__(self, *, dependency_name: str, run_id: str, reason: str) -> None:
+        if not dependency_name:
+            raise ValueError("dependency_name must not be empty")
+        if not run_id:
+            raise ValueError("run_id must not be empty")
+        if not reason:
+            raise ValueError("reason must not be empty")
+        self.dependency_name = dependency_name
+        self.run_id = run_id
+        self.reason = reason
+        super().__init__(f"Dependency '{dependency_name}' failed (run_id={run_id}): {reason}")
+
+
+class CommencementGateFailedError(Exception):
+    """A commencement gate evaluated to falsy or raised an error."""
+
+    def __init__(
+        self,
+        *,
+        gate_name: str,
+        condition: str,
+        reason: str,
+        context_snapshot: Mapping[str, Any],
+    ) -> None:
+        if not gate_name:
+            raise ValueError("gate_name must not be empty")
+        if not condition:
+            raise ValueError("condition must not be empty")
+        if not reason:
+            raise ValueError("reason must not be empty")
+        self.gate_name = gate_name
+        self.condition = condition
+        self.reason = reason
+        self.context_snapshot: Mapping[str, Any] = deep_freeze(context_snapshot)
+        super().__init__(f"Commencement gate '{gate_name}' failed: {reason} (condition: {condition})")
+
+
+class RetrievalNotReadyError(Exception):
+    """A retrieval provider's collection is empty or unreachable."""
+
+    def __init__(self, *, collection: str, reason: str) -> None:
+        if not collection:
+            raise ValueError("collection must not be empty")
+        if not reason:
+            raise ValueError("reason must not be empty")
+        self.collection = collection
+        self.reason = reason
+        super().__init__(f"Collection {collection!r} not ready: {reason}")
+
+
+class DuplicateDocumentError(Exception):
+    """Sink rejected a write because document IDs already exist in the collection.
+
+    Raised when on_duplicate='error' and pre-existing IDs are detected.
+    """
+
+    def __init__(self, *, collection: str, duplicate_ids: list[str]) -> None:
+        if not collection:
+            raise ValueError("collection must not be empty")
+        if not duplicate_ids:
+            raise ValueError("duplicate_ids must not be empty — DuplicateDocumentError requires at least one duplicate")
+        self.collection = collection
+        self.duplicate_ids = tuple(duplicate_ids)
+        super().__init__(f"Duplicate document IDs in collection {collection!r}: {list(self.duplicate_ids)}")

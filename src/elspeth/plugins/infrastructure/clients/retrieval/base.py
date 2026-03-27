@@ -5,6 +5,7 @@ from __future__ import annotations
 from typing import Protocol, runtime_checkable
 
 from elspeth.contracts.errors import PluginRetryableError
+from elspeth.contracts.probes import CollectionReadinessResult
 from elspeth.plugins.infrastructure.clients.retrieval.types import RetrievalChunk
 
 
@@ -57,6 +58,14 @@ class RetrievalProvider(Protocol):
 
         Raises:
             RetrievalError: On search failures (retryable or permanent).
+        """
+        ...
+
+    def check_readiness(self) -> CollectionReadinessResult:
+        """Check that the target collection exists and has documents.
+
+        Single-attempt, no retry. Called during on_start() — transient
+        failures crash the pipeline startup.
         """
         ...
 

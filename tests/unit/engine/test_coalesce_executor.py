@@ -16,6 +16,7 @@ from uuid import uuid4
 import pytest
 
 from elspeth.contracts import TokenInfo
+from elspeth.contracts.coalesce_enums import CoalescePolicy, MergeStrategy
 from elspeth.contracts.enums import NodeStateStatus, RowOutcome
 from elspeth.contracts.errors import AuditIntegrityError, OrchestrationInvariantError
 from elspeth.contracts.schema_contract import PipelineRow, SchemaContract
@@ -154,7 +155,7 @@ class TestCoalesceOutcome:
         from elspeth.contracts.coalesce_metadata import CoalesceMetadata
 
         token = _make_token()
-        metadata = CoalesceMetadata.for_late_arrival(policy="require_all", reason="test")
+        metadata = CoalesceMetadata.for_late_arrival(policy=CoalescePolicy.REQUIRE_ALL, reason="test")
         outcome = CoalesceOutcome(
             held=False,
             merged_token=token,
@@ -165,7 +166,7 @@ class TestCoalesceOutcome:
         assert outcome.held is False
         assert outcome.merged_token is token
         assert outcome.consumed_tokens == (token,)
-        assert outcome.coalesce_metadata.policy == "require_all"
+        assert outcome.coalesce_metadata.policy == CoalescePolicy.REQUIRE_ALL
         assert outcome.failure_reason is None
         assert outcome.coalesce_name == "merge"
         assert outcome.outcomes_recorded is False
@@ -174,7 +175,7 @@ class TestCoalesceOutcome:
         from elspeth.contracts.coalesce_metadata import CoalesceMetadata
 
         token = _make_token()
-        metadata = CoalesceMetadata.for_late_arrival(policy="require_all", reason="test")
+        metadata = CoalesceMetadata.for_late_arrival(policy=CoalescePolicy.REQUIRE_ALL, reason="test")
         outcome = CoalesceOutcome(
             held=False,
             consumed_tokens=(token,),
@@ -336,8 +337,8 @@ class TestRequireAllPolicy:
         executor.accept(_make_token(branch_name="a", token_id="t1"), "merge")
         o = executor.accept(_make_token(branch_name="b", token_id="t2"), "merge")
         md = o.coalesce_metadata
-        assert md.policy == "require_all"
-        assert md.merge_strategy == "union"
+        assert md.policy == CoalescePolicy.REQUIRE_ALL
+        assert md.merge_strategy == MergeStrategy.UNION
         assert set(md.expected_branches) == {"a", "b"}
         assert set(md.branches_arrived) == {"a", "b"}
 
@@ -541,7 +542,7 @@ class TestLateArrival:
         executor.accept(_make_token(branch_name="b", token_id="t2"), "merge")
         late = _make_token(branch_name="a", token_id="t_late", row_id="row_1")
         o = executor.accept(late, "merge")
-        assert o.coalesce_metadata.policy == "require_all"
+        assert o.coalesce_metadata.policy == CoalescePolicy.REQUIRE_ALL
         assert o.coalesce_metadata.reason is not None
 
 
@@ -1403,7 +1404,7 @@ class TestFailPendingDetails:
         clock.advance(6.0)
         results = executor.check_timeouts("merge")
         md = results[0].coalesce_metadata
-        assert md.policy == "require_all"
+        assert md.policy == CoalescePolicy.REQUIRE_ALL
         assert set(md.expected_branches) == {"a", "b"}
 
     def test_failure_removes_pending_entry(self):

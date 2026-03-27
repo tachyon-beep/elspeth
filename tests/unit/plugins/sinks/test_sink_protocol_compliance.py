@@ -139,11 +139,14 @@ class TestSinkProtocolCompliance:
         # Call write with empty list (should not crash)
         result = sink.write([], mock_ctx)
 
-        # Verify return type - direct attribute access, crash on wrong type
-        assert isinstance(result, ArtifactDescriptor), f"write() must return ArtifactDescriptor, got {type(result)}"
+        # Verify return type - write() now returns SinkWriteResult wrapping ArtifactDescriptor
+        from elspeth.contracts.diversion import SinkWriteResult
+
+        assert isinstance(result, SinkWriteResult), f"write() must return SinkWriteResult, got {type(result)}"
+        assert isinstance(result.artifact, ArtifactDescriptor), f"write().artifact must be ArtifactDescriptor, got {type(result.artifact)}"
         # Verify required fields exist (our code, crash on missing)
-        _ = result.content_hash
-        _ = result.size_bytes
+        _ = result.artifact.content_hash
+        _ = result.artifact.size_bytes
 
         # Clean up
         sink.close()
@@ -163,14 +166,16 @@ class TestSinkProtocolCompliance:
         result = sink.write(test_rows, mock_ctx)
 
         # Verify return type
-        assert isinstance(result, ArtifactDescriptor)
+        from elspeth.contracts.diversion import SinkWriteResult
+
+        assert isinstance(result, SinkWriteResult)
 
         # Content hash should be non-empty hex string
-        assert result.content_hash, "content_hash should not be empty"
-        assert all(c in "0123456789abcdef" for c in result.content_hash), "content_hash should be hex string"
+        assert result.artifact.content_hash, "content_hash should not be empty"
+        assert all(c in "0123456789abcdef" for c in result.artifact.content_hash), "content_hash should be hex string"
 
         # Size should be positive (we wrote data)
-        assert result.size_bytes > 0 or expected_name == "database"  # DB uses payload_size
+        assert result.artifact.size_bytes > 0 or expected_name == "database"  # DB uses payload_size
 
         # Clean up
         sink.close()
@@ -492,7 +497,7 @@ class TestSinkContentHashConsistency:
         sink2.close()
 
         # Same data should produce same hash
-        assert result1.content_hash == result2.content_hash
+        assert result1.artifact.content_hash == result2.artifact.content_hash
 
         path1.unlink()
         path2.unlink()
@@ -515,7 +520,7 @@ class TestSinkContentHashConsistency:
         sink2.close()
 
         # Different data should produce different hashes
-        assert result1.content_hash != result2.content_hash
+        assert result1.artifact.content_hash != result2.artifact.content_hash
 
         path1.unlink()
         path2.unlink()
@@ -538,12 +543,12 @@ class TestSinkContentHashConsistency:
         sink2.close()
 
         # Empty writes should produce same hash
-        assert result1.content_hash == result2.content_hash
+        assert result1.artifact.content_hash == result2.artifact.content_hash
         # Should be SHA-256 of empty bytes
         import hashlib
 
         expected = hashlib.sha256(b"").hexdigest()
-        assert result1.content_hash == expected
+        assert result1.artifact.content_hash == expected
 
         path1.unlink()
         path2.unlink()

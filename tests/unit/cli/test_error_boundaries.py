@@ -184,6 +184,7 @@ class TestDatabaseConnectionErrors:
             "sinks": {
                 "output": {
                     "plugin": "json",
+                    "on_write_failure": "discard",
                     "options": {
                         "path": str(tmp_path / "output.json"),
                         "schema": {"mode": "observed"},
@@ -242,6 +243,7 @@ class TestDatabaseConnectionErrors:
             "sinks": {
                 "output": {
                     "plugin": "json",
+                    "on_write_failure": "discard",
                     "options": {
                         "path": str(tmp_path / "output.json"),
                         "schema": {"mode": "observed"},
@@ -286,6 +288,7 @@ class TestSourceFileErrors:
             "sinks": {
                 "output": {
                     "plugin": "json",
+                    "on_write_failure": "discard",
                     "options": {
                         "path": str(tmp_path / "output.json"),
                         "schema": {"mode": "observed"},
@@ -328,6 +331,7 @@ class TestSourceFileErrors:
             "sinks": {
                 "output": {
                     "plugin": "json",
+                    "on_write_failure": "discard",
                     "options": {
                         "path": str(tmp_path / "output.json"),
                         "schema": {"mode": "observed"},
@@ -372,6 +376,7 @@ class TestExitCodeConsistency:
             "sinks": {
                 "output": {
                     "plugin": "json",
+                    "on_write_failure": "discard",
                     "options": {
                         "path": str(tmp_path / "output.json"),
                         "schema": {"mode": "observed"},
@@ -423,6 +428,7 @@ sinks:
             "sinks": {
                 "output": {
                     "plugin": "json",
+                    "on_write_failure": "discard",
                     "options": {
                         "path": str(tmp_path / "output.json"),
                         "schema": {"mode": "observed"},
@@ -477,6 +483,7 @@ class TestJsonModeErrors:
             "sinks": {
                 "output": {
                     "plugin": "json",
+                    "on_write_failure": "discard",
                     "options": {
                         "path": str(tmp_path / "output.json"),
                         "schema": {"mode": "observed"},

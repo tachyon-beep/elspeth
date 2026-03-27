@@ -37,7 +37,9 @@ from abc import ABC, abstractmethod
 from collections.abc import Iterator, Mapping
 from typing import TYPE_CHECKING, Any
 
-from elspeth.contracts import ArtifactDescriptor, Determinism, PluginSchema, SourceRow
+from elspeth.contracts import Determinism, PluginSchema, SourceRow
+from elspeth.contracts.diversion import RowDiversion, SinkWriteResult
+from elspeth.contracts.errors import FrameworkBugError
 from elspeth.contracts.schema_contract import PipelineRow
 
 if TYPE_CHECKING:
@@ -373,13 +375,15 @@ class BaseSink(ABC):
             input_schema = RowSchema
             idempotent = False
 
-            def write(self, rows: list[dict], ctx: SinkContext) -> ArtifactDescriptor:
+            def write(self, rows: list[dict], ctx: SinkContext) -> SinkWriteResult:
                 for row in rows:
                     self._writer.writerow(row)
-                return ArtifactDescriptor.for_file(
-                    path=self._path,
-                    content_hash=self._compute_hash(),
-                    size_bytes=self._file.tell(),
+                return SinkWriteResult(
+                    artifact=ArtifactDescriptor.for_file(
+                        path=self._path,
+                        content_hash=self._compute_hash(),
+                        size_bytes=self._file.tell(),
+                    ),
                 )
 
             def flush(self) -> None:
@@ -409,6 +413,10 @@ class BaseSink(ABC):
     # Input validation (centralized in SinkExecutor).
     # When True, executor validates input against input_schema before write().
     validate_input: bool = False
+
+    # Failsink infrastructure — set by orchestrator from SinkSettings.on_write_failure.
+    # None until injected at pipeline startup; "discard" or sink name at runtime.
+    _on_write_failure: str | None = None
 
     def configure_for_resume(self) -> None:
         """Configure sink for resume mode (append instead of truncate).
@@ -488,13 +496,14 @@ class BaseSink(ABC):
         self.config = config
         self._output_contract = None
         self._needs_resume_field_resolution = False
+        self._diversion_log: list[RowDiversion] = []
 
     @abstractmethod
     def write(
         self,
         rows: list[dict[str, Any]],
         ctx: SinkContext,
-    ) -> ArtifactDescriptor:
+    ) -> SinkWriteResult:
         """Write a batch of rows to the sink.
 
         Args:
@@ -502,7 +511,7 @@ class BaseSink(ABC):
             ctx: Sink context with run identity and recording methods
 
         Returns:
-            ArtifactDescriptor with content_hash and size_bytes
+            SinkWriteResult with artifact descriptor and optional diversions
         """
         ...
 
@@ -542,6 +551,42 @@ class BaseSink(ABC):
             contract: The schema contract to use for output operations
         """
         self._output_contract = contract
+
+    # === Diversion Infrastructure ===
+
+    def _divert_row(self, row_data: dict[str, Any], *, row_index: int, reason: str) -> None:
+        """Record a row diversion during write().
+
+        Called by concrete sinks when an individual row fails at the
+        external system boundary (Tier 2 -> External). Both "discard"
+        and failsink modes accumulate to _diversion_log. The executor
+        reads the log after write() returns and handles the actual
+        discard-vs-write decision.
+
+        Args:
+            row_data: The row dict that couldn't be written.
+            row_index: Index in the original batch (for token correlation).
+            reason: Human-readable reason for the diversion.
+
+        Raises:
+            FrameworkBugError: If _on_write_failure has not been set
+                (plugin bug — calling _divert_row before orchestrator injection).
+        """
+        if self._on_write_failure is None:
+            raise FrameworkBugError(
+                f"Sink '{self.name}' called _divert_row() but _on_write_failure "
+                f"is not set. Configure on_write_failure in pipeline YAML or "
+                f"re-raise the exception to crash the pipeline."
+            )
+        self._diversion_log.append(RowDiversion(row_index=row_index, reason=reason, row_data=row_data))
+
+    def _reset_diversion_log(self) -> None:
+        """Clear the diversion log. Called by SinkExecutor before each write()."""
+        self._diversion_log.clear()
+
+    def _get_diversions(self) -> tuple[RowDiversion, ...]:
+        """Return accumulated diversions as an immutable tuple."""
+        return tuple(self._diversion_log)
 
     # === Lifecycle Hooks ===
     # Call ordering: on_start -> write/flush -> on_complete -> close

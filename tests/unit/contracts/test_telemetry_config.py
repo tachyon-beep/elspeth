@@ -354,3 +354,19 @@ class TestRuntimeTelemetryProtocolCompliance:
         _ = config.backpressure_mode
         _ = config.fail_on_total_exporter_failure
         _ = config.exporter_configs
+
+
+class TestRuntimeTelemetryValidation:
+    """Test __post_init__ validation in RuntimeTelemetryConfig."""
+
+    def test_max_consecutive_failures_rejects_bool(self) -> None:
+        """max_consecutive_failures=True should raise TypeError — bool is not int."""
+        with pytest.raises(TypeError, match="max_consecutive_failures must be int"):
+            RuntimeTelemetryConfig(
+                enabled=True,
+                granularity=TelemetryGranularity.LIFECYCLE,
+                backpressure_mode=BackpressureMode.BLOCK,
+                fail_on_total_exporter_failure=True,
+                max_consecutive_failures=True,  # type: ignore[arg-type]  # Intentional: testing bool rejection
+                exporter_configs=(),
+            )

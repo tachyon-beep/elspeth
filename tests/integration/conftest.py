@@ -20,6 +20,20 @@ from tests.fixtures.landscape import make_landscape_db, make_recorder
 from tests.fixtures.stores import MockPayloadStore
 
 
+@pytest.fixture(autouse=True)
+def _inject_default_on_write_failure(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Ensure all BaseSink subclasses have _on_write_failure set.
+
+    Production code injects this via cli_helpers from SinkSettings.
+    Integration tests that construct sinks directly bypass that path.
+    This fixture sets the class-level default to "discard" so the
+    orchestrator validation doesn't crash on un-injected sinks.
+    """
+    from elspeth.plugins.infrastructure.base import BaseSink
+
+    monkeypatch.setattr(BaseSink, "_on_write_failure", "discard")
+
+
 def pytest_collection_modifyitems(items: list[pytest.Item]) -> None:
     """Auto-apply integration marker to all tests in this directory."""
     for item in items:

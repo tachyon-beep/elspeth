@@ -26,7 +26,9 @@ from pydantic import BaseModel, field_validator, model_validator
 
 from elspeth.contracts.call_data import RawCallPayload
 from elspeth.contracts.enums import CallStatus, CallType
+from elspeth.contracts.probes import CollectionReadinessResult
 from elspeth.plugins.infrastructure.clients.retrieval.base import RetrievalError
+from elspeth.plugins.infrastructure.clients.retrieval.connection import ChromaConnectionConfig
 from elspeth.plugins.infrastructure.clients.retrieval.types import RetrievalChunk
 
 if TYPE_CHECKING:
@@ -70,15 +72,40 @@ class ChromaSearchProviderConfig(BaseModel):
 
     @model_validator(mode="after")
     def validate_mode_requirements(self) -> Self:
-        if self.mode == "persistent" and not self.persist_directory:
-            raise ValueError("persistent mode requires persist_directory")
-        if self.mode == "client" and not self.host:
-            raise ValueError("client mode requires host")
-        if self.mode == "client" and self.host:
-            is_local = self.host in ("localhost", "127.0.0.1", "::1")
-            if not is_local and not self.ssl:
-                raise ValueError(f"Remote Chroma server {self.host!r} requires ssl=true. HTTP is only permitted for localhost.")
+        if self.mode in ("persistent", "client"):
+            # Delegate cross-field validation to ChromaConnectionConfig.
+            # Construction triggers its model_validator; we discard the
+            # instance — the provider config keeps its own flat fields.
+            ChromaConnectionConfig(
+                collection=self.collection,
+                mode=self.mode,
+                persist_directory=self.persist_directory,
+                host=self.host,
+                port=self.port,
+                ssl=self.ssl,
+                distance_function=self.distance_function,
+            )
         return self
+
+    def to_connection_config(self) -> ChromaConnectionConfig:
+        """Build a ChromaConnectionConfig from this provider config.
+
+        Only valid when mode is 'persistent' or 'client'. Raises
+        ValueError for ephemeral mode (no shared connection to configure).
+        """
+        if self.mode == "ephemeral":
+            raise ValueError(
+                "Cannot create ChromaConnectionConfig from ephemeral mode — ephemeral clients have no shared connection parameters"
+            )
+        return ChromaConnectionConfig(
+            collection=self.collection,
+            mode=self.mode,
+            persist_directory=self.persist_directory,
+            host=self.host,
+            port=self.port,
+            ssl=self.ssl,
+            distance_function=self.distance_function,
+        )
 
 
 class ChromaSearchProvider:
@@ -250,6 +277,34 @@ class ChromaSearchProvider:
             return 1.0 / (1.0 + distance)
         else:  # ip
             return max(0.0, min(1.0, 1.0 - distance))
+
+    def check_readiness(self) -> CollectionReadinessResult:
+        """Check that the ChromaDB collection exists and has documents.
+
+        Called during on_start() AFTER provider construction. self._collection
+        is always set by __init__ (which calls get_or_create_collection).
+        If __init__ fails, the provider doesn't exist and this method is
+        never called.
+        """
+        collection_name = self._config.collection
+
+        try:
+            count = self._collection.count()
+            return CollectionReadinessResult(
+                collection=collection_name,
+                reachable=True,
+                count=count,
+                message=(
+                    f"Collection '{collection_name}' has {count} documents" if count > 0 else f"Collection '{collection_name}' is empty"
+                ),
+            )
+        except (chromadb.errors.ChromaError, ConnectionError, OSError) as exc:
+            return CollectionReadinessResult(
+                collection=collection_name,
+                reachable=False,
+                count=0,
+                message=f"Collection '{collection_name}' unreachable: {type(exc).__name__}: {exc}",
+            )
 
     def close(self) -> None:
         pass

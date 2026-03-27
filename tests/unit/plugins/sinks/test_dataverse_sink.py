@@ -323,12 +323,12 @@ class TestArtifactDescriptor:
 
         descriptor = sink.write([], ctx)
 
-        assert descriptor.artifact_type == "webhook"
-        assert descriptor.content_hash == hashlib.sha256(b"").hexdigest()
-        assert descriptor.size_bytes == 0
-        assert descriptor.metadata["row_count"] == 0
-        assert descriptor.metadata["entity"] == "contacts"
-        assert "dataverse://contacts@" in descriptor.path_or_uri
+        assert descriptor.artifact.artifact_type == "webhook"
+        assert descriptor.artifact.content_hash == hashlib.sha256(b"").hexdigest()
+        assert descriptor.artifact.size_bytes == 0
+        assert descriptor.artifact.metadata["row_count"] == 0
+        assert descriptor.artifact.metadata["entity"] == "contacts"
+        assert "dataverse://contacts@" in descriptor.artifact.path_or_uri
 
     def test_non_empty_rows_returns_correct_descriptor(self) -> None:
         sink, _ = self._make_sink_with_mock_client()
@@ -343,13 +343,13 @@ class TestArtifactDescriptor:
         expected_canonical = canonical_json(rows).encode("utf-8")
         expected_hash = hashlib.sha256(expected_canonical).hexdigest()
 
-        assert descriptor.artifact_type == "webhook"
-        assert descriptor.content_hash == expected_hash
-        assert descriptor.size_bytes == len(expected_canonical)
-        assert descriptor.metadata["row_count"] == 2
-        assert descriptor.metadata["entity"] == "contacts"
-        assert descriptor.metadata["mode"] == "upsert"
-        assert "dataverse://contacts@" in descriptor.path_or_uri
+        assert descriptor.artifact.artifact_type == "webhook"
+        assert descriptor.artifact.content_hash == expected_hash
+        assert descriptor.artifact.size_bytes == len(expected_canonical)
+        assert descriptor.artifact.metadata["row_count"] == 2
+        assert descriptor.artifact.metadata["entity"] == "contacts"
+        assert descriptor.artifact.metadata["mode"] == "upsert"
+        assert "dataverse://contacts@" in descriptor.artifact.path_or_uri
 
 
 # ---------------------------------------------------------------------------

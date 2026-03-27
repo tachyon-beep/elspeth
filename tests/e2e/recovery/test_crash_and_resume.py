@@ -35,6 +35,7 @@ from elspeth.contracts.aggregation_checkpoint import (
 )
 from elspeth.contracts.config.runtime import RuntimeCheckpointConfig
 from elspeth.contracts.contract_records import ContractAuditRecord
+from elspeth.contracts.diversion import SinkWriteResult
 from elspeth.contracts.schema import SchemaConfig
 from elspeth.contracts.schema_contract import FieldContract, SchemaContract
 from elspeth.contracts.types import NodeID, SinkName
@@ -204,9 +205,9 @@ class _ResumeSink(_TestSinkBase):
     def on_complete(self, ctx: Any) -> None:
         pass
 
-    def write(self, rows: Any, ctx: Any) -> ArtifactDescriptor:
+    def write(self, rows: Any, ctx: Any) -> SinkWriteResult:
         _ResumeSink.results.extend(rows)
-        return ArtifactDescriptor.for_file(path="memory", size_bytes=0, content_hash="abc")
+        return SinkWriteResult(artifact=ArtifactDescriptor.for_file(path="memory", size_bytes=0, content_hash="abc"))
 
     def close(self) -> None:
         pass

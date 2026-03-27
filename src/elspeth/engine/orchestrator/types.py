@@ -26,6 +26,7 @@ from types import MappingProxyType
 from typing import TYPE_CHECKING, Any
 
 from elspeth.contracts.freeze import freeze_fields
+from elspeth.contracts.run_result import RunResult as RunResult  # re-exported
 
 if TYPE_CHECKING:
     from elspeth.contracts import PendingOutcome, SinkProtocol, SourceProtocol, TokenInfo
@@ -100,28 +101,6 @@ class PipelineConfig:
 
 
 @dataclass(frozen=True, slots=True)
-class RunResult:
-    """Result of a pipeline run."""
-
-    run_id: str
-    status: RunStatus
-    rows_processed: int
-    rows_succeeded: int
-    rows_failed: int
-    rows_routed: int
-    rows_quarantined: int = 0
-    rows_forked: int = 0
-    rows_coalesced: int = 0
-    rows_coalesce_failed: int = 0  # Coalesce failures (quorum_not_met, incomplete_branches)
-    rows_expanded: int = 0  # Deaggregation parent tokens
-    rows_buffered: int = 0  # Passthrough mode buffered tokens
-    routed_destinations: Mapping[str, int] = field(default_factory=lambda: MappingProxyType({}))
-
-    def __post_init__(self) -> None:
-        freeze_fields(self, "routed_destinations")
-
-
-@dataclass(frozen=True, slots=True)
 class AggregationFlushResult:
     """Result of flushing aggregation buffers.
 
@@ -137,6 +116,7 @@ class AggregationFlushResult:
     rows_forked: int = 0
     rows_expanded: int = 0
     rows_buffered: int = 0
+    rows_diverted: int = 0
     routed_destinations: Mapping[str, int] = field(default_factory=lambda: MappingProxyType({}))
 
     def __post_init__(self) -> None:
@@ -155,6 +135,7 @@ class AggregationFlushResult:
             rows_forked=self.rows_forked + other.rows_forked,
             rows_expanded=self.rows_expanded + other.rows_expanded,
             rows_buffered=self.rows_buffered + other.rows_buffered,
+            rows_diverted=self.rows_diverted + other.rows_diverted,
             routed_destinations=MappingProxyType(dict(combined_destinations)),
         )
 
@@ -181,6 +162,7 @@ class ExecutionCounters:
     rows_coalesce_failed: int = 0
     rows_expanded: int = 0
     rows_buffered: int = 0
+    rows_diverted: int = 0
     routed_destinations: Counter[str] = field(default_factory=Counter)
 
     def accumulate_flush_result(self, result: AggregationFlushResult) -> None:
@@ -197,6 +179,7 @@ class ExecutionCounters:
         self.rows_forked += result.rows_forked
         self.rows_expanded += result.rows_expanded
         self.rows_buffered += result.rows_buffered
+        self.rows_diverted += result.rows_diverted
         for dest, count in result.routed_destinations.items():
             self.routed_destinations[dest] += count
 
@@ -214,6 +197,7 @@ class ExecutionCounters:
             rows_forked=self.rows_forked,
             rows_expanded=self.rows_expanded,
             rows_buffered=self.rows_buffered,
+            rows_diverted=self.rows_diverted,
             routed_destinations=dict(self.routed_destinations),
         )
 
@@ -237,6 +221,7 @@ class ExecutionCounters:
             rows_coalesce_failed=self.rows_coalesce_failed,
             rows_expanded=self.rows_expanded,
             rows_buffered=self.rows_buffered,
+            rows_diverted=self.rows_diverted,
             routed_destinations=dict(self.routed_destinations),
         )
 

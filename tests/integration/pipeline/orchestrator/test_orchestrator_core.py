@@ -248,7 +248,10 @@ class TestOrchestrator:
 
         settings = ElspethSettings(
             source={"plugin": "test", "on_success": "source_out", "options": {}},
-            sinks={"output": {"plugin": "test"}, "source_sink": {"plugin": "test"}},
+            sinks={
+                "output": {"plugin": "test", "on_write_failure": "discard"},
+                "source_sink": {"plugin": "test", "on_write_failure": "discard"},
+            },
             gates=[fork_gate, terminal_gate],
             coalesce=[coalesce],
         )
@@ -477,7 +480,11 @@ class TestOrchestratorAcceptsGraph:
                     "schema": {"mode": "observed"},
                 },
             ),
-            sinks={"output": SinkSettings(plugin="json", options={"path": "output.json", "schema": {"mode": "observed"}})},
+            sinks={
+                "output": SinkSettings(
+                    plugin="json", on_write_failure="discard", options={"path": "output.json", "schema": {"mode": "observed"}}
+                )
+            },
         )
         plugins = instantiate_plugins_from_config(settings)
 
@@ -512,6 +519,8 @@ class TestOrchestratorAcceptsGraph:
         mock_sink.name = "csv"
         mock_sink.determinism = Determinism.IO_WRITE
         mock_sink.plugin_version = "1.0.0"
+        mock_sink._on_write_failure = "discard"
+        mock_sink._reset_diversion_log = MagicMock()
 
         sink_node_id_setter = PropertyMock()
         type(mock_sink).node_id = sink_node_id_setter
@@ -558,8 +567,12 @@ class TestOrchestratorAcceptsGraph:
                 },
             ),
             sinks={
-                "output_a": SinkSettings(plugin="json", options={"path": "a.json", "schema": {"mode": "observed"}}),
-                "output_b": SinkSettings(plugin="json", options={"path": "b.json", "schema": {"mode": "observed"}}),
+                "output_a": SinkSettings(
+                    plugin="json", on_write_failure="discard", options={"path": "a.json", "schema": {"mode": "observed"}}
+                ),
+                "output_b": SinkSettings(
+                    plugin="json", on_write_failure="discard", options={"path": "b.json", "schema": {"mode": "observed"}}
+                ),
             },
         )
         plugins = instantiate_plugins_from_config(settings)
@@ -595,6 +608,8 @@ class TestOrchestratorAcceptsGraph:
         mock_sink_a.name = "output_a"
         mock_sink_a.determinism = Determinism.IO_WRITE
         mock_sink_a.plugin_version = "1.0.0"
+        mock_sink_a._on_write_failure = "discard"
+        mock_sink_a._reset_diversion_log = MagicMock()
 
         sink_a_node_id_setter = PropertyMock()
         type(mock_sink_a).node_id = sink_a_node_id_setter
@@ -607,6 +622,8 @@ class TestOrchestratorAcceptsGraph:
         mock_sink_b.name = "output_b"
         mock_sink_b.determinism = Determinism.IO_WRITE
         mock_sink_b.plugin_version = "1.0.0"
+        mock_sink_b._on_write_failure = "discard"
+        mock_sink_b._reset_diversion_log = MagicMock()
 
         sink_b_node_id_setter = PropertyMock()
         type(mock_sink_b).node_id = sink_b_node_id_setter

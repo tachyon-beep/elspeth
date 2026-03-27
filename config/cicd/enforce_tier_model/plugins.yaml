@@ -164,24 +164,24 @@ allow_hits:
   owner: architecture
   reason: HTTP redirect Location header — external system boundary, header may be absent
   safety: Missing Location header breaks redirect loop naturally
-- key: plugins/sinks/database_sink.py:R1:DatabaseSink:__init__:fp=5565ae22ee269a37
+- key: plugins/sinks/database_sink.py:R1:DatabaseSink:__init__:fp=ded76dbbb1479f9c
   owner: architecture
   reason: os.environ.get() for optional env var at trust boundary — ELSPETH_ALLOW_RAW_SECRETS is genuinely optional with empty-string default
   safety: Empty string default is meaning-preserving (feature disabled); no data fabrication
   expires: '2026-05-02'
-- key: plugins/sinks/csv_sink.py:R1:CSVSink:validate_output_target:fp=c7d8579f470f2ef8
+- key: plugins/sinks/csv_sink.py:R1:CSVSink:validate_output_target:fp=5d6649996f9b8101
   owner: feature
   reason: Display header mapping - fields not in map keep original name (transform-added fields)
   safety: Intentional fallback to original field name, not bug hiding
-- key: plugins/sinks/csv_sink.py:R1:CSVSink:_open_file:fp=48e3e1cfb4ade393
+- key: plugins/sinks/csv_sink.py:R1:CSVSink:_open_file:fp=7779a935c35ef7a8
   owner: feature
   reason: Intentional fallback - reverse mapping may not contain all fields (transform-added)
   safety: Falls back to original field name - correct behavior for fields not in source
-- key: plugins/sinks/csv_sink.py:R1:CSVSink:_get_field_names_and_display:fp=4de1ab42b67c14e5
+- key: plugins/sinks/csv_sink.py:R1:CSVSink:_get_field_names_and_display:fp=0155f461a13bc0c9
   owner: feature
   reason: Intentional fallback - display mapping may not contain all fields (transform-added)
   safety: Falls back to normalized field name - correct behavior for fields not in source
-- key: plugins/sinks/json_sink.py:R1:JSONSink:validate_output_target:fp=6734d84d40b2178e
+- key: plugins/sinks/json_sink.py:R1:JSONSink:validate_output_target:fp=a96553acb6efa982
   owner: feature
   reason: Display header mapping - fields not in map keep original name (transform-added fields)
   safety: Intentional fallback to original field name, not bug hiding
@@ -270,7 +270,7 @@ allow_hits:
   reason: Worker thread can raise any exception type — must catch broadly to prevent buffer slot leak (FrameworkBugError/AuditIntegrityError re-raised before this catch)
   safety: Exception converted to TransformResult.error (row gets quarantined), buffer stays consistent; framework errors re-raised above
   expires: '2026-06-08'
-- key: plugins/sinks/azure_blob_sink.py:R5:AzureBlobSinkConfig:headers_mapping:fp=2ec56a095db42344
+- key: plugins/sinks/azure_blob_sink.py:R5:AzureBlobSinkConfig:headers_mapping:fp=7ca855f402cbaf42
   owner: refactor
   reason: isinstance(dict) check for config field type discrimination — same pattern as SinkPathConfig.headers_mapping
   safety: Config validated by Pydantic before this property runs; isinstance only distinguishes dict from str
@@ -300,12 +300,12 @@ allow_hits:
   reason: Optional ChromaDB provider registration — ImportError means chromadb is not installed ([rag] extra absent); provider is silently omitted from registry
   safety: Unknown provider raises ValueError at config validation time with list of available providers; no silent data loss
   expires: null
-- key: plugins/infrastructure/clients/retrieval/chroma.py:R1:ChromaSearchProvider:__init__:fp=4589e3566d1726e6
+- key: plugins/infrastructure/clients/retrieval/chroma.py:R1:ChromaSearchProvider:__init__:fp=3b96c13fababf5b4
   owner: feature
   reason: ChromaDB collection metadata is persisted external data (Tier 3) — .get() safely detects distance_function mismatch on pre-existing collections without crashing on absent key
   safety: Missing key yields None (no mismatch detected — safe); present key with wrong value raises RetrievalError immediately
   expires: null
-- key: plugins/infrastructure/clients/retrieval/chroma.py:R5:ChromaSearchProvider:search:fp=3ff33e6b86bd451b
+- key: plugins/infrastructure/clients/retrieval/chroma.py:R5:ChromaSearchProvider:search:fp=2bdf19e04ce79d90
   owner: bugfix
   reason: Tier 3 boundary type check — ChromaDB SDK may return non-string documents from corrupt index; isinstance guards pipeline from non-string content
   safety: Non-string documents are skipped (continue); only validated str content enters pipeline as Tier 2
@@ -320,70 +320,110 @@ allow_hits:
   reason: Provider lookup — dict.get() with explicit None check and meaningful ValueError; this IS the guard that catches unknown providers at config load time rather than first-row execution
   safety: None result raises ValueError immediately with list of available providers; no silent pass-through
   expires: null
-- key: plugins/infrastructure/clients/retrieval/azure_search.py:R1:AzureSearchProvider:_parse_response:fp=ac3495bbb7ec9639
+- key: plugins/infrastructure/clients/retrieval/azure_search.py:R1:AzureSearchProvider:_parse_response:fp=a14c4889c394d571
   owner: feature
   reason: Azure AI Search API response parsing at Tier 3 boundary — @search.score is optional in malformed responses; absence recorded in skipped_items
   safety: Missing score causes item to be skipped and recorded; no silent data loss
   expires: null
-- key: plugins/infrastructure/clients/retrieval/azure_search.py:R1:AzureSearchProvider:_parse_response:fp=866a8f498d10e0fe
+- key: plugins/infrastructure/clients/retrieval/azure_search.py:R1:AzureSearchProvider:_parse_response:fp=fb9f1a8411c4965a
   owner: feature
   reason: Azure AI Search API Tier 3 — item.get("id") in skipped item record; ID may be absent on malformed items
   safety: Captured in skipped_items for audit; no data corruption
   expires: null
-- key: plugins/infrastructure/clients/retrieval/azure_search.py:R5:AzureSearchProvider:_parse_response:fp=83c83b73ebf0ae32
+- key: plugins/infrastructure/clients/retrieval/azure_search.py:R5:AzureSearchProvider:_parse_response:fp=7f2807b1ff5622b6
   owner: bugfix
   reason: Tier 3 boundary type validation — isinstance(raw_score, bool) guards against Python bool-is-int before arithmetic
   safety: Invalid score type causes item to be skipped and recorded in skipped_items as "invalid_score_type"
   expires: null
-- key: plugins/infrastructure/clients/retrieval/azure_search.py:R5:AzureSearchProvider:_parse_response:fp=cdec26776f3d3d1a
+- key: plugins/infrastructure/clients/retrieval/azure_search.py:R5:AzureSearchProvider:_parse_response:fp=f0435cde719d3c73
   owner: bugfix
   reason: Tier 3 boundary type validation — rejects non-numeric score types (string, list, dict) before math.isfinite
   safety: Invalid score type causes item to be skipped and recorded; no crash
   expires: null
-- key: plugins/infrastructure/clients/retrieval/azure_search.py:R1:AzureSearchProvider:_parse_response:fp=d3ae8b449f567803
+- key: plugins/infrastructure/clients/retrieval/azure_search.py:R1:AzureSearchProvider:_parse_response:fp=d1290a34a312ccb0
   owner: bugfix
   reason: Azure AI Search API Tier 3 — item.get("id") in skipped item record for invalid score type
   safety: Captured in skipped_items for audit; no data corruption
   expires: null
-- key: plugins/infrastructure/clients/retrieval/azure_search.py:R1:AzureSearchProvider:_parse_response:fp=f9be71eef8e59cb3
-  owner: feature
-  reason: Azure AI Search API Tier 3 — item.get("id") in skipped item record for missing content
-  safety: Captured in skipped_items for audit; no data corruption
-  expires: null
-- key: plugins/infrastructure/clients/retrieval/azure_search.py:R1:AzureSearchProvider:_parse_response:fp=1a56c5169fca221b
+- key: plugins/infrastructure/clients/retrieval/azure_search.py:R1:AzureSearchProvider:_parse_response:fp=fbda9e1b97ddf29e
   owner: feature
   reason: Azure AI Search API Tier 3 — content field may be absent in malformed responses
   safety: Missing content (None) causes item to be skipped and recorded in skipped_items as "missing_content"
   expires: null
-- key: plugins/infrastructure/clients/retrieval/azure_search.py:R1:AzureSearchProvider:_parse_response:fp=46bde1db12749de8
+- key: plugins/infrastructure/clients/retrieval/azure_search.py:R1:AzureSearchProvider:_parse_response:fp=7a8706a015bc766f
+  owner: feature
+  reason: Azure AI Search API Tier 3 — item.get("id") in skipped item record for missing content
+  safety: Captured in skipped_items for audit; no data corruption
+  expires: null
+- key: plugins/infrastructure/clients/retrieval/azure_search.py:R1:AzureSearchProvider:_parse_response:fp=dd0ccf0f967f4203
   owner: feature
   reason: Azure AI Search API Tier 3 — item.get("id") in skipped item record for empty content
   safety: Captured in skipped_items as "empty_content" for audit; no data corruption
   expires: null
-- key: plugins/infrastructure/clients/retrieval/azure_search.py:R1:AzureSearchProvider:_parse_response:fp=d1f5265e28000e0f
+- key: plugins/infrastructure/clients/retrieval/azure_search.py:R1:AzureSearchProvider:_parse_response:fp=2971e051c2e86351
   owner: feature
   reason: Azure AI Search API Tier 3 — source ID lookup chain (id then @search.documentId); items without any ID are skipped
   safety: No fabricated IDs; items without source_id skipped and recorded
   expires: null
-- key: plugins/infrastructure/clients/retrieval/azure_search.py:R1:AzureSearchProvider:_parse_response:fp=b60212fd103dba98
+- key: plugins/infrastructure/clients/retrieval/azure_search.py:R1:AzureSearchProvider:_parse_response:fp=75c71621b9bfd488
   owner: feature
   reason: Azure AI Search API Tier 3 — @search.documentId fallback in source ID chain
   safety: No fabricated IDs; items without source_id skipped and recorded
   expires: null
-- key: plugins/infrastructure/clients/retrieval/azure_search.py:R5:AzureSearchProvider:_parse_response:fp=f8dda98dc46281fe
+- key: plugins/infrastructure/clients/retrieval/azure_search.py:R5:AzureSearchProvider:_parse_response:fp=72af858e0a57a875
   owner: feature
   reason: Azure AI Search API response metadata coercion at Tier 3 boundary — isinstance check converts non-primitive types to str for JSON serializability
   safety: Non-serializable types coerced to str; RetrievalChunk validates metadata JSON-serializability at construction
   expires: null
-- key: plugins/infrastructure/clients/retrieval/chroma.py:R5:ChromaSearchProvider:search:fp=a438ed23ab599de8
+- key: plugins/infrastructure/clients/retrieval/azure_search.py:R1:AzureSearchProvider:check_readiness:fp=dfa3aca2ecd13fb6
+  owner: feature
+  reason: httpx.get() method call for Azure Search $count endpoint — false positive from R1 rule matching .get( syntax
+  safety: This is the actual HTTP call, not a defensive dict access
+  expires: null
+- key: plugins/infrastructure/clients/retrieval/chroma.py:R5:ChromaSearchProvider:search:fp=9c8adbd251d61ac3
   owner: bugfix
   reason: Offensive type guard — ChromaDB is our infrastructure, not external API; non-numeric distance indicates index corruption or SDK bug
   safety: Raises RetrievalError immediately (crash) — not silently skipped
   expires: null
-- key: plugins/infrastructure/clients/retrieval/chroma.py:R5:ChromaSearchProvider:search:fp=2422ae2a2039987b
+- key: plugins/infrastructure/clients/retrieval/chroma.py:R5:ChromaSearchProvider:search:fp=a36738ef1d0de1df
   owner: bugfix
   reason: Offensive type guard — rejects non-numeric distance types with crash; corrupt ChromaDB index must not produce silent wrong results
   safety: Raises RetrievalError immediately (crash) — not silently skipped
+  expires: null
+- key: plugins/sinks/chroma_sink.py:R6:ChromaSink:write:fp=2a519513e79027ab
+  owner: feature
+  reason: Per-row KeyError catch at Tier 2→external boundary — missing id/document field diverts the row via _divert_row() instead of aborting the batch
+  safety: Row diverted to failsink with descriptive reason; remaining valid rows written normally; no silent data loss
+  expires: null
+- key: plugins/sinks/chroma_sink.py:R5:ChromaSink:write:fp=588afe419bda7c03
+  owner: feature
+  reason: Tier 2→external trust boundary — ChromaDB requires string IDs; isinstance(str) validates before write to avoid batch-aborting TypeError from SDK
+  safety: Non-string ID diverts the row via _divert_row() with descriptive reason; not silent suppression
+  expires: null
+- key: plugins/sinks/chroma_sink.py:R5:ChromaSink:write:fp=fe63d592e1c8dda5
+  owner: feature
+  reason: Tier 2→external trust boundary — ChromaDB requires string documents; isinstance(str) validates before write
+  safety: Non-string document diverts the row via _divert_row() with descriptive reason; not silent suppression
+  expires: null
+- key: plugins/sinks/chroma_sink.py:R6:ChromaSink:write:fp=e0cc36f33d709f47
+  owner: feature
+  reason: Per-row KeyError catch for optional metadata fields — missing metadata field skipped (metadata is optional per-field)
+  safety: Missing metadata fields silently omitted from the per-row metadata dict; no data fabrication
+  expires: null
+- key: plugins/sinks/chroma_sink.py:R5:ChromaSink:write:fp=cbfaba9b66704f56
+  owner: feature
+  reason: Tier 2→external trust boundary — validates metadata value types before sending to ChromaDB; isinstance check filters rows with non-scalar metadata (dict, list, datetime) so they go to failsink instead of crashing the batch
+  safety: Invalid rows diverted via _divert_row() with per-field detail; valid rows written normally; no silent data loss
+  expires: null
+- key: plugins/sinks/chroma_sink.py:R1:ChromaSink:write:fp=f60012fec4fd7493
+  owner: feature
+  reason: Collection.get() is the ChromaDB SDK method for retrieving documents by ID, not dict.get() — false positive from R1 rule matching `.get(` syntax
+  safety: Returns GetResult dict with "ids" key; subscript access on result["ids"] crashes if ChromaDB SDK contract breaks
+  expires: null
+- key: plugins/sinks/chroma_sink.py:R1:ChromaSink:write:fp=4628dd10e5323d79
+  owner: feature
+  reason: Collection.get() is the ChromaDB SDK method for retrieving documents by ID, not dict.get() — false positive from R1 rule matching `.get(` syntax
+  safety: Returns GetResult dict with "ids" key; subscript access on result["ids"] crashes if ChromaDB SDK contract breaks
   expires: null
 - key: plugins/transforms/web_scrape.py:R5:WebScrapeTransform:__init__:fp=189a33d2bccf7c9b
   owner: feature

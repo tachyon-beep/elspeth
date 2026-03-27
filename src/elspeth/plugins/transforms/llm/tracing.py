@@ -101,14 +101,14 @@ class LangfuseTracingConfig(TracingConfig):
         provider: Always 'langfuse'
         public_key: Langfuse public API key (REQUIRED - use ${LANGFUSE_PUBLIC_KEY})
         secret_key: Langfuse secret API key (REQUIRED - use ${LANGFUSE_SECRET_KEY})
-        host: Langfuse host URL (default: cloud.langfuse.com)
+        host: Langfuse host URL (REQUIRED - operator must specify)
         tracing_enabled: Whether tracing is enabled (v3 parameter, default: True)
     """
 
     provider: str = "langfuse"
     public_key: str | None = None
     secret_key: str | None = None
-    host: str = "https://cloud.langfuse.com"
+    host: str | None = None
     tracing_enabled: bool = True
 
     def __post_init__(self) -> None:
@@ -118,6 +118,8 @@ class LangfuseTracingConfig(TracingConfig):
             raise ValueError("LangfuseTracingConfig requires public_key. Use ${LANGFUSE_PUBLIC_KEY} in YAML.")
         if self.secret_key is None:
             raise ValueError("LangfuseTracingConfig requires secret_key. Use ${LANGFUSE_SECRET_KEY} in YAML.")
+        if self.host is None:
+            raise ValueError("LangfuseTracingConfig requires host (e.g. 'https://cloud.langfuse.com' or your on-prem URL).")
 
 
 def parse_tracing_config(config: dict[str, Any] | None) -> TracingConfig | None:
@@ -153,7 +155,7 @@ def parse_tracing_config(config: dict[str, Any] | None) -> TracingConfig | None:
             return LangfuseTracingConfig(
                 public_key=config.get("public_key"),
                 secret_key=config.get("secret_key"),
-                host=config.get("host", "https://cloud.langfuse.com"),
+                host=config["host"],  # infrastructure addressing — no default
                 tracing_enabled=config.get("tracing_enabled", True),
             )
         case "none":

@@ -220,7 +220,10 @@ class TestExplicitSinkRouting:
 
         settings = ElspethSettings(
             source={"plugin": "test", "on_success": "source_out", "options": {}},
-            sinks={"output": {"plugin": "test"}, "source_sink": {"plugin": "test"}},
+            sinks={
+                "output": {"plugin": "test", "on_write_failure": "discard"},
+                "source_sink": {"plugin": "test", "on_write_failure": "discard"},
+            },
             gates=[fork_gate, terminal_gate],
             coalesce=[coalesce],
         )

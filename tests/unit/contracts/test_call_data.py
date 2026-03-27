@@ -496,6 +496,31 @@ class TestHTTPCallResponse:
         with pytest.raises(AttributeError):
             obj.status_code = 404  # type: ignore[misc]
 
+    def test_rejects_bool_status_code(self) -> None:
+        with pytest.raises(TypeError, match="status_code must be int"):
+            HTTPCallResponse(status_code=True, headers={})
+
+    def test_rejects_bool_body_size(self) -> None:
+        with pytest.raises(TypeError, match="body_size must be int"):
+            HTTPCallResponse(status_code=200, headers={}, body_size=False)
+
+    def test_rejects_bool_redirect_count(self) -> None:
+        with pytest.raises(TypeError, match="redirect_count must be int"):
+            HTTPCallResponse(status_code=200, headers={}, redirect_count=True)
+
+    def test_rejects_status_code_below_100(self) -> None:
+        with pytest.raises(ValueError, match="status_code must be >= 100"):
+            HTTPCallResponse(status_code=99, headers={})
+
+    def test_rejects_negative_body_size(self) -> None:
+        with pytest.raises(ValueError, match="body_size must be >= 0"):
+            HTTPCallResponse(status_code=200, headers={}, body_size=-1)
+
+    def test_body_size_none_accepted(self) -> None:
+        """None body_size is valid (optional field)."""
+        obj = HTTPCallResponse(status_code=200, headers={}, body_size=None)
+        assert obj.body_size is None
+
 
 # ---------------------------------------------------------------------------
 # HTTPCallError

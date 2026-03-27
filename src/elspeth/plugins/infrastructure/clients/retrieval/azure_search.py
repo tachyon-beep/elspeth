@@ -8,9 +8,11 @@ import re
 import urllib.parse
 from typing import TYPE_CHECKING, Any, Literal, Self, cast
 
+import httpx
 import structlog
 from pydantic import BaseModel, field_validator, model_validator
 
+from elspeth.contracts.probes import CollectionReadinessResult
 from elspeth.plugins.infrastructure.clients.retrieval.base import RetrievalError
 from elspeth.plugins.infrastructure.clients.retrieval.types import RetrievalChunk
 
@@ -295,6 +297,70 @@ class AzureSearchProvider:
             return 0.0
         normalized = (raw_score - min_val) / (max_val - min_val)
         return max(0.0, min(1.0, normalized))
+
+    def check_readiness(self) -> CollectionReadinessResult:
+        """Check that the Azure Search index exists and has documents.
+
+        Uses raw httpx (NOT AuditedHTTPClient) because this is a startup
+        probe, not a row-level operation. There is no state_id or token_id
+        available during on_start().
+
+        Auth modes:
+        - api_key: sends api-key header
+        - use_managed_identity: acquires a Bearer token via DefaultAzureCredential
+        """
+        index_name = self._config.index
+
+        try:
+            count_url = f"{self._config.endpoint.rstrip('/')}/indexes/{index_name}/docs/$count?api-version={self._config.api_version}"
+            headers: dict[str, str] = {}
+            if self._config.api_key:
+                headers["api-key"] = self._config.api_key
+            elif self._config.use_managed_identity:
+                from azure.identity import DefaultAzureCredential
+
+                credential = DefaultAzureCredential()
+                token = credential.get_token("https://search.azure.com/.default")
+                headers["Authorization"] = f"Bearer {token.token}"
+
+            response = httpx.get(count_url, headers=headers, timeout=10.0)
+
+            if response.status_code == 404:
+                return CollectionReadinessResult(
+                    collection=index_name,
+                    reachable=True,
+                    count=0,
+                    message=f"Index '{index_name}' not found",
+                )
+
+            response.raise_for_status()
+
+            # Tier 3 boundary: $count response body is external data.
+            # Parse defensively — malformed body should be distinguishable
+            # from a genuine network outage.
+            try:
+                count = int(response.text.strip())
+            except ValueError:
+                return CollectionReadinessResult(
+                    collection=index_name,
+                    reachable=True,
+                    count=0,
+                    message=f"Index '{index_name}' returned non-integer $count body: {response.text!r}",
+                )
+
+            return CollectionReadinessResult(
+                collection=index_name,
+                reachable=True,
+                count=count,
+                message=(f"Index '{index_name}' has {count} documents" if count > 0 else f"Index '{index_name}' is empty"),
+            )
+        except (httpx.HTTPError, ConnectionError, OSError) as exc:
+            return CollectionReadinessResult(
+                collection=index_name,
+                reachable=False,
+                count=0,
+                message=f"Index '{index_name}' unreachable: {type(exc).__name__}: {exc}",
+            )
 
     def close(self) -> None:
         pass

@@ -20,6 +20,7 @@ gates:
 sinks:
   approved:
     plugin: csv
+    on_write_failure: discard
     options:
       path: examples/boolean_routing/output/approved.csv
       schema:
@@ -30,6 +31,7 @@ sinks:
         - 'approved: str'
   rejected:
     plugin: csv
+    on_write_failure: discard
     options:
       path: examples/boolean_routing/output/rejected.csv
       schema:

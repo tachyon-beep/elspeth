@@ -141,9 +141,14 @@ class _TestSinkBase:
     plugin_version = "1.0.0"
     validate_input: bool = False
     declared_required_fields: frozenset[str] = frozenset()
+    _on_write_failure: str = "discard"
 
     def __init__(self) -> None:
         self.config: dict[str, Any] = {"schema": {"mode": "observed"}}
+        self._diversion_log: list[Any] = []
+
+    def _reset_diversion_log(self) -> None:
+        self._diversion_log = []
 
     def on_start(self, ctx: Any) -> None:
         pass
@@ -197,7 +202,16 @@ def as_batch_transform(transform: Any) -> BatchTransformProtocol:
 
 
 def as_sink(sink: Any) -> SinkProtocol:
-    """Cast a test sink to SinkProtocol."""
+    """Cast a test sink to SinkProtocol.
+
+    Also ensures _on_write_failure is set if not already — production code
+    injects this via cli_helpers, but tests that construct sinks directly
+    bypass that path. Uses direct attribute access: BaseSink subclasses
+    always have _on_write_failure (class-level default None); test sinks
+    from _TestSinkBase have it set to "discard".
+    """
+    if sink._on_write_failure is None:
+        sink._on_write_failure = "discard"
     return cast("SinkProtocol", sink)
 
 

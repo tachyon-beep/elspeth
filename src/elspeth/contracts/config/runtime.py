@@ -25,7 +25,7 @@ from typing import TYPE_CHECKING, Any
 from elspeth.contracts.config.defaults import INTERNAL_DEFAULTS, POLICY_DEFAULTS
 from elspeth.contracts.engine import RetryPolicy
 from elspeth.contracts.enums import _IMPLEMENTED_BACKPRESSURE_MODES, BackpressureMode, TelemetryGranularity
-from elspeth.contracts.freeze import freeze_fields
+from elspeth.contracts.freeze import freeze_fields, require_int
 
 if TYPE_CHECKING:
     from elspeth.core.config import (
@@ -164,8 +164,7 @@ class RuntimeRetryConfig:
         which masked configuration errors — the runtime behavior diverged
         from what the user configured, violating auditability.
         """
-        if self.max_attempts < 1:
-            raise ValueError(f"max_attempts must be >= 1, got {self.max_attempts}")
+        require_int(self.max_attempts, "max_attempts", min_value=1)
         if self.base_delay < 0.01:
             raise ValueError(f"base_delay must be >= 0.01, got {self.base_delay}")
         if self.max_delay < 0.1:
@@ -296,8 +295,7 @@ class RuntimeServiceRateLimit:
 
     def __post_init__(self) -> None:
         """Validate rate limit is positive."""
-        if self.requests_per_minute < 1:
-            raise ValueError(f"requests_per_minute must be >= 1, got {self.requests_per_minute}")
+        require_int(self.requests_per_minute, "requests_per_minute", min_value=1)
 
 
 @dataclass(frozen=True, slots=True)
@@ -329,8 +327,7 @@ class RuntimeRateLimitConfig:
 
     def __post_init__(self) -> None:
         """Validate rate limit config and freeze mutable services mapping."""
-        if self.default_requests_per_minute < 1:
-            raise ValueError(f"default_requests_per_minute must be >= 1, got {self.default_requests_per_minute}")
+        require_int(self.default_requests_per_minute, "default_requests_per_minute", min_value=1)
         # Freeze services mapping to prevent external mutation
         object.__setattr__(self, "services", MappingProxyType(dict(self.services)))
 
@@ -411,8 +408,7 @@ class RuntimeConcurrencyConfig:
 
     def __post_init__(self) -> None:
         """Validate configuration values."""
-        if self.max_workers < 1:
-            raise ValueError("max_workers must be >= 1")
+        require_int(self.max_workers, "max_workers", min_value=1)
 
     @classmethod
     def default(cls) -> "RuntimeConcurrencyConfig":
@@ -471,8 +467,8 @@ class RuntimeCheckpointConfig:
 
     def __post_init__(self) -> None:
         """Validate configuration values."""
-        if self.frequency < 0:
-            raise ValueError("frequency must be >= 0")
+        require_int(self.frequency, "frequency", min_value=0)
+        require_int(self.checkpoint_interval, "checkpoint_interval", optional=True, min_value=0)
 
     @classmethod
     def default(cls) -> "RuntimeCheckpointConfig":
@@ -592,8 +588,7 @@ class RuntimeTelemetryConfig:
 
     def __post_init__(self) -> None:
         """Validate telemetry config invariants."""
-        if self.max_consecutive_failures < 1:
-            raise ValueError(f"max_consecutive_failures must be >= 1, got {self.max_consecutive_failures}")
+        require_int(self.max_consecutive_failures, "max_consecutive_failures", min_value=1)
 
     @classmethod
     def default(cls) -> "RuntimeTelemetryConfig":

@@ -66,10 +66,30 @@ per_file_rules:
   expires: null
   max_hits: 2
 allow_hits:
-- key: engine/executors/sink.py:R4:SinkExecutor:write:fp=45c1a6c9e0bdf4a9
+- key: engine/dependency_resolver.py:R1:_load_depends_on:fp=982376c81e3fc0d5
   owner: architecture
-  reason: 'Post-durability callbacks: checkpoint callback fails after durable sink write'
-  safety: Logged with error - sink artifact exists but checkpoint failed, resume will replay
+  reason: 'Tier 3 boundary: reads raw YAML from operator-authored settings files for cycle detection. depends_on is optional — absence means no dependencies.'
+  safety: Returns empty list on missing key; only used for lightweight cycle detection, not config validation
+  expires: null
+- key: engine/dependency_resolver.py:R5:_load_depends_on:fp=a56f683525216d0d
+  owner: architecture
+  reason: 'Tier 3 validation: raw YAML from operator files — isinstance checks validate structure before use'
+  safety: Raises ValueError with file path and type info on malformed input
+  expires: null
+- key: engine/dependency_resolver.py:R5:_load_depends_on:fp=07d449ea7db2ee15
+  owner: architecture
+  reason: 'Tier 3 validation: raw YAML from operator files — isinstance checks validate each entry is a mapping'
+  safety: Raises ValueError with index and type info on malformed entry
+  expires: null
+- key: engine/executors/sink.py:R4:SinkExecutor:write:fp=f4b797746420aea6
+  owner: architecture
+  reason: Cleanup of OPEN primary states after begin_node_state failure must not mask original error
+  safety: Logs warning with cleanup exception details; always re-raises the original error
+  expires: null
+- key: engine/executors/sink.py:R4:SinkExecutor:write:fp=16d836eedf375856
+  owner: architecture
+  reason: Cleanup of OPEN divert states after begin_node_state failure must not mask original error
+  safety: Logs warning with cleanup exception details; always re-raises the original error
   expires: null
 - key: engine/executors/state_guard.py:R4:NodeStateGuard:__exit__:fp=b15e639a7bc1936b
   owner: architecture
@@ -97,11 +117,6 @@ allow_hits:
   reason: Cleanup/pop with default - entry may not exist due to race between timeout and emit
   safety: Documented TOCTOU race pattern - pop(None) is intentional cleanup of possibly-absent entry
   expires: '2026-05-02'
-- key: engine/dag_navigator.py:R1:DAGNavigator:create_continuation_work_item:fp=ff169983eb391d6b
-  owner: bugfix
-  reason: _node_to_plugin.get() needed — not all node IDs are in plugin map (source nodes, coalesce pseudo-nodes)
-  safety: None return from .get() is the correct signal for non-gate nodes; isinstance(None, GateSettings) → False
-  expires: '2026-05-15'
 - key: engine/processor.py:R8:RowProcessor:__init__:fp=25cdbba00a78d397
   owner: architecture
   reason: Local dedup dict — setdefault on locally-constructed dict for deduplication by identity, not hiding missing keys
@@ -111,37 +126,37 @@ allow_hits:
   reason: dict.get() correct - not all branch names have coalesce point mapping
   safety: Crashes on type mismatch - no silent fallback
   expires: '2026-05-12'
-- key: engine/orchestrator/core.py:R4:Orchestrator:_cleanup_plugins:fp=978ce16eec87ec86
+- key: engine/orchestrator/core.py:R4:Orchestrator:_cleanup_plugins:fp=870dbff31b21a3e6
   owner: architecture
   reason: Plugin cleanup must attempt all closures; broad catch collects errors then raises
   safety: Code reviewed - collects all cleanup errors into list, raises ExceptionGroup after all attempted
   expires: '2026-05-02'
-- key: engine/orchestrator/core.py:R4:Orchestrator:_cleanup_plugins:fp=d752bed13d8d623c
+- key: engine/orchestrator/core.py:R4:Orchestrator:_cleanup_plugins:fp=37d49a544759841a
   owner: architecture
   reason: Plugin cleanup must attempt all closures; broad catch collects errors then raises
   safety: Code reviewed - collects all cleanup errors into list, raises ExceptionGroup after all attempted
   expires: '2026-05-02'
-- key: engine/orchestrator/core.py:R4:Orchestrator:_cleanup_plugins:fp=f7a9a29193c998e6
+- key: engine/orchestrator/core.py:R4:Orchestrator:_cleanup_plugins:fp=7eb27acca6f19d96
   owner: architecture
   reason: Plugin cleanup must attempt all closures; broad catch collects errors then raises
   safety: Code reviewed - collects all cleanup errors into list, raises ExceptionGroup after all attempted
   expires: '2026-05-02'
-- key: engine/orchestrator/core.py:R4:Orchestrator:_cleanup_plugins:fp=d8052b508d4214c3
+- key: engine/orchestrator/core.py:R4:Orchestrator:_cleanup_plugins:fp=b9180a5b428a74ab
   owner: architecture
   reason: Plugin cleanup must attempt all closures; broad catch collects errors then raises
   safety: Code reviewed - collects all cleanup errors into list, raises ExceptionGroup after all attempted
   expires: '2026-05-02'
-- key: engine/orchestrator/core.py:R4:Orchestrator:_cleanup_plugins:fp=174dced7d417d548
+- key: engine/orchestrator/core.py:R4:Orchestrator:_cleanup_plugins:fp=dc6aa3758e234f6d
   owner: architecture
   reason: Plugin cleanup must attempt all closures; broad catch collects errors then raises
   safety: Code reviewed - collects all cleanup errors into list, raises ExceptionGroup after all attempted
   expires: '2026-05-02'
-- key: engine/orchestrator/core.py:R4:Orchestrator:_cleanup_plugins:fp=00a7c3bce0b72aca
+- key: engine/orchestrator/core.py:R4:Orchestrator:_cleanup_plugins:fp=1bc906e98ce5e29b
   owner: architecture
   reason: Plugin cleanup must attempt all closures; broad catch collects errors then raises
   safety: Code reviewed - collects all cleanup errors into list, raises ExceptionGroup after all attempted
   expires: '2026-05-02'
-- key: engine/orchestrator/core.py:R6:Orchestrator:_handle_quarantine_row:fp=60ffec009f61ba02
+- key: engine/orchestrator/core.py:R6:Orchestrator:_handle_quarantine_row:fp=821570d6dc26dd67
   owner: bugfix
   reason: Tier-3 boundary — quarantined row data may contain NaN/Infinity that stable_hash rejects
   safety: Falls back to repr_hash with debug logging; audit trail uses separate hashing path

@@ -148,7 +148,7 @@ class AzurePromptShield(BaseAzureSafetyTransform):
         # - Non-list documentsAnalysis would crash or misbehave
         try:
             data = response.json()
-        except Exception as e:
+        except (ValueError, TypeError) as e:
             raise MalformedResponseError(f"Invalid JSON in response: {e}") from e
 
         # Tier 3 boundary: validate top-level response structure first

@@ -73,6 +73,7 @@ from elspeth.contracts.coalesce_checkpoint import (
     CoalescePendingCheckpoint,
     CoalesceTokenCheckpoint,
 )
+from elspeth.contracts.coalesce_enums import CoalescePolicy, MergeStrategy
 from elspeth.contracts.coalesce_metadata import ArrivalOrderEntry, CoalesceMetadata
 
 # =============================================================================
@@ -132,6 +133,7 @@ from elspeth.contracts.data import (
     check_compatibility,
     validate_row,
 )
+from elspeth.contracts.diversion import RowDiversion, SinkWriteResult
 from elspeth.contracts.engine import BufferEntry, PendingOutcome, RetryPolicy
 from elspeth.contracts.enums import (
     BackpressureMode,
@@ -155,10 +157,13 @@ from elspeth.contracts.enums import (
 from elspeth.contracts.errors import (
     BatchPendingError,
     CoalesceFailureReason,
+    CommencementGateFailedError,
     ConfigGateReason,
     # Schema contract violations
     ContractMergeError,
     ContractViolation,
+    DependencyFailedError,
+    DuplicateDocumentError,
     ErrorDetail,
     ExecutionError,
     ExtraFieldViolation,
@@ -168,8 +173,10 @@ from elspeth.contracts.errors import (
     MissingFieldViolation,
     PluginContractViolation,
     QueryFailureDetail,
+    RetrievalNotReadyError,
     RoutingReason,
     RowErrorEntry,
+    SinkDiversionReason,
     SourceQuarantineReason,
     TemplateErrorEntry,
     TransformActionCategory,
@@ -215,6 +222,7 @@ from elspeth.contracts.node_state_context import (
     QueryOrderEntry,
 )
 from elspeth.contracts.payload_store import IntegrityError, PayloadNotFoundError, PayloadStore
+from elspeth.contracts.pipeline_runner import PipelineRunner
 from elspeth.contracts.plugin_context import (
     PluginContext,
     TransformErrorToken,
@@ -226,6 +234,7 @@ from elspeth.contracts.plugin_protocols import (
     SourceProtocol,
     TransformProtocol,
 )
+from elspeth.contracts.probes import CollectionProbe, CollectionReadinessResult
 from elspeth.contracts.results import (
     ArtifactDescriptor,
     ExceptionResult,
@@ -281,10 +290,14 @@ __all__ = [  # Grouped by category for readability
     "Operation",
     # errors
     "BatchPendingError",
+    "CommencementGateFailedError",
+    "DependencyFailedError",
+    "DuplicateDocumentError",
     "FrameworkBugError",
     "GracefulShutdownError",
     "MaxRetriesExceeded",
     "PluginContractViolation",
+    "RetrievalNotReadyError",
     "CoalesceFailureReason",
     "ConfigGateReason",
     "ErrorDetail",
@@ -292,6 +305,7 @@ __all__ = [  # Grouped by category for readability
     "QueryFailureDetail",
     "RoutingReason",
     "RowErrorEntry",
+    "SinkDiversionReason",
     "SourceQuarantineReason",
     "TemplateErrorEntry",
     "TransformActionCategory",
@@ -381,6 +395,9 @@ __all__ = [  # Grouped by category for readability
     "CoalesceTokenCheckpoint",
     "ResumeCheck",
     "ResumePoint",
+    # coalesce enums
+    "CoalescePolicy",
+    "MergeStrategy",
     # coalesce metadata
     "ArrivalOrderEntry",
     "CoalesceMetadata",
@@ -400,6 +417,9 @@ __all__ = [  # Grouped by category for readability
     "NodeID",
     "SinkName",
     "StepResolver",
+    # diversion
+    "RowDiversion",
+    "SinkWriteResult",
     # results (NOTE: AcceptResult deleted in aggregation structural cleanup)
     "ArtifactDescriptor",
     "ExceptionResult",
@@ -487,6 +507,7 @@ __all__ = [  # Grouped by category for readability
     "map_schema_mode",
     "normalize_type_for_contract",
     "PipelineRow",
+    "PipelineRunner",
     "SchemaContract",
     # Schema contracts — audit trail records
     "ContractAuditRecord",
@@ -502,4 +523,7 @@ __all__ = [  # Grouped by category for readability
     "resolve_headers",
     "validate_output_against_contract",
     "violations_to_error_reason",
+    # probes
+    "CollectionProbe",
+    "CollectionReadinessResult",
 ]

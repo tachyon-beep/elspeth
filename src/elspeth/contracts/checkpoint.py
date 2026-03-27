@@ -11,6 +11,7 @@ from dataclasses import dataclass
 from elspeth.contracts.aggregation_checkpoint import AggregationCheckpointState
 from elspeth.contracts.audit import Checkpoint
 from elspeth.contracts.coalesce_checkpoint import CoalesceCheckpointState
+from elspeth.contracts.freeze import require_int
 
 
 @dataclass(frozen=True, slots=True)
@@ -63,10 +64,7 @@ class ResumePoint:
             raise TypeError(f"ResumePoint.node_id must be str, got {type(self.node_id).__name__}: {self.node_id!r}")
         if not self.node_id:
             raise ValueError("ResumePoint.node_id must not be empty")
-        if not isinstance(self.sequence_number, int) or isinstance(self.sequence_number, bool):
-            raise TypeError(f"ResumePoint.sequence_number must be int, got {type(self.sequence_number).__name__}: {self.sequence_number!r}")
-        if self.sequence_number < 0:
-            raise ValueError(f"ResumePoint.sequence_number must be non-negative, got {self.sequence_number}")
+        require_int(self.sequence_number, "ResumePoint.sequence_number", min_value=0)
         if self.aggregation_state is not None and not isinstance(self.aggregation_state, AggregationCheckpointState):
             raise TypeError(
                 f"ResumePoint.aggregation_state must be AggregationCheckpointState or None, got {type(self.aggregation_state).__name__}"

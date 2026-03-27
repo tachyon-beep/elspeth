@@ -344,8 +344,10 @@ class SchemaConfig:
         required_fields = _parse_field_names_list(config.get("required_fields"), "required_fields")
         audit_fields = _parse_field_names_list(config.get("audit_fields"), "audit_fields")
 
-        # Get mode - required for all schemas
-        mode = config.get("mode")
+        # Mode is required for all schemas — crash on absence
+        if "mode" not in config:
+            raise ValueError("'mode' is required for all schema configs (e.g. 'fixed', 'flexible', 'observed')")
+        mode = config["mode"]
 
         # Handle observed schema (mode: observed)
         if mode == "observed":

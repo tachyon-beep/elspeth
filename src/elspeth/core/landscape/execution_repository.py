@@ -6,6 +6,7 @@ Owns thread-safe call index allocation (Lock + per-state and per-operation dicts
 from __future__ import annotations
 
 import json
+from collections.abc import Mapping
 from threading import Lock
 from typing import TYPE_CHECKING, Any, Literal, NamedTuple, overload
 from uuid import uuid4
@@ -130,7 +131,7 @@ class ExecutionRepository:
         node_id: str,
         run_id: str,
         step_index: int,
-        input_data: dict[str, Any],
+        input_data: Mapping[str, object],
         *,
         state_id: str | None = None,
         attempt: int = 0,
@@ -200,7 +201,7 @@ class ExecutionRepository:
         state_id: str,
         status: Literal[NodeStateStatus.PENDING],
         *,
-        output_data: dict[str, Any] | list[dict[str, Any]] | None = None,
+        output_data: Mapping[str, object] | list[Mapping[str, object]] | None = None,
         duration_ms: float | None = None,
         error: ExecutionError | TransformErrorReason | CoalesceFailureReason | None = None,
         context_after: NodeStateContext | None = None,
@@ -212,7 +213,7 @@ class ExecutionRepository:
         state_id: str,
         status: Literal[NodeStateStatus.COMPLETED],
         *,
-        output_data: dict[str, Any] | list[dict[str, Any]] | None = None,
+        output_data: Mapping[str, object] | list[Mapping[str, object]] | None = None,
         duration_ms: float | None = None,
         error: ExecutionError | TransformErrorReason | CoalesceFailureReason | None = None,
         success_reason: TransformSuccessReason | None = None,
@@ -225,7 +226,7 @@ class ExecutionRepository:
         state_id: str,
         status: Literal[NodeStateStatus.FAILED],
         *,
-        output_data: dict[str, Any] | list[dict[str, Any]] | None = None,
+        output_data: Mapping[str, object] | list[Mapping[str, object]] | None = None,
         duration_ms: float | None = None,
         error: ExecutionError | TransformErrorReason | CoalesceFailureReason | None = None,
         context_after: NodeStateContext | None = None,
@@ -236,7 +237,7 @@ class ExecutionRepository:
         state_id: str,
         status: NodeStateStatus,
         *,
-        output_data: dict[str, Any] | list[dict[str, Any]] | None = None,
+        output_data: Mapping[str, object] | list[Mapping[str, object]] | None = None,
         duration_ms: float | None = None,
         error: ExecutionError | TransformErrorReason | CoalesceFailureReason | None = None,
         success_reason: TransformSuccessReason | None = None,
@@ -644,7 +645,7 @@ class ExecutionRepository:
         node_id: str,
         operation_type: Literal["source_load", "sink_write"],
         *,
-        input_data: dict[str, Any] | None = None,
+        input_data: Mapping[str, object] | None = None,
     ) -> Operation:
         """Begin an operation for source/sink I/O.
 
@@ -692,7 +693,7 @@ class ExecutionRepository:
         operation_id: str,
         status: Literal["completed", "failed", "pending"],
         *,
-        output_data: dict[str, Any] | None = None,
+        output_data: Mapping[str, object] | None = None,
         error: str | None = None,
         duration_ms: float | None = None,
     ) -> None:

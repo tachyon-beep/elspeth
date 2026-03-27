@@ -7,6 +7,7 @@ LandscapeDB.connection() usage.
 from __future__ import annotations
 
 import json
+from collections.abc import Mapping
 from typing import TYPE_CHECKING, Any
 
 import structlog
@@ -272,7 +273,7 @@ class DataFlowRepository:
         run_id: str,
         source_node_id: str,
         row_index: int,
-        data: dict[str, Any],
+        data: Mapping[str, object],
         *,
         row_id: str | None = None,
         quarantined: bool = False,
@@ -332,7 +333,7 @@ class DataFlowRepository:
                         "Quarantined row data not canonically serializable (using repr fallback for payload): %s",
                         type(data).__name__,
                     )
-                    payload_bytes = json.dumps({"_repr": repr(data)}).encode("utf-8")
+                    payload_bytes = json.dumps({"_repr": repr(data)}, allow_nan=False).encode("utf-8")
             else:
                 payload_bytes = canonical_json(data).encode("utf-8")
             final_payload_ref = self._payload_store.store(payload_bytes)
@@ -523,7 +524,7 @@ class DataFlowRepository:
                     is_terminal=1,
                     recorded_at=now(),
                     fork_group_id=fork_group_id,
-                    expected_branches_json=json.dumps(branches),
+                    expected_branches_json=json.dumps(branches, allow_nan=False),
                 )
             )
             if result.rowcount == 0:
@@ -736,7 +737,7 @@ class DataFlowRepository:
                         recorded_at=now(),
                         expand_group_id=expand_group_id,
                         # Store expected count for recovery validation
-                        expected_branches_json=json.dumps({"count": count}),
+                        expected_branches_json=json.dumps({"count": count}, allow_nan=False),
                     )
                 )
                 if result.rowcount == 0:
@@ -758,7 +759,7 @@ class DataFlowRepository:
         join_group_id: str | None = None,
         expand_group_id: str | None = None,
         error_hash: str | None = None,
-        context: dict[str, Any] | None = None,
+        context: Mapping[str, object] | None = None,
     ) -> str:
         """Record a token's outcome in the audit trail.
 
@@ -906,7 +907,7 @@ class DataFlowRepository:
         plugin_name: str,
         node_type: NodeType,
         plugin_version: str,
-        config: dict[str, Any],
+        config: Mapping[str, object],
         *,
         node_id: str | None = None,
         sequence: int | None = None,
@@ -1295,7 +1296,7 @@ class DataFlowRepository:
             row_hash = repr_hash(row_data)
             # Store non-canonical representation with type metadata
             metadata = NonCanonicalMetadata.from_error(row_data, e)
-            row_data_json = json.dumps(metadata.to_dict())
+            row_data_json = json.dumps(metadata.to_dict(), allow_nan=False)
 
         # Extract contract violation details if provided
         violation_type: str | None = None
@@ -1338,7 +1339,7 @@ class DataFlowRepository:
         run_id: str,
         token_id: str,
         transform_id: str,
-        row_data: dict[str, Any] | PipelineRow,
+        row_data: Mapping[str, object] | PipelineRow,
         error_details: TransformErrorReason,
         destination: str,
     ) -> str:
@@ -1385,7 +1386,8 @@ class DataFlowRepository:
                     "__non_canonical__": True,
                     "repr": repr(error_details)[:500],
                     "serialization_error": str(e),
-                }
+                },
+                allow_nan=False,
             )
 
         # row_data may contain NaN/Infinity (valid floats that passed source
@@ -1402,7 +1404,7 @@ class DataFlowRepository:
             )
             row_hash = repr_hash(row_data)
             metadata = NonCanonicalMetadata.from_error(row_data, e)
-            row_data_json = json.dumps(metadata.to_dict())
+            row_data_json = json.dumps(metadata.to_dict(), allow_nan=False)
 
         self._ops.execute_insert(
             transform_errors_table.insert().values(

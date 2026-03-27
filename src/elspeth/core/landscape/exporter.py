@@ -30,6 +30,24 @@ from elspeth.contracts import (
     TokenParent,
 )
 from elspeth.contracts.errors import AuditIntegrityError
+from elspeth.contracts.export_records import (
+    ArtifactExportRecord,
+    BatchExportRecord,
+    BatchMemberExportRecord,
+    CallExportRecord,
+    EdgeExportRecord,
+    ExportRecord,
+    NodeExportRecord,
+    NodeStateExportRecord,
+    OperationExportRecord,
+    RoutingEventExportRecord,
+    RowExportRecord,
+    RunExportRecord,
+    SecretResolutionExportRecord,
+    TokenExportRecord,
+    TokenOutcomeExportRecord,
+    TokenParentExportRecord,
+)
 from elspeth.contracts.freeze import deep_thaw
 from elspeth.core.canonical import canonical_json
 from elspeth.core.landscape.database import LandscapeDB
@@ -151,7 +169,9 @@ class LandscapeExporter:
         running_hash = hashlib.sha256()
         record_count = 0
 
-        for record in self._iter_records(run_id):
+        for typed_record in self._iter_records(run_id):
+            # Widen to dict[str, Any] — export_run may add "signature" key
+            record: dict[str, Any] = typed_record  # type: ignore[assignment]
             if sign:
                 record["signature"] = self._sign_record(record)
                 # Update running hash with signed record
@@ -174,7 +194,7 @@ class LandscapeExporter:
             manifest["signature"] = self._sign_record(manifest)
             yield manifest
 
-    def _iter_records(self, run_id: str) -> Iterator[dict[str, Any]]:
+    def _iter_records(self, run_id: str) -> Iterator[ExportRecord]:
         """Internal: iterate over raw records (no signing).
 
         Bug 76r fix: Uses batch queries to pre-load all data, avoiding N+1 pattern.
@@ -195,7 +215,7 @@ class LandscapeExporter:
         if run is None:
             raise ValueError(f"Run not found: {run_id}")
 
-        yield {
+        run_record: RunExportRecord = {
             "record_type": "run",
             "run_id": run.run_id,
             "status": run.status.value,
@@ -207,10 +227,11 @@ class LandscapeExporter:
             "settings": self._parse_tier1_json(run.settings_json, "settings_json", f"run {run_id}"),
             "reproducibility_grade": run.reproducibility_grade.value if run.reproducibility_grade is not None else None,
         }
+        yield run_record
 
         # Secret resolutions (run-level provenance for Key Vault secrets)
         for resolution in self._recorder.get_secret_resolutions_for_run(run_id):
-            yield {
+            secret_record: SecretResolutionExportRecord = {
                 "record_type": "secret_resolution",
                 "run_id": run_id,
                 "resolution_id": resolution.resolution_id,
@@ -222,10 +243,11 @@ class LandscapeExporter:
                 "fingerprint": resolution.fingerprint,
                 "resolution_latency_ms": resolution.resolution_latency_ms,
             }
+            yield secret_record
 
         # Nodes
         for node in self._recorder.get_nodes(run_id):
-            yield {
+            node_record: NodeExportRecord = {
                 "record_type": "node",
                 "run_id": run_id,
                 "node_id": node.node_id,
@@ -241,10 +263,11 @@ class LandscapeExporter:
                 "schema_fields": deep_thaw(node.schema_fields) if node.schema_fields is not None else None,
                 "sequence_in_pipeline": node.sequence_in_pipeline,
             }
+            yield node_record
 
         # Edges
         for edge in self._recorder.get_edges(run_id):
-            yield {
+            edge_record: EdgeExportRecord = {
                 "record_type": "edge",
                 "run_id": run_id,
                 "edge_id": edge.edge_id,
@@ -253,6 +276,7 @@ class LandscapeExporter:
                 "label": edge.label,
                 "default_mode": edge.default_mode.value,
             }
+            yield edge_record
 
         # Operations (source loads, sink writes)
         all_operations = self._recorder.get_operations_for_run(run_id)
@@ -265,7 +289,7 @@ class LandscapeExporter:
                 op_calls_by_operation[call.operation_id].append(call)
 
         for operation in all_operations:
-            yield {
+            operation_record: OperationExportRecord = {
                 "record_type": "operation",
                 "run_id": run_id,
                 "operation_id": operation.operation_id,
@@ -281,10 +305,11 @@ class LandscapeExporter:
                 "output_data_ref": operation.output_data_ref,
                 "output_data_hash": operation.output_data_hash,
             }
+            yield operation_record
 
             # External calls for this operation (from pre-loaded dict)
             for call in op_calls_by_operation.get(operation.operation_id, []):
-                yield {
+                op_call_record: CallExportRecord = {
                     "record_type": "call",
                     "run_id": run_id,
                     "call_id": call.call_id,
@@ -301,6 +326,7 @@ class LandscapeExporter:
                     "error_json": call.error_json,
                     "created_at": call.created_at.isoformat() if call.created_at else None,
                 }
+                yield op_call_record
 
         # === Bug 76r fix: Pre-load all row-related data with batch queries ===
         # This replaces the N+1 pattern where nested loops issued per-entity queries.
@@ -345,7 +371,7 @@ class LandscapeExporter:
 
         # Now iterate through rows using pre-loaded data (no more per-entity queries)
         for row in self._recorder.get_rows(run_id):
-            yield {
+            row_record: RowExportRecord = {
                 "record_type": "row",
                 "run_id": run_id,
                 "row_id": row.row_id,
@@ -353,10 +379,11 @@ class LandscapeExporter:
                 "source_node_id": row.source_node_id,
                 "source_data_hash": row.source_data_hash,
             }
+            yield row_record
 
             # Tokens for this row (from pre-loaded dict)
             for token in tokens_by_row.get(row.row_id, []):
-                yield {
+                token_record: TokenExportRecord = {
                     "record_type": "token",
                     "run_id": run_id,
                     "token_id": token.token_id,
@@ -367,20 +394,22 @@ class LandscapeExporter:
                     "join_group_id": token.join_group_id,
                     "expand_group_id": token.expand_group_id,
                 }
+                yield token_record
 
                 # Token parents (from pre-loaded dict)
                 for parent in parents_by_token.get(token.token_id, []):
-                    yield {
+                    token_parent_record: TokenParentExportRecord = {
                         "record_type": "token_parent",
                         "run_id": run_id,
                         "token_id": parent.token_id,
                         "parent_token_id": parent.parent_token_id,
                         "ordinal": parent.ordinal,
                     }
+                    yield token_parent_record
 
                 # Token outcomes (from pre-loaded dict)
                 for outcome in outcomes_by_token.get(token.token_id, []):
-                    yield {
+                    token_outcome_record: TokenOutcomeExportRecord = {
                         "record_type": "token_outcome",
                         "run_id": run_id,
                         "outcome_id": outcome.outcome_id,
@@ -397,12 +426,14 @@ class LandscapeExporter:
                         "context_json": outcome.context_json,
                         "expected_branches_json": outcome.expected_branches_json,
                     }
+                    yield token_outcome_record
 
                 # Node states for this token (from pre-loaded dict)
                 for state in states_by_token.get(token.token_id, []):
                     # Handle discriminated union types
+                    node_state_record: NodeStateExportRecord
                     if isinstance(state, NodeStateOpen):
-                        yield {
+                        node_state_record = {
                             "record_type": "node_state",
                             "run_id": run_id,
                             "state_id": state.state_id,
@@ -422,7 +453,7 @@ class LandscapeExporter:
                             "success_reason_json": None,  # OPEN states aren't completed
                         }
                     elif isinstance(state, NodeStatePending):
-                        yield {
+                        node_state_record = {
                             "record_type": "node_state",
                             "run_id": run_id,
                             "state_id": state.state_id,
@@ -442,7 +473,7 @@ class LandscapeExporter:
                             "success_reason_json": None,  # PENDING states aren't completed yet
                         }
                     elif isinstance(state, NodeStateCompleted):
-                        yield {
+                        node_state_record = {
                             "record_type": "node_state",
                             "run_id": run_id,
                             "state_id": state.state_id,
@@ -462,7 +493,7 @@ class LandscapeExporter:
                             "success_reason_json": state.success_reason_json,
                         }
                     else:  # NodeStateFailed
-                        yield {
+                        node_state_record = {
                             "record_type": "node_state",
                             "run_id": run_id,
                             "state_id": state.state_id,
@@ -481,10 +512,11 @@ class LandscapeExporter:
                             "error_json": state.error_json,
                             "success_reason_json": None,  # FAILED states aren't completed
                         }
+                    yield node_state_record
 
                     # Routing events for this state (from pre-loaded dict)
                     for event in events_by_state.get(state.state_id, []):
-                        yield {
+                        routing_event_record: RoutingEventExportRecord = {
                             "record_type": "routing_event",
                             "run_id": run_id,
                             "event_id": event.event_id,
@@ -497,10 +529,11 @@ class LandscapeExporter:
                             "reason_ref": event.reason_ref,
                             "created_at": event.created_at.isoformat() if event.created_at else None,
                         }
+                        yield routing_event_record
 
                     # External calls for this state (from pre-loaded dict)
                     for call in calls_by_state.get(state.state_id, []):
-                        yield {
+                        state_call_record: CallExportRecord = {
                             "record_type": "call",
                             "run_id": run_id,
                             "call_id": call.call_id,
@@ -518,6 +551,7 @@ class LandscapeExporter:
                             "error_json": call.error_json,
                             "created_at": call.created_at.isoformat() if call.created_at else None,
                         }
+                        yield state_call_record
 
         # Batches
         all_batches = self._recorder.get_batches(run_id)
@@ -529,32 +563,34 @@ class LandscapeExporter:
             members_by_batch[member.batch_id].append(member)
 
         for batch in all_batches:
-            yield {
+            batch_record: BatchExportRecord = {
                 "record_type": "batch",
                 "run_id": run_id,
                 "batch_id": batch.batch_id,
                 "aggregation_node_id": batch.aggregation_node_id,
                 "attempt": batch.attempt,
                 "status": batch.status.value,
-                "trigger_type": batch.trigger_type,
+                "trigger_type": batch.trigger_type.value if batch.trigger_type is not None else None,
                 "trigger_reason": batch.trigger_reason,
                 "created_at": (batch.created_at.isoformat() if batch.created_at else None),
                 "completed_at": (batch.completed_at.isoformat() if batch.completed_at else None),
             }
+            yield batch_record
 
             # Batch members (from pre-loaded dict)
             for member in members_by_batch.get(batch.batch_id, []):
-                yield {
+                batch_member_record: BatchMemberExportRecord = {
                     "record_type": "batch_member",
                     "run_id": run_id,
                     "batch_id": member.batch_id,
                     "token_id": member.token_id,
                     "ordinal": member.ordinal,
                 }
+                yield batch_member_record
 
         # Artifacts
         for artifact in self._recorder.get_artifacts(run_id):
-            yield {
+            artifact_record: ArtifactExportRecord = {
                 "record_type": "artifact",
                 "run_id": run_id,
                 "artifact_id": artifact.artifact_id,
@@ -565,6 +601,7 @@ class LandscapeExporter:
                 "content_hash": artifact.content_hash,
                 "size_bytes": artifact.size_bytes,
             }
+            yield artifact_record
 
     def export_run_grouped(
         self,

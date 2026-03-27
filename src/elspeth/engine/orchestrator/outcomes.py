@@ -109,6 +109,12 @@ def accumulate_row_outcomes(
             counters.rows_failed += 1
         elif result.outcome == RowOutcome.QUARANTINED:
             counters.rows_quarantined += 1
+        elif result.outcome == RowOutcome.DIVERTED:
+            raise OrchestrationInvariantError(
+                f"DIVERTED outcome should not appear in processing results — "
+                f"diversions are counted in SinkExecutor, not the processing loop. "
+                f"Token: {result.token}"
+            )
         elif result.outcome == RowOutcome.FORKED:
             counters.rows_forked += 1
             # Children are counted separately when they reach terminal state

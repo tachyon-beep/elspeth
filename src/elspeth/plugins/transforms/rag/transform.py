@@ -18,7 +18,7 @@ from typing import TYPE_CHECKING, Any, cast
 import structlog
 
 from elspeth.contracts import Determinism, TransformResult, propagate_contract
-from elspeth.contracts.errors import TransformErrorReason
+from elspeth.contracts.errors import RetrievalNotReadyError, TransformErrorReason
 from elspeth.contracts.schema_contract import PipelineRow
 from elspeth.plugins.infrastructure.base import BaseTransform
 from elspeth.plugins.infrastructure.clients.retrieval.base import RetrievalError
@@ -128,6 +128,31 @@ class RAGRetrievalTransform(BaseTransform):
             telemetry_emit=ctx.telemetry_emit,
             limiter=(ctx.rate_limit_registry.get_limiter(provider_name) if ctx.rate_limit_registry is not None else None),
         )
+
+        # Readiness check — refuse to start against empty/missing collection.
+        # Two distinct failure modes: unreachable (infra problem) and empty
+        # (operator error). Both crash startup, but the message distinguishes them.
+        readiness = self._provider.check_readiness()
+
+        # Record first — the readiness result is an auditable fact regardless of outcome.
+        # "If it's not recorded, it didn't happen" — an auditor can query
+        # what the collection state was when this pipeline started, including failures.
+        if ctx.landscape is not None:
+            ctx.landscape.record_readiness_check(
+                run_id=ctx.run_id,
+                name=self.name,
+                collection=readiness.collection,
+                reachable=readiness.reachable,
+                count=readiness.count,
+                message=readiness.message,
+            )
+
+        # Then guard on the result
+        if not readiness.reachable or readiness.count <= 0:
+            raise RetrievalNotReadyError(
+                collection=readiness.collection,
+                reason=readiness.message,
+            )
 
     def process(self, row: PipelineRow, ctx: TransformContext) -> TransformResult:
         """Process a single row: build query, search, format, attach."""

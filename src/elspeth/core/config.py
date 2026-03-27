@@ -16,6 +16,7 @@ from pydantic import BaseModel, Field, field_validator, model_validator
 
 from elspeth.contracts.enums import OutputMode, RunMode
 from elspeth.contracts.security import SecretFingerprintError as SecretFingerprintError
+from elspeth.core.dependency_config import CollectionProbeConfig, CommencementGateConfig, DependencyConfig
 
 # Reserved edge labels that cannot be used as user-defined routing names.
 # "continue" is used for sequential edges, "fork" is a gate-only routing action,
@@ -196,7 +197,7 @@ class SecretsConfig(BaseModel):
         # Validate URL format
         try:
             parsed = urlparse(v)
-        except Exception as e:
+        except (ValueError, TypeError) as e:
             raise ValueError(f"Invalid URL: {v}") from e
 
         if not parsed.scheme or not parsed.netloc:
@@ -922,6 +923,25 @@ class SinkSettings(BaseModel):
         default_factory=dict,
         description="Plugin-specific configuration options",
     )
+    on_write_failure: str = Field(
+        ...,  # Required — no default
+        description=(
+            "Per-row write failure handling. Required — pipeline author must decide: "
+            "'discard' to drop with audit record, or a sink name to divert to failsink "
+            "(must be csv, json, or xml plugin)."
+        ),
+    )
+
+    @field_validator("on_write_failure")
+    @classmethod
+    def validate_on_write_failure(cls, v: str) -> str:
+        """Ensure on_write_failure is not empty."""
+        if not v or not v.strip():
+            raise ValueError("on_write_failure must be a sink name or 'discard'")
+        value = v.strip()
+        if value == "discard":
+            return value
+        return _validate_connection_or_sink_name(value, field_label="Sink on_write_failure sink name")
 
 
 class LandscapeExportSettings(BaseModel):
@@ -1263,6 +1283,27 @@ class ElspethSettings(BaseModel):
         default_factory=list,
         max_length=100,
         description="Engine-level gates for config-driven routing (evaluated by ExpressionParser)",
+    )
+
+    # Optional - pipeline dependencies (run before this pipeline)
+    depends_on: list[DependencyConfig] = Field(
+        default_factory=list,
+        max_length=20,
+        description="Pipeline dependencies — run these before the main pipeline",
+    )
+
+    # Optional - commencement gates (go/no-go conditions before pipeline starts)
+    commencement_gates: list[CommencementGateConfig] = Field(
+        default_factory=list,
+        max_length=20,
+        description="Go/no-go conditions evaluated after dependencies complete",
+    )
+
+    # Optional - collection probes (vector store readiness checks for gate context)
+    collection_probes: list[CollectionProbeConfig] = Field(
+        default_factory=list,
+        max_length=20,
+        description="Vector store collections to probe for gate context",
     )
 
     # Optional - coalesce configuration (for merging fork paths)

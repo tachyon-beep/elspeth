@@ -56,6 +56,7 @@ class TestLandscapeExport:
             "sinks": {
                 "output": {
                     "plugin": "json",
+                    "on_write_failure": "discard",
                     "options": {
                         "path": str(output_csv.with_suffix(".json")),
                         "schema": {"mode": "observed"},
@@ -64,6 +65,7 @@ class TestLandscapeExport:
                 },
                 "audit_export": {
                     "plugin": "json",
+                    "on_write_failure": "discard",
                     "options": {
                         "path": str(audit_json),
                         "schema": {"mode": "observed"},
@@ -177,6 +179,7 @@ class TestLandscapeExport:
             "sinks": {
                 "output": {
                     "plugin": "json",
+                    "on_write_failure": "discard",
                     "options": {
                         "path": str(output_csv.with_suffix(".json")),
                         "schema": {"mode": "observed"},
@@ -326,6 +329,7 @@ class TestSignedExportDeterminism:
             "sinks": {
                 "output": {
                     "plugin": "json",
+                    "on_write_failure": "discard",
                     "options": {
                         "path": str(output_csv.with_suffix(".json")),
                         "schema": {"mode": "observed"},
@@ -334,6 +338,7 @@ class TestSignedExportDeterminism:
                 },
                 "audit_export": {
                     "plugin": "json",
+                    "on_write_failure": "discard",
                     "options": {
                         "path": str(audit_json),
                         "schema": {"mode": "observed"},
@@ -399,6 +404,7 @@ class TestSignedExportDeterminism:
                 "sinks": {
                     "output": {
                         "plugin": "json",
+                        "on_write_failure": "discard",
                         "options": {
                             "path": str(output_csv.with_suffix(".json")),
                             "schema": {"mode": "observed"},
@@ -407,6 +413,7 @@ class TestSignedExportDeterminism:
                     },
                     "audit_export": {
                         "plugin": "json",
+                        "on_write_failure": "discard",
                         "options": {
                             "path": str(audit_json),
                             "schema": {"mode": "observed"},

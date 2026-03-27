@@ -17,6 +17,7 @@ class TestPluginSystemIntegration:
         """Test source -> transform -> sink workflow."""
         from elspeth.contracts import ArtifactDescriptor, PluginSchema, SourceRow
         from elspeth.contracts.contexts import SinkContext, SourceContext, TransformContext
+        from elspeth.contracts.diversion import SinkWriteResult
         from elspeth.contracts.schema_contract import SchemaContract
         from elspeth.plugins.infrastructure.base import BaseSink, BaseSource, BaseTransform
         from elspeth.plugins.infrastructure.hookspecs import hookimpl
@@ -71,9 +72,9 @@ class TestPluginSystemIntegration:
             input_schema = EnrichedSchema
             collected: ClassVar[list[dict[str, Any]]] = []
 
-            def write(self, rows: list[dict[str, Any]], ctx: SinkContext) -> ArtifactDescriptor:
+            def write(self, rows: list[dict[str, Any]], ctx: SinkContext) -> SinkWriteResult:
                 MemorySink.collected.extend(rows)
-                return ArtifactDescriptor.for_file(path="memory://collected", content_hash="test", size_bytes=0)
+                return SinkWriteResult(artifact=ArtifactDescriptor.for_file(path="memory://collected", content_hash="test", size_bytes=0))
 
             def flush(self) -> None:
                 pass

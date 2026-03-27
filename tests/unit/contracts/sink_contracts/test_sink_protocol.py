@@ -115,7 +115,7 @@ class SinkContractTestBase(ABC):
     ) -> None:
         """Contract: write() MUST return ArtifactDescriptor."""
         result = sink.write(sample_rows, ctx)
-        assert isinstance(result, ArtifactDescriptor), f"write() returned {type(result).__name__}, expected ArtifactDescriptor"
+        assert isinstance(result.artifact, ArtifactDescriptor), f"write() returned {type(result).__name__}, expected ArtifactDescriptor"
 
     def test_artifact_has_content_hash(
         self,
@@ -126,8 +126,8 @@ class SinkContractTestBase(ABC):
         """Contract: ArtifactDescriptor MUST have content_hash (audit integrity!)."""
         result = sink.write(sample_rows, ctx)
 
-        assert result.content_hash is not None, "ArtifactDescriptor.content_hash is None - REQUIRED for audit integrity"
-        assert isinstance(result.content_hash, str)
+        assert result.artifact.content_hash is not None, "ArtifactDescriptor.content_hash is None - REQUIRED for audit integrity"
+        assert isinstance(result.artifact.content_hash, str)
 
     def test_content_hash_is_sha256_hex(
         self,
@@ -138,8 +138,12 @@ class SinkContractTestBase(ABC):
         """Contract: content_hash MUST be a valid SHA-256 hex string (64 chars)."""
         result = sink.write(sample_rows, ctx)
 
-        assert len(result.content_hash) == 64, f"content_hash has {len(result.content_hash)} chars, expected 64 for SHA-256"
-        assert all(c in "0123456789abcdef" for c in result.content_hash), f"content_hash contains invalid hex chars: {result.content_hash}"
+        assert len(result.artifact.content_hash) == 64, (
+            f"content_hash has {len(result.artifact.content_hash)} chars, expected 64 for SHA-256"
+        )
+        assert all(c in "0123456789abcdef" for c in result.artifact.content_hash), (
+            f"content_hash contains invalid hex chars: {result.artifact.content_hash}"
+        )
 
     def test_artifact_has_size_bytes(
         self,
@@ -150,9 +154,9 @@ class SinkContractTestBase(ABC):
         """Contract: ArtifactDescriptor MUST have size_bytes."""
         result = sink.write(sample_rows, ctx)
 
-        assert result.size_bytes is not None, "ArtifactDescriptor.size_bytes is None - REQUIRED for verification"
-        assert isinstance(result.size_bytes, int)
-        assert result.size_bytes >= 0
+        assert result.artifact.size_bytes is not None, "ArtifactDescriptor.size_bytes is None - REQUIRED for verification"
+        assert isinstance(result.artifact.size_bytes, int)
+        assert result.artifact.size_bytes >= 0
 
     def test_artifact_has_artifact_type(
         self,
@@ -163,8 +167,8 @@ class SinkContractTestBase(ABC):
         """Contract: ArtifactDescriptor MUST have artifact_type."""
         result = sink.write(sample_rows, ctx)
 
-        assert result.artifact_type is not None
-        assert result.artifact_type in ("file", "database", "webhook")
+        assert result.artifact.artifact_type is not None
+        assert result.artifact.artifact_type in ("file", "database", "webhook")
 
     def test_artifact_has_path_or_uri(
         self,
@@ -175,9 +179,9 @@ class SinkContractTestBase(ABC):
         """Contract: ArtifactDescriptor MUST have path_or_uri."""
         result = sink.write(sample_rows, ctx)
 
-        assert result.path_or_uri is not None
-        assert isinstance(result.path_or_uri, str)
-        assert len(result.path_or_uri) > 0
+        assert result.artifact.path_or_uri is not None
+        assert isinstance(result.artifact.path_or_uri, str)
+        assert len(result.artifact.path_or_uri) > 0
 
     # =========================================================================
     # Empty Batch Contracts
@@ -191,10 +195,10 @@ class SinkContractTestBase(ABC):
         """Contract: write([]) MUST return a valid ArtifactDescriptor."""
         result = sink.write([], ctx)
 
-        assert isinstance(result, ArtifactDescriptor)
-        assert result.content_hash is not None
-        assert result.size_bytes is not None
-        assert result.size_bytes >= 0
+        assert isinstance(result.artifact, ArtifactDescriptor)
+        assert result.artifact.content_hash is not None
+        assert result.artifact.size_bytes is not None
+        assert result.artifact.size_bytes >= 0
 
     # =========================================================================
     # Lifecycle Contracts
@@ -267,12 +271,12 @@ class SinkDeterminismContractTestBase(SinkContractTestBase):
         """
         first_sink = sink_factory()
         first_result = first_sink.write(sample_rows, ctx)
-        first_hash = first_result.content_hash
+        first_hash = first_result.artifact.content_hash
         first_sink.close()
 
         second_sink = sink_factory()
         second_result = second_sink.write(sample_rows, ctx)
-        second_hash = second_result.content_hash
+        second_hash = second_result.artifact.content_hash
         second_sink.close()
 
         assert first_hash == second_hash, (
@@ -292,7 +296,7 @@ class SinkDeterminismContractTestBase(SinkContractTestBase):
         """
         first_sink = sink_factory()
         first_result = first_sink.write(sample_rows, ctx)
-        first_hash = first_result.content_hash
+        first_hash = first_result.artifact.content_hash
         first_sink.close()
 
         modified_rows = [row.copy() for row in sample_rows]
@@ -302,7 +306,7 @@ class SinkDeterminismContractTestBase(SinkContractTestBase):
 
         second_sink = sink_factory()
         second_result = second_sink.write(modified_rows, ctx)
-        second_hash = second_result.content_hash
+        second_hash = second_result.artifact.content_hash
         second_sink.close()
 
         assert first_hash != second_hash, f"Different data produced same hash - hash not computed from content! hash={first_hash}"

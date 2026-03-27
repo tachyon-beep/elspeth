@@ -384,3 +384,16 @@ class TestRuntimeRetryValidation:
                 jitter=1.0,
                 exponential_base=1.0,
             )
+
+    def test_max_attempts_rejects_bool(self) -> None:
+        """max_attempts=True should raise TypeError — bool is not int."""
+        from elspeth.contracts.config.runtime import RuntimeRetryConfig
+
+        with pytest.raises(TypeError, match="max_attempts must be int"):
+            RuntimeRetryConfig(
+                max_attempts=True,  # type: ignore[arg-type]  # Intentional: testing bool rejection
+                base_delay=1.0,
+                max_delay=60.0,
+                jitter=1.0,
+                exponential_base=2.0,
+            )

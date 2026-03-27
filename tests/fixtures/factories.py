@@ -17,6 +17,7 @@ from typing import TYPE_CHECKING, Any, Literal
 from unittest.mock import Mock
 from uuid import uuid4
 
+from elspeth.contracts.coalesce_enums import CoalescePolicy, MergeStrategy
 from elspeth.contracts.coalesce_metadata import CoalesceMetadata
 from elspeth.contracts.node_state_context import (
     PoolConfigSnapshot,
@@ -398,8 +399,8 @@ def make_run_record(
 
 def make_coalesce_metadata(
     *,
-    policy: str = "manual",
-    merge_strategy: str = "union",
+    policy: CoalescePolicy = CoalescePolicy.REQUIRE_ALL,
+    merge_strategy: MergeStrategy = MergeStrategy.UNION,
     expected_branches: list[str] | None = None,
     branches_arrived: list[str] | None = None,
     wait_duration_ms: float = 150.0,

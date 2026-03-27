@@ -75,17 +75,24 @@ class DatadogExporter:
 
         Args:
             config: Exporter-specific configuration dict containing:
-                - service_name (optional): Service name for APM (default: "elspeth")
-                - env (optional): Environment tag (default: "production")
-                - agent_host (optional): Agent hostname (default: "localhost")
-                - agent_port (optional): Agent port (default: 8126)
+                - service_name (required): Service name for APM
+                - env (required): Environment tag (e.g. "production", "staging")
+                - agent_host (required): Datadog Agent hostname
+                - agent_port (required): Datadog Agent port
                 - version (optional): Service version tag
 
         Raises:
             TelemetryExporterError: If ddtrace is not installed or config types are wrong
         """
-        # Validate and extract service_name
-        service_name = config.get("service_name", "elspeth")
+        # Validate and extract service_name (required — distinguishes this
+        # pipeline in APM; "elspeth" is not a useful default for orgs running
+        # multiple instances)
+        if "service_name" not in config:
+            raise TelemetryExporterError(
+                self._name,
+                "Datadog exporter requires 'service_name' in config",
+            )
+        service_name = config["service_name"]
         if not isinstance(service_name, str):
             raise TelemetryExporterError(
                 self._name,
@@ -93,8 +100,14 @@ class DatadogExporter:
             )
         self._service_name = service_name
 
-        # Validate and extract env
-        env = config.get("env", "production")
+        # Validate and extract env (required — defaulting to "production"
+        # risks dev traces polluting the production telemetry namespace)
+        if "env" not in config:
+            raise TelemetryExporterError(
+                self._name,
+                "Datadog exporter requires 'env' in config (e.g. 'production', 'staging', 'development')",
+            )
+        env = config["env"]
         if not isinstance(env, str):
             raise TelemetryExporterError(
                 self._name,
@@ -121,16 +134,27 @@ class DatadogExporter:
                 "Configure a local Datadog Agent and use agent_host/agent_port instead.",
             )
 
-        # Validate and extract agent_host
-        agent_host = config.get("agent_host", "localhost")
+        # Validate and extract agent_host (required — infrastructure addressing;
+        # guessing "localhost" silently sends traces to the wrong destination)
+        if "agent_host" not in config:
+            raise TelemetryExporterError(
+                self._name,
+                "Datadog exporter requires 'agent_host' in config",
+            )
+        agent_host = config["agent_host"]
         if not isinstance(agent_host, str):
             raise TelemetryExporterError(
                 self._name,
                 f"'agent_host' must be a string, got {type(agent_host).__name__}",
             )
 
-        # Validate agent_port type and value
-        agent_port = config.get("agent_port", 8126)
+        # Validate agent_port type and value (required — infrastructure addressing)
+        if "agent_port" not in config:
+            raise TelemetryExporterError(
+                self._name,
+                "Datadog exporter requires 'agent_port' in config",
+            )
+        agent_port = config["agent_port"]
         if not isinstance(agent_port, int):
             raise TelemetryExporterError(
                 self._name,

@@ -44,6 +44,7 @@ class TestCLIIntegration:
                 # "default" is required - Orchestrator routes completed rows here
                 "default": {
                     "plugin": "json",
+                    "on_write_failure": "discard",
                     "options": {
                         "path": str(tmp_path / "output.json"),
                         "schema": {"mode": "observed"},
@@ -160,6 +161,7 @@ class TestSourceQuarantineRouting:
             "sinks": {
                 "default": {
                     "plugin": "json",
+                    "on_write_failure": "discard",
                     "options": {
                         "path": str(tmp_path / "output.json"),
                         "schema": {"mode": "observed"},
@@ -167,6 +169,7 @@ class TestSourceQuarantineRouting:
                 },
                 "quarantine": {
                     "plugin": "json",
+                    "on_write_failure": "discard",
                     "options": {
                         "path": str(tmp_path / "quarantine.json"),
                         "schema": {"mode": "observed"},
@@ -224,6 +227,7 @@ class TestSourceQuarantineRouting:
             "sinks": {
                 "default": {
                     "plugin": "json",
+                    "on_write_failure": "discard",
                     "options": {
                         "path": str(tmp_path / "output.json"),
                         "schema": {"mode": "observed"},
@@ -281,6 +285,7 @@ class TestTransformErrorSinkRouting:
             "sinks": {
                 "default": {
                     "plugin": "json",
+                    "on_write_failure": "discard",
                     "options": {
                         "path": str(tmp_path / "output.json"),
                         "schema": {"mode": "observed"},
@@ -288,12 +293,14 @@ class TestTransformErrorSinkRouting:
                 },
                 "errors": {
                     "plugin": "json",
+                    "on_write_failure": "discard",
                     "options": {
                         "path": str(tmp_path / "errors.json"),
                         "schema": {"mode": "observed"},
                     },
                 },
             },
+            "landscape": {"url": f"sqlite:///{tmp_path / 'landscape.db'}"},
         }
 
         config_path = tmp_path / "settings.yaml"

@@ -18,6 +18,7 @@ from typing import IO, TYPE_CHECKING, Any, Literal
 from pydantic import field_validator
 
 from elspeth.contracts import ArtifactDescriptor, PluginSchema
+from elspeth.contracts.diversion import SinkWriteResult
 
 if TYPE_CHECKING:
     from elspeth.contracts.sink import OutputValidationResult
@@ -238,7 +239,7 @@ class CSVSink(BaseSink):
         # Incremental hasher — avoids O(N²) full-file re-reads in append mode
         self._hasher: hashlib._Hash | None = None
 
-    def write(self, rows: list[dict[str, Any]], ctx: SinkContext) -> ArtifactDescriptor:
+    def write(self, rows: list[dict[str, Any]], ctx: SinkContext) -> SinkWriteResult:
         """Write a batch of rows to the CSV file.
 
         Args:
@@ -254,10 +255,12 @@ class CSVSink(BaseSink):
         """
         if not rows:
             # Empty batch - return descriptor for empty content
-            return ArtifactDescriptor.for_file(
-                path=str(self._path),
-                content_hash=hashlib.sha256(b"").hexdigest(),
-                size_bytes=0,
+            return SinkWriteResult(
+                artifact=ArtifactDescriptor.for_file(
+                    path=str(self._path),
+                    content_hash=hashlib.sha256(b"").hexdigest(),
+                    size_bytes=0,
+                )
             )
 
         # Lazy resolution of contract from context for headers: original mode
@@ -320,10 +323,12 @@ class CSVSink(BaseSink):
         content_hash = self._hasher.hexdigest()
         size_bytes = self._path.stat().st_size
 
-        return ArtifactDescriptor.for_file(
-            path=str(self._path),
-            content_hash=content_hash,
-            size_bytes=size_bytes,
+        return SinkWriteResult(
+            artifact=ArtifactDescriptor.for_file(
+                path=str(self._path),
+                content_hash=content_hash,
+                size_bytes=size_bytes,
+            )
         )
 
     def _open_file(self, rows: list[dict[str, Any]]) -> None:

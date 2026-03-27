@@ -201,3 +201,27 @@ class TestRuntimeCheckpointValidation:
                 checkpoint_interval=None,
                 aggregation_boundaries=True,
             )
+
+    def test_frequency_rejects_bool(self) -> None:
+        """frequency=True should raise TypeError — bool is not int."""
+        from elspeth.contracts.config.runtime import RuntimeCheckpointConfig
+
+        with pytest.raises(TypeError, match="frequency must be int"):
+            RuntimeCheckpointConfig(
+                enabled=True,
+                frequency=True,  # type: ignore[arg-type]  # Intentional: testing bool rejection
+                checkpoint_interval=None,
+                aggregation_boundaries=True,
+            )
+
+    def test_checkpoint_interval_rejects_bool(self) -> None:
+        """checkpoint_interval=True should raise TypeError — bool is not int."""
+        from elspeth.contracts.config.runtime import RuntimeCheckpointConfig
+
+        with pytest.raises(TypeError, match="checkpoint_interval must be int"):
+            RuntimeCheckpointConfig(
+                enabled=True,
+                frequency=1,
+                checkpoint_interval=True,  # type: ignore[arg-type]  # Intentional: testing bool rejection
+                aggregation_boundaries=True,
+            )

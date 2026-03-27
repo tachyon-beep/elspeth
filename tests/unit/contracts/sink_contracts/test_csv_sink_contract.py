@@ -98,8 +98,8 @@ class TestCSVSinkHashVerification:
         sink.close()
 
         expected_hash = hashlib.sha256(csv_path.read_bytes()).hexdigest()
-        assert result.content_hash == expected_hash, (
-            f"content_hash does not match file content! reported={result.content_hash}, actual={expected_hash}"
+        assert result.artifact.content_hash == expected_hash, (
+            f"content_hash does not match file content! reported={result.artifact.content_hash}, actual={expected_hash}"
         )
 
     def test_size_bytes_matches_file_size(self, tmp_path: Path) -> None:
@@ -115,8 +115,8 @@ class TestCSVSinkHashVerification:
         sink.close()
 
         expected_size = csv_path.stat().st_size
-        assert result.size_bytes == expected_size, (
-            f"size_bytes does not match file size! reported={result.size_bytes}, actual={expected_size}"
+        assert result.artifact.size_bytes == expected_size, (
+            f"size_bytes does not match file size! reported={result.artifact.size_bytes}, actual={expected_size}"
         )
 
 
@@ -221,9 +221,9 @@ class TestCSVSinkPropertyBased:
         result = sink.write(rows, ctx)
         sink.close()
 
-        assert isinstance(result, ArtifactDescriptor)
-        assert len(result.content_hash) == 64
-        assert result.size_bytes > 0
+        assert isinstance(result.artifact, ArtifactDescriptor)
+        assert len(result.artifact.content_hash) == 64
+        assert result.artifact.size_bytes > 0
 
     @given(
         rows=st.lists(
@@ -257,7 +257,7 @@ class TestCSVSinkPropertyBased:
         result2 = sink2.write(rows, ctx)
         sink2.close()
 
-        assert result1.content_hash == result2.content_hash
+        assert result1.artifact.content_hash == result2.artifact.content_hash
 
 
 class TestCSVSinkQuotingCharacters:
@@ -369,7 +369,7 @@ class TestCSVSinkQuotingCharacters:
         result2 = sink2.write(rows, ctx)
         sink2.close()
 
-        assert result1.content_hash == result2.content_hash
+        assert result1.artifact.content_hash == result2.artifact.content_hash
         assert path1.read_bytes() == path2.read_bytes()
 
 

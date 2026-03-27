@@ -706,7 +706,8 @@ class AzureBatchLLMTransform(BaseTransform):
         Args:
             checkpoint: Typed checkpoint state with requests and row_mapping.
             ctx: Plugin context for record_call.
-            terminal_status: The batch terminal status (failed, cancelled, expired, batch_timeout).
+            terminal_status: The batch terminal status (failed, cancelled, expired, timeout).
+                Prefixed with "batch_" to produce the audit reason (e.g., "timeout" → "batch_timeout").
             error_detail: Optional extra error detail string.
         """
         if not checkpoint.requests and not checkpoint.row_mapping:
@@ -931,7 +932,7 @@ class AzureBatchLLMTransform(BaseTransform):
             elapsed_hours = (datetime.now(UTC) - submitted_at).total_seconds() / 3600
 
             if elapsed_hours > self._max_wait_hours:
-                self._record_per_row_failure_calls(checkpoint, ctx, terminal_status="batch_timeout")
+                self._record_per_row_failure_calls(checkpoint, ctx, terminal_status="timeout")
                 self._clear_checkpoint(ctx)
                 return TransformResult.error(
                     {

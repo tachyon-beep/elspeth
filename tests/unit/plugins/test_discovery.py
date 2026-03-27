@@ -248,7 +248,7 @@ class TestDiscoverAllPlugins:
         EXPECTED_TRANSFORM_COUNT = (
             14  # 8 standard transforms + 2 azure safety + llm + azure_batch_llm + openrouter_batch_llm + rag_retrieval
         )
-        EXPECTED_SINK_COUNT = 5  # csv, json, database, azure_blob, dataverse
+        EXPECTED_SINK_COUNT = 6  # csv, json, database, azure_blob, dataverse, chroma_sink
 
         discovered = discover_all_plugins()
 

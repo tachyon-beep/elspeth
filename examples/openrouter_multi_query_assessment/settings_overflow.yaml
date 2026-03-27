@@ -329,6 +329,7 @@ transforms:
 sinks:
   output:
     plugin: csv
+    on_write_failure: discard
     options:
       path: examples/openrouter_multi_query_assessment/output/overflow_results.csv
       schema:

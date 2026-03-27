@@ -51,6 +51,7 @@ transforms:
 sinks:
   output:
     plugin: csv
+    on_write_failure: discard
     options:
       path: test_output.csv
       schema:
@@ -113,6 +114,7 @@ transforms:
 sinks:
   output:
     plugin: json
+    on_write_failure: discard
     options:
       path: test_output.json
       schema: {mode: observed}
@@ -173,6 +175,7 @@ aggregations:
 sinks:
   output:
     plugin: csv
+    on_write_failure: discard
     options:
       path: test_output.csv
       schema:
@@ -220,6 +223,7 @@ transforms:
 sinks:
   output:
     plugin: json
+    on_write_failure: discard
     options:
       path: test_output.json
       schema: {mode: observed}
@@ -273,6 +277,7 @@ aggregations:
 sinks:
   output:
     plugin: json
+    on_write_failure: discard
     options:
       path: out.json
       schema: {mode: observed}
@@ -335,6 +340,7 @@ aggregations:
 sinks:
   output:
     plugin: csv
+    on_write_failure: discard
     options:
       path: out.csv
       schema:
@@ -405,6 +411,7 @@ def test_two_phase_validation_separates_self_and_compatibility_errors(plugin_man
         "sinks": {
             "out": {
                 "plugin": "json",
+                "on_write_failure": "discard",
                 "options": {"path": "out.json", "schema": {"mode": "observed"}, "format": "jsonl"},
             }
         },

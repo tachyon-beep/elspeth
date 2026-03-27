@@ -68,11 +68,11 @@ class TestJSONSinkProperties:
             recorder = make_recorder(db)
             ctx = make_context(landscape=recorder)
 
-            descriptor = sink.write(rows, ctx)
+            result = sink.write(rows, ctx)
             sink.close()
 
-            assert descriptor.content_hash == _compute_sha256(path)
-            assert descriptor.size_bytes == path.stat().st_size
+            assert result.artifact.content_hash == _compute_sha256(path)
+            assert result.artifact.size_bytes == path.stat().st_size
 
     @given(rows=rows_strategy, data=st.data())
     @SLOW_SETTINGS
@@ -92,11 +92,11 @@ class TestJSONSinkProperties:
             recorder = make_recorder(db)
             ctx = make_context(landscape=recorder)
 
-            descriptor = sink.write(rows, ctx)
+            result = sink.write(rows, ctx)
             sink.close()
 
-            assert descriptor.content_hash == _compute_sha256(path)
-            assert descriptor.size_bytes == path.stat().st_size
+            assert result.artifact.content_hash == _compute_sha256(path)
+            assert result.artifact.size_bytes == path.stat().st_size
 
     def test_json_sink_validate_input_attribute_set_from_config(self, tmp_path: Path) -> None:
         """validate_input=True stored as attribute for executor enforcement.

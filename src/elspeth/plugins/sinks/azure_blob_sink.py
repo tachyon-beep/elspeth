@@ -27,6 +27,7 @@ from pydantic import BaseModel, Field, field_validator, model_validator
 
 from elspeth.contracts import ArtifactDescriptor, CallStatus, CallType, PluginSchema
 from elspeth.contracts.contexts import SinkContext
+from elspeth.contracts.diversion import SinkWriteResult
 from elspeth.contracts.errors import AuditIntegrityError
 from elspeth.contracts.header_modes import HeaderMode, parse_header_mode
 from elspeth.plugins.infrastructure.azure_auth import AzureAuthConfig
@@ -531,7 +532,7 @@ class AzureBlobSink(BaseSink):
     def set_resume_field_resolution(self, resolution_mapping: dict[str, str]) -> None:
         set_resume_field_resolution(self, resolution_mapping)
 
-    def write(self, rows: list[dict[str, Any]], ctx: SinkContext) -> ArtifactDescriptor:
+    def write(self, rows: list[dict[str, Any]], ctx: SinkContext) -> SinkWriteResult:
         """Write a batch of rows to Azure Blob Storage.
 
         Args:
@@ -549,11 +550,13 @@ class AzureBlobSink(BaseSink):
         if not rows:
             # Still render the path for consistent audit trail
             rendered_path = self._get_or_init_blob_path(ctx)
-            return ArtifactDescriptor(
-                artifact_type="file",
-                path_or_uri=f"azure://{self._container}/{rendered_path}",
-                content_hash=hashlib.sha256(b"").hexdigest(),
-                size_bytes=0,
+            return SinkWriteResult(
+                artifact=ArtifactDescriptor(
+                    artifact_type="file",
+                    path_or_uri=f"azure://{self._container}/{rendered_path}",
+                    content_hash=hashlib.sha256(b"").hexdigest(),
+                    size_bytes=0,
+                )
             )
 
         resolve_contract_from_context_if_needed(self, ctx)
@@ -663,11 +666,13 @@ class AzureBlobSink(BaseSink):
         # (upload + audit recording) to keep write retries idempotent.
         self._buffered_rows = candidate_rows
 
-        return ArtifactDescriptor(
-            artifact_type="file",
-            path_or_uri=f"azure://{self._container}/{rendered_path}",
-            content_hash=content_hash,
-            size_bytes=size_bytes,
+        return SinkWriteResult(
+            artifact=ArtifactDescriptor(
+                artifact_type="file",
+                path_or_uri=f"azure://{self._container}/{rendered_path}",
+                content_hash=content_hash,
+                size_bytes=size_bytes,
+            )
         )
 
     def flush(self) -> None:

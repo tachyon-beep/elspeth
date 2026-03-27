@@ -54,6 +54,7 @@ transforms:
 sinks:
   output:
     plugin: csv
+    on_write_failure: discard
     options:
       path: output.csv
       schema:
@@ -118,6 +119,7 @@ transforms:
 sinks:
   output:
     plugin: json
+    on_write_failure: discard
     options:
       path: output.json
       schema:

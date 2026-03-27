@@ -48,6 +48,7 @@ gates:
 sinks:
   high_value:
     plugin: csv
+    on_write_failure: discard
     options:
       path: examples/explicit_routing/output/high_value.csv
       schema:
@@ -60,6 +61,7 @@ sinks:
         - 'region: str'
   standard:
     plugin: csv
+    on_write_failure: discard
     options:
       path: examples/explicit_routing/output/standard.csv
       schema:

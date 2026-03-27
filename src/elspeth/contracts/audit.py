@@ -12,7 +12,7 @@ from dataclasses import dataclass
 from datetime import datetime
 from typing import TYPE_CHECKING, Any, ClassVar, Literal, TypedDict
 
-from elspeth.contracts.freeze import freeze_fields
+from elspeth.contracts.freeze import freeze_fields, require_int
 
 if TYPE_CHECKING:
     pass  # Placeholder for future type-only imports
@@ -96,6 +96,7 @@ class Node:
 
     def __post_init__(self) -> None:
         """Validate enum fields - Tier 1 crash on invalid types."""
+        require_int(self.sequence_in_pipeline, "sequence_in_pipeline", optional=True, min_value=0)
         _validate_enum(self.node_type, NodeType, "node_type")
         _validate_enum(self.determinism, Determinism, "determinism")
         freeze_fields(self, "schema_fields")
@@ -133,6 +134,10 @@ class Row:
     created_at: datetime
     source_data_ref: str | None = None
 
+    def __post_init__(self) -> None:
+        """Validate int fields - Tier 1 crash on invalid types."""
+        require_int(self.row_index, "row_index", min_value=0)
+
 
 @dataclass(frozen=True, slots=True)
 class Token:
@@ -148,6 +153,10 @@ class Token:
     branch_name: str | None = None
     step_in_pipeline: int | None = None  # Step where token was created (fork/coalesce/expand)
 
+    def __post_init__(self) -> None:
+        """Validate int fields - Tier 1 crash on invalid types."""
+        require_int(self.step_in_pipeline, "step_in_pipeline", optional=True, min_value=0)
+
 
 @dataclass(frozen=True, slots=True)
 class TokenParent:
@@ -156,6 +165,10 @@ class TokenParent:
     token_id: str
     parent_token_id: str
     ordinal: int
+
+    def __post_init__(self) -> None:
+        """Validate int fields - Tier 1 crash on invalid types."""
+        require_int(self.ordinal, "ordinal", min_value=0)
 
 
 @dataclass(frozen=True, slots=True)
@@ -177,6 +190,11 @@ class NodeStateOpen:
     input_hash: str
     started_at: datetime
     context_before_json: str | None = None
+
+    def __post_init__(self) -> None:
+        """Validate int fields - Tier 1 crash on invalid types."""
+        require_int(self.step_index, "step_index", min_value=0)
+        require_int(self.attempt, "attempt", min_value=0)
 
 
 @dataclass(frozen=True, slots=True)
@@ -205,6 +223,11 @@ class NodeStatePending:
     context_before_json: str | None = None
     context_after_json: str | None = None
 
+    def __post_init__(self) -> None:
+        """Validate int fields - Tier 1 crash on invalid types."""
+        require_int(self.step_index, "step_index", min_value=0)
+        require_int(self.attempt, "attempt", min_value=0)
+
 
 @dataclass(frozen=True, slots=True)
 class NodeStateCompleted:
@@ -231,6 +254,11 @@ class NodeStateCompleted:
     context_after_json: str | None = None
     success_reason_json: str | None = None
 
+    def __post_init__(self) -> None:
+        """Validate int fields - Tier 1 crash on invalid types."""
+        require_int(self.step_index, "step_index", min_value=0)
+        require_int(self.attempt, "attempt", min_value=0)
+
 
 @dataclass(frozen=True, slots=True)
 class NodeStateFailed:
@@ -256,6 +284,11 @@ class NodeStateFailed:
     output_hash: str | None = None
     context_before_json: str | None = None
     context_after_json: str | None = None
+
+    def __post_init__(self) -> None:
+        """Validate int fields - Tier 1 crash on invalid types."""
+        require_int(self.step_index, "step_index", min_value=0)
+        require_int(self.attempt, "attempt", min_value=0)
 
 
 # Discriminated union type
@@ -292,6 +325,7 @@ class Call:
 
     def __post_init__(self) -> None:
         """Validate enum fields and structural invariants — Tier 1 crash on invalid types."""
+        require_int(self.call_index, "call_index", min_value=0)
         _validate_enum(self.call_type, CallType, "call_type")
         _validate_enum(self.status, CallStatus, "status")
         # XOR: exactly one of state_id or operation_id must be set
@@ -318,6 +352,10 @@ class Artifact:
     created_at: datetime
     idempotency_key: str | None = None  # For retry deduplication
 
+    def __post_init__(self) -> None:
+        """Validate int fields - Tier 1 crash on invalid types."""
+        require_int(self.size_bytes, "size_bytes", min_value=0)
+
 
 @dataclass(frozen=True, slots=True)
 class RoutingEvent:
@@ -338,6 +376,7 @@ class RoutingEvent:
 
     def __post_init__(self) -> None:
         """Validate enum fields - Tier 1 crash on invalid types."""
+        require_int(self.ordinal, "ordinal", min_value=0)
         _validate_enum(self.mode, RoutingMode, "mode")
 
 
@@ -361,6 +400,7 @@ class Batch:
 
     def __post_init__(self) -> None:
         """Validate enum fields - Tier 1 crash on invalid types."""
+        require_int(self.attempt, "attempt", min_value=0)
         _validate_enum(self.status, BatchStatus, "status")
         _validate_enum(self.trigger_type, TriggerType, "trigger_type")
 
@@ -372,6 +412,10 @@ class BatchMember:
     batch_id: str
     token_id: str
     ordinal: int
+
+    def __post_init__(self) -> None:
+        """Validate int fields - Tier 1 crash on invalid types."""
+        require_int(self.ordinal, "ordinal", min_value=0)
 
 
 @dataclass(frozen=True, slots=True)
@@ -421,6 +465,8 @@ class Checkpoint:
         Per Data Manifesto: Audit data is OUR data. If we receive None
         for required hash fields, that's a bug in our code - crash immediately.
         """
+        require_int(self.sequence_number, "sequence_number", min_value=0)
+        require_int(self.format_version, "format_version", optional=True, min_value=0)
         if not self.upstream_topology_hash:
             raise ValueError("upstream_topology_hash is required and cannot be empty")
         if not self.checkpoint_node_config_hash:
@@ -451,6 +497,7 @@ class RowLineage:
     payload_available: bool
 
     def __post_init__(self) -> None:
+        require_int(self.row_index, "row_index", min_value=0)
         freeze_fields(self, "source_data")
 
 

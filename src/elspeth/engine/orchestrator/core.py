@@ -26,6 +26,7 @@ from collections.abc import Callable, Iterator, Mapping, Sequence
 from contextlib import contextmanager, nullcontext
 from dataclasses import replace
 from datetime import UTC, datetime
+from types import SimpleNamespace
 from typing import TYPE_CHECKING, Any
 
 import structlog
@@ -123,6 +124,7 @@ from elspeth.engine.orchestrator.types import (
 )
 from elspeth.engine.orchestrator.validation import (
     validate_route_destinations,
+    validate_sink_failsink_destinations,
     validate_source_quarantine_destination,
     validate_transform_error_sinks,
 )
@@ -135,6 +137,7 @@ if TYPE_CHECKING:
     from elspeth.contracts.config.runtime import RuntimeCheckpointConfig, RuntimeConcurrencyConfig
     from elspeth.core.checkpoint import CheckpointManager
     from elspeth.core.config import ElspethSettings, GateSettings
+    from elspeth.core.dependency_config import PreflightResult
     from elspeth.core.rate_limit import RateLimitRegistry
     from elspeth.engine.clock import Clock
     from elspeth.engine.coalesce_executor import CoalesceExecutor
@@ -515,10 +518,11 @@ class Orchestrator:
         ctx: PluginContext,
         pending_tokens: PendingTokenMap,
         sink_id_map: dict[SinkName, NodeID],
+        edge_map: Mapping[tuple[NodeID, str], str],
         sink_step: int,
         *,
         on_token_written_factory: Callable[[str], Callable[[TokenInfo], None]] | None = None,
-    ) -> None:
+    ) -> int:
         """Write pending tokens to sinks using SinkExecutor.
 
         Extracted from _execute_run() and _process_resumed_rows() to eliminate
@@ -542,6 +546,7 @@ class Orchestrator:
 
         sink_executor = SinkExecutor(recorder, self._span_factory, run_id)
         step = sink_step
+        total_diversions = 0
 
         for sink_name, token_outcome_pairs in pending_tokens.items():
             if not token_outcome_pairs:
@@ -554,6 +559,32 @@ class Orchestrator:
                 )
             sink = config.sinks[sink_name]
             sink_node_id = sink_id_map[SinkName(sink_name)]
+
+            # Resolve failsink reference (if configured and not 'discard')
+
+            failsink: SinkProtocol | None = None
+            failsink_config_name: str | None = None
+            failsink_edge_id: str | None = None
+            on_write_failure = sink._on_write_failure
+            if on_write_failure is not None and on_write_failure != "discard":
+                if on_write_failure not in config.sinks:
+                    raise OrchestrationInvariantError(
+                        f"Sink '{sink_name}' on_write_failure references '{on_write_failure}' "
+                        f"which passed validation but is not in config.sinks at runtime. "
+                        f"Available: {sorted(config.sinks.keys())}."
+                    )
+                failsink = config.sinks[on_write_failure]
+                failsink_config_name = on_write_failure
+                failsink_edge_key = (sink_node_id, "__failsink__")
+                try:
+                    failsink_edge_id = edge_map[failsink_edge_key]
+                except KeyError as exc:
+                    raise OrchestrationInvariantError(
+                        f"Sink '{sink_name}' on_write_failure='{on_write_failure}' "
+                        f"but no __failsink__ DIVERT edge exists in DAG for node '{sink_node_id}'. "
+                        f"This is a DAG construction bug — on_write_failure should have "
+                        f"created a DIVERT edge in from_plugin_instances()."
+                    ) from exc
 
             # Group tokens by pending_outcome for separate write() calls
             # (sink_executor.write() takes a single PendingOutcome for all tokens in a batch)
@@ -573,15 +604,21 @@ class Orchestrator:
 
             for pending_outcome, group in groupby(sorted_pairs, key=lambda x: x[1]):
                 group_tokens = [token for token, _ in group]
-                sink_executor.write(
+                _, diversion_count = sink_executor.write(
                     sink=sink,
                     tokens=group_tokens,
                     ctx=ctx,
                     step_in_pipeline=step,
                     sink_name=sink_name,
                     pending_outcome=pending_outcome,
+                    failsink=failsink,
+                    failsink_name=failsink_config_name,
+                    failsink_edge_id=failsink_edge_id,
                     on_token_written=on_token_written,
                 )
+                total_diversions += diversion_count
+
+        return total_diversions
 
     def _cleanup_plugins(
         self,
@@ -1068,6 +1105,7 @@ class Orchestrator:
         *,
         payload_store: PayloadStore,
         secret_resolutions: list[SecretResolutionInput] | None = None,
+        preflight_results: PreflightResult | None = None,
         shutdown_event: threading.Event | None = None,
     ) -> RunResult:
         """Execute a pipeline run.
@@ -1083,6 +1121,9 @@ class Orchestrator:
             payload_store: PayloadStore for persisting source row payloads.
             secret_resolutions: Optional secret resolution records from
                 load_secrets_from_config(). Recorded in audit trail after run creation.
+            preflight_results: Optional pre-flight results (dependency runs and
+                commencement gates) from bootstrap_and_run(). Recorded in audit
+                trail after run creation.
             shutdown_event: Optional pre-created shutdown event for testing.
                 Skips signal handler installation when provided.
 
@@ -1103,6 +1144,13 @@ class Orchestrator:
             payload_store,
             secret_resolutions,
         )
+
+        # Record pre-flight results (deferred from bootstrap_and_run)
+        if preflight_results is not None:
+            recorder.record_preflight_results(
+                run_id=run.run_id,
+                preflight=preflight_results,
+            )
 
         from elspeth.telemetry import RunFinished
 
@@ -1421,6 +1469,16 @@ class Orchestrator:
                 available_sinks=set(config.sinks.keys()),
             )
 
+            # Validate sink failsink destinations
+
+            sink_validation_stubs = {name: SimpleNamespace(on_write_failure=sink._on_write_failure) for name, sink in config.sinks.items()}
+            sink_plugins = {name: sink.name for name, sink in config.sinks.items()}
+            validate_sink_failsink_destinations(
+                sink_configs=sink_validation_stubs,
+                available_sinks=set(config.sinks.keys()),
+                sink_plugins=sink_plugins,
+            )
+
             self._events.emit(PhaseCompleted(phase=PipelinePhase.GRAPH, duration_seconds=time.perf_counter() - phase_start))
         except Exception as e:
             self._events.emit(PhaseError(phase=PipelinePhase.GRAPH, error=e))
@@ -1612,6 +1670,15 @@ class Orchestrator:
             available_sinks=set(config.sinks.keys()),
         )
 
+        # Validate sink failsink destinations
+        sink_validation_stubs = {name: SimpleNamespace(on_write_failure=sink._on_write_failure) for name, sink in config.sinks.items()}
+        sink_plugins = {name: sink.name for name, sink in config.sinks.items()}
+        validate_sink_failsink_destinations(
+            sink_configs=sink_validation_stubs,
+            available_sinks=set(config.sinks.keys()),
+            sink_plugins=sink_plugins,
+        )
+
         return GraphArtifacts(
             edge_map=edge_map,
             source_id=source_id,
@@ -1627,6 +1694,7 @@ class Orchestrator:
         run_id: str,
         loop_ctx: LoopContext,
         sink_id_map: Mapping[SinkName, NodeID],
+        edge_map: Mapping[tuple[NodeID, str], str],
         interrupted_by_shutdown: bool,
         *,
         on_token_written_factory: _CheckpointFactory | None = None,
@@ -1644,16 +1712,18 @@ class Orchestrator:
         """
         counters = loop_ctx.counters
 
-        self._write_pending_to_sinks(
+        total_diversions = self._write_pending_to_sinks(
             recorder=recorder,
             run_id=run_id,
             config=loop_ctx.config,
             ctx=loop_ctx.ctx,
             pending_tokens=loop_ctx.pending_tokens,
             sink_id_map=dict(sink_id_map),
+            edge_map=edge_map,
             sink_step=loop_ctx.processor.resolve_sink_step(),
             on_token_written_factory=on_token_written_factory,
         )
+        loop_ctx.counters.rows_diverted += total_diversions
 
         # If shutdown interrupted the loop, raise after all pending work is flushed.
         # At this point: sink writes are done, and any buffered aggregation/coalesce
@@ -2454,6 +2524,7 @@ class Orchestrator:
                 run_id,
                 loop_ctx,
                 artifacts.sink_id_map,
+                artifacts.edge_map,
                 loop_result.interrupted,
                 on_token_written_factory=self._make_checkpoint_after_sink_factory(run_id, run_ctx.processor),
                 shutdown_checkpoint_source_id=artifacts.source_id,
@@ -2794,6 +2865,7 @@ class Orchestrator:
                 run_id,
                 loop_ctx,
                 artifacts.sink_id_map,
+                artifacts.edge_map,
                 interrupted,
                 on_token_written_factory=self._make_checkpoint_after_sink_factory(run_id, run_ctx.processor),
                 shutdown_checkpoint_source_id=artifacts.source_id,

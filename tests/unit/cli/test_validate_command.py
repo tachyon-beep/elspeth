@@ -30,6 +30,7 @@ class TestValidateCommand:
             "sinks": {
                 "output": {
                     "plugin": "json",
+                    "on_write_failure": "discard",
                     "options": {
                         "path": "/data/output.json",
                         "schema": {"mode": "observed"},
@@ -55,6 +56,7 @@ class TestValidateCommand:
             "sinks": {
                 "output": {
                     "plugin": "json",
+                    "on_write_failure": "discard",
                     "options": {
                         "path": "/data/output.json",
                         "schema": {"mode": "observed"},
@@ -82,6 +84,7 @@ class TestValidateCommand:
             "sinks": {
                 "output": {
                     "plugin": "json",
+                    "on_write_failure": "discard",
                     "options": {
                         "path": "/data/output.json",
                         "schema": {"mode": "observed"},
@@ -149,6 +152,7 @@ source:
 sinks:
   output:
     plugin: csv
+    on_write_failure: discard
     options:
       path: /data/output.csv
       schema:
@@ -187,6 +191,7 @@ source:
 sinks:
   results:
     plugin: csv
+    on_write_failure: discard
     options:
       path: /data/results.csv
       schema:
@@ -195,6 +200,7 @@ sinks:
           - "data: str"
   flagged:
     plugin: csv
+    on_write_failure: discard
     options:
       path: /data/flagged.csv
       schema:

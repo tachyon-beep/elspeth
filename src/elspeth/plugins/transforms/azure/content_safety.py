@@ -173,7 +173,7 @@ class AzureContentSafety(BaseAzureSafetyTransform):
         # Azure API responses are external data (Tier 3: Zero Trust) — validate immediately
         try:
             data = response.json()
-        except Exception as e:
+        except (ValueError, TypeError) as e:
             raise MalformedResponseError(f"Invalid JSON in Content Safety response: {e}") from e
 
         try:

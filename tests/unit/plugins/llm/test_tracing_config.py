@@ -74,20 +74,37 @@ class TestTracingConfigParsing:
         assert result.secret_key == "sk-xxx"
         assert result.host == "https://self-hosted.example.com"
 
+    def test_langfuse_rejects_missing_host(self) -> None:
+        """LangfuseTracingConfig crashes without host — infrastructure addressing."""
+        with pytest.raises(KeyError, match="host"):
+            parse_tracing_config(
+                {
+                    "provider": "langfuse",
+                    "public_key": "pk-xxx",
+                    "secret_key": "sk-xxx",
+                }
+            )
+
     def test_langfuse_rejects_missing_keys(self) -> None:
         """LangfuseTracingConfig crashes without public_key/secret_key."""
+        base = {"provider": "langfuse", "host": "https://langfuse.example.com"}
         with pytest.raises(ValueError, match="public_key"):
-            parse_tracing_config({"provider": "langfuse"})
+            parse_tracing_config(base)
         with pytest.raises(ValueError, match="secret_key"):
-            parse_tracing_config({"provider": "langfuse", "public_key": "pk-xxx"})
+            parse_tracing_config({**base, "public_key": "pk-xxx"})
 
     def test_langfuse_defaults(self) -> None:
-        """LangfuseTracingConfig has sensible defaults for optional fields."""
-        config = {"provider": "langfuse", "public_key": "pk-xxx", "secret_key": "sk-xxx"}
+        """LangfuseTracingConfig defaults for genuinely optional fields."""
+        config = {
+            "provider": "langfuse",
+            "public_key": "pk-xxx",
+            "secret_key": "sk-xxx",
+            "host": "https://langfuse.example.com",
+        }
         result = parse_tracing_config(config)
 
         assert isinstance(result, LangfuseTracingConfig)
-        assert result.host == "https://cloud.langfuse.com"  # Default: cloud
+        assert result.host == "https://langfuse.example.com"
         assert result.tracing_enabled is True  # v3: default enabled
 
     def test_langfuse_tracing_enabled_field(self) -> None:
@@ -96,6 +113,7 @@ class TestTracingConfigParsing:
             "provider": "langfuse",
             "public_key": "pk-xxx",
             "secret_key": "sk-xxx",
+            "host": "https://langfuse.example.com",
             "tracing_enabled": False,  # Explicitly disabled
         }
         result = parse_tracing_config(config)
@@ -142,18 +160,20 @@ class TestTracingConfigValidation:
     def test_langfuse_rejects_none_keys(self) -> None:
         """Langfuse crashes at construction without required keys."""
         with pytest.raises(ValueError, match="public_key"):
-            LangfuseTracingConfig(public_key=None, secret_key="sk-xxx")
+            LangfuseTracingConfig(public_key=None, secret_key="sk-xxx", host="https://x.com")
         with pytest.raises(ValueError, match="secret_key"):
-            LangfuseTracingConfig(public_key="pk-xxx", secret_key=None)
+            LangfuseTracingConfig(public_key="pk-xxx", secret_key=None, host="https://x.com")
+        with pytest.raises(ValueError, match="host"):
+            LangfuseTracingConfig(public_key="pk-xxx", secret_key="sk-xxx", host=None)
 
     def test_langfuse_rejects_wrong_provider(self) -> None:
         """Langfuse crashes if provider discriminator is overridden."""
         with pytest.raises(ValueError, match="provider='langfuse'"):
-            LangfuseTracingConfig(provider="azure_ai", public_key="pk", secret_key="sk")
+            LangfuseTracingConfig(provider="azure_ai", public_key="pk", secret_key="sk", host="https://x.com")
 
     def test_langfuse_valid_construction(self) -> None:
-        """Langfuse with keys passes validation."""
-        config = LangfuseTracingConfig(public_key="pk-xxx", secret_key="sk-xxx")
+        """Langfuse with all required fields passes validation."""
+        config = LangfuseTracingConfig(public_key="pk-xxx", secret_key="sk-xxx", host="https://langfuse.example.com")
         errors = validate_tracing_config(config)
         assert len(errors) == 0
 

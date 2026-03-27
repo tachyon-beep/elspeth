@@ -78,11 +78,11 @@ class TestBufferEntryPostInit:
     """Tests for BufferEntry __post_init__ validation."""
 
     def test_rejects_negative_submit_index(self) -> None:
-        with pytest.raises(ValueError, match="submit_index must be non-negative"):
+        with pytest.raises(ValueError, match="submit_index must be >= 0"):
             BufferEntry(submit_index=-1, complete_index=0, result="x", submit_timestamp=0.0, complete_timestamp=0.0, buffer_wait_ms=0.0)
 
     def test_rejects_negative_complete_index(self) -> None:
-        with pytest.raises(ValueError, match="complete_index must be non-negative"):
+        with pytest.raises(ValueError, match="complete_index must be >= 0"):
             BufferEntry(submit_index=0, complete_index=-1, result="x", submit_timestamp=0.0, complete_timestamp=0.0, buffer_wait_ms=0.0)
 
     def test_rejects_nan_submit_timestamp(self) -> None:

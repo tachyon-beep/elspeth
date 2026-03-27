@@ -128,7 +128,7 @@ class TestCSVSinkAtomicBatchWrite:
         sink.close()
 
         expected_hash = hashlib.sha256(output_file.read_bytes()).hexdigest()
-        assert artifact.content_hash == expected_hash
+        assert artifact.artifact.content_hash == expected_hash
 
 
 # =============================================================================

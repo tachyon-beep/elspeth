@@ -58,7 +58,7 @@ class TestAzureMonitorIntegration:
         connection_string = (
             "InstrumentationKey=00000000-0000-0000-0000-000000000000;IngestionEndpoint=https://test.in.applicationinsights.azure.com/"
         )
-        exporter.configure({"connection_string": connection_string, "batch_size": 1})
+        exporter.configure({"connection_string": connection_string, "service_name": "test-service", "batch_size": 1})
 
         # Patch the SDK's export to capture instead of send
         exporter._azure_exporter.export = capture_export
@@ -192,7 +192,7 @@ class TestAzureMonitorIntegration:
         connection_string = (
             "InstrumentationKey=00000000-0000-0000-0000-000000000000;IngestionEndpoint=https://test.in.applicationinsights.azure.com/"
         )
-        exporter.configure({"connection_string": connection_string, "batch_size": 3})
+        exporter.configure({"connection_string": connection_string, "service_name": "test-service", "batch_size": 3})
         exporter._azure_exporter.export = capture_export  # type: ignore[method-assign,union-attr]
 
         # Send 3 events (should trigger batch)
@@ -223,7 +223,7 @@ class TestAzureMonitorIntegration:
         connection_string = (
             "InstrumentationKey=00000000-0000-0000-0000-000000000000;IngestionEndpoint=https://test.in.applicationinsights.azure.com/"
         )
-        exporter.configure({"connection_string": connection_string, "batch_size": 10})
+        exporter.configure({"connection_string": connection_string, "service_name": "test-service", "batch_size": 10})
         exporter._azure_exporter.export = capture_export  # type: ignore[method-assign,union-attr]
 
         # Send 2 events (less than batch_size of 10)
@@ -264,7 +264,7 @@ class TestAzureMonitorSpanFormat:
         connection_string = (
             "InstrumentationKey=00000000-0000-0000-0000-000000000000;IngestionEndpoint=https://test.in.applicationinsights.azure.com/"
         )
-        exporter.configure({"connection_string": connection_string, "batch_size": 1})
+        exporter.configure({"connection_string": connection_string, "service_name": "test-service", "batch_size": 1})
         exporter._azure_exporter.export = capture_export
 
         return exporter, captured

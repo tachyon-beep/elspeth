@@ -11,10 +11,13 @@ allowed_external_types:
   - "core/security/web:SSRFSafeRequest"
   # Engine types used in testing factories - test infrastructure wraps these for convenience
   - "engine/orchestrator/types:PipelineConfig"
-  - "engine/orchestrator/types:RunResult"
   - "engine/orchestrator/types:AggregationFlushResult"
   - "engine/orchestrator/types:ExecutionCounters"
   # BufferEntry moved to contracts/engine.py — no longer an external type exception
+  # Dependency/gate result types - used only by engine bootstrap and resolver
+  - "core/dependency_config:DependencyRunResult"
+  - "core/dependency_config:CommencementGateResult"
+  - "core/dependency_config:PreflightResult"
 
 # dict[str, Any] patterns that are intentional
 # Format: "file_path:context:param_name"
@@ -28,8 +31,8 @@ allowed_dict_patterns:
 
   # Engine - row data handling
   - "src/elspeth/engine/tokens.py:TokenManager.expand_token:expanded_rows (list)"
-  - "src/elspeth/core/expression_parser.py:_ExpressionEvaluator.__init__:row"
-  - "src/elspeth/core/expression_parser.py:ExpressionParser.evaluate:row"
+  - "src/elspeth/core/expression_parser.py:_ExpressionEvaluator.__init__:context"
+  - "src/elspeth/core/expression_parser.py:ExpressionParser.evaluate:context"
 
 
   # Node state guard - row data is Tier 2 pipeline data
@@ -89,6 +92,8 @@ allowed_dict_patterns:
   - "src/elspeth/plugins/infrastructure/config_base.py:PluginConfig.from_dict:config"
 
   # Plugin implementations - config input
+  - "src/elspeth/plugins/sinks/chroma_sink.py:ChromaSink.__init__:config"
+  - "src/elspeth/plugins/sinks/chroma_sink.py:ChromaSink.write:rows (list)"
   - "src/elspeth/plugins/sinks/database_sink.py:DatabaseSink.__init__:config"
   - "src/elspeth/plugins/sinks/csv_sink.py:CSVSink.__init__:config"
   - "src/elspeth/plugins/sinks/json_sink.py:JSONSink.__init__:config"
@@ -164,30 +169,7 @@ allowed_dict_patterns:
   # pipeline data from execution.
   # ═══════════════════════════════════════════════════════════════════════════
 
-  # Query repository - returns deserialized user row data (dynamic per-pipeline schema)
-  - "src/elspeth/core/landscape/query_repository.py:QueryRepository._retrieve_and_parse_payload:return"
-
-  # Execution repository (node state, call, batch recording)
-  - "src/elspeth/core/landscape/execution_repository.py:ExecutionRepository.begin_node_state:input_data"
-  - "src/elspeth/core/landscape/execution_repository.py:ExecutionRepository.complete_node_state:output_data"
-  - "src/elspeth/core/landscape/execution_repository.py:ExecutionRepository.begin_operation:input_data"
-  - "src/elspeth/core/landscape/execution_repository.py:ExecutionRepository.complete_operation:output_data"
-  # Recorder delegation signatures (pass-through to ExecutionRepository)
-  - "src/elspeth/core/landscape/recorder.py:LandscapeRecorder.begin_node_state:input_data"
-  - "src/elspeth/core/landscape/recorder.py:LandscapeRecorder.complete_node_state:output_data"
-  - "src/elspeth/core/landscape/recorder.py:LandscapeRecorder.begin_operation:input_data"
-  - "src/elspeth/core/landscape/recorder.py:LandscapeRecorder.complete_operation:output_data"
-
-  # Data flow recording
-  - "src/elspeth/core/landscape/data_flow_repository.py:DataFlowRepository.create_row:data"
-  - "src/elspeth/core/landscape/data_flow_repository.py:DataFlowRepository.record_token_outcome:context"
-  - "src/elspeth/core/landscape/data_flow_repository.py:DataFlowRepository.register_node:config"
-  - "src/elspeth/core/landscape/data_flow_repository.py:DataFlowRepository.record_transform_error:row_data"
-  # Recorder delegation signatures (pass-through to DataFlowRepository)
-  - "src/elspeth/core/landscape/recorder.py:LandscapeRecorder.create_row:data"
-  - "src/elspeth/core/landscape/recorder.py:LandscapeRecorder.record_token_outcome:context"
-  - "src/elspeth/core/landscape/recorder.py:LandscapeRecorder.register_node:config"
-  - "src/elspeth/core/landscape/recorder.py:LandscapeRecorder.record_transform_error:row_data"
+  # Execution repository and recorder — narrowed to Mapping[str, object] (Task 5)
 
   # (Call recording entries moved to Execution repository block above)
 
@@ -261,6 +243,9 @@ allowed_dict_patterns:
   # Multi-query partial output (keys are dynamic: query-spec-dependent field names — _QuerySuccess.fields)
   # Pool work context (PooledExecutor row interface is dict[str, Any])
   - "src/elspeth/plugins/transforms/llm/transform.py:MultiQueryStrategy._process_fn:work"
+
+  # BaseSink diversion — row_data is the pipeline row dict (Tier 2 data) being diverted to failsink
+  - "src/elspeth/plugins/infrastructure/base.py:BaseSink._divert_row:row_data"
 
   # Plugin validation dispatcher — config is user YAML (Tier 3 boundary)
   - "src/elspeth/plugins/infrastructure/validation.py:PluginConfigValidator._get_transform_config_model:config"
@@ -423,3 +408,18 @@ allowed_dict_patterns:
 
   # OpenRouter batch LLM (async batch API)
   - "src/elspeth/plugins/transforms/llm/openrouter_batch.py:OpenRouterBatchLLMTransform.__init__:config"
+
+  # ═══════════════════════════════════════════════════════════════════════════
+  # PRE-FLIGHT CONTEXT (COMMENCEMENT GATES)
+  # Gate evaluation context is a namespace dict assembled from heterogeneous
+  # probe results and dependency metadata. ExpressionParser already accepts
+  # dict[str, Any] (whitelisted above). These are the assembly and evaluation
+  # functions that build and consume the context.
+  # ═══════════════════════════════════════════════════════════════════════════
+  - "src/elspeth/engine/commencement.py:build_preflight_context:dependency_results"
+  - "src/elspeth/engine/commencement.py:build_preflight_context:collection_probes"
+  - "src/elspeth/engine/commencement.py:build_preflight_context:return"
+  - "src/elspeth/engine/commencement.py:evaluate_commencement_gates:context"
+
+  # Serializer thaws MappingProxyType back to dict for Pydantic JSON round-trip
+  - "src/elspeth/core/dependency_config.py:CollectionProbeConfig._serialize_provider_config:return"

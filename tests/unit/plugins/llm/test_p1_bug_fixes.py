@@ -452,7 +452,7 @@ class TestAzureBatchTerminalFailureCallRecording:
 
         assert result.status == "error"
         assert result.reason["reason"] == "batch_timeout"
-        self._assert_per_row_calls_recorded(ctx, "batch_timeout")
+        self._assert_per_row_calls_recorded(ctx, "timeout")
 
     def test_per_row_calls_include_request_data(self) -> None:
         """Per-row failure calls include the original request data from checkpoint."""

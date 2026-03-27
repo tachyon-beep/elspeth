@@ -188,8 +188,8 @@ class TestSinkRoutingInvariant:
             elspeth_settings = ElspethSettings(
                 source={"plugin": "test", "on_success": "route_in", "options": {}},
                 sinks={
-                    "sink_a": {"plugin": "test"},
-                    "sink_b": {"plugin": "test"},
+                    "sink_a": {"plugin": "test", "on_write_failure": "discard"},
+                    "sink_b": {"plugin": "test", "on_write_failure": "discard"},
                 },
                 gates=[gate],
             )

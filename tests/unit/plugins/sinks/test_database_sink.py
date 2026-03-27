@@ -106,10 +106,10 @@ class TestDatabaseSink:
         artifact = sink.write([{"id": 1, "name": "alice"}], ctx)
         sink.close()
 
-        assert isinstance(artifact, ArtifactDescriptor)
-        assert artifact.artifact_type == "database"
-        assert artifact.content_hash  # Non-empty
-        assert artifact.size_bytes > 0
+        assert isinstance(artifact.artifact, ArtifactDescriptor)
+        assert artifact.artifact.artifact_type == "database"
+        assert artifact.artifact.content_hash  # Non-empty
+        assert artifact.artifact.size_bytes > 0
 
     def test_batch_write_content_hash_is_payload_hash(self, db_url: str, ctx: PluginContext) -> None:
         """content_hash is SHA-256 of canonical JSON payload BEFORE insert."""
@@ -125,7 +125,7 @@ class TestDatabaseSink:
         # Hash should be of the canonical JSON payload (RFC 8785)
         expected_hash = stable_hash(rows)
 
-        assert artifact.content_hash == expected_hash
+        assert artifact.artifact.content_hash == expected_hash
 
     def test_batch_write_metadata_has_row_count(self, db_url: str, ctx: PluginContext) -> None:
         """ArtifactDescriptor metadata includes row_count."""
@@ -136,8 +136,8 @@ class TestDatabaseSink:
         artifact = sink.write([{"id": 1, "name": "a"}, {"id": 2, "name": "b"}, {"id": 3, "name": "c"}], ctx)
         sink.close()
 
-        assert artifact.metadata is not None
-        assert artifact.metadata["row_count"] == 3
+        assert artifact.artifact.metadata is not None
+        assert artifact.artifact.metadata["row_count"] == 3
 
     def test_batch_write_empty_list(self, db_url: str, ctx: PluginContext) -> None:
         """Batch write with empty list returns descriptor with canonical size."""
@@ -150,10 +150,10 @@ class TestDatabaseSink:
         artifact = sink.write([], ctx)
         sink.close()
 
-        assert isinstance(artifact, ArtifactDescriptor)
-        assert artifact.size_bytes == len(canonical_json([]).encode("utf-8"))
+        assert isinstance(artifact.artifact, ArtifactDescriptor)
+        assert artifact.artifact.size_bytes == len(canonical_json([]).encode("utf-8"))
         # Empty payload hash (canonical JSON of empty list)
-        assert artifact.content_hash == stable_hash([])
+        assert artifact.artifact.content_hash == stable_hash([])
 
     def test_has_plugin_version(self) -> None:
         """DatabaseSink has plugin_version attribute."""
@@ -523,8 +523,8 @@ class TestDatabaseSinkCanonicalHashing:
 
         # Hash MUST match stable_hash (canonical JSON)
         expected_hash = stable_hash(rows)
-        assert artifact.content_hash == expected_hash, (
-            f"DatabaseSink must use canonical JSON hashing. Got {artifact.content_hash}, expected {expected_hash}"
+        assert artifact.artifact.content_hash == expected_hash, (
+            f"DatabaseSink must use canonical JSON hashing. Got {artifact.artifact.content_hash}, expected {expected_hash}"
         )
 
     def test_content_hash_rejects_nan(self, db_url: str, ctx: PluginContext) -> None:
@@ -580,7 +580,7 @@ class TestDatabaseSinkCanonicalHashing:
 
         # Hash must match stable_hash
         expected_hash = stable_hash(rows)
-        assert artifact.content_hash == expected_hash
+        assert artifact.artifact.content_hash == expected_hash
 
     def test_payload_size_uses_canonical_bytes(self, db_url: str, ctx: PluginContext) -> None:
         """payload_size must be byte length of canonical JSON, not json.dumps.
@@ -600,8 +600,8 @@ class TestDatabaseSinkCanonicalHashing:
 
         # Size must match canonical JSON byte length
         expected_size = len(canonical_json(rows).encode("utf-8"))
-        assert artifact.size_bytes == expected_size, (
-            f"payload_size must use canonical JSON bytes. Got {artifact.size_bytes}, expected {expected_size}"
+        assert artifact.artifact.size_bytes == expected_size, (
+            f"payload_size must use canonical JSON bytes. Got {artifact.artifact.size_bytes}, expected {expected_size}"
         )
 
 

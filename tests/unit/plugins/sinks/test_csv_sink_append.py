@@ -352,7 +352,7 @@ class TestCSVSinkAppendExplicitSchema:
         artifact = sink.write([{"id": 2, "score": 2.0}], ctx)
         sink.close()
 
-        assert artifact.size_bytes > 0
+        assert artifact.artifact.size_bytes > 0
 
         # Verify both rows present
         content = output_path.read_text()

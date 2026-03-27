@@ -20,6 +20,7 @@ from pydantic import BaseModel, Field, field_validator
 from elspeth.contracts import CallStatus, CallType, Determinism, PluginSchema
 from elspeth.contracts.call_data import RawCallPayload
 from elspeth.contracts.contexts import LifecycleContext, SinkContext
+from elspeth.contracts.diversion import SinkWriteResult
 from elspeth.contracts.errors import AuditIntegrityError, FrameworkBugError
 from elspeth.contracts.events import ExternalCallCompleted
 from elspeth.contracts.results import ArtifactDescriptor
@@ -311,7 +312,7 @@ class DataverseSink(BaseSink):
 
         return payload
 
-    def write(self, rows: list[dict[str, Any]], ctx: SinkContext) -> ArtifactDescriptor:
+    def write(self, rows: list[dict[str, Any]], ctx: SinkContext) -> SinkWriteResult:
         """Write batch of rows to Dataverse via individual PATCH requests.
 
         Processes rows serially. On success, returns a single ArtifactDescriptor.
@@ -329,12 +330,14 @@ class DataverseSink(BaseSink):
             RuntimeError: If any row fails to upsert
         """
         if not rows:
-            return ArtifactDescriptor(
-                artifact_type="webhook",
-                path_or_uri=f"dataverse://{self._entity}@{self._environment_url}",
-                content_hash=hashlib.sha256(b"").hexdigest(),
-                size_bytes=0,
-                metadata=MappingProxyType({"row_count": 0, "entity": self._entity}),
+            return SinkWriteResult(
+                artifact=ArtifactDescriptor(
+                    artifact_type="webhook",
+                    path_or_uri=f"dataverse://{self._entity}@{self._environment_url}",
+                    content_hash=hashlib.sha256(b"").hexdigest(),
+                    size_bytes=0,
+                    metadata=MappingProxyType({"row_count": 0, "entity": self._entity}),
+                )
             )
 
         # Compute content hash BEFORE writing (proves intent)
@@ -445,18 +448,20 @@ class DataverseSink(BaseSink):
                 # preserves the retryable/status_code metadata in the chain.
                 raise
 
-        return ArtifactDescriptor(
-            artifact_type="webhook",
-            path_or_uri=f"dataverse://{self._entity}@{self._environment_url}",
-            content_hash=content_hash,
-            size_bytes=total_size,
-            metadata=MappingProxyType(
-                {
-                    "row_count": len(rows),
-                    "entity": self._entity,
-                    "mode": self._mode,
-                }
-            ),
+        return SinkWriteResult(
+            artifact=ArtifactDescriptor(
+                artifact_type="webhook",
+                path_or_uri=f"dataverse://{self._entity}@{self._environment_url}",
+                content_hash=content_hash,
+                size_bytes=total_size,
+                metadata=MappingProxyType(
+                    {
+                        "row_count": len(rows),
+                        "entity": self._entity,
+                        "mode": self._mode,
+                    }
+                ),
+            )
         )
 
     def flush(self) -> None:

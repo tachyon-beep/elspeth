@@ -434,7 +434,7 @@ def make_run_result(
 ) -> RunResult:
     """Build a RunResult with sensible defaults."""
     from elspeth.contracts.enums import RunStatus
-    from elspeth.engine.orchestrator.types import RunResult
+    from elspeth.contracts.run_result import RunResult
 
     return RunResult(
         run_id=run_id,
