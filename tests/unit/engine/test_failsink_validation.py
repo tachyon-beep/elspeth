@@ -10,7 +10,7 @@ from elspeth.engine.orchestrator.types import RouteValidationError
 from elspeth.engine.orchestrator.validation import validate_sink_failsink_destinations
 
 
-def _stub(on_write_failure: str) -> SimpleNamespace:
+def _stub(on_write_failure: str | None) -> SimpleNamespace:
     """Minimal stub with on_write_failure attribute."""
     return SimpleNamespace(on_write_failure=on_write_failure)
 
@@ -118,6 +118,14 @@ class TestValidateSinkFailsinkDestinations:
             },
             available_sinks={"chroma_out", "db_out", "csv_fail"},
             sink_plugins={"chroma_out": "chroma_sink", "db_out": "database", "csv_fail": "csv"},
+        )  # No error raised
+
+    def test_none_on_write_failure_skipped(self) -> None:
+        """on_write_failure=None (pre-injection default) is silently skipped."""
+        validate_sink_failsink_destinations(
+            sink_configs={"output": _stub(None)},
+            available_sinks={"output"},
+            sink_plugins={"output": "chroma_sink"},
         )  # No error raised
 
     def test_all_discard(self) -> None:

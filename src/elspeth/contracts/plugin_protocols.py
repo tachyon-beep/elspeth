@@ -449,7 +449,7 @@ class SinkProtocol(Protocol):
 
     # Write failure routing — injected by cli_helpers from SinkSettings.
     # "discard" = drop failed rows with audit record, else = failsink name.
-    _on_write_failure: str
+    _on_write_failure: str | None
 
     def _reset_diversion_log(self) -> None:
         """Clear diversion log before each write() call."""
