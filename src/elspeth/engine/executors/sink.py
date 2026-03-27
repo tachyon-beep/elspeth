@@ -35,16 +35,16 @@ logger = logging.getLogger(__name__)
 class SinkExecutor:
     """Executes sinks with artifact recording.
 
-    Wraps sink.write() to:
-    1. Create node_state for EACH token - this is how COMPLETED terminal state is derived
-    2. Time the operation
-    3. Record artifact produced by sink
-    4. Complete all token states
-    5. Emit OpenTelemetry span
+    Wraps sink.write() with a three-phase flow:
+    1. Call sink.write() inside track_operation (discover diversions)
+    2. Open/complete node_states and record outcomes for primary tokens
+    3. Route diverted tokens to failsink or discard with audit trail
+    4. Register artifacts and emit OpenTelemetry span
 
-    CRITICAL: Every token reaching a sink gets a node_state. This is the audit
-    proof that the row reached its terminal state. The COMPLETED terminal state
-    is DERIVED from having a completed node_state at a sink node.
+    CRITICAL: Every token reaching a sink gets a node_state — at the primary
+    sink for accepted rows, or at the failsink for diverted rows. Discard-mode
+    tokens get a DIVERTED outcome but no node_state (audit trade-off documented
+    in spec).
 
     Note: Unlike TransformExecutor/GateExecutor/AggregationExecutor, SinkExecutor
     does NOT use StepResolver. Sinks are not DAG processing nodes — their step is
@@ -54,11 +54,13 @@ class SinkExecutor:
 
     Example:
         executor = SinkExecutor(recorder, span_factory, run_id)
-        artifact = executor.write(
+        artifact, diversion_count = executor.write(
             sink=my_sink,
             tokens=tokens_to_write,
             ctx=ctx,
             step_in_pipeline=5,
+            sink_name="output",
+            pending_outcome=pending,
         )
     """
 
@@ -145,7 +147,7 @@ class SinkExecutor:
             Tuple of (Artifact if tokens were written else None, diversion count)
 
         Raises:
-            Exception: Re-raised from sink.write() after recording failure
+            Exception: Propagated from sink.write(), sink.flush(), or failsink.write()
         """
         if not tokens:
             return None, 0
@@ -280,6 +282,8 @@ class SinkExecutor:
                     )
                 raise
 
+            # Amortize batch write time across ALL tokens (including diverted)
+            # since sink.write() processed the entire batch
             per_token_ms = duration_ms / len(tokens)
             for token, state in primary_states:
                 output_dict = token.row_data.to_dict()
