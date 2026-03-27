@@ -4,7 +4,7 @@
 **Date:** 2026-03-28
 **Parent Spec:** `docs/superpowers/specs/2026-03-28-web-ux-composer-mvp-design.md`
 **Phase:** 5
-**Depends On:** Sub-Specs 2 (Auth & Sessions), 4 (Composer)
+**Depends On:** Sub-Specs 2 (Auth & Sessions), 3 (Catalog), 4 (Composer)
 **Blocks:** Sub-Spec 6 (Frontend)
 
 ---
@@ -42,7 +42,7 @@ The ExecutionService protocol defines four operations. All are called from FastA
 
 **execute(session_id: UUID, state_id: UUID) -> UUID** -- Starts a background pipeline run. Returns the run ID immediately. Enforces the one-active-run-per-session constraint (B6) before submission. Creates the Run record in pending status, stores a shutdown Event for cancellation, submits the pipeline function to the thread pool, and attaches a done callback as a safety net.
 
-**get_status(run_id: UUID) -> RunStatus** -- Returns the current run status, including rows_processed, rows_failed, error message (if failed), and landscape_run_id (if available). Reads from the Run database record.
+**get_status(run_id: UUID) -> RunStatus** -- Returns the current run status, including rows_processed, rows_failed, error message (if failed), and landscape_run_id (if available). Reads from the Run record via SessionService.
 
 **cancel(run_id: UUID) -> None** -- Cancels a run. If the run is actively executing (a shutdown Event exists for it), sets the Event, which the Orchestrator checks during row processing. If the run is pending (submitted to the thread pool but not yet started), updates the Run record status to cancelled directly.
 
@@ -132,10 +132,10 @@ The thread pool is created during `ExecutionServiceImpl` construction and shut d
 
 When `execute()` is called:
 
-1. Query the Run table for any active run on this session (status in pending, running). If one exists, raise `RunAlreadyActiveError`.
+1. Call `session_service.get_active_run(session_id)` to check for any active run on this session (status in pending, running). If one exists, raise `RunAlreadyActiveError`. The ExecutionService does not have direct DB access -- all Run CRUD goes through SessionService (sub-2).
 2. Load the CompositionState by `state_id` from the SessionService.
 3. Generate pipeline YAML via `yaml_generator.generate_yaml(state)`.
-4. Create a Run record with status=pending, binding it to the specific CompositionState version.
+4. Call `session_service.create_run(session_id, state_id)` to create a Run record with status=pending, binding it to the specific CompositionState version.
 5. Create a `threading.Event` instance for shutdown signalling.
 6. Store the Event in `self._shutdown_events[run_id]`.
 7. Submit `_run_pipeline(run_id, pipeline_yaml, shutdown_event)` to the thread pool.
@@ -148,7 +148,7 @@ This function runs in the background thread. It is the only function in the exec
 
 **Lifecycle:**
 
-1. Update Run status to running.
+1. Call `session_service.update_run_status(run_id, "running")` to transition the Run record.
 2. Construct LandscapeDB from `WebSettings.get_landscape_url()` (B3 fix).
 3. Construct FilesystemPayloadStore from `WebSettings.get_payload_store_path()` (B3 fix).
 4. Write the pipeline YAML to a temporary file and load settings via `load_settings(tmp_path)`.
@@ -156,13 +156,13 @@ This function runs in the background thread. It is the only function in the exec
 6. Build the ExecutionGraph via `ExecutionGraph.from_plugin_instances()` with the PluginBundle fields.
 7. Construct the Orchestrator with the LandscapeDB instance.
 8. Call `orchestrator.run()` with the graph, payload_store, shutdown_event, and a progress callback that broadcasts RunEvents through the ProgressBroadcaster.
-9. On successful completion, update Run status to completed and record the landscape_run_id from the RunResult.
+9. On successful completion, call `session_service.update_run_status(run_id, "completed", landscape_run_id=result.run_id)` to record the terminal state and landscape_run_id from the RunResult.
 
-**Exception and cleanup contract:** The entire body of `_run_pipeline()` is wrapped in `try/except BaseException/finally` (B7 fix). The except clause catches `BaseException`, not `Exception`, to handle `KeyboardInterrupt`, `SystemExit`, and OOM-triggered exceptions. On any exception, the Run record is updated to failed with the exception message before the exception is re-raised. The finally clause removes the shutdown Event from `self._shutdown_events`. Re-raising ensures the `future.add_done_callback()` safety net can also observe the failure.
+**Exception and cleanup contract:** The entire body of `_run_pipeline()` is wrapped in `try/except BaseException/finally` (B7 fix). The except clause catches `BaseException`, not `Exception`, to handle `KeyboardInterrupt`, `SystemExit`, and OOM-triggered exceptions. On any exception, `session_service.update_run_status(run_id, "failed", error=str(exc))` is called to record the failure before the exception is re-raised. The finally clause removes the shutdown Event from `self._shutdown_events`. Re-raising ensures the `future.add_done_callback()` safety net can also observe the failure.
 
 ### _on_pipeline_done() -- Safety Net Callback
 
-Registered via `future.add_done_callback()` on every submitted pipeline run. Its purpose is to catch exceptions that somehow bypassed the try/finally in `_run_pipeline()` -- a scenario that should not happen but would leave the Run record stuck in running status if it did. The callback calls `future.exception()` and, if non-None, logs the exception via structlog. It does not attempt to update the Run record because `_run_pipeline()` should have already done so; this is purely a diagnostic backstop.
+Registered via `future.add_done_callback()` on every submitted pipeline run. Its purpose is to catch exceptions that somehow bypassed the try/finally in `_run_pipeline()` -- a scenario that should not happen but would leave the Run record stuck in running status if it did. The callback calls `future.exception()` and, if non-None, logs the exception via structlog. It does not attempt to update the Run record via SessionService because `_run_pipeline()` should have already done so; this is purely a diagnostic backstop.
 
 ---
 
@@ -176,7 +176,7 @@ This section documents the three blocking review fixes (B1, B2, B7) and the infr
 
 **Solution:** The ProgressBroadcaster captures a reference to the asyncio event loop at construction time (when it is created in the app factory on the main thread). Its `broadcast()` method wraps every `queue.put_nowait()` call in `self._loop.call_soon_threadsafe()`, which schedules the put operation on the event loop's thread. This is the standard Python pattern for pushing data from a synchronous thread into an asyncio context.
 
-**Construction timing:** The ProgressBroadcaster is constructed in the FastAPI application factory (`create_app()`), which runs on the main thread. The loop reference is obtained via `asyncio.get_event_loop()` at that point. The broadcaster instance is then injected into the ExecutionServiceImpl constructor and into the WebSocket route handler via FastAPI's dependency injection.
+**Construction timing:** The ProgressBroadcaster is constructed inside the FastAPI lifespan async context manager (defined in sub-1), NOT in the synchronous `create_app()` factory. The loop reference is obtained via `asyncio.get_running_loop()` inside the lifespan, which guarantees a running event loop exists and is Python 3.12+ compatible (`asyncio.get_event_loop()` emits a deprecation warning when no running loop exists). The broadcaster instance is then stored as application state and injected into the ExecutionServiceImpl constructor and into the WebSocket route handler via FastAPI's dependency injection.
 
 ### B2 Fix: Always Pass shutdown_event to Orchestrator.run()
 
@@ -200,7 +200,7 @@ This section documents the three blocking review fixes (B1, B2, B7) and the infr
 
 **Solution:** Two layers of protection:
 
-**Layer 1 -- try/except BaseException/finally.** The `_run_pipeline()` body is wrapped in `try/except BaseException as exc`. The except clause updates the Run record to failed status with the exception message, then re-raises. The finally clause unconditionally removes the shutdown Event from `self._shutdown_events`, preventing a resource leak.
+**Layer 1 -- try/except BaseException/finally.** The `_run_pipeline()` body is wrapped in `try/except BaseException as exc`. The except clause calls `session_service.update_run_status(run_id, "failed", error=str(exc))` to record the failure, then re-raises. The finally clause unconditionally removes the shutdown Event from `self._shutdown_events`, preventing a resource leak.
 
 **Layer 2 -- future.add_done_callback().** After submitting `_run_pipeline()` to the thread pool, `execute()` attaches `_on_pipeline_done` via `future.add_done_callback()`. This callback fires when the Future completes, regardless of how it completed. It calls `future.exception()` and logs any non-None result. This is purely diagnostic -- the try/finally in Layer 1 should have already handled status updates -- but it provides a safety net against scenarios where the try/finally itself fails (e.g., the `_update_run_status()` call in the except clause raises).
 
@@ -218,7 +218,7 @@ The broadcaster maintains a `dict[str, set[asyncio.Queue[RunEvent]]]` mapping ru
 
 ### Lifecycle
 
-**Construction:** Created in `create_app()` with `asyncio.get_event_loop()`. Stored as application state and injected into both the ExecutionServiceImpl and the WebSocket route handler.
+**Construction:** Created inside the FastAPI lifespan async context manager with `asyncio.get_running_loop()`. Stored as application state and injected into both the ExecutionServiceImpl and the WebSocket route handler.
 
 **subscribe(run_id: str) -> asyncio.Queue[RunEvent]:** Creates a new `asyncio.Queue`, adds it to the subscriber set for the given run_id, and returns it. Called from the WebSocket handler when a client connects.
 
@@ -228,7 +228,7 @@ The broadcaster maintains a `dict[str, set[asyncio.Queue[RunEvent]]]` mapping ru
 
 ### Cleanup
 
-When a run completes (or fails), the execution service broadcasts a terminal RunEvent (event_type "completed" or "error"). The WebSocket handler receives this event, forwards it to the client, and disconnects. The `unsubscribe()` call in the handler's finally block removes the queue. If no clients are connected, the subscriber set for that run_id becomes empty and is eventually cleaned up.
+When a run completes, fails, or is cancelled, the execution service broadcasts a terminal RunEvent (event_type "completed", "error", or "cancelled"). The WebSocket handler receives this event, forwards it to the client, and disconnects. The `unsubscribe()` call in the handler's finally block removes the queue. If no clients are connected, the subscriber set for that run_id becomes empty and is eventually cleaned up.
 
 ---
 
@@ -241,7 +241,7 @@ When `cancel(run_id)` is called and the run is actively executing:
 1. Look up the `threading.Event` in `self._shutdown_events[run_id]`.
 2. Call `event.set()`.
 3. The Orchestrator checks `shutdown_event.is_set()` during row processing. When it detects the set Event, it stops processing and returns a RunResult with appropriate status.
-4. The `_run_pipeline()` function receives the result, updates the Run record to cancelled status, and broadcasts a terminal RunEvent.
+4. The `_run_pipeline()` function receives the result, calls `session_service.update_run_status(run_id, "cancelled")`, and broadcasts a terminal `cancelled` RunEvent.
 
 ### Pending Run Cancellation
 
@@ -264,16 +264,16 @@ Calling `cancel()` on an already-completed, already-failed, or already-cancelled
 
 ### Endpoint
 
-`WS /ws/runs/{run_id}` -- authenticated WebSocket endpoint that streams RunEvent payloads for a specific run.
+`WS /ws/runs/{run_id}?token=<jwt>` -- authenticated WebSocket endpoint that streams RunEvent payloads for a specific run. Authentication is via query parameter: the client passes the JWT as the `token` query parameter when opening the connection.
 
 ### Connection Lifecycle
 
-1. Client opens WebSocket connection to `/ws/runs/{run_id}`.
-2. The handler authenticates the request (same auth mechanism as REST endpoints, token passed as query parameter or first message).
-3. The handler verifies the run exists and belongs to the authenticated user's session (IDOR prevention, W5 related).
+1. Client opens WebSocket connection to `/ws/runs/{run_id}?token=<jwt>`.
+2. The handler extracts the token from the query string and validates it via the same AuthProvider protocol used by REST endpoints. If the token is missing or invalid, the handler closes the WebSocket with code 4001 (custom close code for auth failure). The client MUST NOT auto-reconnect on 4001 close codes -- the token must be refreshed or the user must re-authenticate.
+3. The handler verifies the run exists and belongs to the authenticated user's session (IDOR prevention -- returns 404-equivalent close if not found or foreign-owned, W5 related).
 4. The handler calls `broadcaster.subscribe(run_id)` to get an asyncio.Queue.
 5. The handler enters a read loop: `event = await queue.get()`, serialize event to JSON, `await websocket.send_json(event_dict)`.
-6. On terminal event (event_type "completed" or "error"), the handler sends the event and closes the connection.
+6. On terminal event (event_type "completed", "error", or "cancelled"), the handler sends the event and closes the connection.
 7. On client disconnect (WebSocketDisconnect exception), the handler exits the loop.
 8. In a finally block, the handler calls `broadcaster.unsubscribe(run_id, queue)`.
 
@@ -295,9 +295,9 @@ If the WebSocket connection drops, the queue remains subscribed until the finall
 
 **Response (200):** `ValidationResult` -- `is_valid`, `checks`, `errors` as defined in the ValidationResult Model section.
 
-**Errors:** 404 if session not found or no CompositionState exists. 403 if session belongs to another user.
+**Errors:** 404 if session not found, no CompositionState exists, or session belongs to another user (IDOR prevention -- returning 404 rather than 403 avoids leaking the existence of other users' sessions).
 
-**Behaviour:** Calls `validate_pipeline()` synchronously. This runs the full engine validation pipeline and may take 1-5 seconds depending on plugin count. The response is not cached -- each call re-validates against current state.
+**Behaviour:** The route handler calls `validate_pipeline()` via `await asyncio.get_running_loop().run_in_executor(None, validate_pipeline, state)` because the validation is synchronous and takes 1-5 seconds depending on plugin count. Running it directly would block the FastAPI event loop for the duration. The response is not cached -- each call re-validates against current state.
 
 ### POST /api/sessions/{session_id}/execute
 
@@ -305,7 +305,7 @@ If the WebSocket connection drops, the queue remains subscribed until the finall
 
 **Response (202):** `{ "run_id": "<uuid>" }` -- the run has been accepted and queued.
 
-**Errors:** 404 if session not found or state_id not found. 403 if session belongs to another user. 409 if an active run already exists on this session (RunAlreadyActiveError).
+**Errors:** 404 if session not found, state_id not found, or session belongs to another user (IDOR prevention). 409 if an active run already exists on this session (RunAlreadyActiveError).
 
 **Behaviour:** Calls `execution_service.execute()`. The run starts in pending status and transitions to running when the thread pool worker picks it up.
 
@@ -315,7 +315,7 @@ If the WebSocket connection drops, the queue remains subscribed until the finall
 
 **Response (200):** RunStatus model -- `run_id`, `status` (pending/running/completed/failed/cancelled), `started_at`, `finished_at`, `rows_processed`, `rows_failed`, `error`, `landscape_run_id`, `pipeline_yaml`.
 
-**Errors:** 404 if run not found. 403 if run belongs to a session owned by another user.
+**Errors:** 404 if run not found or run belongs to a session owned by another user (IDOR prevention).
 
 ### POST /api/runs/{run_id}/cancel
 
@@ -323,7 +323,7 @@ If the WebSocket connection drops, the queue remains subscribed until the finall
 
 **Response (200):** `{ "status": "cancelled" }` or `{ "status": "<current>" }` if the run was already in a terminal state.
 
-**Errors:** 404 if run not found. 403 if run belongs to a session owned by another user.
+**Errors:** 404 if run not found or run belongs to a session owned by another user (IDOR prevention).
 
 **Behaviour:** Calls `execution_service.cancel()`. Returns immediately -- cancellation is asynchronous (the Orchestrator detects the set Event during the next row-processing check).
 
@@ -333,7 +333,7 @@ If the WebSocket connection drops, the queue remains subscribed until the finall
 
 **Response (200):** Run summary including rows_processed, rows_succeeded, rows_failed, rows_quarantined, rows_routed, rows_forked from the RunResult. Also includes landscape_run_id for cross-referencing with the ELSPETH audit trail.
 
-**Errors:** 404 if run not found. 403 if run belongs to a session owned by another user. 409 if run is not yet in a terminal state (pending or running).
+**Errors:** 404 if run not found or run belongs to a session owned by another user (IDOR prevention). 409 if run is not yet in a terminal state (pending or running).
 
 ---
 
@@ -345,14 +345,15 @@ RunEvent is the WebSocket payload model. It has the same shape whether forwarded
 |-------|------|-------------|
 | `run_id` | `str` | UUID of the pipeline run |
 | `timestamp` | `datetime` | When the event was generated (UTC) |
-| `event_type` | `str` | One of: "progress", "error", "completed" |
+| `event_type` | `str` | One of: "progress", "error", "completed", "cancelled" |
 | `data` | `dict` | Event-type-specific payload |
 
 **Event type payloads:**
 
-- **progress:** `{ "rows_processed": int, "rows_failed": int }` -- cumulative counts at the time of the event.
+- **progress:** `{ "rows_processed": int, "rows_failed": int }` -- cumulative counts at the time of the event. Note: `estimated_total` is not available from the engine in v1. The frontend progress bar should use indeterminate mode (no `aria-valuemax`), showing only `rows_processed` and `rows_failed` counters without a percentage. If the source reports a row count (some sources know their total), it can be included in a future `start` event type.
 - **error:** `{ "message": str, "node_id": str or null, "row_id": str or null }` -- an exception during processing. Non-terminal: the pipeline continues processing other rows.
 - **completed:** `{ "rows_processed": int, "rows_succeeded": int, "rows_failed": int, "rows_quarantined": int, "landscape_run_id": str }` -- terminal event. The pipeline has finished.
+- **cancelled:** `{ "rows_processed": int, "rows_failed": int }` -- terminal event. The pipeline was cancelled via the cancel mechanism. When `_run_pipeline()` detects the shutdown event and the orchestrator returns, it broadcasts this event. The WebSocket handler closes the connection after sending this terminal event.
 
 The execution service constructs RunEvent instances from the Orchestrator's internal event types. The `_to_run_event()` method on ExecutionServiceImpl handles this translation. The translation is explicit -- it maps known Orchestrator event types to RunEvent fields. Unknown event types are not silently dropped; they raise a ValueError (offensive programming).
 
@@ -427,10 +428,20 @@ The `validate_pipeline()` function catches only typed exceptions (pydantic.Valid
 
 11. **One active run per session.** `execute()` raises `RunAlreadyActiveError` if a pending or running Run exists for the session.
 
-12. **WebSocket streams RunEvent JSON.** Clients connecting to `WS /ws/runs/{run_id}` receive RunEvent payloads with event_type "progress", "error", or "completed".
+12. **WebSocket streams RunEvent JSON.** Clients connecting to `WS /ws/runs/{run_id}?token=<jwt>` receive RunEvent payloads with event_type "progress", "error", "completed", or "cancelled". WebSocket auth failure closes the connection with code 4001.
 
-13. **REST endpoints enforce ownership.** All run and session endpoints verify that the resource belongs to the authenticated user. Foreign session/run access returns 403.
+13. **REST endpoints enforce ownership.** All run and session endpoints verify that the resource belongs to the authenticated user. Foreign session/run access returns 404 (not 403) to avoid leaking the existence of other users' resources.
 
 14. **Integration test passes end-to-end.** A test creates a session, saves a CompositionState for a CSV-passthrough-CSV pipeline, validates it (is_valid=True), executes it, polls to completion, and verifies rows_processed > 0 and rows_failed == 0. The landscape_run_id links to a real audit trail entry.
 
 15. **Multi-worker warning emitted.** If `WEB_CONCURRENCY > 1`, the application logs a startup warning about WebSocket progress limitations.
+
+16. **Validation does not block the event loop.** The validate route handler calls `validate_pipeline()` via `await asyncio.get_running_loop().run_in_executor(None, validate_pipeline, state)`. Direct synchronous invocation from the route handler is forbidden.
+
+17. **ExecutionService delegates Run CRUD to SessionService.** All Run record creation and status updates go through `session_service.create_run()`, `session_service.update_run_status()`, and `session_service.get_active_run()`. The ExecutionService has no direct database access for Run records.
+
+18. **Progress bar uses indeterminate mode.** `estimated_total` is not available from the engine in v1. Progress events report only `rows_processed` and `rows_failed` counters without a percentage or total.
+
+19. **Cancelled runs broadcast a terminal event.** When a run is cancelled, `_run_pipeline()` broadcasts a `cancelled` RunEvent with `{rows_processed, rows_failed}` data. The WebSocket handler closes the connection after sending this terminal event.
+
+20. **Cross-module integration test.** An integration test exercises the full flow: create session, save composition state, validate, execute, poll status, verify completion. This test uses real SessionService, real CatalogService, and real ExecutionService wired together.

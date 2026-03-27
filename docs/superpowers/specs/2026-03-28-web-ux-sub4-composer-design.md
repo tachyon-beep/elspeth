@@ -31,6 +31,13 @@ dataclass representing an immutable, versioned snapshot of a pipeline under
 construction. Every edit produces a new instance with an incremented version
 number. The previous version is never modified.
 
+**Authoritative definition:** CompositionState (frozen dataclass in
+`composer/state.py`) is the single authoritative domain model. Sub-Spec 2's
+database stores it as serialised JSON. API responses use a Pydantic schema in
+`sessions/schemas.py` for serialisation. The dataclass does NOT contain
+`is_valid` or `validation_errors` -- those travel alongside it (in
+ValidationSummary and ToolResult), not inside it.
+
 ### Fields
 
 | Field | Type | Description |
@@ -173,12 +180,12 @@ configuration shapes.
 **list_sinks()** -- Returns a list of available sink plugins with name and
 one-line summary for each. Delegates to CatalogService.list_sinks().
 
-**get_plugin_schema(type, name)** -- Returns the full Pydantic config schema for
-a specific plugin, identified by type ("source", "transform", or "sink") and
-name (e.g. "csv"). The schema includes field names, types, defaults, and
-descriptions. Delegates to CatalogService.get_schema(type, name). The LLM uses
-this to construct valid option dicts for set_source, upsert_node, and
-set_output.
+**get_plugin_schema(plugin_type, name)** -- Returns the full Pydantic config
+schema for a specific plugin, identified by plugin_type ("source", "transform",
+or "sink") and name (e.g. "csv"). The schema includes field names, types,
+defaults, and descriptions. Delegates to
+CatalogService.get_schema(plugin_type, name). The LLM uses this to construct
+valid option dicts for set_source, upsert_node, and set_output.
 
 **get_expression_grammar()** -- Returns the gate expression syntax reference:
 what variables are available (row, the row dict), what operators are supported,
@@ -382,6 +389,22 @@ translates it to an appropriate HTTP error response. The ComposerService does
 not retry LLM calls -- that is LiteLLM's responsibility (LiteLLM has built-in
 retry logic for transient failures).
 
+### HTTP Error Shapes
+
+The route handler translates composer failures to structured HTTP error
+responses:
+
+| Exception | HTTP Status | Response Body |
+|-----------|-------------|---------------|
+| `ComposerConvergenceError` | 422 Unprocessable Entity | `{error_type: "convergence", message: "...", turns_used: int}` |
+| LLM client failure (network, rate limit) | 502 Bad Gateway | `{error_type: "llm_unavailable", message: "..."}` |
+| LLM authentication failure | 502 Bad Gateway | `{error_type: "llm_auth_error", message: "..."}` |
+
+All error responses use `Content-Type: application/json`. The `message` field
+contains a human-readable description suitable for display in the frontend chat
+pane. The `error_type` field is a stable machine-readable discriminator that the
+frontend uses to select the appropriate error UI treatment.
+
 ---
 
 ## System Prompt
@@ -525,6 +548,17 @@ While the composer is running, the frontend shows a "composing" indicator. The
 request blocks until the composer completes or times out (controlled by
 WebSettings.composer_timeout_seconds). There is no streaming in v1.
 
+### GET /api/sessions/{id}/state/yaml
+
+Returns the generated YAML for the current composition state. The route handler
+loads the session's active CompositionState and calls `generate_yaml(state)`.
+
+**Response:** `{yaml: str}` -- the YAML string ready for display in the
+frontend's YAML tab.
+
+If the session has no CompositionState yet, returns HTTP 404. Authentication
+and session ownership checks are identical to the messages endpoint.
+
 ### Initial State
 
 When a session has no CompositionState yet (first message), the route handler
@@ -532,6 +566,16 @@ creates an initial empty state: source=None, nodes=(), edges=(), outputs=(),
 metadata=PipelineMetadata(), version=1. This is passed to the composer as the
 starting point. If the composer produces tool calls that mutate the state, the
 resulting state is persisted as version 1.
+
+### State Revert and Chat History
+
+When the user reverts to a prior composition version (via Sub-Spec 2's
+`set_active_state`), the route handler must inject a system message into the
+chat history: "Pipeline reverted to version N." This gives the LLM context that
+the state has been rolled back, preventing it from making decisions based on
+stale assumptions about what the pipeline currently contains. The injected
+message uses role="system" and is persisted as a ChatMessage so it appears in
+the conversation history on subsequent turns.
 
 ---
 
@@ -607,3 +651,7 @@ resulting state is persisted as version 1.
 
 14. All frozen dataclasses with container fields pass the enforce_freeze_guards.py
     CI check.
+
+15. Tests that mock CatalogService must use real PluginSummary and
+    PluginSchemaInfo instances, not plain dicts. Mock return types must match
+    the CatalogService protocol.

@@ -65,11 +65,13 @@ All fields on `WebSettings`, a Pydantic `BaseModel`.
 | `oidc_issuer` | `str \| None` | `None` | OIDC issuer URL (required when `auth_provider="oidc"`) |
 | `oidc_audience` | `str \| None` | `None` | OIDC audience claim (required when `auth_provider="oidc"`) |
 | `entra_tenant_id` | `str \| None` | `None` | Azure Entra tenant ID (required when `auth_provider="entra"`) |
+| `session_db_url` | `str \| None` | `None` | SQLAlchemy URL for the session database (sessions, messages, composition states, runs). When `None`, resolves to `sqlite:///{data_dir}/sessions.db` via `get_session_db_url()`. Separate from `landscape_url` (audit DB) |
 
 **Derived accessors:**
 
 - `get_landscape_url() -> str` -- returns `landscape_url` if set, otherwise `sqlite:///{data_dir}/runs/audit.db`
 - `get_payload_store_path() -> Path` -- returns `payload_store_path` if set, otherwise `{data_dir}/payloads/`
+- `get_session_db_url() -> str` -- returns `session_db_url` if set, otherwise `sqlite:///{data_dir}/sessions.db`
 
 **Validation:** `auth_provider` uses `Literal` type, so Pydantic rejects invalid values automatically. No manual `@field_validator` needed.
 
@@ -87,6 +89,22 @@ Located in `src/elspeth/web/app.py`. Responsibilities:
 - Store `settings` on `app.state.settings` for dependency injection
 - Register the `/api/health` GET endpoint returning `{"status": "ok"}`
 - Return the configured `FastAPI` instance
+
+**Lifespan context manager:** `create_app` attaches an async lifespan context manager to the `FastAPI` instance. Services that require a running event loop (e.g., `ProgressBroadcaster` in Phase 5, which needs `asyncio.get_running_loop()`) **must** be constructed inside the lifespan's `__aenter__`, not in the synchronous `create_app()` function. The lifespan populates `app.state` with these async-dependent services.
+
+```python
+from contextlib import asynccontextmanager
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    # Phase 1: stub — no async services yet.
+    # Phase 5 will add:
+    #   app.state.broadcaster = ProgressBroadcaster(asyncio.get_running_loop())
+    yield
+    # Shutdown: clean up async services here.
+```
+
+**Critical constraint:** `create_app()` is synchronous. Do NOT call `asyncio.get_event_loop()` inside it — there may not be a running loop at factory time (e.g., during test setup or uvicorn's import phase). Async-dependent services belong in the lifespan, which runs inside the ASGI server's event loop. Synchronous state (like `settings`) can still be attached to `app.state` directly in `create_app()`.
 
 **`dependencies.py`** provides `get_settings(request: Request) -> WebSettings` as a FastAPI `Depends()` provider that reads from `request.app.state.settings`. Service dependency stubs are added as each subsequent phase lands.
 

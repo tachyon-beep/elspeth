@@ -259,6 +259,25 @@ expiry.
 
 Error responses: 401 if token invalid or expired.
 
+**GET /api/auth/config**
+
+Returns the authentication configuration so the frontend can discover the auth
+mode and OIDC redirect parameters at runtime. This endpoint is unauthenticated
+(no Bearer token required) -- the frontend needs it before any login flow.
+
+Response (200):
+
+| Field | Type | Notes |
+|-------|------|-------|
+| provider | str | One of "local", "oidc", "entra" |
+| oidc_issuer | str or null | Present when provider is "oidc" or "entra" |
+| oidc_client_id | str or null | Present when provider is "oidc" or "entra" |
+
+Values are read from `WebSettings.auth_provider`, `WebSettings.oidc_issuer`, and
+`WebSettings.oidc_client_id`. The `oidc_client_id` field is added to WebSettings
+alongside the existing OIDC fields (it is the OAuth 2.0 client ID the frontend
+uses for the authorization code flow).
+
 **GET /api/auth/me**
 
 Returns the current user's profile. Available for all auth providers.
@@ -329,6 +348,35 @@ Ordered by created_at ascending for conversation history retrieval.
 - UNIQUE(session_id, version) -- enforces monotonic versioning per session.
 - Rows are immutable once written. Each edit creates a new version.
 
+### CompositionState Serialisation Contract
+
+The `composition_states` table stores the pipeline graph as JSON fields with a
+schema evolution envelope. The `CompositionState` frozen dataclass (defined in
+sub-spec 4) represents the in-memory pipeline graph; it does NOT contain
+`is_valid` or `validation_errors` -- those are separate DB columns on the
+`composition_states` table, outside the serialised state.
+
+**JSON envelope:** Each JSON column (`source`, `nodes`, `edges`, `outputs`,
+`metadata_`) is stored with a `_version: int` key at the top level for schema
+evolution. Version 1 is the initial format. Future schema changes increment this
+version and add migration logic in `from_record()`.
+
+**API serialisation:** `sessions/schemas.py` defines a `CompositionStateResponse`
+Pydantic model that combines the deserialised `CompositionState` fields with
+`is_valid` and `validation_errors` for API responses. This model is the only
+shape returned by session state endpoints.
+
+**Conversion functions** (part of the SessionService contract):
+
+| Function | Signature | Purpose |
+|----------|-----------|---------|
+| `to_record` | (state: CompositionState, is_valid: bool, validation_errors: list[str] or None) -> dict | Serialises CompositionState fields to JSON-ready dict with `_version` envelope, plus `is_valid` and `validation_errors` as top-level keys for DB columns |
+| `from_record` | (row: Row) -> CompositionStateRecord | Deserialises DB row back to CompositionStateRecord, validating `_version` and raising on unknown versions |
+
+`to_record` and `from_record` are defined in `sessions/service.py` and are
+internal to the SessionService implementation. They are not part of the
+SessionServiceProtocol (callers never need to serialise/deserialise directly).
+
 ### runs table
 
 | Column | Type | Constraint |
@@ -363,13 +411,14 @@ This provides database-level enforcement as a safety net.
 | id | UUID | PRIMARY KEY, server-generated |
 | run_id | UUID | NOT NULL, FOREIGN KEY -> runs.id, indexed |
 | timestamp | DATETIME | NOT NULL, server default utcnow |
-| event_type | VARCHAR | NOT NULL, CHECK IN ("progress", "error", "completed") |
+| event_type | VARCHAR | NOT NULL, CHECK IN ("progress", "error", "completed", "cancelled") |
 | data | JSON | NOT NULL |
 
 The data field shape depends on event_type:
 - progress: `{"rows_processed": int, "rows_failed": int}`
-- error: `{"message": str, "row_id": str or null, "exception_type": str}`
-- completed: `{"rows_processed": int, "rows_failed": int, "duration_seconds": float}`
+- error: `{"message": str, "node_id": str or null, "row_id": str or null}`
+- completed: `{"rows_processed": int, "rows_succeeded": int, "rows_failed": int, "rows_quarantined": int, "landscape_run_id": str}`
+- cancelled: `{"rows_processed": int, "rows_failed": int}`
 
 RunEvent doubles as the WebSocket payload model. Same shape whether forwarded
 in-process (v1) or via Redis Streams (later extraction).
@@ -394,9 +443,15 @@ File: `src/elspeth/web/sessions/protocol.py`
 | get_messages | async (session_id: UUID) -> list[ChatMessageRecord] | list[ChatMessageRecord] |
 | save_composition_state | async (session_id: UUID, state: CompositionStateData) -> CompositionStateRecord | CompositionStateRecord |
 | get_current_state | async (session_id: UUID) -> CompositionStateRecord or None | CompositionStateRecord or None |
+| get_state | async (state_id: UUID) -> CompositionStateRecord | CompositionStateRecord |
 | get_state_versions | async (session_id: UUID) -> list[CompositionStateRecord] | list[CompositionStateRecord] |
+| set_active_state | async (session_id: UUID, state_id: UUID) -> CompositionStateRecord | CompositionStateRecord |
+| create_run | async (session_id: UUID, state_id: UUID) -> RunRecord | RunRecord |
+| get_run | async (run_id: UUID) -> RunRecord | RunRecord |
+| update_run_status | async (run_id: UUID, status: str, error: str or None = None) -> None | None |
+| get_active_run | async (session_id: UUID) -> RunRecord or None | RunRecord or None |
 
-`SessionRecord`, `ChatMessageRecord`, and `CompositionStateRecord` are frozen
+`SessionRecord`, `ChatMessageRecord`, `CompositionStateRecord`, and `RunRecord` are frozen
 dataclasses representing database rows. `CompositionStateData` is the input DTO
 containing source, nodes, edges, outputs, metadata, is_valid, and
 validation_errors.
@@ -419,7 +474,13 @@ within a single transaction.
 - `get_messages`: selects where session_id matches, ordered by created_at ascending.
 - `save_composition_state`: queries max version for session, increments by 1 (first version is 1), inserts new row. The UNIQUE(session_id, version) constraint prevents race conditions.
 - `get_current_state`: selects the composition_states row with the highest version for the session. Returns None if no state exists.
+- `get_state`: selects a composition_states row by its primary key (id). Raises ValueError if not found.
 - `get_state_versions`: selects all composition_states for the session, ordered by version ascending.
+- `set_active_state`: creates a new version record that is a copy of the specified prior version (looked up by state_id). The new record gets version = max(existing) + 1. This means "revert" always creates a new version, preserving full history. Execute and validate always use the latest version (from `get_current_state`). Raises ValueError if state_id not found or does not belong to the session.
+- `create_run`: inserts a new runs row with status="pending", linking to the specified session and state. Enforces one-active-run per session (raises RunAlreadyActiveError if a pending or running run exists). The check-and-insert runs within a single transaction.
+- `get_run`: selects a runs row by id. Raises ValueError if not found.
+- `update_run_status`: updates the status (and optionally error) of a run. Sets finished_at to utcnow when status transitions to "completed", "failed", or "cancelled". Raises ValueError if run not found.
+- `get_active_run`: selects the runs row for the session where status IN ("pending", "running"). Returns None if no active run exists.
 
 ---
 
@@ -649,7 +710,7 @@ production PostgreSQL deployments, Alembic migrations should be used instead
 | Create | `src/elspeth/web/sessions/models.py` | SQLAlchemy table definitions (sessions, chat_messages, composition_states, runs, run_events) |
 | Create | `src/elspeth/web/sessions/service.py` | SessionServiceImpl -- CRUD, state versioning, active run check |
 | Create | `src/elspeth/web/sessions/routes.py` | /api/sessions/* endpoints with IDOR protection |
-| Create | `src/elspeth/web/sessions/schemas.py` | Pydantic request/response models for all session endpoints |
+| Create | `src/elspeth/web/sessions/schemas.py` | Pydantic request/response models for all session endpoints, including CompositionStateResponse |
 | Modify | `src/elspeth/web/app.py` | Register auth and session routers, create session DB engine, call metadata.create_all on startup |
 | Modify | `src/elspeth/web/dependencies.py` | Add get_current_user, get_session_service, get_auth_provider dependencies |
 | Create | `tests/unit/web/auth/__init__.py` | Test package |
@@ -709,6 +770,9 @@ production PostgreSQL deployments, Alembic migrations should be used instead
 25. `POST /api/auth/login` returns 404 when auth_provider is not "local".
 26. `POST /api/auth/token` with a valid Bearer token returns a new access_token.
 27. `GET /api/auth/me` returns the full UserProfile for the authenticated user.
+28a. `GET /api/auth/config` returns `{provider: "local"}` with null OIDC fields for local auth.
+28b. `GET /api/auth/config` returns `{provider: "oidc", oidc_issuer: ..., oidc_client_id: ...}` for OIDC auth.
+28c. `GET /api/auth/config` is accessible without authentication.
 
 ### SessionService
 
@@ -722,6 +786,13 @@ production PostgreSQL deployments, Alembic migrations should be used instead
 35. `get_current_state` returns the highest-version state, or None if none exists.
 36. `get_state_versions` returns all versions in ascending order.
 37. The UNIQUE(session_id, version) constraint prevents duplicate versions.
+37a. `get_state` returns a specific CompositionStateRecord by its UUID primary key.
+37b. `set_active_state` creates a new version that is a copy of the specified prior version, with an incremented version number.
+37c. `set_active_state` preserves full version history (revert does not delete or overwrite prior versions).
+37d. `create_run` inserts a run with status="pending" and links it to the specified session and state.
+37e. `get_run` returns the RunRecord for a valid run ID, raises ValueError for unknown ID.
+37f. `update_run_status` updates the run status and sets finished_at when transitioning to a terminal status.
+37g. `get_active_run` returns the pending/running run for a session, or None if no active run exists.
 
 ### Session Routes
 

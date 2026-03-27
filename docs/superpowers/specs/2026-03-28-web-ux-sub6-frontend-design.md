@@ -174,7 +174,7 @@ React Flow DAG visualisation of the current `CompositionState`. Converts `nodes`
 
 ### YAML Tab
 
-Read-only display of the generated ELSPETH pipeline YAML. The YAML is obtained from the backend (stored on `CompositionState` or generated client-side from the state).
+Read-only display of the generated ELSPETH pipeline YAML. The YAML is fetched from `GET /api/sessions/{id}/state/yaml` (defined in sub-4). The tab calls this endpoint whenever the composition state version changes.
 
 - **Syntax highlighting:** Uses `prism-react-renderer` with a YAML grammar.
 - **Copy-to-clipboard:** A button in the tab header copies the full YAML text to the clipboard with a brief "Copied" confirmation.
@@ -205,6 +205,8 @@ Clicking an active run shows the ProgressView inline within the Runs tab.
 
 Shown inline as a banner between the inspector header and the tab content area. Appears after the user clicks Validate and the backend responds.
 
+**Validate button loading state:** While the validation endpoint is processing, the Validate button shows a spinner and is disabled. The spinner replaces the button text. The button returns to its normal state when the response arrives.
+
 - **Pass:** Green banner with a checkmark and summary text (e.g., "Validation passed: 4 nodes, all schemas compatible, routes valid"). The Execute button becomes enabled.
 - **Fail:** Red banner with per-component error list. Each error identifies the component by name, describes the issue, and includes a suggested fix from the backend. The Execute button remains disabled.
 
@@ -214,12 +216,12 @@ Shown inline as a banner between the inspector header and the tab content area. 
 
 When a run is in progress, the Runs tab displays a live progress view:
 
-- **Progress bar:** Shows rows processed relative to estimated total. Uses `role="progressbar"` with `aria-valuenow`, `aria-valuemin`, and `aria-valuemax` attributes for screen reader support.
-- **Counters:** Rows processed, rows failed, estimated total -- displayed as text alongside the progress bar.
+- **Progress bar:** Uses indeterminate mode (no percentage, animated stripe) since the source row count is not known in advance. Uses `role="progressbar"` without `aria-valuemax` (indicating indeterminate progress) and with `aria-label="Pipeline execution in progress"`. In a future version, if the source provides a row count, the bar can switch to determinate mode by adding `aria-valuenow` and `aria-valuemax`.
+- **Counters:** `rows_processed` and `rows_failed` counters displayed as text alongside the progress bar. No `estimated_total` is shown.
 - **Recent exceptions:** A scrollable list showing the most recent exceptions, newest first. Limited to the last 50 entries to avoid memory growth.
 - **Cancel button:** Calls `POST /api/runs/{id}/cancel`. Disabled once the run has reached a terminal state.
 
-Progress data streams over the WebSocket connection. The `executionStore` receives `RunEvent` payloads and updates the progress state reactively.
+Progress data streams over the WebSocket connection. The `executionStore` receives `RunEvent` payloads and updates the progress state reactively. The `RunEvent` `event_type` union includes: `progress`, `completed`, `failed`, and `cancelled`. When the store receives a `cancelled` event, it updates the run status to "cancelled", closes the WebSocket connection, and the ProgressView displays "Pipeline execution was cancelled."
 
 ---
 
@@ -275,7 +277,7 @@ Three Zustand stores manage client-side state. All stores use the slice pattern 
 
 - `validate(sessionId)` -- calls `POST /api/sessions/{id}/validate`, stores result
 - `execute(sessionId)` -- calls `POST /api/sessions/{id}/execute`, stores run, connects WebSocket
-- `connectWebSocket(runId)` -- opens WebSocket to `/ws/runs/{id}`, updates `progress` on each `RunEvent`
+- `connectWebSocket(runId)` -- opens WebSocket to `/ws/runs/{id}?token=<jwt>` (appends the JWT from `authStore.token` as a query parameter). On close code 4001 (auth failure), does NOT auto-reconnect -- instead calls `authStore.logout()` and redirects to LoginPage. On other close codes (network drop, server restart), auto-reconnects with exponential backoff. Updates `progress` on each `RunEvent`
 - `cancel(runId)` -- calls `POST /api/runs/{id}/cancel`
 - `clearValidation()` -- called when a new CompositionState version arrives (W3 auto-clear)
 
@@ -289,7 +291,9 @@ Located in `src/api/client.ts`. Provides typed `fetch` wrappers for every backen
 
 **Auth token injection:** Every request includes an `Authorization: Bearer {token}` header, read from `authStore.token`. If the token is missing (user not authenticated), the request is not sent and the caller receives an authentication error.
 
-**Error handling:** Non-2xx responses are parsed into a typed error object with `status`, `detail`, and optional `validation_errors`. The API client does not silently swallow errors -- callers handle them explicitly.
+**Global 401 interceptor:** The typed fetch wrapper includes a global response interceptor. If any API call returns HTTP 401, the interceptor calls `authStore.logout()` and navigates to LoginPage. This handles token expiry mid-session without requiring each caller to check for auth failures. The WebSocket disconnect path (close code 4001) also triggers logout via the same `authStore.logout()` call.
+
+**Error handling:** Non-2xx responses are parsed into a typed error object with `status`, `detail`, and optional `error_type` and `validation_errors` fields. The API client does not silently swallow errors -- callers handle them explicitly.
 
 **Base URL:** All fetch calls use relative paths (`/api/sessions`, `/api/runs/{id}`, etc.). In development, the Vite proxy forwards these to FastAPI. In production, the SPA is served from the same origin as the API, so relative paths work directly.
 
@@ -312,7 +316,12 @@ The login page adapts to the configured auth provider:
 - **Local auth:** Renders a username/password form with a "Sign in" submit button. On submit, calls `authStore.login(username, password)`. Displays an inline error message on authentication failure.
 - **OIDC / Entra:** Renders a "Sign in with SSO" button. On click, redirects the browser to the IdP authorization endpoint. On return (with the token in the URL fragment or query parameter), calls `authStore.loginWithToken(token)`.
 
-The auth provider type is determined at runtime. The frontend fetches `GET /api/auth/me` on load -- if it returns 401, the user is not authenticated. The login page queries a configuration endpoint or uses a build-time environment variable to determine which auth mode to display.
+The auth provider type is determined at runtime. On app load, the frontend fetches `GET /api/auth/config`, which returns `{provider: "local" | "oidc" | "entra", oidc_issuer?: string, oidc_client_id?: string}`. The `provider` field determines which login form to render:
+
+- **`"local"`:** Render the username/password form.
+- **`"oidc"` or `"entra"`:** Render the "Sign in with SSO" button. Construct the OIDC redirect URL from the `oidc_issuer` and `oidc_client_id` fields in the config response (i.e., `{oidc_issuer}/authorize?client_id={oidc_client_id}&response_type=code&redirect_uri=...`).
+
+This endpoint is unauthenticated (it must be callable before login). The response is cached in memory for the session lifetime -- it does not change at runtime.
 
 ---
 
@@ -351,16 +360,24 @@ This avoids requiring users to manually type server-side file paths. The user se
 
 | Scenario | User-facing text |
 |----------|-----------------|
-| Composer convergence error | "ELSPETH couldn't complete the composition after multiple attempts. Try simplifying your request or breaking it into smaller steps." |
-| LLM unavailable | "The composition service is temporarily unavailable. Please try again in a moment." |
+| Composer convergence error (422, `error_type: "convergence"`) | "ELSPETH couldn't complete the composition after multiple attempts. Try breaking your request into smaller steps." |
+| LLM unavailable (502, `error_type: "llm_unavailable"`) | "The AI service is temporarily unavailable. Please try again in a moment." |
+| LLM auth error (502, `error_type: "llm_auth_error"`) | "The AI service configuration is invalid. Please contact your administrator." |
+| Composing timeout (POST /messages > 90s) | "The composition request timed out. Try a simpler request." |
 | Upload failure (size) | "The file exceeds the maximum upload size. Please use a smaller file." |
 | Upload failure (network) | "Upload failed due to a network error. Please check your connection and try again." |
 | Execution failure | "Pipeline execution failed. Check the Runs tab for error details." |
-| WebSocket disconnect | "Live progress connection lost. Reconnecting..." (shown as a subtle banner at the top of the Runs tab; auto-dismisses on reconnect) |
+| Execution conflict (409 on execute) | "A run is already in progress for this pipeline." |
+| Execution cancelled (WebSocket `cancelled` event) | "Pipeline execution was cancelled." |
+| Validation internal error (500 on validate) | "Validation encountered an internal error. Please try again." |
+| WebSocket disconnect (non-4001 close) | "Live progress connection lost. Reconnecting..." (shown as a subtle banner at the top of the Runs tab; auto-dismisses on reconnect) |
+| WebSocket auth failure (close code 4001) | Triggers `authStore.logout()` and redirect to LoginPage (no user-facing message -- the login page is the message). |
 | Validation failure | Displayed inline in the validation result banner with per-component detail (not a generic message). |
 | Session load failure | "Failed to load session. Please refresh the page." |
 | Authentication failure (local) | "Invalid username or password." |
 | Authentication failure (token expired) | "Your session has expired. Please sign in again." |
+
+The `useComposer` hook is responsible for dispatching composer-specific error messages. It checks the HTTP response status and the `error_type` field in the error response body to select the correct message. The 90-second composing timeout is implemented via `AbortController` on the `POST /messages` fetch call -- if the timeout fires, the request is aborted and the timeout message is shown.
 
 ---
 
@@ -376,7 +393,7 @@ This avoids requiring users to manually type server-side file paths. The user se
 ### ARIA
 
 - **Inspector panel:** The tab content area is wrapped in an ARIA live region (`aria-live="polite"`) so that screen readers announce state changes (e.g., new validation results, updated spec cards) without requiring the user to navigate to the panel.
-- **Execution progress bar:** Uses `role="progressbar"` with `aria-valuenow` (rows processed), `aria-valuemin` (0), and `aria-valuemax` (estimated total). Includes `aria-label="Pipeline execution progress"`.
+- **Execution progress bar:** Uses `role="progressbar"` in indeterminate mode (no `aria-valuemax`). Includes `aria-label="Pipeline execution in progress"`. When a future version supports source-provided row counts, `aria-valuenow` and `aria-valuemax` can be added for determinate mode.
 - **React Flow container:** Has `aria-label` describing the pipeline structure (e.g., "Pipeline graph: 4 nodes, 3 connections"). Since the graph is read-only and the same information is available in the Spec tab, the graph container is marked with `aria-hidden="false"` but is not the primary means of conveying pipeline structure.
 - **Composing indicator:** Marked with `aria-live="polite"` and `aria-label="ELSPETH is composing a response"` so screen readers announce when composition starts without interrupting the user.
 
@@ -398,9 +415,9 @@ The inspector panel includes a version history affordance for reverting to prior
 
 - Displays the current CompositionState version number (e.g., "v3").
 - Clicking opens a dropdown listing all versions for the active session, ordered newest-first, with timestamps.
-- Selecting a prior version calls `sessionStore.revertToVersion(version)`, which loads that version's state from `GET /api/sessions/{id}/state/versions` and sets it as the current `compositionState`.
+- Selecting a prior version calls `sessionStore.revertToVersion(version)`, which calls the backend revert endpoint (sub-2's `set_active_state` via `POST /api/sessions/{id}/state/revert`). The backend sets the selected version as active and injects a system message "Pipeline reverted to version N." into the session's message history. The frontend then refreshes both the message list and the composition state from the backend response.
 - Reverting clears the validation result (W3 auto-clear applies) and disables the Execute button.
-- The chat history is not affected by revert -- it remains a complete chronological record.
+- The chat history is not affected by revert beyond the injected system message -- it remains a complete chronological record. The system message provides an audit trail of the revert action.
 
 ---
 
@@ -472,7 +489,7 @@ The `app.py` modification adds static file serving: mount `frontend/dist/` with 
 
 11. **Validation UX works.** Clicking Validate shows a pass (green) or fail (red) banner with per-component detail. The Execute button enables on pass. A new CompositionState version arriving from the composer clears the validation banner and disables Execute (W3).
 
-12. **Execution progress works.** Starting execution connects the WebSocket. Row counts and exceptions update in real time. The progress bar has correct `role="progressbar"` ARIA semantics. The cancel button sends the cancel request.
+12. **Execution progress works.** Starting execution connects the WebSocket (with JWT in query parameter). Row counts (`rows_processed`, `rows_failed`) and exceptions update in real time. The progress bar uses indeterminate mode with correct `role="progressbar"` ARIA semantics (no `aria-valuemax`). The cancel button sends the cancel request. A `cancelled` RunEvent updates the status and shows the cancellation message. WebSocket close code 4001 triggers logout.
 
 13. **File upload works.** Clicking the upload button opens a file picker. After upload, the server path is auto-injected into the chat input. Upload errors display inline messages.
 

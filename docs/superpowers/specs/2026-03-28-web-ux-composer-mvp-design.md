@@ -36,7 +36,7 @@ user reviews the deterministic spec → validates (dry-run) → executes.
 - Run history per session
 - Pluggable auth: LocalAuthProvider, OIDCAuthProvider, EntraAuthProvider
 - `elspeth web` CLI entry point
-- `[web]` optional install extra
+- `[webui]` optional install extra (named `webui` because `web` is already taken by the web scraping extra)
 
 ### Out of scope (later increments)
 
@@ -564,7 +564,7 @@ Enforced by the existing `enforce_tier_model.py` CI script.
 
 ### Packaging
 
-Optional install extra: `uv pip install -e ".[web]"`
+Optional install extra: `uv pip install -e ".[webui]"`
 
 Adds: `fastapi`, `uvicorn`, `python-jose[cryptography]`, `httpx`,
 `python-multipart`, `websockets`.
