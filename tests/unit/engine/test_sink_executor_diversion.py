@@ -350,10 +350,12 @@ class TestFailsinkMode:
             failsink_edge_id="edge-failsink-1",
         )
         begin_calls = recorder.begin_node_state.call_args_list
-        assert len(begin_calls) == 2
-        node_ids = [c.kwargs["node_id"] for c in begin_calls]
-        assert "node-primary" in node_ids
-        assert "node-failsink" in node_ids
+        # 3 states: t0 at primary, t1 at primary (divert anchor), t1 at failsink
+        assert len(begin_calls) == 3
+        primary_calls = [c for c in begin_calls if c.kwargs["node_id"] == "node-primary"]
+        failsink_calls = [c for c in begin_calls if c.kwargs["node_id"] == "node-failsink"]
+        assert len(primary_calls) == 2  # t0 (written) + t1 (divert anchor)
+        assert len(failsink_calls) == 1  # t1 (destination)
 
 
 class TestFailsinkErrorHandling:
@@ -407,16 +409,18 @@ class TestFailsinkCleanup:
                 failsink_name="csv_failsink",
                 failsink_edge_id="edge-failsink-1",
             )
-        # t0 was diverted so no primary states opened; failsink write crashes
-        # before failsink states are opened. No complete_node_state calls at all.
+        # t0's primary divert state was opened (divert anchor), then failsink
+        # write crashed. The cleanup marks the primary divert state as FAILED.
         complete_calls = recorder.complete_node_state.call_args_list
         failed_calls = [c for c in complete_calls if c.kwargs.get("status") == NodeStateStatus.FAILED]
         completed_calls = [c for c in complete_calls if c.kwargs.get("status") == NodeStateStatus.COMPLETED]
-        assert len(failed_calls) == 0
+        assert len(failed_calls) == 1  # primary divert anchor cleaned up
         assert len(completed_calls) == 0
-        # No begin_node_state calls for failsink because write crashed first
+        # Primary divert state opened, but no failsink states (write crashed first)
         begin_calls = recorder.begin_node_state.call_args_list
+        primary_begins = [c for c in begin_calls if c.kwargs.get("node_id") == sink.node_id]
         failsink_begins = [c for c in begin_calls if c.kwargs.get("node_id") == failsink.node_id]
+        assert len(primary_begins) == 1  # divert anchor
         assert len(failsink_begins) == 0
 
     def test_failsink_failure_does_not_affect_primary_states(self) -> None:
@@ -444,18 +448,18 @@ class TestFailsinkCleanup:
                 failsink_edge_id="edge-failsink-1",
             )
         complete_calls = recorder.complete_node_state.call_args_list
-        # t0: COMPLETED at primary node_id (Phase 2 completed before failsink)
+        # t0: COMPLETED at primary (Phase 2)
+        # t1: FAILED at primary (divert anchor — failsink write crashed)
         completed_calls = [c for c in complete_calls if c.kwargs.get("status") == NodeStateStatus.COMPLETED]
-        assert len(completed_calls) == 1
-        # No failsink states opened (write crashed before begin_node_state)
         failed_calls = [c for c in complete_calls if c.kwargs.get("status") == NodeStateStatus.FAILED]
-        assert len(failed_calls) == 0
-        # Verify node_id isolation: primary states at primary node, no failsink states
+        assert len(completed_calls) == 1  # t0
+        assert len(failed_calls) == 1  # t1 primary divert state cleaned up
+        # Verify: 2 primary states opened (t0 + t1 divert anchor), 0 failsink states
         begin_calls = recorder.begin_node_state.call_args_list
         primary_begins = [c for c in begin_calls if c.kwargs.get("node_id") == sink.node_id]
         failsink_begins = [c for c in begin_calls if c.kwargs.get("node_id") == failsink.node_id]
-        assert len(primary_begins) == 1  # t0 at primary
-        assert len(failsink_begins) == 0  # t1 never reached failsink states
+        assert len(primary_begins) == 2  # t0 + t1 divert anchor
+        assert len(failsink_begins) == 0  # failsink write crashed before state opening
 
     def test_failsink_flush_failure_crashes(self) -> None:
         """If failsink.flush() raises, crash — it's the last resort."""

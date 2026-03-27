@@ -106,7 +106,7 @@ class SinkExecutor:
         step_in_pipeline: int,
         *,
         sink_name: str,
-        pending_outcome: PendingOutcome,
+        pending_outcome: PendingOutcome | None,
         failsink: SinkProtocol | None = None,
         failsink_name: str | None = None,
         failsink_edge_id: str | None = None,
@@ -151,6 +151,14 @@ class SinkExecutor:
         """
         if not tokens:
             return None, 0
+
+        # pending_outcome is required for all sink-bound tokens.
+        # PendingTokenMap allows None in its type alias, but _route_to_sink()
+        # always wraps in PendingOutcome. None here means a routing bug.
+        if pending_outcome is None:
+            raise OrchestrationInvariantError(
+                f"Sink '{sink_name}' received pending_outcome=None — all sink-bound tokens must have a PendingOutcome."
+            )
 
         # Extract dicts from PipelineRow for sink write
         rows = [t.row_data.to_dict() for t in tokens]
@@ -324,21 +332,58 @@ class SinkExecutor:
                         )
 
         # ── PHASE 3: Handle diversions ──
+        # Every diverted token gets a node_state at the PRIMARY sink (the routing
+        # node). This matches the quarantine/transform-error pattern: the routing
+        # decision is recorded where it happened. Failsink-mode tokens ALSO get
+        # a state at the failsink node (the destination).
         diversion_count = len(diverted_tokens)
         if diverted_tokens:
-            # Build diversion lookup by row_index
             diversion_by_index = {d.row_index: d for d in diversions}
+
+            # Open node_states at the PRIMARY sink for all diverted tokens.
+            # These are the routing anchors — routing_event.state_id points here.
+            primary_divert_states: list[tuple[TokenInfo, int, NodeStateOpen]] = []
+            try:
+                for token, idx in diverted_tokens:
+                    input_dict = token.row_data.to_dict()
+                    state = self._recorder.begin_node_state(
+                        token_id=token.token_id,
+                        node_id=sink_node_id,
+                        run_id=ctx.run_id,
+                        step_index=step_in_pipeline,
+                        input_data=input_dict,
+                    )
+                    primary_divert_states.append((token, idx, state))
+            except (FrameworkBugError, AuditIntegrityError):
+                raise
+            except Exception as e:
+                if primary_divert_states:
+                    begin_error = ExecutionError(
+                        exception=str(e),
+                        exception_type=type(e).__name__,
+                        phase="begin_node_state_divert",
+                    )
+                    self._complete_states_failed(
+                        states=[(t, s) for t, _, s in primary_divert_states],
+                        duration_ms=0.0,
+                        error=begin_error,
+                    )
+                raise
 
             if failsink is not None:
                 # Failsink mode: write enriched rows to failsink
                 if failsink.node_id is None:
                     raise OrchestrationInvariantError(f"Failsink '{failsink.name}' executed without node_id - orchestrator bug")
+                if failsink_edge_id is None:
+                    raise OrchestrationInvariantError("failsink_edge_id is None but failsink is not None — orchestrator bug")
+                if failsink_name is None:
+                    raise OrchestrationInvariantError("failsink_name is None but failsink is not None — orchestrator bug")
                 failsink_node_id: str = failsink.node_id
 
                 # Build enriched rows
                 iso_ts = datetime.now(UTC).isoformat()
                 enriched_rows = []
-                for _token, idx in diverted_tokens:
+                for _token, idx, _state in primary_divert_states:
                     diversion = diversion_by_index[idx]
                     enriched_row = {
                         **diversion.row_data,
@@ -348,10 +393,26 @@ class SinkExecutor:
                     }
                     enriched_rows.append(enriched_row)
 
-                # Write to failsink
+                # Write to failsink — if this fails, complete primary divert
+                # states as FAILED before re-raising (they're already open).
                 failsink._reset_diversion_log()
-                failsink_write_result = failsink.write(enriched_rows, ctx)
-                failsink.flush()
+                try:
+                    failsink_write_result = failsink.write(enriched_rows, ctx)
+                    failsink.flush()
+                except (FrameworkBugError, AuditIntegrityError):
+                    raise
+                except Exception as e:
+                    fs_write_error = ExecutionError(
+                        exception=str(e),
+                        exception_type=type(e).__name__,
+                        phase="failsink_write",
+                    )
+                    self._complete_states_failed(
+                        states=[(t, s) for t, _, s in primary_divert_states],
+                        duration_ms=0.0,
+                        error=fs_write_error,
+                    )
+                    raise
 
                 if failsink_write_result.diversions:
                     raise FrameworkBugError(
@@ -361,10 +422,10 @@ class SinkExecutor:
 
                 failsink_artifact_info = failsink_write_result.artifact
 
-                # Open and complete node_states at failsink node
+                # Open node_states at failsink node (destination)
                 failsink_states: list[tuple[TokenInfo, NodeStateOpen]] = []
                 try:
-                    for token, _idx in diverted_tokens:
+                    for token, _idx, _primary_state in primary_divert_states:
                         input_dict = token.row_data.to_dict()
                         state = self._recorder.begin_node_state(
                             token_id=token.token_id,
@@ -390,28 +451,33 @@ class SinkExecutor:
                         )
                     raise
 
-                # Record routing_event and complete failsink states
-                # failsink_edge_id is guaranteed non-None when failsink is not None
-                # (validated in orchestrator's failsink resolution)
-                if failsink_edge_id is None:
-                    raise OrchestrationInvariantError("failsink_edge_id is None but failsink is not None — orchestrator bug")
-                if failsink_name is None:
-                    raise OrchestrationInvariantError("failsink_name is None but failsink is not None — orchestrator bug")
-                for (token, idx), (_, fs_state) in zip(diverted_tokens, failsink_states, strict=True):
+                # Record routing_event anchored to PRIMARY sink state (the routing node),
+                # complete primary state, then complete failsink state.
+                # This matches the quarantine pattern: routing_event lives at the
+                # node that made the routing decision.
+                for (token, idx, primary_state), (_, fs_state) in zip(primary_divert_states, failsink_states, strict=True):
                     diversion = diversion_by_index[idx]
-
-                    # Routing event links primary sink → failsink
                     reason: SinkDiversionReason = {"diversion_reason": diversion.reason}
+
+                    # Routing event anchored to primary sink state
                     self._recorder.record_routing_event(
-                        state_id=fs_state.state_id,
+                        state_id=primary_state.state_id,
                         edge_id=failsink_edge_id,
                         mode=RoutingMode.DIVERT,
                         reason=reason,
                     )
 
-                    output_dict = token.row_data.to_dict()
+                    # Complete primary state (token reached this sink, was diverted)
+                    self._recorder.complete_node_state(
+                        state_id=primary_state.state_id,
+                        status=NodeStateStatus.COMPLETED,
+                        output_data={"diverted_to": failsink_name, "reason": diversion.reason},
+                        duration_ms=0.0,
+                    )
+
+                    # Complete failsink state (token written to failsink)
                     failsink_output = {
-                        "row": output_dict,
+                        "row": token.row_data.to_dict(),
                         "artifact_path": failsink_artifact_info.path_or_uri,
                         "content_hash": failsink_artifact_info.content_hash,
                     }
@@ -434,8 +500,8 @@ class SinkExecutor:
                     size_bytes=failsink_artifact_info.size_bytes,
                 )
 
-                # Record DIVERTED outcomes with failsink name
-                for token, idx in diverted_tokens:
+                # Record DIVERTED outcomes
+                for token, idx, _primary_state in primary_divert_states:
                     diversion = diversion_by_index[idx]
                     error_hash = hashlib.sha256(diversion.reason.encode()).hexdigest()[:16]
                     self._recorder.record_token_outcome(
@@ -447,9 +513,18 @@ class SinkExecutor:
                     )
 
             else:
-                # Discard mode: record DIVERTED outcomes only (no routing_event, no failsink write)
-                for token, idx in diverted_tokens:
+                # Discard mode: complete primary states and record DIVERTED outcomes.
+                # No routing_event (no DAG edge for discard), no failsink write.
+                for token, idx, primary_state in primary_divert_states:
                     diversion = diversion_by_index[idx]
+
+                    self._recorder.complete_node_state(
+                        state_id=primary_state.state_id,
+                        status=NodeStateStatus.COMPLETED,
+                        output_data={"discarded": True, "reason": diversion.reason},
+                        duration_ms=0.0,
+                    )
+
                     error_hash = hashlib.sha256(diversion.reason.encode()).hexdigest()[:16]
                     self._recorder.record_token_outcome(
                         run_id=self._run_id,

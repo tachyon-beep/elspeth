@@ -81,7 +81,7 @@ allow_hits:
   reason: 'Tier 3 validation: raw YAML from operator files — isinstance checks validate each entry is a mapping'
   safety: Raises ValueError with index and type info on malformed entry
   expires: null
-- key: engine/executors/sink.py:R4:SinkExecutor:write:fp=766fc69b0146b782
+- key: engine/executors/sink.py:R4:SinkExecutor:write:fp=f3f7223a12cd8a18
   owner: architecture
   reason: 'Post-durability callbacks: checkpoint callback fails after durable sink write'
   safety: Logged with error - sink artifact exists but checkpoint failed, resume will replay
