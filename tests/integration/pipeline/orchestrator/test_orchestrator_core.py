@@ -608,6 +608,8 @@ class TestOrchestratorAcceptsGraph:
         mock_sink_a.name = "output_a"
         mock_sink_a.determinism = Determinism.IO_WRITE
         mock_sink_a.plugin_version = "1.0.0"
+        mock_sink_a._on_write_failure = "discard"
+        mock_sink_a._reset_diversion_log = MagicMock()
 
         sink_a_node_id_setter = PropertyMock()
         type(mock_sink_a).node_id = sink_a_node_id_setter
@@ -620,6 +622,8 @@ class TestOrchestratorAcceptsGraph:
         mock_sink_b.name = "output_b"
         mock_sink_b.determinism = Determinism.IO_WRITE
         mock_sink_b.plugin_version = "1.0.0"
+        mock_sink_b._on_write_failure = "discard"
+        mock_sink_b._reset_diversion_log = MagicMock()
 
         sink_b_node_id_setter = PropertyMock()
         type(mock_sink_b).node_id = sink_b_node_id_setter

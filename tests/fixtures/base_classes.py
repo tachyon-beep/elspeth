@@ -145,6 +145,10 @@ class _TestSinkBase:
 
     def __init__(self) -> None:
         self.config: dict[str, Any] = {"schema": {"mode": "observed"}}
+        self._diversion_log: list[Any] = []
+
+    def _reset_diversion_log(self) -> None:
+        self._diversion_log = []
 
     def on_start(self, ctx: Any) -> None:
         pass
