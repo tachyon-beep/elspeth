@@ -1,6 +1,6 @@
 # ELSPETH Examples
 
-This directory contains runnable pipeline examples demonstrating ELSPETH's features. Each example has its own `settings.yaml` and a `README.md` explaining what it demonstrates.
+This directory contains runnable pipeline examples demonstrating ELSPETH's features. Most examples have a `settings.yaml` entry point; some use named pipeline files instead (see notes below).
 
 ## Quick Start
 
@@ -37,6 +37,16 @@ These examples run locally with no credentials or external services.
 | [`schema_contracts_demo`](schema_contracts_demo/) | DAG-time schema validation (`guaranteed_fields` / `required_input_fields`) |
 | [`large_scale_test`](large_scale_test/) | Performance testing with large datasets |
 | [`threshold_gate_container`](threshold_gate_container/) | Docker-packaged pipeline deployment |
+
+### RAG / ChromaDB (requires `chromadb` — no API keys for retrieval-only)
+
+These examples demonstrate Retrieval-Augmented Generation using ChromaDB as a vector store. Install ChromaDB first: `uv pip install chromadb`.
+
+| Example | What It Demonstrates |
+|---------|---------------------|
+| [`chroma_rag`](chroma_rag/) | Basic RAG retrieval — query a pre-populated ChromaDB collection |
+| [`chroma_rag_qa`](chroma_rag_qa/) | RAG + LLM — retrieve context then generate answers via OpenRouter (requires `OPENROUTER_API_KEY`) |
+| [`chroma_rag_indexed`](chroma_rag_indexed/) | **Pipeline dependencies** — `depends_on` runs an indexing pipeline first, commencement gate verifies the collection, then query pipeline retrieves context. Entry point: `query_pipeline.yaml` |
 
 ### OpenRouter LLM (real API — requires `OPENROUTER_API_KEY`)
 
@@ -106,3 +116,7 @@ These examples use ELSPETH's built-in fault injection servers to test pipeline r
 | **Docker deployment** | [`threshold_gate_container`](threshold_gate_container/) — containerised pipeline |
 | **Retry under faults** | [`chaosllm_endurance`](chaosllm_endurance/) — 5 retries with exponential backoff against ChaosLLM |
 | **Stress testing** | [`large_scale_test`](large_scale_test/) or [`chaosllm_endurance`](chaosllm_endurance/) |
+| **RAG retrieval** | [`chroma_rag`](chroma_rag/) — basic vector search against ChromaDB |
+| **RAG + LLM** | [`chroma_rag_qa`](chroma_rag_qa/) — retrieval then LLM-generated answers |
+| **Pipeline dependencies (`depends_on`)** | [`chroma_rag_indexed`](chroma_rag_indexed/) — index → gate → query in one command |
+| **Commencement gates** | [`chroma_rag_indexed`](chroma_rag_indexed/) — go/no-go check before pipeline starts |
