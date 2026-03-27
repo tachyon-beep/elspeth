@@ -768,13 +768,17 @@ def build_execution_graph(
         on_write_failure = sink_instance._on_write_failure
         if on_write_failure is not None and on_write_failure != "discard":
             failsink_name = SinkName(on_write_failure)
-            if failsink_name in sink_ids:
-                graph.add_edge(
-                    sink_node_id,
-                    sink_ids[failsink_name],
-                    label="__failsink__",
-                    mode=RoutingMode.DIVERT,
+            if failsink_name not in sink_ids:
+                raise GraphValidationError(
+                    f"Sink '{sink_name_key}' on_write_failure references '{on_write_failure}' "
+                    f"which is not in sink_ids. Available: {sorted(str(s) for s in sink_ids)}."
                 )
+            graph.add_edge(
+                sink_node_id,
+                sink_ids[failsink_name],
+                label="__failsink__",
+                mode=RoutingMode.DIVERT,
+            )
 
     # ===== PIPELINE ORDERING (TOPOLOGICAL) =====
     processing_node_ids: set[NodeID] = set()

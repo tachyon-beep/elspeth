@@ -340,6 +340,7 @@ class TestSinkNameValidation:
                 ctx=ctx,
                 pending_tokens=pending_tokens,
                 sink_id_map={"output": "node-1"},
+                edge_map={},
                 sink_step=5,
             )
 
@@ -365,5 +366,6 @@ class TestSinkNameValidation:
             ctx=ctx,
             pending_tokens=pending_tokens,
             sink_id_map={},
+            edge_map={},
             sink_step=5,
         )

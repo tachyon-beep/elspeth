@@ -412,6 +412,8 @@ class SinkExecutor:
                 # (validated in orchestrator's failsink resolution)
                 if failsink_edge_id is None:
                     raise OrchestrationInvariantError("failsink_edge_id is None but failsink is not None — orchestrator bug")
+                if failsink_name is None:
+                    raise OrchestrationInvariantError("failsink_name is None but failsink is not None — orchestrator bug")
                 for (token, idx), (_, fs_state) in zip(diverted_tokens, failsink_states, strict=True):
                     diversion = diversion_by_index[idx]
 
@@ -458,7 +460,7 @@ class SinkExecutor:
                         token_id=token.token_id,
                         outcome=RowOutcome.DIVERTED,
                         error_hash=error_hash,
-                        sink_name=failsink_name or sink_name,
+                        sink_name=failsink_name,
                     )
 
             else:
