@@ -6,7 +6,7 @@
 
 **Architecture:** Auth providers are protocol-based with three concrete implementations. The auth middleware is a FastAPI dependency (`Depends(get_current_user)`) injected into all protected routes. Session data lives in a dedicated SQLite database (separate from Landscape). All table definitions use SQLAlchemy Core. Schema creation uses `metadata.create_all()` on startup. Session routes verify user ownership on every request (IDOR protection returns 404, not 403).
 
-**Tech Stack:** FastAPI, SQLAlchemy Core (aiosqlite for dev), passlib[bcrypt] (password hashing), python-jose[cryptography] (JWT), httpx (OIDC JWKS discovery), Pydantic v2 (request/response schemas)
+**Tech Stack:** FastAPI, SQLAlchemy Core, bcrypt (password hashing), python-jose[cryptography] (JWT), httpx (OIDC JWKS discovery), Pydantic v2 (request/response schemas)
 
 **Spec:** `docs/superpowers/specs/2026-03-28-web-ux-sub2-auth-sessions-design.md`
 
@@ -21,7 +21,7 @@
 | Create | `src/elspeth/web/auth/__init__.py` | Module init |
 | Create | `src/elspeth/web/auth/protocol.py` | AuthProvider protocol (two methods, no exceptions) |
 | Create | `src/elspeth/web/auth/models.py` | UserIdentity, UserProfile, AuthenticationError |
-| Create | `src/elspeth/web/auth/local.py` | LocalAuthProvider -- SQLite, bcrypt/passlib, JWT via python-jose |
+| Create | `src/elspeth/web/auth/local.py` | LocalAuthProvider -- SQLite, bcrypt, JWT via python-jose |
 | Create | `src/elspeth/web/auth/oidc.py` | OIDCAuthProvider -- JWKS discovery via httpx, token validation |
 | Create | `src/elspeth/web/auth/entra.py` | EntraAuthProvider -- tenant validation, group claims |
 | Create | `src/elspeth/web/auth/middleware.py` | get_current_user FastAPI dependency |
@@ -34,7 +34,7 @@
 | Create | `src/elspeth/web/sessions/schemas.py` | Pydantic request/response models for all session endpoints |
 | Modify | `src/elspeth/web/app.py` | Register auth and session routers, create session DB engine, call metadata.create_all on startup |
 | Modify | `src/elspeth/web/dependencies.py` | Add get_current_user, get_session_service, get_auth_provider dependencies |
-| Modify | `pyproject.toml` | Add passlib[bcrypt] and aiosqlite to [webui] extra |
+| Modify | `pyproject.toml` | Add bcrypt to [webui] extra |
 | Create | `tests/unit/web/auth/__init__.py` | Test package |
 | Create | `tests/unit/web/auth/test_models.py` | Auth model tests |
 | Create | `tests/unit/web/auth/test_local_provider.py` | LocalAuthProvider tests |
@@ -59,7 +59,7 @@ Before starting this plan, Phase 1 must be complete. The following files must ex
 - `src/elspeth/web/dependencies.py` (with `get_settings()`)
 - `pyproject.toml` has `[webui]` extra with fastapi, uvicorn, python-jose, python-multipart, httpx
 
-Additionally, `passlib[bcrypt]` and `aiosqlite` must be added to the `[webui]` extra. If not already present, add them as the first step of Task 2.1.
+Additionally, `bcrypt` must be added to the `[webui]` extra. If not already present, add it as the first step of Task 2.1.
 
 ---
 
@@ -72,9 +72,9 @@ Additionally, `passlib[bcrypt]` and `aiosqlite` must be added to the `[webui]` e
 - Create: `tests/unit/web/auth/__init__.py`
 - Create: `tests/unit/web/auth/test_models.py`
 
-- [ ] **Step 1: Add passlib and aiosqlite to pyproject.toml**
+- [ ] **Step 1: Add bcrypt to pyproject.toml**
 
-In the `[project.optional-dependencies]` section, add `passlib[bcrypt]` and `aiosqlite` to the `webui` extra:
+In the `[project.optional-dependencies]` section, add `bcrypt` to the `webui` extra:
 
 ```toml
 webui = [
@@ -84,8 +84,7 @@ webui = [
     "python-multipart>=0.0.20",
     "websockets>=14.0,<15",
     "httpx>=0.27,<1",
-    "passlib[bcrypt]>=1.7,<2",
-    "aiosqlite>=0.20,<1",
+    "bcrypt>=4.0,<5",
 ]
 ```
 
@@ -485,7 +484,7 @@ Expected: `ModuleNotFoundError: No module named 'elspeth.web.auth.local'`
 # src/elspeth/web/auth/local.py
 """Local authentication provider -- SQLite user store with bcrypt and JWT.
 
-Uses passlib for bcrypt password hashing and python-jose for JWT token
+Uses bcrypt for password hashing and python-jose for JWT token
 creation and validation. The SQLite database is created at db_path on
 first use.
 """
@@ -496,12 +495,10 @@ import sqlite3
 import time
 from pathlib import Path
 
+import bcrypt
 from jose import JWTError, jwt
-from passlib.context import CryptContext
 
 from elspeth.web.auth.models import AuthenticationError, UserIdentity, UserProfile
-
-_pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 
 
 class LocalAuthProvider:
@@ -547,7 +544,7 @@ class LocalAuthProvider:
 
         Raises ValueError if a user with the given user_id already exists.
         """
-        password_hash = _pwd_context.hash(password)
+        password_hash = bcrypt.hashpw(password.encode(), bcrypt.gensalt()).decode()
         with self._get_conn() as conn:
             try:
                 conn.execute(
@@ -571,7 +568,7 @@ class LocalAuthProvider:
                 (username,),
             ).fetchone()
 
-        if row is None or not _pwd_context.verify(password, row[0]):
+        if row is None or not bcrypt.checkpw(password.encode(), row[0].encode()):
             raise AuthenticationError("Invalid credentials")
 
         payload = {
@@ -4754,7 +4751,7 @@ After completing all tasks, run the full test suite and verify:
 - AuthenticationError is in `models.py`, not `protocol.py`
 - UserIdentity and UserProfile are `frozen=True, slots=True` with no freeze guards (scalar fields only)
 - ChatMessageRecord and CompositionStateRecord/CompositionStateData have `freeze_fields()` in `__post_init__`
-- LocalAuthProvider uses passlib bcrypt and python-jose JWT
+- LocalAuthProvider uses bcrypt and python-jose JWT
 - OIDCAuthProvider discovers JWKS via httpx and caches with TTL
 - EntraAuthProvider validates `tid` claim and extracts `groups`/`roles`
 - All session routes verify ownership via `_verify_session_ownership()` returning 404 on IDOR

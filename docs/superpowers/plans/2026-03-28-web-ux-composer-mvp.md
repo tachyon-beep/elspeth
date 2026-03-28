@@ -740,7 +740,7 @@ async def test_get_user_info(provider):
 
 - [ ] **Step 3: Implement LocalAuthProvider**
 
-LocalAuthProvider uses SQLite for user storage, bcrypt/passlib for password
+LocalAuthProvider uses SQLite for user storage, bcrypt for password
 hashing, and python-jose for JWT tokens. The `login()` method returns a JWT.
 `authenticate()` validates the JWT and returns `UserIdentity`.
 `get_user_info()` returns the full `UserProfile`.
