@@ -5,15 +5,14 @@ from __future__ import annotations
 from fastapi import APIRouter, HTTPException, Request
 
 from elspeth.web.catalog.protocol import CatalogService
-from elspeth.web.catalog.schemas import PluginSchemaInfo, PluginSummary
+from elspeth.web.catalog.schemas import PluginKind, PluginSchemaInfo, PluginSummary
 
 catalog_router = APIRouter(tags=["catalog"])
 
-# Map plural REST path segments to singular protocol values (Seam C, M3 fix).
-# The CatalogService protocol uses singular ("source", "transform", "sink").
-# REST paths use plural ("sources", "transforms", "sinks").
-# Translation is a REST presentation concern — does not leak into service layer.
-_PLURAL_TO_SINGULAR = {"sources": "source", "transforms": "transform", "sinks": "sink"}
+# Map plural REST path segments to singular protocol values.
+# The CatalogService protocol uses singular forms; REST paths use plural
+# (see Seam Contract C in web-ux-seam-contracts.md).
+_PLURAL_TO_SINGULAR: dict[str, PluginKind] = {"sources": "source", "transforms": "transform", "sinks": "sink"}
 
 
 def _get_catalog(request: Request) -> CatalogService:

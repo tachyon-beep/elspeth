@@ -2,9 +2,11 @@
 
 from __future__ import annotations
 
-from typing import Protocol, runtime_checkable
+from typing import Literal, Protocol, runtime_checkable
 
 from elspeth.web.catalog.schemas import PluginSchemaInfo, PluginSummary
+
+PluginKind = Literal["source", "transform", "sink"]
 
 
 @runtime_checkable
@@ -22,4 +24,11 @@ class CatalogService(Protocol):
 
     def list_sinks(self) -> list[PluginSummary]: ...
 
-    def get_schema(self, plugin_type: str, name: str) -> PluginSchemaInfo: ...
+    def get_schema(self, plugin_type: PluginKind, name: str) -> PluginSchemaInfo:
+        """Get full JSON schema for a plugin's configuration.
+
+        Raises:
+            ValueError: If plugin_type is not a valid kind or name is
+                not a registered plugin of that type.
+        """
+        ...

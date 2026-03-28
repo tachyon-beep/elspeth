@@ -89,6 +89,15 @@ class TestListTransforms:
         transforms = catalog.list_transforms()
         assert len(transforms) == len(plugin_manager.get_transforms())
 
+    def test_no_gates_in_transforms(self, catalog: CatalogServiceImpl) -> None:
+        """Gates are config-driven system operations, not plugins (AC6)."""
+        transforms = catalog.list_transforms()
+        names = {t.name for t in transforms}
+        # Gates are not registered in PluginManager.get_transforms(), so they
+        # should never appear here. Known gate names for a sanity check:
+        gate_names = {"threshold_gate", "routing_gate", "classification_gate"}
+        assert names.isdisjoint(gate_names), f"Gates found in transforms: {names & gate_names}"
+
 
 class TestListSinks:
     """list_sinks() returns all registered sink plugins."""
@@ -124,6 +133,13 @@ class TestGetSchema:
         assert isinstance(info.json_schema, dict)
         assert "properties" in info.json_schema
         assert info.json_schema["type"] == "object"
+
+    def test_csv_source_schema_matches_model_json_schema(self, catalog: CatalogServiceImpl) -> None:
+        """AC2: json_schema output matches model_json_schema() directly."""
+        from elspeth.plugins.sources.csv_source import CSVSourceConfig
+
+        info = catalog.get_schema("source", "csv")
+        assert info.json_schema == CSVSourceConfig.model_json_schema()
 
     def test_passthrough_transform_schema(self, catalog: CatalogServiceImpl) -> None:
         info = catalog.get_schema("transform", "passthrough")

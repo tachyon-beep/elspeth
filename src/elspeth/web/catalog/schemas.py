@@ -2,9 +2,11 @@
 
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, Literal
 
 from pydantic import BaseModel
+
+PluginKind = Literal["source", "transform", "sink"]
 
 
 class ConfigFieldSummary(BaseModel):
@@ -22,14 +24,19 @@ class PluginSummary(BaseModel):
 
     name: str
     description: str
-    plugin_type: str
+    plugin_type: PluginKind
     config_fields: list[ConfigFieldSummary]
 
 
 class PluginSchemaInfo(BaseModel):
-    """Full plugin schema detail for the composer."""
+    """Full plugin schema detail for the composer.
+
+    ``json_schema`` contains the raw output of ``ConfigModel.model_json_schema()``.
+    It is ``{}`` (empty dict) when the plugin has no configuration model
+    (e.g., the ``null`` source).
+    """
 
     name: str
-    plugin_type: str
+    plugin_type: PluginKind
     description: str
     json_schema: dict[str, Any]

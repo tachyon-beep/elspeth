@@ -17,10 +17,3 @@ per_file_rules:
   reason: "False positive from @app.get() FastAPI decorator (text-based pattern match)."
   expires: null
   max_hits: 1
-
-allow_hits:
-- key: web/catalog/service.py:R6:CatalogServiceImpl:_resolve_config_model:fp=9ff84b7ab14ae105
-  owner: architecture
-  reason: "Explicit mapping gap — plugin exists in PluginManager but has no config model in PluginConfigValidator. Returns None (empty schema), not silent error swallowing."
-  safety: Caller checks for None and returns {} schema. Plugin is still listed in catalog, just without config details.
-  expires: null

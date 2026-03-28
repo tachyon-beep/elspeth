@@ -14,7 +14,7 @@ from elspeth.web.catalog.schemas import (
     PluginSummary,
 )
 
-# Valid plugin type path segments and their PluginManager lookup methods
+# Valid singular plugin type identifiers
 _VALID_TYPES = frozenset({"source", "transform", "sink"})
 
 
@@ -59,9 +59,9 @@ class CatalogServiceImpl:
         }
         try:
             plugin_cls = lookup[plugin_type](name)
-        except ValueError:
+        except ValueError as exc:
             available = self._available_names(plugin_type)
-            raise ValueError(f"Unknown {plugin_type} plugin: {name}. Available: {available}") from None
+            raise ValueError(f"Unknown {plugin_type} plugin: {name}. Available: {available}") from exc
 
         # Get config model via PluginConfigValidator
         json_schema = self._get_json_schema(plugin_type, name)
@@ -132,22 +132,32 @@ class CatalogServiceImpl:
         """Resolve plugin name to its Pydantic config model class.
 
         Delegates to PluginConfigValidator's private methods to avoid
-        duplicating the name-to-config-class mapping.
+        duplicating the name-to-config-class mapping. These should be
+        promoted to public API on PluginConfigValidator if more consumers
+        need the mapping.
 
-        Returns None for plugins with no config model (e.g., null source).
+        Returns None for plugins with no config model. This includes both
+        intentionally config-less plugins (e.g., null source, where the
+        validator returns None) and plugins whose config model is not yet
+        wired into PluginConfigValidator's mapping (e.g., dataverse).
+        The validator raises ValueError("Unknown X type: ...") for the
+        latter case — we catch only that specific pattern.
         """
         try:
-            if plugin_type in ("source", "sources"):
+            if plugin_type == "source":
                 return self._validator._get_source_config_model(name)
-            elif plugin_type in ("transform", "transforms"):
+            elif plugin_type == "transform":
                 return self._validator._get_transform_config_model(name)
-            elif plugin_type in ("sink", "sinks"):
+            elif plugin_type == "sink":
                 return self._validator._get_sink_config_model(name)
-        except ValueError:
-            # Plugin exists in PluginManager but has no config model mapping
-            # in PluginConfigValidator — return None (empty schema)
-            return None
-        return None
+            else:
+                raise ValueError(f"Bug: _resolve_config_model called with invalid plugin_type: {plugin_type!r}")
+        except ValueError as exc:
+            # Only catch "Unknown X type" from the validator's else branch.
+            # Any other ValueError is a real bug that should crash.
+            if str(exc).startswith("Unknown "):
+                return None
+            raise
 
     def _get_json_schema(self, plugin_type: str, name: str) -> dict[str, Any]:
         """Get full JSON schema for a plugin's config model."""
