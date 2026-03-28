@@ -14,7 +14,7 @@
 
 | Action | Path | Responsibility |
 |--------|------|----------------|
-| Modify | `pyproject.toml` | Add passlib[bcrypt] and aiosqlite to [webui] extra |
+| Modify | `pyproject.toml` | Add passlib[bcrypt] to [webui] extra |
 | Create | `src/elspeth/web/auth/__init__.py` | Module init |
 | Create | `src/elspeth/web/auth/protocol.py` | AuthProvider protocol (two methods, no exceptions) |
 | Create | `src/elspeth/web/auth/models.py` | UserIdentity, UserProfile, AuthenticationError |
@@ -22,6 +22,7 @@
 | Create | `src/elspeth/web/auth/oidc.py` | OIDCAuthProvider -- JWKS discovery via httpx, token validation |
 | Create | `src/elspeth/web/auth/entra.py` | EntraAuthProvider -- tenant validation, group claims |
 | Create | `tests/unit/web/auth/__init__.py` | Test package |
+| Create | `tests/unit/web/auth/conftest.py` | Shared RSA keypair, JWKS response, and token signing fixtures |
 | Create | `tests/unit/web/auth/test_models.py` | Auth model tests |
 | Create | `tests/unit/web/auth/test_local_provider.py` | LocalAuthProvider tests |
 | Create | `tests/unit/web/auth/test_oidc_provider.py` | OIDCAuthProvider tests |
@@ -39,7 +40,7 @@ Before starting this plan, Phase 1 must be complete. The following files must ex
 - `src/elspeth/web/dependencies.py` (with `get_settings()`)
 - `pyproject.toml` has `[webui]` extra with fastapi, uvicorn, python-jose, python-multipart, httpx
 
-Additionally, `passlib[bcrypt]` and `aiosqlite` must be added to the `[webui]` extra. If not already present, add them as the first step of Task 2.1.
+Additionally, `passlib[bcrypt]` must be added to the `[webui]` extra. If not already present, add it as the first step of Task 2.1.
 
 ---
 
@@ -52,9 +53,9 @@ Additionally, `passlib[bcrypt]` and `aiosqlite` must be added to the `[webui]` e
 - Create: `tests/unit/web/auth/__init__.py`
 - Create: `tests/unit/web/auth/test_models.py`
 
-- [ ] **Step 1: Add passlib and aiosqlite to pyproject.toml**
+- [ ] **Step 1: Add passlib to pyproject.toml**
 
-In the `[project.optional-dependencies]` section, add `passlib[bcrypt]` and `aiosqlite` to the `webui` extra:
+In the `[project.optional-dependencies]` section, add `passlib[bcrypt]` to the `webui` extra:
 
 ```toml
 webui = [
@@ -65,7 +66,6 @@ webui = [
     "websockets>=14.0,<15",
     "httpx>=0.27,<1",
     "passlib[bcrypt]>=1.7,<2",
-    "aiosqlite>=0.20,<1",
 ]
 ```
 
@@ -338,6 +338,10 @@ class TestCreateUser:
         with pytest.raises(ValueError, match="alice"):
             provider.create_user("alice", "other-password", display_name="Alice 2")
 
+    def test_create_user_empty_display_name_raises(self, provider) -> None:
+        with pytest.raises(ValueError, match="display_name must not be empty"):
+            provider.create_user("alice", "password123", display_name="")
+
 
 class TestLogin:
     """Tests for username/password login."""
@@ -472,6 +476,7 @@ first use.
 
 from __future__ import annotations
 
+import asyncio
 import sqlite3
 import time
 from pathlib import Path
@@ -520,25 +525,28 @@ class LocalAuthProvider:
         self,
         user_id: str,
         password: str,
-        display_name: str = "",
+        display_name: str,
         email: str | None = None,
     ) -> None:
         """Create a new user with a bcrypt-hashed password.
 
-        Raises ValueError if a user with the given user_id already exists.
+        Raises ValueError if a user with the given user_id already exists
+        or if display_name is empty.
         """
+        if not display_name:
+            raise ValueError("display_name must not be empty")
         password_hash = _pwd_context.hash(password)
         with self._get_conn() as conn:
             try:
                 conn.execute(
                     "INSERT INTO users (user_id, password_hash, display_name, email) "
                     "VALUES (?, ?, ?, ?)",
-                    (user_id, password_hash, display_name or user_id, email),
+                    (user_id, password_hash, display_name, email),
                 )
-            except sqlite3.IntegrityError:
+            except sqlite3.IntegrityError as exc:
                 raise ValueError(
                     f"User already exists: {user_id}"
-                ) from None
+                ) from exc
 
     def login(self, username: str, password: str) -> str:
         """Authenticate with username/password and return a JWT.
@@ -568,23 +576,31 @@ class LocalAuthProvider:
         """
         try:
             payload = jwt.decode(token, self._secret_key, algorithms=["HS256"])
-        except JWTError:
-            raise AuthenticationError("Invalid token") from None
+        except JWTError as exc:
+            raise AuthenticationError("Invalid token") from exc
 
         return UserIdentity(
             user_id=payload["sub"],
             username=payload["username"],
         )
 
+    def _query_user(self, user_id: str) -> tuple[str, str | None] | None:
+        """Synchronous DB lookup — called via asyncio.to_thread."""
+        with self._get_conn() as conn:
+            return conn.execute(
+                "SELECT display_name, email FROM users WHERE user_id = ?",
+                (user_id,),
+            ).fetchone()
+
     async def get_user_info(self, token: str) -> UserProfile:
-        """Decode the JWT, then query the users table for full profile."""
+        """Decode the JWT, then query the users table for full profile.
+
+        The DB query is offloaded to a thread to avoid blocking the
+        event loop — sqlite3 is synchronous.
+        """
         identity = await self.authenticate(token)
 
-        with self._get_conn() as conn:
-            row = conn.execute(
-                "SELECT display_name, email FROM users WHERE user_id = ?",
-                (identity.user_id,),
-            ).fetchone()
+        row = await asyncio.to_thread(self._query_user, identity.user_id)
 
         if row is None:
             raise AuthenticationError("User not found")
@@ -603,7 +619,7 @@ class LocalAuthProvider:
 .venv/bin/python -m pytest tests/unit/web/auth/test_local_provider.py -v
 ```
 
-Expected: all 11 tests pass.
+Expected: all 12 tests pass.
 
 - [ ] **Step 5: Commit**
 
@@ -617,33 +633,28 @@ git commit -m "feat(web/auth): implement LocalAuthProvider with bcrypt and JWT"
 ### Task 2.3: OIDCAuthProvider
 
 **Files:**
+- Create: `tests/unit/web/auth/conftest.py`
 - Create: `src/elspeth/web/auth/oidc.py`
 - Create: `tests/unit/web/auth/test_oidc_provider.py`
 
-- [ ] **Step 1: Write tests**
+- [ ] **Step 1: Create shared test conftest and write tests**
 
-The OIDC tests require creating JWTs signed with an RSA key, then validating them via a mocked JWKS endpoint. Generate an RSA key pair at test time using `cryptography`.
+The OIDC and Entra tests both need RSA key generation, JWKS response building, and token signing. Extract these into a shared conftest so Task 2.4 can reuse them.
 
 ```python
-# tests/unit/web/auth/test_oidc_provider.py
-"""Tests for OIDCAuthProvider -- JWKS discovery, token validation."""
+# tests/unit/web/auth/conftest.py
+"""Shared fixtures for auth provider tests.
+
+Provides RSA keypair generation, JWKS response building, and JWT
+signing for both OIDC and Entra test modules.
+"""
 
 from __future__ import annotations
-
-import json
-import time
-from unittest.mock import AsyncMock, patch
 
 import pytest
 from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric import rsa
 from jose import jwk, jwt as jose_jwt
-
-from elspeth.web.auth.models import AuthenticationError, UserIdentity
-from elspeth.web.auth.oidc import OIDCAuthProvider
-
-ISSUER = "https://login.example.com"
-AUDIENCE = "my-app-client-id"
 
 
 @pytest.fixture
@@ -670,8 +681,12 @@ def jwks_response(rsa_keypair):
     return {"keys": [key_dict]}
 
 
-def _make_token(private_key, claims: dict) -> str:
-    """Sign a JWT with the test RSA private key."""
+def make_rs256_token(private_key, claims: dict) -> str:
+    """Sign a JWT with an RSA private key (RS256, kid=test-key-1).
+
+    Not a fixture — a plain helper function imported explicitly by
+    test modules that need it.
+    """
     priv_pem = private_key.private_bytes(
         encoding=serialization.Encoding.PEM,
         format=serialization.PrivateFormat.PKCS8,
@@ -681,6 +696,22 @@ def _make_token(private_key, claims: dict) -> str:
         claims, priv_pem.decode(), algorithm="RS256",
         headers={"kid": "test-key-1"},
     )
+```
+
+```python
+# tests/unit/web/auth/test_oidc_provider.py
+"""Tests for OIDCAuthProvider -- JWKS discovery, token validation."""
+
+from __future__ import annotations
+
+import time
+from unittest.mock import AsyncMock, patch
+
+import pytest
+
+from elspeth.web.auth.models import AuthenticationError, UserIdentity
+from elspeth.web.auth.oidc import OIDCAuthProvider
+from tests.unit.web.auth.conftest import make_rs256_token
 
 
 def _valid_claims(overrides: dict | None = None) -> dict:
@@ -731,7 +762,7 @@ class TestOIDCDiscovery:
     ) -> None:
         private_key, _ = rsa_keypair
         provider = OIDCAuthProvider(issuer=ISSUER, audience=AUDIENCE)
-        token = _make_token(private_key, _valid_claims())
+        token = make_rs256_token(private_key, _valid_claims())
         with mock_httpx_discovery as mock_client_cls:
             identity = await provider.authenticate(token)
             assert identity.user_id == "user-123"
@@ -747,7 +778,7 @@ class TestOIDCDiscovery:
         provider = OIDCAuthProvider(
             issuer=ISSUER, audience=AUDIENCE, jwks_cache_ttl_seconds=3600,
         )
-        token = _make_token(private_key, _valid_claims())
+        token = make_rs256_token(private_key, _valid_claims())
         with mock_httpx_discovery:
             await provider.authenticate(token)
             # Second call should use cached keys -- no additional HTTP calls
@@ -763,7 +794,7 @@ class TestOIDCTokenValidation:
     ) -> None:
         private_key, _ = rsa_keypair
         provider = OIDCAuthProvider(issuer=ISSUER, audience=AUDIENCE)
-        token = _make_token(private_key, _valid_claims())
+        token = make_rs256_token(private_key, _valid_claims())
         with mock_httpx_discovery:
             identity = await provider.authenticate(token)
         assert isinstance(identity, UserIdentity)
@@ -776,7 +807,7 @@ class TestOIDCTokenValidation:
     ) -> None:
         private_key, _ = rsa_keypair
         provider = OIDCAuthProvider(issuer=ISSUER, audience="wrong-audience")
-        token = _make_token(private_key, _valid_claims())
+        token = make_rs256_token(private_key, _valid_claims())
         with mock_httpx_discovery:
             with pytest.raises(AuthenticationError):
                 await provider.authenticate(token)
@@ -789,7 +820,7 @@ class TestOIDCTokenValidation:
         provider = OIDCAuthProvider(
             issuer="https://wrong-issuer.com", audience=AUDIENCE,
         )
-        token = _make_token(private_key, _valid_claims())
+        token = make_rs256_token(private_key, _valid_claims())
         with mock_httpx_discovery:
             with pytest.raises(AuthenticationError):
                 await provider.authenticate(token)
@@ -801,7 +832,7 @@ class TestOIDCTokenValidation:
         private_key, _ = rsa_keypair
         provider = OIDCAuthProvider(issuer=ISSUER, audience=AUDIENCE)
         claims = _valid_claims({"exp": int(time.time()) - 10})
-        token = _make_token(private_key, claims)
+        token = make_rs256_token(private_key, claims)
         with mock_httpx_discovery:
             with pytest.raises(AuthenticationError):
                 await provider.authenticate(token)
@@ -817,7 +848,7 @@ class TestOIDCGetUserInfo:
         private_key, _ = rsa_keypair
         provider = OIDCAuthProvider(issuer=ISSUER, audience=AUDIENCE)
         claims = _valid_claims({"groups": ["team-a", "team-b"]})
-        token = _make_token(private_key, claims)
+        token = make_rs256_token(private_key, claims)
         with mock_httpx_discovery:
             profile = await provider.get_user_info(token)
         assert profile.user_id == "user-123"
@@ -835,7 +866,7 @@ class TestOIDCGetUserInfo:
         # Remove optional fields
         del claims["email"]
         del claims["name"]
-        token = _make_token(private_key, claims)
+        token = make_rs256_token(private_key, claims)
         with mock_httpx_discovery:
             profile = await provider.get_user_info(token)
         assert profile.display_name == "alice"  # Falls back to preferred_username
@@ -929,7 +960,7 @@ class OIDCAuthProvider:
                 issuer=self._issuer,
             )
         except JWTError as exc:
-            raise AuthenticationError(f"Invalid token: {exc}") from None
+            raise AuthenticationError(f"Invalid token: {exc}") from exc
         return payload
 
     async def authenticate(self, token: str) -> UserIdentity:
@@ -973,7 +1004,8 @@ Expected: all 8 tests pass.
 - [ ] **Step 5: Commit**
 
 ```bash
-git add src/elspeth/web/auth/oidc.py tests/unit/web/auth/test_oidc_provider.py
+git add src/elspeth/web/auth/oidc.py tests/unit/web/auth/conftest.py \
+    tests/unit/web/auth/test_oidc_provider.py
 git commit -m "feat(web/auth): implement OIDCAuthProvider with JWKS discovery and caching"
 ```
 
@@ -997,52 +1029,14 @@ import time
 from unittest.mock import AsyncMock, patch
 
 import pytest
-from cryptography.hazmat.primitives import serialization
-from cryptography.hazmat.primitives.asymmetric import rsa
-from jose import jwk, jwt as jose_jwt
 
 from elspeth.web.auth.entra import EntraAuthProvider
 from elspeth.web.auth.models import AuthenticationError
+from tests.unit.web.auth.conftest import make_rs256_token
 
 TENANT_ID = "00000000-aaaa-bbbb-cccc-111111111111"
 AUDIENCE = "my-entra-app-id"
 ISSUER = f"https://login.microsoftonline.com/{TENANT_ID}/v2.0"
-
-
-@pytest.fixture
-def rsa_keypair():
-    """Generate an RSA key pair for signing test JWTs."""
-    private_key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
-    public_key = private_key.public_key()
-    return private_key, public_key
-
-
-@pytest.fixture
-def jwks_response(rsa_keypair):
-    """Build a JWKS response dict from the test RSA public key."""
-    _, public_key = rsa_keypair
-    pub_pem = public_key.public_bytes(
-        encoding=serialization.Encoding.PEM,
-        format=serialization.PublicFormat.SubjectPublicKeyInfo,
-    )
-    key_obj = jwk.RSAKey(algorithm="RS256", key=pub_pem.decode())
-    key_dict = key_obj.to_dict()
-    key_dict["kid"] = "entra-test-key"
-    key_dict["use"] = "sig"
-    return {"keys": [key_dict]}
-
-
-def _make_token(private_key, claims: dict) -> str:
-    """Sign a JWT with the test RSA private key."""
-    priv_pem = private_key.private_bytes(
-        encoding=serialization.Encoding.PEM,
-        format=serialization.PrivateFormat.PKCS8,
-        encryption_algorithm=serialization.NoEncryption(),
-    )
-    return jose_jwt.encode(
-        claims, priv_pem.decode(), algorithm="RS256",
-        headers={"kid": "entra-test-key"},
-    )
 
 
 def _valid_entra_claims(overrides: dict | None = None) -> dict:
@@ -1094,7 +1088,7 @@ class TestEntraTenantValidation:
     ) -> None:
         private_key, _ = rsa_keypair
         provider = EntraAuthProvider(tenant_id=TENANT_ID, audience=AUDIENCE)
-        token = _make_token(private_key, _valid_entra_claims())
+        token = make_rs256_token(private_key, _valid_entra_claims())
         with mock_httpx_discovery:
             identity = await provider.authenticate(token)
         assert identity.user_id == "entra-user-456"
@@ -1123,10 +1117,24 @@ class TestEntraTenantValidation:
         provider_correct = EntraAuthProvider(
             tenant_id=TENANT_ID, audience=AUDIENCE,
         )
-        token = _make_token(private_key, claims)
+        token = make_rs256_token(private_key, claims)
         with mock_httpx_discovery:
             with pytest.raises(AuthenticationError, match="Invalid tenant"):
                 await provider_correct.authenticate(token)
+
+    @pytest.mark.asyncio
+    async def test_missing_tid_claim_raises(
+        self, rsa_keypair, mock_httpx_discovery,
+    ) -> None:
+        """Token without a tid claim should fail with a specific message."""
+        private_key, _ = rsa_keypair
+        provider = EntraAuthProvider(tenant_id=TENANT_ID, audience=AUDIENCE)
+        claims = _valid_entra_claims()
+        del claims["tid"]
+        token = make_rs256_token(private_key, claims)
+        with mock_httpx_discovery:
+            with pytest.raises(AuthenticationError, match="Missing tenant claim"):
+                await provider.authenticate(token)
 
 
 class TestEntraGroupClaims:
@@ -1143,7 +1151,7 @@ class TestEntraGroupClaims:
             "22222222-bbbb-0000-0000-000000000002",
         ]
         claims = _valid_entra_claims({"groups": group_ids})
-        token = _make_token(private_key, claims)
+        token = make_rs256_token(private_key, claims)
         with mock_httpx_discovery:
             profile = await provider.get_user_info(token)
         assert "11111111-aaaa-0000-0000-000000000001" in profile.groups
@@ -1159,7 +1167,7 @@ class TestEntraGroupClaims:
             "groups": ["group-1"],
             "roles": ["admin", "reader"],
         })
-        token = _make_token(private_key, claims)
+        token = make_rs256_token(private_key, claims)
         with mock_httpx_discovery:
             profile = await provider.get_user_info(token)
         assert "group-1" in profile.groups
@@ -1173,7 +1181,7 @@ class TestEntraGroupClaims:
         private_key, _ = rsa_keypair
         provider = EntraAuthProvider(tenant_id=TENANT_ID, audience=AUDIENCE)
         claims = _valid_entra_claims()
-        token = _make_token(private_key, claims)
+        token = make_rs256_token(private_key, claims)
         with mock_httpx_discovery:
             profile = await provider.get_user_info(token)
         assert profile.groups == ()
@@ -1193,8 +1201,9 @@ Expected: `ModuleNotFoundError: No module named 'elspeth.web.auth.entra'`
 # src/elspeth/web/auth/entra.py
 """Azure Entra ID authentication provider.
 
-Wraps OIDCAuthProvider with Entra-specific tenant validation and group
-claim extraction. The OIDC issuer is derived from the tenant_id.
+Inherits from OIDCAuthProvider, adding Entra-specific tenant validation
+and group/role claim extraction. The OIDC issuer is derived from the
+tenant_id.
 """
 
 from __future__ import annotations
@@ -1205,8 +1214,13 @@ from elspeth.web.auth.models import AuthenticationError, UserIdentity, UserProfi
 from elspeth.web.auth.oidc import OIDCAuthProvider
 
 
-class EntraAuthProvider:
-    """Validates Azure Entra ID tokens with tenant and group claim handling."""
+class EntraAuthProvider(OIDCAuthProvider):
+    """Validates Azure Entra ID tokens with tenant and group claim handling.
+
+    Extends OIDCAuthProvider with:
+    - Tenant ID verification (``tid`` claim must match expected tenant)
+    - Group claim extraction (``groups`` + ``role:``-prefixed ``roles``)
+    """
 
     def __init__(
         self,
@@ -1216,7 +1230,7 @@ class EntraAuthProvider:
     ) -> None:
         self._tenant_id = tenant_id
         issuer = f"https://login.microsoftonline.com/{tenant_id}/v2.0"
-        self._oidc = OIDCAuthProvider(
+        super().__init__(
             issuer=issuer,
             audience=audience,
             jwks_cache_ttl_seconds=jwks_cache_ttl_seconds,
@@ -1225,14 +1239,26 @@ class EntraAuthProvider:
     def _validate_tenant(self, payload: dict[str, Any]) -> None:
         """Verify the tid claim matches the expected tenant.
 
-        Raises AuthenticationError("Invalid tenant") on mismatch.
+        Raises AuthenticationError if ``tid`` is missing or mismatched.
+        The ``tid`` claim is required in Entra ID tokens — absence
+        indicates a non-Entra token or a configuration error.
         """
-        tid = payload.get("tid")
+        try:
+            tid = payload["tid"]
+        except KeyError as exc:
+            raise AuthenticationError(
+                "Missing tenant claim (tid) — token may not be from Entra ID"
+            ) from exc
         if tid != self._tenant_id:
             raise AuthenticationError("Invalid tenant")
 
     def _extract_groups(self, payload: dict[str, Any]) -> tuple[str, ...]:
-        """Extract group IDs and role-prefixed entries from Entra claims."""
+        """Extract group IDs and role-prefixed entries from Entra claims.
+
+        ``groups`` and ``roles`` are optional Entra claims (Tier 3 data
+        from the IdP) — ``.get()`` with empty-list default is correct
+        here because absence means "no groups/roles assigned."
+        """
         groups: list[str] = []
 
         raw_groups = payload.get("groups", [])
@@ -1246,12 +1272,15 @@ class EntraAuthProvider:
         return tuple(groups)
 
     async def authenticate(self, token: str) -> UserIdentity:
-        """Validate an Entra ID token with tenant verification."""
-        # First, do standard OIDC validation (signature, exp, iss, aud)
-        jwks = await self._oidc._ensure_jwks()
-        payload = self._oidc._decode_token(token, jwks)
+        """Validate an Entra ID token with tenant verification.
 
-        # Then validate tenant
+        Performs standard OIDC validation (signature, expiry, issuer,
+        audience) via the inherited _decode_token, then checks the
+        tenant claim.
+        """
+        jwks = await self._ensure_jwks()
+        payload = self._decode_token(token, jwks)
+
         self._validate_tenant(payload)
 
         return UserIdentity(
@@ -1261,8 +1290,8 @@ class EntraAuthProvider:
 
     async def get_user_info(self, token: str) -> UserProfile:
         """Decode an Entra ID token and extract profile with group claims."""
-        jwks = await self._oidc._ensure_jwks()
-        payload = self._oidc._decode_token(token, jwks)
+        jwks = await self._ensure_jwks()
+        payload = self._decode_token(token, jwks)
 
         self._validate_tenant(payload)
 
@@ -1283,7 +1312,7 @@ class EntraAuthProvider:
 .venv/bin/python -m pytest tests/unit/web/auth/test_entra_provider.py -v
 ```
 
-Expected: all 5 tests pass.
+Expected: all 6 tests pass.
 
 - [ ] **Step 5: Run all auth tests**
 
@@ -1304,13 +1333,13 @@ git commit -m "feat(web/auth): implement EntraAuthProvider with tenant validatio
 
 Before marking Task-Plan 2A complete, verify:
 
-- [ ] **pyproject.toml** has `passlib[bcrypt]` and `aiosqlite` in the `[webui]` extra
+- [ ] **pyproject.toml** has `passlib[bcrypt]` in the `[webui]` extra
 - [ ] **AuthProvider protocol** (`protocol.py`) defines exactly two async methods: `authenticate` and `get_user_info`
 - [ ] **Auth models** (`models.py`) -- `UserIdentity` and `UserProfile` are `frozen=True, slots=True`; `AuthenticationError` has a `detail` attribute
 - [ ] **LocalAuthProvider** (`local.py`) -- creates SQLite schema on init, bcrypt-hashes passwords, issues HS256 JWTs, validates token expiry
 - [ ] **OIDCAuthProvider** (`oidc.py`) -- fetches JWKS via discovery, caches with TTL, validates RS256 tokens against issuer and audience
-- [ ] **EntraAuthProvider** (`entra.py`) -- wraps OIDCAuthProvider, validates `tid` claim, extracts `groups` and `role:`-prefixed `roles`
-- [ ] **All test files exist** and pass: `test_models.py` (9 tests), `test_local_provider.py` (11 tests), `test_oidc_provider.py` (8 tests), `test_entra_provider.py` (5 tests)
+- [ ] **EntraAuthProvider** (`entra.py`) -- inherits from OIDCAuthProvider, validates `tid` claim, extracts `groups` and `role:`-prefixed `roles`
+- [ ] **All test files exist** and pass: `test_models.py` (9 tests), `test_local_provider.py` (12 tests), `test_oidc_provider.py` (8 tests), `test_entra_provider.py` (6 tests)
 - [ ] **No freeze guards needed** -- all dataclass fields are scalars, `None`, or `tuple[str, ...]`
 - [ ] **No defensive `.get()` on our own types** -- `.get()` only used on external JWT payloads (Tier 3 data)
 - [ ] **Full test suite still passes**: `.venv/bin/python -m pytest tests/unit/web/auth/ -v`
