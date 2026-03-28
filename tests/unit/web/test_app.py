@@ -94,3 +94,20 @@ class TestGetSettingsDependency:
         response = client.get("/api/_test_settings")
         assert response.status_code == 200
         assert response.json() == {"port": 4242}
+
+
+class TestCatalogWiring:
+    """Tests that create_app() wires the catalog service into app state."""
+
+    def test_catalog_service_on_app_state(self) -> None:
+        app = create_app(WebSettings())
+        assert hasattr(app.state, "catalog_service")
+
+    def test_catalog_sources_endpoint_reachable(self) -> None:
+        app = create_app(WebSettings())
+        client = TestClient(app)
+        response = client.get("/api/catalog/sources")
+        assert response.status_code == 200
+        data = response.json()
+        assert isinstance(data, list)
+        assert len(data) > 0
