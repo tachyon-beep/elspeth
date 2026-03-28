@@ -5,6 +5,7 @@ from __future__ import annotations
 import time
 from unittest.mock import AsyncMock, MagicMock, patch
 
+import httpx
 import pytest
 
 from elspeth.web.auth.models import AuthenticationError, UserIdentity
@@ -189,3 +190,148 @@ class TestOIDCGetUserInfo:
         assert profile.display_name == "alice"  # Falls back to preferred_username
         assert profile.email is None
         assert profile.groups == ()
+
+    @pytest.mark.asyncio
+    async def test_non_list_groups_claim_raises(
+        self,
+        rsa_keypair,
+        mock_httpx_discovery,
+    ) -> None:
+        """A groups claim that is not a list should raise AuthenticationError."""
+        private_key, _ = rsa_keypair
+        provider = OIDCAuthProvider(issuer=ISSUER, audience=AUDIENCE)
+        claims = _valid_claims({"groups": "not-a-list"})
+        token = make_rs256_token(private_key, claims)
+        with (
+            mock_httpx_discovery,
+            pytest.raises(
+                AuthenticationError,
+                match="Unexpected type for 'groups' claim",
+            ),
+        ):
+            await provider.get_user_info(token)
+
+    @pytest.mark.asyncio
+    async def test_authenticate_missing_preferred_username(
+        self,
+        rsa_keypair,
+        mock_httpx_discovery,
+    ) -> None:
+        """Without preferred_username, username should fall back to sub."""
+        private_key, _ = rsa_keypair
+        provider = OIDCAuthProvider(issuer=ISSUER, audience=AUDIENCE)
+        claims = _valid_claims()
+        del claims["preferred_username"]
+        token = make_rs256_token(private_key, claims)
+        with mock_httpx_discovery:
+            identity = await provider.authenticate(token)
+        assert identity.username == identity.user_id
+        assert identity.username == "user-123"
+
+
+class TestOIDCJWKSFailures:
+    """Tests for JWKS discovery network failures."""
+
+    @pytest.mark.asyncio
+    async def test_jwks_connect_error_raises(self) -> None:
+        """httpx.ConnectError during discovery raises AuthenticationError."""
+        provider = OIDCAuthProvider(issuer=ISSUER, audience=AUDIENCE)
+
+        async def mock_get(url, **kwargs):
+            raise httpx.ConnectError("Connection refused")
+
+        client_mock = AsyncMock()
+        client_mock.get = mock_get
+        client_mock.__aenter__ = AsyncMock(return_value=client_mock)
+        client_mock.__aexit__ = AsyncMock(return_value=False)
+
+        with (
+            patch(
+                "elspeth.web.auth.oidc.httpx.AsyncClient",
+                return_value=client_mock,
+            ),
+            pytest.raises(AuthenticationError, match="Failed to fetch JWKS"),
+        ):
+            await provider.authenticate("some-token")
+
+    @pytest.mark.asyncio
+    async def test_jwks_missing_jwks_uri_key_raises(self) -> None:
+        """Discovery JSON without jwks_uri key raises AuthenticationError."""
+        provider = OIDCAuthProvider(issuer=ISSUER, audience=AUDIENCE)
+
+        async def mock_get(url, **kwargs):
+            response = MagicMock()
+            response.raise_for_status = lambda: None
+            # Discovery response missing the jwks_uri key
+            response.json.return_value = {"issuer": ISSUER}
+            return response
+
+        client_mock = AsyncMock()
+        client_mock.get = mock_get
+        client_mock.__aenter__ = AsyncMock(return_value=client_mock)
+        client_mock.__aexit__ = AsyncMock(return_value=False)
+
+        with (
+            patch(
+                "elspeth.web.auth.oidc.httpx.AsyncClient",
+                return_value=client_mock,
+            ),
+            pytest.raises(AuthenticationError, match="Failed to fetch JWKS"),
+        ):
+            await provider.authenticate("some-token")
+
+    @pytest.mark.asyncio
+    async def test_jwks_malformed_json_raises(self) -> None:
+        """Discovery response with malformed JSON raises AuthenticationError."""
+        provider = OIDCAuthProvider(issuer=ISSUER, audience=AUDIENCE)
+
+        async def mock_get(url, **kwargs):
+            response = MagicMock()
+            response.raise_for_status = lambda: None
+            response.json.side_effect = ValueError("No JSON object could be decoded")
+            return response
+
+        client_mock = AsyncMock()
+        client_mock.get = mock_get
+        client_mock.__aenter__ = AsyncMock(return_value=client_mock)
+        client_mock.__aexit__ = AsyncMock(return_value=False)
+
+        with (
+            patch(
+                "elspeth.web.auth.oidc.httpx.AsyncClient",
+                return_value=client_mock,
+            ),
+            pytest.raises(AuthenticationError, match="Failed to fetch JWKS"),
+        ):
+            await provider.authenticate("some-token")
+
+    @pytest.mark.asyncio
+    async def test_jwks_cache_expiry_refetches(
+        self,
+        rsa_keypair,
+        mock_httpx_discovery,
+    ) -> None:
+        """With TTL=0, every authenticate call must re-fetch JWKS."""
+        private_key, _ = rsa_keypair
+        provider = OIDCAuthProvider(
+            issuer=ISSUER,
+            audience=AUDIENCE,
+            jwks_cache_ttl_seconds=0,
+        )
+        token = make_rs256_token(private_key, _valid_claims())
+        with mock_httpx_discovery:
+            identity1 = await provider.authenticate(token)
+            identity2 = await provider.authenticate(token)
+        assert identity1.user_id == "user-123"
+        assert identity2.user_id == "user-123"
+
+
+class TestOIDCProtocolConformance:
+    """Verify OIDCAuthProvider satisfies the AuthProvider protocol."""
+
+    def test_oidc_satisfies_auth_provider(self) -> None:
+        from elspeth.web.auth.protocol import AuthProvider
+
+        provider: AuthProvider = OIDCAuthProvider(issuer=ISSUER, audience=AUDIENCE)
+        assert callable(type(provider).authenticate)
+        assert callable(type(provider).get_user_info)

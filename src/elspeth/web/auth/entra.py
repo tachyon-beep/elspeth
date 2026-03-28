@@ -47,24 +47,36 @@ class EntraAuthProvider(OIDCAuthProvider):
         except KeyError as exc:
             raise AuthenticationError("Missing tenant claim (tid) — token may not be from Entra ID") from exc
         if tid != self._tenant_id:
-            raise AuthenticationError("Invalid tenant")
+            raise AuthenticationError(f"Invalid tenant: received tid={tid!r}")
 
     def _extract_groups(self, payload: dict[str, Any]) -> tuple[str, ...]:
         """Extract group IDs and role-prefixed entries from Entra claims.
 
         ``groups`` and ``roles`` are optional Entra claims (Tier 3 data
-        from the IdP) — ``.get()`` with empty-list default is correct
-        here because absence means "no groups/roles assigned."
+        from the IdP). Absence means "no groups/roles assigned";
+        non-list values indicate IdP misconfiguration.
         """
         groups: list[str] = []
 
-        raw_groups = payload.get("groups", [])
-        if isinstance(raw_groups, list):
+        raw_groups = payload.get("groups")
+        if raw_groups is None:
+            pass  # Absent claim — no groups assigned
+        elif isinstance(raw_groups, list):
             groups.extend(str(g) for g in raw_groups)
+        else:
+            raise AuthenticationError(
+                f"Unexpected type for 'groups' claim: {type(raw_groups).__name__} (expected list) — check IdP token configuration"
+            )
 
-        raw_roles = payload.get("roles", [])
-        if isinstance(raw_roles, list):
+        raw_roles = payload.get("roles")
+        if raw_roles is None:
+            pass  # Absent claim — no roles assigned
+        elif isinstance(raw_roles, list):
             groups.extend(f"role:{r}" for r in raw_roles)
+        else:
+            raise AuthenticationError(
+                f"Unexpected type for 'roles' claim: {type(raw_roles).__name__} (expected list) — check IdP token configuration"
+            )
 
         return tuple(groups)
 
@@ -95,7 +107,7 @@ class EntraAuthProvider(OIDCAuthProvider):
         return UserProfile(
             user_id=payload["sub"],
             username=payload.get("preferred_username", payload["sub"]),
-            display_name=payload.get("name", payload.get("preferred_username", payload["sub"])),
+            display_name=payload.get("name") or payload.get("preferred_username", "Unknown"),
             email=payload.get("email"),
             groups=self._extract_groups(payload),
         )

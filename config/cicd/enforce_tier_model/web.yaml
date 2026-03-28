@@ -25,34 +25,10 @@ allow_hits:
   safety: "Default is payload['sub'] which is required; absence of optional claim is expected"
   expires: null
 
-- key: web/auth/oidc.py:R1:OIDCAuthProvider:get_user_info:fp=3d32b1076da741ae
-  owner: web-auth
-  reason: "Tier 3 boundary — groups claim is optional in OIDC tokens"
-  safety: "Default empty list; absence means no groups assigned (correct semantics)"
-  expires: null
-
-- key: web/auth/oidc.py:R5:OIDCAuthProvider:get_user_info:fp=23fa5c6c39ac1a66
-  owner: web-auth
-  reason: "Tier 3 boundary — groups claim type is not guaranteed by external IdP"
-  safety: "If not a list, treated as empty groups; non-list types cannot be iterated safely"
-  expires: null
-
 - key: web/auth/oidc.py:R1:OIDCAuthProvider:get_user_info:fp=386e22984360fb5b
   owner: web-auth
   reason: "Tier 3 boundary — preferred_username is optional in OIDC tokens, falls back to sub"
   safety: "Default is payload['sub'] which is required; absence of optional claim is expected"
-  expires: null
-
-- key: web/auth/oidc.py:R1:OIDCAuthProvider:get_user_info:fp=f369a37fab2abbbf
-  owner: web-auth
-  reason: "Tier 3 boundary — name claim is optional, falls back to preferred_username then sub"
-  safety: "Cascading defaults ensure a display_name is always set; all fallbacks are valid"
-  expires: null
-
-- key: web/auth/oidc.py:R1:OIDCAuthProvider:get_user_info:fp=52d8f45a19a02648
-  owner: web-auth
-  reason: "Tier 3 boundary — nested fallback for display_name from preferred_username"
-  safety: "See parent entry; inner .get() is part of the same cascading default chain"
   expires: null
 
 - key: web/auth/oidc.py:R1:OIDCAuthProvider:get_user_info:fp=dc8858275b2d5f02
@@ -61,29 +37,54 @@ allow_hits:
   safety: "Default None; UserProfile.email accepts None; absence is honest representation"
   expires: null
 
-# Entra provider — Tier 3 JWT payload .get() and isinstance() calls
-- key: web/auth/entra.py:R1:EntraAuthProvider:_extract_groups:fp=b0373af700da2323
+# New fingerprints after review fixes (groups now raise on non-list, display_name changed)
+- key: web/auth/oidc.py:R1:OIDCAuthProvider:get_user_info:fp=2acca2e414510abd
   owner: web-auth
-  reason: "Tier 3 boundary — groups claim is optional in Entra tokens"
-  safety: "Default empty list; absence means no groups assigned"
+  reason: "Tier 3 boundary — groups claim is optional in OIDC tokens; None = no groups"
+  safety: "None returns empty groups; non-list raises AuthenticationError; no silent discard"
   expires: null
 
-- key: web/auth/entra.py:R5:EntraAuthProvider:_extract_groups:fp=e7401821bcf18890
+- key: web/auth/oidc.py:R5:OIDCAuthProvider:get_user_info:fp=7c9a52fe399ba9b5
   owner: web-auth
   reason: "Tier 3 boundary — groups claim type is not guaranteed by external IdP"
-  safety: "If not a list, treated as empty groups; non-list types cannot be iterated safely"
+  safety: "Non-list raises AuthenticationError with type info for debugging"
   expires: null
 
-- key: web/auth/entra.py:R1:EntraAuthProvider:_extract_groups:fp=39902a4b9d158494
+- key: web/auth/oidc.py:R1:OIDCAuthProvider:get_user_info:fp=63dab39d37b831df
   owner: web-auth
-  reason: "Tier 3 boundary — roles claim is optional in Entra tokens"
-  safety: "Default empty list; absence means no roles assigned"
+  reason: "Tier 3 boundary — name claim is optional, falls back to preferred_username"
+  safety: "Falls back to preferred_username (a real name) or 'Unknown'; never to opaque sub UUID"
   expires: null
 
-- key: web/auth/entra.py:R5:EntraAuthProvider:_extract_groups:fp=1d3ccfef2cb1411d
+- key: web/auth/oidc.py:R1:OIDCAuthProvider:get_user_info:fp=b7a1502ba8ac62e8
+  owner: web-auth
+  reason: "Tier 3 boundary — preferred_username fallback in display_name chain"
+  safety: "Part of name -> preferred_username -> 'Unknown' chain; no opaque ID fabrication"
+  expires: null
+
+# Entra provider — Tier 3 JWT payload .get() and isinstance() calls
+- key: web/auth/entra.py:R1:EntraAuthProvider:_extract_groups:fp=268368c0e155cc41
+  owner: web-auth
+  reason: "Tier 3 boundary — groups claim is optional in Entra tokens; None = no groups"
+  safety: "None returns empty; non-list raises AuthenticationError; no silent discard"
+  expires: null
+
+- key: web/auth/entra.py:R5:EntraAuthProvider:_extract_groups:fp=6dcc1eafd56c6429
+  owner: web-auth
+  reason: "Tier 3 boundary — groups claim type is not guaranteed by external IdP"
+  safety: "Non-list raises AuthenticationError with type info"
+  expires: null
+
+- key: web/auth/entra.py:R1:EntraAuthProvider:_extract_groups:fp=cc258a6069465936
+  owner: web-auth
+  reason: "Tier 3 boundary — roles claim is optional in Entra tokens; None = no roles"
+  safety: "None returns empty; non-list raises AuthenticationError; no silent discard"
+  expires: null
+
+- key: web/auth/entra.py:R5:EntraAuthProvider:_extract_groups:fp=8a85154b5c04b93d
   owner: web-auth
   reason: "Tier 3 boundary — roles claim type is not guaranteed by external IdP"
-  safety: "If not a list, treated as empty roles; non-list types cannot be iterated safely"
+  safety: "Non-list raises AuthenticationError with type info"
   expires: null
 
 - key: web/auth/entra.py:R1:EntraAuthProvider:authenticate:fp=fd48174d76f75c9d
@@ -98,20 +99,20 @@ allow_hits:
   safety: "Default is payload['sub'] which is required"
   expires: null
 
-- key: web/auth/entra.py:R1:EntraAuthProvider:get_user_info:fp=83c4e72f33707519
-  owner: web-auth
-  reason: "Tier 3 boundary — name claim is optional, falls back to preferred_username then sub"
-  safety: "Cascading defaults ensure a display_name is always set"
-  expires: null
-
-- key: web/auth/entra.py:R1:EntraAuthProvider:get_user_info:fp=a7235cfc2e9a1a95
-  owner: web-auth
-  reason: "Tier 3 boundary — nested fallback for display_name from preferred_username"
-  safety: "Inner .get() is part of the same cascading default chain"
-  expires: null
-
 - key: web/auth/entra.py:R1:EntraAuthProvider:get_user_info:fp=cf8febe0ecd5d91c
   owner: web-auth
   reason: "Tier 3 boundary — email claim is optional in Entra tokens"
   safety: "Default None; UserProfile.email accepts None"
+  expires: null
+
+- key: web/auth/entra.py:R1:EntraAuthProvider:get_user_info:fp=b006a5696f76b645
+  owner: web-auth
+  reason: "Tier 3 boundary — name claim is optional, falls back to preferred_username"
+  safety: "Falls back to preferred_username or 'Unknown'; never to opaque sub UUID"
+  expires: null
+
+- key: web/auth/entra.py:R1:EntraAuthProvider:get_user_info:fp=a3dbe8d2b3f309d5
+  owner: web-auth
+  reason: "Tier 3 boundary — preferred_username fallback in display_name chain"
+  safety: "Part of name -> preferred_username -> 'Unknown' chain"
   expires: null

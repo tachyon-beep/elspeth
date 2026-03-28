@@ -16,6 +16,9 @@ from jose import JWTError, jwt
 
 from elspeth.web.auth.models import AuthenticationError, UserIdentity, UserProfile
 
+# Module-level constant for timing-safe login
+_DUMMY_HASH = bcrypt.hashpw(b"dummy", bcrypt.gensalt())
+
 
 class LocalAuthProvider:
     """Authenticates users against a local SQLite database with bcrypt + JWT."""
@@ -77,14 +80,24 @@ class LocalAuthProvider:
         """Authenticate with username/password and return a JWT.
 
         Raises AuthenticationError("Invalid credentials") on failure.
+        Uses constant-time comparison to prevent username enumeration
+        via timing side-channel.
         """
+        if not username or not password:
+            raise AuthenticationError("Invalid credentials")
+
         with self._get_conn() as conn:
             row = conn.execute(
                 "SELECT password_hash FROM users WHERE user_id = ?",
                 (username,),
             ).fetchone()
 
-        if row is None or not bcrypt.checkpw(password.encode(), row[0].encode()):
+        if row is None:
+            # Constant-time: hash against dummy to prevent timing oracle
+            bcrypt.checkpw(password.encode(), _DUMMY_HASH)
+            raise AuthenticationError("Invalid credentials")
+
+        if not bcrypt.checkpw(password.encode(), row[0].encode()):
             raise AuthenticationError("Invalid credentials")
 
         payload = {

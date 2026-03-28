@@ -156,3 +156,42 @@ class TestGetUserInfo:
     async def test_get_user_info_invalid_token(self, provider) -> None:
         with pytest.raises(AuthenticationError):
             await provider.get_user_info("garbage-token")
+
+    @pytest.mark.asyncio
+    async def test_get_user_info_deleted_user(self, provider) -> None:
+        """User deleted between login (token issued) and get_user_info call."""
+        provider.create_user("alice", "pw", display_name="Alice")
+        token = provider.login("alice", "pw")
+
+        # Delete the user directly via sqlite3
+        import sqlite3
+
+        with sqlite3.connect(str(provider._db_path)) as conn:
+            conn.execute("DELETE FROM users WHERE user_id = ?", ("alice",))
+
+        with pytest.raises(AuthenticationError, match="User not found"):
+            await provider.get_user_info(token)
+
+
+class TestLoginEdgeCases:
+    """Edge-case tests for login input validation."""
+
+    def test_login_empty_username_raises(self, provider) -> None:
+        with pytest.raises(AuthenticationError, match="Invalid credentials"):
+            provider.login("", "some-password")
+
+    def test_login_empty_password_raises(self, provider) -> None:
+        provider.create_user("alice", "pw", display_name="Alice")
+        with pytest.raises(AuthenticationError, match="Invalid credentials"):
+            provider.login("alice", "")
+
+
+class TestProtocolConformance:
+    """Verify LocalAuthProvider satisfies the AuthProvider protocol."""
+
+    def test_local_satisfies_auth_provider(self, provider) -> None:
+        from elspeth.web.auth.protocol import AuthProvider
+
+        typed: AuthProvider = provider
+        assert callable(type(typed).authenticate)
+        assert callable(type(typed).get_user_info)

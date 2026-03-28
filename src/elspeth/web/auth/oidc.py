@@ -38,7 +38,7 @@ class OIDCAuthProvider:
             return self._jwks
 
         try:
-            async with httpx.AsyncClient() as client:
+            async with httpx.AsyncClient(timeout=httpx.Timeout(10.0, connect=5.0)) as client:
                 discovery_url = f"{self._issuer}/.well-known/openid-configuration"
                 discovery_resp = await client.get(discovery_url)
                 discovery_resp.raise_for_status()
@@ -49,7 +49,7 @@ class OIDCAuthProvider:
                 jwks_resp.raise_for_status()
                 self._jwks = jwks_resp.json()
                 self._jwks_fetched_at = now
-        except (httpx.HTTPError, KeyError) as exc:
+        except (httpx.HTTPError, KeyError, ValueError) as exc:
             raise AuthenticationError(f"Failed to fetch JWKS: {exc}") from exc
 
         return self._jwks
@@ -83,14 +83,20 @@ class OIDCAuthProvider:
         jwks = await self._ensure_jwks()
         payload = self._decode_token(token, jwks)
 
-        groups = payload.get("groups", [])
-        if not isinstance(groups, list):
-            groups = []
+        raw_groups = payload.get("groups")
+        if raw_groups is None:
+            groups: list[str] = []
+        elif isinstance(raw_groups, list):
+            groups = [str(g) for g in raw_groups]
+        else:
+            raise AuthenticationError(
+                f"Unexpected type for 'groups' claim: {type(raw_groups).__name__} (expected list) — check IdP token configuration"
+            )
 
         return UserProfile(
             user_id=payload["sub"],
             username=payload.get("preferred_username", payload["sub"]),
-            display_name=payload.get("name", payload.get("preferred_username", payload["sub"])),
+            display_name=payload.get("name") or payload.get("preferred_username", "Unknown"),
             email=payload.get("email"),
-            groups=tuple(str(g) for g in groups),
+            groups=tuple(groups),
         )
