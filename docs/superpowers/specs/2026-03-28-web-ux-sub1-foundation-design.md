@@ -58,7 +58,8 @@ All fields on `WebSettings`, a Pydantic `BaseModel`.
 | `composer_model` | `str` | `"gpt-4o"` | LiteLLM model identifier for the composition LLM |
 | `composer_max_turns` | `int` | `20` | Maximum tool-use loop iterations before convergence error |
 | `composer_timeout_seconds` | `float` | `120.0` | HTTP timeout for the composer loop (W12 fix) |
-| `secret_key` | `str` | `"change-me-in-production"` | JWT signing key for local auth |
+| `composer_rate_limit_per_minute` | `int` | `10` | Maximum `POST /messages` requests per user per minute. Prevents LLM cost amplification via rapid message submission (H8 fix). Enforced by the messages route handler using a per-user in-memory counter with a sliding window. Returns HTTP 429 Too Many Requests when exceeded. |
+| `secret_key` | `str` | `"change-me-in-production"` | JWT signing key for local auth. **S3: App crashes on startup if this default is not changed in non-test environments.** |
 | `max_upload_bytes` | `int` | `104857600` (100 MB) | Maximum file upload size (W8 fix) |
 | `landscape_url` | `str \| None` | `None` | SQLAlchemy URL for the Landscape audit DB. When `None`, resolves to `sqlite:///{data_dir}/runs/audit.db` via `get_landscape_url()` (B3 fix) |
 | `payload_store_path` | `Path \| None` | `None` | Directory for payload blob storage. When `None`, resolves to `{data_dir}/payloads/` via `get_payload_store_path()` (B3 fix) |

@@ -266,10 +266,10 @@ class TestGetSchema:
     """get_schema() returns full JSON schema for a plugin's config."""
 
     def test_csv_source_schema(self, catalog: CatalogServiceImpl) -> None:
-        info = catalog.get_schema("sources", "csv")
+        info = catalog.get_schema("source", "csv")
         assert isinstance(info, PluginSchemaInfo)
         assert info.name == "csv"
-        assert info.plugin_type == "sources"
+        assert info.plugin_type == "source"
         assert info.description  # non-empty
         assert isinstance(info.json_schema, dict)
         # Pydantic JSON schema has 'properties' and 'type'
@@ -279,28 +279,28 @@ class TestGetSchema:
     def test_passthrough_transform_schema(
         self, catalog: CatalogServiceImpl
     ) -> None:
-        info = catalog.get_schema("transforms", "passthrough")
+        info = catalog.get_schema("transform", "passthrough")
         assert info.name == "passthrough"
-        assert info.plugin_type == "transforms"
+        assert info.plugin_type == "transform"
         assert isinstance(info.json_schema, dict)
 
     def test_csv_sink_schema(self, catalog: CatalogServiceImpl) -> None:
-        info = catalog.get_schema("sinks", "csv")
+        info = catalog.get_schema("sink", "csv")
         assert info.name == "csv"
-        assert info.plugin_type == "sinks"
+        assert info.plugin_type == "sink"
         assert isinstance(info.json_schema, dict)
 
     def test_null_source_returns_empty_schema(
         self, catalog: CatalogServiceImpl
     ) -> None:
-        info = catalog.get_schema("sources", "null")
+        info = catalog.get_schema("source", "null")
         assert info.name == "null"
         assert info.json_schema == {}
 
     def test_llm_transform_returns_base_schema(
         self, catalog: CatalogServiceImpl
     ) -> None:
-        info = catalog.get_schema("transforms", "llm")
+        info = catalog.get_schema("transform", "llm")
         assert info.name == "llm"
         assert isinstance(info.json_schema, dict)
         # Base LLMConfig has a 'provider' field
@@ -316,14 +316,14 @@ class TestGetSchema:
     def test_unknown_name_raises_value_error(
         self, catalog: CatalogServiceImpl
     ) -> None:
-        with pytest.raises(ValueError, match="Unknown sources plugin"):
-            catalog.get_schema("sources", "nonexistent_plugin_xyz")
+        with pytest.raises(ValueError, match="Unknown source plugin"):
+            catalog.get_schema("source", "nonexistent_plugin_xyz")
 
     def test_unknown_name_includes_available(
         self, catalog: CatalogServiceImpl
     ) -> None:
         with pytest.raises(ValueError, match="Available:"):
-            catalog.get_schema("sources", "nonexistent_plugin_xyz")
+            catalog.get_schema("source", "nonexistent_plugin_xyz")
 ```
 
 - [ ] **Step 4: Implement CatalogServiceImpl**
@@ -346,7 +346,7 @@ from elspeth.web.catalog.schemas import (
 )
 
 # Valid plugin type path segments and their PluginManager lookup methods
-_VALID_TYPES = frozenset({"sources", "transforms", "sinks"})
+_VALID_TYPES = frozenset({"source", "transform", "sink"})
 
 
 class CatalogServiceImpl:
@@ -396,9 +396,9 @@ class CatalogServiceImpl:
 
         # Look up plugin class to verify it exists
         lookup = {
-            "sources": self._pm.get_source_by_name,
-            "transforms": self._pm.get_transform_by_name,
-            "sinks": self._pm.get_sink_by_name,
+            "source": self._pm.get_source_by_name,
+            "transform": self._pm.get_transform_by_name,
+            "sink": self._pm.get_sink_by_name,
         }
         try:
             plugin_cls = lookup[plugin_type](name)
@@ -509,9 +509,9 @@ class CatalogServiceImpl:
     def _available_names(self, plugin_type: str) -> list[str]:
         """Get sorted list of available plugin names for a type."""
         classes = {
-            "sources": self._source_classes,
-            "transforms": self._transform_classes,
-            "sinks": self._sink_classes,
+            "source": self._source_classes,
+            "transform": self._transform_classes,
+            "sink": self._sink_classes,
         }[plugin_type]
         return sorted(
             cls.name for cls in classes  # type: ignore[attr-defined]
@@ -655,7 +655,7 @@ class TestGetSchema:
         assert resp.status_code == 200
         data = resp.json()
         assert data["name"] == "csv"
-        assert data["plugin_type"] == "sources"
+        assert data["plugin_type"] == "source"
         assert "json_schema" in data
         assert "properties" in data["json_schema"]
 
@@ -666,7 +666,7 @@ class TestGetSchema:
         assert resp.status_code == 200
         data = resp.json()
         assert data["name"] == "passthrough"
-        assert data["plugin_type"] == "transforms"
+        assert data["plugin_type"] == "transform"
 
     def test_csv_sink_schema_200(self, client: TestClient) -> None:
         resp = client.get("/api/catalog/sinks/csv/schema")
@@ -688,7 +688,7 @@ class TestGetSchema:
     def test_unknown_name_returns_404(self, client: TestClient) -> None:
         resp = client.get("/api/catalog/sources/nonexistent_xyz/schema")
         assert resp.status_code == 404
-        assert "Unknown sources plugin" in resp.json()["detail"]
+        assert "Unknown source plugin" in resp.json()["detail"]
 
     def test_unknown_name_includes_available_list(
         self, client: TestClient
@@ -710,6 +710,12 @@ from fastapi import APIRouter, HTTPException, Request
 from elspeth.web.catalog.schemas import PluginSchemaInfo, PluginSummary
 
 catalog_router = APIRouter(tags=["catalog"])
+
+# Map plural REST path segments to singular protocol values (M3 fix).
+# The CatalogService protocol uses singular ("source", "transform", "sink").
+# REST paths use plural ("sources", "transforms", "sinks").
+# Translation is a REST presentation concern — does not leak into service layer.
+_PLURAL_TO_SINGULAR = {"sources": "source", "transforms": "transform", "sinks": "sink"}
 
 
 def _get_catalog(request: Request):  # noqa: ANN202
@@ -742,8 +748,14 @@ def get_schema(
     plugin_type: str, name: str, request: Request
 ) -> PluginSchemaInfo:
     """Get full JSON schema for a plugin's configuration."""
+    singular = _PLURAL_TO_SINGULAR.get(plugin_type)
+    if singular is None:
+        raise HTTPException(
+            status_code=404,
+            detail=f"Unknown plugin type: {plugin_type}. Must be one of: {sorted(_PLURAL_TO_SINGULAR)}",
+        )
     try:
-        return _get_catalog(request).get_schema(plugin_type, name)
+        return _get_catalog(request).get_schema(singular, name)
     except ValueError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
 ```
@@ -802,3 +814,12 @@ app.include_router(catalog_router, prefix="/api/catalog")
 ```bash
 git commit -m "feat(web/catalog): add catalog API routes and wire into app factory"
 ```
+
+---
+
+## Round 4 Review Amendments
+
+> **Status: Amendments below have been integrated into the plan body.**
+
+- **R4-M3a: Plural-to-singular translation in route handler.** The `CatalogService` protocol uses singular `plugin_type` values (`"source"`, `"transform"`, `"sink"`), but the REST endpoints use plural path segments (`sources`, `transforms`, `sinks`). In Task 3.2 Step 2 (`catalog/routes.py`), the `get_schema()` route handler must translate the plural `plugin_type` path parameter to singular before calling `CatalogService.get_schema()`. Map: `{"sources": "source", "transforms": "transform", "sinks": "sink"}`. Return 404 if the path segment is not in the map.
+- **R4-M3b: Seam contract C alignment.** The Catalog-to-Composer interface is defined in Seam C of `specs/2026-03-28-web-ux-seam-contracts.md`. Sub-4 (LLM Composer) calls `CatalogService` using singular forms matching the protocol. The plural-to-singular translation is purely a REST presentation concern and must not leak into the service layer.

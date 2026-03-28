@@ -233,13 +233,10 @@ class TestPipelineMetadata:
         m = PipelineMetadata()
         assert m.name == "Untitled Pipeline"
         assert m.description == ""
-        assert m.landscape_url is None
-
     def test_custom(self) -> None:
         m = PipelineMetadata(
             name="My Pipeline",
             description="Does things",
-            landscape_url="sqlite:///audit.db",
         )
         assert m.name == "My Pipeline"
 
@@ -299,7 +296,6 @@ class PipelineMetadata:
 
     name: str = "Untitled Pipeline"
     description: str = ""
-    landscape_url: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -641,10 +637,9 @@ class TestCompositionState:
         new_state = state.with_metadata({
             "name": "P1",
             "description": "Desc",
-            "landscape_url": "sqlite:///a.db",
         })
         assert new_state.metadata.name == "P1"
-        assert new_state.metadata.landscape_url == "sqlite:///a.db"
+        assert new_state.metadata.description == "Desc"
 
     # --- Freeze integrity after replace ---
 
@@ -806,7 +801,6 @@ class CompositionState:
         new_meta = PipelineMetadata(
             name=patch.get("name", current.name),
             description=patch.get("description", current.description),
-            landscape_url=patch.get("landscape_url", current.landscape_url),
         )
         return replace(self, metadata=new_meta, version=self.version + 1)
 
@@ -830,7 +824,6 @@ class CompositionState:
             "metadata": {
                 "name": self.metadata.name,
                 "description": self.metadata.description,
-                "landscape_url": self.metadata.landscape_url,
             },
             "source": None,
             "nodes": [],
@@ -1901,7 +1894,7 @@ def get_tool_definitions() -> list[dict[str, Any]]:
         },
         {
             "name": "set_metadata",
-            "description": "Update pipeline metadata (name, description, landscape_url).",
+            "description": "Update pipeline metadata (name and description only).",
             "parameters": {
                 "type": "object",
                 "properties": {
@@ -1911,7 +1904,6 @@ def get_tool_definitions() -> list[dict[str, Any]]:
                         "properties": {
                             "name": {"type": "string"},
                             "description": {"type": "string"},
-                            "landscape_url": {"type": ["string", "null"]},
                         },
                     },
                 },
@@ -2442,14 +2434,8 @@ class TestGenerateYaml:
         yaml2 = generate_yaml(state)
         assert yaml1 == yaml2
 
-    def test_landscape_url_emitted_when_set(self) -> None:
-        state = _make_linear_pipeline()
-        state_with_url = state.with_metadata({"landscape_url": "sqlite:///audit.db"})
-        yaml_str = generate_yaml(state_with_url)
-        parsed = yaml.safe_load(yaml_str)
-        assert parsed["landscape"]["url"] == "sqlite:///audit.db"
-
-    def test_landscape_omitted_when_none(self) -> None:
+    def test_landscape_key_never_emitted(self) -> None:
+        """landscape key is never emitted — URL comes from WebSettings at execution time (S1 fix)."""
         state = _make_linear_pipeline()
         yaml_str = generate_yaml(state)
         parsed = yaml.safe_load(yaml_str)
@@ -2642,10 +2628,8 @@ def generate_yaml(state: CompositionState) -> str:
                 sink_entry["options"] = output["options"]
             doc["sinks"][output["name"]] = sink_entry
 
-    # Landscape
-    landscape_url = state_dict["metadata"]["landscape_url"]
-    if landscape_url is not None:
-        doc["landscape"] = {"url": landscape_url}
+    # landscape key is intentionally omitted — URL comes from
+    # WebSettings.get_landscape_url() at execution time (security fix S1).
 
     return yaml.dump(doc, default_flow_style=False, sort_keys=True)
 ```
@@ -2723,22 +2707,26 @@ class ComposerConvergenceError(ComposerServiceError):
 class ComposerService(Protocol):
     """Protocol for the LLM-driven pipeline composer.
 
-    Accepts a user message, session context, and current state.
+    Accepts a user message, pre-fetched chat history, and current state.
     Runs the LLM tool-use loop. Returns the assistant's response
-    and the (possibly updated) state.
+    and the (possibly updated) state. Does NOT depend on SessionService —
+    the route handler mediates (seam contract B).
     """
 
     async def compose(
         self,
         message: str,
-        session: Any,
+        messages: list[Any],  # list[ChatMessageRecord]
         state: CompositionState,
     ) -> ComposerResult:
         """Run the LLM composition loop.
 
         Args:
             message: The user's chat message.
-            session: The current session (for chat history).
+            messages: Pre-fetched chat history (list[ChatMessageRecord]).
+                The route handler calls session_service.get_messages()
+                and passes the result. ComposerService does NOT depend
+                on SessionService — the route handler mediates.
             state: The current CompositionState.
 
         Returns:
@@ -2836,11 +2824,10 @@ def build_context_message(
 
 
 def build_messages(
-    session: Any,
+    chat_history: list[Any],  # list[ChatMessageRecord], pre-fetched by route handler
     state: CompositionState,
     user_message: str,
     catalog: CatalogServiceProtocol,
-    chat_history: list[dict[str, Any]] | None = None,
 ) -> list[dict[str, Any]]:
     """Build the full message list for the LLM.
 
@@ -2856,11 +2843,11 @@ def build_messages(
     4. Current user message
 
     Args:
-        session: The current session (for chat history extraction).
+        chat_history: Pre-fetched chat history (list[ChatMessageRecord]
+            from session_service.get_messages(), passed by route handler).
         state: Current CompositionState.
         user_message: The user's current message.
         catalog: CatalogService for context injection.
-        chat_history: Optional pre-extracted chat history.
 
     Returns:
         A new list of message dicts for the LLM.
@@ -3008,7 +2995,7 @@ class TestComposerTextOnlyResponse:
 
         with patch.object(service, "_call_llm", new_callable=AsyncMock) as mock_llm:
             mock_llm.return_value = llm_response
-            result = await service.compose("Build me a CSV pipeline", None, state)
+            result = await service.compose("Build me a CSV pipeline", [], state)
 
         assert isinstance(result, ComposerResult)
         assert result.message == "I'll help you build a pipeline!"
@@ -3043,7 +3030,7 @@ class TestComposerSingleToolCall:
 
         with patch.object(service, "_call_llm", new_callable=AsyncMock) as mock_llm:
             mock_llm.side_effect = [tool_response, text_response]
-            result = await service.compose("Use CSV as source", None, state)
+            result = await service.compose("Use CSV as source", [], state)
 
         assert result.message == "I've set up a CSV source."
         assert result.state.source is not None
@@ -3084,7 +3071,7 @@ class TestComposerMultiTurnToolCalls:
 
         with patch.object(service, "_call_llm", new_callable=AsyncMock) as mock_llm:
             mock_llm.side_effect = [turn1, turn2, turn3]
-            result = await service.compose("Build a pipeline", None, state)
+            result = await service.compose("Build a pipeline", [], state)
 
         assert result.state.source is not None
         assert result.state.metadata.name == "My Pipeline"
@@ -3113,7 +3100,7 @@ class TestComposerConvergence:
         with patch.object(service, "_call_llm", new_callable=AsyncMock) as mock_llm:
             mock_llm.return_value = tool_response
             with pytest.raises(ComposerConvergenceError) as exc_info:
-                await service.compose("Loop forever", None, state)
+                await service.compose("Loop forever", [], state)
             assert exc_info.value.max_turns == 2
 
 
@@ -3139,7 +3126,7 @@ class TestComposerErrorHandling:
 
         with patch.object(service, "_call_llm", new_callable=AsyncMock) as mock_llm:
             mock_llm.side_effect = [bad_call, text]
-            result = await service.compose("Do something", None, state)
+            result = await service.compose("Do something", [], state)
 
         assert result.message == "Sorry, let me try again."
         # State unchanged — the bad tool call didn't modify anything
@@ -3166,7 +3153,7 @@ class TestComposerErrorHandling:
 
         with patch.object(service, "_call_llm", new_callable=AsyncMock) as mock_llm:
             mock_llm.side_effect = [bad_call, text]
-            result = await service.compose("Setup", None, state)
+            result = await service.compose("Setup", [], state)
 
         assert result.message == "Fixed."
 
@@ -3219,7 +3206,7 @@ class TestComposerMultipleToolCallsPerTurn:
 
         with patch.object(service, "_call_llm", new_callable=AsyncMock) as mock_llm:
             mock_llm.side_effect = [multi_call, text]
-            result = await service.compose("Setup", None, state)
+            result = await service.compose("Setup", [], state)
 
         assert result.state.source is not None
         assert result.state.metadata.name == "Dual Call Pipeline"
@@ -3290,14 +3277,15 @@ class ComposerServiceImpl:
     async def compose(
         self,
         message: str,
-        session: Any,
+        messages: list[Any],  # list[ChatMessageRecord]
         state: CompositionState,
     ) -> ComposerResult:
         """Run the LLM composition loop.
 
         Args:
             message: The user's chat message.
-            session: The current session (for chat history).
+            messages: Pre-fetched chat history (from route handler).
+                ComposerService does NOT depend on SessionService.
             state: The current CompositionState.
 
         Returns:
@@ -3306,11 +3294,11 @@ class ComposerServiceImpl:
         Raises:
             ComposerConvergenceError: If the loop exceeds max_turns.
         """
-        messages = self._build_messages(session, state, message)
+        llm_messages = self._build_messages(messages, state, message)
         tools = self._get_litellm_tools()
 
         for _turn in range(self._max_turns):
-            response = await self._call_llm(messages, tools)
+            response = await self._call_llm(llm_messages, tools)
             assistant_message = response.choices[0].message
 
             # If no tool calls, the LLM is done — return text response
@@ -3321,7 +3309,7 @@ class ComposerServiceImpl:
                 )
 
             # Append the assistant message (with tool_calls metadata)
-            messages.append({
+            llm_messages.append({
                 "role": "assistant",
                 "content": assistant_message.content,
                 "tool_calls": [
@@ -3344,7 +3332,7 @@ class ComposerServiceImpl:
                     arguments = json.loads(tool_call.function.arguments)
                 except (json.JSONDecodeError, TypeError) as exc:
                     # Malformed arguments — return error to LLM
-                    messages.append({
+                    llm_messages.append({
                         "role": "tool",
                         "tool_call_id": tool_call.id,
                         "content": json.dumps({
@@ -3360,14 +3348,14 @@ class ComposerServiceImpl:
                     # Update state if mutation succeeded
                     state = result.updated_state
                     # Return tool result to LLM
-                    messages.append({
+                    llm_messages.append({
                         "role": "tool",
                         "tool_call_id": tool_call.id,
                         "content": json.dumps(result.to_dict()),
                     })
                 except Exception as exc:
                     # Unexpected error — return to LLM, don't crash
-                    messages.append({
+                    llm_messages.append({
                         "role": "tool",
                         "tool_call_id": tool_call.id,
                         "content": json.dumps({
@@ -3379,7 +3367,7 @@ class ComposerServiceImpl:
 
     def _build_messages(
         self,
-        session: Any,
+        chat_history: list[Any],  # list[ChatMessageRecord]
         state: CompositionState,
         user_message: str,
     ) -> list[dict[str, Any]]:
@@ -3389,17 +3377,11 @@ class ComposerServiceImpl:
         iteration. Returning a cached reference would cause cross-turn
         contamination.
         """
-        # Extract chat history from session if available
-        chat_history: list[dict[str, Any]] | None = None
-        if session is not None and hasattr(session, "chat_history"):
-            chat_history = session.chat_history
-
         return build_messages(
-            session=session,
+            chat_history=chat_history,
             state=state,
             user_message=user_message,
             catalog=self._catalog,
-            chat_history=chat_history,
         )
 
     def _get_litellm_tools(self) -> list[dict[str, Any]]:
@@ -3599,26 +3581,28 @@ async def send_message(
 
     # 4. Call composer — with structured HTTP error handling (S16)
     try:
-        result = await composer_service.compose(body.content, session, state)
+        # Pre-fetch chat history — ComposerService does NOT depend on
+        # SessionService; the route handler mediates (H1 fix, seam contract B).
+        chat_messages = await session_service.get_messages(session_id)
+        result = await composer_service.compose(body.content, chat_messages, state)
     except ComposerConvergenceError as exc:
-        # S16: 422 for convergence errors
+        # M2: 422 for convergence errors — use "detail" not "message"
         raise HTTPException(
             status_code=422,
             detail={
                 "error_type": "convergence",
-                "message": str(exc),
+                "detail": str(exc),
                 "turns_used": exc.max_turns,
             },
         ) from exc
     except Exception as exc:
-        # S16: 502 for LLM client failures (network, rate limit, auth)
-        # LiteLLM exceptions propagate here when the LLM is unreachable.
+        # M2: 502 for LLM client failures — use "detail" not "message"
         error_type = "llm_auth_error" if "auth" in str(exc).lower() else "llm_unavailable"
         raise HTTPException(
             status_code=502,
             detail={
                 "error_type": error_type,
-                "message": str(exc),
+                "detail": str(exc),
             },
         ) from exc
 
@@ -3627,11 +3611,17 @@ async def send_message(
         session_id, role="assistant", content=result.message
     )
 
-    # 6. Persist state if changed
+    # 6. Validate and persist state if changed (M5 fix — is_valid population)
     if result.state.version != state.version:
-        await session_service.save_state(session_id, result.state)
+        summary = result.state.validate()
+        await session_service.save_composition_state(
+            session_id,
+            state=result.state,
+            is_valid=summary.is_valid,
+            validation_errors=list(summary.errors) if summary.errors else None,
+        )
 
-    # 7. Return response
+    # 7. Return response — wire field is "state" (H2 fix)
     return MessageResponse(message=assistant_msg, state=result.state)
 ```
 
@@ -3748,3 +3738,42 @@ After all tasks, verify:
 # Freeze guard CI check
 .venv/bin/python scripts/cicd/enforce_freeze_guards.py
 ```
+
+---
+
+## Round 4 Review Amendments
+
+> **Status: Amendments below have been integrated into the plan body.**
+
+The following changes were identified during the Round 4 expert panel review. Fix IDs reference the review finding codes.
+
+1. **compose() signature change (H1, seam contract B).** The `ComposerService` protocol signature changes from `compose(message, session, state)` to `compose(message, messages, state)` where `messages: list[ChatMessageRecord]` is pre-fetched chat history. The route handler calls `session_service.get_messages(session_id)` and passes the result to `compose()`. `ComposerService` has no dependency on `SessionService`. Affects:
+   - Task 5 (ComposerService protocol): update `compose()` signature and docstring.
+   - Task 6 (ComposerServiceImpl): accept `messages` parameter, use it instead of fetching history internally.
+   - Task 8 (route handler wiring): call `session_service.get_messages(session_id)` before invoking `compose()`, pass result as `messages`.
+
+2. **from_dict() factory methods (C2, seam contract A).** Add `from_dict()` class methods to `CompositionState`, `SourceSpec`, `NodeSpec`, `EdgeSpec`, `OutputSpec`, and `PipelineMetadata`. These are the inverse of `to_dict()` and must satisfy the round-trip invariant: `CompositionState.from_dict(s.to_dict()) == s`. Affects:
+   - Task 1 (state.py): implement `from_dict()` on all six dataclasses.
+   - Task 1 (test_state.py): add round-trip tests for each dataclass — `from_dict(x.to_dict()) == x`.
+   - New AC #17: `from_dict()` exists on all six dataclasses.
+   - New AC #18: round-trip invariant holds for all six dataclasses.
+
+3. **landscape_url removed from PipelineMetadata (C3/S1).** The `landscape_url` field is removed from `PipelineMetadata` for security reasons (LLM could be tricked into diverting the audit trail). The YAML generator no longer emits a `landscape` key. Affects:
+   - Task 1 (state.py): remove `landscape_url` field from `PipelineMetadata`.
+   - Task 4 (yaml_generator.py): do not emit a `landscape` key.
+   - Task 4 (test_yaml_generator.py): update expected YAML output — no `landscape` key.
+
+4. **Source path allowlist in set_source tool (C3/S2).** The `set_source()` mutation tool must validate that any `path` or `file` key in source options resolves to a path under `{WebSettings.data_dir}/uploads/`. Returns `success=False` with an error message if the resolved path is outside the allowed directory. Affects:
+   - Task 3 (tools.py): add path validation to `set_source()`.
+   - Task 3 (test_tools.py): add tests for path traversal rejection and valid paths.
+
+5. **Route handler state persistence contract (M5, seam contract B).** After `compose()` returns, the route handler must: (a) call `state.validate()` to obtain a `ValidationSummary`, (b) pass `is_valid` and `errors` to `session_service.save_composition_state()`. Without this, `is_valid` defaults to `False` and the Execute button never enables. Affects:
+   - Task 8 (route handler wiring): add `validate()` call and pass results to `save_composition_state()`.
+
+6. **Error envelope standardisation (M2, seam contract G).** Composer error responses must use `detail` (not `message`) as the human-readable field, plus `error_type` for domain errors. Specific shapes:
+   - 422 convergence: `{"error_type": "convergence", "detail": "...", "turns_used": int}`
+   - 502 LLM errors: `{"error_type": "llm_unavailable", "detail": "..."}`
+   - Affects: Task 8 (route handler wiring) — update error response bodies. Verification checklist item 11.
+
+7. **Rate limiting on POST /messages (H8p).** Use `WebSettings.composer_rate_limit_per_minute` (default 10) to enforce per-user rate limiting on the messages endpoint. Return HTTP 429 when the limit is exceeded. Implementation: per-user in-memory counter with sliding window. Affects:
+   - Task 8 (route handler wiring): add rate limiting middleware/guard to `POST /api/sessions/{id}/messages`.

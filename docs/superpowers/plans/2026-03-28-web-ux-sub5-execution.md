@@ -22,6 +22,7 @@
 | B2 | `signal.signal()` from non-main thread raises `ValueError` | Always pass `shutdown_event=threading.Event()` to `Orchestrator.run()` |
 | B3 | Orchestrator needs LandscapeDB/PayloadStore without CLI path | Construct from `WebSettings.get_landscape_url()` / `.get_payload_store_path()` |
 | B7 | `except Exception` misses `KeyboardInterrupt`/`SystemExit`, leaving ghost runs | `except BaseException` + `future.add_done_callback()` safety net |
+| B8/C1 | `SessionService` methods are async but `_run_pipeline()` runs in sync thread | `_call_async()` bridges via `asyncio.run_coroutine_threadsafe()` |
 
 ---
 
@@ -193,7 +194,7 @@ class TestRunEvent:
             run_id="run-123",
             timestamp=datetime.now(tz=timezone.utc),
             event_type="error",
-            data={"message": "Division by zero", "node_id": "transform_1", "row_id": "row-5"},
+            data={"detail": "Division by zero", "node_id": "transform_1", "row_id": "row-5"},
         )
         assert event.event_type == "error"
         assert event.data["node_id"] == "transform_1"
@@ -356,22 +357,29 @@ class ExecutionService(Protocol):
         """
         ...
 
-    def execute(self, session_id: UUID, state_id: UUID | None = None) -> UUID:
+    async def execute(self, session_id: UUID, state_id: UUID | None = None) -> UUID:
         """Start a background pipeline run.
 
         Returns the run_id immediately. Raises RunAlreadyActiveError if
         a pending or running Run already exists for this session.
+
+        Note: async because it calls SessionService (async) for active-run
+        check and run creation. The actual pipeline runs in a background
+        thread via ThreadPoolExecutor — only the setup is async.
         """
         ...
 
-    def get_status(self, run_id: UUID) -> RunStatusResponse:
+    async def get_status(self, run_id: UUID) -> RunStatusResponse:
         """Return current run status from the Run database record."""
         ...
 
-    def cancel(self, run_id: UUID) -> None:
+    async def cancel(self, run_id: UUID) -> None:
         """Cancel a run. Sets the shutdown Event for active runs.
 
         Idempotent — cancelling a terminal run is a no-op.
+        Note: async because cancelling a pending run calls
+        SessionService.update_run_status() directly (not via _call_async,
+        since we're in the event loop thread).
         """
         ...
 ```
@@ -729,8 +737,65 @@ from elspeth.web.execution.validation import validate_pipeline
 class FakeCompositionState:
     """Minimal stand-in for CompositionState during validation tests."""
 
-    def __init__(self, yaml_content: str = "") -> None:
+    def __init__(self, yaml_content: str = "", source_options: dict | None = None) -> None:
         self.yaml_content = yaml_content
+        self.source_options = source_options or {}
+
+
+class FakeWebSettings:
+    """Minimal stand-in for WebSettings during validation tests."""
+
+    def __init__(self, data_dir: str = "/tmp/test_data") -> None:
+        self.data_dir = data_dir
+
+
+class TestValidatePipelinePathAllowlist:
+    """C3/S2: Source path allowlist check — defense-in-depth."""
+
+    def test_path_within_uploads_passes(self) -> None:
+        state = FakeCompositionState(
+            source_options={"path": "/tmp/test_data/uploads/data.csv"},
+        )
+        settings = FakeWebSettings(data_dir="/tmp/test_data")
+        # Path check passes — validation continues to settings_load
+        # (which will fail because no real engine, but the path check itself passes)
+        with patch("elspeth.web.execution.validation.yaml_generator") as mock_gen, \
+             patch("elspeth.web.execution.validation.load_settings") as mock_load:
+            mock_gen.generate_yaml.return_value = "source:\n  plugin: csv_source"
+            mock_load.side_effect = FileNotFoundError("no temp file")
+            result = validate_pipeline(state, settings)
+        # Path check passed — failure is from settings_load, not path_allowlist
+        assert not any(c.name == "source_path_allowlist" and not c.passed for c in result.checks)
+
+    def test_path_outside_uploads_blocked(self) -> None:
+        state = FakeCompositionState(
+            source_options={"path": "/etc/passwd"},
+        )
+        settings = FakeWebSettings(data_dir="/tmp/test_data")
+        result = validate_pipeline(state, settings)
+        assert result.is_valid is False
+        assert result.checks[0].name == "source_path_allowlist"
+        assert result.checks[0].passed is False
+        assert any("Path traversal" in e.message for e in result.errors)
+
+    def test_path_traversal_via_dotdot_blocked(self) -> None:
+        state = FakeCompositionState(
+            source_options={"path": "/tmp/test_data/uploads/../../secret.csv"},
+        )
+        settings = FakeWebSettings(data_dir="/tmp/test_data")
+        result = validate_pipeline(state, settings)
+        assert result.is_valid is False
+
+    def test_no_path_option_skips_check(self) -> None:
+        state = FakeCompositionState(source_options={})
+        settings = FakeWebSettings(data_dir="/tmp/test_data")
+        with patch("elspeth.web.execution.validation.yaml_generator") as mock_gen, \
+             patch("elspeth.web.execution.validation.load_settings") as mock_load:
+            mock_gen.generate_yaml.return_value = "source:\n  plugin: csv_source"
+            mock_load.side_effect = FileNotFoundError("no temp file")
+            result = validate_pipeline(state, settings)
+        # No path_allowlist failure — check was skipped
+        assert not any(c.name == "source_path_allowlist" for c in result.checks)
 
 
 class TestValidatePipelineSuccess:
@@ -761,7 +826,8 @@ class TestValidatePipelineSuccess:
         mock_graph_cls.from_plugin_instances.return_value = mock_graph
 
         state = FakeCompositionState()
-        result = validate_pipeline(state)
+        settings = FakeWebSettings()
+        result = validate_pipeline(state, settings)
 
         assert result.is_valid is True
         assert len(result.checks) == 4
@@ -798,7 +864,8 @@ class TestValidatePipelineSettingsFailure:
         )
 
         state = FakeCompositionState()
-        result = validate_pipeline(state)
+        settings = FakeWebSettings()
+        result = validate_pipeline(state, settings)
 
         assert result.is_valid is False
         assert result.checks[0].name == "settings_load"
@@ -819,7 +886,8 @@ class TestValidatePipelineSettingsFailure:
         mock_load.side_effect = FileNotFoundError("temp file missing")
 
         state = FakeCompositionState()
-        result = validate_pipeline(state)
+        settings = FakeWebSettings()
+        result = validate_pipeline(state, settings)
 
         assert result.is_valid is False
         assert result.checks[0].passed is False
@@ -842,7 +910,8 @@ class TestValidatePipelinePluginFailure:
         )
 
         state = FakeCompositionState()
-        result = validate_pipeline(state)
+        settings = FakeWebSettings()
+        result = validate_pipeline(state, settings)
 
         assert result.is_valid is False
         assert result.checks[0].passed is True  # settings_load passed
@@ -879,7 +948,8 @@ class TestValidatePipelineGraphFailure:
         )
 
         state = FakeCompositionState()
-        result = validate_pipeline(state)
+        settings = FakeWebSettings()
+        result = validate_pipeline(state, settings)
 
         assert result.is_valid is False
         assert result.checks[2].passed is False  # graph_structure failed
@@ -914,7 +984,8 @@ class TestValidatePipelineGraphFailure:
         )
 
         state = FakeCompositionState()
-        result = validate_pipeline(state)
+        settings = FakeWebSettings()
+        result = validate_pipeline(state, settings)
 
         assert result.is_valid is False
         assert result.checks[2].passed is True  # graph_structure passed
@@ -936,9 +1007,10 @@ class TestValidatePipelineNoBareCatch:
 
         state = FakeCompositionState()
 
+        settings = FakeWebSettings()
         # RuntimeError is NOT in the typed exception list — it must propagate
         with pytest.raises(RuntimeError, match="Unexpected engine bug"):
-            validate_pipeline(state)
+            validate_pipeline(state, settings)
 
 
 class TestValidatePipelineTempFileCleanup:
@@ -970,7 +1042,8 @@ class TestValidatePipelineTempFileCleanup:
         mock_graph_cls.from_plugin_instances.return_value = mock_graph
 
         state = FakeCompositionState()
-        result = validate_pipeline(state)
+        settings = FakeWebSettings()
+        result = validate_pipeline(state, settings)
 
         # load_settings was called with a Path, not YAML content
         call_args = mock_load.call_args
@@ -1025,12 +1098,13 @@ yaml_generator: YamlGenerator
 
 
 # ── Check names (ordered) ─────────────────────────────────────────────
+_CHECK_PATH_ALLOWLIST = "source_path_allowlist"
 _CHECK_SETTINGS = "settings_load"
 _CHECK_PLUGINS = "plugin_instantiation"
 _CHECK_GRAPH = "graph_structure"
 _CHECK_SCHEMA = "schema_compatibility"
 
-_ALL_CHECKS = [_CHECK_SETTINGS, _CHECK_PLUGINS, _CHECK_GRAPH, _CHECK_SCHEMA]
+_ALL_CHECKS = [_CHECK_PATH_ALLOWLIST, _CHECK_SETTINGS, _CHECK_PLUGINS, _CHECK_GRAPH, _CHECK_SCHEMA]
 
 
 def _skipped_checks(from_check: str) -> list[ValidationCheck]:
@@ -1077,24 +1151,62 @@ def _extract_component_id(message: str) -> tuple[str | None, str | None]:
     return None, None
 
 
-def validate_pipeline(state: Any) -> ValidationResult:
+def validate_pipeline(state: Any, settings: Any) -> ValidationResult:
     """Dry-run validation through the real engine code path.
 
     Steps:
-    1. Generate YAML from CompositionState
-    2. Write to temp file, load_settings(path) — NOT yaml content
-    3. instantiate_plugins_from_config(settings)
-    4. ExecutionGraph.from_plugin_instances(bundle fields)
-    5. graph.validate() + graph.validate_edge_compatibility()
+    1. Source path allowlist check (C3/S2 defense-in-depth)
+    2. Generate YAML from CompositionState
+    3. Write to temp file, load_settings(path) — NOT yaml content
+    4. instantiate_plugins_from_config(settings)
+    5. ExecutionGraph.from_plugin_instances(bundle fields)
+    6. graph.validate() + graph.validate_edge_compatibility()
 
     Only catches: PydanticValidationError, FileNotFoundError, ValueError,
     GraphValidationError. All other exceptions propagate (W18).
+
+    Args:
+        state: CompositionState from the session.
+        settings: WebSettings — used for path allowlist check.
     """
     checks: list[ValidationCheck] = []
     errors: list[ValidationError] = []
     tmp_path: Path | None = None
 
-    # Step 1: Generate YAML
+    # Step 1: Source path allowlist check (C3/S2 defense-in-depth)
+    # Any `path` or `file` key in source options must resolve under
+    # {settings.data_dir}/uploads/. This duplicates the composer tool
+    # check as defense-in-depth.
+    uploads_dir = Path(settings.data_dir) / "uploads"
+    source_options = getattr(state, "source_options", None) or {}
+    for key in ("path", "file"):
+        value = source_options.get(key)
+        if value is not None:
+            resolved = Path(value).resolve()
+            if not resolved.is_relative_to(uploads_dir.resolve()):
+                return ValidationResult(
+                    is_valid=False,
+                    checks=[
+                        ValidationCheck(
+                            name="source_path_allowlist",
+                            passed=False,
+                            detail=f"Source {key} '{value}' is outside allowed "
+                            f"upload directory: {uploads_dir}",
+                        ),
+                        *_skipped_checks("source_path_allowlist"),
+                    ],
+                    errors=[
+                        ValidationError(
+                            component_id="source",
+                            component_type="source",
+                            message=f"Path traversal blocked: {key}='{value}' "
+                            f"resolves outside {uploads_dir}",
+                            suggestion="Use a file within the uploads directory.",
+                        ),
+                    ],
+                )
+
+    # Step 2: Generate YAML
     pipeline_yaml = yaml_generator.generate_yaml(state)
 
     # Step 2: Settings loading
@@ -1248,13 +1360,13 @@ git commit -m "feat(web/execution): add dry-run validation using real engine cod
 
 ---
 
-### Task 5.5: ExecutionServiceImpl (B2 + B3 + B7 Fixes)
+### Task 5.5: ExecutionServiceImpl (B2 + B3 + B7 + B8/C1 Fixes)
 
 **Files:**
 - Create: `src/elspeth/web/execution/service.py`
 - Create: `tests/unit/web/execution/test_service.py`
 
-This is the highest-risk task. Three blocking review fixes live here: B2 (shutdown_event), B3 (LandscapeDB construction), B7 (BaseException + done_callback). Every test verifies a specific thread safety invariant.
+This is the highest-risk task. Four blocking review fixes live here: B2 (shutdown_event), B3 (LandscapeDB construction), B7 (BaseException + done_callback), B8/C1 (async/sync bridging via `_call_async()`). Every test verifies a specific thread safety invariant.
 
 - [ ] **Step 1: Write ExecutionServiceImpl tests**
 
@@ -1267,6 +1379,7 @@ Each test class targets a specific review fix:
 - TestB2ShutdownEvent: shutdown_event always passed to Orchestrator.run()
 - TestB3Construction: LandscapeDB/PayloadStore from WebSettings
 - TestB7ExceptionHandling: BaseException catch + done_callback safety net
+- TestB8AsyncBridging: _call_async() bridges sync thread to async event loop
 - TestCancelMechanism: Event-based cancellation
 - TestOneActiveRun: B6 constraint enforcement
 """
@@ -1323,6 +1436,7 @@ def mock_session_service() -> MagicMock:
 
 @pytest.fixture
 def service(
+    mock_loop: MagicMock,
     broadcaster: ProgressBroadcaster,
     mock_settings: MagicMock,
     mock_session_service: MagicMock,
@@ -1333,6 +1447,7 @@ def service(
     # (landscape_run_id, pipeline_yaml, rows_processed, rows_failed).
     mock_session_service.get_active_run.return_value = None
     return ExecutionServiceImpl(
+        loop=mock_loop,
         broadcaster=broadcaster,
         settings=mock_settings,
         session_service=mock_session_service,
@@ -1772,18 +1887,22 @@ Thread safety fixes implemented here:
 - B2: Always pass shutdown_event=threading.Event() to Orchestrator.run()
 - B3: Construct LandscapeDB/PayloadStore from WebSettings resolvers
 - B7: except BaseException + future.add_done_callback() safety net
+- B8/C1: _call_async() bridges sync thread to async event loop for SessionService
 
 The _run_pipeline() method is the ONLY code that runs outside the asyncio
-event loop. Everything else runs in the main async context.
+event loop. Everything else runs in the main async context. Because
+SessionService methods are async, _run_pipeline() uses _call_async() to
+schedule coroutines on the main event loop from the background thread.
 """
 from __future__ import annotations
 
+import asyncio
 import tempfile
 import threading
 from concurrent.futures import Future, ThreadPoolExecutor
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, Coroutine, TypeVar
 from uuid import UUID, uuid4
 
 import structlog
@@ -1805,6 +1924,8 @@ if TYPE_CHECKING:
 
 slog = structlog.get_logger()
 
+T = TypeVar("T")
+
 # Module-level reference — set by the app factory
 yaml_generator: YamlGenerator
 
@@ -1819,20 +1940,27 @@ class ExecutionServiceImpl:
     Construction: Created inside the FastAPI lifespan async context manager
     (after ProgressBroadcaster), NOT in the synchronous create_app() factory.
     Stored as application state and injected into route handlers via FastAPI's
-    dependency injection.
+    dependency injection. The event loop reference is obtained from
+    asyncio.get_running_loop() in the lifespan (same loop as ProgressBroadcaster).
 
     Thread model: execute() submits _run_pipeline() to a ThreadPoolExecutor
     with max_workers=1. The pipeline runs in a background thread. All other
     methods run in the asyncio event loop thread.
+
+    B8/C1 fix: SessionService methods are async. _run_pipeline() runs in a
+    background thread and uses _call_async() to bridge async calls back to
+    the main event loop via asyncio.run_coroutine_threadsafe().
     """
 
     def __init__(
         self,
         *,
+        loop: asyncio.AbstractEventLoop,
         broadcaster: ProgressBroadcaster,
         settings: Any,  # WebSettings
         session_service: Any,  # SessionService
     ) -> None:
+        self._loop = loop
         self._broadcaster = broadcaster
         self._settings = settings
         self._session_service = session_service
@@ -1843,11 +1971,21 @@ class ExecutionServiceImpl:
         self._executor = ThreadPoolExecutor(max_workers=1)
         self._shutdown_events: dict[str, threading.Event] = {}
 
+    def _call_async(self, coro: Coroutine[Any, Any, T]) -> T:
+        """Bridge an async call from the background thread to the main event loop.
+
+        B8/C1 fix: SessionService methods are async, but _run_pipeline() runs
+        in a ThreadPoolExecutor worker thread. This helper schedules the
+        coroutine on the main event loop and blocks until it completes.
+        """
+        future = asyncio.run_coroutine_threadsafe(coro, self._loop)
+        return future.result()
+
     def shutdown(self) -> None:
         """Shut down the thread pool. Called during app shutdown."""
         self._executor.shutdown(wait=True)
 
-    def execute(
+    async def execute(
         self, session_id: UUID, state_id: UUID | None = None
     ) -> UUID:
         """Start a background pipeline run.
@@ -1856,23 +1994,26 @@ class ExecutionServiceImpl:
         run already exists for this session.
 
         Returns the run_id immediately.
+
+        Note: async because SessionService methods are async. The pipeline
+        itself runs in a background thread — only setup is async.
         """
         # B6: One active run per session (AC #17: via SessionService)
-        active = self._session_service.get_active_run(session_id)
+        active = await self._session_service.get_active_run(session_id)
         if active is not None:
             raise RunAlreadyActiveError(
                 f"Session {session_id} already has an active run: {active.run_id}"
             )
 
         # Load composition state
-        state = self._session_service.get_composition_state(
+        state = await self._session_service.get_composition_state(
             session_id, state_id
         )
         pipeline_yaml = yaml_generator.generate_yaml(state)
 
         # Create run record (AC #17: via SessionService with R6 expanded params)
         run_id = uuid4()
-        self._session_service.create_run(
+        await self._session_service.create_run(
             session_id=session_id,
             state_id=state_id,
             pipeline_yaml=pipeline_yaml,
@@ -1891,9 +2032,9 @@ class ExecutionServiceImpl:
 
         return run_id
 
-    def get_status(self, run_id: UUID) -> RunStatusResponse:
+    async def get_status(self, run_id: UUID) -> RunStatusResponse:
         """Return current run status. AC #17: delegates to SessionService."""
-        run = self._session_service.get_run(run_id)
+        run = await self._session_service.get_run(run_id)
         return RunStatusResponse(
             run_id=str(run.run_id),
             status=run.status,
@@ -1905,21 +2046,25 @@ class ExecutionServiceImpl:
             landscape_run_id=run.landscape_run_id,
         )
 
-    def cancel(self, run_id: UUID) -> None:
+    async def cancel(self, run_id: UUID) -> None:
         """Cancel a run via the shutdown Event.
 
         Active runs: sets the Event, Orchestrator detects during row processing.
         Pending runs: sets the Event so _run_pipeline terminates immediately.
         Terminal runs: no-op (idempotent).
+
+        Note: async because pending-run cancellation calls SessionService
+        directly (we're in the event loop thread, not the background thread,
+        so await is correct here — NOT _call_async).
         """
         event = self._shutdown_events.get(str(run_id))
         if event is not None:
             event.set()
         else:
             # No event means either pending (not yet started) or already done
-            run = self._session_service.get_run(run_id)
+            run = await self._session_service.get_run(run_id)
             if run.status not in ("completed", "failed", "cancelled"):
-                self._session_service.update_run_status(
+                await self._session_service.update_run_status(
                     run_id, status="cancelled"
                 )
 
@@ -1942,7 +2087,10 @@ class ExecutionServiceImpl:
         """
         tmp_path: Path | None = None
         try:
-            self._session_service.update_run_status(run_id, status="running")
+            # B8/C1: SessionService is async — bridge from background thread
+            self._call_async(
+                self._session_service.update_run_status(run_id, status="running")
+            )
 
             # B3 fix: construct from WebSettings, not hardcoded paths
             landscape_db = LandscapeDB(
@@ -2030,12 +2178,12 @@ class ExecutionServiceImpl:
                         },
                     ),
                 )
-                self._session_service.update_run_status(
+                self._call_async(self._session_service.update_run_status(
                     run_id,
                     status="cancelled",
                     rows_processed=result.rows_processed,
                     rows_failed=result.rows_failed,
-                )
+                ))
             else:
                 # Broadcast terminal completed event
                 self._broadcaster.broadcast(
@@ -2053,13 +2201,13 @@ class ExecutionServiceImpl:
                         },
                     ),
                 )
-                self._session_service.update_run_status(
+                self._call_async(self._session_service.update_run_status(
                     run_id,
                     status="completed",
                     landscape_run_id=result.run_id,
                     rows_processed=result.rows_processed,
                     rows_failed=result.rows_failed,
-                )
+                ))
 
             landscape_db.close()
 
@@ -2074,15 +2222,15 @@ class ExecutionServiceImpl:
                     timestamp=datetime.now(tz=timezone.utc),
                     event_type="error",
                     data={
-                        "message": str(exc),
+                        "detail": str(exc),
                         "node_id": None,
                         "row_id": None,
                     },
                 ),
             )
-            self._session_service.update_run_status(
+            self._call_async(self._session_service.update_run_status(
                 run_id, status="failed", error=str(exc)
-            )
+            ))
             raise  # Re-raise so future.add_done_callback sees it
         finally:
             # Always clean up, regardless of success or failure
@@ -2125,7 +2273,7 @@ class ExecutionServiceImpl:
 
 ```bash
 .venv/bin/python -m pytest tests/unit/web/execution/test_service.py -v
-git commit -m "feat(web/execution): add ExecutionServiceImpl with B2/B3/B7 thread safety fixes"
+git commit -m "feat(web/execution): add ExecutionServiceImpl with B2/B3/B7/B8 thread safety fixes"
 ```
 
 ---
@@ -2291,6 +2439,10 @@ class TestExecuteEndpoint:
         )
         # resp = await client.post(f"/api/sessions/{uuid4()}/execute")
         # assert resp.status_code == 409
+        # body = resp.json()
+        # Seam contract D: structured error envelope
+        # assert body["error_type"] == "run_already_active"
+        # assert "detail" in body
         pass
 
 
@@ -2335,8 +2487,19 @@ class TestWebSocketProgress:
         # 1. subscribe(run_id) on connect
         # 2. await queue.get() in a loop
         # 3. send_json(event) for each event
-        # 4. close on terminal event (completed/error)
+        # 4. close with code 1000 on terminal event (completed/error/cancelled)
         # 5. unsubscribe(run_id, queue) in finally block
+        pass
+
+    @pytest.mark.asyncio
+    async def test_websocket_closes_1011_on_internal_error(
+        self,
+        mock_broadcaster: MagicMock,
+    ) -> None:
+        """H6: Internal server error sends close code 1011."""
+        # When app factory is available:
+        #   Inject a broadcaster that raises on queue.get()
+        #   Verify close code is 1011
         pass
 
     @pytest.mark.asyncio
@@ -2382,6 +2545,7 @@ from typing import Any
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, WebSocket, WebSocketDisconnect
+from fastapi.responses import JSONResponse
 
 from elspeth.web.execution.progress import ProgressBroadcaster
 from elspeth.web.execution.schemas import RunStatusResponse, ValidationResult
@@ -2422,7 +2586,8 @@ async def validate_session_pipeline(
 
     loop = asyncio.get_running_loop()
     state = service.get_composition_state(session_id)
-    return await loop.run_in_executor(None, validate_pipeline, state)
+    settings = service.get_settings()
+    return await loop.run_in_executor(None, validate_pipeline, state, settings)
 
 
 @router.post(
@@ -2438,7 +2603,14 @@ async def execute_pipeline(
     try:
         run_id = service.execute(session_id, state_id)
     except RunAlreadyActiveError as exc:
-        raise HTTPException(status_code=409, detail=str(exc)) from exc
+        # Seam contract D: structured error envelope for 409
+        return JSONResponse(
+            status_code=409,
+            content={
+                "error_type": "run_already_active",
+                "detail": str(exc),
+            },
+        )
     return {"run_id": str(run_id)}
 
 
@@ -2533,9 +2705,18 @@ async def websocket_run_progress(
             event = await queue.get()
             await websocket.send_json(event.model_dump(mode="json"))
             if event.event_type in ("completed", "error", "cancelled"):
+                # H6: Use specific close codes per seam contract E
+                # 1000 = normal closure after terminal event
+                await websocket.close(code=1000)
                 break
     except WebSocketDisconnect:
         pass  # Client disconnected — fall through to finally
+    except Exception:
+        # H6: 1011 = internal server error
+        try:
+            await websocket.close(code=1011, reason="Internal server error")
+        except Exception:
+            pass  # Connection may already be closed
     finally:
         broadcaster.unsubscribe(run_id, queue)
 ```
@@ -2844,3 +3025,17 @@ git commit -m "test(web): add end-to-end pipeline execution integration test"
 ```
 
 Tasks 5.1 and 5.2 can run in parallel. Task 5.3 depends on 5.1 (uses RunEvent schema). Task 5.4 depends on 5.1. Task 5.5 depends on 5.1, 5.3, and 5.4. Tasks 5.6-5.8 are sequential.
+
+## Round 4 Review Amendments
+
+> **Status: Amendments below have been integrated into the plan body.**
+
+1. **Async/sync bridging — B8, C1.** `_run_pipeline()` executes in a `ThreadPoolExecutor` worker thread, but `SessionService` methods are async. All `SessionService` calls from `_run_pipeline()` must use `asyncio.run_coroutine_threadsafe(coro, self._loop).result()` via a `_call_async()` helper method. `self._loop` is obtained from `asyncio.get_running_loop()` in the FastAPI lifespan (same loop as `ProgressBroadcaster`). Changes: (a) update `ExecutionServiceImpl` constructor to accept the loop reference; (b) update `_run_pipeline()` to use `_call_async()` for every `session_service` call; (c) add acceptance criterion 17a — test that Run status transitions work with a real async `SessionService`.
+
+2. **Source path allowlist in validation — C3, S2.** `validate_pipeline()` signature changes from `(state)` to `(state, settings)`. A new step 1 checks that any `path` or `file` key in source options resolves under `{settings.data_dir}/uploads/` using `Path.resolve()` and `is_relative_to()`. Returns `ValidationResult(is_valid=False)` with a source-attributed error if the check fails. This is defense-in-depth (the composer tool also checks). Update the validation task and `test_validation.py`.
+
+3. **WebSocket close codes — H6, seam contract E.** The WebSocket handler must use specific close codes: `1000` for normal closure (run reached terminal state after sending terminal event), `1011` for internal error (server-side failure), `4001` for auth failure. Update the `routes.py` WebSocket handler task and `test_routes.py`.
+
+4. **RunAlreadyActiveError error envelope — seam contract D.** The 409 response for `RunAlreadyActiveError` must include `{"error_type": "run_already_active", "detail": "A run is already in progress for this session."}`. Update the execute route handler.
+
+5. **Seam contracts reference.** The seam contracts document defines Seam D (Execution <> Sessions run lifecycle) and Seam E (WebSocket progress). Implementation should follow these contracts for async bridging, close codes, and `RunEvent` wire format.

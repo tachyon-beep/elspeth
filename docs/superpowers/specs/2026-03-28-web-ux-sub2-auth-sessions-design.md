@@ -602,6 +602,19 @@ Returns all composition state versions for a session. IDOR-protected.
 
 Response (200): list of composition state objects, ordered by version ascending.
 
+**GET /api/sessions/{id}/state/yaml**
+
+Returns the generated YAML for the current composition state. IDOR-protected.
+Defined in Sub-Spec 4 (Composer), wired here in `sessions/routes.py`. The route
+handler loads the session's active CompositionState and calls
+`generate_yaml(state)` (from `composer/yaml_generator.py`).
+
+Response (200): `{"yaml": str}` — the YAML string for display in the frontend's
+YAML tab.
+
+Error: 404 if session not found, belongs to another user, or has no
+CompositionState yet.
+
 **POST /api/sessions/{id}/state/revert**
 
 Reverts the pipeline to a prior composition state version. Creates a new version
@@ -703,13 +716,24 @@ ExecutionService).
 Raises `RunAlreadyActiveError` (a domain exception defined in
 `sessions/service.py`). The route handler converts this to HTTP 409 Conflict.
 
-### Secret Key Production Guard (W16)
+### Secret Key Production Guard (W16, upgraded to S3)
 
 On application startup, if `WebSettings.secret_key == "change-me-in-production"`
-and the environment is not test (determined by checking for pytest in sys.modules
-or an explicit `ELSPETH_ENV=test` environment variable), log a warning. This is
-a warning, not a crash, because the MVP targets single-tenant dev/small-team
-deployment.
+and the environment is not test (determined by checking for `pytest` in
+`sys.modules` or an explicit `ELSPETH_ENV=test` environment variable), **raise
+`SystemExit` with a clear error message**: `"FATAL: WebSettings.secret_key is
+set to the default value. Set a secure secret_key before starting the web
+server. See WebSettings documentation."` This is a hard crash, not a warning.
+
+**Rationale (security fix S3):** The default `secret_key` is a well-known string.
+Any deployment that fails to change it has zero authentication — an attacker can
+forge valid JWTs for any user with zero skill. A warning is insufficient because
+it can be missed in log output, and the system appears to function correctly with
+the default key. A crash makes the failure impossible to ignore.
+
+**Test environments** (where `pytest` is in `sys.modules` or `ELSPETH_ENV=test`)
+are exempt because test fixtures need a predictable key for JWT generation in
+test setup.
 
 ### Session DB Schema Creation (W6)
 

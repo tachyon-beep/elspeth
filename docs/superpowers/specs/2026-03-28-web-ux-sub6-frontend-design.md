@@ -268,9 +268,9 @@ Three Zustand stores manage client-side state. All stores use the slice pattern 
 - `loadSessions()` -- fetches session list from `GET /api/sessions`
 - `createSession()` -- calls `POST /api/sessions`, adds to list, sets as active
 - `selectSession(id)` -- sets active session, loads messages via `GET /api/sessions/{id}/messages` and state via `GET /api/sessions/{id}/state`
-- `sendMessage(content)` -- sets `isComposing = true`, calls `POST /api/sessions/{id}/messages`, updates `messages` and `compositionState` from response, sets `isComposing = false`
+- `sendMessage(content)` -- sets `isComposing = true`, calls `POST /api/sessions/{id}/messages`, updates `messages` from `response.message` and `compositionState` from `response.state` (note: the API wire field is `state`, not `compositionState` — the store maps the key on destructure), sets `isComposing = false`. If `compositionState.version` changed, calls `executionStore.clearValidation()` (W3 auto-clear).
 - `loadStateVersions()` -- fetches version history from `GET /api/sessions/{id}/state/versions`
-- `revertToVersion(version)` -- restores a prior CompositionState version (W2)
+- `revertToVersion(version)` -- calls `executionStore.clearValidation()` first (H3 fix — revert must clear stale validation), then calls backend revert endpoint, updates `compositionState` from response (W2)
 
 ### executionStore
 
@@ -285,7 +285,7 @@ Three Zustand stores manage client-side state. All stores use the slice pattern 
 
 - `validate(sessionId)` -- calls `POST /api/sessions/{id}/validate`, stores result
 - `execute(sessionId)` -- calls `POST /api/sessions/{id}/execute`, stores run, connects WebSocket
-- `connectWebSocket(runId)` -- opens WebSocket to `/ws/runs/{id}?token=<jwt>` (appends the JWT from `authStore.token` as a query parameter). On close code 4001 (auth failure), does NOT auto-reconnect -- instead calls `authStore.logout()` and redirects to LoginPage. On other close codes (network drop, server restart), auto-reconnects with exponential backoff. Updates `progress` on each `RunEvent`
+- `connectWebSocket(runId)` -- opens WebSocket to `/ws/runs/{id}?token=<jwt>` (appends the JWT from `authStore.token` as a query parameter). Close code handling (seam contract E): **1000** (normal closure — run terminal) → do NOT reconnect, poll `GET /api/runs/{id}` for final status; **1006** (abnormal closure — network drop) → auto-reconnect with exponential backoff; **1011** (internal error) → do NOT reconnect, poll REST for status; **4001** (auth failure) → do NOT reconnect, call `authStore.logout()`. Updates `progress` on each `RunEvent`
 - `cancel(runId)` -- calls `POST /api/runs/{id}/cancel`
 - `clearValidation()` -- called when a new CompositionState version arrives (W3 auto-clear)
 
@@ -424,7 +424,7 @@ The inspector panel includes a version history affordance for reverting to prior
 - Displays the current CompositionState version number (e.g., "v3").
 - Clicking opens a dropdown listing all versions for the active session, ordered newest-first, with timestamps.
 - Selecting a prior version calls `sessionStore.revertToVersion(version)`, which calls the backend revert endpoint (sub-2's `set_active_state` via `POST /api/sessions/{id}/state/revert`). The backend sets the selected version as active and injects a system message "Pipeline reverted to version N." into the session's message history. The frontend then refreshes both the message list and the composition state from the backend response.
-- Reverting clears the validation result (W3 auto-clear applies) and disables the Execute button.
+- Reverting clears the validation result and disables the Execute button. **Invariant (H3 fix):** `revertToVersion()` calls `executionStore.clearValidation()` **before** updating `compositionState`. This is not reactive wiring — it is an explicit call. The trigger for `clearValidation()` is any change to `compositionState.version`, regardless of source (composer response, revert, session switch). Without this, a user could revert to an unvalidated version while the Execute button still shows a stale "valid" badge from the pre-revert version.
 - The chat history is not affected by revert beyond the injected system message -- it remains a complete chronological record. The system message provides an audit trail of the revert action.
 
 ---

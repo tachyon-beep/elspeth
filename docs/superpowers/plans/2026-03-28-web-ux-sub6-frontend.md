@@ -250,11 +250,14 @@ export interface Session {
   updated_at: string;
 }
 
-/** A single tool call within an assistant message */
+/** A single tool call within an assistant message (LiteLLM format) */
 export interface ToolCall {
-  name: string;
-  arguments: Record<string, unknown>;
-  result_summary: string | null;
+  id: string;
+  type: string;
+  function: {
+    name: string;
+    arguments: string; // JSON string, not parsed object
+  };
 }
 
 /** A chat message in a session */
@@ -290,6 +293,7 @@ export interface CompositionState {
   version: number;
   nodes: NodeSpec[];
   edges: EdgeSpec[];
+  validation_errors?: string[]; // Stage 1 errors from composer (simple strings)
 }
 
 /** A version history entry for CompositionState */
@@ -306,18 +310,19 @@ export interface PluginSummary {
   description: string;
 }
 
-/** Validation result from POST /api/sessions/{id}/validate */
+/** Validation result from POST /api/sessions/{id}/validate (Stage 2) */
 export interface ValidationResult {
   valid: boolean;
   summary: string;
   errors: ValidationError[];
 }
 
-/** A single validation error */
+/** A single validation error (Stage 2 — per-component detail) */
 export interface ValidationError {
-  node_name: string;
+  component_id: string;
+  component_type: string;
   message: string;
-  suggested_fix: string | null;
+  suggestion: string | null;
 }
 
 /** An execution run */
@@ -495,17 +500,22 @@ async function parseResponse<T>(response: Response): Promise<T> {
       useAuthStore.getState().logout();
     }
 
+    // R4-M2: Error envelope handling priority:
+    //   1. error_type (if present in response body) — most specific
+    //   2. HTTP status code — structural fallback
+    //   3. detail text — human-readable description
+    // All backend errors use `detail` (not `message`) as the human-readable field.
     let detail = response.statusText;
     let error_type: string | undefined;
     try {
       const body = await response.json();
-      detail = body.detail ?? detail;
-      error_type = body.error_type;
+      error_type = body.error_type;          // Check error_type first
+      detail = body.detail ?? detail;        // detail, never body.message
     } catch {
-      // Response body wasn't JSON — use statusText
+      // Response body wasn't JSON — use statusText as detail fallback
     }
     const error: ApiError = {
-      status: response.status,
+      status: response.status,               // HTTP status as structural fallback
       detail,
       error_type,
     };
@@ -583,9 +593,8 @@ export async function sendMessage(
   sessionId: string,
   content: string
 ): Promise<{
-  user_message: ChatMessage;
-  assistant_message: ChatMessage;
-  composition_state: CompositionState | null;
+  message: ChatMessage;
+  state: CompositionState | null;
 }> {
   const response = await fetch(`/api/sessions/${sessionId}/messages`, {
     method: "POST",
@@ -727,7 +736,7 @@ git commit -m "feat(web/frontend): add typed API client with auth token injectio
 
 - [ ] **Step 1: Implement the WebSocket manager with auto-reconnect**
 
-The manager connects to `/ws/runs/{runId}?token=<jwt>`, appending the JWT from `authStore.token` as a query parameter. It parses `RunEvent` JSON and calls registered handlers. On close code 4001 (auth failure), the manager does NOT auto-reconnect -- instead it calls `authStore.logout()` and redirects to LoginPage. On other close codes (network drop, server restart), it auto-reconnects with exponential backoff (1s, 2s, 4s, max 30s). The caller can close the connection explicitly when the run completes or is cancelled.
+The manager connects to `/ws/runs/{runId}?token=<jwt>`, appending the JWT from `authStore.token` as a query parameter. It parses `RunEvent` JSON and calls registered handlers. Close codes are discriminated: 1000 (normal closure) and 1011 (internal error) do NOT reconnect -- the caller should poll REST for final status. 1006 (abnormal closure from network drop or server restart) triggers auto-reconnect with exponential backoff (1s, 2s, 4s, max 30s). 4001 (auth failure) does NOT reconnect -- instead it calls `authStore.logout()` and redirects to LoginPage. The caller can close the connection explicitly when the run completes or is cancelled.
 
 ```typescript
 // src/api/websocket.ts
@@ -799,15 +808,36 @@ export function connectToRun(
     socket.onclose = (closeEvent: CloseEvent) => {
       if (closed) return;
 
-      // Close code 4001 = auth failure. Do NOT reconnect — trigger logout.
-      if (closeEvent.code === 4001) {
-        closed = true;
-        handlers.onAuthFailure();
-        return;
+      // R4-H6: Discriminate close codes for reconnect behaviour
+      switch (closeEvent.code) {
+        case 1000:
+          // Normal closure — run is terminal. Do NOT reconnect, poll REST
+          // for final status.
+          closed = true;
+          handlers.onDisconnect();
+          return;
+        case 1006:
+          // Abnormal closure (network drop, server restart) — auto-reconnect
+          // with exponential backoff.
+          handlers.onDisconnect();
+          scheduleReconnect();
+          return;
+        case 1011:
+          // Internal error — do NOT reconnect, poll REST for status.
+          closed = true;
+          handlers.onDisconnect();
+          return;
+        case 4001:
+          // Auth failure — do NOT reconnect, trigger logout.
+          closed = true;
+          handlers.onAuthFailure();
+          return;
+        default:
+          // Unknown close code — treat as abnormal, attempt reconnect.
+          handlers.onDisconnect();
+          scheduleReconnect();
+          return;
       }
-
-      handlers.onDisconnect();
-      scheduleReconnect();
     };
   }
 
@@ -972,7 +1002,7 @@ git commit -m "feat(web/frontend): add auth Zustand store with localStorage pers
 
 - [ ] **Step 1: Implement the session Zustand store**
 
-The session store manages the session list, active session selection, chat messages, composition state, composing indicator, and version history. The `sendMessage` action sets `isComposing = true` before calling the API and resets it when the response arrives. When a new `CompositionState` version arrives, the execution store's validation result is cleared (see Task 7 for that wiring).
+The session store manages the session list, active session selection, chat messages, composition state, composing indicator, and version history. The `sendMessage` action sets `isComposing = true` before calling the API and resets it when the response arrives. The wire response from `POST /api/sessions/{id}/messages` returns `{message, state}` -- the `state` field maps to the store's `compositionState`. When a new version arrives, `sendMessage` calls `executionStore.clearValidation()` explicitly. `selectSession` and `revertToVersion` also call `clearValidation()` directly -- `selectSession` on session switch, `revertToVersion` BEFORE updating compositionState (to prevent a frame where stale validation is visible with the new version). The executionStore subscriber (Task 7) provides a safety net for any other version-change paths.
 
 ```typescript
 // src/stores/sessionStore.ts
@@ -985,6 +1015,7 @@ import type {
   ApiError,
 } from "@/types/api";
 import * as api from "@/api/client";
+import { useExecutionStore } from "./executionStore";
 
 interface SessionState {
   sessions: Session[];
@@ -1039,6 +1070,10 @@ export const useSessionStore = create<SessionState>((set, get) => ({
   },
 
   async selectSession(id: string) {
+    // R4-H3: Clear validation when switching sessions to prevent
+    // stale validation from a previous session being visible
+    useExecutionStore.getState().clearValidation();
+
     set({
       activeSessionId: id,
       messages: [],
@@ -1067,22 +1102,23 @@ export const useSessionStore = create<SessionState>((set, get) => ({
 
     try {
       const result = await api.sendMessage(activeSessionId, content);
-      set((state) => {
-        const previousVersion = state.compositionState?.version ?? null;
-        const newVersion = result.composition_state?.version ?? null;
+      const { message, state } = result;
+      set((s) => {
+        const previousVersion = s.compositionState?.version ?? null;
+        const newVersion = state?.version ?? null;
         const versionChanged =
           newVersion !== null && newVersion !== previousVersion;
 
+        // R4-H3: Clear validation BEFORE updating compositionState
+        // when a new state version arrives from the composer
+        if (versionChanged) {
+          useExecutionStore.getState().clearValidation();
+        }
+
         return {
-          messages: [
-            ...state.messages,
-            result.user_message,
-            result.assistant_message,
-          ],
-          compositionState: result.composition_state ?? state.compositionState,
+          messages: [...s.messages, message],
+          compositionState: state ?? s.compositionState,
           isComposing: false,
-          // If the composition version changed, downstream auto-clear
-          // is triggered by the executionStore subscriber (see Task 7)
         };
       });
     } catch (err) {
@@ -1122,12 +1158,15 @@ export const useSessionStore = create<SessionState>((set, get) => ({
     if (!activeSessionId) return;
 
     try {
+      // R4-H3: Clear validation BEFORE updating compositionState
+      // to prevent a frame where stale validation is visible with the new version
+      useExecutionStore.getState().clearValidation();
+
       const compositionState = await api.revertToVersion(
         activeSessionId,
         version
       );
       set({ compositionState });
-      // Auto-clear validation is handled by the executionStore subscriber
     } catch {
       set({ error: "Failed to revert to version. Please try again." });
     }
@@ -2016,13 +2055,27 @@ export function MessageBubble({ message }: MessageBubbleProps) {
             {toolsExpanded && (
               <ul style={{ margin: "4px 0 0", paddingLeft: 16, fontSize: 12 }}>
                 {message.tool_calls.map((tc, i) => (
-                  <li key={i} style={{ color: "#4b5563", marginBottom: 4 }}>
-                    <strong>{tc.name}</strong>
-                    {tc.result_summary && (
-                      <span style={{ color: "#6b7280" }}>
-                        {" "}
-                        — {tc.result_summary}
-                      </span>
+                  <li key={tc.id ?? i} style={{ color: "#4b5563", marginBottom: 4 }}>
+                    <strong>{tc.function.name}</strong>
+                    {tc.function.arguments && (
+                      <details style={{ marginTop: 2 }}>
+                        <summary style={{ cursor: "pointer", color: "#6b7280", fontSize: 11 }}>
+                          Arguments
+                        </summary>
+                        <pre
+                          style={{
+                            margin: "2px 0 0",
+                            padding: 4,
+                            backgroundColor: "#f9fafb",
+                            borderRadius: 3,
+                            fontSize: 11,
+                            whiteSpace: "pre-wrap",
+                            wordBreak: "break-word",
+                          }}
+                        >
+                          {tc.function.arguments}
+                        </pre>
+                      </details>
                     )}
                   </li>
                 ))}
@@ -2430,10 +2483,12 @@ import * as api from "@/api/client";
 
 const COMPOSE_TIMEOUT_MS = 90_000;
 
-/** Map backend error responses to user-facing messages */
+/** Map backend error responses to user-facing messages.
+ * R4-M2: Checks error_type first, then HTTP status, then detail text. */
 function dispatchComposerError(err: unknown): string {
   const apiErr = err as ApiError;
 
+  // error_type takes precedence (most specific signal)
   if (apiErr.status === 422 && apiErr.error_type === "convergence") {
     return "ELSPETH couldn't complete the composition after multiple attempts. Try breaking your request into smaller steps.";
   }
@@ -2500,7 +2555,7 @@ git commit -m "feat(web/frontend): add chat panel with composing indicator and f
 
 - [ ] **Step 1: Implement `ValidationResult` banner**
 
-Shown inline between the inspector header and tab content. Green banner for pass, red for fail with per-component errors.
+Shown inline between the inspector header and tab content. Green banner for pass, red for fail with per-component errors. This is the **Stage 2** validation renderer -- it displays `ValidationError[]` from the validate endpoint with per-component attribution (`component_id`, `component_type`, `message`, `suggestion`). Stage 1 errors (`string[]` from `compositionState.validation_errors`) are rendered separately in SpecView (see Step 3).
 
 ```tsx
 // src/components/execution/ValidationResult.tsx
@@ -2551,10 +2606,10 @@ export function ValidationResultBanner({ result }: ValidationResultProps) {
       >
         {result.errors.map((err, i) => (
           <li key={i} style={{ marginBottom: 4 }}>
-            <strong>{err.node_name}:</strong> {err.message}
-            {err.suggested_fix && (
+            <strong>[{err.component_type}] {err.component_id}:</strong> {err.message}
+            {err.suggestion && (
               <div style={{ color: "#6b7280", fontSize: 12, marginTop: 2 }}>
-                Suggestion: {err.suggested_fix}
+                Suggestion: {err.suggestion}
               </div>
             )}
           </li>
@@ -2935,6 +2990,30 @@ export function SpecView() {
       onClick={handleBackgroundClick}
       style={{ padding: 12, display: "flex", flexDirection: "column", gap: 8 }}
     >
+      {/* Stage 1 validation errors: simple string[] from composer */}
+      {compositionState.validation_errors &&
+        compositionState.validation_errors.length > 0 && (
+          <div
+            role="alert"
+            style={{
+              padding: "8px 12px",
+              backgroundColor: "#fef3c7",
+              borderRadius: 6,
+              fontSize: 13,
+              color: "#92400e",
+            }}
+          >
+            <div style={{ fontWeight: 600, marginBottom: 4 }}>
+              Composition warnings
+            </div>
+            <ul style={{ margin: 0, paddingLeft: 16 }}>
+              {compositionState.validation_errors.map((msg, i) => (
+                <li key={i} style={{ marginBottom: 2 }}>{msg}</li>
+              ))}
+            </ul>
+          </div>
+        )}
+
       {compositionState.nodes.map((node) => {
         const badge = TYPE_BADGES[node.type];
         const relBadge = getRelBadge(
@@ -3972,11 +4051,41 @@ git commit -m "feat(web): wire three-panel layout with static file serving"
 - [x] **Accessibility:** Component cards have `tabindex="0"` with Enter/Space handlers. Tab strip uses arrow key navigation. Progress bar uses `role="progressbar"` in indeterminate mode (no `aria-valuemax`). Composing indicator has `aria-live`. Type badges use text+colour. Dimming is background-only. Focus-visible outline is defined globally.
 - [x] **RunEvent semantics:** `"error"` is non-terminal (per-row exception, pipeline continues). `"completed"` and `"cancelled"` are terminal. WebSocket only closes on terminal events. No `"failed"` event type.
 - [x] **Auth config:** LoginPage fetches `GET /api/auth/config` to determine provider; OIDC redirect URL constructed from `oidc_issuer` + `oidc_client_id`.
-- [x] **WebSocket auth:** JWT appended as `?token=` query parameter. Close code 4001 triggers logout without reconnect.
+- [x] **WebSocket auth:** JWT appended as `?token=` query parameter. Close codes discriminated: 1000 (no reconnect, poll REST), 1006 (auto-reconnect with backoff), 1011 (no reconnect, poll REST), 4001 (no reconnect, logout).
 - [x] **YAML tab:** Fetches from `GET /api/sessions/{id}/state/yaml` on composition state version change; no client-side generation.
 - [x] **Global 401 interceptor:** API client calls `authStore.logout()` on any 401 response.
 - [x] **System messages:** MessageBubble renders `role="system"` as centre-aligned banner with muted colour, italic text, no sender label.
-- [x] **Auto-clear:** Execution store subscribes to session store composition version changes and clears validation result.
-- [x] **Version history:** Inspector header includes version dropdown that fetches and displays prior versions; revert clears validation via auto-clear.
+- [x] **Auto-clear:** Execution store subscribes to session store composition version changes and clears validation result. Additionally, `sendMessage`, `revertToVersion`, and `selectSession` call `clearValidation()` explicitly for immediate effect.
+- [x] **Version history:** Inspector header includes version dropdown that fetches and displays prior versions; revert calls `clearValidation()` BEFORE updating compositionState to prevent stale-validation frame.
 - [x] **No placeholder code:** All tasks contain complete implementation code.
 - [x] **Parent plan tasks mapped:** Task 1 = 6.1, Tasks 2-4 = 6.2, Tasks 5-7 = 6.3, Task 8 = 6.4, Task 9 = 6.5, Task 10 = 6.6, Task 11 = 6.7, Tasks 12-14 = 6.8+6.9, Task 15 = 6.10.
+
+---
+
+## Round 4 Review Amendments
+
+> **Status: Amendments below have been integrated into the plan body.**
+
+Fixes from expert panel review (Round 4). Each amendment references its review finding ID and affected seam contract.
+
+1. **R4-H2 — API response key mapping** (Task 6: Session Store). The `POST /api/sessions/{id}/messages` response returns `{message, state}` — the wire field is `state`, not `compositionState`. The `sendMessage()` action must destructure `response.state` and assign it to the store field `compositionState`: `const { message, state } = result; set({ compositionState: state, ... })`. Verify all other consumers of this endpoint use `state` as the response key.
+
+2. **R4-H3 — Validation gate invariant** (seam contract F; Tasks 6 and 7). `executionStore.clearValidation()` must be called whenever `compositionState.version` changes, regardless of source:
+   - `sendMessage()` (Task 6) calls `clearValidation()` when the response includes a new state version
+   - `revertToVersion()` (Task 6) calls `clearValidation()` BEFORE updating `compositionState` (not after, to prevent a frame where stale validation is visible with the new version)
+   - `selectSession()` (Task 6) calls `clearValidation()` when switching sessions
+   - This prevents the Execute button from remaining enabled with a stale validation result after revert.
+
+3. **R4-H6 — WebSocket close code discrimination** (seam contract E; Task 4: WebSocket Manager). The `useWebSocket` hook / `connectWebSocket` action must check `event.code` on WebSocket close:
+   - `1000` (normal closure) — run is terminal, do NOT reconnect, poll REST for final status
+   - `1006` (abnormal closure) — auto-reconnect with exponential backoff
+   - `1011` (internal error) — do NOT reconnect, poll REST for status
+   - `4001` (auth failure) — do NOT reconnect, call `authStore.logout()`
+
+4. **R4-H7 — Stage 1 vs Stage 2 error rendering** (seam contract F; Task 11: Inspector Panel Shell and Spec View). Two separate rendering paths, NOT a shared renderer:
+   - Stage 1 errors from `compositionState.validation_errors`: `string[]` — rendered as a simple list in the Spec tab summary area
+   - Stage 2 errors from `executionStore.validationResult.errors`: `ValidationError[]` (with `component_id`, `component_type`, `message`, `suggestion`) — rendered in the validation banner with per-component attribution and highlighting
+
+5. **R4-M2 — Error envelope handling** (seam contract G; Task 3: API Client). The error handler in `api/client.ts` must check fields in this order: `error_type` first (if present in response body), then fall back to HTTP status code, then fall back to `detail` text. All backend errors use `detail` as the human-readable field (not `message`).
+
+6. **R4-H5 — tool_calls rendering schema** (seam contracts cross-cutting; Task 10: Chat Components). The `ChatMessage.tool_calls` field is a JSON array in LiteLLM format: `[{id, type, function: {name, arguments}}]`. The `MessageBubble` component must extract `function.name` for display and optionally show `function.arguments` (which is a JSON string, not a parsed object) in a collapsible section.

@@ -63,6 +63,28 @@ with_metadata) are instance methods that return a new CompositionState with the
 relevant field changed and the version incremented by one. They do not modify the
 current instance.
 
+### Reconstruction from Dict (Seam Contract: Sub-2 ↔ Sub-4)
+
+CompositionState and all nested `*Spec` types define a `from_dict(d: dict)` class
+method that reconstructs a frozen dataclass instance from a plain Python dict (as
+produced by `to_dict()` or deserialised from JSON). This is the inverse of
+`to_dict()` and is **load-bearing for every seam that reads state from the
+database**: the composer route handler, the execution service, and the validation
+endpoint.
+
+**Factory methods:**
+
+- `SourceSpec.from_dict(d: dict) -> SourceSpec` — constructs from `{"plugin": ..., "on_success": ..., "options": ..., "on_validation_failure": ...}`.
+- `NodeSpec.from_dict(d: dict) -> NodeSpec` — constructs from the full NodeSpec field dict. Optional fields (`condition`, `routes`, `fork_to`, `branches`, `policy`, `merge`) default to `None` when absent from the dict.
+- `EdgeSpec.from_dict(d: dict) -> EdgeSpec` — constructs from `{"id": ..., "from_node": ..., "to_node": ..., "edge_type": ..., "label": ...}`.
+- `OutputSpec.from_dict(d: dict) -> OutputSpec` — constructs from `{"name": ..., "plugin": ..., "options": ..., "on_write_failure": ...}`.
+- `PipelineMetadata.from_dict(d: dict) -> PipelineMetadata` — constructs from `{"name": ..., "description": ..., "landscape_url": ...}`. Missing fields use the dataclass defaults.
+- `CompositionState.from_dict(d: dict) -> CompositionState` — reconstructs the full hierarchy: calls `SourceSpec.from_dict()` on `d["source"]` (if not None), `NodeSpec.from_dict()` on each entry in `d["nodes"]`, etc. Sets `version` from `d["version"]`.
+
+**Round-trip invariant:** For any `CompositionState` instance `s`, `CompositionState.from_dict(s.to_dict())` must produce a value-equal instance (same fields, same deep-frozen containers). This invariant is enforced by a dedicated test in `test_state.py`.
+
+**Relationship to Sub-2:** Sub-2's `from_record()` deserialises DB row JSON columns into plain dicts, then calls `CompositionState.from_dict()` to reconstruct the domain model. Sub-2's `to_record()` calls `CompositionState.to_dict()` to serialise to JSON-ready dicts. The `_version` envelope (Sub-2) wraps the dict produced by `to_dict()` and is stripped before calling `from_dict()`.
+
 ### Validation
 
 CompositionState exposes a `validate()` method that returns a tuple of
@@ -150,9 +172,15 @@ Frozen dataclass for pipeline-level metadata.
 |-------|------|-------------|
 | name | str | Pipeline name. Defaults to "Untitled Pipeline". |
 | description | str | Pipeline description. Defaults to empty string. |
-| landscape_url | str or None | Landscape database URL override. None means use the WebSettings default. |
 
 PipelineMetadata has no container fields. frozen=True is sufficient.
+
+**Removed field (security fix S1):** `landscape_url` was originally included as a
+metadata override. It has been removed because the LLM's `set_metadata` tool could
+be tricked via prompt injection into setting `landscape_url` to an
+attacker-controlled database, diverting the audit trail. The Landscape database URL
+must come exclusively from `WebSettings.get_landscape_url()` — it is infrastructure
+configuration, not pipeline metadata.
 
 ---
 
@@ -216,6 +244,16 @@ as a tool result so it can self-correct.
 SourceSpec (plugin name, on_success connection, options, validation failure
 mode). Validates that the plugin exists in the catalog. Affected nodes:
 ["source"].
+
+**Source path allowlist (security fix S2):** If the source options contain a
+`path` or `file` key (used by CSV, JSON, and other file-based source plugins),
+the value must resolve to a path under `{WebSettings.data_dir}/uploads/`. The
+tool validates this constraint and returns `success=False` with an error message
+if the path is outside the allowed directory. This prevents the LLM from being
+tricked via prompt injection into configuring a source that reads arbitrary
+server-side files (e.g., `/etc/passwd`, environment files, other users' data).
+The allowlist is also enforced at the execution boundary in Sub-Spec 5's
+`validate_pipeline()` (defense in depth).
 
 **upsert_node(id, node_spec)** -- Adds a new node or updates an existing node.
 If a node with the given ID already exists, it is replaced. If it does not
@@ -313,11 +351,24 @@ identifies the offending element (e.g. "Edge 'e1' references unknown node
 
 The ComposerService protocol defines a single primary method:
 
-**compose(message, session, state) -> ComposerResult** -- Accepts the user's
-chat message, the current session (for chat history), and the current
+**compose(message, messages, state) -> ComposerResult** -- Accepts the user's
+chat message, the pre-fetched conversation history, and the current
 CompositionState. Runs the LLM tool-use loop. Returns a ComposerResult
 containing the assistant's text response and the (possibly updated)
 CompositionState.
+
+**Parameter types (seam contract B):**
+
+| Parameter | Type | Source |
+|-----------|------|--------|
+| `message` | `str` | The user's current chat message |
+| `messages` | `list[ChatMessageRecord]` | Pre-fetched via `session_service.get_messages(session_id)` by the route handler |
+| `state` | `CompositionState` | Reconstructed from DB via `CompositionState.from_dict()` by the route handler |
+
+The route handler mediates between SessionService and ComposerService.
+ComposerService does NOT depend on SessionService — the route handler pre-fetches
+the chat history and passes it in. `_build_messages()` uses the `messages`
+parameter to construct the LLM message list.
 
 ComposerResult is a frozen dataclass with two fields: message (str) and state
 (CompositionState). The state may be the same instance as the input state if
@@ -330,7 +381,7 @@ ComposerService depends on:
 - **CatalogService** (protocol) -- for discovery tool delegation.
 - **LLM client** -- LiteLLM completion interface, configured with the model
   name from WebSettings.composer_model.
-- **WebSettings** -- for max_turns and timeout configuration.
+- **WebSettings** -- for max_turns, timeout, and rate limit configuration.
 
 These are injected at construction time, not resolved per-call.
 
@@ -500,9 +551,10 @@ NodeSpec.id), `branches`, `policy`, and `merge`.
 key, keyed by OutputSpec.name. Each entry includes `plugin`, `on_write_failure`,
 and `options`.
 
-**landscape:** Emits `url` from PipelineMetadata.landscape_url if set. If not
-set, the landscape key is omitted (the execution service will use the
-WebSettings default).
+**landscape:** The landscape key is always omitted from generated YAML. The
+Landscape database URL is resolved at execution time from
+`WebSettings.get_landscape_url()`, not from pipeline configuration. This
+prevents the LLM from controlling audit infrastructure (security fix S1).
 
 ### Determinism
 
@@ -690,3 +742,13 @@ the conversation history on subsequent turns.
 16. Tests that mock CatalogService must use real PluginSummary and
     PluginSchemaInfo instances, not plain dicts. Mock return types must match
     the CatalogService protocol.
+
+17. Every `*Spec` type and `CompositionState` defines a `from_dict()` class method
+    that reconstructs a frozen dataclass instance from a plain Python dict. The
+    round-trip invariant `CompositionState.from_dict(s.to_dict()) == s` holds for
+    any valid CompositionState instance, including states with nested
+    MappingProxyType fields and None optional fields.
+
+18. `from_dict()` is the **only** way to construct domain objects from deserialised
+    JSON. Direct dataclass construction from raw dicts is forbidden at seam
+    boundaries (Sub-2's `from_record()`, the validation route handler, etc.).

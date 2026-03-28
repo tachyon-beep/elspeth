@@ -36,9 +36,12 @@
 
 ## ExecutionService Protocol
 
-The ExecutionService protocol defines four operations. All are called from FastAPI route handlers in the async context.
+The ExecutionService protocol defines four operations. `execute`, `get_status`,
+and `cancel` are `async def` — they call async SessionService methods directly
+(they run in the event loop thread). `validate` is synchronous (called via
+`run_in_executor` from the route handler).
 
-**validate(state: CompositionState) -> ValidationResult** -- Synchronous dry-run validation. Generates YAML from the composition state, runs it through the real engine validation pipeline (settings loading, plugin instantiation, graph construction, graph validation), and returns a structured result with per-component error attribution. This is Stage 2 validation; Stage 1 happens inside the ComposerService tool-use loop.
+**validate(state: CompositionState, settings: WebSettings) -> ValidationResult** -- Synchronous dry-run validation. Generates YAML from the composition state, runs it through the real engine validation pipeline (settings loading, plugin instantiation, graph construction, graph validation), and returns a structured result with per-component error attribution. This is Stage 2 validation; Stage 1 happens inside the ComposerService tool-use loop.
 
 **execute(session_id: UUID, state_id: UUID) -> UUID** -- Starts a background pipeline run. Returns the run ID immediately. Enforces the one-active-run-per-session constraint (B6) before submission. Creates the Run record in pending status, stores a shutdown Event for cancellation, submits the pipeline function to the thread pool, and attaches a done callback as a safety net.
 
@@ -56,17 +59,19 @@ Dry-run validation calls the real engine validation code. There is no parallel v
 
 ### Validation Pipeline
 
-The validation function `validate_pipeline(state: CompositionState) -> ValidationResult` executes five steps in sequence:
+The validation function `validate_pipeline(state: CompositionState, settings: WebSettings) -> ValidationResult` executes six steps in sequence:
 
-1. **YAML generation.** Call `yaml_generator.generate_yaml(state)` to produce ELSPETH pipeline YAML from the CompositionState.
+1. **Source path allowlist check (security fix S2).** If the source options contain a `path` or `file` key, verify the resolved path is under `{settings.data_dir}/uploads/`. Use `Path.resolve()` to canonicalise the path (defeating `../` traversal), then check `resolved.is_relative_to(settings.data_dir / "uploads")`. If the check fails, return a `ValidationResult` with `is_valid=False` and an error attributed to the source component: `"Source file path must be within the uploads directory. Path '{path}' is not allowed."` This is defense in depth — the same check runs in Sub-Spec 4's `set_source` tool — but the execution boundary is the authoritative enforcement point because it cannot be bypassed by prompt injection.
 
-2. **Settings loading.** Write the generated YAML to a temporary file and call `load_settings(tmp_path)` to produce an `ElspethSettings` instance. The temporary file is cleaned up in a finally block.
+2. **YAML generation.** Call `yaml_generator.generate_yaml(state)` to produce ELSPETH pipeline YAML from the CompositionState.
 
-3. **Plugin instantiation.** Call `instantiate_plugins_from_config(settings)` to create live plugin instances. This catches unknown plugin names, invalid config options, and batch-awareness violations on aggregations.
+3. **Settings loading.** Write the generated YAML to a temporary file and call `load_settings(tmp_path)` to produce an `ElspethSettings` instance. The temporary file is cleaned up in a finally block.
 
-4. **Graph construction.** Call `ExecutionGraph.from_plugin_instances()` with the source, transforms, sinks, aggregations, gates, and coalesce settings from the PluginBundle. This catches route destination violations, missing on_success declarations, and unknown sink references.
+4. **Plugin instantiation.** Call `instantiate_plugins_from_config(settings)` to create live plugin instances. This catches unknown plugin names, invalid config options, and batch-awareness violations on aggregations.
 
-5. **Graph validation.** Call `graph.validate()` to verify structural integrity (acyclicity, single source, reachable nodes, unique edge labels, route label completeness). Then call `graph.validate_edge_compatibility()` to verify schema compatibility across edges.
+5. **Graph construction.** Call `ExecutionGraph.from_plugin_instances()` with the source, transforms, sinks, aggregations, gates, and coalesce settings from the PluginBundle. This catches route destination violations, missing on_success declarations, and unknown sink references.
+
+6. **Graph validation.** Call `graph.validate()` to verify structural integrity (acyclicity, single source, reachable nodes, unique edge labels, route label completeness). Then call `graph.validate_edge_compatibility()` to verify schema compatibility across edges.
 
 ### Exception Handling
 
@@ -146,9 +151,22 @@ When `execute()` is called:
 
 This function runs in the background thread. It is the only function in the execution service that runs outside the asyncio event loop.
 
+**Async/sync bridging (B8 fix):** All SessionService methods are `async def` (Sub-Spec 2 uses an async-compatible SQLAlchemy engine). `_run_pipeline()` runs in a synchronous `ThreadPoolExecutor` worker thread and cannot `await` directly. Every call from `_run_pipeline()` to an async SessionService method **must** use `asyncio.run_coroutine_threadsafe(coro, self._loop).result()` to bridge the sync/async boundary. The `self._loop` reference is the same event loop captured by the ProgressBroadcaster (obtained via `asyncio.get_running_loop()` inside the FastAPI lifespan). It is passed to `ExecutionServiceImpl` at construction time alongside the ProgressBroadcaster.
+
+A private helper method encapsulates this pattern:
+
+```python
+def _call_async(self, coro: Coroutine[Any, Any, T]) -> T:
+    """Bridge an async call from the background thread to the main event loop."""
+    future = asyncio.run_coroutine_threadsafe(coro, self._loop)
+    return future.result()  # Blocks the background thread until complete
+```
+
+All `session_service` calls in `_run_pipeline()` use `self._call_async(session_service.method(...))`.
+
 **Lifecycle:**
 
-1. Call `session_service.update_run_status(run_id, "running")` to transition the Run record.
+1. Call `self._call_async(session_service.update_run_status(run_id, "running"))` to transition the Run record.
 2. Construct LandscapeDB from `WebSettings.get_landscape_url()` (B3 fix).
 3. Construct FilesystemPayloadStore from `WebSettings.get_payload_store_path()` (B3 fix).
 4. Write the pipeline YAML to a temporary file and load settings via `load_settings(tmp_path)`.
@@ -156,9 +174,11 @@ This function runs in the background thread. It is the only function in the exec
 6. Build the ExecutionGraph via `ExecutionGraph.from_plugin_instances()` with the PluginBundle fields.
 7. Construct the Orchestrator with the LandscapeDB instance.
 8. Call `orchestrator.run()` with the graph, payload_store, shutdown_event, and a progress callback that broadcasts RunEvents through the ProgressBroadcaster.
-9. On successful completion, call `session_service.update_run_status(run_id, "completed", landscape_run_id=result.run_id)` to record the terminal state and landscape_run_id from the RunResult.
+9. On successful completion, call `self._call_async(session_service.update_run_status(run_id, "completed", landscape_run_id=result.run_id))` to record the terminal state and landscape_run_id from the RunResult.
 
-**Exception and cleanup contract:** The entire body of `_run_pipeline()` is wrapped in `try/except BaseException/finally` (B7 fix). The except clause catches `BaseException`, not `Exception`, to handle `KeyboardInterrupt`, `SystemExit`, and OOM-triggered exceptions. On any exception, `session_service.update_run_status(run_id, "failed", error=str(exc))` is called to record the failure before the exception is re-raised. The finally clause removes the shutdown Event from `self._shutdown_events`. Re-raising ensures the `future.add_done_callback()` safety net can also observe the failure.
+**Exception and cleanup contract:** The entire body of `_run_pipeline()` is wrapped in `try/except BaseException/finally` (B7 fix). The except clause catches `BaseException`, not `Exception`, to handle `KeyboardInterrupt`, `SystemExit`, and OOM-triggered exceptions. On any exception, `self._call_async(session_service.update_run_status(run_id, "failed", error=str(exc)))` is called to record the failure before the exception is re-raised. The finally clause removes the shutdown Event from `self._shutdown_events`. Re-raising ensures the `future.add_done_callback()` safety net can also observe the failure.
+
+**Invariant:** `_run_pipeline()` never calls `await` directly — it always uses `self._call_async()`. Direct `await` in a synchronous thread context would raise `SyntaxError` (the function is not `async def`) or, if manually constructed, would fail because there is no running event loop on the worker thread.
 
 ### _on_pipeline_done() -- Safety Net Callback
 
@@ -168,7 +188,7 @@ Registered via `future.add_done_callback()` on every submitted pipeline run. Its
 
 ## Thread Safety
 
-This section documents the three blocking review fixes (B1, B2, B7) and the infrastructure fix (B3) that address the async/thread boundary in the execution service.
+This section documents the four blocking review fixes (B1, B2, B7, B8) and the infrastructure fix (B3) that address the async/thread boundary in the execution service.
 
 ### B1 Fix: ProgressBroadcaster Uses loop.call_soon_threadsafe()
 
@@ -205,6 +225,16 @@ This section documents the three blocking review fixes (B1, B2, B7) and the infr
 **Layer 2 -- future.add_done_callback().** After submitting `_run_pipeline()` to the thread pool, `execute()` attaches `_on_pipeline_done` via `future.add_done_callback()`. This callback fires when the Future completes, regardless of how it completed. It calls `future.exception()` and logs any non-None result. This is purely diagnostic -- the try/finally in Layer 1 should have already handled status updates -- but it provides a safety net against scenarios where the try/finally itself fails (e.g., the `_update_run_status()` call in the except clause raises).
 
 **Ordering guarantee:** `add_done_callback()` runs in the thread that completed the Future (the worker thread), or in the thread that called `add_done_callback()` if the Future was already completed. Since `execute()` calls `add_done_callback()` immediately after `submit()`, and the pipeline takes non-trivial time to start, the callback will consistently run in the worker thread.
+
+### B8 Fix: Async SessionService Calls From Background Thread
+
+**Problem:** `SessionServiceImpl` uses an async-compatible SQLAlchemy engine (aiosqlite for SQLite dev, asyncpg for Postgres prod). All `SessionServiceProtocol` methods are `async def`. `_run_pipeline()` runs in a synchronous `ThreadPoolExecutor` worker thread with no running event loop. Calling an async method directly from this thread would either: (a) create a coroutine that is never awaited (producing a `RuntimeWarning` and silently doing nothing), or (b) raise `RuntimeError: no running event loop` if the code attempts `asyncio.get_event_loop().run_until_complete()`.
+
+**Consequence if unfixed:** If `session_service.update_run_status()` silently no-ops, the Run record stays in `"running"` permanently after any pipeline failure. The B6 constraint blocks all future executions on that session. The WebSocket never gets a terminal event. The ProgressBroadcaster leaks a subscriber queue. Recovery requires direct database manipulation.
+
+**Solution:** `ExecutionServiceImpl` captures the main event loop reference (`asyncio.AbstractEventLoop`) at construction time — the same loop used by the ProgressBroadcaster (obtained via `asyncio.get_running_loop()` inside the FastAPI lifespan). A private `_call_async(coro)` helper bridges all async calls using `asyncio.run_coroutine_threadsafe(coro, self._loop).result()`. This blocks the background thread until the coroutine completes on the main event loop. All SessionService calls in `_run_pipeline()` use this helper.
+
+**Invariant:** `_run_pipeline()` never calls an async method without `_call_async()`. Direct coroutine creation (calling an `async def` without `await` or `run_coroutine_threadsafe`) is a silent correctness failure — Python emits only a `RuntimeWarning`, not an exception.
 
 ---
 
@@ -439,6 +469,8 @@ The `validate_pipeline()` function catches only typed exceptions (pydantic.Valid
 16. **Validation does not block the event loop.** The validate route handler calls `validate_pipeline()` via `await asyncio.get_running_loop().run_in_executor(None, validate_pipeline, state)`. Direct synchronous invocation from the route handler is forbidden.
 
 17. **ExecutionService delegates Run CRUD to SessionService.** All Run record creation and status updates go through `session_service.create_run()`, `session_service.update_run_status()`, and `session_service.get_active_run()`. The ExecutionService has no direct database access for Run records.
+
+17a. **Async SessionService calls from background thread use `_call_async()` (B8).** Every call from `_run_pipeline()` to an async SessionService method uses `asyncio.run_coroutine_threadsafe(coro, self._loop).result()` via the `_call_async()` helper. Direct coroutine creation without `_call_async()` is forbidden — it silently no-ops. A unit test verifies that `_run_pipeline()` successfully transitions Run status from `"pending"` through `"running"` to `"completed"` (or `"failed"`) when using the real async SessionService with an aiosqlite backend.
 
 18. **Progress bar uses indeterminate mode.** `estimated_total` is not available from the engine in v1. Progress events report only `rows_processed` and `rows_failed` counters without a percentage or total.
 

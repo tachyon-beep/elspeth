@@ -279,6 +279,10 @@ class TestWebSettingsDefaults:
         settings = WebSettings()
         assert settings.composer_timeout_seconds == 120.0
 
+    def test_composer_rate_limit_per_minute_default(self) -> None:
+        settings = WebSettings()
+        assert settings.composer_rate_limit_per_minute == 10
+
     def test_secret_key_default(self) -> None:
         settings = WebSettings()
         assert settings.secret_key == "change-me-in-production"
@@ -451,7 +455,8 @@ class WebSettings(BaseModel):
     composer_model: str = "gpt-4o"
     composer_max_turns: int = 20
     composer_timeout_seconds: float = 120.0
-    secret_key: str = "change-me-in-production"
+    composer_rate_limit_per_minute: int = 10
+    secret_key: str = "change-me-in-production"  # S3: startup guard in Sub-2 enforces non-default in production
     max_upload_bytes: int = 100 * 1024 * 1024  # 100 MB
 
     # Execution infrastructure (B3 fix)
@@ -678,6 +683,11 @@ def create_app(settings: WebSettings | None = None) -> FastAPI:
 
 Each phase adds its service dependency here.  Phase 1 provides only
 get_settings().  Service stubs are added as phases 2-5 land.
+
+Service construction order follows specs/2026-03-28-web-ux-seam-contracts.md.
+ProgressBroadcaster and event-loop reference are created in the lifespan()
+async context manager (not in the synchronous create_app()), per the seam
+contract for async service wiring.
 """
 
 from __future__ import annotations
@@ -864,7 +874,7 @@ Before marking this sub-plan as complete, verify every item:
 - [ ] **Singleton extraction:** `get_shared_plugin_manager()` exists in `manager.py` and returns the same instance on repeated calls
 - [ ] **CLI decoupled:** `cli_helpers.py` no longer imports anything from `cli.py`
 - [ ] **Dead code removed:** `_get_plugin_manager()` and `_plugin_manager_cache` do not exist in `cli.py`
-- [ ] **WebSettings complete:** All 18 fields present (host, port, auth_provider, cors_origins, data_dir, composer_model, composer_max_turns, composer_timeout_seconds, secret_key, max_upload_bytes, landscape_url, payload_store_path, oidc_issuer, oidc_audience, oidc_client_id, entra_tenant_id, session_db_url)
+- [ ] **WebSettings complete:** All 19 fields present (host, port, auth_provider, cors_origins, data_dir, composer_model, composer_max_turns, composer_timeout_seconds, composer_rate_limit_per_minute, secret_key, max_upload_bytes, landscape_url, payload_store_path, oidc_issuer, oidc_audience, oidc_client_id, entra_tenant_id, session_db_url)
 - [ ] **No `validate_auth_provider`:** `auth_provider` uses `Literal["local", "oidc", "entra"]` -- Pydantic handles validation, no manual `@field_validator`
 - [ ] **Derived accessors work:** `get_landscape_url()`, `get_payload_store_path()`, and `get_session_db_url()` return data-dir-relative defaults when fields are `None`, and return explicit values when set
 - [ ] **App factory correct:** `create_app()` returns a `FastAPI` with `title="ELSPETH Web"`, `version="0.1.0"`, CORS middleware, lifespan context manager, and `/api/health` endpoint
@@ -878,3 +888,15 @@ Before marking this sub-plan as complete, verify every item:
 - [ ] **Layer compliance:** `enforce_tier_model.py` passes with no new violations
 - [ ] **All tests pass:** `pytest tests/ -x` has no failures
 - [ ] **No `@pytest.mark.asyncio` needed:** This sub-plan has no async test functions (all tests are synchronous)
+
+---
+
+## Round 4 Review Amendments
+
+> **Status: Amendments below have been integrated into the plan body.**
+
+Changes from the expert panel review (Round 4) that affect this sub-plan:
+
+- **H8p — `composer_rate_limit_per_minute` field:** Task 1.1 must add `composer_rate_limit_per_minute: int = 10` to `WebSettings` in `config.py`. A corresponding default test (`test_composer_rate_limit_per_minute_default`) must be added to `tests/unit/web/test_config.py`. Update the self-review checklist field count from 18 to 19.
+- **S3/C4 — `secret_key` production guard:** The `secret_key` field retains its default `"change-me-in-production"` in `WebSettings` (created in this sub-plan). The field must carry an `# S3: startup guard in Sub-2 enforces non-default in production` comment. The actual enforcement (hard `SystemExit` crash when the default value is detected in non-test environments) is implemented in Sub-2's `app.py` startup path, not here.
+- **Seam contracts reference:** Task 1.2's `dependencies.py` stub must note in its module docstring that service construction order follows `specs/2026-03-28-web-ux-seam-contracts.md`. Specifically: `ProgressBroadcaster` and the event-loop reference are created in the `lifespan()` async context manager (not in the synchronous `create_app()`), per the seam contract for async service wiring.

@@ -2344,7 +2344,12 @@ class RunRecord:
 
 
 class RunAlreadyActiveError(Exception):
-    """Raised when attempting to create a run while one is already active."""
+    """Raised when attempting to create a run while one is already active.
+
+    Seam contract D: HTTP handlers catching this error MUST return 409 with
+    {"detail": str(exc), "error_type": "run_already_active"} -- not a bare
+    HTTPException. See seam-contracts.md for the canonical error shape.
+    """
 
     def __init__(self, session_id: str) -> None:
         self.session_id = session_id
@@ -3169,16 +3174,24 @@ class SessionServiceImpl:
                     return list(val)
                 return val
 
+            # Seam contract A: wrap JSON columns with _version envelope
+            # for schema evolution. Version 1 is the initial format.
+            def _enveloped(val: Any) -> Any:
+                raw = _to_json(val)
+                if raw is None:
+                    return None
+                return {"_version": 1, "data": raw}
+
             conn.execute(
                 insert(composition_states_table).values(
                     id=str(state_id),
                     session_id=sid,
                     version=version,
-                    source=_to_json(state.source),
-                    nodes=_to_json(state.nodes),
-                    edges=_to_json(state.edges),
-                    outputs=_to_json(state.outputs),
-                    metadata_=_to_json(state.metadata_),
+                    source=_enveloped(state.source),
+                    nodes=_enveloped(state.nodes),
+                    edges=_enveloped(state.edges),
+                    outputs=_enveloped(state.outputs),
+                    metadata_=_enveloped(state.metadata_),
                     is_valid=state.is_valid,
                     validation_errors=_to_json(state.validation_errors),
                     created_at=now,
@@ -3233,17 +3246,43 @@ class SessionServiceImpl:
 
         return [self._row_to_state_record(row) for row in rows]
 
+    @staticmethod
+    def _unwrap_envelope(val: Any) -> Any:
+        """Unwrap _version envelope from a JSON column value.
+
+        Seam contract A: JSON columns are stored with {"_version": 1, "data": ...}.
+        Raises ValueError on unknown versions. Returns None for NULL columns.
+        """
+        if val is None:
+            return None
+        if isinstance(val, dict) and "_version" in val:
+            if val["_version"] != 1:
+                raise ValueError(
+                    f"Unknown composition state envelope version: {val['_version']}"
+                )
+            return val["data"]
+        # Legacy data without envelope -- pass through as-is
+        return val
+
     def _row_to_state_record(self, row: Any) -> CompositionStateRecord:
-        """Convert a SQLAlchemy row to a CompositionStateRecord."""
+        """Convert a SQLAlchemy row to a CompositionStateRecord.
+
+        Seam contract A: metadata_ maps DB column metadata_ back to the
+        dataclass field. JSON columns are unwrapped from their _version envelope.
+        When Sub-4 provides CompositionState.from_dict(), this method becomes
+        the swap point for domain object reconstruction.
+        """
+        # TODO(sub-4): Replace raw dict fields with CompositionState.from_dict()
+        # call once Sub-4 defines it. The swap should be a single-line change.
         return CompositionStateRecord(
             id=UUID(row.id),
             session_id=UUID(row.session_id),
             version=row.version,
-            source=row.source,
-            nodes=row.nodes,
-            edges=row.edges,
-            outputs=row.outputs,
-            metadata_=row.metadata_,
+            source=self._unwrap_envelope(row.source),
+            nodes=self._unwrap_envelope(row.nodes),
+            edges=self._unwrap_envelope(row.edges),
+            outputs=self._unwrap_envelope(row.outputs),
+            metadata_=self._unwrap_envelope(row.metadata_),
             is_valid=row.is_valid,
             validation_errors=row.validation_errors,
             created_at=row.created_at,
@@ -4192,10 +4231,11 @@ from pathlib import Path
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Request, UploadFile, File
+from fastapi.responses import JSONResponse
 
 from elspeth.web.auth.middleware import get_current_user
 from elspeth.web.auth.models import UserIdentity
-from elspeth.web.sessions.protocol import SessionRecord
+from elspeth.web.sessions.protocol import RunAlreadyActiveError, SessionRecord
 from elspeth.web.sessions.schemas import (
     ChatMessageResponse,
     CompositionStateResponse,
@@ -4442,6 +4482,31 @@ def create_session_router() -> APIRouter:
             created_at=new_state.created_at,
         )
 
+    @router.get("/{session_id}/state/yaml")
+    async def get_state_yaml(
+        session_id: str,
+        request: Request,
+        user: UserIdentity = Depends(get_current_user),
+    ) -> dict[str, str]:
+        """Get YAML representation of the current composition state (M1).
+
+        Stub endpoint -- returns 501 until Sub-4 implements generate_yaml().
+        When Sub-4 lands, replace the 501 with:
+            state = await service.get_current_state(session.id)
+            yaml_str = generate_yaml(CompositionState.from_dict(state))
+            return {"yaml": yaml_str}
+        """
+        session = await _verify_session_ownership(session_id, user, request)
+        service = request.app.state.session_service
+        state = await service.get_current_state(session.id)
+        if state is None:
+            raise HTTPException(status_code=404, detail="No composition state exists")
+        # TODO(sub-4): Replace stub with generate_yaml() call
+        raise HTTPException(
+            status_code=501,
+            detail="YAML generation not yet implemented (see Sub-4)",
+        )
+
     @router.post("/{session_id}/upload", response_model=UploadResponse)
     async def upload_file(
         session_id: str,
@@ -4534,11 +4599,13 @@ Add the following to `create_app()` in `src/elspeth/web/app.py`:
 # Add these imports at the top of app.py:
 import sys
 
+from fastapi.responses import JSONResponse
 from sqlalchemy import create_engine
 
 from elspeth.web.auth.local import LocalAuthProvider
 from elspeth.web.auth.routes import create_auth_router
 from elspeth.web.sessions.models import metadata as session_metadata
+from elspeth.web.sessions.protocol import RunAlreadyActiveError
 from elspeth.web.sessions.routes import create_session_router
 from elspeth.web.sessions.service import SessionServiceImpl
 ```
@@ -4566,15 +4633,16 @@ Inside `create_app()`, after the existing CORS and health setup, add:
         )
     app.state.auth_provider = auth_provider
 
-    # W16: Secret key production guard
+    # W16/S3: Secret key production guard -- hard crash (S3/C4 upgrade)
     if (
         settings.secret_key == "change-me-in-production"
         and "pytest" not in sys.modules
         and os.environ.get("ELSPETH_ENV") != "test"
     ):
-        import logging
-        logging.getLogger("elspeth.web").warning(
-            "Using default secret_key -- change this for production!"
+        raise SystemExit(
+            "FATAL: WebSettings.secret_key is set to the default value. "
+            "Set a secure secret_key before starting the web server. "
+            "See WebSettings documentation."
         )
 
     # --- Session database setup (W6, S14) ---
@@ -4588,6 +4656,16 @@ Inside `create_app()`, after the existing CORS and health setup, add:
     # --- Register routers ---
     app.include_router(create_auth_router())
     app.include_router(create_session_router())
+
+    # --- Seam contract D: RunAlreadyActiveError → 409 with error_type ---
+    @app.exception_handler(RunAlreadyActiveError)
+    async def handle_run_already_active(
+        request: Request, exc: RunAlreadyActiveError,
+    ) -> JSONResponse:
+        return JSONResponse(
+            status_code=409,
+            content={"detail": str(exc), "error_type": "run_already_active"},
+        )
 ```
 
 - [ ] **Step 2: Update dependencies.py**
@@ -4658,3 +4736,21 @@ After completing all tasks, run the full test suite and verify:
 - File size is checked against `max_upload_bytes` before writing (not trusting Content-Length)
 - Active run check-and-set happens within a single transaction
 - Schema creation via `metadata.create_all()` runs on startup
+
+---
+
+## Round 4 Review Amendments
+
+> **Status: Amendments below have been integrated into the plan body.**
+
+Changes from the expert panel review (Round 4), applied to the plan above. Fix IDs reference the review findings for traceability.
+
+- **S3/C4 -- Secret key hard crash (Task 2.12):** The W16 secret key production guard in `create_app()` is upgraded from `logging.warning()` to `SystemExit`. If `settings.secret_key == "change-me-in-production"` and the environment is not test, raise `SystemExit("FATAL: default secret_key in non-test environment -- set ELSPETH_WEB__SECRET_KEY")` instead of logging a warning. The existing `"pytest" not in sys.modules` and `ELSPETH_ENV != "test"` guards remain.
+
+- **M1 -- New endpoint: GET /api/sessions/{id}/state/yaml (Task 2.11):** Add a stub route in `sessions/routes.py` for `GET /api/sessions/{session_id}/state/yaml`. The route is defined by Sub-4 but wired here. The handler loads the active `CompositionState` via `session_service.get_latest_state()` and calls `generate_yaml(state)`. Until Sub-4 implements the YAML generator, the stub returns HTTP 501 with `{"detail": "YAML generation not yet implemented (see Sub-4)"}`. When Sub-4 lands, the stub is replaced with the real call. Returns `{"yaml": str}` on success or 404 if no state exists.
+
+- **Seam contract A -- Serialisation contract (Task 2.8, Task 2.9):** `to_record()` must map the dataclass field `metadata` to DB column `metadata_`. `from_record()` must call `CompositionState.from_dict()` (defined in Sub-4) to reconstruct the domain model from DB JSON. Add a `_version` envelope to the serialised JSON as specified in the seam contracts doc. Until Sub-4 provides `from_dict()`, `from_record()` returns raw dicts in a `CompositionStateRecord` -- the interface must be designed so swapping in `from_dict()` later is a single-line change.
+
+- **Seam contract A -- CompositionStateData and from_dict() (Task 2.8):** Design `CompositionStateRecord` so that when Sub-4 provides `CompositionState.from_dict()`, Sub-2's `_row_to_state_record()` / `from_record()` can call it directly. Until then, raw dicts are acceptable in record fields. The swap point should be clearly marked with a `# TODO(sub-4):` comment.
+
+- **Seam contract D -- RunAlreadyActiveError envelope (Task 2.12 `create_app()`):** The HTTP 409 response when catching `RunAlreadyActiveError` must include `error_type: "run_already_active"` in the JSON body alongside `detail`. This is implemented as a global `@app.exception_handler(RunAlreadyActiveError)` in `create_app()`, not in a specific route handler. Sub-2 defines the exception class (Task 2.7) and the global handler (Task 2.12); Sub-5's execution routes raise it.
