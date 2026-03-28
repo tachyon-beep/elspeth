@@ -5,13 +5,20 @@ per_file_rules:
   reason: JSON Schema traversal — keys like "type", "anyOf", "description", "default" are conditionally present per JSON Schema spec. .get() is correct for schema dict navigation, not defensive programming.
   expires: null
   max_hits: 8
+- pattern: web/catalog/routes.py
+  rules:
+  - R1
+  reason: "False positives from @catalog_router.get() FastAPI decorators (text-based pattern match), plus one legitimate .get() on _PLURAL_TO_SINGULAR mapping (Tier 3 user input from URL path segment — unknown type returns 404)."
+  expires: null
+  max_hits: 6
+- pattern: web/app.py
+  rules:
+  - R1
+  reason: "False positive from @app.get() FastAPI decorator (text-based pattern match)."
+  expires: null
+  max_hits: 1
 
 allow_hits:
-- key: web/app.py:R1:create_app:health:fp=34cd0485fb465e86
-  owner: architecture
-  reason: "False positive — @app.get() is FastAPI HTTP route decorator, not dict.get()"
-  safety: No dict access involved; decorator syntax triggers text-based pattern match
-  expires: null
 - key: web/catalog/service.py:R6:CatalogServiceImpl:_resolve_config_model:fp=9ff84b7ab14ae105
   owner: architecture
   reason: "Explicit mapping gap — plugin exists in PluginManager but has no config model in PluginConfigValidator. Returns None (empty schema), not silent error swallowing."

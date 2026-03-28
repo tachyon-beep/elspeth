@@ -8,7 +8,9 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
+from elspeth.web.catalog.routes import catalog_router
 from elspeth.web.config import WebSettings
+from elspeth.web.dependencies import create_catalog_service
 
 
 @asynccontextmanager
@@ -48,6 +50,10 @@ def create_app(settings: WebSettings | None = None) -> FastAPI:
     )
 
     app.state.settings = settings
+
+    # --- Catalog ---
+    app.state.catalog_service = create_catalog_service()
+    app.include_router(catalog_router, prefix="/api/catalog")
 
     @app.get("/api/health")
     async def health() -> dict[str, str]:

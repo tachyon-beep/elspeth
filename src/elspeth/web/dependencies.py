@@ -12,9 +12,14 @@ contract for async service wiring.
 
 from __future__ import annotations
 
+from typing import TYPE_CHECKING
+
 from fastapi import Request
 
 from elspeth.web.config import WebSettings
+
+if TYPE_CHECKING:
+    from elspeth.web.catalog.service import CatalogServiceImpl
 
 
 def get_settings(request: Request) -> WebSettings:
@@ -24,3 +29,16 @@ def get_settings(request: Request) -> WebSettings:
     """
     settings: WebSettings = request.app.state.settings
     return settings
+
+
+def create_catalog_service() -> CatalogServiceImpl:
+    """Create CatalogService backed by the shared PluginManager singleton.
+
+    get_shared_plugin_manager() returns an already-initialized manager
+    (with register_builtin_plugins() called). CatalogServiceImpl does
+    not re-initialize — it caches the existing plugin lists.
+    """
+    from elspeth.plugins.infrastructure.manager import get_shared_plugin_manager
+    from elspeth.web.catalog.service import CatalogServiceImpl
+
+    return CatalogServiceImpl(get_shared_plugin_manager())
