@@ -108,6 +108,21 @@ class LocalAuthProvider:
         token: str = jwt.encode(payload, self._secret_key, algorithm="HS256")
         return token
 
+    def refresh(self, user_id: str, username: str) -> str:
+        """Issue a new JWT for an already-authenticated user.
+
+        Called by the token refresh route. Does NOT re-verify
+        credentials — the caller (get_current_user middleware)
+        has already validated the existing token.
+        """
+        payload = {
+            "sub": user_id,
+            "username": username,
+            "exp": int(time.time()) + self._token_expiry_hours * 3600,
+        }
+        token: str = jwt.encode(payload, self._secret_key, algorithm="HS256")
+        return token
+
     async def authenticate(self, token: str) -> UserIdentity:
         """Validate a JWT and return the authenticated identity.
 

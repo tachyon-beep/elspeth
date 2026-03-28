@@ -117,6 +117,19 @@ allow_hits:
   safety: "Part of name -> preferred_username -> 'Unknown' chain"
   expires: null
 
+# Auth routes — @router.get() false positives (FastAPI route decorators, not dict.get)
+- key: web/auth/routes.py:R1:create_auth_router:auth_config:fp=3f8fc32990ce6112
+  owner: web-auth
+  reason: "False positive — @router.get() is FastAPI HTTP route decorator, not dict.get()"
+  safety: No dict access involved; decorator syntax triggers text-based pattern match
+  expires: null
+
+- key: web/auth/routes.py:R1:create_auth_router:me:fp=4db7c70c9126b330
+  owner: web-auth
+  reason: "False positive — @router.get() is FastAPI HTTP route decorator, not dict.get()"
+  safety: No dict access involved; decorator syntax triggers text-based pattern match
+  expires: null
+
 # Auth middleware — Tier 3 HTTP header access (Authorization header from client)
 - key: web/auth/middleware.py:R1:get_current_user:fp=27850ac518f1116d
   owner: web-auth
