@@ -4,3 +4,59 @@ allow_hits:
   reason: "False positive — @app.get() is FastAPI HTTP route decorator, not dict.get()"
   safety: No dict access involved; decorator syntax triggers text-based pattern match
   expires: null
+
+# OIDC provider — httpx client.get() false positives (HTTP method, not dict.get)
+- key: web/auth/oidc.py:R1:OIDCAuthProvider:_ensure_jwks:fp=a9a0de711a8df098
+  owner: web-auth
+  reason: "False positive — httpx.AsyncClient.get() is an HTTP GET request, not dict.get()"
+  safety: HTTP errors caught by raise_for_status() and except block
+  expires: null
+
+- key: web/auth/oidc.py:R1:OIDCAuthProvider:_ensure_jwks:fp=62cb387f045528c6
+  owner: web-auth
+  reason: "False positive — httpx.AsyncClient.get() is an HTTP GET request, not dict.get()"
+  safety: HTTP errors caught by raise_for_status() and except block
+  expires: null
+
+# OIDC provider — Tier 3 JWT payload .get() calls (external IdP token claims)
+- key: web/auth/oidc.py:R1:OIDCAuthProvider:authenticate:fp=58567a661b6fe40a
+  owner: web-auth
+  reason: "Tier 3 boundary — preferred_username is optional in OIDC tokens, falls back to sub"
+  safety: "Default is payload['sub'] which is required; absence of optional claim is expected"
+  expires: null
+
+- key: web/auth/oidc.py:R1:OIDCAuthProvider:get_user_info:fp=3d32b1076da741ae
+  owner: web-auth
+  reason: "Tier 3 boundary — groups claim is optional in OIDC tokens"
+  safety: "Default empty list; absence means no groups assigned (correct semantics)"
+  expires: null
+
+- key: web/auth/oidc.py:R5:OIDCAuthProvider:get_user_info:fp=23fa5c6c39ac1a66
+  owner: web-auth
+  reason: "Tier 3 boundary — groups claim type is not guaranteed by external IdP"
+  safety: "If not a list, treated as empty groups; non-list types cannot be iterated safely"
+  expires: null
+
+- key: web/auth/oidc.py:R1:OIDCAuthProvider:get_user_info:fp=386e22984360fb5b
+  owner: web-auth
+  reason: "Tier 3 boundary — preferred_username is optional in OIDC tokens, falls back to sub"
+  safety: "Default is payload['sub'] which is required; absence of optional claim is expected"
+  expires: null
+
+- key: web/auth/oidc.py:R1:OIDCAuthProvider:get_user_info:fp=f369a37fab2abbbf
+  owner: web-auth
+  reason: "Tier 3 boundary — name claim is optional, falls back to preferred_username then sub"
+  safety: "Cascading defaults ensure a display_name is always set; all fallbacks are valid"
+  expires: null
+
+- key: web/auth/oidc.py:R1:OIDCAuthProvider:get_user_info:fp=52d8f45a19a02648
+  owner: web-auth
+  reason: "Tier 3 boundary — nested fallback for display_name from preferred_username"
+  safety: "See parent entry; inner .get() is part of the same cascading default chain"
+  expires: null
+
+- key: web/auth/oidc.py:R1:OIDCAuthProvider:get_user_info:fp=dc8858275b2d5f02
+  owner: web-auth
+  reason: "Tier 3 boundary — email claim is optional in OIDC tokens"
+  safety: "Default None; UserProfile.email accepts None; absence is honest representation"
+  expires: null
