@@ -4610,6 +4610,32 @@ from elspeth.web.sessions.routes import create_session_router
 from elspeth.web.sessions.service import SessionServiceImpl
 ```
 
+**Before wiring auth into create_app(), add the OIDC/Entra conditional validator to WebSettings.**
+
+In `src/elspeth/web/config.py`, add a `@model_validator(mode="after")` that enforces conditional field requirements:
+
+```python
+from pydantic import model_validator
+
+    @model_validator(mode="after")
+    def _validate_auth_fields(self) -> WebSettings:
+        if self.auth_provider == "oidc":
+            missing = [f for f in ("oidc_issuer", "oidc_audience", "oidc_client_id") if getattr(self, f) is None]
+            if missing:
+                raise ValueError(f"OIDC auth requires: {', '.join(missing)}")
+        elif self.auth_provider == "entra":
+            missing = [f for f in ("oidc_issuer", "oidc_audience", "oidc_client_id", "entra_tenant_id") if getattr(self, f) is None]
+            if missing:
+                raise ValueError(f"Entra auth requires: {', '.join(missing)}")
+        return self
+```
+
+This catches misconfiguration at settings construction (CLI or test setup) rather than deep in the auth provider init. Tracked as `elspeth-34df5d61e4` (from Sub-1 review). Add corresponding tests to `tests/unit/web/test_config.py`:
+- `WebSettings(auth_provider="oidc")` without oidc fields → ValueError
+- `WebSettings(auth_provider="oidc", oidc_issuer=..., oidc_audience=..., oidc_client_id=...)` → valid
+- `WebSettings(auth_provider="entra")` without entra_tenant_id → ValueError
+- `WebSettings(auth_provider="local")` with no OIDC fields → valid (the default)
+
 Inside `create_app()`, after the existing CORS and health setup, add:
 
 ```python

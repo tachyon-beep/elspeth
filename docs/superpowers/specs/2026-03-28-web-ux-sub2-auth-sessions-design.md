@@ -735,6 +735,18 @@ the default key. A crash makes the failure impossible to ignore.
 are exempt because test fixtures need a predictable key for JWT generation in
 test setup.
 
+### OIDC/Entra Conditional Field Validation (from Sub-1 review)
+
+`WebSettings` must validate that OIDC/Entra-specific fields are populated when their auth provider is selected. Add a `@model_validator(mode="after")` to `WebSettings` in `src/elspeth/web/config.py`:
+
+- When `auth_provider="oidc"`: `oidc_issuer`, `oidc_audience`, and `oidc_client_id` must all be non-None. Raise `ValueError` if any are missing.
+- When `auth_provider="entra"`: all three OIDC fields above must be non-None, AND `entra_tenant_id` must be non-None. Raise `ValueError` if any are missing.
+- When `auth_provider="local"`: no conditional requirements (OIDC/Entra fields may be None).
+
+This catches misconfiguration at construction time rather than at first auth request, producing a clear error instead of a `NoneType` traceback deep in the OIDC validation flow.
+
+**Origin:** Sub-1 PR review (type-design-analyzer). Deferred to Sub-2 because Sub-1 has no auth middleware — validating fields before the consumer exists risks assumptions that may not hold. Tracked as `elspeth-34df5d61e4`.
+
 ### Session DB Schema Creation (W6)
 
 On application startup, the app factory calls `metadata.create_all(engine)` to
