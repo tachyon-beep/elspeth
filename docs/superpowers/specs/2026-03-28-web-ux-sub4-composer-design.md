@@ -291,6 +291,7 @@ ToolResult is a frozen dataclass returned by every mutation tool.
 | updated_state | CompositionState | The full state after mutation (or the original state if success=False). |
 | validation | ValidationSummary | Stage 1 validation result: is_valid and errors. |
 | affected_nodes | tuple[str, ...] | Node IDs that were changed or had their edges changed. |
+| data | Any or None | Optional data payload for discovery tools. None for mutation tools. |
 
 ToolResult's `__post_init__` calls `freeze_fields()` on affected_nodes. The
 updated_state and validation fields are themselves frozen dataclasses, so

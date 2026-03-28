@@ -597,9 +597,10 @@ import json
 from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Protocol
+from typing import Any
 
 from elspeth.contracts.freeze import freeze_fields
+from elspeth.web.catalog.protocol import CatalogService
 
 from elspeth.web.composer.state import (
     CompositionState,
@@ -612,18 +613,7 @@ from elspeth.web.composer.state import (
 )
 
 
-class CatalogServiceProtocol(Protocol):
-    """Protocol for catalog service dependency.
-
-    Return types match the CatalogService protocol from Sub-Spec 3:
-    list methods return list[PluginSummary], get_schema returns
-    PluginSchemaInfo. Import these from web.catalog.schemas.
-    """
-
-    def list_sources(self) -> list[Any]: ...
-    def list_transforms(self) -> list[Any]: ...
-    def list_sinks(self) -> list[Any]: ...
-    def get_schema(self, plugin_type: str, name: str) -> Any: ...
+CatalogServiceProtocol = CatalogService  # Re-export for local use
 
 
 @dataclass(frozen=True, slots=True)
@@ -1333,3 +1323,32 @@ Documented in `docs/superpowers/meta/web-ux-program.md` and
 - Added `TestSetSourcePathSecurity` test class with 5 cases: path under
   uploads (success), path outside uploads (fail), traversal attack (fail),
   `file` key validation (fail), and no path/file key (skip validation).
+
+### Amendment 3: Replace local `CatalogServiceProtocol` with import (2026-03-29)
+
+**Date:** 2026-03-29
+**Reason:** Go/no-go review identified a duplicate protocol definition. The local
+`CatalogServiceProtocol` in `tools.py` used `list[Any]` return types, losing the
+type safety of the real `CatalogService` protocol in `web.catalog.protocol` (which
+returns `list[PluginSummary]` and `PluginSchemaInfo`). Both are L3, so importing
+across web subpackages is a valid same-layer dependency, not a layer violation.
+
+**Changes:**
+- Removed the local `CatalogServiceProtocol(Protocol)` class from `tools.py`.
+- Added `from elspeth.web.catalog.protocol import CatalogService` import.
+- Added `CatalogServiceProtocol = CatalogService` re-export alias (preserves
+  existing references in `prompts.py` and `service.py` without renaming).
+- Removed unused `Protocol` import from `typing`.
+
+### Amendment 4: `ToolResult.data` field — spec deviation note (2026-03-29)
+
+**Date:** 2026-03-29
+**Reason:** Go/no-go review identified that the spec defines `ToolResult` with 4
+fields (`success`, `updated_state`, `validation`, `affected_nodes`) but the plan
+adds `data: Any = None` for discovery tool payloads. This is a necessary extension
+— discovery tools need to return their results (plugin lists, schemas, state
+serialization) and `ToolResult` is the unified return type for all tools.
+
+**Spec update needed:** Add `data` field to the ToolResult definition in
+`specs/2026-03-28-web-ux-sub4-composer-design.md`. Description: "Optional data
+payload for discovery tools. None for mutation tools."

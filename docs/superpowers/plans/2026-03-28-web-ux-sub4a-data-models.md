@@ -1007,14 +1007,16 @@ class CompositionState:
 
     def with_node(self, node: NodeSpec) -> CompositionState:
         """Add or replace a node (matched by id). Version incremented."""
-        nodes = tuple(n for n in self.nodes if n.id != node.id) + (node,)
-        # Preserve insertion order: if replacing, put at original position
         existing_ids = [n.id for n in self.nodes]
         if node.id in existing_ids:
+            # Replace at original position to preserve order
             idx = existing_ids.index(node.id)
             node_list = list(self.nodes)
             node_list[idx] = node
             nodes = tuple(node_list)
+        else:
+            # Append new node
+            nodes = self.nodes + (node,)
         return replace(self, nodes=nodes, version=self.version + 1)
 
     def without_node(self, node_id: str) -> CompositionState | None:
@@ -1534,6 +1536,7 @@ git commit -m "test(web/composer): comprehensive Stage 1 validation tests"
 - [ ] All six frozen dataclasses (`PipelineMetadata`, `SourceSpec`, `NodeSpec`, `EdgeSpec`, `OutputSpec`, `ValidationSummary`) are implemented with `frozen=True, slots=True`
 - [ ] Container fields (`options`, `routes`) use `freeze_fields()` in `__post_init__`
 - [ ] `CompositionState` mutation methods (`with_source`, `with_node`, `without_node`, `with_edge`, `without_edge`, `with_output`, `without_output`, `with_metadata`) return new instances via `replace()` and increment version
+- [ ] `with_node` checks existence first, then builds tuple once (no redundant filter+append; Amendment R5)
 - [ ] `without_node` cascades edge removal for edges referencing the removed node
 - [ ] `without_*` methods return `None` when the target does not exist
 - [ ] `to_dict()` recursively unwraps `MappingProxyType` to `dict` and `tuple` to `list`
@@ -1564,3 +1567,14 @@ git commit -m "test(web/composer): comprehensive Stage 1 validation tests"
 - Added per-type `from_dict` tests in `TestSourceSpec`, `TestNodeSpec`, `TestEdgeSpec`, `TestOutputSpec`, `TestPipelineMetadata`
 - Added round-trip invariant tests in `TestCompositionState`: empty state, fully populated state (gate + coalesce + nested options), None optional field preservation, and deep-freeze verification on restored instances
 - Updated self-review checklist with `from_dict()` and round-trip invariant items
+
+### Fixed `with_node` redundant work on replace path (2026-03-29)
+
+**Reason:** Go/no-go review identified that `with_node` built a filtered+appended
+tuple on line 1 that was thrown away when the replace branch fired on line 3-7.
+The replace branch reconstructed from `self.nodes` (the original), so the first
+line's work was wasted.
+
+**Fix:** Restructured to check existence first, then build the appropriate tuple
+once: replace-at-position for existing IDs, append for new IDs. No redundant
+intermediate tuple construction.

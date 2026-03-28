@@ -747,14 +747,16 @@ class CompositionState:
 
     def with_node(self, node: NodeSpec) -> CompositionState:
         """Add or replace a node (matched by id). Version incremented."""
-        nodes = tuple(n for n in self.nodes if n.id != node.id) + (node,)
-        # Preserve insertion order: if replacing, put at original position
         existing_ids = [n.id for n in self.nodes]
         if node.id in existing_ids:
+            # Replace at original position to preserve order
             idx = existing_ids.index(node.id)
             node_list = list(self.nodes)
             node_list[idx] = node
             nodes = tuple(node_list)
+        else:
+            # Append new node
+            nodes = self.nodes + (node,)
         return replace(self, nodes=nodes, version=self.version + 1)
 
     def without_node(self, node_id: str) -> CompositionState | None:

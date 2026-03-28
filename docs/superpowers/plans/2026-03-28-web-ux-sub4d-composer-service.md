@@ -547,8 +547,8 @@ class TestBuildMessages:
         service = ComposerServiceImpl(catalog=catalog, settings=settings)
         state = _empty_state()
 
-        msgs1 = service._build_messages(None, state, "Hello")
-        msgs2 = service._build_messages(None, state, "Hello")
+        msgs1 = service._build_messages([], state, "Hello")
+        msgs2 = service._build_messages([], state, "Hello")
 
         assert msgs1 is not msgs2  # different list objects
         assert msgs1 == msgs2  # same content
@@ -653,6 +653,7 @@ class ComposerServiceImpl:
         self._catalog = catalog
         self._model = settings.composer_model
         self._max_turns = settings.composer_max_turns
+        self._data_dir = str(settings.data_dir)
 
     async def compose(
         self,
@@ -727,7 +728,8 @@ class ComposerServiceImpl:
                 # our code and must crash — do not catch. See CLAUDE.md:
                 # "Plugin Ownership: System Code, Not User Code".
                 result = execute_tool(
-                    tool_name, arguments, state, self._catalog
+                    tool_name, arguments, state, self._catalog,
+                    data_dir=self._data_dir,
                 )
                 # Update state if mutation succeeded
                 state = result.updated_state
@@ -1112,7 +1114,7 @@ After all tasks, verify:
 5. `ComposerServiceImpl` runs bounded tool-use loop. `_call_llm()` is separated for test mocking.
 6. Loop handles: text-only response, single tool call, multi-turn tool calls, multiple tool calls per turn, convergence error, unknown tool, malformed arguments. `execute_tool()` runs unguarded — bugs crash (Amendment 2).
 7. `_build_messages()` delegates to `build_messages()` and returns a new list on every call.
-8. Model configured via `WebSettings.composer_model`, max turns via `WebSettings.composer_max_turns`.
+8. Model configured via `WebSettings.composer_model`, max turns via `WebSettings.composer_max_turns`. `data_dir` stored in `__init__` and passed to `execute_tool()` for S2 path allowlist enforcement (Amendment 3).
 9. Route handler catches `ComposerConvergenceError` -> HTTP 422 with `{"error_type": "convergence", "detail": "...", "turns_used": int}` (S16).
 10. Route handler catches LLM client errors -> HTTP 502 with `{"error_type": "llm_unavailable"|"llm_auth_error", "detail": "..."}` (S16).
 11. Route handler pre-fetches chat history via `session_service.get_messages()`, converts `ChatMessageRecord` to plain dicts, and passes to `compose()` (H1 fix, Amendment 1).
@@ -1176,3 +1178,30 @@ handling is in the route handler where it belongs.
 
 **Affected locations:**
 - `service.py`: `ComposerServiceImpl.compose()` — removed `except Exception` block
+
+### Amendment 3: Pass `data_dir` to `execute_tool()` — S2 security fix (2026-03-29)
+
+**Problem:** Go/no-go review identified that the `execute_tool()` call in the
+tool-use loop did not pass `data_dir`, rendering the S2 source path allowlist
+inert at runtime. `execute_tool()` accepts an optional `data_dir` parameter for
+path validation, and `WebSettings.data_dir` is available on the service, but the
+call omitted it.
+
+**Fix:** Store `data_dir` as `self._data_dir = str(settings.data_dir)` in
+`__init__`. Pass `data_dir=self._data_dir` in the `execute_tool()` call.
+
+**Affected locations:**
+- `service.py`: `ComposerServiceImpl.__init__()` — added `self._data_dir`
+- `service.py`: `ComposerServiceImpl.compose()` — added `data_dir=self._data_dir`
+  to `execute_tool()` call
+
+### Amendment 4: Fix `_build_messages` test — `None` → `[]` (2026-03-29)
+
+**Problem:** Go/no-go review identified that `TestBuildMessages` passed `None`
+for `chat_history`, but the type signature is `list[dict[str, Any]]`. The runtime
+survived because `prompts.py` uses `if chat_history:` (truthiness check), but
+mypy would flag the type mismatch. More importantly, the route handler always
+provides a list (possibly empty), so the test should match the actual call pattern.
+
+**Fix:** Changed `service._build_messages(None, state, "Hello")` to
+`service._build_messages([], state, "Hello")` in `TestBuildMessages`.
