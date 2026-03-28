@@ -2,7 +2,7 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development or superpowers:executing-plans.
 
-**Goal:** Implement ToolResult, 6 discovery tools, 6 mutation tools with catalog validation and state-reflecting returns
+**Goal:** Implement ToolResult, 6 discovery tools, 8 mutation tools with catalog validation, S2 path security, and state-reflecting returns
 **Parent Plan:** `plans/2026-03-28-web-ux-sub4-composer.md`
 **Spec:** `specs/2026-03-28-web-ux-sub4-composer-design.md`
 **Depends On:** Task-Plan 4A (Data Models), Sub-Plan 3 (Catalog)
@@ -323,6 +323,182 @@ class TestSetMetadata:
         assert result.affected_nodes == ()  # metadata doesn't affect nodes
 
 
+class TestSetOutput:
+    def test_adds_output(self) -> None:
+        state = _empty_state()
+        catalog = _mock_catalog()
+        result = execute_tool(
+            "set_output",
+            {
+                "sink_name": "main",
+                "plugin": "csv",
+                "options": {"path": "/data/out.csv"},
+                "on_write_failure": "discard",
+            },
+            state,
+            catalog,
+        )
+        assert result.success is True
+        assert len(result.updated_state.outputs) == 1
+        assert result.updated_state.outputs[0].name == "main"
+        assert result.updated_state.outputs[0].plugin == "csv"
+        assert result.updated_state.version == 2
+        assert "main" in result.affected_nodes
+
+    def test_replaces_existing_output(self) -> None:
+        state = _empty_state()
+        catalog = _mock_catalog()
+        r1 = execute_tool(
+            "set_output",
+            {
+                "sink_name": "main", "plugin": "csv",
+                "options": {}, "on_write_failure": "discard",
+            },
+            state, catalog,
+        )
+        r2 = execute_tool(
+            "set_output",
+            {
+                "sink_name": "main", "plugin": "csv",
+                "options": {"path": "/new.csv"}, "on_write_failure": "quarantine",
+            },
+            r1.updated_state, catalog,
+        )
+        assert r2.success is True
+        assert len(r2.updated_state.outputs) == 1
+        assert r2.updated_state.outputs[0].on_write_failure == "quarantine"
+
+    def test_unknown_sink_plugin_fails(self) -> None:
+        state = _empty_state()
+        catalog = _mock_catalog()
+        catalog.get_schema.side_effect = ValueError("Unknown plugin: foobar")
+        result = execute_tool(
+            "set_output",
+            {
+                "sink_name": "main", "plugin": "foobar",
+                "options": {}, "on_write_failure": "discard",
+            },
+            state, catalog,
+        )
+        assert result.success is False
+        assert result.updated_state.version == 1  # unchanged
+
+
+class TestRemoveOutput:
+    def test_removes_output(self) -> None:
+        state = _empty_state()
+        catalog = _mock_catalog()
+        r1 = execute_tool(
+            "set_output",
+            {
+                "sink_name": "main", "plugin": "csv",
+                "options": {}, "on_write_failure": "discard",
+            },
+            state, catalog,
+        )
+        r2 = execute_tool("remove_output", {"sink_name": "main"}, r1.updated_state, catalog)
+        assert r2.success is True
+        assert len(r2.updated_state.outputs) == 0
+
+    def test_remove_nonexistent_fails(self) -> None:
+        state = _empty_state()
+        catalog = _mock_catalog()
+        result = execute_tool("remove_output", {"sink_name": "nope"}, state, catalog)
+        assert result.success is False
+        assert result.updated_state.version == 1  # unchanged
+
+
+class TestSetSourcePathSecurity:
+    """S2: Source path allowlist — paths must be under {data_dir}/uploads/."""
+
+    def test_path_under_uploads_succeeds(self) -> None:
+        state = _empty_state()
+        catalog = _mock_catalog()
+        result = execute_tool(
+            "set_source",
+            {
+                "plugin": "csv",
+                "on_success": "t1",
+                "options": {"path": "/data/uploads/input.csv"},
+                "on_validation_failure": "quarantine",
+            },
+            state,
+            catalog,
+            data_dir="/data",
+        )
+        assert result.success is True
+
+    def test_path_outside_uploads_fails(self) -> None:
+        state = _empty_state()
+        catalog = _mock_catalog()
+        result = execute_tool(
+            "set_source",
+            {
+                "plugin": "csv",
+                "on_success": "t1",
+                "options": {"path": "/etc/passwd"},
+                "on_validation_failure": "quarantine",
+            },
+            state,
+            catalog,
+            data_dir="/data",
+        )
+        assert result.success is False
+        assert "path" in result.data["error"].lower()
+
+    def test_traversal_attack_fails(self) -> None:
+        state = _empty_state()
+        catalog = _mock_catalog()
+        result = execute_tool(
+            "set_source",
+            {
+                "plugin": "csv",
+                "on_success": "t1",
+                "options": {"path": "/data/uploads/../../etc/passwd"},
+                "on_validation_failure": "quarantine",
+            },
+            state,
+            catalog,
+            data_dir="/data",
+        )
+        assert result.success is False
+
+    def test_file_key_also_validated(self) -> None:
+        state = _empty_state()
+        catalog = _mock_catalog()
+        result = execute_tool(
+            "set_source",
+            {
+                "plugin": "csv",
+                "on_success": "t1",
+                "options": {"file": "/tmp/evil.csv"},
+                "on_validation_failure": "quarantine",
+            },
+            state,
+            catalog,
+            data_dir="/data",
+        )
+        assert result.success is False
+
+    def test_no_path_key_skips_validation(self) -> None:
+        """Source options without path/file keys are not subject to S2."""
+        state = _empty_state()
+        catalog = _mock_catalog()
+        result = execute_tool(
+            "set_source",
+            {
+                "plugin": "csv",
+                "on_success": "t1",
+                "options": {"connection_string": "postgres://..."},
+                "on_validation_failure": "quarantine",
+            },
+            state,
+            catalog,
+            data_dir="/data",
+        )
+        assert result.success is True
+
+
 class TestDiscoveryTools:
     def test_list_sources_delegates(self) -> None:
         catalog = _mock_catalog()
@@ -367,10 +543,10 @@ class TestDiscoveryTools:
 
 
 class TestToolDefinitions:
-    def test_has_twelve_tools(self) -> None:
-        """6 discovery + 6 mutation = 12 tools."""
+    def test_has_fourteen_tools(self) -> None:
+        """6 discovery + 8 mutation = 14 tools."""
         defs = get_tool_definitions()
-        assert len(defs) == 12
+        assert len(defs) == 14
 
     def test_all_have_json_schema(self) -> None:
         for defn in get_tool_definitions():
@@ -420,6 +596,7 @@ from __future__ import annotations
 import json
 from collections.abc import Mapping
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Any, Protocol
 
 from elspeth.contracts.freeze import freeze_fields
@@ -528,7 +705,7 @@ def get_expression_grammar() -> str:
 def get_tool_definitions() -> list[dict[str, Any]]:
     """Return JSON Schema tool definitions for the LLM.
 
-    Returns 12 tools: 6 discovery, 6 mutation.
+    Returns 14 tools: 6 discovery, 8 mutation.
     """
     return [
         # Discovery tools
@@ -679,6 +856,36 @@ def get_tool_definitions() -> list[dict[str, Any]]:
                 "required": ["patch"],
             },
         },
+        {
+            "name": "set_output",
+            "description": "Add or replace a pipeline output (sink).",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "sink_name": {"type": "string", "description": "Sink name (connection point for edges/routes)."},
+                    "plugin": {"type": "string", "description": "Sink plugin name (e.g. 'csv', 'json')."},
+                    "options": {"type": "object", "description": "Plugin-specific config."},
+                    "on_write_failure": {
+                        "type": "string",
+                        "enum": ["discard", "quarantine"],
+                        "description": "How to handle write failures.",
+                        "default": "discard",
+                    },
+                },
+                "required": ["sink_name", "plugin", "options"],
+            },
+        },
+        {
+            "name": "remove_output",
+            "description": "Remove a pipeline output (sink) by name.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "sink_name": {"type": "string", "description": "Sink name to remove."},
+                },
+                "required": ["sink_name"],
+            },
+        },
     ]
 
 
@@ -700,12 +907,18 @@ def execute_tool(
     arguments: dict[str, Any],
     state: CompositionState,
     catalog: CatalogServiceProtocol,
+    data_dir: str | None = None,
 ) -> ToolResult:
     """Execute a composition tool by name.
 
     Discovery tools return data without modifying state.
     Mutation tools return ToolResult with updated state and validation.
     Invalid tool names return a failure result with an error message.
+
+    Args:
+        data_dir: Base data directory for S2 path allowlist enforcement.
+            When provided, source options containing ``path`` or ``file``
+            keys are restricted to ``{data_dir}/uploads/``.
     """
     # Discovery tools
     if tool_name == "list_sources":
@@ -738,7 +951,7 @@ def execute_tool(
 
     # Mutation tools
     if tool_name == "set_source":
-        return _execute_set_source(arguments, state, catalog)
+        return _execute_set_source(arguments, state, catalog, data_dir)
 
     if tool_name == "upsert_node":
         return _execute_upsert_node(arguments, state, catalog)
@@ -754,6 +967,12 @@ def execute_tool(
 
     if tool_name == "set_metadata":
         return _execute_set_metadata(arguments, state)
+
+    if tool_name == "set_output":
+        return _execute_set_output(arguments, state, catalog)
+
+    if tool_name == "remove_output":
+        return _execute_remove_output(arguments, state)
 
     return _failure_result(state, f"Unknown tool: {tool_name}")
 
@@ -799,10 +1018,37 @@ def _mutation_result(
     )
 
 
+def _validate_source_path(
+    options: dict[str, Any],
+    data_dir: str | None,
+) -> str | None:
+    """S2: Validate that path/file options are under {data_dir}/uploads/.
+
+    Returns an error message if validation fails, None if OK.
+    Uses Path.resolve() + is_relative_to() to defeat ../ traversal.
+    """
+    if data_dir is None:
+        return None
+
+    uploads_dir = Path(data_dir).resolve() / "uploads"
+
+    for key in ("path", "file"):
+        if key in options:
+            resolved = Path(options[key]).resolve()
+            if not resolved.is_relative_to(uploads_dir):
+                return (
+                    f"Path violation (S2): '{options[key]}' is outside the "
+                    f"allowed directory '{uploads_dir}'. Source file paths "
+                    f"must be under {{data_dir}}/uploads/."
+                )
+    return None
+
+
 def _execute_set_source(
     args: dict[str, Any],
     state: CompositionState,
     catalog: CatalogServiceProtocol,
+    data_dir: str | None = None,
 ) -> ToolResult:
     """Set or replace the pipeline source."""
     plugin = args["plugin"]
@@ -812,10 +1058,16 @@ def _execute_set_source(
     except (ValueError, KeyError) as exc:
         return _failure_result(state, f"Unknown source plugin '{plugin}': {exc}")
 
+    # S2: Validate source path allowlist
+    options = args.get("options", {})
+    path_error = _validate_source_path(options, data_dir)
+    if path_error is not None:
+        return _failure_result(state, path_error)
+
     source = SourceSpec(
         plugin=plugin,
         on_success=args["on_success"],
-        options=args.get("options", {}),
+        options=options,
         on_validation_failure=args.get("on_validation_failure", "quarantine"),
     )
     new_state = state.with_source(source)
@@ -946,6 +1198,41 @@ def _execute_set_metadata(
 
     new_state = state.with_metadata(patch)
     return _mutation_result(new_state, ())
+
+
+def _execute_set_output(
+    args: dict[str, Any],
+    state: CompositionState,
+    catalog: CatalogServiceProtocol,
+) -> ToolResult:
+    """Add or replace a pipeline output (sink)."""
+    plugin = args["plugin"]
+    # Validate plugin exists in catalog
+    try:
+        catalog.get_schema("sink", plugin)
+    except (ValueError, KeyError) as exc:
+        return _failure_result(state, f"Unknown sink plugin '{plugin}': {exc}")
+
+    output = OutputSpec(
+        name=args["sink_name"],
+        plugin=plugin,
+        options=args.get("options", {}),
+        on_write_failure=args.get("on_write_failure", "discard"),
+    )
+    new_state = state.with_output(output)
+    return _mutation_result(new_state, (args["sink_name"],))
+
+
+def _execute_remove_output(
+    args: dict[str, Any],
+    state: CompositionState,
+) -> ToolResult:
+    """Remove a pipeline output (sink) by name."""
+    sink_name = args["sink_name"]
+    new_state = state.without_output(sink_name)
+    if new_state is None:
+        return _failure_result(state, f"Output '{sink_name}' not found.")
+    return _mutation_result(new_state, (sink_name,))
 ```
 
 - [ ] **Step 4: Run tests — expect PASS**
@@ -962,7 +1249,7 @@ Expected: PASS.
 
 ```bash
 git add src/elspeth/web/composer/tools.py tests/unit/web/composer/test_tools.py
-git commit -m "feat(web/composer): add composition tools — 6 discovery, 6 mutation, ToolResult"
+git commit -m "feat(web/composer): add composition tools — 6 discovery, 8 mutation, ToolResult, S2 path security"
 ```
 
 ---
@@ -972,7 +1259,7 @@ git commit -m "feat(web/composer): add composition tools — 6 discovery, 6 muta
 After completing all steps, verify:
 
 - [ ] `ToolResult` is frozen with `affected_nodes` deep-frozen via `freeze_fields()`. `pytest tests/unit/web/composer/test_tools.py`
-- [ ] All 12 tools (6 discovery, 6 mutation) work. Mutations return `ToolResult` with validation. Invalid input returns `success=False`, not exceptions.
+- [ ] All 14 tools (6 discovery, 8 mutation) work. Mutations return `ToolResult` with validation. Invalid input returns `success=False`, not exceptions.
 - [ ] Discovery tools delegate to `CatalogService` — `list_sources`, `list_transforms`, `list_sinks`, `get_plugin_schema`, `get_expression_grammar`, `get_current_state`.
 - [ ] Mutation tools validate against catalog — `set_source` and `upsert_node` (for transform/aggregation types) call `catalog.get_schema()` before mutating state.
 - [ ] Gate nodes skip plugin validation (`catalog.get_schema` not called).
@@ -980,7 +1267,9 @@ After completing all steps, verify:
 - [ ] Nonexistent node/edge removal returns `success=False` with unchanged state.
 - [ ] Every mutation result includes `ValidationSummary` from `state.validate()`.
 - [ ] `ToolResult.to_dict()` serializes to LLM-friendly dict with `success`, `validation`, `affected_nodes`, `version`, and optional `data`.
-- [ ] `get_tool_definitions()` returns exactly 12 tool definitions, each with `name`, `description`, and `parameters` (JSON Schema).
+- [ ] `get_tool_definitions()` returns exactly 14 tool definitions, each with `name`, `description`, and `parameters` (JSON Schema).
+- [ ] `set_output` validates sink plugin against catalog and delegates to `state.with_output()`. `remove_output` delegates to `state.without_output()` and returns `success=False` for nonexistent outputs.
+- [ ] S2 path allowlist enforced in `_execute_set_source`: options containing `path` or `file` keys validated via `Path.resolve()` + `is_relative_to()`. Traversal attacks (`../`) defeated. Returns `ToolResult(success=False)` on violation.
 - [ ] All mock catalogs in tests use real `PluginSummary` and `PluginSchemaInfo` instances, not plain dicts (AC #16).
 - [ ] mypy passes on `src/elspeth/web/composer/tools.py`.
 
@@ -994,3 +1283,53 @@ After completing all steps, verify:
 # Freeze guard CI check
 .venv/bin/python scripts/cicd/enforce_freeze_guards.py
 ```
+
+---
+
+## Review Amendments
+
+### Amendment 1: `set_output` and `remove_output` mutation tools
+
+**Date:** 2026-03-28
+**Reason:** The CompositionState (Sub-4a) defines `with_output()` and
+`without_output()` methods, but the original plan had no LLM tools exposing
+them. Without these tools, the LLM cannot add sinks to a pipeline, and Stage 1
+validation will always fail with "No sinks configured."
+
+**Changes:**
+- Added `set_output` tool definition (parameters: `sink_name`, `plugin`,
+  `options`, `on_write_failure`) to the MUTATION_TOOLS list in
+  `get_tool_definitions()`.
+- Added `remove_output` tool definition (parameter: `sink_name`).
+- Added `_execute_set_output(args, state, catalog)` -- validates sink plugin
+  against catalog via `get_schema("sink", plugin)`, then delegates to
+  `state.with_output(OutputSpec(...))`.
+- Added `_execute_remove_output(args, state)` -- delegates to
+  `state.without_output(sink_name)`, returns `success=False` if output not found.
+- Added dispatch entries in `execute_tool()` for both new tools.
+- Added `TestSetOutput` and `TestRemoveOutput` test classes.
+- Updated tool count from 12 to 14 (6 discovery + 8 mutation).
+
+### Amendment 2: S2 source path allowlist in `set_source`
+
+**Date:** 2026-03-28
+**Reason:** Security rule S2 (R4 expert panel review) requires that source
+plugin options containing `path` or `file` keys are restricted to paths under
+`{WebSettings.data_dir}/uploads/`. This prevents prompt injection attacks that
+trick the LLM into configuring a source that reads arbitrary server-side files.
+Documented in `docs/superpowers/meta/web-ux-program.md` and
+`docs/superpowers/specs/2026-03-28-web-ux-seam-contracts.md` (Seam H).
+
+**Changes:**
+- Added `_validate_source_path(options, data_dir)` helper that checks `path`
+  and `file` keys against `{data_dir}/uploads/` using `Path.resolve()` +
+  `is_relative_to()` to defeat `../` traversal attacks.
+- Updated `_execute_set_source` to accept `data_dir` parameter and call
+  `_validate_source_path()` before constructing the SourceSpec. Returns
+  `ToolResult(success=False)` with a descriptive error on violation.
+- Updated `execute_tool()` signature to accept optional `data_dir` parameter,
+  passed through to `_execute_set_source`.
+- Added `pathlib.Path` import.
+- Added `TestSetSourcePathSecurity` test class with 5 cases: path under
+  uploads (success), path outside uploads (fail), traversal attack (fail),
+  `file` key validation (fail), and no path/file key (skip validation).
