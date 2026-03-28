@@ -12,7 +12,8 @@ import time
 from typing import Any
 
 import httpx
-from jose import JWTError, jwt
+import jwt
+from jwt.exceptions import PyJWTError
 
 from elspeth.web.auth.models import AuthenticationError, UserIdentity, UserProfile
 
@@ -73,16 +74,30 @@ class JWKSTokenValidator:
         return self._jwks
 
     def decode_token(self, token: str, jwks: dict[str, Any]) -> dict[str, Any]:
-        """Decode and validate a JWT using the cached JWKS."""
+        """Decode and validate a JWT using the cached JWKS.
+
+        Extracts the signing key from the JWKS by matching the token's
+        ``kid`` header to the correct JWK entry.
+        """
         try:
+            jwk_set = jwt.PyJWKSet.from_dict(jwks)
+            header = jwt.get_unverified_header(token)
+            kid = header.get("kid")
+            signing_key = None
+            for key in jwk_set.keys:
+                if key.key_id == kid:
+                    signing_key = key.key
+                    break
+            if signing_key is None:
+                raise AuthenticationError(f"No matching key found in JWKS for kid={kid!r}")
             payload: dict[str, Any] = jwt.decode(
                 token,
-                jwks,
+                signing_key,
                 algorithms=["RS256"],
                 audience=self._audience,
                 issuer=self._issuer,
             )
-        except JWTError as exc:
+        except PyJWTError as exc:
             raise AuthenticationError(f"Invalid token: {exc}") from exc
         return payload
 

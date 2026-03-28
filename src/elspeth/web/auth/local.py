@@ -1,6 +1,6 @@
 """Local authentication provider -- SQLite user store with bcrypt and JWT.
 
-Uses bcrypt for password hashing and python-jose for JWT token creation
+Uses bcrypt for password hashing and PyJWT for JWT token creation
 and validation. The SQLite database is created at db_path on first use.
 """
 
@@ -12,7 +12,8 @@ import time
 from pathlib import Path
 
 import bcrypt
-from jose import JWTError, jwt
+import jwt
+from jwt.exceptions import PyJWTError
 
 from elspeth.web.auth.models import AuthenticationError, UserIdentity, UserProfile
 
@@ -139,7 +140,7 @@ class LocalAuthProvider:
         """
         try:
             payload = jwt.decode(token, self._secret_key, algorithms=["HS256"])
-        except JWTError as exc:
+        except PyJWTError as exc:
             raise AuthenticationError("Invalid token") from exc
 
         return UserIdentity(

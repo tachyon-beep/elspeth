@@ -86,7 +86,7 @@ class TestAuthenticate:
     @pytest.mark.asyncio
     async def test_authenticate_expired_token(self, tmp_path) -> None:
         """Token with 0-second expiry should fail after creation."""
-        from jose import jwt as jose_jwt
+        import jwt as pyjwt
 
         provider = LocalAuthProvider(
             db_path=tmp_path / "auth.db",
@@ -101,7 +101,7 @@ class TestAuthenticate:
             "username": "alice",
             "exp": int(time.time()) - 10,  # 10 seconds in the past
         }
-        expired_token = jose_jwt.encode(payload, "test-key", algorithm="HS256")
+        expired_token = pyjwt.encode(payload, "test-key", algorithm="HS256")
 
         with pytest.raises(AuthenticationError):
             await provider.authenticate(expired_token)
@@ -109,7 +109,7 @@ class TestAuthenticate:
     @pytest.mark.asyncio
     async def test_authenticate_wrong_secret_key(self, tmp_path) -> None:
         """Token signed with a different key should fail."""
-        from jose import jwt as jose_jwt
+        import jwt as pyjwt
 
         provider = LocalAuthProvider(
             db_path=tmp_path / "auth.db",
@@ -120,7 +120,7 @@ class TestAuthenticate:
             "username": "alice",
             "exp": int(time.time()) + 3600,
         }
-        bad_token = jose_jwt.encode(payload, "wrong-key", algorithm="HS256")
+        bad_token = pyjwt.encode(payload, "wrong-key", algorithm="HS256")
         with pytest.raises(AuthenticationError, match="Invalid token"):
             await provider.authenticate(bad_token)
 
