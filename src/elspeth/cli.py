@@ -2193,8 +2193,6 @@ def web(
     """Start the ELSPETH web application."""
     try:
         import uvicorn
-
-        from elspeth.web.config import WebSettings
     except ImportError:
         typer.echo(
             "Error: Web UI requires the [webui] extra. Install with: uv pip install -e '.[webui]'",
@@ -2202,7 +2200,23 @@ def web(
         )
         raise typer.Exit(1) from None
 
+    from elspeth.web.config import WebSettings
+
+    # Validate CLI arguments against WebSettings (catches invalid auth_provider early).
     settings = WebSettings(port=port, host=host, auth_provider=auth)
+
+    # FIXME(Sub-2): uvicorn's factory protocol calls create_app() with no arguments,
+    # so only host/port (passed to uvicorn directly) take effect. The auth_provider
+    # and other WebSettings fields are lost — create_app() constructs WebSettings()
+    # with defaults. This is acceptable in Sub-1 (no auth middleware exists yet).
+    # Sub-2 must wire settings through to create_app(), e.g. via env vars or a
+    # module-level holder. See spec W7 note.
+    if auth != "local":
+        typer.echo(
+            f"Warning: --auth={auth} accepted but not yet effective. Auth middleware is added in Sub-2.",
+            err=True,
+        )
+
     uvicorn.run(
         "elspeth.web.app:create_app",
         host=settings.host,
