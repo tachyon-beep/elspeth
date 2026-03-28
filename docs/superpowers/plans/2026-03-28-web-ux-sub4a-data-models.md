@@ -2,7 +2,7 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development or superpowers:executing-plans.
 
-**Goal:** Implement all Spec types, CompositionState with freeze_fields/to_dict/mutation methods, and Stage 1 validation
+**Goal:** Implement all Spec types, CompositionState with freeze_fields/to_dict/from_dict/mutation methods, and Stage 1 validation
 **Parent Plan:** `plans/2026-03-28-web-ux-sub4-composer.md`
 **Spec:** `specs/2026-03-28-web-ux-sub4-composer-design.md`
 **Depends On:** Sub-Plan 1 (Foundation) — completed
@@ -90,6 +90,21 @@ class TestSourceSpec:
         )
         with pytest.raises(TypeError):
             s.options["nested"]["mutate"] = "x"  # type: ignore[index]
+
+    def test_from_dict_round_trip(self) -> None:
+        s = SourceSpec(
+            plugin="csv",
+            on_success="t1",
+            options={"nested": {"key": "val"}},
+            on_validation_failure="quarantine",
+        )
+        restored = SourceSpec.from_dict({
+            "plugin": "csv",
+            "on_success": "t1",
+            "options": {"nested": {"key": "val"}},
+            "on_validation_failure": "quarantine",
+        })
+        assert restored == s
 
 
 class TestNodeSpec:
@@ -180,6 +195,36 @@ class TestNodeSpec:
         )
         assert isinstance(n.branches, tuple)
 
+    def test_from_dict_with_optional_fields(self) -> None:
+        """from_dict reconstructs optional fields; missing ones default to None."""
+        d = {
+            "id": "g1", "node_type": "gate", "plugin": None,
+            "input": "in", "on_success": None, "on_error": None,
+            "options": {},
+            "condition": "row['x'] > 1",
+            "routes": {"high": "s1"},
+            "fork_to": ["path_a", "path_b"],
+        }
+        n = NodeSpec.from_dict(d)
+        assert n.condition == "row['x'] > 1"
+        assert n.fork_to == ("path_a", "path_b")
+        assert n.branches is None
+        assert n.policy is None
+        assert n.merge is None
+
+    def test_from_dict_converts_list_to_tuple(self) -> None:
+        """to_dict() serialises tuples as lists; from_dict() must convert back."""
+        d = {
+            "id": "c1", "node_type": "coalesce", "plugin": None,
+            "input": "join", "on_success": "out", "on_error": None,
+            "options": {},
+            "branches": ["a", "b"],
+            "policy": "require_all", "merge": "nested",
+        }
+        n = NodeSpec.from_dict(d)
+        assert isinstance(n.branches, tuple)
+        assert n.branches == ("a", "b")
+
 
 class TestEdgeSpec:
     def test_create(self) -> None:
@@ -203,6 +248,17 @@ class TestEdgeSpec:
         )
         with pytest.raises(AttributeError):
             e.id = "e2"  # type: ignore[misc]
+
+    def test_from_dict_round_trip(self) -> None:
+        e = EdgeSpec(
+            id="e1", from_node="source", to_node="t1",
+            edge_type="on_success", label="main",
+        )
+        restored = EdgeSpec.from_dict({
+            "id": "e1", "from_node": "source", "to_node": "t1",
+            "edge_type": "on_success", "label": "main",
+        })
+        assert restored == e
 
 
 class TestOutputSpec:
@@ -233,6 +289,17 @@ class TestOutputSpec:
         with pytest.raises(TypeError):
             o.options["new"] = 2  # type: ignore[index]
 
+    def test_from_dict_round_trip(self) -> None:
+        o = OutputSpec(
+            name="out", plugin="csv",
+            options={"path": "/out.csv"}, on_write_failure="quarantine",
+        )
+        restored = OutputSpec.from_dict({
+            "name": "out", "plugin": "csv",
+            "options": {"path": "/out.csv"}, "on_write_failure": "quarantine",
+        })
+        assert restored == o
+
 
 class TestPipelineMetadata:
     def test_defaults(self) -> None:
@@ -250,6 +317,19 @@ class TestPipelineMetadata:
         m = PipelineMetadata()
         with pytest.raises(AttributeError):
             m.name = "new"  # type: ignore[misc]
+
+    def test_from_dict_round_trip(self) -> None:
+        m = PipelineMetadata(name="My Pipeline", description="Desc")
+        restored = PipelineMetadata.from_dict({
+            "name": "My Pipeline", "description": "Desc",
+        })
+        assert restored == m
+
+    def test_from_dict_uses_defaults_for_missing_fields(self) -> None:
+        """Missing fields fall back to dataclass defaults."""
+        restored = PipelineMetadata.from_dict({})
+        assert restored.name == "Untitled Pipeline"
+        assert restored.description == ""
 
 
 class TestValidationSummary:
@@ -288,7 +368,7 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 from dataclasses import dataclass, field, replace
-from typing import Any
+from typing import Any, Self
 
 from elspeth.contracts.freeze import freeze_fields
 
@@ -302,6 +382,14 @@ class PipelineMetadata:
 
     name: str = "Untitled Pipeline"
     description: str = ""
+
+    @classmethod
+    def from_dict(cls, d: dict[str, Any]) -> Self:
+        """Reconstruct from a plain dict (inverse of to_dict serialisation)."""
+        return cls(
+            name=d.get("name", "Untitled Pipeline"),
+            description=d.get("description", ""),
+        )
 
 
 @dataclass(frozen=True, slots=True)
@@ -322,6 +410,16 @@ class SourceSpec:
 
     def __post_init__(self) -> None:
         freeze_fields(self, "options")
+
+    @classmethod
+    def from_dict(cls, d: dict[str, Any]) -> Self:
+        """Reconstruct from a plain dict (inverse of to_dict serialisation)."""
+        return cls(
+            plugin=d["plugin"],
+            on_success=d["on_success"],
+            options=d["options"],
+            on_validation_failure=d["on_validation_failure"],
+        )
 
 
 @dataclass(frozen=True, slots=True)
@@ -363,6 +461,32 @@ class NodeSpec:
         if self.routes is not None:
             freeze_fields(self, "routes")
 
+    @classmethod
+    def from_dict(cls, d: dict[str, Any]) -> Self:
+        """Reconstruct from a plain dict (inverse of to_dict serialisation).
+
+        Optional fields (condition, routes, fork_to, branches, policy, merge)
+        default to None when absent from the dict. fork_to and branches are
+        converted from list to tuple since to_dict() serialises tuples as lists.
+        """
+        fork_to = d.get("fork_to")
+        branches = d.get("branches")
+        return cls(
+            id=d["id"],
+            node_type=d["node_type"],
+            plugin=d["plugin"],
+            input=d["input"],
+            on_success=d["on_success"],
+            on_error=d["on_error"],
+            options=d["options"],
+            condition=d.get("condition"),
+            routes=d.get("routes"),
+            fork_to=tuple(fork_to) if fork_to is not None else None,
+            branches=tuple(branches) if branches is not None else None,
+            policy=d.get("policy"),
+            merge=d.get("merge"),
+        )
+
 
 @dataclass(frozen=True, slots=True)
 class EdgeSpec:
@@ -381,6 +505,17 @@ class EdgeSpec:
     to_node: str
     edge_type: str
     label: str | None
+
+    @classmethod
+    def from_dict(cls, d: dict[str, Any]) -> Self:
+        """Reconstruct from a plain dict (inverse of to_dict serialisation)."""
+        return cls(
+            id=d["id"],
+            from_node=d["from_node"],
+            to_node=d["to_node"],
+            edge_type=d["edge_type"],
+            label=d["label"],
+        )
 
 
 @dataclass(frozen=True, slots=True)
@@ -401,6 +536,16 @@ class OutputSpec:
 
     def __post_init__(self) -> None:
         freeze_fields(self, "options")
+
+    @classmethod
+    def from_dict(cls, d: dict[str, Any]) -> Self:
+        """Reconstruct from a plain dict (inverse of to_dict serialisation)."""
+        return cls(
+            name=d["name"],
+            plugin=d["plugin"],
+            options=d["options"],
+            on_write_failure=d["on_write_failure"],
+        )
 
 
 @dataclass(frozen=True, slots=True)
@@ -704,6 +849,115 @@ class TestCompositionState:
         # Source options should still be frozen after replace
         with pytest.raises(TypeError):
             new_state.source.options["new"] = "x"  # type: ignore[union-attr, index]
+
+    # --- from_dict round-trip ---
+
+    def test_from_dict_round_trip_empty(self) -> None:
+        """Empty state round-trips through to_dict/from_dict."""
+        state = self._empty_state()
+        restored = CompositionState.from_dict(state.to_dict())
+        assert restored == state
+
+    def test_from_dict_round_trip_fully_populated(self) -> None:
+        """Fully populated state round-trips through to_dict/from_dict.
+
+        This is the Seam A invariant: state == CompositionState.from_dict(state.to_dict()).
+        Covers nested MappingProxyType fields, optional None fields, and tuple fields.
+        """
+        gate = NodeSpec(
+            id="gate_1",
+            node_type="gate",
+            plugin=None,
+            input="source_out",
+            on_success=None,
+            on_error=None,
+            options={},
+            condition="row['score'] >= 0.5",
+            routes={"high": "sink_good", "low": "sink_bad"},
+            fork_to=("path_a", "path_b"),
+            branches=None,
+            policy=None,
+            merge=None,
+        )
+        coalesce = NodeSpec(
+            id="coal_1",
+            node_type="coalesce",
+            plugin=None,
+            input="join_point",
+            on_success="main_output",
+            on_error=None,
+            options={},
+            condition=None,
+            routes=None,
+            fork_to=None,
+            branches=("path_a", "path_b"),
+            policy="require_all",
+            merge="nested",
+        )
+        state = CompositionState(
+            source=SourceSpec(
+                plugin="csv",
+                on_success="transform_1",
+                options={"path": "/data/in.csv", "nested": {"key": "val"}},
+                on_validation_failure="quarantine",
+            ),
+            nodes=(self._make_node("transform_1"), gate, coalesce),
+            edges=(
+                self._make_edge("e1"),
+                EdgeSpec(
+                    id="e2",
+                    from_node="gate_1",
+                    to_node="sink_good",
+                    edge_type="route_true",
+                    label="high",
+                ),
+            ),
+            outputs=(
+                self._make_output("main_output"),
+                OutputSpec(
+                    name="sink_good",
+                    plugin="json",
+                    options={"indent": 2},
+                    on_write_failure="discard",
+                ),
+            ),
+            metadata=PipelineMetadata(
+                name="Test Pipeline",
+                description="A fully populated test state",
+            ),
+            version=42,
+        )
+        restored = CompositionState.from_dict(state.to_dict())
+        assert restored == state
+
+    def test_from_dict_round_trip_none_optional_fields(self) -> None:
+        """NodeSpec optional fields omitted by to_dict() reconstruct as None."""
+        node = self._make_node("t1")
+        state = self._empty_state().with_node(node)
+        restored = CompositionState.from_dict(state.to_dict())
+        restored_node = restored.nodes[0]
+        assert restored_node.condition is None
+        assert restored_node.routes is None
+        assert restored_node.fork_to is None
+        assert restored_node.branches is None
+        assert restored_node.policy is None
+        assert restored_node.merge is None
+
+    def test_from_dict_containers_are_frozen(self) -> None:
+        """from_dict() output has deep-frozen containers (not plain dicts)."""
+        state = self._empty_state()
+        src = SourceSpec(
+            plugin="csv",
+            on_success="t1",
+            options={"nested": {"k": "v"}},
+            on_validation_failure="discard",
+        )
+        state = state.with_source(src)
+        restored = CompositionState.from_dict(state.to_dict())
+        with pytest.raises(TypeError):
+            restored.source.options["new"] = "x"  # type: ignore[union-attr, index]
+        with pytest.raises(TypeError):
+            restored.source.options["nested"]["mutate"] = "y"  # type: ignore[union-attr, index]
 ```
 
 - [ ] **Step 2: Implement CompositionState**
@@ -887,6 +1141,25 @@ class CompositionState:
             })
 
         return result
+
+    @classmethod
+    def from_dict(cls, d: dict[str, Any]) -> Self:
+        """Reconstruct from a plain dict (inverse of to_dict serialisation).
+
+        Calls from_dict() on each nested Spec type. This is the only way
+        to construct CompositionState from deserialised JSON (Spec AC #18).
+        The round-trip invariant holds:
+            state == CompositionState.from_dict(state.to_dict())
+        """
+        source_data = d["source"]
+        return cls(
+            source=SourceSpec.from_dict(source_data) if source_data is not None else None,
+            nodes=tuple(NodeSpec.from_dict(n) for n in d["nodes"]),
+            edges=tuple(EdgeSpec.from_dict(e) for e in d["edges"]),
+            outputs=tuple(OutputSpec.from_dict(o) for o in d["outputs"]),
+            metadata=PipelineMetadata.from_dict(d["metadata"]),
+            version=d["version"],
+        )
 
     # --- Validation ---
 
@@ -1264,9 +1537,30 @@ git commit -m "test(web/composer): comprehensive Stage 1 validation tests"
 - [ ] `without_node` cascades edge removal for edges referencing the removed node
 - [ ] `without_*` methods return `None` when the target does not exist
 - [ ] `to_dict()` recursively unwraps `MappingProxyType` to `dict` and `tuple` to `list`
+- [ ] `from_dict()` class methods on all `*Spec` types and `CompositionState` reconstruct frozen dataclass instances from plain dicts
+- [ ] Round-trip invariant holds: `state == CompositionState.from_dict(state.to_dict())` for fully populated states
 - [ ] `to_dict()` output round-trips through `yaml.dump()` without `RepresenterError`
 - [ ] `validate()` checks: source exists, outputs exist, edge references valid, unique IDs, node-type field consistency, connection completeness
 - [ ] All tests pass: `.venv/bin/python -m pytest tests/unit/web/composer/test_state.py -v`
 - [ ] mypy passes: `.venv/bin/python -m mypy src/elspeth/web/composer/state.py`
 - [ ] No defensive programming patterns (no `.get()` on typed fields, no `getattr` with defaults)
 - [ ] Layer dependency respected: `state.py` imports from L0 (`contracts.freeze`) only
+
+---
+
+## Round 4 Review Amendments
+
+### Added `from_dict()` factory methods (2026-03-28)
+
+**Reason:** Seam A requires the round-trip invariant `state == CompositionState.from_dict(state.to_dict())`. Sub-2's `from_record()` calls `CompositionState.from_dict()` to reconstruct domain objects from deserialised JSON. Spec AC #17 and #18 mandate `from_dict()` on every `*Spec` type and `CompositionState`.
+
+**Changes:**
+
+- Added `from typing import Self` to the state module imports
+- Added `@classmethod from_dict(cls, d: dict[str, Any]) -> Self` to: `PipelineMetadata`, `SourceSpec`, `NodeSpec`, `EdgeSpec`, `OutputSpec`, `CompositionState`
+- `NodeSpec.from_dict()` handles optional fields that `to_dict()` conditionally omits (defaulting to `None`) and converts lists back to tuples for `fork_to` and `branches`
+- `PipelineMetadata.from_dict()` uses `d.get()` with dataclass defaults for missing fields (this is the one legitimate use of `.get()` -- the dict comes from `to_dict()` which always includes all fields, but the spec says "missing fields use the dataclass defaults" for forward compatibility)
+- `CompositionState.from_dict()` delegates to each nested Spec type's `from_dict()`
+- Added per-type `from_dict` tests in `TestSourceSpec`, `TestNodeSpec`, `TestEdgeSpec`, `TestOutputSpec`, `TestPipelineMetadata`
+- Added round-trip invariant tests in `TestCompositionState`: empty state, fully populated state (gate + coalesce + nested options), None optional field preservation, and deep-freeze verification on restored instances
+- Updated self-review checklist with `from_dict()` and round-trip invariant items

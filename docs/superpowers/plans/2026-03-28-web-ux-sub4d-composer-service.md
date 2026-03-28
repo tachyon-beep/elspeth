@@ -86,17 +86,19 @@ class ComposerService(Protocol):
     async def compose(
         self,
         message: str,
-        messages: list[Any],  # list[ChatMessageRecord]
+        messages: list[dict[str, Any]],  # pre-converted by route handler
         state: CompositionState,
     ) -> ComposerResult:
         """Run the LLM composition loop.
 
         Args:
             message: The user's chat message.
-            messages: Pre-fetched chat history (list[ChatMessageRecord]).
-                The route handler calls session_service.get_messages()
-                and passes the result. ComposerService does NOT depend
-                on SessionService — the route handler mediates.
+            messages: Chat history as plain dicts (role/content keys).
+                The route handler fetches list[ChatMessageRecord] from
+                session_service.get_messages(), converts each to a dict
+                via dataclasses.asdict(), and passes the result here.
+                ComposerService does NOT depend on SessionService —
+                the route handler mediates (seam contract B).
             state: The current CompositionState.
 
         Returns:
@@ -194,7 +196,7 @@ def build_context_message(
 
 
 def build_messages(
-    chat_history: list[Any],  # list[ChatMessageRecord], pre-fetched by route handler
+    chat_history: list[dict[str, Any]],  # pre-converted by route handler
     state: CompositionState,
     user_message: str,
     catalog: CatalogServiceProtocol,
@@ -213,8 +215,13 @@ def build_messages(
     4. Current user message
 
     Args:
-        chat_history: Pre-fetched chat history (list[ChatMessageRecord]
-            from session_service.get_messages(), passed by route handler).
+        chat_history: Chat history as plain dicts (role/content keys).
+            The route handler fetches list[ChatMessageRecord] from
+            session_service.get_messages() and converts each to a dict
+            via dataclasses.asdict() before passing here.
+            ChatMessageRecord is a frozen dataclass (Sub-2), not a
+            plain dict — direct extension would fail. Seam contract B
+            places the conversion responsibility on the route handler.
         state: Current CompositionState.
         user_message: The user's current message.
         catalog: CatalogService for context injection.
@@ -230,7 +237,10 @@ def build_messages(
     # 2. Injected context
     messages.append(build_context_message(state, catalog))
 
-    # 3. Chat history
+    # 3. Chat history — expects list[dict], NOT list[ChatMessageRecord].
+    # ChatMessageRecord (Sub-2) is a frozen dataclass, not a plain dict.
+    # The route handler converts via dataclasses.asdict() before passing
+    # to compose(). See seam contract B.
     if chat_history:
         messages.extend(chat_history)
 
@@ -647,15 +657,15 @@ class ComposerServiceImpl:
     async def compose(
         self,
         message: str,
-        messages: list[Any],  # list[ChatMessageRecord]
+        messages: list[dict[str, Any]],  # pre-converted by route handler
         state: CompositionState,
     ) -> ComposerResult:
         """Run the LLM composition loop.
 
         Args:
             message: The user's chat message.
-            messages: Pre-fetched chat history (from route handler).
-                ComposerService does NOT depend on SessionService.
+            messages: Chat history as plain dicts (pre-converted from
+                ChatMessageRecord by route handler; seam contract B).
             state: The current CompositionState.
 
         Returns:
@@ -711,33 +721,28 @@ class ComposerServiceImpl:
                     })
                     continue
 
-                try:
-                    result = execute_tool(
-                        tool_name, arguments, state, self._catalog
-                    )
-                    # Update state if mutation succeeded
-                    state = result.updated_state
-                    # Return tool result to LLM
-                    llm_messages.append({
-                        "role": "tool",
-                        "tool_call_id": tool_call.id,
-                        "content": json.dumps(result.to_dict()),
-                    })
-                except Exception as exc:
-                    # Unexpected error — return to LLM, don't crash
-                    llm_messages.append({
-                        "role": "tool",
-                        "tool_call_id": tool_call.id,
-                        "content": json.dumps({
-                            "error": f"Tool execution error: {exc}",
-                        }),
-                    })
+                # execute_tool() is system code (not a Tier 3 boundary).
+                # It returns ToolResult(success=False) for expected failures
+                # (unknown tool, bad arguments). Any exception is a bug in
+                # our code and must crash — do not catch. See CLAUDE.md:
+                # "Plugin Ownership: System Code, Not User Code".
+                result = execute_tool(
+                    tool_name, arguments, state, self._catalog
+                )
+                # Update state if mutation succeeded
+                state = result.updated_state
+                # Return tool result to LLM
+                llm_messages.append({
+                    "role": "tool",
+                    "tool_call_id": tool_call.id,
+                    "content": json.dumps(result.to_dict()),
+                })
 
         raise ComposerConvergenceError(self._max_turns)
 
     def _build_messages(
         self,
-        chat_history: list[Any],  # list[ChatMessageRecord]
+        chat_history: list[dict[str, Any]],  # pre-converted by route handler
         state: CompositionState,
         user_message: str,
     ) -> list[dict[str, Any]]:
@@ -963,7 +968,13 @@ async def send_message(
     try:
         # Pre-fetch chat history — ComposerService does NOT depend on
         # SessionService; the route handler mediates (H1 fix, seam contract B).
-        chat_messages = await session_service.get_messages(session_id)
+        # ChatMessageRecord is a frozen dataclass (Sub-2). Convert to plain
+        # dicts for LLM message construction. Only role and content are needed.
+        chat_records = await session_service.get_messages(session_id)
+        chat_messages = [
+            {"role": r.role, "content": r.content}
+            for r in chat_records
+        ]
         result = await composer_service.compose(body.content, chat_messages, state)
     except ComposerConvergenceError as exc:
         # M2: 422 for convergence errors — use "detail" not "message"
@@ -1099,12 +1110,12 @@ After all tasks, verify:
 3. `SYSTEM_PROMPT` covers all 9 rules. `build_messages()` returns a NEW list on every call.
 4. `build_context_message()` injects current state + validation + plugin summary (names only, via `.name` attribute).
 5. `ComposerServiceImpl` runs bounded tool-use loop. `_call_llm()` is separated for test mocking.
-6. Loop handles: text-only response, single tool call, multi-turn tool calls, multiple tool calls per turn, convergence error, unknown tool, malformed arguments.
+6. Loop handles: text-only response, single tool call, multi-turn tool calls, multiple tool calls per turn, convergence error, unknown tool, malformed arguments. `execute_tool()` runs unguarded — bugs crash (Amendment 2).
 7. `_build_messages()` delegates to `build_messages()` and returns a new list on every call.
 8. Model configured via `WebSettings.composer_model`, max turns via `WebSettings.composer_max_turns`.
 9. Route handler catches `ComposerConvergenceError` -> HTTP 422 with `{"error_type": "convergence", "detail": "...", "turns_used": int}` (S16).
 10. Route handler catches LLM client errors -> HTTP 502 with `{"error_type": "llm_unavailable"|"llm_auth_error", "detail": "..."}` (S16).
-11. Route handler pre-fetches chat history via `session_service.get_messages()` and passes to `compose()` (H1 fix).
+11. Route handler pre-fetches chat history via `session_service.get_messages()`, converts `ChatMessageRecord` to plain dicts, and passes to `compose()` (H1 fix, Amendment 1).
 12. Route handler calls `state.validate()` and passes `is_valid`/`errors` to `save_composition_state()` (M5 fix).
 13. Route handler only persists state when `version` changed.
 14. `GET /api/sessions/{id}/state/yaml` returns `{"yaml": str}` or 404 when no state exists (S10).
@@ -1118,3 +1129,50 @@ After all tasks, verify:
 # Type checking
 .venv/bin/python -m mypy src/elspeth/web/composer/
 ```
+
+---
+
+## Review Amendments
+
+### Amendment 1: ChatMessageRecord serialization (2026-03-28)
+
+**Problem:** `build_messages()` in `prompts.py` called `messages.extend(chat_history)`
+where `chat_history` was `list[ChatMessageRecord]`. `ChatMessageRecord` is a frozen
+dataclass (Sub-2 spec), not a plain dict. Extending a `list[dict]` with dataclass
+instances would produce a malformed LLM message list — LiteLLM expects dicts with
+`role` and `content` keys.
+
+**Fix:** The route handler now converts `ChatMessageRecord` instances to plain dicts
+before passing to `compose()`. The conversion extracts only `role` and `content`
+(the fields LiteLLM needs). All type signatures updated from `list[Any]` to
+`list[dict[str, Any]]` across the protocol, service, and prompts module.
+The conversion responsibility sits in the route handler (seam contract B) because
+ComposerService must not depend on SessionService or its types.
+
+**Affected locations:**
+- `prompts.py`: `build_messages()` signature and docstring
+- `protocol.py`: `ComposerService.compose()` signature and docstring
+- `service.py`: `ComposerServiceImpl.compose()` and `_build_messages()` signatures
+- `sessions/routes.py`: `send_message()` handler — added dict conversion
+
+### Amendment 2: Remove defensive `except Exception` around `execute_tool()` (2026-03-28)
+
+**Problem:** The `compose()` method's tool-use loop wrapped `execute_tool()` in
+`except Exception`, catching any error and returning it to the LLM as a tool
+result. `execute_tool()` is system code, not an external boundary. It already
+handles expected failures (unknown tool, bad arguments) by returning
+`ToolResult(success=False)`. Any exception from `execute_tool()` is a bug in
+our code.
+
+Per CLAUDE.md's offensive programming mandate: "A defective plugin that silently
+produces wrong results is worse than a crash." Catching the exception and feeding
+an error string back to the LLM hides the bug and allows the conversation to
+continue with corrupted state.
+
+**Fix:** Removed the `try/except Exception` block around `execute_tool()`. The call
+now runs unguarded — bugs crash immediately. The `_call_llm()` call remains the
+only Tier 3 boundary in the loop (LLM responses are external data), and its error
+handling is in the route handler where it belongs.
+
+**Affected locations:**
+- `service.py`: `ComposerServiceImpl.compose()` — removed `except Exception` block
