@@ -264,6 +264,5 @@ class TestEntraProtocolConformance:
     def test_entra_satisfies_auth_provider(self) -> None:
         from elspeth.web.auth.protocol import AuthProvider
 
-        provider: AuthProvider = EntraAuthProvider(tenant_id=TENANT_ID, audience=AUDIENCE)
-        assert callable(type(provider).authenticate)
-        assert callable(type(provider).get_user_info)
+        provider = EntraAuthProvider(tenant_id=TENANT_ID, audience=AUDIENCE)
+        assert isinstance(provider, AuthProvider)

@@ -82,8 +82,9 @@ class TestOIDCDiscovery:
     async def test_caches_jwks_on_subsequent_calls(
         self,
         rsa_keypair,
-        mock_httpx_discovery,
+        jwks_response,
     ) -> None:
+        """Second authenticate should use cached JWKS, not re-fetch."""
         private_key, _ = rsa_keypair
         provider = OIDCAuthProvider(
             issuer=ISSUER,
@@ -91,10 +92,38 @@ class TestOIDCDiscovery:
             jwks_cache_ttl_seconds=3600,
         )
         token = make_rs256_token(private_key, _valid_claims())
-        with mock_httpx_discovery:
+
+        # First call: mock returns valid JWKS
+        async def success_get(url, **kwargs):
+            response = MagicMock()
+            response.raise_for_status = lambda: None
+            if ".well-known/openid-configuration" in url:
+                response.json.return_value = {"jwks_uri": f"{ISSUER}/keys", "issuer": ISSUER}
+            elif url.endswith("/keys"):
+                response.json.return_value = jwks_response
+            return response
+
+        success_client = AsyncMock()
+        success_client.get = success_get
+        success_client.__aenter__ = AsyncMock(return_value=success_client)
+        success_client.__aexit__ = AsyncMock(return_value=False)
+
+        with patch("elspeth.web.auth.oidc.httpx.AsyncClient", return_value=success_client):
             await provider.authenticate(token)
-            # Second call should use cached keys -- no additional HTTP calls
-            await provider.authenticate(token)
+
+        # Second call: mock raises on any HTTP call -- if caching works,
+        # this mock is never hit
+        async def failing_get(url, **kwargs):
+            raise AssertionError("JWKS should have been cached -- HTTP call should not happen")
+
+        failing_client = AsyncMock()
+        failing_client.get = failing_get
+        failing_client.__aenter__ = AsyncMock(return_value=failing_client)
+        failing_client.__aexit__ = AsyncMock(return_value=False)
+
+        with patch("elspeth.web.auth.oidc.httpx.AsyncClient", return_value=failing_client):
+            identity = await provider.authenticate(token)
+            assert identity.user_id == "user-123"
 
 
 class TestOIDCTokenValidation:
@@ -401,6 +430,5 @@ class TestOIDCProtocolConformance:
     def test_oidc_satisfies_auth_provider(self) -> None:
         from elspeth.web.auth.protocol import AuthProvider
 
-        provider: AuthProvider = OIDCAuthProvider(issuer=ISSUER, audience=AUDIENCE)
-        assert callable(type(provider).authenticate)
-        assert callable(type(provider).get_user_info)
+        provider = OIDCAuthProvider(issuer=ISSUER, audience=AUDIENCE)
+        assert isinstance(provider, AuthProvider)

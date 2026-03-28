@@ -6,7 +6,7 @@ import uuid
 from datetime import UTC, datetime
 
 import pytest
-from sqlalchemy import create_engine, insert, inspect, select
+from sqlalchemy import create_engine, insert, inspect, select, text
 from sqlalchemy.exc import IntegrityError
 
 from elspeth.web.sessions.models import (
@@ -172,6 +172,21 @@ class TestSessionForeignKeys:
             # Verify it was inserted
             result = conn.execute(select(chat_messages_table).where(chat_messages_table.c.id == msg_id)).fetchone()
             assert result is not None
+
+    def test_orphan_message_rejected_with_fk_enforcement(self, engine) -> None:
+        """With PRAGMA foreign_keys=ON, orphan messages are rejected."""
+        with engine.begin() as conn:
+            conn.execute(text("PRAGMA foreign_keys=ON"))
+            with pytest.raises(IntegrityError):
+                conn.execute(
+                    insert(chat_messages_table).values(
+                        id=str(uuid.uuid4()),
+                        session_id="nonexistent-session",
+                        role="user",
+                        content="Orphan message",
+                        created_at=datetime.now(UTC),
+                    )
+                )
 
 
 class TestCheckConstraints:

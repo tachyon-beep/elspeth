@@ -192,9 +192,7 @@ class TestProtocolConformance:
     def test_local_satisfies_auth_provider(self, provider) -> None:
         from elspeth.web.auth.protocol import AuthProvider
 
-        typed: AuthProvider = provider
-        assert callable(type(typed).authenticate)
-        assert callable(type(typed).get_user_info)
+        assert isinstance(provider, AuthProvider)
 
 
 class TestTimingDefense:

@@ -7,6 +7,8 @@ from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
+_LOCAL_HOSTS = {"127.0.0.1", "localhost", "::1"}
+
 
 class WebSettings(BaseModel):
     """Configuration for the ELSPETH web application.
@@ -52,10 +54,10 @@ class WebSettings(BaseModel):
     @model_validator(mode="after")
     def _enforce_secret_key_in_production(self) -> WebSettings:
         """Reject the default secret key when host suggests non-local deployment."""
-        if self.secret_key == "change-me-in-production" and self.host != "127.0.0.1":
+        if self.secret_key == "change-me-in-production" and self.host not in _LOCAL_HOSTS:
             raise ValueError(
                 "secret_key must be set to a secure value for non-local deployments "
-                "(host is not 127.0.0.1). Set ELSPETH_WEB__SECRET_KEY or pass secret_key explicitly."
+                "(host is not a loopback address). Set ELSPETH_WEB__SECRET_KEY or pass secret_key explicitly."
             )
         return self
 

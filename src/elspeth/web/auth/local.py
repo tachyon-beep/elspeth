@@ -21,6 +21,20 @@ from elspeth.web.auth.models import AuthenticationError, UserIdentity, UserProfi
 class LocalAuthProvider:
     """Authenticates users against a local SQLite database with bcrypt + JWT."""
 
+    _dummy_hash: bytes | None = None
+
+    @classmethod
+    def _get_dummy_hash(cls) -> bytes:
+        """Lazily compute a dummy bcrypt hash for constant-time comparison.
+
+        Deferred to first use (not import time, not construction time)
+        so the ~200ms bcrypt cost is only paid if a login attempt
+        against a nonexistent user actually occurs.
+        """
+        if cls._dummy_hash is None:
+            cls._dummy_hash = bcrypt.hashpw(b"dummy", bcrypt.gensalt())
+        return cls._dummy_hash
+
     def __init__(
         self,
         db_path: Path,
@@ -31,7 +45,6 @@ class LocalAuthProvider:
         self._secret_key = secret_key
         self._token_expiry_hours = token_expiry_hours
         self._ensure_schema()
-        self._dummy_hash = bcrypt.hashpw(b"dummy", bcrypt.gensalt())
 
     def _get_conn(self) -> sqlite3.Connection:
         """Open a connection to the SQLite database."""
@@ -82,6 +95,11 @@ class LocalAuthProvider:
         Uses constant-time comparison to prevent username enumeration
         via timing side-channel.
         """
+        # Early rejection for empty credentials. This exits before the
+        # bcrypt path, so it is faster than a real login attempt. This is
+        # acceptable: empty credentials are syntactically invalid (not a
+        # guessable input), so the timing difference does not enable
+        # credential enumeration.
         if not username or not password:
             raise AuthenticationError("Invalid credentials")
 
@@ -93,7 +111,7 @@ class LocalAuthProvider:
 
         if row is None:
             # Constant-time: hash against dummy to prevent timing oracle
-            bcrypt.checkpw(password.encode(), self._dummy_hash)
+            bcrypt.checkpw(password.encode(), self._get_dummy_hash())
             raise AuthenticationError("Invalid credentials")
 
         if not bcrypt.checkpw(password.encode(), row[0].encode()):

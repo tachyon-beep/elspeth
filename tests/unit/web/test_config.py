@@ -223,6 +223,14 @@ class TestSecretKeyGuard:
         settings = WebSettings(host="127.0.0.1")
         assert settings.secret_key == "change-me-in-production"
 
+    def test_default_secret_key_allowed_on_localhost_name(self) -> None:
+        settings = WebSettings(host="localhost")
+        assert settings.secret_key == "change-me-in-production"
+
+    def test_default_secret_key_allowed_on_ipv6_loopback(self) -> None:
+        settings = WebSettings(host="::1")
+        assert settings.secret_key == "change-me-in-production"
+
     def test_custom_secret_key_allowed_on_any_host(self) -> None:
         settings = WebSettings(host="0.0.0.0", secret_key="my-real-secret")
         assert settings.secret_key == "my-real-secret"
