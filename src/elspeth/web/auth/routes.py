@@ -62,6 +62,10 @@ def create_auth_router() -> APIRouter:
 
         login() is synchronous (bcrypt is intentionally slow ~200ms),
         so it is offloaded to a thread to avoid blocking the event loop.
+
+        No CSRF token required — this is a bearer-token-only API (no
+        cookies). If cookie-based sessions are added later, CSRF
+        protection must be revisited.
         """
         provider = request.app.state.auth_provider
         if not isinstance(provider, LocalAuthProvider):
@@ -119,6 +123,10 @@ def create_auth_router() -> APIRouter:
         The raw token was stashed on request.state.auth_token by
         get_current_user, so we don't re-parse the Authorization header.
         """
+        # Note: authenticate() already decoded the JWT in get_current_user.
+        # get_user_info() decodes it again to extract profile claims.
+        # This is intentional — the middleware returns UserIdentity (minimal),
+        # while /me needs the full UserProfile with groups/email/display_name.
         token: str = request.state.auth_token
         auth_provider: AuthProvider = request.app.state.auth_provider
 

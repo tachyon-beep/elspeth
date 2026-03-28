@@ -34,7 +34,11 @@ def _valid_claims(overrides: dict | None = None) -> dict:
 
 @pytest.fixture
 def mock_httpx_discovery(jwks_response):
-    """Patch httpx.AsyncClient to return OIDC discovery and JWKS responses."""
+    """Patch httpx.AsyncClient to return OIDC discovery and JWKS responses.
+
+    NOTE: Similar fixture exists in test_entra_provider.py.
+    Intentionally kept separate — different ISSUER and JWKS URL patterns.
+    """
 
     async def mock_get(url, **kwargs):
         response = MagicMock()
@@ -324,6 +328,71 @@ class TestOIDCJWKSFailures:
             identity2 = await provider.authenticate(token)
         assert identity1.user_id == "user-123"
         assert identity2.user_id == "user-123"
+
+    @pytest.mark.asyncio
+    async def test_jwks_stale_cache_served_on_fetch_failure(
+        self,
+        rsa_keypair,
+        mock_httpx_discovery,
+    ) -> None:
+        """After a successful fetch, if re-fetch fails, stale cache is served."""
+        private_key, _ = rsa_keypair
+        provider = OIDCAuthProvider(
+            issuer=ISSUER,
+            audience=AUDIENCE,
+            jwks_cache_ttl_seconds=0,
+        )
+        token = make_rs256_token(private_key, _valid_claims())
+
+        # First call: successful fetch
+        with mock_httpx_discovery:
+            identity = await provider.authenticate(token)
+            assert identity.user_id == "user-123"
+
+        # Second call: fetch fails, but stale cache should be served
+        async def failing_get(url, **kwargs):
+            raise httpx.ConnectError("IdP is down")
+
+        failing_client = AsyncMock()
+        failing_client.get = failing_get
+        failing_client.__aenter__ = AsyncMock(return_value=failing_client)
+        failing_client.__aexit__ = AsyncMock(return_value=False)
+
+        with patch(
+            "elspeth.web.auth.oidc.httpx.AsyncClient",
+            return_value=failing_client,
+        ):
+            # Should succeed using stale cache, not raise
+            identity2 = await provider.authenticate(token)
+            assert identity2.user_id == "user-123"
+
+    @pytest.mark.asyncio
+    async def test_jwks_http_error_from_discovery(self) -> None:
+        """HTTP 500 from discovery endpoint raises AuthenticationError."""
+        provider = OIDCAuthProvider(issuer=ISSUER, audience=AUDIENCE)
+
+        async def mock_get(url, **kwargs):
+            response = MagicMock()
+            response.raise_for_status.side_effect = httpx.HTTPStatusError(
+                "500 Server Error",
+                request=MagicMock(),
+                response=MagicMock(),
+            )
+            return response
+
+        client_mock = AsyncMock()
+        client_mock.get = mock_get
+        client_mock.__aenter__ = AsyncMock(return_value=client_mock)
+        client_mock.__aexit__ = AsyncMock(return_value=False)
+
+        with (
+            patch(
+                "elspeth.web.auth.oidc.httpx.AsyncClient",
+                return_value=client_mock,
+            ),
+            pytest.raises(AuthenticationError, match="Failed to fetch JWKS"),
+        ):
+            await provider.authenticate("some-token")
 
 
 class TestOIDCProtocolConformance:

@@ -72,6 +72,16 @@ class TestLoginEndpoint:
         )
         assert response.status_code == 404
 
+    def test_login_not_available_for_entra(self) -> None:
+        provider = AsyncMock()
+        app = _create_test_app(provider, auth_provider_type="entra")
+        client = TestClient(app)
+        response = client.post(
+            "/api/auth/login",
+            json={"username": "alice", "password": "pw"},
+        )
+        assert response.status_code == 404
+
 
 class TestTokenRefreshEndpoint:
     """Tests for POST /api/auth/token."""

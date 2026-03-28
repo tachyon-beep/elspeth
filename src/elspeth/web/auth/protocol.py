@@ -6,11 +6,12 @@ No exception definitions here -- AuthenticationError lives in models.py.
 
 from __future__ import annotations
 
-from typing import Protocol
+from typing import Protocol, runtime_checkable
 
 from elspeth.web.auth.models import UserIdentity, UserProfile
 
 
+@runtime_checkable
 class AuthProvider(Protocol):
     """Protocol for pluggable authentication providers."""
 

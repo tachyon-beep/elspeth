@@ -62,6 +62,8 @@ class EntraAuthProvider:
         if raw_groups is None:
             pass  # Absent claim -- no groups assigned
         elif isinstance(raw_groups, list):
+            # Coerce group IDs to str — IdPs may send integers (e.g. Entra
+            # group object IDs). This is intentional Tier 3 coercion.
             groups.extend(str(g) for g in raw_groups)
         else:
             raise AuthenticationError(
@@ -72,6 +74,8 @@ class EntraAuthProvider:
         if raw_roles is None:
             pass  # Absent claim -- no roles assigned
         elif isinstance(raw_roles, list):
+            # Coerce group IDs to str — IdPs may send integers (e.g. Entra
+            # group object IDs). This is intentional Tier 3 coercion.
             groups.extend(f"role:{r}" for r in raw_roles)
         else:
             raise AuthenticationError(

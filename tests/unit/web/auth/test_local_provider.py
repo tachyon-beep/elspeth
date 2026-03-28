@@ -163,7 +163,7 @@ class TestGetUserInfo:
         provider.create_user("alice", "pw", display_name="Alice")
         token = provider.login("alice", "pw")
 
-        # Delete the user directly via sqlite3
+        # Access _db_path directly — no public API to delete users by design
         import sqlite3
 
         with sqlite3.connect(str(provider._db_path)) as conn:
@@ -219,7 +219,7 @@ class TestRefresh:
         import sqlite3
 
         provider.create_user("alice", "pw", display_name="Alice")
-        # Delete the user directly
+        # Access _db_path directly — no public API to delete users by design
         with sqlite3.connect(str(provider._db_path)) as conn:
             conn.execute("DELETE FROM users WHERE user_id = ?", ("alice",))
         with pytest.raises(AuthenticationError, match="User not found"):

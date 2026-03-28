@@ -13,6 +13,8 @@ from elspeth.web.sessions.models import (
     chat_messages_table,
     composition_states_table,
     metadata,
+    run_events_table,
+    runs_table,
     sessions_table,
 )
 
@@ -170,3 +172,110 @@ class TestSessionForeignKeys:
             # Verify it was inserted
             result = conn.execute(select(chat_messages_table).where(chat_messages_table.c.id == msg_id)).fetchone()
             assert result is not None
+
+
+class TestCheckConstraints:
+    """Verify CHECK constraints reject invalid values."""
+
+    def test_invalid_chat_message_role_rejected(self, engine) -> None:
+        session_id = str(uuid.uuid4())
+        with engine.begin() as conn:
+            conn.execute(
+                insert(sessions_table).values(
+                    id=session_id,
+                    user_id="alice",
+                    title="Test",
+                    created_at=datetime.now(UTC),
+                    updated_at=datetime.now(UTC),
+                )
+            )
+            with pytest.raises(IntegrityError):
+                conn.execute(
+                    insert(chat_messages_table).values(
+                        id=str(uuid.uuid4()),
+                        session_id=session_id,
+                        role="invalid_role",
+                        content="Hello",
+                        created_at=datetime.now(UTC),
+                    )
+                )
+
+    def test_invalid_run_status_rejected(self, engine) -> None:
+        session_id = str(uuid.uuid4())
+        state_id = str(uuid.uuid4())
+        with engine.begin() as conn:
+            conn.execute(
+                insert(sessions_table).values(
+                    id=session_id,
+                    user_id="alice",
+                    title="Test",
+                    created_at=datetime.now(UTC),
+                    updated_at=datetime.now(UTC),
+                )
+            )
+            conn.execute(
+                insert(composition_states_table).values(
+                    id=state_id,
+                    session_id=session_id,
+                    version=1,
+                    is_valid=True,
+                    created_at=datetime.now(UTC),
+                )
+            )
+            with pytest.raises(IntegrityError):
+                conn.execute(
+                    insert(runs_table).values(
+                        id=str(uuid.uuid4()),
+                        session_id=session_id,
+                        state_id=state_id,
+                        status="invalid_status",
+                        started_at=datetime.now(UTC),
+                        rows_processed=0,
+                        rows_failed=0,
+                    )
+                )
+
+    def test_invalid_run_event_type_rejected(self, engine) -> None:
+        session_id = str(uuid.uuid4())
+        state_id = str(uuid.uuid4())
+        run_id = str(uuid.uuid4())
+        with engine.begin() as conn:
+            conn.execute(
+                insert(sessions_table).values(
+                    id=session_id,
+                    user_id="alice",
+                    title="Test",
+                    created_at=datetime.now(UTC),
+                    updated_at=datetime.now(UTC),
+                )
+            )
+            conn.execute(
+                insert(composition_states_table).values(
+                    id=state_id,
+                    session_id=session_id,
+                    version=1,
+                    is_valid=True,
+                    created_at=datetime.now(UTC),
+                )
+            )
+            conn.execute(
+                insert(runs_table).values(
+                    id=run_id,
+                    session_id=session_id,
+                    state_id=state_id,
+                    status="pending",
+                    started_at=datetime.now(UTC),
+                    rows_processed=0,
+                    rows_failed=0,
+                )
+            )
+            with pytest.raises(IntegrityError):
+                conn.execute(
+                    insert(run_events_table).values(
+                        id=str(uuid.uuid4()),
+                        run_id=run_id,
+                        timestamp=datetime.now(UTC),
+                        event_type="invalid_type",
+                        data="{}",
+                    )
+                )

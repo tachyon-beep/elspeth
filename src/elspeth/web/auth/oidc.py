@@ -120,6 +120,8 @@ class OIDCAuthProvider:
 
         return UserIdentity(
             user_id=payload["sub"],
+            # sub is OIDC-required (crash on absence); preferred_username is
+            # optional (fall back to sub if absent)
             username=payload.get("preferred_username", payload["sub"]),
         )
 
@@ -132,6 +134,8 @@ class OIDCAuthProvider:
         if raw_groups is None:
             groups: list[str] = []
         elif isinstance(raw_groups, list):
+            # Coerce group IDs to str — IdPs may send integers (e.g. Entra
+            # group object IDs). This is intentional Tier 3 coercion.
             groups = [str(g) for g in raw_groups]
         else:
             raise AuthenticationError(
@@ -140,6 +144,8 @@ class OIDCAuthProvider:
 
         return UserProfile(
             user_id=payload["sub"],
+            # sub is OIDC-required (crash on absence); preferred_username is
+            # optional (fall back to sub if absent)
             username=payload.get("preferred_username", payload["sub"]),
             display_name=payload.get("name") or payload.get("preferred_username", "Unknown"),
             email=payload.get("email"),

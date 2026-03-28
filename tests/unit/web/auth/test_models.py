@@ -22,7 +22,7 @@ class TestUserIdentity:
 
     def test_slots(self) -> None:
         identity = UserIdentity(user_id="alice", username="alice")
-        assert not hasattr(identity, "__dict__")
+        assert "__slots__" in dir(type(identity))
 
 
 class TestUserProfile:

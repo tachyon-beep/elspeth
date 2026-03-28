@@ -35,7 +35,11 @@ def _valid_entra_claims(overrides: dict | None = None) -> dict:
 
 @pytest.fixture
 def mock_httpx_discovery(jwks_response):
-    """Patch httpx.AsyncClient to return OIDC discovery and JWKS responses."""
+    """Patch httpx.AsyncClient to return OIDC discovery and JWKS responses.
+
+    NOTE: Similar fixture exists in test_oidc_provider.py.
+    Intentionally kept separate — different ISSUER and JWKS URL patterns.
+    """
 
     async def mock_get(url, **kwargs):
         response = MagicMock()

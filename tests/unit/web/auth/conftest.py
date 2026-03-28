@@ -12,10 +12,11 @@ import jwt as pyjwt
 import pytest
 from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric import rsa
+from cryptography.hazmat.primitives.asymmetric.rsa import RSAPrivateKey, RSAPublicKey
 
 
 @pytest.fixture
-def rsa_keypair():
+def rsa_keypair() -> tuple[RSAPrivateKey, RSAPublicKey]:
     """Generate an RSA key pair for signing test JWTs."""
     private_key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
     public_key = private_key.public_key()
