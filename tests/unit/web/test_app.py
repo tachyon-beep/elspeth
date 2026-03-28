@@ -2,10 +2,12 @@
 
 from __future__ import annotations
 
+from fastapi import Depends
 from starlette.testclient import TestClient
 
 from elspeth.web.app import create_app
 from elspeth.web.config import WebSettings
+from elspeth.web.dependencies import get_settings
 
 
 class TestCreateApp:
@@ -75,3 +77,20 @@ class TestCORSMiddleware:
         )
         # Starlette CORS middleware omits the header for disallowed origins
         assert "access-control-allow-origin" not in response.headers
+
+
+class TestGetSettingsDependency:
+    """Tests for get_settings() dependency provider."""
+
+    def test_get_settings_returns_app_settings(self) -> None:
+        settings = WebSettings(port=4242)
+        app = create_app(settings)
+
+        @app.get("/api/_test_settings")
+        async def _test_endpoint(s: WebSettings = Depends(get_settings)) -> dict[str, int]:  # noqa: B008
+            return {"port": s.port}
+
+        client = TestClient(app)
+        response = client.get("/api/_test_settings")
+        assert response.status_code == 200
+        assert response.json() == {"port": 4242}

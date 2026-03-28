@@ -18,14 +18,11 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     Services that require a running event loop must be constructed here,
     not in the synchronous create_app() function.
 
-    Phase 1: stub -- no async services yet.
-    Phase 5 will construct ProgressBroadcaster here using
+    Sub-1: stub -- no async services yet.
+    Sub-5 will construct ProgressBroadcaster here using
     asyncio.get_running_loop().
     """
-    # Phase 5 will add:
-    #   app.state.broadcaster = ProgressBroadcaster(asyncio.get_running_loop())
     yield
-    # Shutdown: clean up async services here.
 
 
 def create_app(settings: WebSettings | None = None) -> FastAPI:

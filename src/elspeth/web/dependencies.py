@@ -1,9 +1,10 @@
 """FastAPI dependency injection providers.
 
-Each phase adds its service dependency here.  Phase 1 provides only
-get_settings().  Service stubs are added as phases 2-5 land.
+Sub-1 provides only get_settings().  Service dependencies are added
+as Sub-2 through Sub-5 land.
 
-Service construction order follows specs/2026-03-28-web-ux-seam-contracts.md.
+Service construction order follows
+docs/superpowers/specs/2026-03-28-web-ux-seam-contracts.md.
 ProgressBroadcaster and event-loop reference are created in the lifespan()
 async context manager (not in the synchronous create_app()), per the seam
 contract for async service wiring.

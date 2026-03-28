@@ -120,6 +120,43 @@ class TestWebSettingsValidation:
         with pytest.raises(ValueError):
             WebSettings(auth_provider="kerberos")  # type: ignore[arg-type]
 
+    def test_port_zero_rejected(self) -> None:
+        with pytest.raises(ValueError):
+            WebSettings(port=0)
+
+    def test_port_negative_rejected(self) -> None:
+        with pytest.raises(ValueError):
+            WebSettings(port=-1)
+
+    def test_port_above_65535_rejected(self) -> None:
+        with pytest.raises(ValueError):
+            WebSettings(port=65536)
+
+    def test_composer_max_turns_zero_rejected(self) -> None:
+        with pytest.raises(ValueError):
+            WebSettings(composer_max_turns=0)
+
+    def test_composer_timeout_zero_rejected(self) -> None:
+        with pytest.raises(ValueError):
+            WebSettings(composer_timeout_seconds=0)
+
+    def test_composer_rate_limit_zero_rejected(self) -> None:
+        with pytest.raises(ValueError):
+            WebSettings(composer_rate_limit_per_minute=0)
+
+    def test_max_upload_bytes_zero_rejected(self) -> None:
+        with pytest.raises(ValueError):
+            WebSettings(max_upload_bytes=0)
+
+
+class TestWebSettingsImmutability:
+    """Tests that frozen=True prevents post-construction mutation."""
+
+    def test_field_assignment_raises(self) -> None:
+        settings = WebSettings()
+        with pytest.raises(ValueError):
+            settings.port = 9090  # type: ignore[misc]
+
 
 class TestWebSettingsDerivedAccessors:
     """Tests for get_landscape_url() and get_payload_store_path()."""

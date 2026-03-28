@@ -5,7 +5,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Literal
 
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict, Field
 
 
 class WebSettings(BaseModel):
@@ -14,22 +14,28 @@ class WebSettings(BaseModel):
     All fields have sensible defaults for local development.
     auth_provider uses a Literal type so Pydantic rejects invalid
     values automatically -- no manual @field_validator needed.
+
+    Frozen to prevent accidental mutation in async request handlers —
+    settings are constructed once and shared via app.state.
     """
 
+    model_config = ConfigDict(frozen=True)
+
     host: str = "127.0.0.1"
-    port: int = 8000
+    port: int = Field(default=8000, ge=1, le=65535)
     auth_provider: Literal["local", "oidc", "entra"] = "local"
     cors_origins: list[str] = ["http://localhost:5173"]
     data_dir: Path = Path("data")
     composer_model: str = "gpt-4o"
-    composer_max_turns: int = 20
-    composer_timeout_seconds: float = 120.0
-    composer_rate_limit_per_minute: int = 10
-    secret_key: str = "change-me-in-production"  # S3: startup guard in Sub-2 enforces non-default in production
-    max_upload_bytes: int = 100 * 1024 * 1024  # 100 MB
+    composer_max_turns: int = Field(default=20, ge=1)
+    composer_timeout_seconds: float = Field(default=120.0, gt=0)
+    composer_rate_limit_per_minute: int = Field(default=10, ge=1)
+    secret_key: str = (
+        "change-me-in-production"  # Security rule S3 (seam-contracts.md): Sub-2 startup guard enforces non-default in production
+    )
+    max_upload_bytes: int = Field(default=100 * 1024 * 1024, ge=1)
 
-    # Execution infrastructure (B3 fix)
-    # Defaults derive from data_dir when not explicitly set
+    # Execution infrastructure — defaults derive from data_dir when not explicitly set
     landscape_url: str | None = None
     payload_store_path: Path | None = None
 
