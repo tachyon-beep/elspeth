@@ -122,7 +122,7 @@ Add a `webui` optional extra to `pyproject.toml` under `[project.optional-depend
 |------------|-------------------|---------|
 | `fastapi` | `>=0.115,<1` | Web framework |
 | `uvicorn[standard]` | `>=0.34,<1` | ASGI server with lifespan support |
-| `python-jose[cryptography]` | `>=3.3,<4` | JWT encoding/decoding for local auth |
+| `PyJWT[crypto]` | `>=2.8,<3` | JWT encoding/decoding for local auth |
 | `python-multipart` | `>=0.0.20` | File upload parsing |
 | `websockets` | `>=14.0,<15` | WebSocket protocol support |
 | `httpx` | `>=0.27,<1` | Async HTTP client (OIDC JWKS discovery, test client) |

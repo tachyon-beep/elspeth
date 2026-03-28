@@ -426,3 +426,19 @@ allowed_dict_patterns:
 
   # Serializer thaws MappingProxyType back to dict for Pydantic JSON round-trip
   - "src/elspeth/core/dependency_config.py:CollectionProbeConfig._serialize_provider_config:return"
+
+  # ═══════════════════════════════════════════════════════════════════════════
+  # WEB AUTH — OIDC/Entra token validation (Tier 3 boundary)
+  # JWKS and JWT payloads are external IdP data with no typed schema.
+  # ═══════════════════════════════════════════════════════════════════════════
+  - "src/elspeth/web/auth/oidc.py:JWKSTokenValidator.ensure_jwks:return"
+  - "src/elspeth/web/auth/oidc.py:JWKSTokenValidator.decode_token:jwks"
+  - "src/elspeth/web/auth/oidc.py:JWKSTokenValidator.decode_token:return"
+  - "src/elspeth/web/auth/entra.py:EntraAuthProvider._validate_tenant:payload"
+  - "src/elspeth/web/auth/entra.py:EntraAuthProvider._extract_groups:payload"
+
+  # ═══════════════════════════════════════════════════════════════════════════
+  # WEB AUTH — Session service protocol
+  # tool_calls is pipeline composition data (Tier 2 — user-defined graph structure).
+  # ═══════════════════════════════════════════════════════════════════════════
+  - "src/elspeth/web/sessions/protocol.py:SessionServiceProtocol.add_message:tool_calls"

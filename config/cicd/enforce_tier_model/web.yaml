@@ -1,19 +1,237 @@
-per_file_rules:
-- pattern: web/catalog/service.py
-  rules:
-  - R1
-  reason: JSON Schema traversal — keys like "type", "anyOf", "description", "default" are conditionally present per JSON Schema spec. .get() is correct for schema dict navigation, not defensive programming.
+allow_hits:
+- key: web/app.py:R1:create_app:health:fp=09d5b0878cd851c8
+  owner: architecture
+  reason: "False positive — @app.get() is FastAPI HTTP route decorator, not dict.get()"
+  safety: No dict access involved; decorator syntax triggers text-based pattern match
   expires: null
-  max_hits: 8
-- pattern: web/catalog/routes.py
-  rules:
-  - R1
-  reason: "False positives from @catalog_router.get() FastAPI decorators (text-based pattern match), plus one legitimate .get() on _PLURAL_TO_SINGULAR mapping (Tier 3 user input from URL path segment — unknown type returns 404)."
+
+# Catalog routes — @router.get() false positives (FastAPI route decorators, not dict.get)
+- key: web/catalog/routes.py:R1:list_sources:fp=ccdc6bb55bdef578
+  owner: web-catalog
+  reason: "False positive — @catalog_router.get() is FastAPI route decorator, not dict.get()"
+  safety: No dict access involved
   expires: null
-  max_hits: 6
-- pattern: web/app.py
-  rules:
-  - R1
-  reason: "False positive from @app.get() FastAPI decorator (text-based pattern match)."
+
+- key: web/catalog/routes.py:R1:list_transforms:fp=2c4051cabdd7abc4
+  owner: web-catalog
+  reason: "False positive — @catalog_router.get() is FastAPI route decorator, not dict.get()"
+  safety: No dict access involved
   expires: null
-  max_hits: 1
+
+- key: web/catalog/routes.py:R1:list_sinks:fp=2f3c4211eedd8864
+  owner: web-catalog
+  reason: "False positive — @catalog_router.get() is FastAPI route decorator, not dict.get()"
+  safety: No dict access involved
+  expires: null
+
+- key: web/catalog/routes.py:R1:get_schema:fp=bfaf3a79a383cb6f
+  owner: web-catalog
+  reason: "False positive — @catalog_router.get() is FastAPI route decorator, not dict.get()"
+  safety: No dict access involved
+  expires: null
+
+# Catalog service — Tier 3 JSON schema introspection (.get() on Pydantic-generated JSON schema dicts)
+- key: web/catalog/routes.py:R1:get_schema:fp=bc80b0854f0cb34e
+  owner: web-catalog
+  reason: "Tier 3 boundary — plugin_type from URL path parameter, lookup in constant dict"
+  safety: "Returns None on miss, handled by 404 response"
+  expires: null
+
+- key: web/catalog/service.py:R1:CatalogServiceImpl:_extract_config_fields:fp=4ff2ba785b505451
+  owner: web-catalog
+  reason: "Tier 3 boundary — Pydantic-generated JSON schema 'properties' key may be absent"
+  safety: "Default empty dict; no properties means no config fields"
+  expires: null
+
+- key: web/catalog/service.py:R1:CatalogServiceImpl:_extract_config_fields:fp=1f5f1cda6e9c0466
+  owner: web-catalog
+  reason: "Tier 3 boundary — Pydantic JSON schema 'required' key may be absent"
+  safety: "Default empty list; no required fields"
+  expires: null
+
+- key: web/catalog/service.py:R1:CatalogServiceImpl:_extract_config_fields:fp=1de9302972b26a3a
+  owner: web-catalog
+  reason: "Tier 3 boundary — JSON schema field 'type' may be absent (e.g. anyOf unions)"
+  safety: "Default 'object'; conservative fallback"
+  expires: null
+
+- key: web/catalog/service.py:R1:CatalogServiceImpl:_extract_config_fields:fp=ff5c2a0e7c73ce66
+  owner: web-catalog
+  reason: "Tier 3 boundary — JSON schema anyOf branch may lack 'type'"
+  safety: "Checked before use; null branch skipped"
+  expires: null
+
+- key: web/catalog/service.py:R1:CatalogServiceImpl:_extract_config_fields:fp=e3cf8be3854ff16b
+  owner: web-catalog
+  reason: "Tier 3 boundary — JSON schema branch 'type' checked for null filtering"
+  safety: "Skips null branches; extracts real type from remaining"
+  expires: null
+
+- key: web/catalog/service.py:R1:CatalogServiceImpl:_extract_config_fields:fp=eddfe72d549a8215
+  owner: web-catalog
+  reason: "Tier 3 boundary — fallback type extraction from anyOf branch"
+  safety: "Default 'object'; conservative"
+  expires: null
+
+- key: web/catalog/service.py:R1:CatalogServiceImpl:_extract_config_fields:fp=4fcdbac964375893
+  owner: web-catalog
+  reason: "Tier 3 boundary — JSON schema field 'description' is optional"
+  safety: "Returns None; ConfigFieldInfo.description accepts None"
+  expires: null
+
+- key: web/catalog/service.py:R1:CatalogServiceImpl:_extract_config_fields:fp=a288b28b42de381b
+  owner: web-catalog
+  reason: "Tier 3 boundary — JSON schema field 'default' is optional"
+  safety: "Returns None; ConfigFieldInfo.default accepts None"
+  expires: null
+
+# JWKSTokenValidator — httpx client.get() false positives (HTTP method, not dict.get)
+- key: web/auth/oidc.py:R1:JWKSTokenValidator:ensure_jwks:fp=5d9ec6c99446cd42
+  owner: web-auth
+  reason: "False positive — httpx.AsyncClient.get() is an HTTP GET request, not dict.get()"
+  safety: HTTP errors caught by raise_for_status() and except block
+  expires: null
+
+- key: web/auth/oidc.py:R1:JWKSTokenValidator:ensure_jwks:fp=0212bb5677a2406e
+  owner: web-auth
+  reason: "False positive — httpx.AsyncClient.get() is an HTTP GET request, not dict.get()"
+  safety: HTTP errors caught by raise_for_status() and except block
+  expires: null
+
+# JWKSTokenValidator — Tier 3 JWT header .get() for kid extraction
+- key: web/auth/oidc.py:R1:JWKSTokenValidator:decode_token:fp=43b5f14ace609f1d
+  owner: web-auth
+  reason: "Tier 3 boundary — JWT header kid field is optional per RFC 7515"
+  safety: "Missing kid falls through to first key in JWKS; AuthenticationError on decode failure"
+  expires: null
+
+# OIDC provider — Tier 3 JWT payload .get() calls (external IdP token claims)
+- key: web/auth/oidc.py:R1:OIDCAuthProvider:authenticate:fp=a8c6a2b695a3d754
+  owner: web-auth
+  reason: "Tier 3 boundary — preferred_username is optional in OIDC tokens, falls back to sub"
+  safety: "Default is payload['sub'] which is required; absence of optional claim is expected"
+  expires: null
+
+- key: web/auth/oidc.py:R1:OIDCAuthProvider:get_user_info:fp=a3787dad45249f67
+  owner: web-auth
+  reason: "Tier 3 boundary — groups claim is optional in OIDC tokens; None = no groups"
+  safety: "None returns empty groups; non-list raises AuthenticationError; no silent discard"
+  expires: null
+
+- key: web/auth/oidc.py:R5:OIDCAuthProvider:get_user_info:fp=8ca64d6c43cc262d
+  owner: web-auth
+  reason: "Tier 3 boundary — groups claim type is not guaranteed by external IdP"
+  safety: "Non-list raises AuthenticationError with type info for debugging"
+  expires: null
+
+- key: web/auth/oidc.py:R1:OIDCAuthProvider:get_user_info:fp=e9a89464d499fed3
+  owner: web-auth
+  reason: "Tier 3 boundary — preferred_username is optional in OIDC tokens, falls back to sub"
+  safety: "Default is payload['sub'] which is required"
+  expires: null
+
+- key: web/auth/oidc.py:R1:OIDCAuthProvider:get_user_info:fp=50e2c5aea8128cfe
+  owner: web-auth
+  reason: "Tier 3 boundary — name claim is optional, falls back to preferred_username"
+  safety: "Falls back to preferred_username or 'Unknown'; never to opaque sub UUID"
+  expires: null
+
+- key: web/auth/oidc.py:R1:OIDCAuthProvider:get_user_info:fp=64985ed62a0e03ec
+  owner: web-auth
+  reason: "Tier 3 boundary — preferred_username fallback in display_name chain"
+  safety: "Part of name -> preferred_username -> 'Unknown' chain"
+  expires: null
+
+- key: web/auth/oidc.py:R1:OIDCAuthProvider:get_user_info:fp=f2a1b1758a966c9d
+  owner: web-auth
+  reason: "Tier 3 boundary — email claim is optional in OIDC tokens"
+  safety: "Default None; UserProfile.email accepts None; absence is honest representation"
+  expires: null
+
+# Entra provider — Tier 3 JWT payload .get() and isinstance() calls
+- key: web/auth/entra.py:R1:EntraAuthProvider:_extract_groups:fp=268368c0e155cc41
+  owner: web-auth
+  reason: "Tier 3 boundary — groups claim is optional in Entra tokens; None = no groups"
+  safety: "None returns empty; non-list raises AuthenticationError; no silent discard"
+  expires: null
+
+- key: web/auth/entra.py:R5:EntraAuthProvider:_extract_groups:fp=6dcc1eafd56c6429
+  owner: web-auth
+  reason: "Tier 3 boundary — groups claim type is not guaranteed by external IdP"
+  safety: "Non-list raises AuthenticationError with type info"
+  expires: null
+
+- key: web/auth/entra.py:R1:EntraAuthProvider:_extract_groups:fp=cc258a6069465936
+  owner: web-auth
+  reason: "Tier 3 boundary — roles claim is optional in Entra tokens; None = no roles"
+  safety: "None returns empty; non-list raises AuthenticationError; no silent discard"
+  expires: null
+
+- key: web/auth/entra.py:R5:EntraAuthProvider:_extract_groups:fp=8a85154b5c04b93d
+  owner: web-auth
+  reason: "Tier 3 boundary — roles claim type is not guaranteed by external IdP"
+  safety: "Non-list raises AuthenticationError with type info"
+  expires: null
+
+- key: web/auth/entra.py:R1:EntraAuthProvider:authenticate:fp=fd48174d76f75c9d
+  owner: web-auth
+  reason: "Tier 3 boundary — preferred_username is optional in Entra tokens, falls back to sub"
+  safety: "Default is payload['sub'] which is required; absence of optional claim is expected"
+  expires: null
+
+- key: web/auth/entra.py:R1:EntraAuthProvider:get_user_info:fp=011fa8f44233c8e6
+  owner: web-auth
+  reason: "Tier 3 boundary — preferred_username is optional in Entra tokens, falls back to sub"
+  safety: "Default is payload['sub'] which is required"
+  expires: null
+
+- key: web/auth/entra.py:R1:EntraAuthProvider:get_user_info:fp=cf8febe0ecd5d91c
+  owner: web-auth
+  reason: "Tier 3 boundary — email claim is optional in Entra tokens"
+  safety: "Default None; UserProfile.email accepts None"
+  expires: null
+
+- key: web/auth/entra.py:R1:EntraAuthProvider:get_user_info:fp=b006a5696f76b645
+  owner: web-auth
+  reason: "Tier 3 boundary — name claim is optional, falls back to preferred_username"
+  safety: "Falls back to preferred_username or 'Unknown'; never to opaque sub UUID"
+  expires: null
+
+- key: web/auth/entra.py:R1:EntraAuthProvider:get_user_info:fp=a3dbe8d2b3f309d5
+  owner: web-auth
+  reason: "Tier 3 boundary — preferred_username fallback in display_name chain"
+  safety: "Part of name -> preferred_username -> 'Unknown' chain"
+  expires: null
+
+# Auth routes — @router.get() false positives (FastAPI route decorators, not dict.get)
+- key: web/auth/routes.py:R1:create_auth_router:auth_config:fp=082ca992116be396
+  owner: web-auth
+  reason: "False positive — @router.get() is FastAPI HTTP route decorator, not dict.get()"
+  safety: No dict access involved; decorator syntax triggers text-based pattern match
+  expires: null
+
+- key: web/auth/routes.py:R1:create_auth_router:me:fp=92915d8d86aae15f
+  owner: web-auth
+  reason: "False positive — @router.get() is FastAPI HTTP route decorator, not dict.get()"
+  safety: No dict access involved; decorator syntax triggers text-based pattern match
+  expires: null
+
+# Auth routes — isinstance() for route dispatch (narrows AuthProvider to LocalAuthProvider)
+- key: web/auth/routes.py:R5:create_auth_router:login:fp=e28a1843fa68a647
+  owner: web-auth
+  reason: "Route dispatch — narrows AuthProvider to LocalAuthProvider for local-only endpoints"
+  safety: "Non-local providers return 404; isinstance enables mypy type narrowing for login()/refresh()"
+  expires: null
+
+- key: web/auth/routes.py:R5:create_auth_router:refresh_token:fp=c5c9aafff36b7e51
+  owner: web-auth
+  reason: "Route dispatch — narrows AuthProvider to LocalAuthProvider for local-only endpoints"
+  safety: "Non-local providers return 404; isinstance enables mypy type narrowing for login()/refresh()"
+  expires: null
+
+# Auth middleware — Tier 3 HTTP header access (Authorization header from client)
+- key: web/auth/middleware.py:R1:get_current_user:fp=27850ac518f1116d
+  owner: web-auth
+  reason: "Tier 3 boundary — request.headers.get('Authorization') reads untrusted HTTP header"
+  safety: "Missing header returns 401; malformed header returns 401; no default fabrication"
+  expires: null

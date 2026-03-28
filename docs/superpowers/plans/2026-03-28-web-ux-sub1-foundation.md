@@ -745,7 +745,7 @@ webui = [
     # Web UX -- LLM Composer MVP
     "fastapi>=0.115,<1",
     "uvicorn[standard]>=0.34,<1",
-    "python-jose[cryptography]>=3.3,<4",
+    "PyJWT[crypto]>=2.8,<3",
     "python-multipart>=0.0.20",
     "websockets>=14.0,<15",
     "httpx>=0.27,<1",
@@ -760,7 +760,7 @@ In the `all` section of `[project.optional-dependencies]`, add webui dependencie
     # webui dependencies
     "fastapi>=0.115,<1",
     "uvicorn[standard]>=0.34,<1",
-    "python-jose[cryptography]>=3.3,<4",
+    "PyJWT[crypto]>=2.8,<3",
     "python-multipart>=0.0.20",
     "websockets>=14.0,<15",
 ```
@@ -881,7 +881,7 @@ Before marking this sub-plan as complete, verify every item:
 - [ ] **Lifespan stub present:** `lifespan()` async context manager exists in `app.py`, passed to `FastAPI(lifespan=lifespan)`, with Phase 5 `ProgressBroadcaster` comments
 - [ ] **No lazy imports in `create_app()`:** All imports are at the top of `app.py`, not inside the function body
 - [ ] **dependencies.py exists:** `get_settings()` reads from `request.app.state.settings`
-- [ ] **`[webui]` extra in pyproject.toml:** Contains fastapi, uvicorn[standard], python-jose[cryptography], python-multipart, websockets, httpx
+- [ ] **`[webui]` extra in pyproject.toml:** Contains fastapi, uvicorn[standard], PyJWT[crypto], python-multipart, websockets, httpx
 - [ ] **`all` extra updated:** Includes webui dependencies
 - [ ] **CLI command works:** `elspeth web --help` shows port, host, auth, reload options
 - [ ] **Graceful degradation:** Without `[webui]` installed, `elspeth web` prints an error to stderr and exits with code 1

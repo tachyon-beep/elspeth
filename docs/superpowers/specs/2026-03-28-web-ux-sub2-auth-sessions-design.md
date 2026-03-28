@@ -89,8 +89,8 @@ catches this and converts it to HTTP 401.
 File: `src/elspeth/web/auth/local.py`
 
 Provides username/password authentication backed by a SQLite database. Passwords
-are hashed with bcrypt via passlib. Tokens are JWTs signed with HMAC-SHA256 via
-python-jose.
+are hashed with bcrypt. Tokens are JWTs signed with HMAC-SHA256 via
+PyJWT.
 
 **Constructor parameters:**
 
@@ -763,7 +763,7 @@ production PostgreSQL deployments, Alembic migrations should be used instead
 | Create | `src/elspeth/web/auth/__init__.py` | Module init |
 | Create | `src/elspeth/web/auth/protocol.py` | AuthProvider protocol (two methods, no exceptions) |
 | Create | `src/elspeth/web/auth/models.py` | UserIdentity, UserProfile, AuthenticationError |
-| Create | `src/elspeth/web/auth/local.py` | LocalAuthProvider -- SQLite, bcrypt/passlib, JWT via python-jose |
+| Create | `src/elspeth/web/auth/local.py` | LocalAuthProvider -- SQLite, bcrypt, JWT via PyJWT |
 | Create | `src/elspeth/web/auth/oidc.py` | OIDCAuthProvider -- JWKS discovery, token validation, audience check |
 | Create | `src/elspeth/web/auth/entra.py` | EntraAuthProvider -- tenant/group claims on top of OIDC |
 | Create | `src/elspeth/web/auth/middleware.py` | get_current_user FastAPI dependency |

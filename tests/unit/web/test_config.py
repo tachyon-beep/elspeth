@@ -5,6 +5,7 @@ from __future__ import annotations
 from pathlib import Path
 
 import pytest
+from pydantic import ValidationError
 
 from elspeth.web.config import WebSettings
 
@@ -83,7 +84,7 @@ class TestWebSettingsCustomValues:
     """Tests for custom field overrides."""
 
     def test_custom_port_and_host(self) -> None:
-        settings = WebSettings(port=9090, host="0.0.0.0")
+        settings = WebSettings(port=9090, host="0.0.0.0", secret_key="test-secret")
         assert settings.port == 9090
         assert settings.host == "0.0.0.0"
 
@@ -208,3 +209,28 @@ class TestWebSettingsDerivedAccessors:
         settings = WebSettings()
         url = settings.get_session_db_url()
         assert url == f"sqlite:///{Path('data') / 'sessions.db'}"
+
+
+class TestSecretKeyGuard:
+    """Tests for the secret_key production guard validator."""
+
+    def test_default_secret_key_rejected_on_non_local_host(self) -> None:
+        with pytest.raises(ValidationError, match="secret_key must be set"):
+            WebSettings(host="0.0.0.0")
+
+    def test_default_secret_key_allowed_on_localhost(self) -> None:
+        # Should not raise
+        settings = WebSettings(host="127.0.0.1")
+        assert settings.secret_key == "change-me-in-production"
+
+    def test_default_secret_key_allowed_on_localhost_name(self) -> None:
+        settings = WebSettings(host="localhost")
+        assert settings.secret_key == "change-me-in-production"
+
+    def test_default_secret_key_allowed_on_ipv6_loopback(self) -> None:
+        settings = WebSettings(host="::1")
+        assert settings.secret_key == "change-me-in-production"
+
+    def test_custom_secret_key_allowed_on_any_host(self) -> None:
+        settings = WebSettings(host="0.0.0.0", secret_key="my-real-secret")
+        assert settings.secret_key == "my-real-secret"
