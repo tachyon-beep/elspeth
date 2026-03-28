@@ -18,7 +18,7 @@
 | Create | `src/elspeth/web/auth/__init__.py` | Module init |
 | Create | `src/elspeth/web/auth/protocol.py` | AuthProvider protocol (two methods, no exceptions) |
 | Create | `src/elspeth/web/auth/models.py` | UserIdentity, UserProfile, AuthenticationError |
-| Create | `src/elspeth/web/auth/local.py` | LocalAuthProvider -- SQLite, bcrypt, JWT via python-jose |
+| Create | `src/elspeth/web/auth/local.py` | LocalAuthProvider -- SQLite, bcrypt, JWT via PyJWT |
 | Create | `src/elspeth/web/auth/oidc.py` | OIDCAuthProvider -- JWKS discovery via httpx, token validation |
 | Create | `src/elspeth/web/auth/entra.py` | EntraAuthProvider -- tenant validation, group claims |
 | Create | `tests/unit/web/auth/__init__.py` | Test package |
@@ -38,7 +38,7 @@ Before starting this plan, Phase 1 must be complete. The following files must ex
 - `src/elspeth/web/app.py` (with `create_app()` factory and `/api/health` endpoint)
 - `src/elspeth/web/config.py` (with `WebSettings` including `secret_key`, `auth_provider`, `data_dir`, `max_upload_bytes`)
 - `src/elspeth/web/dependencies.py` (with `get_settings()`)
-- `pyproject.toml` has `[webui]` extra with fastapi, uvicorn, python-jose, python-multipart, httpx
+- `pyproject.toml` has `[webui]` extra with fastapi, uvicorn, PyJWT, python-multipart, httpx
 
 Additionally, `bcrypt` must be added to the `[webui]` extra. If not already present, add it as the first step of Task 2.1.
 
@@ -61,7 +61,7 @@ In the `[project.optional-dependencies]` section, add `bcrypt` to the `webui` ex
 webui = [
     "fastapi>=0.115,<1",
     "uvicorn[standard]>=0.34,<1",
-    "python-jose[cryptography]>=3.3,<4",
+    "PyJWT[crypto]>=2.8,<3",
     "python-multipart>=0.0.20",
     "websockets>=14.0,<15",
     "httpx>=0.27,<1",
@@ -385,7 +385,7 @@ class TestAuthenticate:
     async def test_authenticate_expired_token(self, tmp_path) -> None:
         """Token with 0-second expiry should fail after creation."""
         # Use a provider with near-zero expiry
-        from jose import jwt as jose_jwt
+        import jwt as pyjwt
 
         provider = LocalAuthProvider(
             db_path=tmp_path / "auth.db",
@@ -400,14 +400,14 @@ class TestAuthenticate:
             "username": "alice",
             "exp": int(time.time()) - 10,  # 10 seconds in the past
         }
-        expired_token = jose_jwt.encode(payload, "test-key", algorithm="HS256")
+        expired_token = pyjwt.encode(payload, "test-key", algorithm="HS256")
         with pytest.raises(AuthenticationError):
             await provider.authenticate(expired_token)
 
     @pytest.mark.asyncio
     async def test_authenticate_wrong_secret_key(self, tmp_path) -> None:
         """Token signed with a different key should fail."""
-        from jose import jwt as jose_jwt
+        import jwt as pyjwt
 
         provider = LocalAuthProvider(
             db_path=tmp_path / "auth.db",
@@ -418,7 +418,7 @@ class TestAuthenticate:
             "username": "alice",
             "exp": int(time.time()) + 3600,
         }
-        bad_token = jose_jwt.encode(payload, "wrong-key", algorithm="HS256")
+        bad_token = pyjwt.encode(payload, "wrong-key", algorithm="HS256")
         with pytest.raises(AuthenticationError, match="Invalid token"):
             await provider.authenticate(bad_token)
 
@@ -469,7 +469,7 @@ Expected: `ModuleNotFoundError: No module named 'elspeth.web.auth.local'`
 # src/elspeth/web/auth/local.py
 """Local authentication provider -- SQLite user store with bcrypt and JWT.
 
-Uses bcrypt for password hashing and python-jose for JWT token
+Uses bcrypt for password hashing and PyJWT for JWT token
 creation and validation. The SQLite database is created at db_path on
 first use.
 """
@@ -482,7 +482,8 @@ import time
 from pathlib import Path
 
 import bcrypt
-from jose import JWTError, jwt
+import jwt
+from jwt.exceptions import PyJWTError
 
 from elspeth.web.auth.models import AuthenticationError, UserIdentity, UserProfile
 
@@ -574,7 +575,7 @@ class LocalAuthProvider:
         """
         try:
             payload = jwt.decode(token, self._secret_key, algorithms=["HS256"])
-        except JWTError as exc:
+        except PyJWTError as exc:
             raise AuthenticationError("Invalid token") from exc
 
         return UserIdentity(
@@ -652,7 +653,8 @@ from __future__ import annotations
 import pytest
 from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric import rsa
-from jose import jwk, jwt as jose_jwt
+import jwt as pyjwt
+from jwt import PyJWK
 
 
 @pytest.fixture
@@ -672,8 +674,8 @@ def jwks_response(rsa_keypair):
         format=serialization.PublicFormat.SubjectPublicKeyInfo,
     )
     # Convert to JWK format
-    key_obj = jwk.RSAKey(algorithm="RS256", key=pub_pem.decode())
-    key_dict = key_obj.to_dict()
+    key_obj = PyJWK.from_pem(pub_pem, algorithm="RS256")
+    key_dict = key_obj.export(as_dict=True)
     key_dict["kid"] = "test-key-1"
     key_dict["use"] = "sig"
     return {"keys": [key_dict]}
@@ -690,7 +692,7 @@ def make_rs256_token(private_key, claims: dict) -> str:
         format=serialization.PrivateFormat.PKCS8,
         encryption_algorithm=serialization.NoEncryption(),
     )
-    return jose_jwt.encode(
+    return pyjwt.encode(
         claims, priv_pem.decode(), algorithm="RS256",
         headers={"kid": "test-key-1"},
     )
@@ -897,7 +899,8 @@ import time
 from typing import Any
 
 import httpx
-from jose import JWTError, jwt
+import jwt
+from jwt.exceptions import PyJWTError
 
 from elspeth.web.auth.models import AuthenticationError, UserIdentity, UserProfile
 
@@ -957,7 +960,7 @@ class OIDCAuthProvider:
                 audience=self._audience,
                 issuer=self._issuer,
             )
-        except JWTError as exc:
+        except PyJWTError as exc:
             raise AuthenticationError(f"Invalid token: {exc}") from exc
         return payload
 

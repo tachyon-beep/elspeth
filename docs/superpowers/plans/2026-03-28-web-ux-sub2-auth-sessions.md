@@ -6,7 +6,7 @@
 
 **Architecture:** Auth providers are protocol-based with three concrete implementations. The auth middleware is a FastAPI dependency (`Depends(get_current_user)`) injected into all protected routes. Session data lives in a dedicated SQLite database (separate from Landscape). All table definitions use SQLAlchemy Core. Schema creation uses `metadata.create_all()` on startup. Session routes verify user ownership on every request (IDOR protection returns 404, not 403).
 
-**Tech Stack:** FastAPI, SQLAlchemy Core, bcrypt (password hashing), python-jose[cryptography] (JWT), httpx (OIDC JWKS discovery), Pydantic v2 (request/response schemas)
+**Tech Stack:** FastAPI, SQLAlchemy Core, bcrypt (password hashing), PyJWT[crypto] (JWT), httpx (OIDC JWKS discovery), Pydantic v2 (request/response schemas)
 
 **Spec:** `docs/superpowers/specs/2026-03-28-web-ux-sub2-auth-sessions-design.md`
 
@@ -21,7 +21,7 @@
 | Create | `src/elspeth/web/auth/__init__.py` | Module init |
 | Create | `src/elspeth/web/auth/protocol.py` | AuthProvider protocol (two methods, no exceptions) |
 | Create | `src/elspeth/web/auth/models.py` | UserIdentity, UserProfile, AuthenticationError |
-| Create | `src/elspeth/web/auth/local.py` | LocalAuthProvider -- SQLite, bcrypt, JWT via python-jose |
+| Create | `src/elspeth/web/auth/local.py` | LocalAuthProvider -- SQLite, bcrypt, JWT via PyJWT |
 | Create | `src/elspeth/web/auth/oidc.py` | OIDCAuthProvider -- JWKS discovery via httpx, token validation |
 | Create | `src/elspeth/web/auth/entra.py` | EntraAuthProvider -- tenant validation, group claims |
 | Create | `src/elspeth/web/auth/middleware.py` | get_current_user FastAPI dependency |
@@ -57,7 +57,7 @@ Before starting this plan, Phase 1 must be complete. The following files must ex
 - `src/elspeth/web/app.py` (with `create_app()` factory and `/api/health` endpoint)
 - `src/elspeth/web/config.py` (with `WebSettings` including `secret_key`, `auth_provider`, `data_dir`, `max_upload_bytes`)
 - `src/elspeth/web/dependencies.py` (with `get_settings()`)
-- `pyproject.toml` has `[webui]` extra with fastapi, uvicorn, python-jose, python-multipart, httpx
+- `pyproject.toml` has `[webui]` extra with fastapi, uvicorn, PyJWT, python-multipart, httpx
 
 Additionally, `bcrypt` must be added to the `[webui]` extra. If not already present, add it as the first step of Task 2.1.
 
@@ -80,7 +80,7 @@ In the `[project.optional-dependencies]` section, add `bcrypt` to the `webui` ex
 webui = [
     "fastapi>=0.115,<1",
     "uvicorn[standard]>=0.34,<1",
-    "python-jose[cryptography]>=3.3,<4",
+    "PyJWT[crypto]>=2.8,<3",
     "python-multipart>=0.0.20",
     "websockets>=14.0,<15",
     "httpx>=0.27,<1",
@@ -400,7 +400,7 @@ class TestAuthenticate:
     async def test_authenticate_expired_token(self, tmp_path) -> None:
         """Token with 0-second expiry should fail after creation."""
         # Use a provider with near-zero expiry
-        from jose import jwt as jose_jwt
+        import jwt as pyjwt
 
         provider = LocalAuthProvider(
             db_path=tmp_path / "auth.db",
@@ -415,14 +415,14 @@ class TestAuthenticate:
             "username": "alice",
             "exp": int(time.time()) - 10,  # 10 seconds in the past
         }
-        expired_token = jose_jwt.encode(payload, "test-key", algorithm="HS256")
+        expired_token = pyjwt.encode(payload, "test-key", algorithm="HS256")
         with pytest.raises(AuthenticationError):
             await provider.authenticate(expired_token)
 
     @pytest.mark.asyncio
     async def test_authenticate_wrong_secret_key(self, tmp_path) -> None:
         """Token signed with a different key should fail."""
-        from jose import jwt as jose_jwt
+        import jwt as pyjwt
 
         provider = LocalAuthProvider(
             db_path=tmp_path / "auth.db",
@@ -433,7 +433,7 @@ class TestAuthenticate:
             "username": "alice",
             "exp": int(time.time()) + 3600,
         }
-        bad_token = jose_jwt.encode(payload, "wrong-key", algorithm="HS256")
+        bad_token = pyjwt.encode(payload, "wrong-key", algorithm="HS256")
         with pytest.raises(AuthenticationError, match="Invalid token"):
             await provider.authenticate(bad_token)
 
@@ -484,7 +484,7 @@ Expected: `ModuleNotFoundError: No module named 'elspeth.web.auth.local'`
 # src/elspeth/web/auth/local.py
 """Local authentication provider -- SQLite user store with bcrypt and JWT.
 
-Uses bcrypt for password hashing and python-jose for JWT token
+Uses bcrypt for password hashing and PyJWT for JWT token
 creation and validation. The SQLite database is created at db_path on
 first use.
 """
@@ -496,7 +496,8 @@ import time
 from pathlib import Path
 
 import bcrypt
-from jose import JWTError, jwt
+import jwt
+from jwt.exceptions import PyJWTError
 
 from elspeth.web.auth.models import AuthenticationError, UserIdentity, UserProfile
 
@@ -585,7 +586,7 @@ class LocalAuthProvider:
         """
         try:
             payload = jwt.decode(token, self._secret_key, algorithms=["HS256"])
-        except JWTError:
+        except PyJWTError:
             raise AuthenticationError("Invalid token") from None
 
         return UserIdentity(
@@ -654,7 +655,8 @@ from unittest.mock import AsyncMock, patch
 import pytest
 from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric import rsa
-from jose import jwk, jwt as jose_jwt
+import jwt as pyjwt
+from jwt import PyJWK
 
 from elspeth.web.auth.models import AuthenticationError, UserIdentity
 from elspeth.web.auth.oidc import OIDCAuthProvider
@@ -680,8 +682,8 @@ def jwks_response(rsa_keypair):
         format=serialization.PublicFormat.SubjectPublicKeyInfo,
     )
     # Convert to JWK format
-    key_obj = jwk.RSAKey(algorithm="RS256", key=pub_pem.decode())
-    key_dict = key_obj.to_dict()
+    key_obj = PyJWK.from_pem(pub_pem, algorithm="RS256")
+    key_dict = key_obj.export(as_dict=True)
     key_dict["kid"] = "test-key-1"
     key_dict["use"] = "sig"
     return {"keys": [key_dict]}
@@ -694,7 +696,7 @@ def _make_token(private_key, claims: dict) -> str:
         format=serialization.PrivateFormat.PKCS8,
         encryption_algorithm=serialization.NoEncryption(),
     )
-    return jose_jwt.encode(
+    return pyjwt.encode(
         claims, priv_pem.decode(), algorithm="RS256",
         headers={"kid": "test-key-1"},
     )
@@ -885,7 +887,8 @@ import time
 from typing import Any
 
 import httpx
-from jose import JWTError, jwt
+import jwt
+from jwt.exceptions import PyJWTError
 
 from elspeth.web.auth.models import AuthenticationError, UserIdentity, UserProfile
 
@@ -945,7 +948,7 @@ class OIDCAuthProvider:
                 audience=self._audience,
                 issuer=self._issuer,
             )
-        except JWTError as exc:
+        except PyJWTError as exc:
             raise AuthenticationError(f"Invalid token: {exc}") from None
         return payload
 
@@ -1016,7 +1019,8 @@ from unittest.mock import AsyncMock, patch
 import pytest
 from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric import rsa
-from jose import jwk, jwt as jose_jwt
+import jwt as pyjwt
+from jwt import PyJWK
 
 from elspeth.web.auth.entra import EntraAuthProvider
 from elspeth.web.auth.models import AuthenticationError
@@ -1042,8 +1046,8 @@ def jwks_response(rsa_keypair):
         encoding=serialization.Encoding.PEM,
         format=serialization.PublicFormat.SubjectPublicKeyInfo,
     )
-    key_obj = jwk.RSAKey(algorithm="RS256", key=pub_pem.decode())
-    key_dict = key_obj.to_dict()
+    key_obj = PyJWK.from_pem(pub_pem, algorithm="RS256")
+    key_dict = key_obj.export(as_dict=True)
     key_dict["kid"] = "entra-test-key"
     key_dict["use"] = "sig"
     return {"keys": [key_dict]}
@@ -1056,7 +1060,7 @@ def _make_token(private_key, claims: dict) -> str:
         format=serialization.PrivateFormat.PKCS8,
         encryption_algorithm=serialization.NoEncryption(),
     )
-    return jose_jwt.encode(
+    return pyjwt.encode(
         claims, priv_pem.decode(), algorithm="RS256",
         headers={"kid": "entra-test-key"},
     )
@@ -1805,7 +1809,7 @@ def create_auth_router() -> APIRouter:
         provider = request.app.state.auth_provider
         # Re-login by issuing a new token for the authenticated user.
         # We use the internal JWT creation rather than requiring a password.
-        from jose import jwt
+        import jwt
         import time
 
         payload = {
@@ -4751,7 +4755,7 @@ After completing all tasks, run the full test suite and verify:
 - AuthenticationError is in `models.py`, not `protocol.py`
 - UserIdentity and UserProfile are `frozen=True, slots=True` with no freeze guards (scalar fields only)
 - ChatMessageRecord and CompositionStateRecord/CompositionStateData have `freeze_fields()` in `__post_init__`
-- LocalAuthProvider uses bcrypt and python-jose JWT
+- LocalAuthProvider uses bcrypt and PyJWT
 - OIDCAuthProvider discovers JWKS via httpx and caches with TTL
 - EntraAuthProvider validates `tid` claim and extracts `groups`/`roles`
 - All session routes verify ownership via `_verify_session_ownership()` returning 404 on IDOR

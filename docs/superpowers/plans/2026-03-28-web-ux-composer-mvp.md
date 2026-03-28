@@ -538,7 +538,7 @@ Add to `[project.optional-dependencies]`:
 webui = [
     "fastapi>=0.115,<1",
     "uvicorn[standard]>=0.34,<1",
-    "python-jose[cryptography]>=3.3,<4",
+    "PyJWT[crypto]>=2.8,<3",
     "python-multipart>=0.0.20",
     "websockets>=14.0,<15",
     "httpx>=0.27,<1",
@@ -741,7 +741,7 @@ async def test_get_user_info(provider):
 - [ ] **Step 3: Implement LocalAuthProvider**
 
 LocalAuthProvider uses SQLite for user storage, bcrypt for password
-hashing, and python-jose for JWT tokens. The `login()` method returns a JWT.
+hashing, and PyJWT for JWT tokens. The `login()` method returns a JWT.
 `authenticate()` validates the JWT and returns `UserIdentity`.
 `get_user_info()` returns the full `UserProfile`.
 
@@ -770,7 +770,7 @@ git commit -m "feat(web/auth): implement LocalAuthProvider with JWT"
 - [ ] **Step 1: Write tests for OIDCAuthProvider**
 
 Test JWKS discovery (mocked with httpx), token validation with valid/invalid/expired
-tokens, audience validation. Use `python-jose` to create test JWTs signed with
+tokens, audience validation. Use `PyJWT` to create test JWTs signed with
 a known RSA key.
 
 - [ ] **Step 2: Implement OIDCAuthProvider**

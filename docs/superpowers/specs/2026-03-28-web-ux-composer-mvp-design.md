@@ -566,7 +566,7 @@ Enforced by the existing `enforce_tier_model.py` CI script.
 
 Optional install extra: `uv pip install -e ".[webui]"`
 
-Adds: `fastapi`, `uvicorn`, `python-jose[cryptography]`, `httpx`,
+Adds: `fastapi`, `uvicorn`, `PyJWT[crypto]`, `httpx`,
 `python-multipart`, `websockets`.
 
 CLI entry point: `elspeth web [--port PORT] [--auth {local,oidc,entra}]`
