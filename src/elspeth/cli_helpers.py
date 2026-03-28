@@ -61,10 +61,10 @@ def instantiate_plugins_from_config(config: "ElspethSettings") -> PluginBundle:
     Raises:
         ValueError: If config references unknown plugins (raised by PluginManager)
     """
-    from elspeth.cli import _get_plugin_manager
     from elspeth.core.dag import WiredTransform
+    from elspeth.plugins.infrastructure.manager import get_shared_plugin_manager
 
-    manager = _get_plugin_manager()
+    manager = get_shared_plugin_manager()
 
     # Instantiate source (raises on unknown plugin)
     source_cls = manager.get_source_by_name(config.source.plugin)
