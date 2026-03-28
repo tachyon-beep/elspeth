@@ -19,6 +19,7 @@
 | Create | `src/elspeth/web/sessions/protocol.py` | SessionServiceProtocol, record dataclasses, RunAlreadyActiveError |
 | Create | `tests/unit/web/sessions/__init__.py` | Test package |
 | Create | `tests/unit/web/sessions/test_models.py` | Table schema tests |
+| Create | `tests/unit/web/sessions/test_protocol.py` | Protocol and record type tests |
 
 ---
 
@@ -47,6 +48,7 @@ from datetime import datetime, timezone
 
 import pytest
 from sqlalchemy import create_engine, inspect, select, insert
+from sqlalchemy.exc import IntegrityError
 
 from elspeth.web.sessions.models import (
     metadata,
@@ -143,7 +145,7 @@ class TestCompositionStateUniqueConstraint:
                 )
             )
             # Duplicate version should fail
-            with pytest.raises(Exception):  # IntegrityError
+            with pytest.raises(IntegrityError):
                 conn.execute(
                     insert(composition_states_table).values(
                         id=state_id_2,
@@ -356,8 +358,130 @@ git commit -m "feat(web/sessions): add SQLAlchemy Core table definitions for ses
 
 **Files:**
 - Create: `src/elspeth/web/sessions/protocol.py`
+- Create: `tests/unit/web/sessions/test_protocol.py`
 
-- [ ] **Step 1: Implement protocol and record dataclasses**
+- [ ] **Step 1: Write tests**
+
+```python
+# tests/unit/web/sessions/test_protocol.py
+"""Tests for session record dataclasses and protocol definition."""
+
+from __future__ import annotations
+
+from datetime import datetime, timezone
+from uuid import uuid4
+
+import pytest
+
+from elspeth.web.sessions.protocol import (
+    ChatMessageRecord,
+    CompositionStateData,
+    CompositionStateRecord,
+    RunAlreadyActiveError,
+    RunRecord,
+    SessionRecord,
+    SessionServiceProtocol,
+)
+
+
+class TestSessionRecord:
+    def test_frozen_immutability(self) -> None:
+        record = SessionRecord(
+            id=uuid4(), user_id="alice", title="Test",
+            created_at=datetime.now(timezone.utc),
+            updated_at=datetime.now(timezone.utc),
+        )
+        with pytest.raises(AttributeError):
+            record.title = "Changed"  # type: ignore[misc]
+
+
+class TestChatMessageRecord:
+    def test_tool_calls_frozen_when_present(self) -> None:
+        record = ChatMessageRecord(
+            id=uuid4(), session_id=uuid4(), role="assistant",
+            content="Hello", tool_calls={"name": "search", "args": {"q": "test"}},
+            created_at=datetime.now(timezone.utc),
+        )
+        with pytest.raises(TypeError):
+            record.tool_calls["new_key"] = "value"  # type: ignore[index]
+
+    def test_tool_calls_none_is_fine(self) -> None:
+        record = ChatMessageRecord(
+            id=uuid4(), session_id=uuid4(), role="user",
+            content="Hello", tool_calls=None,
+            created_at=datetime.now(timezone.utc),
+        )
+        assert record.tool_calls is None
+
+
+class TestCompositionStateData:
+    def test_mutable_inputs_are_frozen(self) -> None:
+        source = {"type": "csv", "path": "/data/test.csv"}
+        nodes = [{"id": "n1", "type": "source"}]
+        data = CompositionStateData(
+            source=source, nodes=nodes, is_valid=True,
+        )
+        # Original dicts should not affect the frozen copy
+        source["type"] = "json"
+        assert data.source["type"] == "csv"  # type: ignore[index]
+        # Frozen containers should reject mutation
+        with pytest.raises(TypeError):
+            data.source["new_key"] = "value"  # type: ignore[index]
+        with pytest.raises(TypeError):
+            data.nodes.append({"id": "n2"})  # type: ignore[union-attr]
+
+    def test_none_fields_not_frozen(self) -> None:
+        data = CompositionStateData(is_valid=False)
+        assert data.source is None
+        assert data.nodes is None
+
+    def test_frozen_immutability(self) -> None:
+        data = CompositionStateData(is_valid=True)
+        with pytest.raises(AttributeError):
+            data.is_valid = False  # type: ignore[misc]
+
+
+class TestCompositionStateRecord:
+    def test_mutable_fields_are_frozen(self) -> None:
+        record = CompositionStateRecord(
+            id=uuid4(), session_id=uuid4(), version=1,
+            source={"type": "csv"}, nodes=[{"id": "n1"}],
+            edges=None, outputs=None, metadata_=None,
+            is_valid=True, validation_errors=None,
+            created_at=datetime.now(timezone.utc),
+        )
+        with pytest.raises(TypeError):
+            record.source["new"] = "value"  # type: ignore[index]
+
+
+class TestRunRecord:
+    def test_frozen_immutability(self) -> None:
+        record = RunRecord(
+            id=uuid4(), session_id=uuid4(), state_id=uuid4(),
+            status="running", started_at=datetime.now(timezone.utc),
+            finished_at=None, rows_processed=0, rows_failed=0,
+            error=None, landscape_run_id=None, pipeline_yaml=None,
+        )
+        with pytest.raises(AttributeError):
+            record.status = "completed"  # type: ignore[misc]
+
+
+class TestRunAlreadyActiveError:
+    def test_construction_and_message(self) -> None:
+        err = RunAlreadyActiveError("session-123")
+        assert err.session_id == "session-123"
+        assert "session-123" in str(err)
+        assert isinstance(err, Exception)
+
+
+class TestSessionServiceProtocol:
+    def test_is_runtime_checkable(self) -> None:
+        assert hasattr(SessionServiceProtocol, "__protocol_attrs__") or hasattr(
+            SessionServiceProtocol, "_is_runtime_protocol"
+        )
+```
+
+- [ ] **Step 2: Implement protocol and record dataclasses**
 
 ```python
 # src/elspeth/web/sessions/protocol.py
@@ -367,8 +491,14 @@ Record types are frozen dataclasses representing database rows.
 CompositionStateData is the input DTO for saving new state versions.
 """
 
+# ID Convention: Record dataclasses use UUID for type safety. The database
+# stores IDs as String (TEXT). The SessionServiceImpl (Sub-2d) converts
+# between UUID and str at the query/record boundary. Callers work with
+# UUID exclusively; the storage representation is an implementation detail.
+
 from __future__ import annotations
 
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Any, Protocol, runtime_checkable
@@ -402,7 +532,7 @@ class ChatMessageRecord:
     session_id: UUID
     role: str
     content: str
-    tool_calls: Any | None
+    tool_calls: Mapping[str, Any] | None
     created_at: datetime
 
     def __post_init__(self) -> None:
@@ -426,14 +556,21 @@ class CompositionStateData:
     validation_errors: list[str] | None = None
 
     def __post_init__(self) -> None:
-        fields_to_freeze = []
-        for fname in (
-            "source", "nodes", "edges", "outputs", "metadata_", "validation_errors",
-        ):
-            if getattr(self, fname) is not None:
-                fields_to_freeze.append(fname)
-        if fields_to_freeze:
-            freeze_fields(self, *fields_to_freeze)
+        non_none = []
+        if self.source is not None:
+            non_none.append("source")
+        if self.nodes is not None:
+            non_none.append("nodes")
+        if self.edges is not None:
+            non_none.append("edges")
+        if self.outputs is not None:
+            non_none.append("outputs")
+        if self.metadata_ is not None:
+            non_none.append("metadata_")
+        if self.validation_errors is not None:
+            non_none.append("validation_errors")
+        if non_none:
+            freeze_fields(self, *non_none)
 
 
 @dataclass(frozen=True, slots=True)
@@ -446,24 +583,31 @@ class CompositionStateRecord:
     id: UUID
     session_id: UUID
     version: int
-    source: Any | None
-    nodes: Any | None
-    edges: Any | None
-    outputs: Any | None
-    metadata_: Any | None
+    source: Mapping[str, Any] | None
+    nodes: Sequence[Mapping[str, Any]] | None
+    edges: Sequence[Mapping[str, Any]] | None
+    outputs: Sequence[Mapping[str, Any]] | None
+    metadata_: Mapping[str, Any] | None
     is_valid: bool
-    validation_errors: Any | None
+    validation_errors: Sequence[str] | None
     created_at: datetime
 
     def __post_init__(self) -> None:
-        fields_to_freeze = []
-        for fname in (
-            "source", "nodes", "edges", "outputs", "metadata_", "validation_errors",
-        ):
-            if getattr(self, fname) is not None:
-                fields_to_freeze.append(fname)
-        if fields_to_freeze:
-            freeze_fields(self, *fields_to_freeze)
+        non_none = []
+        if self.source is not None:
+            non_none.append("source")
+        if self.nodes is not None:
+            non_none.append("nodes")
+        if self.edges is not None:
+            non_none.append("edges")
+        if self.outputs is not None:
+            non_none.append("outputs")
+        if self.metadata_ is not None:
+            non_none.append("metadata_")
+        if self.validation_errors is not None:
+            non_none.append("validation_errors")
+        if non_none:
+            freeze_fields(self, *non_none)
 
 
 @dataclass(frozen=True, slots=True)
@@ -569,10 +713,11 @@ class SessionServiceProtocol(Protocol):
     ) -> RunRecord | None: ...
 ```
 
-- [ ] **Step 2: Commit**
+- [ ] **Step 3: Commit**
 
 ```bash
-git add src/elspeth/web/sessions/protocol.py
+git add src/elspeth/web/sessions/protocol.py \
+    tests/unit/web/sessions/test_protocol.py
 git commit -m "feat(web/sessions): add SessionServiceProtocol, record types, and RunAlreadyActiveError"
 ```
 
@@ -585,7 +730,8 @@ git commit -m "feat(web/sessions): add SessionServiceProtocol, record types, and
 - [ ] UNIQUE(session_id, version) constraint on composition_states
 - [ ] CHECK constraints on role, status, and event_type columns
 - [ ] Foreign keys with CASCADE deletes where appropriate
-- [ ] All 9 table schema tests pass
+- [ ] All 9 table schema tests pass (test_models.py)
+- [ ] All 9 protocol/record tests pass (test_protocol.py)
 - [ ] Record dataclasses use `frozen=True, slots=True`
 - [ ] Container fields in records use `freeze_fields()` in `__post_init__`
 - [ ] Scalar-only records (SessionRecord, RunRecord) have no freeze guard
