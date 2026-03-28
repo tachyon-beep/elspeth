@@ -31,6 +31,7 @@ sessions_table = Table(
     metadata,
     Column("id", String, primary_key=True),
     Column("user_id", String, nullable=False, index=True),
+    Column("auth_provider_type", String, nullable=False, default="local"),
     Column("title", String, nullable=False),
     Column("created_at", DateTime, nullable=False),
     Column("updated_at", DateTime, nullable=False),
@@ -77,6 +78,12 @@ composition_states_table = Table(
     Column("is_valid", Boolean, nullable=False, default=False),
     Column("validation_errors", JSON, nullable=True),
     Column("created_at", DateTime, nullable=False),
+    Column(
+        "derived_from_state_id",
+        String,
+        ForeignKey("composition_states.id"),
+        nullable=True,
+    ),
     UniqueConstraint("session_id", "version", name="uq_composition_state_version"),
 )
 

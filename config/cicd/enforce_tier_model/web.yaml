@@ -6,63 +6,63 @@ allow_hits:
   expires: null
 
 # JWKSTokenValidator — httpx client.get() false positives (HTTP method, not dict.get)
-- key: web/auth/oidc.py:R1:JWKSTokenValidator:ensure_jwks:fp=53f7393e85c4867d
+- key: web/auth/oidc.py:R1:JWKSTokenValidator:ensure_jwks:fp=5d9ec6c99446cd42
   owner: web-auth
   reason: "False positive — httpx.AsyncClient.get() is an HTTP GET request, not dict.get()"
   safety: HTTP errors caught by raise_for_status() and except block
   expires: null
 
-- key: web/auth/oidc.py:R1:JWKSTokenValidator:ensure_jwks:fp=51b4e793531431ab
+- key: web/auth/oidc.py:R1:JWKSTokenValidator:ensure_jwks:fp=0212bb5677a2406e
   owner: web-auth
   reason: "False positive — httpx.AsyncClient.get() is an HTTP GET request, not dict.get()"
   safety: HTTP errors caught by raise_for_status() and except block
   expires: null
 
 # JWKSTokenValidator — Tier 3 JWT header .get() for kid extraction
-- key: web/auth/oidc.py:R1:JWKSTokenValidator:decode_token:fp=f92ed8af8727b11c
+- key: web/auth/oidc.py:R1:JWKSTokenValidator:decode_token:fp=43b5f14ace609f1d
   owner: web-auth
   reason: "Tier 3 boundary — JWT header kid field is optional per RFC 7515"
   safety: "Missing kid falls through to first key in JWKS; AuthenticationError on decode failure"
   expires: null
 
 # OIDC provider — Tier 3 JWT payload .get() calls (external IdP token claims)
-- key: web/auth/oidc.py:R1:OIDCAuthProvider:authenticate:fp=7c2edea836730ca5
+- key: web/auth/oidc.py:R1:OIDCAuthProvider:authenticate:fp=a8c6a2b695a3d754
   owner: web-auth
   reason: "Tier 3 boundary — preferred_username is optional in OIDC tokens, falls back to sub"
   safety: "Default is payload['sub'] which is required; absence of optional claim is expected"
   expires: null
 
-- key: web/auth/oidc.py:R1:OIDCAuthProvider:get_user_info:fp=119637c0f9cf8041
+- key: web/auth/oidc.py:R1:OIDCAuthProvider:get_user_info:fp=a3787dad45249f67
   owner: web-auth
   reason: "Tier 3 boundary — groups claim is optional in OIDC tokens; None = no groups"
   safety: "None returns empty groups; non-list raises AuthenticationError; no silent discard"
   expires: null
 
-- key: web/auth/oidc.py:R5:OIDCAuthProvider:get_user_info:fp=597a50f9bd4c0900
+- key: web/auth/oidc.py:R5:OIDCAuthProvider:get_user_info:fp=8ca64d6c43cc262d
   owner: web-auth
   reason: "Tier 3 boundary — groups claim type is not guaranteed by external IdP"
   safety: "Non-list raises AuthenticationError with type info for debugging"
   expires: null
 
-- key: web/auth/oidc.py:R1:OIDCAuthProvider:get_user_info:fp=c8d0bbe25a7a0673
+- key: web/auth/oidc.py:R1:OIDCAuthProvider:get_user_info:fp=e9a89464d499fed3
   owner: web-auth
   reason: "Tier 3 boundary — preferred_username is optional in OIDC tokens, falls back to sub"
   safety: "Default is payload['sub'] which is required"
   expires: null
 
-- key: web/auth/oidc.py:R1:OIDCAuthProvider:get_user_info:fp=b7dc6cb09082acc5
+- key: web/auth/oidc.py:R1:OIDCAuthProvider:get_user_info:fp=50e2c5aea8128cfe
   owner: web-auth
   reason: "Tier 3 boundary — name claim is optional, falls back to preferred_username"
   safety: "Falls back to preferred_username or 'Unknown'; never to opaque sub UUID"
   expires: null
 
-- key: web/auth/oidc.py:R1:OIDCAuthProvider:get_user_info:fp=5156a773c6897f3e
+- key: web/auth/oidc.py:R1:OIDCAuthProvider:get_user_info:fp=64985ed62a0e03ec
   owner: web-auth
   reason: "Tier 3 boundary — preferred_username fallback in display_name chain"
   safety: "Part of name -> preferred_username -> 'Unknown' chain"
   expires: null
 
-- key: web/auth/oidc.py:R1:OIDCAuthProvider:get_user_info:fp=18df83c841e26ed3
+- key: web/auth/oidc.py:R1:OIDCAuthProvider:get_user_info:fp=f2a1b1758a966c9d
   owner: web-auth
   reason: "Tier 3 boundary — email claim is optional in OIDC tokens"
   safety: "Default None; UserProfile.email accepts None; absence is honest representation"

@@ -13,9 +13,12 @@ from typing import Any
 
 import httpx
 import jwt
+import structlog
 from jwt.exceptions import PyJWTError
 
 from elspeth.web.auth.models import AuthenticationError, UserIdentity, UserProfile
+
+slog = structlog.get_logger()
 
 
 class JWKSTokenValidator:
@@ -68,6 +71,11 @@ class JWKSTokenValidator:
             except (httpx.HTTPError, KeyError, ValueError) as exc:
                 if stale_jwks is not None:
                     # Serve stale cache -- JWKS keys are long-lived
+                    slog.debug(
+                        "JWKS fetch failed, serving stale cache",
+                        issuer=self._issuer,
+                        error=str(exc),
+                    )
                     return stale_jwks
                 raise AuthenticationError(f"Failed to fetch JWKS: {exc}") from exc
 

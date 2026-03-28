@@ -42,7 +42,7 @@ class TestTableCreation:
     def test_sessions_columns(self, engine) -> None:
         inspector = inspect(engine)
         columns = {c["name"] for c in inspector.get_columns("sessions")}
-        assert columns >= {"id", "user_id", "title", "created_at", "updated_at"}
+        assert columns >= {"id", "user_id", "auth_provider_type", "title", "created_at", "updated_at"}
 
     def test_chat_messages_columns(self, engine) -> None:
         inspector = inspect(engine)
@@ -71,6 +71,7 @@ class TestTableCreation:
             "is_valid",
             "validation_errors",
             "created_at",
+            "derived_from_state_id",
         }
 
     def test_runs_columns(self, engine) -> None:

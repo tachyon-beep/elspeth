@@ -19,6 +19,16 @@ from uuid import UUID
 
 from elspeth.contracts.freeze import freeze_fields
 
+# Legal run status transitions. Implementations MUST reject any
+# transition not in this table.
+LEGAL_RUN_TRANSITIONS: dict[str, frozenset[str]] = {
+    "pending": frozenset({"running", "cancelled"}),
+    "running": frozenset({"completed", "failed", "cancelled"}),
+    "completed": frozenset(),  # terminal
+    "failed": frozenset(),  # terminal
+    "cancelled": frozenset(),  # terminal
+}
+
 
 @dataclass(frozen=True, slots=True)
 class SessionRecord:
@@ -29,6 +39,7 @@ class SessionRecord:
 
     id: UUID
     user_id: str
+    auth_provider_type: str
     title: str
     created_at: datetime
     updated_at: datetime
@@ -104,6 +115,7 @@ class CompositionStateRecord:
     is_valid: bool
     validation_errors: Sequence[str] | None
     created_at: datetime
+    derived_from_state_id: UUID | None
 
     def __post_init__(self) -> None:
         non_none = []
@@ -164,6 +176,7 @@ class SessionServiceProtocol(Protocol):
         self,
         user_id: str,
         title: str,
+        auth_provider_type: str,
     ) -> SessionRecord: ...
 
     async def get_session(self, session_id: UUID) -> SessionRecord: ...
@@ -207,7 +220,13 @@ class SessionServiceProtocol(Protocol):
         self,
         session_id: UUID,
         state_id: UUID,
-    ) -> CompositionStateRecord: ...
+    ) -> CompositionStateRecord:
+        """Set the active composition state for a session.
+
+        Creates a new state version derived from the specified state_id.
+        Sets derived_from_state_id on the new version to record lineage.
+        """
+        ...
 
     async def create_run(
         self,
@@ -226,9 +245,32 @@ class SessionServiceProtocol(Protocol):
         landscape_run_id: str | None = None,
         rows_processed: int | None = None,
         rows_failed: int | None = None,
-    ) -> None: ...
+    ) -> None:
+        """Update a run's status and metadata.
+
+        Transitions MUST comply with LEGAL_RUN_TRANSITIONS.
+
+        landscape_run_id is write-once: once set to a non-None value,
+        subsequent calls MUST NOT overwrite it. Implementations MUST
+        raise ValueError if landscape_run_id is provided but the run
+        already has one set.
+        """
+        ...
 
     async def get_active_run(
         self,
         session_id: UUID,
     ) -> RunRecord | None: ...
+
+    async def cancel_orphaned_runs(
+        self,
+        session_id: UUID,
+        max_age_seconds: int = 3600,
+    ) -> list[RunRecord]:
+        """Force-cancel runs stuck in 'running' status beyond max_age_seconds.
+
+        Returns the list of cancelled RunRecords. Called by the execution
+        service on startup and periodically to prevent orphaned runs from
+        permanently blocking sessions.
+        """
+        ...

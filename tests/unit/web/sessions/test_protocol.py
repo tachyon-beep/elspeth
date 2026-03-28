@@ -23,6 +23,7 @@ class TestSessionRecord:
         record = SessionRecord(
             id=uuid4(),
             user_id="alice",
+            auth_provider_type="local",
             title="Test",
             created_at=datetime.now(UTC),
             updated_at=datetime.now(UTC),
@@ -99,6 +100,7 @@ class TestCompositionStateRecord:
             is_valid=True,
             validation_errors=None,
             created_at=datetime.now(UTC),
+            derived_from_state_id=None,
         )
         with pytest.raises(TypeError):
             record.source["new"] = "value"  # type: ignore[index]
