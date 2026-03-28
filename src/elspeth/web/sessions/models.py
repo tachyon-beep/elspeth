@@ -126,7 +126,7 @@ run_events_table = Table(
     Column("event_type", String, nullable=False),
     Column("data", JSON, nullable=False),
     CheckConstraint(
-        "event_type IN ('progress', 'error', 'completed')",
+        "event_type IN ('progress', 'error', 'completed', 'cancelled')",
         name="ck_run_events_type",
     ),
 )
