@@ -1,0 +1,59 @@
+"""FastAPI application factory."""
+
+from __future__ import annotations
+
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
+
+from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
+
+from elspeth.web.config import WebSettings
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI) -> AsyncIterator[None]:
+    """Async lifespan context manager for the FastAPI application.
+
+    Services that require a running event loop must be constructed here,
+    not in the synchronous create_app() function.
+
+    Phase 1: stub -- no async services yet.
+    Phase 5 will construct ProgressBroadcaster here using
+    asyncio.get_running_loop().
+    """
+    # Phase 5 will add:
+    #   app.state.broadcaster = ProgressBroadcaster(asyncio.get_running_loop())
+    yield
+    # Shutdown: clean up async services here.
+
+
+def create_app(settings: WebSettings | None = None) -> FastAPI:
+    """Create and configure the FastAPI application.
+
+    Args:
+        settings: Web application settings. Constructs defaults if None.
+
+    Returns:
+        Configured FastAPI instance with CORS middleware and health endpoint.
+    """
+    if settings is None:
+        settings = WebSettings()
+
+    app = FastAPI(title="ELSPETH Web", version="0.1.0", lifespan=lifespan)
+
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=settings.cors_origins,
+        allow_credentials=True,
+        allow_methods=["*"],
+        allow_headers=["*"],
+    )
+
+    app.state.settings = settings
+
+    @app.get("/api/health")
+    async def health() -> dict[str, str]:
+        return {"status": "ok"}
+
+    return app
