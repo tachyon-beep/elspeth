@@ -1,0 +1,6 @@
+allow_hits:
+- key: web/app.py:R1:create_app:health:fp=34cd0485fb465e86
+  owner: architecture
+  reason: "False positive — @app.get() is FastAPI HTTP route decorator, not dict.get()"
+  safety: No dict access involved; decorator syntax triggers text-based pattern match
+  expires: null

@@ -403,7 +403,10 @@ def test_aggregation_rejects_transform_without_is_batch_aware_attribute():
     adapter = TypeAdapter(ElspethSettings)
     config = adapter.validate_python(config_dict)
 
-    with patch("elspeth.cli._get_plugin_manager", return_value=mock_manager), pytest.raises(ValueError) as exc_info:
+    with (
+        patch("elspeth.plugins.infrastructure.manager.get_shared_plugin_manager", return_value=mock_manager),
+        pytest.raises(ValueError) as exc_info,
+    ):
         instantiate_plugins_from_config(config)
 
     # Verify the error mentions is_batch_aware requirement

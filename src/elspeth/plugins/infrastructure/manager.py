@@ -284,3 +284,22 @@ class PluginManager:
 
         # Instantiate with validated config
         return plugin_cls(config)
+
+
+# --- Shared singleton ---
+
+_shared_instance: PluginManager | None = None
+
+
+def get_shared_plugin_manager() -> PluginManager:
+    """Return the shared plugin manager singleton.
+
+    Creates a PluginManager and calls register_builtin_plugins() on first
+    invocation.  Returns the same instance on all subsequent calls.
+    Used by both CLI and web entry points.
+    """
+    global _shared_instance
+    if _shared_instance is None:
+        _shared_instance = PluginManager()
+        _shared_instance.register_builtin_plugins()
+    return _shared_instance

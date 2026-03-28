@@ -40,33 +40,10 @@ if TYPE_CHECKING:
     from elspeth.core.landscape import LandscapeDB
     from elspeth.engine import Orchestrator, PipelineConfig
     from elspeth.engine.orchestrator import RowPlugin
-    from elspeth.plugins.infrastructure.manager import PluginManager
-
 __all__ = [
     "app",
     "load_settings",  # Re-exported from config for convenience
 ]
-
-# Module-level singleton for plugin manager
-_plugin_manager_cache: PluginManager | None = None
-
-
-def _get_plugin_manager() -> PluginManager:
-    """Get initialized plugin manager (singleton).
-
-    Returns:
-        PluginManager with all built-in plugins registered
-    """
-    global _plugin_manager_cache
-
-    from elspeth.plugins.infrastructure.manager import PluginManager
-
-    if _plugin_manager_cache is None:
-        manager = PluginManager()
-        manager.register_builtin_plugins()
-        _plugin_manager_cache = manager
-    return _plugin_manager_cache
-
 
 app = typer.Typer(
     name="elspeth",
@@ -1253,8 +1230,9 @@ def _build_plugin_registry() -> dict[str, list[PluginInfo]]:
         Dict mapping plugin type to list of PluginInfo for each plugin.
     """
     from elspeth.plugins.infrastructure.discovery import get_plugin_description
+    from elspeth.plugins.infrastructure.manager import get_shared_plugin_manager
 
-    manager = _get_plugin_manager()
+    manager = get_shared_plugin_manager()
 
     return {
         "source": [PluginInfo(name=cls.name, description=get_plugin_description(cls)) for cls in manager.get_sources()],
@@ -2154,7 +2132,9 @@ def health(
 
     # Check 7: Plugins loaded
     try:
-        manager = _get_plugin_manager()
+        from elspeth.plugins.infrastructure.manager import get_shared_plugin_manager
+
+        manager = get_shared_plugin_manager()
         source_count = len(manager.get_sources())
         transform_count = len(manager.get_transforms())
         sink_count = len(manager.get_sinks())
@@ -2201,6 +2181,49 @@ def health(
     # Exit with appropriate code
     if not overall_healthy:
         raise typer.Exit(1)
+
+
+@app.command()
+def web(
+    port: int = typer.Option(8000, help="Port to listen on"),
+    host: str = typer.Option("127.0.0.1", help="Host to bind to"),
+    auth: str = typer.Option("local", help="Auth provider: local, oidc, entra"),
+    reload: bool = typer.Option(False, help="Enable auto-reload for development"),
+) -> None:
+    """Start the ELSPETH web application."""
+    try:
+        import uvicorn
+    except ImportError:
+        typer.echo(
+            "Error: Web UI requires the [webui] extra. Install with: uv pip install -e '.[webui]'",
+            err=True,
+        )
+        raise typer.Exit(1) from None
+
+    from elspeth.web.config import WebSettings
+
+    # Validate CLI arguments against WebSettings (catches invalid auth_provider early).
+    settings = WebSettings(port=port, host=host, auth_provider=auth)
+
+    # FIXME(Sub-2): uvicorn's factory protocol calls create_app() with no arguments,
+    # so only host/port (passed to uvicorn directly) take effect. The auth_provider
+    # and other WebSettings fields are lost — create_app() constructs WebSettings()
+    # with defaults. This is acceptable in Sub-1 (no auth middleware exists yet).
+    # Sub-2 must wire settings through to create_app(), e.g. via env vars or a
+    # module-level holder. See spec W7 note.
+    if auth != "local":
+        typer.echo(
+            f"Warning: --auth={auth} accepted but not yet effective. Auth middleware is added in Sub-2.",
+            err=True,
+        )
+
+    uvicorn.run(
+        "elspeth.web.app:create_app",
+        host=settings.host,
+        port=settings.port,
+        reload=reload,
+        factory=True,
+    )
 
 
 if __name__ == "__main__":
