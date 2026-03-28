@@ -147,6 +147,9 @@ allowed_dict_patterns:
   # DAG builder - schema dict extraction from node info
   - "src/elspeth/core/dag/builder.py:_best_schema_dict:return"
 
+  # Catalog service - Pydantic model_json_schema() output (standard JSON Schema dict)
+  - "src/elspeth/web/catalog/service.py:CatalogServiceImpl._get_json_schema:return"
+
   # Schema reconstruction - deserializing schemas from landscape database (refactored into orchestrator/export.py)
 
   # ═══════════════════════════════════════════════════════════════════════════
