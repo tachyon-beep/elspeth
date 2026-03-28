@@ -433,3 +433,9 @@ allowed_dict_patterns:
   - "src/elspeth/web/auth/oidc.py:JWKSTokenValidator.decode_token:return"
   - "src/elspeth/web/auth/entra.py:EntraAuthProvider._validate_tenant:payload"
   - "src/elspeth/web/auth/entra.py:EntraAuthProvider._extract_groups:payload"
+
+  # ═══════════════════════════════════════════════════════════════════════════
+  # WEB AUTH — Session service protocol
+  # tool_calls is pipeline composition data (Tier 2 — user-defined graph structure).
+  # ═══════════════════════════════════════════════════════════════════════════
+  - "src/elspeth/web/sessions/protocol.py:SessionServiceProtocol.add_message:tool_calls"
