@@ -5,7 +5,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Literal
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 
 class WebSettings(BaseModel):
@@ -48,6 +48,16 @@ class WebSettings(BaseModel):
     # Session database (sessions, messages, composition states, runs)
     # Separate from landscape_url (audit DB)
     session_db_url: str | None = None
+
+    @model_validator(mode="after")
+    def _enforce_secret_key_in_production(self) -> WebSettings:
+        """Reject the default secret key when host suggests non-local deployment."""
+        if self.secret_key == "change-me-in-production" and self.host != "127.0.0.1":
+            raise ValueError(
+                "secret_key must be set to a secure value for non-local deployments "
+                "(host is not 127.0.0.1). Set ELSPETH_WEB__SECRET_KEY or pass secret_key explicitly."
+            )
+        return self
 
     def get_landscape_url(self) -> str:
         """Resolve landscape DB URL, defaulting to data_dir-relative path."""

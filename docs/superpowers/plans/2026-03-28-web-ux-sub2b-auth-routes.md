@@ -14,7 +14,8 @@
 
 | Action | Path | Responsibility |
 |--------|------|----------------|
-| Create | `src/elspeth/web/auth/middleware.py` | get_current_user FastAPI dependency |
+| Modify | `src/elspeth/web/auth/local.py` | Add `refresh()` method for token re-issue |
+| Create | `src/elspeth/web/auth/middleware.py` | get_current_user FastAPI dependency (stashes token on request.state) |
 | Create | `src/elspeth/web/auth/routes.py` | /api/auth/login, /api/auth/token, /api/auth/config, /api/auth/me |
 | Create | `tests/unit/web/auth/test_middleware.py` | Auth middleware tests |
 | Create | `tests/unit/web/auth/test_routes.py` | Auth route tests including /api/auth/config |
@@ -83,7 +84,7 @@ class TestGetCurrentUser:
 
         response = client.get("/protected")
         assert response.status_code == 401
-        assert "Missing" in response.json()["detail"] or "invalid" in response.json()["detail"].lower()
+        assert response.json()["detail"] == "Missing or invalid Authorization header"
 
     def test_non_bearer_scheme(self) -> None:
         mock_provider = AsyncMock()
@@ -151,6 +152,10 @@ async def get_current_user(request: Request) -> UserIdentity:
 
     Retrieves the auth_provider from request.app.state and calls
     authenticate(token). Converts AuthenticationError to HTTP 401.
+
+    Stashes the raw token on request.state.auth_token so downstream
+    route handlers (e.g. /me) can reuse it without re-parsing the
+    Authorization header.
     """
     auth_header = request.headers.get("Authorization")
     if not auth_header:
@@ -167,6 +172,7 @@ async def get_current_user(request: Request) -> UserIdentity:
         )
 
     token = parts[1].strip()
+    request.state.auth_token = token
     auth_provider = request.app.state.auth_provider
 
     try:
@@ -195,10 +201,34 @@ git commit -m "feat(web/auth): implement get_current_user auth middleware depend
 ### Task 2.6: Auth Routes
 
 **Files:**
+- Modify: `src/elspeth/web/auth/local.py` (add `refresh()` method)
 - Create: `src/elspeth/web/auth/routes.py`
 - Create: `tests/unit/web/auth/test_routes.py`
 
-- [ ] **Step 1: Write tests**
+- [ ] **Step 1: Add `refresh()` method to LocalAuthProvider**
+
+The token refresh route needs to issue a new JWT for an already-authenticated user without requiring their password. Add a public `refresh()` method to `LocalAuthProvider` so the route doesn't need to access private `_secret_key` or `_token_expiry_hours` attributes.
+
+Add this method to `src/elspeth/web/auth/local.py` after the `login()` method:
+
+```python
+    def refresh(self, user_id: str, username: str) -> str:
+        """Issue a new JWT for an already-authenticated user.
+
+        Called by the token refresh route. Does NOT re-verify
+        credentials — the caller (get_current_user middleware)
+        has already validated the existing token.
+        """
+        payload = {
+            "sub": user_id,
+            "username": username,
+            "exp": int(time.time()) + self._token_expiry_hours * 3600,
+        }
+        token: str = jwt.encode(payload, self._secret_key, algorithm="HS256")
+        return token
+```
+
+- [ ] **Step 2: Write tests**
 
 ```python
 # tests/unit/web/auth/test_routes.py
@@ -217,13 +247,16 @@ from elspeth.web.auth.models import AuthenticationError, UserProfile
 from elspeth.web.auth.routes import create_auth_router
 
 
-def _create_test_app(provider, auth_provider_type: str = "local") -> FastAPI:
+from elspeth.web.config import WebSettings
+
+
+def _create_test_app(
+    provider, auth_provider_type: str = "local", **settings_overrides
+) -> FastAPI:
     """Create a FastAPI app with auth routes for testing."""
     app = FastAPI()
     app.state.auth_provider = provider
-    app.state.settings = type(
-        "FakeSettings", (), {"auth_provider": auth_provider_type}
-    )()
+    app.state.settings = WebSettings(auth_provider=auth_provider_type, **settings_overrides)
     router = create_auth_router()
     app.include_router(router)
     return app
@@ -377,9 +410,6 @@ class TestAuthConfigEndpoint:
             secret_key="test-key",
         )
         app = _create_test_app(provider, auth_provider_type="local")
-        # Add OIDC fields to fake settings
-        app.state.settings.oidc_issuer = None
-        app.state.settings.oidc_client_id = None
         client = TestClient(app)
 
         response = client.get("/api/auth/config")
@@ -389,11 +419,14 @@ class TestAuthConfigEndpoint:
         assert body["oidc_issuer"] is None
         assert body["oidc_client_id"] is None
 
-    def test_oidc_provider_returns_issuer_and_client_id(self, tmp_path) -> None:
+    def test_oidc_provider_returns_issuer_and_client_id(self) -> None:
         provider = AsyncMock()
-        app = _create_test_app(provider, auth_provider_type="oidc")
-        app.state.settings.oidc_issuer = "https://login.example.com"
-        app.state.settings.oidc_client_id = "my-client-id"
+        app = _create_test_app(
+            provider,
+            auth_provider_type="oidc",
+            oidc_issuer="https://login.example.com",
+            oidc_client_id="my-client-id",
+        )
         client = TestClient(app)
 
         response = client.get("/api/auth/config")
@@ -403,12 +436,10 @@ class TestAuthConfigEndpoint:
         assert body["oidc_issuer"] == "https://login.example.com"
         assert body["oidc_client_id"] == "my-client-id"
 
-    def test_config_endpoint_is_unauthenticated(self, tmp_path) -> None:
+    def test_config_endpoint_is_unauthenticated(self) -> None:
         """GET /api/auth/config must not require a Bearer token."""
         provider = AsyncMock()
         app = _create_test_app(provider, auth_provider_type="local")
-        app.state.settings.oidc_issuer = None
-        app.state.settings.oidc_client_id = None
         client = TestClient(app)
 
         # No Authorization header -- should still return 200
@@ -416,7 +447,7 @@ class TestAuthConfigEndpoint:
         assert response.status_code == 200
 ```
 
-- [ ] **Step 2: Run tests -- verify they fail**
+- [ ] **Step 3: Run tests -- verify they fail**
 
 ```bash
 .venv/bin/python -m pytest tests/unit/web/auth/test_routes.py -v
@@ -424,7 +455,7 @@ class TestAuthConfigEndpoint:
 
 Expected: `ModuleNotFoundError: No module named 'elspeth.web.auth.routes'`
 
-- [ ] **Step 3: Implement auth routes**
+- [ ] **Step 4: Implement auth routes**
 
 ```python
 # src/elspeth/web/auth/routes.py
@@ -437,6 +468,8 @@ GET /me returns the full UserProfile for any auth provider.
 """
 
 from __future__ import annotations
+
+import asyncio
 
 from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel
@@ -483,14 +516,20 @@ def create_auth_router() -> APIRouter:
 
     @router.post("/login", response_model=TokenResponse)
     async def login(body: LoginRequest, request: Request) -> TokenResponse:
-        """Authenticate with username/password (local auth only)."""
+        """Authenticate with username/password (local auth only).
+
+        login() is synchronous (bcrypt is intentionally slow ~200ms),
+        so it is offloaded to a thread to avoid blocking the event loop.
+        """
         settings = request.app.state.settings
         if settings.auth_provider != "local":
             raise HTTPException(status_code=404, detail="Not found")
 
         provider = request.app.state.auth_provider
         try:
-            token = provider.login(body.username, body.password)
+            token = await asyncio.to_thread(
+                provider.login, body.username, body.password,
+            )
         except AuthenticationError as exc:
             raise HTTPException(status_code=401, detail=exc.detail) from exc
 
@@ -501,23 +540,17 @@ def create_auth_router() -> APIRouter:
         request: Request,
         user: UserIdentity = Depends(get_current_user),
     ) -> TokenResponse:
-        """Re-issue a JWT from a valid existing token (local auth only)."""
+        """Re-issue a JWT from a valid existing token (local auth only).
+
+        Uses the provider's public refresh() method rather than
+        reaching into private attributes.
+        """
         settings = request.app.state.settings
         if settings.auth_provider != "local":
             raise HTTPException(status_code=404, detail="Not found")
 
         provider = request.app.state.auth_provider
-        # Re-login by issuing a new token for the authenticated user.
-        # We use the internal JWT creation rather than requiring a password.
-        from jose import jwt
-        import time
-
-        payload = {
-            "sub": user.user_id,
-            "username": user.username,
-            "exp": int(time.time()) + provider._token_expiry_hours * 3600,
-        }
-        new_token = jwt.encode(payload, provider._secret_key, algorithm="HS256")
+        new_token = provider.refresh(user.user_id, user.username)
         return TokenResponse(access_token=new_token)
 
     @router.get("/config", response_model=AuthConfigResponse)
@@ -530,15 +563,21 @@ def create_auth_router() -> APIRouter:
         settings = request.app.state.settings
         return AuthConfigResponse(
             provider=settings.auth_provider,
-            oidc_issuer=getattr(settings, "oidc_issuer", None),
-            oidc_client_id=getattr(settings, "oidc_client_id", None),
+            oidc_issuer=settings.oidc_issuer,
+            oidc_client_id=settings.oidc_client_id,
         )
 
     @router.get("/me", response_model=UserProfileResponse)
-    async def me(request: Request, user: UserIdentity = Depends(get_current_user)):
-        """Return the full profile of the authenticated user."""
-        auth_header = request.headers.get("Authorization", "")
-        token = auth_header.split(" ", 1)[1]
+    async def me(
+        request: Request,
+        user: UserIdentity = Depends(get_current_user),
+    ) -> UserProfileResponse:
+        """Return the full profile of the authenticated user.
+
+        The raw token was stashed on request.state.auth_token by
+        get_current_user, so we don't re-parse the Authorization header.
+        """
+        token = request.state.auth_token
         provider = request.app.state.auth_provider
 
         try:
@@ -557,7 +596,7 @@ def create_auth_router() -> APIRouter:
     return router
 ```
 
-- [ ] **Step 4: Run tests -- verify they pass**
+- [ ] **Step 5: Run tests -- verify they pass**
 
 ```bash
 .venv/bin/python -m pytest tests/unit/web/auth/test_routes.py -v
@@ -565,17 +604,18 @@ def create_auth_router() -> APIRouter:
 
 Expected: all 10 tests pass.
 
-- [ ] **Step 5: Run all auth tests**
+- [ ] **Step 6: Run all auth tests**
 
 ```bash
 .venv/bin/python -m pytest tests/unit/web/auth/ -v
 ```
 
-- [ ] **Step 6: Commit**
+- [ ] **Step 7: Commit**
 
 ```bash
-git add src/elspeth/web/auth/routes.py tests/unit/web/auth/test_routes.py
-git commit -m "feat(web/auth): implement auth routes -- login, token refresh, user profile"
+git add src/elspeth/web/auth/local.py src/elspeth/web/auth/routes.py \
+    tests/unit/web/auth/test_routes.py
+git commit -m "feat(web/auth): implement auth routes -- login, token refresh, user profile, config"
 ```
 
 ---
@@ -604,12 +644,16 @@ After completing both tasks, verify:
 **Expected results:**
 
 - [ ] All 15 tests pass (5 middleware + 10 routes)
-- [ ] `get_current_user` extracts Bearer token and delegates to `auth_provider.authenticate()`
+- [ ] `get_current_user` extracts Bearer token, stashes it on `request.state.auth_token`, delegates to `auth_provider.authenticate()`
 - [ ] Missing/malformed Authorization header returns 401, not 500
 - [ ] `AuthenticationError` from provider is converted to HTTP 401 with `exc.detail`
 - [ ] `POST /api/auth/login` returns 404 when `auth_provider != "local"` (not 405 or 500)
-- [ ] `POST /api/auth/token` requires valid Bearer token (uses `get_current_user` dependency)
+- [ ] `POST /api/auth/login` offloads sync `provider.login()` via `asyncio.to_thread` (bcrypt is ~200ms)
+- [ ] `POST /api/auth/token` uses `provider.refresh()` — no access to private `_secret_key` or `_token_expiry_hours`
+- [ ] `GET /api/auth/config` accesses `settings.oidc_issuer` and `settings.oidc_client_id` directly — no `getattr()` with defaults
 - [ ] `GET /api/auth/config` is unauthenticated -- no `Depends(get_current_user)`
+- [ ] `GET /api/auth/me` uses `request.state.auth_token` from middleware — no duplicate header parsing
 - [ ] `GET /api/auth/me` returns full `UserProfileResponse` including groups
+- [ ] Tests use `WebSettings(...)` — no `type()` hacks for fake settings
 - [ ] No imports from `elspeth.web.sessions` (Task-Plan 2B has no session dependencies)
 - [ ] Exception chains preserved with `from exc` on all `raise HTTPException`

@@ -13,6 +13,7 @@ import asyncio
 from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel
 
+from elspeth.web.auth.local import LocalAuthProvider
 from elspeth.web.auth.middleware import get_current_user
 from elspeth.web.auth.models import AuthenticationError, UserIdentity
 from elspeth.web.auth.protocol import AuthProvider
@@ -62,11 +63,10 @@ def create_auth_router() -> APIRouter:
         login() is synchronous (bcrypt is intentionally slow ~200ms),
         so it is offloaded to a thread to avoid blocking the event loop.
         """
-        settings: WebSettings = request.app.state.settings
-        if settings.auth_provider != "local":
+        provider = request.app.state.auth_provider
+        if not isinstance(provider, LocalAuthProvider):
             raise HTTPException(status_code=404, detail="Not found")
 
-        provider = request.app.state.auth_provider
         try:
             token = await asyncio.to_thread(
                 provider.login,
@@ -88,11 +88,10 @@ def create_auth_router() -> APIRouter:
         Uses the provider's public refresh() method rather than
         reaching into private attributes.
         """
-        settings: WebSettings = request.app.state.settings
-        if settings.auth_provider != "local":
+        provider = request.app.state.auth_provider
+        if not isinstance(provider, LocalAuthProvider):
             raise HTTPException(status_code=404, detail="Not found")
 
-        provider = request.app.state.auth_provider
         new_token = provider.refresh(user.user_id, user.username)
         return TokenResponse(access_token=new_token)
 

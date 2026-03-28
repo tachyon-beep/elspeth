@@ -16,9 +16,6 @@ from jose import JWTError, jwt
 
 from elspeth.web.auth.models import AuthenticationError, UserIdentity, UserProfile
 
-# Module-level constant for timing-safe login
-_DUMMY_HASH = bcrypt.hashpw(b"dummy", bcrypt.gensalt())
-
 
 class LocalAuthProvider:
     """Authenticates users against a local SQLite database with bcrypt + JWT."""
@@ -33,6 +30,7 @@ class LocalAuthProvider:
         self._secret_key = secret_key
         self._token_expiry_hours = token_expiry_hours
         self._ensure_schema()
+        self._dummy_hash = bcrypt.hashpw(b"dummy", bcrypt.gensalt())
 
     def _get_conn(self) -> sqlite3.Connection:
         """Open a connection to the SQLite database."""
@@ -94,7 +92,7 @@ class LocalAuthProvider:
 
         if row is None:
             # Constant-time: hash against dummy to prevent timing oracle
-            bcrypt.checkpw(password.encode(), _DUMMY_HASH)
+            bcrypt.checkpw(password.encode(), self._dummy_hash)
             raise AuthenticationError("Invalid credentials")
 
         if not bcrypt.checkpw(password.encode(), row[0].encode()):
@@ -111,10 +109,21 @@ class LocalAuthProvider:
     def refresh(self, user_id: str, username: str) -> str:
         """Issue a new JWT for an already-authenticated user.
 
+        Verifies the user still exists in the database -- a deleted
+        user must not be able to obtain fresh tokens via refresh.
+
         Called by the token refresh route. Does NOT re-verify
-        credentials — the caller (get_current_user middleware)
+        credentials -- the caller (get_current_user middleware)
         has already validated the existing token.
         """
+        with self._get_conn() as conn:
+            row = conn.execute(
+                "SELECT 1 FROM users WHERE user_id = ?",
+                (user_id,),
+            ).fetchone()
+        if row is None:
+            raise AuthenticationError("User not found")
+
         payload = {
             "sub": user_id,
             "username": username,

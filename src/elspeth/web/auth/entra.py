@@ -1,8 +1,8 @@
 """Azure Entra ID authentication provider.
 
-Inherits from OIDCAuthProvider, adding Entra-specific tenant validation
-and group/role claim extraction. The OIDC issuer is derived from the
-tenant_id.
+Uses JWKSTokenValidator via composition, adding Entra-specific tenant
+validation and group/role claim extraction. The OIDC issuer is derived
+from the tenant_id.
 """
 
 from __future__ import annotations
@@ -10,13 +10,13 @@ from __future__ import annotations
 from typing import Any
 
 from elspeth.web.auth.models import AuthenticationError, UserIdentity, UserProfile
-from elspeth.web.auth.oidc import OIDCAuthProvider
+from elspeth.web.auth.oidc import JWKSTokenValidator
 
 
-class EntraAuthProvider(OIDCAuthProvider):
+class EntraAuthProvider:
     """Validates Azure Entra ID tokens with tenant and group claim handling.
 
-    Extends OIDCAuthProvider with:
+    Composes JWKSTokenValidator for JWKS discovery and JWT decode, adding:
     - Tenant ID verification (``tid`` claim must match expected tenant)
     - Group claim extraction (``groups`` + ``role:``-prefixed ``roles``)
     """
@@ -29,7 +29,7 @@ class EntraAuthProvider(OIDCAuthProvider):
     ) -> None:
         self._tenant_id = tenant_id
         issuer = f"https://login.microsoftonline.com/{tenant_id}/v2.0"
-        super().__init__(
+        self._validator = JWKSTokenValidator(
             issuer=issuer,
             audience=audience,
             jwks_cache_ttl_seconds=jwks_cache_ttl_seconds,
@@ -39,7 +39,7 @@ class EntraAuthProvider(OIDCAuthProvider):
         """Verify the tid claim matches the expected tenant.
 
         Raises AuthenticationError if ``tid`` is missing or mismatched.
-        The ``tid`` claim is required in Entra ID tokens — absence
+        The ``tid`` claim is required in Entra ID tokens -- absence
         indicates a non-Entra token or a configuration error.
         """
         try:
@@ -60,7 +60,7 @@ class EntraAuthProvider(OIDCAuthProvider):
 
         raw_groups = payload.get("groups")
         if raw_groups is None:
-            pass  # Absent claim — no groups assigned
+            pass  # Absent claim -- no groups assigned
         elif isinstance(raw_groups, list):
             groups.extend(str(g) for g in raw_groups)
         else:
@@ -70,7 +70,7 @@ class EntraAuthProvider(OIDCAuthProvider):
 
         raw_roles = payload.get("roles")
         if raw_roles is None:
-            pass  # Absent claim — no roles assigned
+            pass  # Absent claim -- no roles assigned
         elif isinstance(raw_roles, list):
             groups.extend(f"role:{r}" for r in raw_roles)
         else:
@@ -84,11 +84,10 @@ class EntraAuthProvider(OIDCAuthProvider):
         """Validate an Entra ID token with tenant verification.
 
         Performs standard OIDC validation (signature, expiry, issuer,
-        audience) via the inherited _decode_token, then checks the
-        tenant claim.
+        audience) via JWKSTokenValidator, then checks the tenant claim.
         """
-        jwks = await self._ensure_jwks()
-        payload = self._decode_token(token, jwks)
+        jwks = await self._validator.ensure_jwks()
+        payload = self._validator.decode_token(token, jwks)
 
         self._validate_tenant(payload)
 
@@ -99,8 +98,8 @@ class EntraAuthProvider(OIDCAuthProvider):
 
     async def get_user_info(self, token: str) -> UserProfile:
         """Decode an Entra ID token and extract profile with group claims."""
-        jwks = await self._ensure_jwks()
-        payload = self._decode_token(token, jwks)
+        jwks = await self._validator.ensure_jwks()
+        payload = self._validator.decode_token(token, jwks)
 
         self._validate_tenant(payload)
 

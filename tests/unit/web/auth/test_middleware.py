@@ -86,3 +86,14 @@ class TestGetCurrentUser:
         )
         assert response.status_code == 401
         assert response.json()["detail"] == "Token expired"
+
+    def test_bearer_with_whitespace_only_token(self) -> None:
+        mock_provider = AsyncMock()
+        app = _create_test_app(mock_provider)
+        client = TestClient(app)
+
+        response = client.get(
+            "/protected",
+            headers={"Authorization": "Bearer   "},
+        )
+        assert response.status_code == 401

@@ -195,3 +195,38 @@ class TestProtocolConformance:
         typed: AuthProvider = provider
         assert callable(type(typed).authenticate)
         assert callable(type(typed).get_user_info)
+
+
+class TestTimingDefense:
+    """Verify constant-time behavior for unknown users."""
+
+    def test_login_unknown_user_still_hashes(self, provider) -> None:
+        """Verify constant-time behavior: bcrypt.checkpw is called even for unknown users."""
+        import unittest.mock as mock
+
+        with mock.patch("elspeth.web.auth.local.bcrypt.checkpw", return_value=False) as mock_checkpw:
+            with pytest.raises(AuthenticationError, match="Invalid credentials"):
+                provider.login("nonexistent", "password")
+            # bcrypt.checkpw must be called even for nonexistent users (timing defense)
+            mock_checkpw.assert_called_once()
+
+
+class TestRefresh:
+    """Tests for the token refresh method."""
+
+    def test_refresh_deleted_user_raises(self, provider) -> None:
+        """A deleted user cannot obtain fresh tokens via refresh."""
+        import sqlite3
+
+        provider.create_user("alice", "pw", display_name="Alice")
+        # Delete the user directly
+        with sqlite3.connect(str(provider._db_path)) as conn:
+            conn.execute("DELETE FROM users WHERE user_id = ?", ("alice",))
+        with pytest.raises(AuthenticationError, match="User not found"):
+            provider.refresh("alice", "alice")
+
+    def test_refresh_valid_user_returns_jwt(self, provider) -> None:
+        provider.create_user("alice", "pw", display_name="Alice")
+        token = provider.refresh("alice", "alice")
+        assert isinstance(token, str)
+        assert len(token.split(".")) == 3

@@ -8,6 +8,7 @@ from fastapi import FastAPI
 from starlette.testclient import TestClient
 
 from elspeth.web.auth.local import LocalAuthProvider
+from elspeth.web.auth.models import AuthenticationError, UserIdentity
 from elspeth.web.auth.routes import create_auth_router
 from elspeth.web.config import WebSettings
 
@@ -206,3 +207,36 @@ class TestAuthConfigEndpoint:
         # No Authorization header -- should still return 200
         response = client.get("/api/auth/config")
         assert response.status_code == 200
+
+
+class TestTokenRefreshNonLocal:
+    """Token refresh must be unavailable for non-local providers."""
+
+    def test_token_refresh_not_available_for_oidc(self) -> None:
+        provider = AsyncMock()
+        provider.authenticate.return_value = UserIdentity(user_id="alice", username="alice")
+        app = _create_test_app(provider, auth_provider_type="oidc")
+        client = TestClient(app)
+        response = client.post(
+            "/api/auth/token",
+            headers={"Authorization": "Bearer some-token"},
+        )
+        assert response.status_code == 404
+
+
+class TestMeErrorPath:
+    """Tests for /me when get_user_info raises."""
+
+    def test_me_get_user_info_failure_returns_401(self) -> None:
+        """If get_user_info raises, /me returns 401 with the detail."""
+        mock_provider = AsyncMock()
+        mock_provider.authenticate.return_value = UserIdentity(user_id="alice", username="alice")
+        mock_provider.get_user_info.side_effect = AuthenticationError("Profile lookup failed")
+        app = _create_test_app(mock_provider, auth_provider_type="oidc")
+        client = TestClient(app)
+        response = client.get(
+            "/api/auth/me",
+            headers={"Authorization": "Bearer valid-token"},
+        )
+        assert response.status_code == 401
+        assert response.json()["detail"] == "Profile lookup failed"

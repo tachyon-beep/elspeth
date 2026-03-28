@@ -5,58 +5,57 @@ allow_hits:
   safety: No dict access involved; decorator syntax triggers text-based pattern match
   expires: null
 
-# OIDC provider — httpx client.get() false positives (HTTP method, not dict.get)
-- key: web/auth/oidc.py:R1:OIDCAuthProvider:_ensure_jwks:fp=a9a0de711a8df098
+# JWKSTokenValidator — httpx client.get() false positives (HTTP method, not dict.get)
+- key: web/auth/oidc.py:R1:JWKSTokenValidator:ensure_jwks:fp=42efa348465aa3be
   owner: web-auth
   reason: "False positive — httpx.AsyncClient.get() is an HTTP GET request, not dict.get()"
   safety: HTTP errors caught by raise_for_status() and except block
   expires: null
 
-- key: web/auth/oidc.py:R1:OIDCAuthProvider:_ensure_jwks:fp=62cb387f045528c6
+- key: web/auth/oidc.py:R1:JWKSTokenValidator:ensure_jwks:fp=4e75d19a7434d595
   owner: web-auth
   reason: "False positive — httpx.AsyncClient.get() is an HTTP GET request, not dict.get()"
   safety: HTTP errors caught by raise_for_status() and except block
   expires: null
 
 # OIDC provider — Tier 3 JWT payload .get() calls (external IdP token claims)
-- key: web/auth/oidc.py:R1:OIDCAuthProvider:authenticate:fp=58567a661b6fe40a
+- key: web/auth/oidc.py:R1:OIDCAuthProvider:authenticate:fp=acdd9fcbb89622f1
   owner: web-auth
   reason: "Tier 3 boundary — preferred_username is optional in OIDC tokens, falls back to sub"
   safety: "Default is payload['sub'] which is required; absence of optional claim is expected"
   expires: null
 
-- key: web/auth/oidc.py:R1:OIDCAuthProvider:get_user_info:fp=386e22984360fb5b
+- key: web/auth/oidc.py:R1:OIDCAuthProvider:get_user_info:fp=79798cd0894f1150
   owner: web-auth
   reason: "Tier 3 boundary — preferred_username is optional in OIDC tokens, falls back to sub"
   safety: "Default is payload['sub'] which is required; absence of optional claim is expected"
   expires: null
 
-- key: web/auth/oidc.py:R1:OIDCAuthProvider:get_user_info:fp=dc8858275b2d5f02
+- key: web/auth/oidc.py:R1:OIDCAuthProvider:get_user_info:fp=821fd79f04b0f7f2
   owner: web-auth
   reason: "Tier 3 boundary — email claim is optional in OIDC tokens"
   safety: "Default None; UserProfile.email accepts None; absence is honest representation"
   expires: null
 
-# New fingerprints after review fixes (groups now raise on non-list, display_name changed)
-- key: web/auth/oidc.py:R1:OIDCAuthProvider:get_user_info:fp=2acca2e414510abd
+- key: web/auth/oidc.py:R1:OIDCAuthProvider:get_user_info:fp=db3b3980f5bda904
   owner: web-auth
   reason: "Tier 3 boundary — groups claim is optional in OIDC tokens; None = no groups"
   safety: "None returns empty groups; non-list raises AuthenticationError; no silent discard"
   expires: null
 
-- key: web/auth/oidc.py:R5:OIDCAuthProvider:get_user_info:fp=7c9a52fe399ba9b5
+- key: web/auth/oidc.py:R5:OIDCAuthProvider:get_user_info:fp=908fccedb8cc61a1
   owner: web-auth
   reason: "Tier 3 boundary — groups claim type is not guaranteed by external IdP"
   safety: "Non-list raises AuthenticationError with type info for debugging"
   expires: null
 
-- key: web/auth/oidc.py:R1:OIDCAuthProvider:get_user_info:fp=63dab39d37b831df
+- key: web/auth/oidc.py:R1:OIDCAuthProvider:get_user_info:fp=74583158b126fa34
   owner: web-auth
   reason: "Tier 3 boundary — name claim is optional, falls back to preferred_username"
   safety: "Falls back to preferred_username (a real name) or 'Unknown'; never to opaque sub UUID"
   expires: null
 
-- key: web/auth/oidc.py:R1:OIDCAuthProvider:get_user_info:fp=b7a1502ba8ac62e8
+- key: web/auth/oidc.py:R1:OIDCAuthProvider:get_user_info:fp=b14d42305b1d4611
   owner: web-auth
   reason: "Tier 3 boundary — preferred_username fallback in display_name chain"
   safety: "Part of name -> preferred_username -> 'Unknown' chain; no opaque ID fabrication"
@@ -118,16 +117,29 @@ allow_hits:
   expires: null
 
 # Auth routes — @router.get() false positives (FastAPI route decorators, not dict.get)
-- key: web/auth/routes.py:R1:create_auth_router:auth_config:fp=3f8fc32990ce6112
+- key: web/auth/routes.py:R1:create_auth_router:auth_config:fp=082ca992116be396
   owner: web-auth
   reason: "False positive — @router.get() is FastAPI HTTP route decorator, not dict.get()"
   safety: No dict access involved; decorator syntax triggers text-based pattern match
   expires: null
 
-- key: web/auth/routes.py:R1:create_auth_router:me:fp=4db7c70c9126b330
+- key: web/auth/routes.py:R1:create_auth_router:me:fp=92915d8d86aae15f
   owner: web-auth
   reason: "False positive — @router.get() is FastAPI HTTP route decorator, not dict.get()"
   safety: No dict access involved; decorator syntax triggers text-based pattern match
+  expires: null
+
+# Auth routes — isinstance() for route dispatch (narrows AuthProvider to LocalAuthProvider)
+- key: web/auth/routes.py:R5:create_auth_router:login:fp=e28a1843fa68a647
+  owner: web-auth
+  reason: "Route dispatch — narrows AuthProvider to LocalAuthProvider for local-only endpoints"
+  safety: "Non-local providers return 404; isinstance enables mypy type narrowing for login()/refresh()"
+  expires: null
+
+- key: web/auth/routes.py:R5:create_auth_router:refresh_token:fp=c5c9aafff36b7e51
+  owner: web-auth
+  reason: "Route dispatch — narrows AuthProvider to LocalAuthProvider for local-only endpoints"
+  safety: "Non-local providers return 404; isinstance enables mypy type narrowing for login()/refresh()"
   expires: null
 
 # Auth middleware — Tier 3 HTTP header access (Authorization header from client)

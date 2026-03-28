@@ -428,8 +428,8 @@ allowed_dict_patterns:
   # WEB AUTH — OIDC/Entra token validation (Tier 3 boundary)
   # JWKS and JWT payloads are external IdP data with no typed schema.
   # ═══════════════════════════════════════════════════════════════════════════
-  - "src/elspeth/web/auth/oidc.py:OIDCAuthProvider._ensure_jwks:return"
-  - "src/elspeth/web/auth/oidc.py:OIDCAuthProvider._decode_token:jwks"
-  - "src/elspeth/web/auth/oidc.py:OIDCAuthProvider._decode_token:return"
+  - "src/elspeth/web/auth/oidc.py:JWKSTokenValidator.ensure_jwks:return"
+  - "src/elspeth/web/auth/oidc.py:JWKSTokenValidator.decode_token:jwks"
+  - "src/elspeth/web/auth/oidc.py:JWKSTokenValidator.decode_token:return"
   - "src/elspeth/web/auth/entra.py:EntraAuthProvider._validate_tenant:payload"
   - "src/elspeth/web/auth/entra.py:EntraAuthProvider._extract_groups:payload"
