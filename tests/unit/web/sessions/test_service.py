@@ -707,3 +707,66 @@ class TestCancelOrphanedRuns:
         # Session should now accept a new run
         run2 = await service.create_run(session.id, state.id)
         assert run2.status == "pending"
+
+    @pytest.mark.asyncio
+    async def test_cancel_includes_pending_orphans(self, service) -> None:
+        """A run stuck in 'pending' (crash before transition to running) is also cleaned."""
+        session = await service.create_session("alice", "Pipeline", "local")
+        state = await service.save_composition_state(
+            session.id,
+            CompositionStateData(is_valid=True),
+        )
+        # Create run that stays in pending (simulates crash before running transition)
+        await service.create_run(session.id, state.id)
+        cancelled = await service.cancel_orphaned_runs(session.id, max_age_seconds=0)
+        assert len(cancelled) == 1
+        assert cancelled[0].status == "cancelled"
+
+    @pytest.mark.asyncio
+    async def test_cancel_does_not_touch_completed_runs(self, service) -> None:
+        """Completed runs are never cancelled regardless of age."""
+        session = await service.create_session("alice", "Pipeline", "local")
+        state = await service.save_composition_state(
+            session.id,
+            CompositionStateData(is_valid=True),
+        )
+        run = await service.create_run(session.id, state.id)
+        await service.update_run_status(run.id, "running")
+        await service.update_run_status(run.id, "completed")
+        cancelled = await service.cancel_orphaned_runs(session.id, max_age_seconds=0)
+        assert len(cancelled) == 0
+
+
+class TestArchiveSessionWithActiveRun:
+    """Tests for archive_session when a run is active."""
+
+    @pytest.mark.asyncio
+    async def test_archive_cascades_through_active_run(self, service) -> None:
+        """Archiving a session with an active run deletes everything including the run."""
+        session = await service.create_session("alice", "Pipeline", "local")
+        state = await service.save_composition_state(
+            session.id,
+            CompositionStateData(is_valid=True),
+        )
+        await service.create_run(session.id, state.id)
+        # Archive should succeed — cascade deletes the run
+        await service.archive_session(session.id)
+        with pytest.raises(ValueError, match="Session not found"):
+            await service.get_session(session.id)
+
+
+class TestGetMessagesNonexistentSession:
+    """Tests for get_messages behavior with a nonexistent session."""
+
+    @pytest.mark.asyncio
+    async def test_get_messages_returns_empty_for_nonexistent_session(self, service) -> None:
+        """get_messages silently returns [] for a nonexistent session_id.
+
+        This is by design — the WHERE clause filters by session_id and
+        returns no rows. Callers (routes) should verify session existence
+        via _verify_session_ownership before calling get_messages.
+        """
+        import uuid
+
+        result = await service.get_messages(uuid.uuid4())
+        assert result == []

@@ -112,7 +112,7 @@ class TestCatalogWiring:
 
     def test_catalog_service_on_app_state(self, tmp_path) -> None:
         app = create_app(_settings(tmp_path))
-        assert hasattr(app.state, "catalog_service")
+        assert app.state.catalog_service is not None
 
     def test_catalog_sources_endpoint_reachable(self, tmp_path) -> None:
         app = create_app(_settings(tmp_path))
@@ -129,7 +129,7 @@ class TestAuthWiring:
 
     def test_auth_provider_on_app_state(self, tmp_path) -> None:
         app = create_app(_settings(tmp_path))
-        assert hasattr(app.state, "auth_provider")
+        assert app.state.auth_provider is not None
 
     def test_auth_routes_registered(self, tmp_path) -> None:
         app = create_app(_settings(tmp_path))
@@ -144,7 +144,7 @@ class TestSessionWiring:
 
     def test_session_service_on_app_state(self, tmp_path) -> None:
         app = create_app(_settings(tmp_path))
-        assert hasattr(app.state, "session_service")
+        assert app.state.session_service is not None
 
     def test_session_routes_registered(self, tmp_path) -> None:
         app = create_app(_settings(tmp_path))

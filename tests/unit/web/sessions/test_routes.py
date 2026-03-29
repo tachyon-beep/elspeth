@@ -14,6 +14,7 @@ from starlette.testclient import TestClient
 
 from elspeth.web.auth.middleware import get_current_user
 from elspeth.web.auth.models import UserIdentity
+from elspeth.web.config import WebSettings
 from elspeth.web.sessions.models import metadata
 from elspeth.web.sessions.protocol import CompositionStateData
 from elspeth.web.sessions.routes import create_session_router
@@ -46,11 +47,9 @@ def _make_app(
 
     # Set up app state
     app.state.session_service = service
-    app.state.settings = type(
-        "FakeSettings",
-        (),
-        {"data_dir": tmp_path, "max_upload_bytes": max_upload_bytes, "auth_provider": "local"},
-    )()
+    app.state.settings = WebSettings(
+        data_dir=tmp_path, max_upload_bytes=max_upload_bytes,
+    )
 
     router = create_session_router()
     app.include_router(router)
@@ -161,11 +160,7 @@ class TestIDORProtection:
 
             app.dependency_overrides[get_current_user] = mock_user
             app.state.session_service = service
-            app.state.settings = type(
-                "S",
-                (),
-                {"data_dir": tmp_path, "max_upload_bytes": 10_000_000, "auth_provider": "local"},
-            )()
+            app.state.settings = WebSettings(data_dir=tmp_path)
             app.include_router(create_session_router())
             return app
 
@@ -328,6 +323,8 @@ class TestRevertEndpoint:
         assert body["version"] == 3
         # Should match v1's source, not v2's
         assert body["source"] == {"type": "csv"}
+        # Lineage: new version derives from v1
+        assert body["derived_from_state_id"] == str(v1.id)
 
     def test_revert_injects_system_message(self, tmp_path) -> None:
         app, service = _make_app(tmp_path)
@@ -359,7 +356,7 @@ class TestRevertEndpoint:
         messages = msgs_resp.json()
         system_msgs = [m for m in messages if m["role"] == "system"]
         assert len(system_msgs) == 1
-        assert "reverted to version 1" in system_msgs[0]["content"].lower()
+        assert system_msgs[0]["content"] == "Pipeline reverted to version 1."
 
     def test_revert_idor_protection(self, tmp_path) -> None:
         """Revert to a state in another user's session returns 404."""
@@ -380,11 +377,7 @@ class TestRevertEndpoint:
 
             app.dependency_overrides[get_current_user] = mock_user
             app.state.session_service = service
-            app.state.settings = type(
-                "S",
-                (),
-                {"data_dir": tmp_path, "max_upload_bytes": 10_000_000, "auth_provider": "local"},
-            )()
+            app.state.settings = WebSettings(data_dir=tmp_path)
             app.include_router(create_session_router())
             return app
 
@@ -541,6 +534,113 @@ class TestUploadRoute:
             f"/api/sessions/{session_id}/upload",
             files={"file": ("test.txt", io.BytesIO(b"data"), "text/plain")},
         )
-        # Should fail because Path("..").name is "" on some platforms
-        # or ".." which sanitizes poorly. Either 400 or 500 is acceptable.
-        assert upload_resp.status_code in (400, 422, 500)
+        assert upload_resp.status_code == 400
+
+
+class TestYamlStubEndpoint:
+    """Tests for GET /api/sessions/{id}/state/yaml (501 stub for Sub-4)."""
+
+    def test_yaml_returns_501_when_state_exists(self, tmp_path) -> None:
+        """Stub returns 501 until Sub-4 implements generate_yaml()."""
+        app, service = _make_app(tmp_path)
+        client = TestClient(app)
+
+        session = asyncio.run(
+            service.create_session("alice", "Pipeline", "local"),
+        )
+        asyncio.run(
+            service.save_composition_state(
+                session.id,
+                CompositionStateData(source={"type": "csv"}, is_valid=True),
+            ),
+        )
+
+        resp = client.get(f"/api/sessions/{session.id}/state/yaml")
+        assert resp.status_code == 501
+        assert "Sub-4" in resp.json()["detail"]
+
+    def test_yaml_returns_404_when_no_state(self, tmp_path) -> None:
+        """No composition state yet → 404 before the 501 stub."""
+        app, _ = _make_app(tmp_path)
+        client = TestClient(app)
+
+        resp = client.post("/api/sessions", json={"title": "Empty"})
+        session_id = resp.json()["id"]
+
+        yaml_resp = client.get(f"/api/sessions/{session_id}/state/yaml")
+        assert yaml_resp.status_code == 404
+
+
+class TestRunAlreadyActiveError:
+    """Tests for seam contract D: RunAlreadyActiveError → 409 with error_type.
+
+    The create_run endpoint does not exist yet (Sub-5), but the exception
+    handler is wired. These tests exercise it via direct service calls +
+    app-level exception propagation to verify the contract.
+    """
+
+    def test_run_already_active_returns_409(self, tmp_path) -> None:
+        """RunAlreadyActiveError produces 409 with error_type field."""
+        from elspeth.web.sessions.protocol import RunAlreadyActiveError
+
+        app, service = _make_app(tmp_path)
+
+        session = asyncio.run(
+            service.create_session("alice", "Pipeline", "local"),
+        )
+        v1 = asyncio.run(
+            service.save_composition_state(
+                session.id,
+                CompositionStateData(is_valid=True),
+            ),
+        )
+        # Create a run to block the session
+        asyncio.run(service.create_run(session.id, v1.id))
+
+        # Register the app-level exception handler (wired in create_app,
+        # but our test app uses create_session_router directly). Wire it here.
+        from fastapi.responses import JSONResponse
+
+        @app.exception_handler(RunAlreadyActiveError)
+        async def handle_run_already_active(
+            request, exc: RunAlreadyActiveError,
+        ) -> JSONResponse:
+            return JSONResponse(
+                status_code=409,
+                content={"detail": str(exc), "error_type": "run_already_active"},
+            )
+
+        # Add a test endpoint that triggers the error
+        @app.post("/api/_test_create_run")
+        async def _test_create_run():
+            await service.create_run(session.id, v1.id)
+
+        client = TestClient(app, raise_server_exceptions=False)
+        resp = client.post("/api/_test_create_run")
+        assert resp.status_code == 409
+        body = resp.json()
+        assert body["error_type"] == "run_already_active"
+        assert "detail" in body
+
+
+class TestNewStateHasNoLineage:
+    """Test that fresh composition states have null derived_from_state_id."""
+
+    def test_fresh_state_has_null_derived_from(self, tmp_path) -> None:
+        app, service = _make_app(tmp_path)
+        client = TestClient(app)
+
+        session = asyncio.run(
+            service.create_session("alice", "Pipeline", "local"),
+        )
+        asyncio.run(
+            service.save_composition_state(
+                session.id,
+                CompositionStateData(source={"type": "csv"}, is_valid=True),
+            ),
+        )
+
+        resp = client.get(f"/api/sessions/{session.id}/state")
+        assert resp.status_code == 200
+        body = resp.json()
+        assert body["derived_from_state_id"] is None

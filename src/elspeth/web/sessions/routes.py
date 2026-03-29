@@ -56,6 +56,7 @@ def _state_response(state: CompositionStateRecord) -> CompositionStateResponse:
         metadata=deep_thaw(state.metadata_),
         is_valid=state.is_valid,
         validation_errors=deep_thaw(state.validation_errors),
+        derived_from_state_id=str(state.derived_from_state_id) if state.derived_from_state_id is not None else None,
         created_at=state.created_at,
     )
 
