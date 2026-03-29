@@ -61,7 +61,7 @@ def _state_response(state: CompositionStateRecord) -> CompositionStateResponse:
 
 
 async def _verify_session_ownership(
-    session_id: str,
+    session_id: UUID,
     user: UserIdentity,
     request: Request,
 ) -> SessionRecord:
@@ -71,7 +71,7 @@ async def _verify_session_ownership(
     """
     service: SessionServiceImpl = request.app.state.session_service
     try:
-        session = await service.get_session(UUID(session_id))
+        session = await service.get_session(session_id)
     except ValueError:
         raise HTTPException(status_code=404, detail="Session not found") from None
 
@@ -113,7 +113,7 @@ def create_session_router() -> APIRouter:
 
     @router.get("/{session_id}", response_model=SessionResponse)
     async def get_session(
-        session_id: str,
+        session_id: UUID,
         request: Request,
         user: UserIdentity = Depends(get_current_user),  # noqa: B008
     ) -> SessionResponse:
@@ -123,7 +123,7 @@ def create_session_router() -> APIRouter:
 
     @router.delete("/{session_id}", status_code=204)
     async def delete_session(
-        session_id: str,
+        session_id: UUID,
         request: Request,
         user: UserIdentity = Depends(get_current_user),  # noqa: B008
     ) -> None:
@@ -137,7 +137,7 @@ def create_session_router() -> APIRouter:
         response_model=MessageWithStateResponse,
     )
     async def send_message(
-        session_id: str,
+        session_id: UUID,
         body: SendMessageRequest,
         request: Request,
         user: UserIdentity = Depends(get_current_user),  # noqa: B008
@@ -163,7 +163,7 @@ def create_session_router() -> APIRouter:
         response_model=list[ChatMessageResponse],
     )
     async def get_messages(
-        session_id: str,
+        session_id: UUID,
         request: Request,
         user: UserIdentity = Depends(get_current_user),  # noqa: B008
     ) -> list[ChatMessageResponse]:
@@ -185,7 +185,7 @@ def create_session_router() -> APIRouter:
 
     @router.get("/{session_id}/state")
     async def get_current_state(
-        session_id: str,
+        session_id: UUID,
         request: Request,
         user: UserIdentity = Depends(get_current_user),  # noqa: B008
     ) -> CompositionStateResponse | None:
@@ -202,7 +202,7 @@ def create_session_router() -> APIRouter:
         response_model=list[CompositionStateResponse],
     )
     async def get_state_versions(
-        session_id: str,
+        session_id: UUID,
         request: Request,
         user: UserIdentity = Depends(get_current_user),  # noqa: B008
     ) -> list[CompositionStateResponse]:
@@ -217,7 +217,7 @@ def create_session_router() -> APIRouter:
         response_model=CompositionStateResponse,
     )
     async def revert_state(
-        session_id: str,
+        session_id: UUID,
         body: RevertStateRequest,
         request: Request,
         user: UserIdentity = Depends(get_current_user),  # noqa: B008
@@ -233,7 +233,7 @@ def create_session_router() -> APIRouter:
         try:
             new_state = await service.set_active_state(
                 session.id,
-                UUID(body.state_id),
+                body.state_id,
             )
         except ValueError:
             raise HTTPException(
@@ -242,7 +242,7 @@ def create_session_router() -> APIRouter:
             ) from None
 
         # Look up the original version number for the system message
-        original_state = await service.get_state(UUID(body.state_id))
+        original_state = await service.get_state(body.state_id)
         await service.add_message(
             session.id,
             role="system",
@@ -253,7 +253,7 @@ def create_session_router() -> APIRouter:
 
     @router.get("/{session_id}/state/yaml")
     async def get_state_yaml(
-        session_id: str,
+        session_id: UUID,
         request: Request,
         user: UserIdentity = Depends(get_current_user),  # noqa: B008
     ) -> dict[str, str]:
@@ -278,7 +278,7 @@ def create_session_router() -> APIRouter:
 
     @router.post("/{session_id}/upload", response_model=UploadResponse)
     async def upload_file(
-        session_id: str,
+        session_id: UUID,
         request: Request,
         file: UploadFile = File(...),  # noqa: B008
         user: UserIdentity = Depends(get_current_user),  # noqa: B008

@@ -31,10 +31,16 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     Services that require a running event loop must be constructed here,
     not in the synchronous create_app() function.
 
-    Sub-1: stub -- no async services yet.
     Sub-5 will construct ProgressBroadcaster here using
     asyncio.get_running_loop().
     """
+    # Cancel runs orphaned by a previous server crash (D5)
+    service = app.state.session_service
+    cancelled = await service.cancel_all_orphaned_runs()
+    if cancelled:
+        import structlog
+
+        structlog.get_logger().info("cancelled_orphaned_runs", count=cancelled)
     yield
 
 

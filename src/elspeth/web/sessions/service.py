@@ -578,6 +578,35 @@ class SessionServiceImpl:
 
         return cancelled
 
+    async def cancel_all_orphaned_runs(
+        self,
+        max_age_seconds: int = 3600,
+    ) -> int:
+        """Force-cancel stale runs across all sessions.
+
+        Called on startup to recover sessions blocked by runs orphaned
+        during a previous server crash. Returns the count of cancelled runs.
+        """
+        now = self._now()
+        cutoff = now - timedelta(seconds=max_age_seconds)
+
+        with self._engine.begin() as conn:
+            stale_rows = conn.execute(
+                select(runs_table.c.id).where(
+                    runs_table.c.status.in_(["pending", "running"]),
+                    runs_table.c.started_at <= cutoff,
+                )
+            ).fetchall()
+
+            for row in stale_rows:
+                conn.execute(
+                    update(runs_table)
+                    .where(runs_table.c.id == row.id)
+                    .values(status="cancelled", finished_at=now)
+                )
+
+        return len(stale_rows)
+
     def _row_to_run_record(self, row: Any) -> RunRecord:
         """Convert a SQLAlchemy row to a RunRecord."""
         return RunRecord(

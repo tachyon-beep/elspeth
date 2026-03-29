@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from datetime import datetime
 from typing import Any
+from uuid import UUID
 
 from pydantic import BaseModel
 
@@ -72,7 +73,7 @@ class CompositionStateResponse(BaseModel):
 class RevertStateRequest(BaseModel):
     """Request body for POST /api/sessions/{id}/state/revert."""
 
-    state_id: str
+    state_id: UUID
 
 
 class UploadResponse(BaseModel):
