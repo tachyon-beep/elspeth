@@ -204,6 +204,25 @@ summary:focus-visible {
   border-radius: var(--radius-sm);
 }
 
+/* Skip-to-content link — visible only on keyboard focus */
+.skip-to-content {
+  position: absolute;
+  top: -100%;
+  left: 0;
+  z-index: 1000;
+  padding: var(--space-sm) var(--space-lg);
+  background-color: var(--color-focus-ring);
+  color: var(--color-text);
+  font-size: var(--font-size-base);
+  font-weight: 600;
+  text-decoration: none;
+  border-radius: 0 0 var(--radius-md) 0;
+}
+
+.skip-to-content:focus {
+  top: 0;
+}
+
 /* Screen-reader-only utility */
 .sr-only {
   position: absolute;
@@ -320,6 +339,30 @@ summary:focus-visible {
   border-top-color: transparent;
   border-radius: 50%;
   animation: spin 0.6s linear infinite;
+}
+
+/* ---------------------------------------------------------------------------
+   Reduced Motion — respect OS-level motion preferences
+   --------------------------------------------------------------------------- */
+@media (prefers-reduced-motion: reduce) {
+  .composing-dot {
+    animation: none;
+    opacity: 0.7;
+  }
+
+  .progress-bar-stripe {
+    animation: none;
+  }
+
+  .spinner {
+    animation: none;
+    border-top-color: var(--color-text-muted);
+    opacity: 0.6;
+  }
+
+  .progress-bar-complete {
+    transition: none;
+  }
 }
 
 /* ---------------------------------------------------------------------------
@@ -609,7 +652,7 @@ summary:focus-visible {
    Resize Handle Hover Feedback
    --------------------------------------------------------------------------- */
 .resize-handle:hover {
-  background-color: var(--color-focus-ring) !important;
+  background-color: var(--color-focus-ring);
   opacity: 0.5;
   transition: background-color var(--transition-normal);
 }

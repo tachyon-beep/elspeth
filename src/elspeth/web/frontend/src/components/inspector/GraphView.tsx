@@ -158,6 +158,7 @@ export function GraphView() {
     <div
       style={{ width: "100%", height: "100%" }}
       aria-label={ariaLabel}
+      aria-roledescription="Pipeline DAG diagram"
       role="img"
     >
       <ReactFlow

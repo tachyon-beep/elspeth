@@ -226,9 +226,10 @@ export function InspectorPanel() {
               aria-label={isValidating ? "Validating" : "Validate pipeline"}
               className="btn"
               style={{
-                padding: "4px 10px",
+                padding: "6px 10px",
                 fontSize: 12,
                 minWidth: 64,
+                minHeight: 36,
                 display: "flex",
                 alignItems: "center",
                 justifyContent: "center",
@@ -252,9 +253,10 @@ export function InspectorPanel() {
               aria-label={isExecuting ? "Starting pipeline" : "Execute pipeline"}
               className={`btn ${canExecute && !isExecuting ? "btn-primary" : ""}`}
               style={{
-                padding: "4px 10px",
+                padding: "6px 10px",
                 fontSize: 12,
                 minWidth: 64,
+                minHeight: 36,
                 display: "flex",
                 alignItems: "center",
                 justifyContent: "center",

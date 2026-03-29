@@ -209,10 +209,10 @@ export function Layout({ sidebar, chat, inspector }: LayoutProps) {
           }}
           style={{
             position: "absolute",
-            left: 0,
+            left: -8,
             top: 0,
             bottom: 0,
-            width: 5,
+            width: 20,
             cursor: "col-resize",
             backgroundColor: "transparent",
             zIndex: 10,

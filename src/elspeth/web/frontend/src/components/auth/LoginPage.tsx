@@ -207,7 +207,6 @@ export function LoginPage() {
               onChange={(e) => setUsername(e.target.value)}
               autoComplete="username"
               required
-              aria-label="Username"
               style={{
                 display: "block",
                 width: "100%",
@@ -240,7 +239,6 @@ export function LoginPage() {
               onChange={(e) => setPassword(e.target.value)}
               autoComplete="current-password"
               required
-              aria-label="Password"
               style={{
                 display: "block",
                 width: "100%",

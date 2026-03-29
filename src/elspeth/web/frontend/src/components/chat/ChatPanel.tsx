@@ -59,6 +59,7 @@ export function ChatPanel() {
   if (!activeSessionId) {
     return (
       <div
+        id="chat-main"
         className="chat-panel chat-panel--empty"
         style={{
           display: "flex",
@@ -81,6 +82,7 @@ export function ChatPanel() {
 
   return (
     <div
+      id="chat-main"
       className="chat-panel"
       style={{
         display: "flex",
@@ -114,6 +116,11 @@ export function ChatPanel() {
               cursor: "pointer",
               fontSize: 16,
               color: "var(--color-error)",
+              minWidth: 44,
+              minHeight: 44,
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
             }}
             aria-label="Dismiss error"
           >
@@ -130,6 +137,7 @@ export function ChatPanel() {
         role="log"
         aria-label="Chat messages"
         aria-live="polite"
+        aria-relevant="additions"
       >
         {messages.length === 0 ? (
           <div

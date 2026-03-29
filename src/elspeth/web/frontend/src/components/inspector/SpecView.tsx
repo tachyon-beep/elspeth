@@ -117,7 +117,7 @@ function ConnectionIndicator({
   if (edge.edge_type === "error") {
     return (
       <div>
-        {"\u26A0"} on_error {"\u2192"} {targetName}
+        <span aria-hidden="true">{"\u26A0"}</span> <span className="sr-only">error route to</span>on_error <span aria-hidden="true">{"\u2192"}</span> {targetName}
       </div>
     );
   }
@@ -142,7 +142,7 @@ function ConnectionIndicator({
 
     return (
       <div>
-        {prefix} {edge.label} {"\u2192"} {targetName}
+        <span aria-hidden="true">{prefix}</span> {edge.label} <span aria-hidden="true">{"\u2192"}</span><span className="sr-only"> routes to</span> {targetName}
       </div>
     );
   }
@@ -150,7 +150,7 @@ function ConnectionIndicator({
   // Default continue edge
   return (
     <div>
-      {"\u2193"} {targetName}
+      <span aria-hidden="true">{"\u2193"}</span><span className="sr-only">continues to</span> {targetName}
     </div>
   );
 }

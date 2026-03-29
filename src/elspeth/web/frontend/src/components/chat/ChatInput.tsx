@@ -98,7 +98,7 @@ export function ChatInput({ onSend, disabled, inputRef }: ChatInputProps) {
           {uploadError}
         </div>
       )}
-      <div style={{ display: "flex", gap: 8, alignItems: "flex-end" }}>
+      <div style={{ display: "flex", gap: 8, alignItems: "flex-end" }} role="group" aria-label="Message composition">
         <textarea
           ref={inputRef}
           data-chat-input
@@ -173,6 +173,17 @@ export function ChatInput({ onSend, disabled, inputRef }: ChatInputProps) {
         >
           Send
         </button>
+      </div>
+      <div
+        style={{
+          fontSize: 11,
+          color: "var(--color-text-muted)",
+          padding: "2px 0 4px",
+          textAlign: "right",
+        }}
+        aria-hidden="true"
+      >
+        Shift+Enter for new line
       </div>
     </div>
   );
