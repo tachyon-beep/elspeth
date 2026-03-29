@@ -1,11 +1,13 @@
 """SessionService implementation -- CRUD, state versioning, active run enforcement.
 
-Uses SQLAlchemy Core with a synchronous engine. Each method executes SQL
-within a single transaction.
+Uses SQLAlchemy Core with a synchronous engine. Database calls run in a
+thread pool executor to avoid blocking the async event loop.
 """
 
 from __future__ import annotations
 
+import asyncio
+import functools
 import uuid
 from collections.abc import Mapping
 from datetime import UTC, datetime, timedelta
@@ -34,10 +36,22 @@ from elspeth.web.sessions.protocol import (
 
 
 class SessionServiceImpl:
-    """Concrete session service backed by SQLAlchemy Core."""
+    """Concrete session service backed by SQLAlchemy Core.
+
+    All public methods are async. Database I/O runs in the default thread
+    pool executor via _run_sync() so the async event loop is never blocked.
+    """
 
     def __init__(self, engine: Engine) -> None:
         self._engine = engine
+
+    async def _run_sync(self, func: Any, *args: Any, **kwargs: Any) -> Any:
+        """Run a synchronous callable in the thread pool executor."""
+        loop = asyncio.get_event_loop()
+        return await loop.run_in_executor(
+            None,
+            functools.partial(func, *args, **kwargs),
+        )
 
     def _now(self) -> datetime:
         return datetime.now(UTC)
@@ -52,17 +66,20 @@ class SessionServiceImpl:
         session_id = uuid.uuid4()
         now = self._now()
 
-        with self._engine.begin() as conn:
-            conn.execute(
-                insert(sessions_table).values(
-                    id=str(session_id),
-                    user_id=user_id,
-                    auth_provider_type=auth_provider_type,
-                    title=title,
-                    created_at=now,
-                    updated_at=now,
+        def _sync() -> None:
+            with self._engine.begin() as conn:
+                conn.execute(
+                    insert(sessions_table).values(
+                        id=str(session_id),
+                        user_id=user_id,
+                        auth_provider_type=auth_provider_type,
+                        title=title,
+                        created_at=now,
+                        updated_at=now,
+                    )
                 )
-            )
+
+        await self._run_sync(_sync)
 
         return SessionRecord(
             id=session_id,
@@ -75,8 +92,12 @@ class SessionServiceImpl:
 
     async def get_session(self, session_id: UUID) -> SessionRecord:
         """Fetch a session by ID. Raises ValueError if not found."""
-        with self._engine.begin() as conn:
-            row = conn.execute(select(sessions_table).where(sessions_table.c.id == str(session_id))).fetchone()
+
+        def _sync() -> Any:
+            with self._engine.begin() as conn:
+                return conn.execute(select(sessions_table).where(sessions_table.c.id == str(session_id))).fetchone()
+
+        row = await self._run_sync(_sync)
 
         if row is None:
             raise ValueError(f"Session not found: {session_id}")
@@ -92,10 +113,14 @@ class SessionServiceImpl:
 
     async def list_sessions(self, user_id: str) -> list[SessionRecord]:
         """List sessions for a user, ordered by updated_at descending."""
-        with self._engine.begin() as conn:
-            rows = conn.execute(
-                select(sessions_table).where(sessions_table.c.user_id == user_id).order_by(desc(sessions_table.c.updated_at))
-            ).fetchall()
+
+        def _sync() -> Any:
+            with self._engine.begin() as conn:
+                return conn.execute(
+                    select(sessions_table).where(sessions_table.c.user_id == user_id).order_by(desc(sessions_table.c.updated_at))
+                ).fetchall()
+
+        rows = await self._run_sync(_sync)
 
         return [
             SessionRecord(
@@ -112,16 +137,20 @@ class SessionServiceImpl:
     async def archive_session(self, session_id: UUID) -> None:
         """Delete a session and cascade to all related records."""
         sid = str(session_id)
-        with self._engine.begin() as conn:
-            # Delete in dependency order (children first for non-CASCADE DBs)
-            # Get run IDs for this session to delete run_events
-            run_ids = [r.id for r in conn.execute(select(runs_table.c.id).where(runs_table.c.session_id == sid)).fetchall()]
-            if run_ids:
-                conn.execute(delete(run_events_table).where(run_events_table.c.run_id.in_(run_ids)))
-            conn.execute(delete(runs_table).where(runs_table.c.session_id == sid))
-            conn.execute(delete(composition_states_table).where(composition_states_table.c.session_id == sid))
-            conn.execute(delete(chat_messages_table).where(chat_messages_table.c.session_id == sid))
-            conn.execute(delete(sessions_table).where(sessions_table.c.id == sid))
+
+        def _sync() -> None:
+            with self._engine.begin() as conn:
+                # Delete in dependency order (children first for non-CASCADE DBs)
+                # Get run IDs for this session to delete run_events
+                run_ids = [r.id for r in conn.execute(select(runs_table.c.id).where(runs_table.c.session_id == sid)).fetchall()]
+                if run_ids:
+                    conn.execute(delete(run_events_table).where(run_events_table.c.run_id.in_(run_ids)))
+                conn.execute(delete(runs_table).where(runs_table.c.session_id == sid))
+                conn.execute(delete(composition_states_table).where(composition_states_table.c.session_id == sid))
+                conn.execute(delete(chat_messages_table).where(chat_messages_table.c.session_id == sid))
+                conn.execute(delete(sessions_table).where(sessions_table.c.id == sid))
+
+        await self._run_sync(_sync)
 
     async def add_message(
         self,
@@ -135,18 +164,21 @@ class SessionServiceImpl:
         now = self._now()
         sid = str(session_id)
 
-        with self._engine.begin() as conn:
-            conn.execute(
-                insert(chat_messages_table).values(
-                    id=str(msg_id),
-                    session_id=sid,
-                    role=role,
-                    content=content,
-                    tool_calls=tool_calls,
-                    created_at=now,
+        def _sync() -> None:
+            with self._engine.begin() as conn:
+                conn.execute(
+                    insert(chat_messages_table).values(
+                        id=str(msg_id),
+                        session_id=sid,
+                        role=role,
+                        content=content,
+                        tool_calls=tool_calls,
+                        created_at=now,
+                    )
                 )
-            )
-            conn.execute(update(sessions_table).where(sessions_table.c.id == sid).values(updated_at=now))
+                conn.execute(update(sessions_table).where(sessions_table.c.id == sid).values(updated_at=now))
+
+        await self._run_sync(_sync)
 
         return ChatMessageRecord(
             id=msg_id,
@@ -162,12 +194,16 @@ class SessionServiceImpl:
         session_id: UUID,
     ) -> list[ChatMessageRecord]:
         """Get all messages for a session, ordered by created_at ascending."""
-        with self._engine.begin() as conn:
-            rows = conn.execute(
-                select(chat_messages_table)
-                .where(chat_messages_table.c.session_id == str(session_id))
-                .order_by(chat_messages_table.c.created_at)
-            ).fetchall()
+
+        def _sync() -> Any:
+            with self._engine.begin() as conn:
+                return conn.execute(
+                    select(chat_messages_table)
+                    .where(chat_messages_table.c.session_id == str(session_id))
+                    .order_by(chat_messages_table.c.created_at)
+                ).fetchall()
+
+        rows = await self._run_sync(_sync)
 
         return [
             ChatMessageRecord(
@@ -194,38 +230,42 @@ class SessionServiceImpl:
         now = self._now()
         sid = str(session_id)
 
-        with self._engine.begin() as conn:
-            # Get the current max version for this session
-            result = conn.execute(
-                select(func.max(composition_states_table.c.version)).where(composition_states_table.c.session_id == sid)
-            ).scalar()
-            version = (result or 0) + 1
+        # Seam contract A: wrap JSON columns with _version envelope
+        # for schema evolution. deep_thaw() handles MappingProxyType→dict
+        # and tuple→list from freeze_fields().
+        def _enveloped(val: Any) -> Any:
+            raw = deep_thaw(val)
+            if raw is None:
+                return None
+            return {"_version": 1, "data": raw}
 
-            # Seam contract A: wrap JSON columns with _version envelope
-            # for schema evolution. deep_thaw() handles MappingProxyType→dict
-            # and tuple→list from freeze_fields().
-            def _enveloped(val: Any) -> Any:
-                raw = deep_thaw(val)
-                if raw is None:
-                    return None
-                return {"_version": 1, "data": raw}
+        def _sync() -> int:
+            with self._engine.begin() as conn:
+                # Get the current max version for this session
+                result = conn.execute(
+                    select(func.max(composition_states_table.c.version)).where(composition_states_table.c.session_id == sid)
+                ).scalar()
+                version = (result or 0) + 1
 
-            conn.execute(
-                insert(composition_states_table).values(
-                    id=str(state_id),
-                    session_id=sid,
-                    version=version,
-                    source=_enveloped(state.source),
-                    nodes=_enveloped(state.nodes),
-                    edges=_enveloped(state.edges),
-                    outputs=_enveloped(state.outputs),
-                    metadata_=_enveloped(state.metadata_),
-                    is_valid=state.is_valid,
-                    validation_errors=deep_thaw(state.validation_errors),
-                    derived_from_state_id=None,
-                    created_at=now,
+                conn.execute(
+                    insert(composition_states_table).values(
+                        id=str(state_id),
+                        session_id=sid,
+                        version=version,
+                        source=_enveloped(state.source),
+                        nodes=_enveloped(state.nodes),
+                        edges=_enveloped(state.edges),
+                        outputs=_enveloped(state.outputs),
+                        metadata_=_enveloped(state.metadata_),
+                        is_valid=state.is_valid,
+                        validation_errors=deep_thaw(state.validation_errors),
+                        derived_from_state_id=None,
+                        created_at=now,
+                    )
                 )
-            )
+                return version
+
+        version = await self._run_sync(_sync)
 
         return CompositionStateRecord(
             id=state_id,
@@ -247,13 +287,17 @@ class SessionServiceImpl:
         session_id: UUID,
     ) -> CompositionStateRecord | None:
         """Return the highest-version state for a session, or None."""
-        with self._engine.begin() as conn:
-            row = conn.execute(
-                select(composition_states_table)
-                .where(composition_states_table.c.session_id == str(session_id))
-                .order_by(desc(composition_states_table.c.version))
-                .limit(1)
-            ).fetchone()
+
+        def _sync() -> Any:
+            with self._engine.begin() as conn:
+                return conn.execute(
+                    select(composition_states_table)
+                    .where(composition_states_table.c.session_id == str(session_id))
+                    .order_by(desc(composition_states_table.c.version))
+                    .limit(1)
+                ).fetchone()
+
+        row = await self._run_sync(_sync)
 
         if row is None:
             return None
@@ -265,12 +309,16 @@ class SessionServiceImpl:
         session_id: UUID,
     ) -> list[CompositionStateRecord]:
         """Return all state versions for a session, ascending order."""
-        with self._engine.begin() as conn:
-            rows = conn.execute(
-                select(composition_states_table)
-                .where(composition_states_table.c.session_id == str(session_id))
-                .order_by(composition_states_table.c.version)
-            ).fetchall()
+
+        def _sync() -> Any:
+            with self._engine.begin() as conn:
+                return conn.execute(
+                    select(composition_states_table)
+                    .where(composition_states_table.c.session_id == str(session_id))
+                    .order_by(composition_states_table.c.version)
+                ).fetchall()
+
+        rows = await self._run_sync(_sync)
 
         return [self._row_to_state_record(row) for row in rows]
 
@@ -288,8 +336,7 @@ class SessionServiceImpl:
                 raise ValueError(f"Unknown composition state envelope version: {val['_version']}")
             return val["data"]
         raise ValueError(
-            f"Composition state column has no _version envelope: {val!r}. "
-            "This indicates a bug in the write path or database corruption."
+            f"Composition state column has no _version envelope: {val!r}. This indicates a bug in the write path or database corruption."
         )
 
     def _row_to_state_record(self, row: Any) -> CompositionStateRecord:
@@ -333,30 +380,33 @@ class SessionServiceImpl:
         now = self._now()
         sid = str(session_id)
 
-        with self._engine.begin() as conn:
-            # Check for existing active runs
-            active = conn.execute(
-                select(runs_table.c.id).where(
-                    runs_table.c.session_id == sid,
-                    runs_table.c.status.in_(["pending", "running"]),
-                )
-            ).fetchone()
+        def _sync() -> None:
+            with self._engine.begin() as conn:
+                # Check for existing active runs
+                active = conn.execute(
+                    select(runs_table.c.id).where(
+                        runs_table.c.session_id == sid,
+                        runs_table.c.status.in_(["pending", "running"]),
+                    )
+                ).fetchone()
 
-            if active is not None:
-                raise RunAlreadyActiveError(sid)
+                if active is not None:
+                    raise RunAlreadyActiveError(sid)
 
-            conn.execute(
-                insert(runs_table).values(
-                    id=str(run_id),
-                    session_id=sid,
-                    state_id=str(state_id),
-                    status="pending",
-                    started_at=now,
-                    rows_processed=0,
-                    rows_failed=0,
-                    pipeline_yaml=pipeline_yaml,
+                conn.execute(
+                    insert(runs_table).values(
+                        id=str(run_id),
+                        session_id=sid,
+                        state_id=str(state_id),
+                        status="pending",
+                        started_at=now,
+                        rows_processed=0,
+                        rows_failed=0,
+                        pipeline_yaml=pipeline_yaml,
+                    )
                 )
-            )
+
+        await self._run_sync(_sync)
 
         return RunRecord(
             id=run_id,
@@ -374,8 +424,12 @@ class SessionServiceImpl:
 
     async def get_run(self, run_id: UUID) -> RunRecord:
         """Fetch a run by ID. Raises ValueError if not found."""
-        with self._engine.begin() as conn:
-            row = conn.execute(select(runs_table).where(runs_table.c.id == str(run_id))).fetchone()
+
+        def _sync() -> Any:
+            with self._engine.begin() as conn:
+                return conn.execute(select(runs_table).where(runs_table.c.id == str(run_id))).fetchone()
+
+        row = await self._run_sync(_sync)
 
         if row is None:
             raise ValueError(f"Run not found: {run_id}")
@@ -402,54 +456,61 @@ class SessionServiceImpl:
         now = self._now()
         rid = str(run_id)
 
-        with self._engine.begin() as conn:
-            # Read current state for transition + write-once validation
-            current = conn.execute(
-                select(
-                    runs_table.c.status,
-                    runs_table.c.landscape_run_id,
-                ).where(runs_table.c.id == rid)
-            ).fetchone()
+        def _sync() -> None:
+            with self._engine.begin() as conn:
+                # Read current state for transition + write-once validation
+                current = conn.execute(
+                    select(
+                        runs_table.c.status,
+                        runs_table.c.landscape_run_id,
+                    ).where(runs_table.c.id == rid)
+                ).fetchone()
 
-            if current is None:
-                raise ValueError(f"Run not found: {run_id}")
+                if current is None:
+                    raise ValueError(f"Run not found: {run_id}")
 
-            # D3: Enforce legal transitions — direct access; KeyError = Tier 1 crash
-            current_status = current.status
-            allowed = LEGAL_RUN_TRANSITIONS[current_status]
-            if status not in allowed:
-                raise ValueError(f"Illegal run transition: {current_status!r} \u2192 {status!r}. Allowed: {sorted(allowed)}")
+                # D3: Enforce legal transitions — direct access; KeyError = Tier 1 crash
+                current_status = current.status
+                allowed = LEGAL_RUN_TRANSITIONS[current_status]
+                if status not in allowed:
+                    raise ValueError(f"Illegal run transition: {current_status!r} \u2192 {status!r}. Allowed: {sorted(allowed)}")
 
-            # D4: landscape_run_id is write-once
-            if landscape_run_id is not None and current.landscape_run_id is not None:
-                raise ValueError(f"landscape_run_id already set to {current.landscape_run_id!r}; cannot overwrite")
+                # D4: landscape_run_id is write-once
+                if landscape_run_id is not None and current.landscape_run_id is not None:
+                    raise ValueError(f"landscape_run_id already set to {current.landscape_run_id!r}; cannot overwrite")
 
-            values: dict[str, Any] = {"status": status}
-            if status in ("completed", "failed", "cancelled"):
-                values["finished_at"] = now
-            if error is not None:
-                values["error"] = error
-            if landscape_run_id is not None:
-                values["landscape_run_id"] = landscape_run_id
-            if rows_processed is not None:
-                values["rows_processed"] = rows_processed
-            if rows_failed is not None:
-                values["rows_failed"] = rows_failed
+                values: dict[str, Any] = {"status": status}
+                if status in ("completed", "failed", "cancelled"):
+                    values["finished_at"] = now
+                if error is not None:
+                    values["error"] = error
+                if landscape_run_id is not None:
+                    values["landscape_run_id"] = landscape_run_id
+                if rows_processed is not None:
+                    values["rows_processed"] = rows_processed
+                if rows_failed is not None:
+                    values["rows_failed"] = rows_failed
 
-            conn.execute(update(runs_table).where(runs_table.c.id == rid).values(**values))
+                conn.execute(update(runs_table).where(runs_table.c.id == rid).values(**values))
+
+        await self._run_sync(_sync)
 
     async def get_active_run(
         self,
         session_id: UUID,
     ) -> RunRecord | None:
         """Return the pending/running run for a session, or None."""
-        with self._engine.begin() as conn:
-            row = conn.execute(
-                select(runs_table).where(
-                    runs_table.c.session_id == str(session_id),
-                    runs_table.c.status.in_(["pending", "running"]),
-                )
-            ).fetchone()
+
+        def _sync() -> Any:
+            with self._engine.begin() as conn:
+                return conn.execute(
+                    select(runs_table).where(
+                        runs_table.c.session_id == str(session_id),
+                        runs_table.c.status.in_(["pending", "running"]),
+                    )
+                ).fetchone()
+
+        row = await self._run_sync(_sync)
 
         if row is None:
             return None
@@ -458,8 +519,12 @@ class SessionServiceImpl:
 
     async def get_state(self, state_id: UUID) -> CompositionStateRecord:
         """Fetch a composition state by its primary key. Raises ValueError if not found."""
-        with self._engine.begin() as conn:
-            row = conn.execute(select(composition_states_table).where(composition_states_table.c.id == str(state_id))).fetchone()
+
+        def _sync() -> Any:
+            with self._engine.begin() as conn:
+                return conn.execute(select(composition_states_table).where(composition_states_table.c.id == str(state_id))).fetchone()
+
+        row = await self._run_sync(_sync)
 
         if row is None:
             raise ValueError(f"State not found: {state_id}")
@@ -479,41 +544,44 @@ class SessionServiceImpl:
         found or does not belong to the session.
         """
         sid = str(session_id)
+        new_state_id = uuid.uuid4()
+        now = self._now()
 
-        with self._engine.begin() as conn:
-            # Look up the prior state
-            prior_row = conn.execute(select(composition_states_table).where(composition_states_table.c.id == str(state_id))).fetchone()
+        def _sync() -> tuple[Any, int]:
+            with self._engine.begin() as conn:
+                # Look up the prior state
+                prior_row = conn.execute(select(composition_states_table).where(composition_states_table.c.id == str(state_id))).fetchone()
 
-            if prior_row is None:
-                raise ValueError(f"State not found: {state_id}")
-            if prior_row.session_id != sid:
-                raise ValueError(f"State {state_id} does not belong to session {session_id}")
+                if prior_row is None:
+                    raise ValueError(f"State not found: {state_id}")
+                if prior_row.session_id != sid:
+                    raise ValueError(f"State {state_id} does not belong to session {session_id}")
 
-            # Get next version number
-            max_version = conn.execute(
-                select(func.max(composition_states_table.c.version)).where(composition_states_table.c.session_id == sid)
-            ).scalar()
-            new_version = (max_version or 0) + 1
+                # Get next version number
+                max_version = conn.execute(
+                    select(func.max(composition_states_table.c.version)).where(composition_states_table.c.session_id == sid)
+                ).scalar()
+                new_version = (max_version or 0) + 1
 
-            new_state_id = uuid.uuid4()
-            now = self._now()
-
-            conn.execute(
-                insert(composition_states_table).values(
-                    id=str(new_state_id),
-                    session_id=sid,
-                    version=new_version,
-                    source=prior_row.source,
-                    nodes=prior_row.nodes,
-                    edges=prior_row.edges,
-                    outputs=prior_row.outputs,
-                    metadata_=prior_row.metadata_,
-                    is_valid=prior_row.is_valid,
-                    validation_errors=prior_row.validation_errors,
-                    derived_from_state_id=str(state_id),
-                    created_at=now,
+                conn.execute(
+                    insert(composition_states_table).values(
+                        id=str(new_state_id),
+                        session_id=sid,
+                        version=new_version,
+                        source=prior_row.source,
+                        nodes=prior_row.nodes,
+                        edges=prior_row.edges,
+                        outputs=prior_row.outputs,
+                        metadata_=prior_row.metadata_,
+                        is_valid=prior_row.is_valid,
+                        validation_errors=prior_row.validation_errors,
+                        derived_from_state_id=str(state_id),
+                        created_at=now,
+                    )
                 )
-            )
+                return prior_row, new_version
+
+        prior_row, new_version = await self._run_sync(_sync)
 
         return CompositionStateRecord(
             id=new_state_id,
@@ -547,36 +615,37 @@ class SessionServiceImpl:
         now = self._now()
         cutoff = now - timedelta(seconds=max_age_seconds)
 
-        cancelled: list[RunRecord] = []
-
-        with self._engine.begin() as conn:
-            stale_rows = conn.execute(
-                select(runs_table).where(
-                    runs_table.c.session_id == sid,
-                    runs_table.c.status.in_(["pending", "running"]),
-                    runs_table.c.started_at <= cutoff,
-                )
-            ).fetchall()
-
-            for row in stale_rows:
-                conn.execute(update(runs_table).where(runs_table.c.id == row.id).values(status="cancelled", finished_at=now))
-                cancelled.append(
-                    RunRecord(
-                        id=UUID(row.id),
-                        session_id=UUID(row.session_id),
-                        state_id=UUID(row.state_id),
-                        status="cancelled",
-                        started_at=row.started_at,
-                        finished_at=now,
-                        rows_processed=row.rows_processed,
-                        rows_failed=row.rows_failed,
-                        error=row.error,
-                        landscape_run_id=row.landscape_run_id,
-                        pipeline_yaml=row.pipeline_yaml,
+        def _sync() -> list[RunRecord]:
+            cancelled: list[RunRecord] = []
+            with self._engine.begin() as conn:
+                stale_rows = conn.execute(
+                    select(runs_table).where(
+                        runs_table.c.session_id == sid,
+                        runs_table.c.status.in_(["pending", "running"]),
+                        runs_table.c.started_at <= cutoff,
                     )
-                )
+                ).fetchall()
 
-        return cancelled
+                for row in stale_rows:
+                    conn.execute(update(runs_table).where(runs_table.c.id == row.id).values(status="cancelled", finished_at=now))
+                    cancelled.append(
+                        RunRecord(
+                            id=UUID(row.id),
+                            session_id=UUID(row.session_id),
+                            state_id=UUID(row.state_id),
+                            status="cancelled",
+                            started_at=row.started_at,
+                            finished_at=now,
+                            rows_processed=row.rows_processed,
+                            rows_failed=row.rows_failed,
+                            error=row.error,
+                            landscape_run_id=row.landscape_run_id,
+                            pipeline_yaml=row.pipeline_yaml,
+                        )
+                    )
+            return cancelled
+
+        return await self._run_sync(_sync)
 
     async def cancel_all_orphaned_runs(
         self,
@@ -590,22 +659,20 @@ class SessionServiceImpl:
         now = self._now()
         cutoff = now - timedelta(seconds=max_age_seconds)
 
-        with self._engine.begin() as conn:
-            stale_rows = conn.execute(
-                select(runs_table.c.id).where(
-                    runs_table.c.status.in_(["pending", "running"]),
-                    runs_table.c.started_at <= cutoff,
-                )
-            ).fetchall()
+        def _sync() -> int:
+            with self._engine.begin() as conn:
+                stale_rows = conn.execute(
+                    select(runs_table.c.id).where(
+                        runs_table.c.status.in_(["pending", "running"]),
+                        runs_table.c.started_at <= cutoff,
+                    )
+                ).fetchall()
 
-            for row in stale_rows:
-                conn.execute(
-                    update(runs_table)
-                    .where(runs_table.c.id == row.id)
-                    .values(status="cancelled", finished_at=now)
-                )
+                for row in stale_rows:
+                    conn.execute(update(runs_table).where(runs_table.c.id == row.id).values(status="cancelled", finished_at=now))
+                return len(stale_rows)
 
-        return len(stale_rows)
+        return await self._run_sync(_sync)
 
     def _row_to_run_record(self, row: Any) -> RunRecord:
         """Convert a SQLAlchemy row to a RunRecord."""

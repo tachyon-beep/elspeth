@@ -7,6 +7,7 @@ from datetime import datetime
 
 import pytest
 from sqlalchemy import create_engine
+from sqlalchemy.pool import StaticPool
 
 from elspeth.web.sessions.models import (
     metadata,
@@ -24,8 +25,16 @@ from elspeth.web.sessions.service import SessionServiceImpl
 
 @pytest.fixture
 def engine():
-    """Create an in-memory SQLite engine with all tables."""
-    eng = create_engine("sqlite:///:memory:")
+    """Create an in-memory SQLite engine with all tables.
+
+    Uses StaticPool so that run_in_executor threads share the same
+    in-memory database connection.
+    """
+    eng = create_engine(
+        "sqlite:///:memory:",
+        connect_args={"check_same_thread": False},
+        poolclass=StaticPool,
+    )
     metadata.create_all(eng)
     return eng
 
