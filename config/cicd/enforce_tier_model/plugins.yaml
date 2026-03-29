@@ -390,37 +390,42 @@ allow_hits:
   reason: Offensive type guard — rejects non-numeric distance types with crash; corrupt ChromaDB index must not produce silent wrong results
   safety: Raises RetrievalError immediately (crash) — not silently skipped
   expires: null
-- key: plugins/sinks/chroma_sink.py:R6:ChromaSink:write:fp=2a519513e79027ab
+- key: plugins/sinks/chroma_sink.py:R6:ChromaSink:write:fp=b4b747bb26344d76
   owner: feature
   reason: Per-row KeyError catch at Tier 2→external boundary — missing id/document field diverts the row via _divert_row() instead of aborting the batch
   safety: Row diverted to failsink with descriptive reason; remaining valid rows written normally; no silent data loss
   expires: null
-- key: plugins/sinks/chroma_sink.py:R5:ChromaSink:write:fp=588afe419bda7c03
+- key: plugins/sinks/chroma_sink.py:R5:ChromaSink:write:fp=5ec13563341213a4
   owner: feature
   reason: Tier 2→external trust boundary — ChromaDB requires string IDs; isinstance(str) validates before write to avoid batch-aborting TypeError from SDK
   safety: Non-string ID diverts the row via _divert_row() with descriptive reason; not silent suppression
   expires: null
-- key: plugins/sinks/chroma_sink.py:R5:ChromaSink:write:fp=fe63d592e1c8dda5
+- key: plugins/sinks/chroma_sink.py:R5:ChromaSink:write:fp=14275469d1b3e44b
   owner: feature
   reason: Tier 2→external trust boundary — ChromaDB requires string documents; isinstance(str) validates before write
   safety: Non-string document diverts the row via _divert_row() with descriptive reason; not silent suppression
   expires: null
-- key: plugins/sinks/chroma_sink.py:R6:ChromaSink:write:fp=e0cc36f33d709f47
+- key: plugins/sinks/chroma_sink.py:R6:ChromaSink:write:fp=0edafbd3bc689eff
   owner: feature
   reason: Per-row KeyError catch for optional metadata fields — missing metadata field skipped (metadata is optional per-field)
   safety: Missing metadata fields silently omitted from the per-row metadata dict; no data fabrication
   expires: null
-- key: plugins/sinks/chroma_sink.py:R5:ChromaSink:write:fp=cbfaba9b66704f56
+- key: plugins/sinks/chroma_sink.py:R5:ChromaSink:write:fp=6ba8a1d631684578
   owner: feature
   reason: Tier 2→external trust boundary — validates metadata value types before sending to ChromaDB; isinstance check filters rows with non-scalar metadata (dict, list, datetime) so they go to failsink instead of crashing the batch
   safety: Invalid rows diverted via _divert_row() with per-field detail; valid rows written normally; no silent data loss
   expires: null
-- key: plugins/sinks/chroma_sink.py:R1:ChromaSink:write:fp=f60012fec4fd7493
+- key: plugins/sinks/chroma_sink.py:R5:ChromaSink:write:fp=0844634d5f6790dc
+  owner: bugfix
+  reason: Tier 2→external trust boundary — isinstance(float) guards non-finite metadata values (NaN/Infinity) before they reach canonical_json() hashing; diverts affected rows instead of crashing the batch
+  safety: Non-finite float rows diverted via _divert_row() with per-field detail; valid rows written normally; no silent data loss
+  expires: null
+- key: plugins/sinks/chroma_sink.py:R1:ChromaSink:write:fp=ce331265ef3a3ae1
   owner: feature
   reason: Collection.get() is the ChromaDB SDK method for retrieving documents by ID, not dict.get() — false positive from R1 rule matching `.get(` syntax
   safety: Returns GetResult dict with "ids" key; subscript access on result["ids"] crashes if ChromaDB SDK contract breaks
   expires: null
-- key: plugins/sinks/chroma_sink.py:R1:ChromaSink:write:fp=4628dd10e5323d79
+- key: plugins/sinks/chroma_sink.py:R1:ChromaSink:write:fp=945f83a101c66b53
   owner: feature
   reason: Collection.get() is the ChromaDB SDK method for retrieving documents by ID, not dict.get() — false positive from R1 rule matching `.get(` syntax
   safety: Returns GetResult dict with "ids" key; subscript access on result["ids"] crashes if ChromaDB SDK contract breaks

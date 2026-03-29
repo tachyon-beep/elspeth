@@ -604,3 +604,48 @@ class TestChromaSinkDivertRow:
         assert result.diversions[2].row_index == 2
         assert result.artifact.metadata is not None
         assert result.artifact.metadata["row_count"] == 0
+
+
+class TestChromaSinkNonFiniteMetadata:
+    """Non-finite float metadata must be diverted before reaching ChromaDB or canonical hashing."""
+
+    @pytest.mark.parametrize("bad_value", [float("nan"), float("inf"), float("-inf")], ids=["nan", "inf", "neg_inf"])
+    def test_non_finite_metadata_diverted(self, bad_value: float) -> None:
+        """Row with non-finite float metadata is diverted, valid rows still written."""
+        mock_collection = MagicMock()
+        sink = _make_sink_with_collection(mock_collection)
+        sink._on_write_failure = "csv_failsink"
+
+        mock_ctx = MagicMock()
+        rows: list[dict[str, Any]] = [
+            {"doc_id": "d1", "text": "good", "topic": "science"},
+            {"doc_id": "d2", "text": "bad", "topic": bad_value},
+        ]
+        result = sink.write(rows, mock_ctx)
+
+        # Only valid row sent to ChromaDB
+        call_kwargs = mock_collection.upsert.call_args.kwargs
+        assert call_kwargs["ids"] == ["d1"]
+        assert call_kwargs["documents"] == ["good"]
+
+        # Bad row diverted with descriptive reason
+        assert len(result.diversions) == 1
+        assert result.diversions[0].row_index == 1
+        assert "non-finite" in result.diversions[0].reason
+        assert "topic" in result.diversions[0].reason
+
+    @pytest.mark.parametrize("bad_value", [float("nan"), float("inf"), float("-inf")], ids=["nan", "inf", "neg_inf"])
+    def test_all_non_finite_metadata_returns_zero_write(self, bad_value: float) -> None:
+        """When all rows have non-finite metadata, nothing is sent to ChromaDB."""
+        mock_collection = MagicMock()
+        sink = _make_sink_with_collection(mock_collection)
+        sink._on_write_failure = "csv_failsink"
+
+        mock_ctx = MagicMock()
+        rows: list[dict[str, Any]] = [
+            {"doc_id": "d1", "text": "bad", "topic": bad_value},
+        ]
+        result = sink.write(rows, mock_ctx)
+
+        mock_collection.upsert.assert_not_called()
+        assert len(result.diversions) == 1

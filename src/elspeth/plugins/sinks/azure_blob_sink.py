@@ -522,11 +522,11 @@ class AzureBlobSink(BaseSink):
 
     def _serialize_json(self, rows: list[dict[str, Any]]) -> bytes:
         """Serialize rows to JSON array bytes."""
-        return json.dumps(rows, indent=2).encode("utf-8")
+        return json.dumps(rows, indent=2, allow_nan=False).encode("utf-8")
 
     def _serialize_jsonl(self, rows: list[dict[str, Any]]) -> bytes:
         """Serialize rows to JSONL bytes (newline-delimited JSON)."""
-        lines = [json.dumps(row) for row in rows]
+        lines = [json.dumps(row, allow_nan=False) for row in rows]
         return "\n".join(lines).encode("utf-8")
 
     def set_resume_field_resolution(self, resolution_mapping: dict[str, str]) -> None:

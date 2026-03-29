@@ -73,6 +73,28 @@ class TestRetrievalChunkMetadataValidation:
         )
         assert chunk.metadata["nested"]["key"] == "value"
 
+    @pytest.mark.parametrize("bad_value", [float("nan"), float("inf"), float("-inf")], ids=["nan", "inf", "neg_inf"])
+    def test_non_finite_metadata_rejected(self, bad_value: float):
+        """Non-finite floats in metadata must be rejected at the Tier 3 boundary."""
+        with pytest.raises(ValueError, match="JSON-serializable"):
+            RetrievalChunk(
+                content="text",
+                score=0.5,
+                source_id="doc1",
+                metadata={"score": bad_value},
+            )
+
+    @pytest.mark.parametrize("bad_value", [float("nan"), float("inf"), float("-inf")], ids=["nan", "inf", "neg_inf"])
+    def test_nested_non_finite_metadata_rejected(self, bad_value: float):
+        """Non-finite floats nested in metadata must also be rejected."""
+        with pytest.raises(ValueError, match="JSON-serializable"):
+            RetrievalChunk(
+                content="text",
+                score=0.5,
+                source_id="doc1",
+                metadata={"nested": {"value": bad_value}},
+            )
+
 
 class TestRetrievalError:
     def test_retryable_error(self):

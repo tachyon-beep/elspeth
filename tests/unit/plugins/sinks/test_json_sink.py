@@ -345,3 +345,39 @@ class TestJSONSink:
 
         sink.close()
         assert len(sink._rows) == 0
+
+
+class TestJSONSinkNonFiniteRejection:
+    """Non-finite floats must be rejected at the JSON serialization boundary."""
+
+    @pytest.fixture
+    def ctx(self) -> PluginContext:
+        db = make_landscape_db()
+        recorder = make_recorder(db)
+        return make_context(landscape=recorder)
+
+    @pytest.mark.parametrize("bad_value", [float("nan"), float("inf"), float("-inf")], ids=["nan", "inf", "neg_inf"])
+    def test_jsonl_rejects_non_finite_float(self, tmp_path: Path, ctx: PluginContext, bad_value: float) -> None:
+        """JSONL format must reject NaN/Infinity instead of emitting non-standard JSON."""
+        from elspeth.plugins.sinks.json_sink import JSONSink
+
+        output_file = tmp_path / "output.jsonl"
+        sink = JSONSink({"path": str(output_file), "format": "jsonl", "schema": DYNAMIC_SCHEMA})
+
+        with pytest.raises(ValueError, match="Out of range float values"):
+            sink.write([{"id": 1, "value": bad_value}], ctx)
+
+        sink.close()
+
+    @pytest.mark.parametrize("bad_value", [float("nan"), float("inf"), float("-inf")], ids=["nan", "inf", "neg_inf"])
+    def test_json_array_rejects_non_finite_float(self, tmp_path: Path, ctx: PluginContext, bad_value: float) -> None:
+        """JSON array format must reject NaN/Infinity instead of emitting non-standard JSON."""
+        from elspeth.plugins.sinks.json_sink import JSONSink
+
+        output_file = tmp_path / "output.json"
+        sink = JSONSink({"path": str(output_file), "format": "json", "schema": DYNAMIC_SCHEMA})
+
+        with pytest.raises(ValueError, match="Out of range float values"):
+            sink.write([{"id": 1, "value": bad_value}], ctx)
+
+        sink.close()

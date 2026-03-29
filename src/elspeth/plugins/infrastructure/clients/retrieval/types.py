@@ -38,7 +38,7 @@ class RetrievalChunk:
                 f"Provider score normalization bug — check the provider implementation."
             )
         try:
-            json.dumps(self.metadata)
+            json.dumps(self.metadata, allow_nan=False)
         except (TypeError, ValueError) as exc:
             raise ValueError(
                 f"metadata must be JSON-serializable (got {type(exc).__name__}: {exc}). "

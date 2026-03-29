@@ -7,6 +7,7 @@ document with ChromaDB's default embedding function.
 from __future__ import annotations
 
 import hashlib
+import math
 import time
 from collections.abc import Callable
 from typing import TYPE_CHECKING, Any, Literal
@@ -254,6 +255,8 @@ class ChromaSink(BaseSink):
                         continue
                     if value is not None and not isinstance(value, (str, int, float, bool)):
                         bad_fields[field] = type(value).__name__
+                    elif isinstance(value, float) and not math.isfinite(value):
+                        bad_fields[field] = f"non-finite float ({value!r})"
                     else:
                         meta[field] = value
                 if bad_fields:

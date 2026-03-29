@@ -399,3 +399,36 @@ class TestRuntimeRetryValidation:
                 jitter=1.0,
                 exponential_base=2.0,
             )
+
+
+class TestRuntimeRetryNonFiniteRejection:
+    """Non-finite float fields must be rejected at construction time."""
+
+    @pytest.mark.parametrize("field", ["base_delay", "max_delay", "jitter", "exponential_base"])
+    @pytest.mark.parametrize("bad_value", [float("nan"), float("inf"), float("-inf")], ids=["nan", "inf", "neg_inf"])
+    def test_rejects_non_finite_float(self, field: str, bad_value: float) -> None:
+        from elspeth.contracts.config.runtime import RuntimeRetryConfig
+
+        valid: dict[str, int | float] = {
+            "max_attempts": 3,
+            "base_delay": 1.0,
+            "max_delay": 60.0,
+            "jitter": 1.0,
+            "exponential_base": 2.0,
+        }
+        valid[field] = bad_value
+        with pytest.raises(ValueError, match=f"{field} must be finite"):
+            RuntimeRetryConfig(**valid)  # type: ignore[arg-type]
+
+    def test_finite_floats_accepted(self) -> None:
+        from elspeth.contracts.config.runtime import RuntimeRetryConfig
+
+        config = RuntimeRetryConfig(
+            max_attempts=3,
+            base_delay=1.0,
+            max_delay=60.0,
+            jitter=1.0,
+            exponential_base=2.0,
+        )
+        assert config.base_delay == 1.0
+        assert config.max_delay == 60.0

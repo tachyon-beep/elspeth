@@ -333,7 +333,7 @@ class JSONSink(BaseSink):
             self._file = open(self._path, file_mode, encoding=self._encoding)  # noqa: SIM115
 
         for row in rows:
-            json.dump(row, self._file)
+            json.dump(row, self._file, allow_nan=False)
             self._file.write("\n")
 
     def _write_json_array(self) -> None:
@@ -353,7 +353,7 @@ class JSONSink(BaseSink):
         temp_path = self._path.with_suffix(self._path.suffix + ".tmp")
         try:
             with open(temp_path, "w", encoding=self._encoding) as f:
-                json.dump(self._rows, f, indent=self._indent)
+                json.dump(self._rows, f, indent=self._indent, allow_nan=False)
                 f.flush()
                 os.fsync(f.fileno())
             # Atomic replace — file transitions directly from old content to new
