@@ -5,6 +5,7 @@ from __future__ import annotations
 import io
 import uuid
 from pathlib import Path
+from unittest.mock import AsyncMock, patch
 
 import pytest
 from fastapi import FastAPI
@@ -14,11 +15,38 @@ from starlette.testclient import TestClient
 
 from elspeth.web.auth.middleware import get_current_user
 from elspeth.web.auth.models import UserIdentity
+from elspeth.web.composer.protocol import ComposerResult
+from elspeth.web.composer.state import CompositionState, PipelineMetadata
 from elspeth.web.config import WebSettings
 from elspeth.web.sessions.models import metadata
 from elspeth.web.sessions.protocol import CompositionStateData
 from elspeth.web.sessions.routes import create_session_router
 from elspeth.web.sessions.service import SessionServiceImpl
+
+# Sentinel empty state for mock composer responses
+_EMPTY_STATE = CompositionState(
+    source=None,
+    nodes=(),
+    edges=(),
+    outputs=(),
+    metadata=PipelineMetadata(),
+    version=1,
+)
+
+
+def _make_composer_mock(
+    response_text: str = "Sure, I can help.",
+    state: CompositionState | None = None,
+) -> AsyncMock:
+    """Create a mock ComposerServiceImpl.compose that returns a fixed result."""
+    mock = AsyncMock()
+    mock.compose = AsyncMock(
+        return_value=ComposerResult(
+            message=response_text,
+            state=state or _EMPTY_STATE,
+        ),
+    )
+    return mock
 
 
 def _make_app(
@@ -51,6 +79,9 @@ def _make_app(
         data_dir=tmp_path,
         max_upload_bytes=max_upload_bytes,
     )
+    # Catalog service stub -- only needed by _get_composer, which is
+    # mocked in tests that POST messages.
+    app.state.catalog_service = None
 
     router = create_session_router()
     app.include_router(router)
@@ -162,6 +193,7 @@ class TestIDORProtection:
             app.dependency_overrides[get_current_user] = mock_user
             app.state.session_service = service
             app.state.settings = WebSettings(data_dir=tmp_path)
+            app.state.catalog_service = None
             app.include_router(create_session_router())
             return app
 
@@ -221,7 +253,11 @@ class TestIDORProtection:
 class TestMessageRoutes:
     """Tests for message send and retrieval endpoints."""
 
-    def test_send_message(self, tmp_path) -> None:
+    @patch("elspeth.web.sessions.routes._get_composer")
+    def test_send_message(self, mock_get_composer, tmp_path) -> None:
+        mock_composer = _make_composer_mock(response_text="Got it!")
+        mock_get_composer.return_value = mock_composer
+
         app, _ = _make_app(tmp_path)
         client = TestClient(app)
 
@@ -234,11 +270,16 @@ class TestMessageRoutes:
         )
         assert msg_resp.status_code == 200
         body = msg_resp.json()
-        assert body["message"]["content"] == "Hello, build me a pipeline"
-        assert body["message"]["role"] == "user"
-        assert body["state"] is None  # Phase 2: no composer yet
+        assert body["message"]["content"] == "Got it!"
+        assert body["message"]["role"] == "assistant"
+        # State unchanged (version stayed at 1) -> no state in response
+        assert body["state"] is None
 
-    def test_get_messages(self, tmp_path) -> None:
+    @patch("elspeth.web.sessions.routes._get_composer")
+    def test_get_messages(self, mock_get_composer, tmp_path) -> None:
+        mock_composer = _make_composer_mock()
+        mock_get_composer.return_value = mock_composer
+
         app, _ = _make_app(tmp_path)
         client = TestClient(app)
 
@@ -257,9 +298,12 @@ class TestMessageRoutes:
         msgs_resp = client.get(f"/api/sessions/{session_id}/messages")
         assert msgs_resp.status_code == 200
         messages = msgs_resp.json()
-        assert len(messages) == 2
+        # Each POST creates a user message + assistant message = 4 total
+        assert len(messages) == 4
         assert messages[0]["content"] == "First"
-        assert messages[1]["content"] == "Second"
+        assert messages[0]["role"] == "user"
+        assert messages[1]["content"] == "Sure, I can help."
+        assert messages[1]["role"] == "assistant"
 
 
 class TestStateRoutes:
@@ -529,27 +573,33 @@ class TestUploadRoute:
         assert upload_resp.status_code == 400
 
 
-class TestYamlStubEndpoint:
-    """Tests for GET /api/sessions/{id}/state/yaml (501 stub for Sub-4)."""
+class TestYamlEndpoint:
+    """Tests for GET /api/sessions/{id}/state/yaml."""
 
     @pytest.mark.asyncio
-    async def test_yaml_returns_501_when_state_exists(self, tmp_path) -> None:
-        """Stub returns 501 until Sub-4 implements generate_yaml()."""
+    async def test_yaml_returns_yaml_when_state_exists(self, tmp_path) -> None:
+        """Returns generated YAML when composition state exists."""
         app, service = _make_app(tmp_path)
         client = TestClient(app)
 
         session = await service.create_session("alice", "Pipeline", "local")
         await service.save_composition_state(
             session.id,
-            CompositionStateData(source={"type": "csv"}, is_valid=True),
+            CompositionStateData(
+                source={"plugin": "csv", "on_success": "out", "options": {"path": "/data.csv"}, "on_validation_failure": "quarantine"},
+                outputs=[{"name": "out", "plugin": "csv", "options": {}, "on_write_failure": "quarantine"}],
+                is_valid=True,
+            ),
         )
 
         resp = client.get(f"/api/sessions/{session.id}/state/yaml")
-        assert resp.status_code == 501
-        assert "Sub-4" in resp.json()["detail"]
+        assert resp.status_code == 200
+        body = resp.json()
+        assert "yaml" in body
+        assert "csv" in body["yaml"]
 
     def test_yaml_returns_404_when_no_state(self, tmp_path) -> None:
-        """No composition state yet → 404 before the 501 stub."""
+        """No composition state yet -> 404."""
         app, _ = _make_app(tmp_path)
         client = TestClient(app)
 
@@ -664,18 +714,18 @@ class TestPaginationRoutes:
         resp = client.get("/api/sessions?offset=-1")
         assert resp.status_code == 422
 
-    def test_get_messages_pagination(self, tmp_path) -> None:
-        app, _ = _make_app(tmp_path)
+    @pytest.mark.asyncio
+    async def test_get_messages_pagination(self, tmp_path) -> None:
+        app, service = _make_app(tmp_path)
         client = TestClient(app)
 
         resp = client.post("/api/sessions", json={"title": "Chat"})
         session_id = resp.json()["id"]
 
+        # Add messages directly via service to avoid composer dependency
+        session = await service.get_session(uuid.UUID(session_id))
         for i in range(5):
-            client.post(
-                f"/api/sessions/{session_id}/messages",
-                json={"content": f"Msg {i}"},
-            )
+            await service.add_message(session.id, "user", f"Msg {i}")
 
         resp = client.get(f"/api/sessions/{session_id}/messages?limit=2")
         assert resp.status_code == 200

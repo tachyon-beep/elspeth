@@ -238,37 +238,37 @@ allow_hits:
   expires: null
 
 # Session routes — @router.get() false positives (FastAPI route decorators)
-- key: web/sessions/routes.py:R1:create_session_router:list_sessions:fp=566a63b023413715
+- key: web/sessions/routes.py:R1:create_session_router:list_sessions:fp=46b0d4c88ce4d445
   owner: web-sessions
   reason: "False positive — @router.get() is FastAPI HTTP route decorator, not dict.get()"
   safety: No dict access involved
   expires: null
 
-- key: web/sessions/routes.py:R1:create_session_router:get_session:fp=06676354866805bb
+- key: web/sessions/routes.py:R1:create_session_router:get_session:fp=e55f0618554f032c
   owner: web-sessions
   reason: "False positive — @router.get() is FastAPI HTTP route decorator, not dict.get()"
   safety: No dict access involved
   expires: null
 
-- key: web/sessions/routes.py:R1:create_session_router:get_messages:fp=e4cd750dba8b0605
+- key: web/sessions/routes.py:R1:create_session_router:get_messages:fp=dffda4b81e771ca1
   owner: web-sessions
   reason: "False positive — @router.get() is FastAPI HTTP route decorator, not dict.get()"
   safety: No dict access involved
   expires: null
 
-- key: web/sessions/routes.py:R1:create_session_router:get_current_state:fp=cef5502322f77a56
+- key: web/sessions/routes.py:R1:create_session_router:get_current_state:fp=4a6057afba5cc2d4
   owner: web-sessions
   reason: "False positive — @router.get() is FastAPI HTTP route decorator, not dict.get()"
   safety: No dict access involved
   expires: null
 
-- key: web/sessions/routes.py:R1:create_session_router:get_state_versions:fp=2488944a97b94499
+- key: web/sessions/routes.py:R1:create_session_router:get_state_versions:fp=b1924a93ee9ec65f
   owner: web-sessions
   reason: "False positive — @router.get() is FastAPI HTTP route decorator, not dict.get()"
   safety: No dict access involved
   expires: null
 
-- key: web/sessions/routes.py:R1:create_session_router:get_state_yaml:fp=8c4e496653f21fcd
+- key: web/sessions/routes.py:R1:create_session_router:get_state_yaml:fp=15fcbae6811d1a46
   owner: web-sessions
   reason: "False positive — @router.get() is FastAPI HTTP route decorator, not dict.get()"
   safety: No dict access involved
