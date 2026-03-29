@@ -10,12 +10,20 @@ import asyncio
 from pathlib import Path
 from uuid import UUID
 
+import structlog
 from fastapi import APIRouter, Depends, File, HTTPException, Query, Request, UploadFile
+from litellm.exceptions import APIError as LiteLLMAPIError
+from litellm.exceptions import AuthenticationError as LiteLLMAuthError
 
 from elspeth.contracts.freeze import deep_thaw
 from elspeth.web.auth.middleware import get_current_user
 from elspeth.web.auth.models import UserIdentity
+from elspeth.web.composer.protocol import ComposerConvergenceError, ComposerService
+from elspeth.web.composer.state import CompositionState, PipelineMetadata
+from elspeth.web.composer.yaml_generator import generate_yaml
+from elspeth.web.middleware.rate_limit import ComposerRateLimiter, get_rate_limiter
 from elspeth.web.sessions.protocol import (
+    CompositionStateData,
     CompositionStateRecord,
     SessionRecord,
     SessionServiceProtocol,
@@ -30,6 +38,8 @@ from elspeth.web.sessions.schemas import (
     SessionResponse,
     UploadResponse,
 )
+
+slog = structlog.get_logger()
 
 
 def _session_response(session: SessionRecord) -> SessionResponse:
@@ -63,6 +73,32 @@ def _state_response(state: CompositionStateRecord) -> CompositionStateResponse:
         derived_from_state_id=str(state.derived_from_state_id) if state.derived_from_state_id is not None else None,
         created_at=state.created_at,
     )
+
+
+def _state_from_record(record: CompositionStateRecord) -> CompositionState:
+    """Reconstruct a CompositionState from a CompositionStateRecord.
+
+    Thaws frozen container fields (MappingProxyType, tuple) back to plain
+    dicts/lists so CompositionState.from_dict() can re-freeze them.
+    """
+    # Tier 1: metadata_ must always be populated. A None here indicates
+    # database corruption or a migration gap — crash immediately.
+    if record.metadata_ is None:
+        msg = f"CompositionStateRecord {record.id} has None metadata_ — database corruption or migration gap"
+        raise ValueError(msg)
+
+    state_dict = {
+        "version": record.version,
+        "source": deep_thaw(record.source) if record.source is not None else None,
+        # nodes/edges/outputs: None is the legitimate initial state when no
+        # nodes have been added yet. Mapping None -> [] is meaning-preserving
+        # (empty collection, not fabricated data).
+        "nodes": [deep_thaw(n) for n in record.nodes] if record.nodes is not None else [],
+        "edges": [deep_thaw(e) for e in record.edges] if record.edges is not None else [],
+        "outputs": [deep_thaw(o) for o in record.outputs] if record.outputs is not None else [],
+        "metadata": deep_thaw(record.metadata_),
+    }
+    return CompositionState.from_dict(state_dict)
 
 
 async def _verify_session_ownership(
@@ -155,21 +191,141 @@ def create_session_router() -> APIRouter:
         body: SendMessageRequest,
         request: Request,
         user: UserIdentity = Depends(get_current_user),  # noqa: B008
+        rate_limiter: ComposerRateLimiter = Depends(get_rate_limiter),  # noqa: B008
     ) -> MessageWithStateResponse:
-        """Send a user message. In Phase 2, only persists the message."""
+        """Send a user message, run the LLM composer, persist results.
+
+        1. Rate limit check (per-user).
+        2. Persist the user message.
+        3. Load or create the current CompositionState.
+        4. Pre-fetch chat history for the composer.
+        5. Run the LLM composition loop.
+        6. Persist the assistant response message.
+        7. If state changed, save the new composition state version.
+        8. Return the assistant message and (optionally) the new state.
+        """
+        # 0. Rate limit check — before any work
+        await rate_limiter.check(user.user_id)
+
         session = await _verify_session_ownership(session_id, user, request)
-        service = request.app.state.session_service
-        msg = await service.add_message(session.id, "user", body.content)
+        service: SessionServiceProtocol = request.app.state.session_service
+
+        # 1. Persist user message
+        await service.add_message(session.id, "user", body.content)
+
+        # 2. Load or create CompositionState
+        state_record = await service.get_current_state(session.id)
+        if state_record is None:
+            state = CompositionState(
+                source=None,
+                nodes=(),
+                edges=(),
+                outputs=(),
+                metadata=PipelineMetadata(),
+                version=1,
+            )
+        else:
+            state = _state_from_record(state_record)
+
+        # 3. Pre-fetch chat history as plain dicts (seam contract B)
+        records = await service.get_messages(session.id)
+        chat_messages = [{"role": r.role, "content": r.content} for r in records]
+
+        # 4. Run the LLM composition loop
+        composer: ComposerService = request.app.state.composer_service
+        try:
+            result = await composer.compose(body.content, chat_messages, state)
+        except ComposerConvergenceError as exc:
+            response_body: dict[str, object] = {
+                "error_type": "convergence",
+                "detail": str(exc),
+                "turns_used": exc.max_turns,
+                "budget_exhausted": exc.budget_exhausted,
+            }
+            if exc.partial_state is not None:
+                # Validate guard: if validation itself fails, persist with
+                # is_valid=False rather than losing the state entirely.
+                try:
+                    validation = exc.partial_state.validate()
+                except Exception:
+                    from elspeth.web.composer.state import ValidationSummary
+
+                    validation = ValidationSummary(is_valid=False, errors=("validation_failed",))
+
+                # Persistence guard: if save fails, log the error and return
+                # 422 without partial_state rather than crashing to 500.
+                try:
+                    state_d = exc.partial_state.to_dict()
+                    state_data = CompositionStateData(
+                        source=state_d["source"],
+                        nodes=state_d["nodes"],
+                        edges=state_d["edges"],
+                        outputs=state_d["outputs"],
+                        metadata_=state_d["metadata"],
+                        is_valid=validation.is_valid,
+                        validation_errors=list(validation.errors) if validation.errors else None,
+                    )
+                    await service.save_composition_state(session.id, state_data)
+                    response_body["partial_state"] = state_d
+                except Exception:
+                    slog.error(
+                        "convergence_partial_state_save_failed",
+                        session_id=str(session_id),
+                        exc_info=True,
+                    )
+                    # Do NOT include partial_state in response — it was not
+                    # persisted, so the frontend cannot resume from it.
+
+            raise HTTPException(status_code=422, detail=response_body) from exc
+        except LiteLLMAuthError as exc:
+            raise HTTPException(
+                status_code=502,
+                detail={"error_type": "llm_auth_error", "detail": str(exc)},
+            ) from exc
+        except LiteLLMAPIError as exc:
+            raise HTTPException(
+                status_code=502,
+                detail={"error_type": "llm_unavailable", "detail": str(exc)},
+            ) from exc
+
+        # 5. Persist assistant message
+        assistant_msg = await service.add_message(
+            session.id,
+            "assistant",
+            result.message,
+        )
+
+        # 6. Save state if version changed
+        state_response: CompositionStateResponse | None = None
+        if result.state.version != state.version:
+            state_d = result.state.to_dict()
+            validation = result.state.validate()
+            state_data = CompositionStateData(
+                source=state_d["source"],
+                nodes=state_d["nodes"],
+                edges=state_d["edges"],
+                outputs=state_d["outputs"],
+                metadata_=state_d["metadata"],
+                is_valid=validation.is_valid,
+                validation_errors=list(validation.errors) if validation.errors else None,
+            )
+            new_state_record = await service.save_composition_state(
+                session.id,
+                state_data,
+            )
+            state_response = _state_response(new_state_record)
+
+        # 7. Return response
         return MessageWithStateResponse(
             message=ChatMessageResponse(
-                id=str(msg.id),
-                session_id=str(msg.session_id),
-                role=msg.role,
-                content=msg.content,
-                tool_calls=msg.tool_calls,
-                created_at=msg.created_at,
+                id=str(assistant_msg.id),
+                session_id=str(assistant_msg.session_id),
+                role=assistant_msg.role,
+                content=assistant_msg.content,
+                tool_calls=assistant_msg.tool_calls,
+                created_at=assistant_msg.created_at,
             ),
-            state=None,
+            state=state_response,
         )
 
     @router.get(
@@ -277,22 +433,17 @@ def create_session_router() -> APIRouter:
     ) -> dict[str, str]:
         """Get YAML representation of the current composition state (M1).
 
-        Stub endpoint -- returns 501 until Sub-4 implements generate_yaml().
-        When Sub-4 lands, replace the 501 with:
-            state = await service.get_current_state(session.id)
-            yaml_str = generate_yaml(CompositionState.from_dict(state))
-            return {"yaml": yaml_str}
+        Reconstructs a CompositionState from the persisted record and
+        generates deterministic YAML via generate_yaml().
         """
         session = await _verify_session_ownership(session_id, user, request)
-        service = request.app.state.session_service
-        state = await service.get_current_state(session.id)
-        if state is None:
+        service: SessionServiceProtocol = request.app.state.session_service
+        state_record = await service.get_current_state(session.id)
+        if state_record is None:
             raise HTTPException(status_code=404, detail="No composition state exists")
-        # TODO(sub-4): Replace stub with generate_yaml() call
-        raise HTTPException(
-            status_code=501,
-            detail="YAML generation not yet implemented (see Sub-4)",
-        )
+        state = _state_from_record(state_record)
+        yaml_str = generate_yaml(state)
+        return {"yaml": yaml_str}
 
     @router.post("/{session_id}/upload", response_model=UploadResponse)
     async def upload_file(

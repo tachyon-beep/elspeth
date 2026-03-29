@@ -31,6 +31,13 @@ allow_hits:
   safety: "Returns None on miss, handled by 404 response"
   expires: null
 
+# CatalogServiceImpl — silent-except for unknown plugin type fallback (pre-existing)
+- key: web/catalog/service.py:R6:CatalogServiceImpl:_resolve_config_model:fp=5e0056175f439976
+  owner: web-catalog
+  reason: "Expected error path — UnknownPluginTypeError caught and returns None to caller"
+  safety: "Caller checks None return and skips config extraction; no silent data loss"
+  expires: null
+
 - key: web/catalog/service.py:R1:CatalogServiceImpl:_extract_config_fields:fp=4ff2ba785b505451
   owner: web-catalog
   reason: "Tier 3 boundary — Pydantic-generated JSON schema 'properties' key may be absent"
@@ -217,54 +224,67 @@ allow_hits:
   safety: "Crashes on unknown version or missing envelope; no silent coercion"
   expires: null
 
-# App factory — @app.get() false positive (moved health route)
-- key: web/app.py:R1:create_app:fp=0ac04e8b084fbb9c
+# App factory — os.environ.get() and @app.get() false positives
+- key: web/app.py:R1:create_app:fp=8c3b81b8e730d734
   owner: web-app
   reason: "Tier 3 boundary — os.environ.get() for env var check, not dict.get() on pipeline data"
   safety: "Guards dev-mode secret_key warning; no data flow impact"
   expires: null
 
-- key: web/app.py:R1:create_app:health:fp=c9fc1c5eac98aa71
+- key: web/app.py:R1:create_app:health:fp=e7882b0a865f247a
   owner: web-app
   reason: "False positive — @app.get() is FastAPI HTTP route decorator, not dict.get()"
   safety: No dict access involved
   expires: null
 
 # Session routes — @router.get() false positives (FastAPI route decorators)
-- key: web/sessions/routes.py:R1:create_session_router:list_sessions:fp=566a63b023413715
+- key: web/sessions/routes.py:R1:create_session_router:list_sessions:fp=decbc54c94c75e3c
   owner: web-sessions
   reason: "False positive — @router.get() is FastAPI HTTP route decorator, not dict.get()"
   safety: No dict access involved
   expires: null
 
-- key: web/sessions/routes.py:R1:create_session_router:get_session:fp=06676354866805bb
+- key: web/sessions/routes.py:R1:create_session_router:get_session:fp=9cf17bef7e30db48
   owner: web-sessions
   reason: "False positive — @router.get() is FastAPI HTTP route decorator, not dict.get()"
   safety: No dict access involved
   expires: null
 
-- key: web/sessions/routes.py:R1:create_session_router:get_messages:fp=e4cd750dba8b0605
+- key: web/sessions/routes.py:R1:create_session_router:get_messages:fp=7ceeee2a5e642481
   owner: web-sessions
   reason: "False positive — @router.get() is FastAPI HTTP route decorator, not dict.get()"
   safety: No dict access involved
   expires: null
 
-- key: web/sessions/routes.py:R1:create_session_router:get_current_state:fp=cef5502322f77a56
+- key: web/sessions/routes.py:R1:create_session_router:get_current_state:fp=fb7810da03bd8b01
   owner: web-sessions
   reason: "False positive — @router.get() is FastAPI HTTP route decorator, not dict.get()"
   safety: No dict access involved
   expires: null
 
-- key: web/sessions/routes.py:R1:create_session_router:get_state_versions:fp=2488944a97b94499
+- key: web/sessions/routes.py:R1:create_session_router:get_state_versions:fp=6e1f4f1fc01319f9
   owner: web-sessions
   reason: "False positive — @router.get() is FastAPI HTTP route decorator, not dict.get()"
   safety: No dict access involved
   expires: null
 
-- key: web/sessions/routes.py:R1:create_session_router:get_state_yaml:fp=8c4e496653f21fcd
+- key: web/sessions/routes.py:R1:create_session_router:get_state_yaml:fp=a709e6420dc9571e
   owner: web-sessions
   reason: "False positive — @router.get() is FastAPI HTTP route decorator, not dict.get()"
   safety: No dict access involved
+  expires: null
+
+# Session routes — broad except in convergence partial state guards (F2 hardening)
+- key: web/sessions/routes.py:R4:create_session_router:send_message:fp=f6fed8b0740f3d3d
+  owner: web-composer
+  reason: "Convergence validation guard — if validate() raises, degrade to is_valid=False rather than lose partial state"
+  safety: "Caught exception produces ValidationSummary(is_valid=False); state still persisted"
+  expires: null
+
+- key: web/sessions/routes.py:R4:create_session_router:send_message:fp=f8cc5e458c655b2c
+  owner: web-composer
+  reason: "Convergence persistence guard — if save_composition_state() fails, log and return 422 without partial_state"
+  safety: "Caught exception logged via structlog; 422 response omits partial_state; no crash to 500"
   expires: null
 
 # Auth middleware — Tier 3 HTTP header access (Authorization header from client)
@@ -272,6 +292,56 @@ allow_hits:
   owner: web-auth
   reason: "Tier 3 boundary — request.headers.get('Authorization') reads untrusted HTTP header"
   safety: "Missing header returns 401; malformed header returns 401; no default fabrication"
+  expires: null
+
+# Composer state — NodeSpec.from_dict() uses .get() for optional fields absent from to_dict()
+- key: web/composer/state.py:R1:NodeSpec:from_dict:fp=cfc303e4ee462b63
+  owner: web-composer
+  reason: "Optional fields — to_dict() conditionally omits None fields; from_dict() defaults to None"
+  safety: "Missing = None; matches dataclass field default; round-trip invariant tested"
+  expires: null
+
+- key: web/composer/state.py:R1:NodeSpec:from_dict:fp=8c8f945cb356cd6b
+  owner: web-composer
+  reason: "Optional fields — to_dict() conditionally omits None fields; from_dict() defaults to None"
+  safety: "Missing = None; matches dataclass field default; round-trip invariant tested"
+  expires: null
+
+- key: web/composer/state.py:R1:NodeSpec:from_dict:fp=54276a836e71e2ad
+  owner: web-composer
+  reason: "Optional fields — to_dict() conditionally omits None fields; from_dict() defaults to None"
+  safety: "Missing = None; matches dataclass field default; round-trip invariant tested"
+  expires: null
+
+- key: web/composer/state.py:R1:NodeSpec:from_dict:fp=1a3dc41d13b14500
+  owner: web-composer
+  reason: "Optional fields — to_dict() conditionally omits None fields; from_dict() defaults to None"
+  safety: "Missing = None; matches dataclass field default; round-trip invariant tested"
+  expires: null
+
+- key: web/composer/state.py:R1:NodeSpec:from_dict:fp=0fc6469ca0fca4c3
+  owner: web-composer
+  reason: "Optional fields — to_dict() conditionally omits None fields; from_dict() defaults to None"
+  safety: "Missing = None; matches dataclass field default; round-trip invariant tested"
+  expires: null
+
+- key: web/composer/state.py:R1:NodeSpec:from_dict:fp=d9e79308f2030bf0
+  owner: web-composer
+  reason: "Optional fields — to_dict() conditionally omits None fields; from_dict() defaults to None"
+  safety: "Missing = None; matches dataclass field default; round-trip invariant tested"
+  expires: null
+
+# Composer state — with_metadata() uses .get() for partial dict patch
+- key: web/composer/state.py:R1:CompositionState:with_metadata:fp=a72cd948565706e7
+  owner: web-composer
+  reason: "Partial patch API — only provided fields are updated, others preserved"
+  safety: "Defaults are the current field values; no fabrication, no loss"
+  expires: null
+
+- key: web/composer/state.py:R1:CompositionState:with_metadata:fp=fc470cb12ec23522
+  owner: web-composer
+  reason: "Partial patch API — only provided fields are updated, others preserved"
+  safety: "Defaults are the current field values; no fabrication, no loss"
   expires: null
 
 # Session service — IntegrityError handling for upsert-or-skip patterns
@@ -287,9 +357,17 @@ allow_hits:
   safety: "Returns None to caller; caller retries or skips; no data loss"
   expires: null
 
-# Catalog service — UnknownPluginTypeError handling for config model resolution
-- key: web/catalog/service.py:R6:CatalogServiceImpl:_resolve_config_model:fp=5e0056175f439976
-  owner: web-catalog
-  reason: "Graceful fallback — unknown plugin type returns None (no config model available)"
-  safety: "Caller treats None as 'no schema'; plugin still listed without config fields"
+per_file_rules:
+# Composer tools — mutation executors parse LLM tool call arguments (Tier 3).
+- pattern: web/composer/tools.py
+  rules:
+  - R1
+  - R5
+  reason: "Tier 3 boundary — LLM tool call arguments are external data with optional fields per JSON schema"
+  expires: null
+
+- pattern: web/composer/service.py
+  rules:
+  - R6
+  reason: "Tier 3 boundary — LLM tool call arguments may contain malformed JSON (JSONDecodeError) or missing required keys (KeyError/TypeError). Errors returned to LLM for self-correction, not swallowed."
   expires: null

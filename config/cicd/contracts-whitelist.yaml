@@ -441,3 +441,64 @@ allowed_dict_patterns:
   # WEB AUTH — Session service protocol
   # tool_calls is pipeline composition data (Tier 2 — user-defined graph structure).
   # ═══════════════════════════════════════════════════════════════════════════
+  # ═══════════════════════════════════════════════════════════════════════════
+  # WEB COMPOSER — CompositionState serialization and factory methods
+  # from_dict() accepts plain dicts from JSON deserialization (Tier 1 read).
+  # to_dict() returns plain dicts for YAML/JSON serialization.
+  # with_metadata() accepts partial patch dicts from LLM tool calls.
+  # ═══════════════════════════════════════════════════════════════════════════
+  - "src/elspeth/web/composer/state.py:PipelineMetadata.from_dict:d"
+  - "src/elspeth/web/composer/state.py:SourceSpec.from_dict:d"
+  - "src/elspeth/web/composer/state.py:NodeSpec.from_dict:d"
+  - "src/elspeth/web/composer/state.py:EdgeSpec.from_dict:d"
+  - "src/elspeth/web/composer/state.py:OutputSpec.from_dict:d"
+  - "src/elspeth/web/composer/state.py:CompositionState.from_dict:d"
+  - "src/elspeth/web/composer/state.py:CompositionState.with_metadata:patch"
+  - "src/elspeth/web/composer/state.py:CompositionState.to_dict:return"
+
+  # ═══════════════════════════════════════════════════════════════════════════
+  # WEB COMPOSER — Tool executor (Tier 3 LLM tool call arguments)
+  # args dicts come from json.loads(tool_call.function.arguments) in the
+  # LLM tool-use loop. Tool JSON schemas define optional fields.
+  # ═══════════════════════════════════════════════════════════════════════════
+  - "src/elspeth/web/composer/tools.py:ToolResult.to_dict:return"
+  - "src/elspeth/web/composer/tools.py:get_tool_definitions:return (list)"
+  - "src/elspeth/web/composer/tools.py:execute_tool:arguments"
+  - "src/elspeth/web/composer/tools.py:_validate_source_path:options"
+  - "src/elspeth/web/composer/tools.py:_execute_set_source:args"
+  - "src/elspeth/web/composer/tools.py:_execute_upsert_node:args"
+  - "src/elspeth/web/composer/tools.py:_execute_upsert_edge:args"
+  - "src/elspeth/web/composer/tools.py:_execute_remove_node:args"
+  - "src/elspeth/web/composer/tools.py:_execute_remove_edge:args"
+  - "src/elspeth/web/composer/tools.py:_execute_set_metadata:args"
+  - "src/elspeth/web/composer/tools.py:_execute_set_output:args"
+  - "src/elspeth/web/composer/tools.py:_execute_remove_output:args"
+  # Handler wrappers normalize signatures for the tool registry (Sub-4x).
+  # Arguments are LLM-provided JSON dicts — inherently dynamic.
+  - "src/elspeth/web/composer/tools.py:_handle_list_sources:arguments"
+  - "src/elspeth/web/composer/tools.py:_handle_list_transforms:arguments"
+  - "src/elspeth/web/composer/tools.py:_handle_list_sinks:arguments"
+  - "src/elspeth/web/composer/tools.py:_handle_get_plugin_schema:arguments"
+  - "src/elspeth/web/composer/tools.py:_handle_get_expression_grammar:arguments"
+  - "src/elspeth/web/composer/tools.py:_handle_upsert_node:arguments"
+  - "src/elspeth/web/composer/tools.py:_handle_upsert_edge:arguments"
+  - "src/elspeth/web/composer/tools.py:_handle_remove_node:arguments"
+  - "src/elspeth/web/composer/tools.py:_handle_remove_edge:arguments"
+  - "src/elspeth/web/composer/tools.py:_handle_set_metadata:arguments"
+  - "src/elspeth/web/composer/tools.py:_handle_set_output:arguments"
+  - "src/elspeth/web/composer/tools.py:_handle_remove_output:arguments"
+
+  # WEB COMPOSER — Service, protocol, prompts (LLM message lists)
+  # LiteLLM message format is list[dict[str, Any]] by API contract.
+  # Chat history arrives as plain dicts from the route handler (seam contract B).
+  - "src/elspeth/web/composer/protocol.py:ComposerService.compose:messages (list)"
+  - "src/elspeth/web/composer/service.py:ComposerServiceImpl.compose:messages (list)"
+  - "src/elspeth/web/composer/service.py:ComposerServiceImpl._compose_loop:messages (list)"
+  - "src/elspeth/web/composer/service.py:ComposerServiceImpl._build_messages:chat_history (list)"
+  - "src/elspeth/web/composer/service.py:_make_cache_key:arguments"
+  - "src/elspeth/web/composer/service.py:ComposerServiceImpl._build_messages:return (list)"
+  - "src/elspeth/web/composer/service.py:ComposerServiceImpl._get_litellm_tools:return (list)"
+  - "src/elspeth/web/composer/service.py:ComposerServiceImpl._call_llm:messages (list)"
+  - "src/elspeth/web/composer/service.py:ComposerServiceImpl._call_llm:tools (list)"
+  - "src/elspeth/web/composer/prompts.py:build_messages:chat_history (list)"
+  - "src/elspeth/web/composer/prompts.py:build_messages:return (list)"
