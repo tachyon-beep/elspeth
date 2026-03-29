@@ -5,6 +5,8 @@ This module defines contracts for sink validation and output target compatibilit
 
 from dataclasses import dataclass, field
 
+from elspeth.contracts.freeze import freeze_fields
+
 
 @dataclass(frozen=True, slots=True)
 class OutputValidationResult:
@@ -38,6 +40,7 @@ class OutputValidationResult:
         """Validate consistency between valid flag and error_message."""
         if not self.valid and not self.error_message:
             raise ValueError("OutputValidationResult with valid=False must have error_message")
+        freeze_fields(self, "target_fields", "schema_fields", "missing_fields", "extra_fields")
 
     @classmethod
     def success(cls, target_fields: list[str] | None = None) -> "OutputValidationResult":

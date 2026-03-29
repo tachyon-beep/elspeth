@@ -147,7 +147,7 @@ class AggregationNodeCheckpoint:
             )
         if not isinstance(self.contract, (dict, MappingProxyType)):
             raise TypeError(f"AggregationNodeCheckpoint.contract must be dict or MappingProxyType, got {type(self.contract).__name__}")
-        freeze_fields(self, "contract")
+        freeze_fields(self, "tokens", "contract")
 
     def to_dict(self) -> dict[str, Any]:
         """Serialize to checkpoint dict format."""

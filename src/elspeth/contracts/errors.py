@@ -9,7 +9,7 @@ from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, Literal, NotRequired, TypedDict
 
-from elspeth.contracts.freeze import deep_freeze
+from elspeth.contracts.freeze import deep_freeze, freeze_fields
 
 if TYPE_CHECKING:
     from elspeth.contracts.batch_checkpoint import BatchCheckpointState
@@ -87,6 +87,7 @@ class CoalesceFailureReason:
             raise ValueError("CoalesceFailureReason.expected_branches must not be empty")
         if self.timeout_ms is not None and self.timeout_ms < 0:
             raise ValueError(f"CoalesceFailureReason.timeout_ms must be non-negative, got {self.timeout_ms}")
+        freeze_fields(self, "expected_branches", "branches_arrived")
 
     def to_dict(self) -> dict[str, Any]:
         """Serialize to audit-trail dict.

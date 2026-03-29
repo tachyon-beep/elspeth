@@ -283,3 +283,36 @@ class TestBatchCheckpointStatePostInit:
             requests={},
         )
         assert s.batch_id == "b1"
+
+
+class TestAggregationNodeCheckpointTokensFreeze:
+    """tokens field must be deeply frozen on direct construction."""
+
+    def test_tokens_list_frozen_to_tuple(self) -> None:
+        from elspeth.contracts.aggregation_checkpoint import (
+            AggregationNodeCheckpoint,
+            AggregationTokenCheckpoint,
+        )
+
+        token = AggregationTokenCheckpoint(
+            token_id="t1",
+            row_id="r1",
+            branch_name="main",
+            fork_group_id=None,
+            join_group_id=None,
+            expand_group_id=None,
+            row_data={"value": 42},
+            contract_version="v1",
+        )
+        tokens_list = [token]
+        node = AggregationNodeCheckpoint(
+            tokens=tokens_list,  # type: ignore[arg-type]
+            batch_id="b1",
+            elapsed_age_seconds=1.0,
+            count_fire_offset=None,
+            condition_fire_offset=None,
+            contract={"mode": "observed"},
+        )
+        tokens_list.append(token)
+        assert isinstance(node.tokens, tuple)
+        assert len(node.tokens) == 1

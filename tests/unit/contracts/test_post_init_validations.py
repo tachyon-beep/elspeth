@@ -113,3 +113,35 @@ class TestRoutingActionReasonCopy:
     def test_none_reason_accepted(self) -> None:
         action = RoutingAction.continue_()
         assert action.reason is None
+
+
+class TestOutputValidationResultDeepFreeze:
+    """Collection fields must be deeply frozen on direct construction."""
+
+    def test_direct_construction_freezes_lists(self) -> None:
+        from elspeth.contracts.sink import OutputValidationResult
+
+        target: list[str] = ["a", "b"]
+        result = OutputValidationResult(
+            valid=True,
+            target_fields=target,  # type: ignore[arg-type]
+        )
+        target.append("mutated")
+        assert isinstance(result.target_fields, tuple)
+        assert "mutated" not in result.target_fields
+
+    def test_all_collection_fields_frozen(self) -> None:
+        from elspeth.contracts.sink import OutputValidationResult
+
+        result = OutputValidationResult(
+            valid=False,
+            target_fields=["a"],  # type: ignore[arg-type]
+            schema_fields=["b"],  # type: ignore[arg-type]
+            missing_fields=["c"],  # type: ignore[arg-type]
+            extra_fields=["d"],  # type: ignore[arg-type]
+            error_message="mismatch",
+        )
+        assert isinstance(result.target_fields, tuple)
+        assert isinstance(result.schema_fields, tuple)
+        assert isinstance(result.missing_fields, tuple)
+        assert isinstance(result.extra_fields, tuple)

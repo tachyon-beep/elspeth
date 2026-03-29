@@ -204,3 +204,42 @@ class TestCoalesceMetadataDetachment:
 
         assert meta.branches_lost is not None
         assert meta.branches_lost["branch_a"] == "not_arrived"
+
+
+class TestCoalesceMetadataDeepFreeze:
+    """Sequence fields must be deeply frozen on direct construction."""
+
+    def test_expected_branches_frozen(self) -> None:
+        branches: list[str] = ["a", "b"]
+        meta = CoalesceMetadata(
+            policy=CoalescePolicy.REQUIRE_ALL,
+            expected_branches=branches,  # type: ignore[arg-type]
+        )
+        branches.append("mutated")
+        assert meta.expected_branches is not None
+        assert isinstance(meta.expected_branches, tuple)
+        assert "mutated" not in meta.expected_branches
+
+    def test_branches_arrived_frozen(self) -> None:
+        arrived: list[str] = ["a"]
+        meta = CoalesceMetadata(
+            policy=CoalescePolicy.REQUIRE_ALL,
+            branches_arrived=arrived,  # type: ignore[arg-type]
+        )
+        arrived.append("mutated")
+        assert meta.branches_arrived is not None
+        assert isinstance(meta.branches_arrived, tuple)
+        assert "mutated" not in meta.branches_arrived
+
+    def test_arrival_order_frozen(self) -> None:
+        from elspeth.contracts.coalesce_metadata import ArrivalOrderEntry
+
+        entries = [ArrivalOrderEntry(branch="a", arrival_offset_ms=100.0)]
+        meta = CoalesceMetadata(
+            policy=CoalescePolicy.REQUIRE_ALL,
+            arrival_order=entries,  # type: ignore[arg-type]
+        )
+        entries.append(ArrivalOrderEntry(branch="mutated", arrival_offset_ms=200.0))
+        assert meta.arrival_order is not None
+        assert isinstance(meta.arrival_order, tuple)
+        assert len(meta.arrival_order) == 1

@@ -567,3 +567,43 @@ class TestHTTPCallError:
         obj = HTTPCallError(type="err", message="msg")
         with pytest.raises(AttributeError):
             obj.type = "other"  # type: ignore[misc]
+
+
+class TestHTTPCallResponseListBodyFreeze:
+    """JSON array bodies must be deeply frozen."""
+
+    def test_list_body_frozen_to_tuple(self) -> None:
+        body = [{"id": 1}, {"id": 2}]
+        resp = HTTPCallResponse(
+            status_code=200,
+            headers={"content-type": "application/json"},
+            body_size=20,
+            body=body,  # type: ignore[arg-type]
+        )
+        body.append({"id": 3})
+        assert isinstance(resp.body, tuple)
+        assert len(resp.body) == 2
+
+    def test_list_body_nested_dicts_frozen(self) -> None:
+        from types import MappingProxyType
+
+        body = [{"nested": {"key": "value"}}]
+        resp = HTTPCallResponse(
+            status_code=200,
+            headers={"content-type": "application/json"},
+            body_size=30,
+            body=body,  # type: ignore[arg-type]
+        )
+        assert isinstance(resp.body, tuple)
+        assert isinstance(resp.body[0], MappingProxyType)
+
+    def test_list_body_round_trips_via_to_dict(self) -> None:
+        resp = HTTPCallResponse(
+            status_code=200,
+            headers={"content-type": "application/json"},
+            body_size=20,
+            body=[{"id": 1}, {"id": 2}],  # type: ignore[arg-type]
+        )
+        d = resp.to_dict()
+        assert isinstance(d["body"], list)
+        assert d["body"] == [{"id": 1}, {"id": 2}]

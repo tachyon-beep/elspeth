@@ -237,7 +237,7 @@ class HTTPCallResponse:
     status_code: int
     headers: Mapping[str, str]
     body_size: int | None = None
-    body: Mapping[str, Any] | str | None = None
+    body: Mapping[str, Any] | tuple[Any, ...] | str | None = None
     redirect_count: int = 0
 
     def __post_init__(self) -> None:
@@ -246,7 +246,7 @@ class HTTPCallResponse:
         require_int(self.redirect_count, "redirect_count", min_value=0)
         if not isinstance(self.headers, MappingProxyType):
             object.__setattr__(self, "headers", MappingProxyType(dict(self.headers)))
-        if self.body is not None and isinstance(self.body, Mapping):
+        if self.body is not None and isinstance(self.body, (Mapping, list)):
             frozen = deep_freeze(self.body)
             if frozen is not self.body:
                 object.__setattr__(self, "body", frozen)
@@ -263,7 +263,7 @@ class HTTPCallResponse:
         }
         if self.body_size is not None:
             d["body_size"] = self.body_size
-            if isinstance(self.body, (MappingProxyType, dict)):
+            if isinstance(self.body, (MappingProxyType, dict, tuple)):
                 d["body"] = deep_thaw(self.body)
             else:
                 d["body"] = self.body

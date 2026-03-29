@@ -710,3 +710,35 @@ class TestCoalesceFailureReasonPostInit:
         assert isinstance(d["branches_arrived"], list)
         assert d["expected_branches"] == ["a", "b"]
         assert d["branches_arrived"] == ["a"]
+
+
+class TestCoalesceFailureReasonDeepFreeze:
+    """Branch fields must be deeply frozen on direct construction."""
+
+    def test_expected_branches_frozen(self) -> None:
+        from elspeth.contracts import CoalesceFailureReason
+
+        branches: list[str] = ["a", "b"]
+        reason = CoalesceFailureReason(
+            failure_reason="quorum_not_met",
+            expected_branches=branches,  # type: ignore[arg-type]
+            branches_arrived=("a",),
+            merge_policy="union",
+        )
+        branches.append("mutated")
+        assert isinstance(reason.expected_branches, tuple)
+        assert "mutated" not in reason.expected_branches
+
+    def test_branches_arrived_frozen(self) -> None:
+        from elspeth.contracts import CoalesceFailureReason
+
+        arrived: list[str] = ["a"]
+        reason = CoalesceFailureReason(
+            failure_reason="quorum_not_met",
+            expected_branches=("a", "b"),
+            branches_arrived=arrived,  # type: ignore[arg-type]
+            merge_policy="union",
+        )
+        arrived.append("mutated")
+        assert isinstance(reason.branches_arrived, tuple)
+        assert "mutated" not in reason.branches_arrived
