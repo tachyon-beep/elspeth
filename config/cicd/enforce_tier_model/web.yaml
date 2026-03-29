@@ -223,37 +223,11 @@ allow_hits:
   safety: "Non-local providers return 404; isinstance enables mypy type narrowing for login()/refresh()"
   expires: null
 
-# SessionServiceImpl — _to_json unfreezes MappingProxyType/tuple for JSON serialization
-- key: web/sessions/service.py:R5:SessionServiceImpl:save_composition_state:_to_json:fp=a648319705b64991
-  owner: web-sessions
-  reason: "Serialization boundary — isinstance(str) guards against str being Sequence (infinite recursion)"
-  safety: "Only used in _to_json for JSON column serialization; no type masking"
-  expires: null
-
-- key: web/sessions/service.py:R5:SessionServiceImpl:save_composition_state:_to_json:fp=c3d0fde02b8705fe
-  owner: web-sessions
-  reason: "Serialization boundary — isinstance(Mapping) detects MappingProxyType from freeze_fields()"
-  safety: "Converts frozen Mapping back to dict for JSON serialization; no bug masking"
-  expires: null
-
-- key: web/sessions/service.py:R5:SessionServiceImpl:save_composition_state:_to_json:fp=0da8ca8137ef3e1e
-  owner: web-sessions
-  reason: "Serialization boundary — isinstance(Sequence) detects tuples from freeze_fields()"
-  safety: "Converts frozen tuple back to list for JSON serialization; no bug masking"
-  expires: null
-
 # SessionServiceImpl — _unwrap_envelope checks envelope structure (Tier 1 read boundary)
-- key: web/sessions/service.py:R5:SessionServiceImpl:_unwrap_envelope:fp=10f09cb713013d46
+- key: web/sessions/service.py:R5:SessionServiceImpl:_unwrap_envelope:fp=3072a4d8278ecb9d
   owner: web-sessions
   reason: "Tier 1 read boundary — validates JSON envelope structure before accessing _version key"
-  safety: "Crashes on unknown version; pass-through for legacy data; no silent coercion"
-  expires: null
-
-# SessionServiceImpl — LEGAL_RUN_TRANSITIONS.get() with explicit empty default
-- key: web/sessions/service.py:R1:SessionServiceImpl:update_run_status:fp=892ec6d55b1cf1cf
-  owner: web-sessions
-  reason: "Defensive lookup on constant transition table — unknown status produces empty set, rejected immediately"
-  safety: "frozenset() default means unknown statuses have no legal transitions; ValueError raised on next line"
+  safety: "Crashes on unknown version or missing envelope; no silent coercion"
   expires: null
 
 # App factory — @app.get() false positive (moved health route)
@@ -270,59 +244,40 @@ allow_hits:
   expires: null
 
 # Session routes — @router.get() false positives (FastAPI route decorators)
-- key: web/sessions/routes.py:R1:create_session_router:list_sessions:fp=72be4b34b1a7ad57
+- key: web/sessions/routes.py:R1:create_session_router:list_sessions:fp=566a63b023413715
   owner: web-sessions
   reason: "False positive — @router.get() is FastAPI HTTP route decorator, not dict.get()"
   safety: No dict access involved
   expires: null
 
-- key: web/sessions/routes.py:R1:create_session_router:get_session:fp=392cebbf005dd9e5
+- key: web/sessions/routes.py:R1:create_session_router:get_session:fp=06676354866805bb
   owner: web-sessions
   reason: "False positive — @router.get() is FastAPI HTTP route decorator, not dict.get()"
   safety: No dict access involved
   expires: null
 
-- key: web/sessions/routes.py:R1:create_session_router:get_messages:fp=27cf61028b780c9d
+- key: web/sessions/routes.py:R1:create_session_router:get_messages:fp=e4cd750dba8b0605
   owner: web-sessions
   reason: "False positive — @router.get() is FastAPI HTTP route decorator, not dict.get()"
   safety: No dict access involved
   expires: null
 
-- key: web/sessions/routes.py:R1:create_session_router:get_current_state:fp=5537fbc463c2b6fd
+- key: web/sessions/routes.py:R1:create_session_router:get_current_state:fp=cef5502322f77a56
   owner: web-sessions
   reason: "False positive — @router.get() is FastAPI HTTP route decorator, not dict.get()"
   safety: No dict access involved
   expires: null
 
-- key: web/sessions/routes.py:R1:create_session_router:get_state_versions:fp=c31bae9bdd6ae3f1
+- key: web/sessions/routes.py:R1:create_session_router:get_state_versions:fp=2488944a97b94499
   owner: web-sessions
   reason: "False positive — @router.get() is FastAPI HTTP route decorator, not dict.get()"
   safety: No dict access involved
   expires: null
 
-- key: web/sessions/routes.py:R1:create_session_router:get_state_yaml:fp=55e02f3a3ce2cfa0
+- key: web/sessions/routes.py:R1:create_session_router:get_state_yaml:fp=8c4e496653f21fcd
   owner: web-sessions
   reason: "False positive — @router.get() is FastAPI HTTP route decorator, not dict.get()"
   safety: No dict access involved
-  expires: null
-
-# Session routes — _unfreeze isinstance() calls (same pattern as service _to_json)
-- key: web/sessions/routes.py:R5:_unfreeze:fp=5105c665bb3aa105
-  owner: web-sessions
-  reason: "Serialization boundary — isinstance(str) guards against str being Sequence (infinite recursion)"
-  safety: "Only used in _unfreeze for Pydantic serialization; no type masking"
-  expires: null
-
-- key: web/sessions/routes.py:R5:_unfreeze:fp=a33a34fdbfb9185d
-  owner: web-sessions
-  reason: "Serialization boundary — isinstance(Mapping) detects MappingProxyType from freeze_fields()"
-  safety: "Converts frozen Mapping back to dict for Pydantic serialization; no bug masking"
-  expires: null
-
-- key: web/sessions/routes.py:R5:_unfreeze:fp=dfc55b0d5078ac74
-  owner: web-sessions
-  reason: "Serialization boundary — isinstance(Sequence) detects tuples from freeze_fields()"
-  safety: "Converts frozen tuple back to list for Pydantic serialization; no bug masking"
   expires: null
 
 # Auth middleware — Tier 3 HTTP header access (Authorization header from client)

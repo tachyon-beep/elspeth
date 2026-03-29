@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import io
 import uuid
 from pathlib import Path
@@ -14,6 +15,7 @@ from starlette.testclient import TestClient
 from elspeth.web.auth.middleware import get_current_user
 from elspeth.web.auth.models import UserIdentity
 from elspeth.web.sessions.models import metadata
+from elspeth.web.sessions.protocol import CompositionStateData
 from elspeth.web.sessions.routes import create_session_router
 from elspeth.web.sessions.service import SessionServiceImpl
 
@@ -300,27 +302,21 @@ class TestRevertEndpoint:
         client = TestClient(app)
 
         # Create session and two state versions via the service
-        import asyncio
-
-        loop = asyncio.new_event_loop()
-        session = loop.run_until_complete(
+        session = asyncio.run(
             service.create_session("alice", "Pipeline", "local"),
         )
-        from elspeth.web.sessions.protocol import CompositionStateData
-
-        v1 = loop.run_until_complete(
+        v1 = asyncio.run(
             service.save_composition_state(
                 session.id,
                 CompositionStateData(source={"type": "csv"}, is_valid=True),
             ),
         )
-        loop.run_until_complete(
+        asyncio.run(
             service.save_composition_state(
                 session.id,
                 CompositionStateData(source={"type": "api"}, is_valid=True),
             ),
         )
-        loop.close()
 
         # Revert to v1
         resp = client.post(
@@ -337,27 +333,21 @@ class TestRevertEndpoint:
         app, service = _make_app(tmp_path)
         client = TestClient(app)
 
-        import asyncio
-
-        loop = asyncio.new_event_loop()
-        session = loop.run_until_complete(
+        session = asyncio.run(
             service.create_session("alice", "Pipeline", "local"),
         )
-        from elspeth.web.sessions.protocol import CompositionStateData
-
-        v1 = loop.run_until_complete(
+        v1 = asyncio.run(
             service.save_composition_state(
                 session.id,
                 CompositionStateData(is_valid=True),
             ),
         )
-        loop.run_until_complete(
+        asyncio.run(
             service.save_composition_state(
                 session.id,
                 CompositionStateData(is_valid=True),
             ),
         )
-        loop.close()
 
         client.post(
             f"/api/sessions/{session.id}/state/revert",
@@ -402,21 +392,15 @@ class TestRevertEndpoint:
         bob_client = TestClient(bob_app)
 
         # Alice creates a session with a state
-        import asyncio
-
-        loop = asyncio.new_event_loop()
-        session = loop.run_until_complete(
+        session = asyncio.run(
             service.create_session("alice", "Alice Only", "local"),
         )
-        from elspeth.web.sessions.protocol import CompositionStateData
-
-        v1 = loop.run_until_complete(
+        v1 = asyncio.run(
             service.save_composition_state(
                 session.id,
                 CompositionStateData(is_valid=True),
             ),
         )
-        loop.close()
 
         # Bob tries to revert -- should be 404
         resp = bob_client.post(
@@ -430,24 +414,18 @@ class TestRevertEndpoint:
         app, service = _make_app(tmp_path)
         client = TestClient(app)
 
-        import asyncio
-
-        loop = asyncio.new_event_loop()
-        s1 = loop.run_until_complete(
+        s1 = asyncio.run(
             service.create_session("alice", "Session 1", "local"),
         )
-        s2 = loop.run_until_complete(
+        s2 = asyncio.run(
             service.create_session("alice", "Session 2", "local"),
         )
-        from elspeth.web.sessions.protocol import CompositionStateData
-
-        v1_s2 = loop.run_until_complete(
+        v1_s2 = asyncio.run(
             service.save_composition_state(
                 s2.id,
                 CompositionStateData(is_valid=True),
             ),
         )
-        loop.close()
 
         # Try to revert s1 using s2's state -- should fail
         resp = client.post(

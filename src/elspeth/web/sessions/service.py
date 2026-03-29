@@ -7,13 +7,14 @@ within a single transaction.
 from __future__ import annotations
 
 import uuid
-from collections.abc import Mapping, Sequence
-from datetime import UTC, datetime
+from collections.abc import Mapping
+from datetime import UTC, datetime, timedelta
 from typing import Any
 from uuid import UUID
 
 from sqlalchemy import Engine, delete, desc, func, insert, select, update
 
+from elspeth.contracts.freeze import deep_thaw
 from elspeth.web.sessions.models import (
     chat_messages_table,
     composition_states_table,
@@ -200,25 +201,11 @@ class SessionServiceImpl:
             ).scalar()
             version = (result or 0) + 1
 
-            # Unfreeze data for JSON serialization (MappingProxyType is not
-            # JSON-serializable). Recursively convert back to plain
-            # dicts/lists, handling deeply-frozen structures from
-            # freeze_fields().
-            def _to_json(val: Any) -> Any:
-                if val is None:
-                    return None
-                if isinstance(val, str):
-                    return val
-                if isinstance(val, Mapping):
-                    return {k: _to_json(v) for k, v in val.items()}
-                if isinstance(val, (list, tuple, Sequence)):
-                    return [_to_json(item) for item in val]
-                return val
-
             # Seam contract A: wrap JSON columns with _version envelope
-            # for schema evolution. Version 1 is the initial format.
+            # for schema evolution. deep_thaw() handles MappingProxyType→dict
+            # and tuple→list from freeze_fields().
             def _enveloped(val: Any) -> Any:
-                raw = _to_json(val)
+                raw = deep_thaw(val)
                 if raw is None:
                     return None
                 return {"_version": 1, "data": raw}
@@ -234,7 +221,7 @@ class SessionServiceImpl:
                     outputs=_enveloped(state.outputs),
                     metadata_=_enveloped(state.metadata_),
                     is_valid=state.is_valid,
-                    validation_errors=_to_json(state.validation_errors),
+                    validation_errors=deep_thaw(state.validation_errors),
                     derived_from_state_id=None,
                     created_at=now,
                 )
@@ -300,8 +287,10 @@ class SessionServiceImpl:
             if val["_version"] != 1:
                 raise ValueError(f"Unknown composition state envelope version: {val['_version']}")
             return val["data"]
-        # Legacy data without envelope -- pass through as-is
-        return val
+        raise ValueError(
+            f"Composition state column has no _version envelope: {val!r}. "
+            "This indicates a bug in the write path or database corruption."
+        )
 
     def _row_to_state_record(self, row: Any) -> CompositionStateRecord:
         """Convert a SQLAlchemy row to a CompositionStateRecord.
@@ -425,9 +414,9 @@ class SessionServiceImpl:
             if current is None:
                 raise ValueError(f"Run not found: {run_id}")
 
-            # D3: Enforce legal transitions
+            # D3: Enforce legal transitions — direct access; KeyError = Tier 1 crash
             current_status = current.status
-            allowed = LEGAL_RUN_TRANSITIONS.get(current_status, frozenset())
+            allowed = LEGAL_RUN_TRANSITIONS[current_status]
             if status not in allowed:
                 raise ValueError(f"Illegal run transition: {current_status!r} \u2192 {status!r}. Allowed: {sorted(allowed)}")
 
@@ -546,27 +535,25 @@ class SessionServiceImpl:
         session_id: UUID,
         max_age_seconds: int = 3600,
     ) -> list[RunRecord]:
-        """Force-cancel runs stuck in 'running' status beyond max_age_seconds.
+        """Force-cancel runs stuck in 'pending' or 'running' beyond max_age_seconds.
 
         Returns the list of cancelled RunRecords. Called by the execution
         service on startup and periodically to prevent orphaned runs from
-        permanently blocking sessions (D5).
+        permanently blocking sessions (D5). Includes 'pending' because a
+        crash between create_run() and the first update_run_status("running")
+        would leave a permanently unblockable session otherwise.
         """
         sid = str(session_id)
         now = self._now()
-        cutoff = datetime.fromtimestamp(
-            now.timestamp() - max_age_seconds,
-            tz=UTC,
-        )
+        cutoff = now - timedelta(seconds=max_age_seconds)
 
         cancelled: list[RunRecord] = []
 
         with self._engine.begin() as conn:
-            # Find running runs older than the cutoff
             stale_rows = conn.execute(
                 select(runs_table).where(
                     runs_table.c.session_id == sid,
-                    runs_table.c.status == "running",
+                    runs_table.c.status.in_(["pending", "running"]),
                     runs_table.c.started_at <= cutoff,
                 )
             ).fetchall()

@@ -6,13 +6,12 @@ Session-scoped endpoints verify ownership before any business logic.
 
 from __future__ import annotations
 
-from collections.abc import Mapping, Sequence
 from pathlib import Path
-from typing import Any
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, File, HTTPException, Request, UploadFile
 
+from elspeth.contracts.freeze import deep_thaw
 from elspeth.web.auth.middleware import get_current_user
 from elspeth.web.auth.models import UserIdentity
 from elspeth.web.sessions.protocol import CompositionStateRecord, SessionRecord
@@ -27,24 +26,6 @@ from elspeth.web.sessions.schemas import (
     UploadResponse,
 )
 from elspeth.web.sessions.service import SessionServiceImpl
-
-
-def _unfreeze(val: Any) -> Any:
-    """Convert frozen containers back to JSON-serializable types.
-
-    freeze_fields() produces MappingProxyType and tuples that Pydantic
-    cannot serialize. This recursively converts them back to plain
-    dicts and lists.
-    """
-    if val is None:
-        return None
-    if isinstance(val, str):
-        return val
-    if isinstance(val, Mapping):
-        return {k: _unfreeze(v) for k, v in val.items()}
-    if isinstance(val, (list, tuple, Sequence)):
-        return [_unfreeze(item) for item in val]
-    return val
 
 
 def _session_response(session: SessionRecord) -> SessionResponse:
@@ -68,13 +49,13 @@ def _state_response(state: CompositionStateRecord) -> CompositionStateResponse:
         id=str(state.id),
         session_id=str(state.session_id),
         version=state.version,
-        source=_unfreeze(state.source),
-        nodes=_unfreeze(state.nodes),
-        edges=_unfreeze(state.edges),
-        outputs=_unfreeze(state.outputs),
-        metadata=_unfreeze(state.metadata_),
+        source=deep_thaw(state.source),
+        nodes=deep_thaw(state.nodes),
+        edges=deep_thaw(state.edges),
+        outputs=deep_thaw(state.outputs),
+        metadata=deep_thaw(state.metadata_),
         is_valid=state.is_valid,
-        validation_errors=_unfreeze(state.validation_errors),
+        validation_errors=deep_thaw(state.validation_errors),
         created_at=state.created_at,
     )
 

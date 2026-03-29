@@ -55,11 +55,24 @@ class WebSettings(BaseModel):
     def _validate_auth_fields(self) -> WebSettings:
         """Enforce that OIDC/Entra providers have their required fields."""
         if self.auth_provider == "oidc":
-            missing = [f for f in ("oidc_issuer", "oidc_audience", "oidc_client_id") if getattr(self, f) is None]
+            missing = [
+                name for name, val in (
+                    ("oidc_issuer", self.oidc_issuer),
+                    ("oidc_audience", self.oidc_audience),
+                    ("oidc_client_id", self.oidc_client_id),
+                ) if val is None
+            ]
             if missing:
                 raise ValueError(f"OIDC auth requires: {', '.join(missing)}")
         elif self.auth_provider == "entra":
-            missing = [f for f in ("oidc_issuer", "oidc_audience", "oidc_client_id", "entra_tenant_id") if getattr(self, f) is None]
+            missing = [
+                name for name, val in (
+                    ("oidc_issuer", self.oidc_issuer),
+                    ("oidc_audience", self.oidc_audience),
+                    ("oidc_client_id", self.oidc_client_id),
+                    ("entra_tenant_id", self.entra_tenant_id),
+                ) if val is None
+            ]
             if missing:
                 raise ValueError(f"Entra auth requires: {', '.join(missing)}")
         return self
