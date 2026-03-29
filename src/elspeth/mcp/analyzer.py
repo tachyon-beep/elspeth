@@ -100,7 +100,12 @@ class LandscapeAnalyzer:
         row_id: str | None = None,
         sink: str | None = None,
     ) -> ExplainTokenResult | ErrorResult:
-        result = queries.explain_token(self._db, self._recorder, run_id, token_id=token_id, row_id=row_id, sink=sink)
+        if token_id is None and row_id is None:
+            return {"error": "Must provide either token_id or row_id"}
+        try:
+            result = queries.explain_token(self._db, self._recorder, run_id, token_id=token_id, row_id=row_id, sink=sink)
+        except ValueError as exc:
+            return {"error": str(exc)}
         if result is None:
             return {"error": "Token or row not found, or no terminal tokens exist yet"}
         return result  # type: ignore[return-value]

@@ -34,11 +34,13 @@ from elspeth.contracts import (
     RunStatus,
 )
 from elspeth.contracts.call_data import RawCallPayload
-from elspeth.contracts.errors import ExecutionError, TransformErrorReason
+from elspeth.contracts.errors import AuditIntegrityError, ExecutionError, TransformErrorReason
 from elspeth.core.landscape.lineage import explain
+from elspeth.core.landscape.schema import nodes_table
+from elspeth.mcp.analyzer import LandscapeAnalyzer
 from elspeth.mcp.analyzers.diagnostics import get_failure_context
 from elspeth.mcp.analyzers.queries import explain_token, list_runs
-from elspeth.mcp.analyzers.reports import get_run_summary
+from elspeth.mcp.analyzers.reports import get_error_analysis, get_run_summary
 from tests.fixtures.landscape import (
     make_recorder_with_run,
     register_test_node,
@@ -799,3 +801,173 @@ class TestListRuns:
 
         with pytest.raises(ValueError, match="Invalid status"):
             list_runs(setup.db, setup.recorder, status="bogus")
+
+
+# ===========================================================================
+# Tier 1 corruption guard tests
+# ===========================================================================
+
+
+def _delete_node(db: Any, run_id: str, node_id: str) -> None:
+    """Directly delete a node row to simulate Tier 1 audit corruption.
+
+    Disables FK enforcement temporarily — real corruption doesn't follow FK rules.
+    """
+    from sqlalchemy import text
+
+    with db.connection() as conn:
+        conn.execute(text("PRAGMA foreign_keys = OFF"))
+        conn.execute(nodes_table.delete().where((nodes_table.c.node_id == node_id) & (nodes_table.c.run_id == run_id)))
+        conn.execute(text("PRAGMA foreign_keys = ON"))
+
+
+class TestFailureContextCorruptionGuards:
+    """Tier 1 corruption guards in get_failure_context.
+
+    These tests simulate audit database corruption by deleting node rows
+    after creating valid pipeline data. The analyzer must raise
+    AuditIntegrityError instead of silently producing degraded reports.
+
+    Bugs: elspeth-2da5ab21dc, elspeth-b3556eb237
+    """
+
+    def test_missing_node_for_failed_state_raises(self) -> None:
+        """Failed node_state referencing a deleted node must raise, not silently drop."""
+        p = _build_linear_pipeline(run_id="corrupt-ns", fail_transform=True)
+        _delete_node(p["db"], "corrupt-ns", p["transform_node_id"])
+
+        with pytest.raises(AuditIntegrityError, match=r"Tier-1 corruption.*node_states"):
+            get_failure_context(p["db"], p["recorder"], "corrupt-ns")
+
+    def test_missing_node_for_transform_error_raises(self) -> None:
+        """Transform error referencing a deleted node must raise, not emit plugin=None."""
+        setup = make_recorder_with_run(run_id="corrupt-te", source_node_id="src")
+        db, recorder = setup.db, setup.recorder
+
+        register_test_node(recorder, "corrupt-te", "xform", node_type=NodeType.TRANSFORM, plugin_name="mapper")
+
+        row = recorder.create_row("corrupt-te", "src", row_index=0, data={"x": 1})
+        token = recorder.create_token(row.row_id)
+        error_reason: TransformErrorReason = {"reason": "test_error"}
+        recorder.record_transform_error("corrupt-te", token.token_id, "xform", {"x": 1}, error_reason, "quarantine")
+        recorder.record_token_outcome("corrupt-te", token.token_id, RowOutcome.QUARANTINED, error_hash="a" * 64)
+        recorder.complete_run("corrupt-te", RunStatus.FAILED)
+
+        _delete_node(db, "corrupt-te", "xform")
+
+        with pytest.raises(AuditIntegrityError, match=r"Tier-1 corruption.*transform_errors"):
+            get_failure_context(db, recorder, "corrupt-te")
+
+    def test_missing_node_for_validation_error_raises(self) -> None:
+        """Validation error with node_id but deleted node must raise."""
+        setup = make_recorder_with_run(run_id="corrupt-ve", source_node_id="src")
+        db, recorder = setup.db, setup.recorder
+
+        recorder.record_validation_error("corrupt-ve", "src", {"bad": "data"}, "missing field", "observed", "quarantine")
+        recorder.complete_run("corrupt-ve", RunStatus.COMPLETED)
+
+        _delete_node(db, "corrupt-ve", "src")
+
+        with pytest.raises(AuditIntegrityError, match=r"Tier-1 corruption.*validation_errors"):
+            get_failure_context(db, recorder, "corrupt-ve")
+
+    def test_clean_run_still_works(self) -> None:
+        """Corruption guards don't break normal operation."""
+        p = _build_linear_pipeline(run_id="clean-guard", fail_transform=True)
+        result = get_failure_context(p["db"], p["recorder"], "clean-guard")
+
+        assert "error" not in result
+        assert result["patterns"]["failure_count"] == 1
+        assert result["failed_node_states"][0]["plugin"] == "field_mapper"
+
+
+class TestErrorAnalysisCorruptionGuard:
+    """Tier 1 corruption guard in get_error_analysis.
+
+    Bug: elspeth-71f25623b2
+    """
+
+    def test_missing_node_for_transform_error_raises(self) -> None:
+        """Transform error grouped with plugin=None must raise, not emit None bucket."""
+        setup = make_recorder_with_run(run_id="corrupt-ea", source_node_id="src")
+        db, recorder = setup.db, setup.recorder
+
+        register_test_node(recorder, "corrupt-ea", "xform", node_type=NodeType.TRANSFORM, plugin_name="mapper")
+
+        row = recorder.create_row("corrupt-ea", "src", row_index=0, data={"x": 1})
+        token = recorder.create_token(row.row_id)
+        error_reason: TransformErrorReason = {"reason": "test_error"}
+        recorder.record_transform_error("corrupt-ea", token.token_id, "xform", {"x": 1}, error_reason, "quarantine")
+        recorder.record_token_outcome("corrupt-ea", token.token_id, RowOutcome.QUARANTINED, error_hash="a" * 64)
+        recorder.complete_run("corrupt-ea", RunStatus.FAILED)
+
+        _delete_node(db, "corrupt-ea", "xform")
+
+        with pytest.raises(AuditIntegrityError, match=r"Tier-1 corruption.*transform_errors"):
+            get_error_analysis(db, recorder, "corrupt-ea")
+
+    def test_clean_error_analysis_still_works(self) -> None:
+        """Corruption guard doesn't break normal error analysis."""
+        setup = make_recorder_with_run(run_id="clean-ea", source_node_id="src")
+        db, recorder = setup.db, setup.recorder
+
+        register_test_node(recorder, "clean-ea", "xform", node_type=NodeType.TRANSFORM, plugin_name="mapper")
+
+        row = recorder.create_row("clean-ea", "src", row_index=0, data={"x": 1})
+        token = recorder.create_token(row.row_id)
+        error_reason: TransformErrorReason = {"reason": "test_error"}
+        recorder.record_transform_error("clean-ea", token.token_id, "xform", {"x": 1}, error_reason, "quarantine")
+        recorder.record_token_outcome("clean-ea", token.token_id, RowOutcome.QUARANTINED, error_hash="a" * 64)
+        recorder.complete_run("clean-ea", RunStatus.FAILED)
+
+        result = get_error_analysis(db, recorder, "clean-ea")
+
+        assert "error" not in result
+        assert result["transform_errors"]["total"] == 1
+        assert result["transform_errors"]["by_transform"][0]["transform_plugin"] == "mapper"
+
+
+class TestExplainTokenErrorHandling:
+    """LandscapeAnalyzer.explain_token input validation and error handling.
+
+    Bug: elspeth-4e410d1fbf
+    """
+
+    def test_neither_token_nor_row_returns_error(self) -> None:
+        """explain_token returns ErrorResult when neither token_id nor row_id given."""
+        setup = make_recorder_with_run(run_id="et-err")
+        recorder = setup.recorder
+        recorder.complete_run("et-err", RunStatus.COMPLETED)
+
+        # Use the analyzer facade directly (not the underlying function)
+        analyzer = LandscapeAnalyzer.__new__(LandscapeAnalyzer)
+        analyzer._db = setup.db
+        analyzer._recorder = recorder
+
+        result = analyzer.explain_token("et-err")
+
+        assert "error" in result
+        assert "Must provide either token_id or row_id" in result["error"]
+
+    def test_ambiguous_row_returns_error(self) -> None:
+        """explain_token returns ErrorResult for row with multiple terminal tokens."""
+        setup = make_recorder_with_run(run_id="et-ambig", source_node_id="src")
+        db, recorder = setup.db, setup.recorder
+
+        register_test_node(recorder, "et-ambig", "sink-a", node_type=NodeType.SINK, plugin_name="sink_a")
+        register_test_node(recorder, "et-ambig", "sink-b", node_type=NodeType.SINK, plugin_name="sink_b")
+
+        row = recorder.create_row("et-ambig", "src", row_index=0, data={"x": 1})
+        token_a = recorder.create_token(row.row_id)
+        token_b = recorder.create_token(row.row_id)
+        recorder.record_token_outcome("et-ambig", token_a.token_id, RowOutcome.COMPLETED, sink_name="sink_a")
+        recorder.record_token_outcome("et-ambig", token_b.token_id, RowOutcome.COMPLETED, sink_name="sink_b")
+        recorder.complete_run("et-ambig", RunStatus.COMPLETED)
+
+        analyzer = LandscapeAnalyzer.__new__(LandscapeAnalyzer)
+        analyzer._db = db
+        analyzer._recorder = recorder
+
+        result = analyzer.explain_token("et-ambig", row_id=row.row_id)
+
+        assert "error" in result

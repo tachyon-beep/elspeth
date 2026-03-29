@@ -12,6 +12,7 @@ import json
 from typing import Any
 
 from elspeth.contracts.enums import CallStatus, NodeType, RoutingMode
+from elspeth.contracts.errors import AuditIntegrityError
 from elspeth.core.landscape.database import LandscapeDB
 from elspeth.core.landscape.recorder import LandscapeRecorder
 from elspeth.mcp.types import (
@@ -405,6 +406,17 @@ def get_error_analysis(db: LandscapeDB, recorder: LandscapeRecorder, run_id: str
         }
         for row in val_rows
     ]
+
+    # Corruption guard: transform_errors always reference a transform node.
+    # A None plugin_name bucket means the outerjoin found no matching node row.
+    for row in trans_rows:
+        if row.plugin_name is None:
+            msg = (
+                f"Tier-1 corruption: {row.count} transform_errors row(s) reference "
+                f"transform_id(s) with no matching node in nodes table "
+                f"for run_id={run_id!r}"
+            )
+            raise AuditIntegrityError(msg)
 
     transform_summary = [{"transform_plugin": row.plugin_name, "count": row.count} for row in trans_rows]
 

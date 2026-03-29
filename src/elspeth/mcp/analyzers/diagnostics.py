@@ -11,6 +11,7 @@ import json
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
+from elspeth.contracts.errors import AuditIntegrityError
 from elspeth.core.landscape.database import LandscapeDB
 from elspeth.core.landscape.recorder import LandscapeRecorder
 from elspeth.mcp.types import (
@@ -259,7 +260,7 @@ def get_failure_context(db: LandscapeDB, recorder: LandscapeRecorder, run_id: st
                 nodes_table.c.plugin_name,
                 nodes_table.c.node_type,
             )
-            .join(
+            .outerjoin(
                 nodes_table,
                 (node_states_table.c.node_id == nodes_table.c.node_id) & (node_states_table.c.run_id == nodes_table.c.run_id),
             )
@@ -304,6 +305,16 @@ def get_failure_context(db: LandscapeDB, recorder: LandscapeRecorder, run_id: st
             .limit(limit)
         ).fetchall()
 
+    # Corruption guard: failed node_states always reference a node — missing node is Tier 1 corruption
+    for s in failed_states:
+        if s.plugin_name is None:
+            msg = (
+                f"Tier-1 corruption: node_states row (state_id={s.state_id!r}) "
+                f"references node_id={s.node_id!r} but no matching node exists "
+                f"in nodes table for run_id={run_id!r}"
+            )
+            raise AuditIntegrityError(msg)
+
     failed_state_list = [
         {
             "state_id": s.state_id,
@@ -316,6 +327,16 @@ def get_failure_context(db: LandscapeDB, recorder: LandscapeRecorder, run_id: st
         }
         for s in failed_states
     ]
+
+    # Corruption guard: transform_errors always reference a transform node
+    for e in transform_errors:
+        if e.plugin_name is None:
+            msg = (
+                f"Tier-1 corruption: transform_errors row references "
+                f"transform_id={e.transform_id!r} but no matching node exists "
+                f"in nodes table for run_id={run_id!r}"
+            )
+            raise AuditIntegrityError(msg)
 
     transform_error_list = [
         {
@@ -334,7 +355,7 @@ def get_failure_context(db: LandscapeDB, recorder: LandscapeRecorder, run_id: st
                 f"Tier-1 corruption: validation_errors row has node_id={e.node_id!r} "
                 f"but no matching node in nodes table for run_id={run_id!r}"
             )
-            raise RuntimeError(msg)
+            raise AuditIntegrityError(msg)
         plugin = e.plugin_name  # None means no associated plugin node — don't fabricate "unknown"
         validation_error_list.append(
             {
