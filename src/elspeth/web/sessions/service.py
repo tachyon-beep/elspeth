@@ -15,6 +15,7 @@ from typing import Any
 from uuid import UUID
 
 from sqlalchemy import Engine, delete, desc, func, insert, select, update
+from sqlalchemy.exc import IntegrityError
 
 from elspeth.contracts.freeze import deep_thaw
 from elspeth.web.sessions.models import (
@@ -240,8 +241,19 @@ class SessionServiceImpl:
             return {"_version": 1, "data": raw}
 
         def _sync() -> int:
+            # Retry loop handles concurrent version increment (TOCTOU).
+            # The UniqueConstraint on (session_id, version) is the real guard.
+            for _attempt in range(3):
+                try:
+                    return _try_insert_state()
+                except IntegrityError as exc:
+                    if "uq_composition_state_version" in str(exc):
+                        continue
+                    raise
+            raise RuntimeError(f"Failed to allocate version for session {sid} after 3 attempts")
+
+        def _try_insert_state() -> int:
             with self._engine.begin() as conn:
-                # Get the current max version for this session
                 result = conn.execute(
                     select(func.max(composition_states_table.c.version)).where(composition_states_table.c.session_id == sid)
                 ).scalar()
@@ -372,9 +384,10 @@ class SessionServiceImpl:
     ) -> RunRecord:
         """Create a new pending run, enforcing one active run per session (B6).
 
-        The check-and-set runs within the same database transaction.
+        Enforced by partial unique index uq_runs_one_active_per_session
+        (at most one row with status IN ('pending','running') per session_id).
+        The SELECT is an early-out optimization; the index is the real guard.
         Raises RunAlreadyActiveError if a pending or running run exists.
-        If pipeline_yaml is provided, stores the generated YAML at creation time.
         """
         run_id = uuid.uuid4()
         now = self._now()
@@ -382,7 +395,7 @@ class SessionServiceImpl:
 
         def _sync() -> None:
             with self._engine.begin() as conn:
-                # Check for existing active runs
+                # Early-out: check before INSERT to give a clear error message
                 active = conn.execute(
                     select(runs_table.c.id).where(
                         runs_table.c.session_id == sid,
@@ -393,18 +406,23 @@ class SessionServiceImpl:
                 if active is not None:
                     raise RunAlreadyActiveError(sid)
 
-                conn.execute(
-                    insert(runs_table).values(
-                        id=str(run_id),
-                        session_id=sid,
-                        state_id=str(state_id),
-                        status="pending",
-                        started_at=now,
-                        rows_processed=0,
-                        rows_failed=0,
-                        pipeline_yaml=pipeline_yaml,
+                try:
+                    conn.execute(
+                        insert(runs_table).values(
+                            id=str(run_id),
+                            session_id=sid,
+                            state_id=str(state_id),
+                            status="pending",
+                            started_at=now,
+                            rows_processed=0,
+                            rows_failed=0,
+                            pipeline_yaml=pipeline_yaml,
+                        )
                     )
-                )
+                except IntegrityError as exc:
+                    if "uq_runs_one_active_per_session" in str(exc):
+                        raise RunAlreadyActiveError(sid) from exc
+                    raise
 
         await self._run_sync(_sync)
 
@@ -548,8 +566,19 @@ class SessionServiceImpl:
         now = self._now()
 
         def _sync() -> tuple[Any, int]:
+            # Retry loop handles concurrent version increment (TOCTOU).
+            # The UniqueConstraint on (session_id, version) is the real guard.
+            for _attempt in range(3):
+                try:
+                    return _try_insert_revert()
+                except IntegrityError as exc:
+                    if "uq_composition_state_version" in str(exc):
+                        continue
+                    raise
+            raise RuntimeError(f"Failed to allocate version for session {sid} after 3 attempts")
+
+        def _try_insert_revert() -> tuple[Any, int]:
             with self._engine.begin() as conn:
-                # Look up the prior state
                 prior_row = conn.execute(select(composition_states_table).where(composition_states_table.c.id == str(state_id))).fetchone()
 
                 if prior_row is None:
@@ -557,7 +586,6 @@ class SessionServiceImpl:
                 if prior_row.session_id != sid:
                     raise ValueError(f"State {state_id} does not belong to session {session_id}")
 
-                # Get next version number
                 max_version = conn.execute(
                     select(func.max(composition_states_table.c.version)).where(composition_states_table.c.session_id == sid)
                 ).scalar()
@@ -568,6 +596,7 @@ class SessionServiceImpl:
                         id=str(new_state_id),
                         session_id=sid,
                         version=new_version,
+                        # prior_row.* values are already enveloped — copy as-is
                         source=prior_row.source,
                         nodes=prior_row.nodes,
                         edges=prior_row.edges,

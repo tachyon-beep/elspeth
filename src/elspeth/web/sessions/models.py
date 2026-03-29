@@ -15,6 +15,7 @@ from sqlalchemy import (
     Column,
     DateTime,
     ForeignKey,
+    Index,
     Integer,
     MetaData,
     String,
@@ -116,6 +117,16 @@ runs_table = Table(
         "status IN ('pending', 'running', 'completed', 'failed', 'cancelled')",
         name="ck_runs_status",
     ),
+)
+
+# Partial unique index: at most one active (pending/running) run per session.
+# Enforces the one-active-run invariant at the database level, eliminating
+# the TOCTOU race in the service-level check-and-insert.
+Index(
+    "uq_runs_one_active_per_session",
+    runs_table.c.session_id,
+    unique=True,
+    sqlite_where=runs_table.c.status.in_(["pending", "running"]),
 )
 
 run_events_table = Table(
