@@ -1,10 +1,4 @@
 allow_hits:
-- key: web/app.py:R1:create_app:health:fp=09d5b0878cd851c8
-  owner: architecture
-  reason: "False positive — @app.get() is FastAPI HTTP route decorator, not dict.get()"
-  safety: No dict access involved; decorator syntax triggers text-based pattern match
-  expires: null
-
 # Catalog routes — @router.get() false positives (FastAPI route decorators, not dict.get)
 - key: web/catalog/routes.py:R1:list_sources:fp=ccdc6bb55bdef578
   owner: web-catalog
@@ -260,6 +254,75 @@ allow_hits:
   owner: web-sessions
   reason: "Defensive lookup on constant transition table — unknown status produces empty set, rejected immediately"
   safety: "frozenset() default means unknown statuses have no legal transitions; ValueError raised on next line"
+  expires: null
+
+# App factory — @app.get() false positive (moved health route)
+- key: web/app.py:R1:create_app:fp=1fc678e07ca95b6c
+  owner: web-app
+  reason: "False positive — list comprehension/return triggers text-based pattern match"
+  safety: No dict access involved
+  expires: null
+
+- key: web/app.py:R1:create_app:health:fp=4c8b1ed957dd54b3
+  owner: web-app
+  reason: "False positive — @app.get() is FastAPI HTTP route decorator, not dict.get()"
+  safety: No dict access involved
+  expires: null
+
+# Session routes — @router.get() false positives (FastAPI route decorators)
+- key: web/sessions/routes.py:R1:create_session_router:list_sessions:fp=72be4b34b1a7ad57
+  owner: web-sessions
+  reason: "False positive — @router.get() is FastAPI HTTP route decorator, not dict.get()"
+  safety: No dict access involved
+  expires: null
+
+- key: web/sessions/routes.py:R1:create_session_router:get_session:fp=392cebbf005dd9e5
+  owner: web-sessions
+  reason: "False positive — @router.get() is FastAPI HTTP route decorator, not dict.get()"
+  safety: No dict access involved
+  expires: null
+
+- key: web/sessions/routes.py:R1:create_session_router:get_messages:fp=27cf61028b780c9d
+  owner: web-sessions
+  reason: "False positive — @router.get() is FastAPI HTTP route decorator, not dict.get()"
+  safety: No dict access involved
+  expires: null
+
+- key: web/sessions/routes.py:R1:create_session_router:get_current_state:fp=5537fbc463c2b6fd
+  owner: web-sessions
+  reason: "False positive — @router.get() is FastAPI HTTP route decorator, not dict.get()"
+  safety: No dict access involved
+  expires: null
+
+- key: web/sessions/routes.py:R1:create_session_router:get_state_versions:fp=c31bae9bdd6ae3f1
+  owner: web-sessions
+  reason: "False positive — @router.get() is FastAPI HTTP route decorator, not dict.get()"
+  safety: No dict access involved
+  expires: null
+
+- key: web/sessions/routes.py:R1:create_session_router:get_state_yaml:fp=55e02f3a3ce2cfa0
+  owner: web-sessions
+  reason: "False positive — @router.get() is FastAPI HTTP route decorator, not dict.get()"
+  safety: No dict access involved
+  expires: null
+
+# Session routes — _unfreeze isinstance() calls (same pattern as service _to_json)
+- key: web/sessions/routes.py:R5:_unfreeze:fp=5105c665bb3aa105
+  owner: web-sessions
+  reason: "Serialization boundary — isinstance(str) guards against str being Sequence (infinite recursion)"
+  safety: "Only used in _unfreeze for Pydantic serialization; no type masking"
+  expires: null
+
+- key: web/sessions/routes.py:R5:_unfreeze:fp=a33a34fdbfb9185d
+  owner: web-sessions
+  reason: "Serialization boundary — isinstance(Mapping) detects MappingProxyType from freeze_fields()"
+  safety: "Converts frozen Mapping back to dict for Pydantic serialization; no bug masking"
+  expires: null
+
+- key: web/sessions/routes.py:R5:_unfreeze:fp=dfc55b0d5078ac74
+  owner: web-sessions
+  reason: "Serialization boundary — isinstance(Sequence) detects tuples from freeze_fields()"
+  safety: "Converts frozen tuple back to list for Pydantic serialization; no bug masking"
   expires: null
 
 # Auth middleware — Tier 3 HTTP header access (Authorization header from client)

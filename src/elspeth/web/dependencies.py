@@ -31,6 +31,16 @@ def get_settings(request: Request) -> WebSettings:
     return settings
 
 
+def get_session_service(request: Request) -> object:
+    """Get the SessionService from app state."""
+    return request.app.state.session_service
+
+
+def get_auth_provider(request: Request) -> object:
+    """Get the AuthProvider from app state."""
+    return request.app.state.auth_provider
+
+
 def create_catalog_service() -> CatalogServiceImpl:
     """Create CatalogService backed by the shared PluginManager singleton.
 

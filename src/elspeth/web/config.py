@@ -52,6 +52,19 @@ class WebSettings(BaseModel):
     session_db_url: str | None = None
 
     @model_validator(mode="after")
+    def _validate_auth_fields(self) -> WebSettings:
+        """Enforce that OIDC/Entra providers have their required fields."""
+        if self.auth_provider == "oidc":
+            missing = [f for f in ("oidc_issuer", "oidc_audience", "oidc_client_id") if getattr(self, f) is None]
+            if missing:
+                raise ValueError(f"OIDC auth requires: {', '.join(missing)}")
+        elif self.auth_provider == "entra":
+            missing = [f for f in ("oidc_issuer", "oidc_audience", "oidc_client_id", "entra_tenant_id") if getattr(self, f) is None]
+            if missing:
+                raise ValueError(f"Entra auth requires: {', '.join(missing)}")
+        return self
+
+    @model_validator(mode="after")
     def _enforce_secret_key_in_production(self) -> WebSettings:
         """Reject the default secret key when host suggests non-local deployment."""
         if self.secret_key == "change-me-in-production" and self.host not in _LOCAL_HOSTS:
