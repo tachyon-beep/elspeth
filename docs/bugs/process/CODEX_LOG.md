@@ -236,3 +236,273 @@
 | 2026-02-13T23:04:19+00:00 | failed | src/elspeth/tui/widgets/__init__.py | docs/bugs/generated/tui/widgets/__init__.py.md |  | 9.43 | codex exec failed for src/elspeth/tui/widgets/__init__.py with code 1\nstderr: OpenAI Codex v0.101.0 (research preview)\n--------\nworkdir: /home/john/elspeth-rapid\nmodel: gpt-5.3-codex\nprovider: openai\n |
 | 2026-02-13T23:04:19+00:00 | failed | src/elspeth/tui/widgets/lineage_tree.py | docs/bugs/generated/tui/widgets/lineage_tree.py.md |  | 9.48 | codex exec failed for src/elspeth/tui/widgets/lineage_tree.py with code 1\nstderr: OpenAI Codex v0.101.0 (research preview)\n--------\nworkdir: /home/john/elspeth-rapid\nmodel: gpt-5.3-codex\nprovider: ope |
 | 2026-02-13T23:04:19+00:00 | failed | src/elspeth/tui/widgets/node_detail.py | docs/bugs/generated/tui/widgets/node_detail.py.md |  | 9.49 | codex exec failed for src/elspeth/tui/widgets/node_detail.py with code 1\nstderr: OpenAI Codex v0.101.0 (research preview)\n--------\nworkdir: /home/john/elspeth-rapid\nmodel: gpt-5.3-codex\nprovider: open |
+| 2026-03-29T02:16:41+00:00 | ok | src/elspeth/__init__.py | docs/bugs/generated/__init__.py.md |  | 81.88 |  |
+| 2026-03-29T02:17:07+00:00 | ok | src/elspeth/contracts/checkpoint.py | docs/bugs/generated/contracts/checkpoint.py.md |  | 107.74 |  |
+| 2026-03-29T02:17:21+00:00 | ok | src/elspeth/contracts/audit.py | docs/bugs/generated/contracts/audit.py.md |  | 121.02 |  |
+| 2026-03-29T02:17:21+00:00 | ok | src/elspeth/contracts/__init__.py | docs/bugs/generated/contracts/__init__.py.md |  | 121.80 |  |
+| 2026-03-29T02:17:25+00:00 | ok | src/elspeth/cli_formatters.py | docs/bugs/generated/cli_formatters.py.md |  | 125.89 |  |
+| 2026-03-29T02:17:27+00:00 | ok | src/elspeth/contracts/batch_checkpoint.py | docs/bugs/generated/contracts/batch_checkpoint.py.md |  | 127.44 |  |
+| 2026-03-29T02:17:43+00:00 | ok | src/elspeth/contracts/call_data.py | docs/bugs/generated/contracts/call_data.py.md |  | 143.01 |  |
+| 2026-03-29T02:18:19+00:00 | ok | src/elspeth/cli.py | docs/bugs/generated/cli.py.md |  | 179.98 |  |
+| 2026-03-29T02:18:42+00:00 | ok | src/elspeth/contracts/aggregation_checkpoint.py | docs/bugs/generated/contracts/aggregation_checkpoint.py.md |  | 202.33 |  |
+| 2026-03-29T02:18:51+00:00 | ok | src/elspeth/cli_helpers.py | docs/bugs/generated/cli_helpers.py.md |  | 211.64 |  |
+| 2026-03-29T02:20:01+00:00 | ok | src/elspeth/contracts/coalesce_enums.py | docs/bugs/generated/contracts/coalesce_enums.py.md |  | 70.01 |  |
+| 2026-03-29T02:20:15+00:00 | ok | src/elspeth/contracts/config/defaults.py | docs/bugs/generated/contracts/config/defaults.py.md |  | 83.96 |  |
+| 2026-03-29T02:20:24+00:00 | ok | src/elspeth/contracts/config/protocols.py | docs/bugs/generated/contracts/config/protocols.py.md |  | 93.00 |  |
+| 2026-03-29T02:20:27+00:00 | ok | src/elspeth/contracts/config/alignment.py | docs/bugs/generated/contracts/config/alignment.py.md |  | 95.42 |  |
+| 2026-03-29T02:20:29+00:00 | ok | src/elspeth/contracts/config/__init__.py | docs/bugs/generated/contracts/config/__init__.py.md |  | 97.96 |  |
+| 2026-03-29T02:20:51+00:00 | ok | src/elspeth/contracts/cli.py | docs/bugs/generated/contracts/cli.py.md |  | 119.97 |  |
+| 2026-03-29T02:20:51+00:00 | ok | src/elspeth/contracts/contexts.py | docs/bugs/generated/contracts/contexts.py.md |  | 120.32 |  |
+| 2026-03-29T02:21:11+00:00 | ok | src/elspeth/contracts/coalesce_metadata.py | docs/bugs/generated/contracts/coalesce_metadata.py.md |  | 139.45 |  |
+| 2026-03-29T02:21:32+00:00 | ok | src/elspeth/contracts/coalesce_checkpoint.py | docs/bugs/generated/contracts/coalesce_checkpoint.py.md |  | 160.69 |  |
+| 2026-03-29T02:21:56+00:00 | ok | src/elspeth/contracts/config/runtime.py | docs/bugs/generated/contracts/config/runtime.py.md |  | 184.96 |  |
+| 2026-03-29T02:23:40+00:00 | ok | src/elspeth/contracts/contract_builder.py | docs/bugs/generated/contracts/contract_builder.py.md |  | 103.52 |  |
+| 2026-03-29T02:23:45+00:00 | ok | src/elspeth/contracts/enums.py | docs/bugs/generated/contracts/enums.py.md |  | 109.10 |  |
+| 2026-03-29T02:23:56+00:00 | ok | src/elspeth/contracts/diversion.py | docs/bugs/generated/contracts/diversion.py.md |  | 119.97 |  |
+| 2026-03-29T02:24:42+00:00 | ok | src/elspeth/contracts/contract_records.py | docs/bugs/generated/contracts/contract_records.py.md |  | 165.49 |  |
+| 2026-03-29T02:24:56+00:00 | ok | src/elspeth/contracts/export_records.py | docs/bugs/generated/contracts/export_records.py.md |  | 179.94 |  |
+| 2026-03-29T02:25:07+00:00 | ok | src/elspeth/contracts/events.py | docs/bugs/generated/contracts/events.py.md |  | 190.27 |  |
+| 2026-03-29T02:25:11+00:00 | ok | src/elspeth/contracts/errors.py | docs/bugs/generated/contracts/errors.py.md |  | 194.81 |  |
+| 2026-03-29T02:25:24+00:00 | ok | src/elspeth/contracts/data.py | docs/bugs/generated/contracts/data.py.md |  | 207.88 |  |
+| 2026-03-29T02:25:35+00:00 | ok | src/elspeth/contracts/engine.py | docs/bugs/generated/contracts/engine.py.md |  | 218.90 |  |
+| 2026-03-29T02:26:13+00:00 | ok | src/elspeth/contracts/contract_propagation.py | docs/bugs/generated/contracts/contract_propagation.py.md |  | 257.33 |  |
+| 2026-03-29T02:27:12+00:00 | ok | src/elspeth/contracts/pipeline_runner.py | docs/bugs/generated/contracts/pipeline_runner.py.md |  | 58.58 |  |
+| 2026-03-29T02:27:49+00:00 | ok | src/elspeth/contracts/freeze.py | docs/bugs/generated/contracts/freeze.py.md |  | 95.19 |  |
+| 2026-03-29T02:28:20+00:00 | ok | src/elspeth/contracts/header_modes.py | docs/bugs/generated/contracts/header_modes.py.md |  | 126.26 |  |
+| 2026-03-29T02:28:26+00:00 | ok | src/elspeth/contracts/node_state_context.py | docs/bugs/generated/contracts/node_state_context.py.md |  | 132.68 |  |
+| 2026-03-29T02:28:27+00:00 | ok | src/elspeth/contracts/identity.py | docs/bugs/generated/contracts/identity.py.md |  | 133.54 |  |
+| 2026-03-29T02:28:42+00:00 | ok | src/elspeth/contracts/probes.py | docs/bugs/generated/contracts/probes.py.md |  | 148.75 |  |
+| 2026-03-29T02:28:48+00:00 | ok | src/elspeth/contracts/plugin_protocols.py | docs/bugs/generated/contracts/plugin_protocols.py.md |  | 154.90 |  |
+| 2026-03-29T02:28:57+00:00 | ok | src/elspeth/contracts/hashing.py | docs/bugs/generated/contracts/hashing.py.md |  | 163.07 |  |
+| 2026-03-29T02:29:04+00:00 | ok | src/elspeth/contracts/payload_store.py | docs/bugs/generated/contracts/payload_store.py.md |  | 170.30 |  |
+| 2026-03-29T02:29:55+00:00 | ok | src/elspeth/contracts/plugin_context.py | docs/bugs/generated/contracts/plugin_context.py.md |  | 221.20 |  |
+| 2026-03-29T02:31:26+00:00 | ok | src/elspeth/contracts/security.py | docs/bugs/generated/contracts/security.py.md |  | 91.06 |  |
+| 2026-03-29T02:31:49+00:00 | ok | src/elspeth/contracts/run_result.py | docs/bugs/generated/contracts/run_result.py.md |  | 114.14 |  |
+| 2026-03-29T02:31:50+00:00 | ok | src/elspeth/contracts/schema_contract_factory.py | docs/bugs/generated/contracts/schema_contract_factory.py.md |  | 115.55 |  |
+| 2026-03-29T02:32:21+00:00 | ok | src/elspeth/contracts/transform_contract.py | docs/bugs/generated/contracts/transform_contract.py.md |  | 145.88 | evidence_gate=1 |
+| 2026-03-29T02:32:23+00:00 | ok | src/elspeth/contracts/sink.py | docs/bugs/generated/contracts/sink.py.md |  | 147.61 |  |
+| 2026-03-29T02:32:42+00:00 | ok | src/elspeth/contracts/token_usage.py | docs/bugs/generated/contracts/token_usage.py.md |  | 167.12 |  |
+| 2026-03-29T02:32:52+00:00 | ok | src/elspeth/contracts/schema.py | docs/bugs/generated/contracts/schema.py.md |  | 176.73 |  |
+| 2026-03-29T02:33:02+00:00 | ok | src/elspeth/contracts/schema_contract.py | docs/bugs/generated/contracts/schema_contract.py.md |  | 187.58 |  |
+| 2026-03-29T02:33:06+00:00 | ok | src/elspeth/contracts/routing.py | docs/bugs/generated/contracts/routing.py.md |  | 190.81 |  |
+| 2026-03-29T02:33:15+00:00 | ok | src/elspeth/contracts/results.py | docs/bugs/generated/contracts/results.py.md |  | 200.26 |  |
+| 2026-03-29T02:34:48+00:00 | ok | src/elspeth/core/__init__.py | docs/bugs/generated/core/__init__.py.md |  | 92.96 |  |
+| 2026-03-29T02:34:48+00:00 | ok | src/elspeth/contracts/types.py | docs/bugs/generated/contracts/types.py.md |  | 93.32 |  |
+| 2026-03-29T02:34:52+00:00 | ok | src/elspeth/core/checkpoint/__init__.py | docs/bugs/generated/core/checkpoint/__init__.py.md |  | 97.22 |  |
+| 2026-03-29T02:35:27+00:00 | ok | src/elspeth/contracts/url.py | docs/bugs/generated/contracts/url.py.md |  | 131.47 |  |
+| 2026-03-29T02:35:56+00:00 | ok | src/elspeth/core/checkpoint/compatibility.py | docs/bugs/generated/core/checkpoint/compatibility.py.md |  | 161.21 |  |
+| 2026-03-29T02:36:08+00:00 | ok | src/elspeth/core/checkpoint/recovery.py | docs/bugs/generated/core/checkpoint/recovery.py.md |  | 173.34 |  |
+| 2026-03-29T02:36:14+00:00 | ok | src/elspeth/core/checkpoint/manager.py | docs/bugs/generated/core/checkpoint/manager.py.md |  | 178.50 |  |
+| 2026-03-29T02:36:19+00:00 | ok | src/elspeth/core/checkpoint/serialization.py | docs/bugs/generated/core/checkpoint/serialization.py.md |  | 184.35 |  |
+| 2026-03-29T02:36:20+00:00 | ok | src/elspeth/contracts/type_normalization.py | docs/bugs/generated/contracts/type_normalization.py.md |  | 184.86 |  |
+| 2026-03-29T02:37:59+00:00 | ok | src/elspeth/core/canonical.py | docs/bugs/generated/core/canonical.py.md |  | 283.65 |  |
+| 2026-03-29T02:39:22+00:00 | ok | src/elspeth/core/dag/__init__.py | docs/bugs/generated/core/dag/__init__.py.md |  | 83.02 |  |
+| 2026-03-29T02:39:50+00:00 | ok | src/elspeth/core/events.py | docs/bugs/generated/core/events.py.md |  | 111.46 |  |
+| 2026-03-29T02:39:58+00:00 | ok | src/elspeth/core/identifiers.py | docs/bugs/generated/core/identifiers.py.md |  | 119.61 |  |
+| 2026-03-29T02:40:09+00:00 | ok | src/elspeth/core/landscape/__init__.py | docs/bugs/generated/core/landscape/__init__.py.md |  | 129.69 |  |
+| 2026-03-29T02:40:37+00:00 | ok | src/elspeth/core/expression_parser.py | docs/bugs/generated/core/expression_parser.py.md |  | 157.95 |  |
+| 2026-03-29T02:40:41+00:00 | ok | src/elspeth/core/dag/models.py | docs/bugs/generated/core/dag/models.py.md |  | 162.13 |  |
+| 2026-03-29T02:41:20+00:00 | ok | src/elspeth/core/config.py | docs/bugs/generated/core/config.py.md |  | 201.73 |  |
+| 2026-03-29T02:41:24+00:00 | ok | src/elspeth/core/dependency_config.py | docs/bugs/generated/core/dependency_config.py.md |  | 205.49 |  |
+| 2026-03-29T02:42:19+00:00 | ok | src/elspeth/core/dag/graph.py | docs/bugs/generated/core/dag/graph.py.md |  | 260.62 |  |
+| 2026-03-29T02:42:23+00:00 | ok | src/elspeth/core/dag/builder.py | docs/bugs/generated/core/dag/builder.py.md |  | 264.14 |  |
+| 2026-03-29T02:43:23+00:00 | ok | src/elspeth/core/landscape/_helpers.py | docs/bugs/generated/core/landscape/_helpers.py.md |  | 60.29 |  |
+| 2026-03-29T02:44:25+00:00 | ok | src/elspeth/core/landscape/_database_ops.py | docs/bugs/generated/core/landscape/_database_ops.py.md |  | 122.21 |  |
+| 2026-03-29T02:44:59+00:00 | ok | src/elspeth/core/landscape/lineage.py | docs/bugs/generated/core/landscape/lineage.py.md |  | 155.84 |  |
+| 2026-03-29T02:45:14+00:00 | ok | src/elspeth/core/landscape/data_flow_repository.py | docs/bugs/generated/core/landscape/data_flow_repository.py.md |  | 170.99 |  |
+| 2026-03-29T02:45:17+00:00 | ok | src/elspeth/core/landscape/database.py | docs/bugs/generated/core/landscape/database.py.md |  | 173.91 |  |
+| 2026-03-29T02:45:29+00:00 | ok | src/elspeth/core/landscape/model_loaders.py | docs/bugs/generated/core/landscape/model_loaders.py.md |  | 186.37 |  |
+| 2026-03-29T02:45:31+00:00 | ok | src/elspeth/core/landscape/exporter.py | docs/bugs/generated/core/landscape/exporter.py.md |  | 187.59 |  |
+| 2026-03-29T02:45:36+00:00 | ok | src/elspeth/core/landscape/formatters.py | docs/bugs/generated/core/landscape/formatters.py.md |  | 193.20 |  |
+| 2026-03-29T02:45:43+00:00 | ok | src/elspeth/core/landscape/journal.py | docs/bugs/generated/core/landscape/journal.py.md |  | 199.62 |  |
+| 2026-03-29T02:46:47+00:00 | ok | src/elspeth/core/landscape/execution_repository.py | docs/bugs/generated/core/landscape/execution_repository.py.md |  | 264.10 |  |
+| 2026-03-29T02:47:50+00:00 | ok | src/elspeth/core/rate_limit/__init__.py | docs/bugs/generated/core/rate_limit/__init__.py.md |  | 63.14 |  |
+| 2026-03-29T02:48:16+00:00 | ok | src/elspeth/core/logging.py | docs/bugs/generated/core/logging.py.md |  | 88.84 |  |
+| 2026-03-29T02:48:41+00:00 | ok | src/elspeth/core/landscape/run_lifecycle_repository.py | docs/bugs/generated/core/landscape/run_lifecycle_repository.py.md |  | 114.06 |  |
+| 2026-03-29T02:48:47+00:00 | ok | src/elspeth/core/landscape/row_data.py | docs/bugs/generated/core/landscape/row_data.py.md |  | 119.87 |  |
+| 2026-03-29T02:49:05+00:00 | ok | src/elspeth/core/landscape/recorder.py | docs/bugs/generated/core/landscape/recorder.py.md |  | 138.17 |  |
+| 2026-03-29T02:49:13+00:00 | ok | src/elspeth/core/payload_store.py | docs/bugs/generated/core/payload_store.py.md |  | 146.13 |  |
+| 2026-03-29T02:49:22+00:00 | ok | src/elspeth/core/landscape/schema.py | docs/bugs/generated/core/landscape/schema.py.md |  | 154.43 |  |
+| 2026-03-29T02:49:26+00:00 | ok | src/elspeth/core/operations.py | docs/bugs/generated/core/operations.py.md |  | 158.43 |  |
+| 2026-03-29T02:49:55+00:00 | ok | src/elspeth/core/landscape/query_repository.py | docs/bugs/generated/core/landscape/query_repository.py.md |  | 188.16 |  |
+| 2026-03-29T02:50:17+00:00 | ok | src/elspeth/core/landscape/reproducibility.py | docs/bugs/generated/core/landscape/reproducibility.py.md |  | 210.01 |  |
+| 2026-03-29T02:51:25+00:00 | ok | src/elspeth/core/retention/__init__.py | docs/bugs/generated/core/retention/__init__.py.md |  | 68.31 |  |
+| 2026-03-29T02:51:27+00:00 | ok | src/elspeth/core/security/__init__.py | docs/bugs/generated/core/security/__init__.py.md |  | 70.03 |  |
+| 2026-03-29T02:51:49+00:00 | ok | src/elspeth/core/retention/purge.py | docs/bugs/generated/core/retention/purge.py.md |  | 91.42 |  |
+| 2026-03-29T02:52:12+00:00 | ok | src/elspeth/core/security/web.py | docs/bugs/generated/core/security/web.py.md |  | 114.49 |  |
+| 2026-03-29T02:52:12+00:00 | ok | src/elspeth/engine/__init__.py | docs/bugs/generated/engine/__init__.py.md |  | 115.13 |  |
+| 2026-03-29T02:52:40+00:00 | ok | src/elspeth/core/security/config_secrets.py | docs/bugs/generated/core/security/config_secrets.py.md |  | 142.79 |  |
+| 2026-03-29T02:52:57+00:00 | ok | src/elspeth/core/security/secret_loader.py | docs/bugs/generated/core/security/secret_loader.py.md |  | 159.76 |  |
+| 2026-03-29T02:52:59+00:00 | ok | src/elspeth/core/rate_limit/limiter.py | docs/bugs/generated/core/rate_limit/limiter.py.md |  | 162.20 |  |
+| 2026-03-29T02:53:01+00:00 | ok | src/elspeth/core/rate_limit/registry.py | docs/bugs/generated/core/rate_limit/registry.py.md |  | 164.29 |  |
+| 2026-03-29T02:53:41+00:00 | ok | src/elspeth/core/templates.py | docs/bugs/generated/core/templates.py.md |  | 203.58 |  |
+| 2026-03-29T02:54:31+00:00 | ok | src/elspeth/engine/executors/__init__.py | docs/bugs/generated/engine/executors/__init__.py.md |  | 50.14 |  |
+| 2026-03-29T02:55:18+00:00 | ok | src/elspeth/engine/clock.py | docs/bugs/generated/engine/clock.py.md |  | 97.19 |  |
+| 2026-03-29T02:55:34+00:00 | ok | src/elspeth/engine/batch_adapter.py | docs/bugs/generated/engine/batch_adapter.py.md |  | 113.39 |  |
+| 2026-03-29T02:56:02+00:00 | ok | src/elspeth/engine/dependency_resolver.py | docs/bugs/generated/engine/dependency_resolver.py.md |  | 141.64 |  |
+| 2026-03-29T02:56:03+00:00 | ok | src/elspeth/engine/commencement.py | docs/bugs/generated/engine/commencement.py.md |  | 141.80 |  |
+| 2026-03-29T02:56:34+00:00 | ok | src/elspeth/engine/bootstrap.py | docs/bugs/generated/engine/bootstrap.py.md |  | 173.21 |  |
+| 2026-03-29T02:56:36+00:00 | ok | src/elspeth/engine/coalesce_executor.py | docs/bugs/generated/engine/coalesce_executor.py.md |  | 175.66 |  |
+| 2026-03-29T02:57:25+00:00 | ok | src/elspeth/engine/executors/aggregation.py | docs/bugs/generated/engine/executors/aggregation.py.md |  | 224.61 |  |
+| 2026-03-29T02:57:42+00:00 | ok | src/elspeth/engine/executors/gate.py | docs/bugs/generated/engine/executors/gate.py.md |  | 241.44 |  |
+| 2026-03-29T02:57:57+00:00 | ok | src/elspeth/engine/dag_navigator.py | docs/bugs/generated/engine/dag_navigator.py.md |  | 255.79 |  |
+| 2026-03-29T02:59:21+00:00 | ok | src/elspeth/engine/orchestrator/__init__.py | docs/bugs/generated/engine/orchestrator/__init__.py.md |  | 84.13 |  |
+| 2026-03-29T02:59:54+00:00 | ok | src/elspeth/engine/executors/state_guard.py | docs/bugs/generated/engine/executors/state_guard.py.md |  | 117.16 |  |
+| 2026-03-29T03:00:19+00:00 | ok | src/elspeth/engine/orchestrator/types.py | docs/bugs/generated/engine/orchestrator/types.py.md |  | 142.10 |  |
+| 2026-03-29T03:00:34+00:00 | ok | src/elspeth/engine/orchestrator/outcomes.py | docs/bugs/generated/engine/orchestrator/outcomes.py.md |  | 157.08 |  |
+| 2026-03-29T03:00:41+00:00 | ok | src/elspeth/engine/executors/types.py | docs/bugs/generated/engine/executors/types.py.md |  | 164.63 |  |
+| 2026-03-29T03:00:56+00:00 | ok | src/elspeth/engine/orchestrator/core.py | docs/bugs/generated/engine/orchestrator/core.py.md |  | 179.12 |  |
+| 2026-03-29T03:00:57+00:00 | ok | src/elspeth/engine/executors/transform.py | docs/bugs/generated/engine/executors/transform.py.md |  | 179.91 |  |
+| 2026-03-29T03:01:04+00:00 | ok | src/elspeth/engine/orchestrator/export.py | docs/bugs/generated/engine/orchestrator/export.py.md |  | 187.04 |  |
+| 2026-03-29T03:01:47+00:00 | ok | src/elspeth/engine/executors/sink.py | docs/bugs/generated/engine/executors/sink.py.md |  | 229.90 |  |
+| 2026-03-29T03:02:35+00:00 | ok | src/elspeth/engine/orchestrator/aggregation.py | docs/bugs/generated/engine/orchestrator/aggregation.py.md |  | 277.89 |  |
+| 2026-03-29T03:03:57+00:00 | ok | src/elspeth/mcp/analyzers/__init__.py | docs/bugs/generated/mcp/analyzers/__init__.py.md |  | 82.48 |  |
+| 2026-03-29T03:04:37+00:00 | ok | src/elspeth/mcp/__init__.py | docs/bugs/generated/mcp/__init__.py.md |  | 122.28 |  |
+| 2026-03-29T03:04:39+00:00 | ok | src/elspeth/engine/retry.py | docs/bugs/generated/engine/retry.py.md |  | 124.49 |  |
+| 2026-03-29T03:04:39+00:00 | ok | src/elspeth/engine/triggers.py | docs/bugs/generated/engine/triggers.py.md |  | 124.74 |  |
+| 2026-03-29T03:05:10+00:00 | ok | src/elspeth/mcp/analyzer.py | docs/bugs/generated/mcp/analyzer.py.md |  | 155.60 |  |
+| 2026-03-29T03:05:14+00:00 | ok | src/elspeth/engine/tokens.py | docs/bugs/generated/engine/tokens.py.md |  | 159.16 |  |
+| 2026-03-29T03:05:26+00:00 | ok | src/elspeth/mcp/analyzers/contracts.py | docs/bugs/generated/mcp/analyzers/contracts.py.md |  | 171.46 |  |
+| 2026-03-29T03:05:31+00:00 | ok | src/elspeth/engine/spans.py | docs/bugs/generated/engine/spans.py.md |  | 176.17 |  |
+| 2026-03-29T03:05:55+00:00 | ok | src/elspeth/engine/processor.py | docs/bugs/generated/engine/processor.py.md |  | 200.19 |  |
+| 2026-03-29T03:06:00+00:00 | ok | src/elspeth/engine/orchestrator/validation.py | docs/bugs/generated/engine/orchestrator/validation.py.md |  | 205.28 |  |
+| 2026-03-29T03:06:59+00:00 | ok | src/elspeth/plugins/__init__.py | docs/bugs/generated/plugins/__init__.py.md |  | 59.17 |  |
+| 2026-03-29T03:07:05+00:00 | ok | src/elspeth/plugins/infrastructure/batching/__init__.py | docs/bugs/generated/plugins/infrastructure/batching/__init__.py.md |  | 64.54 |  |
+| 2026-03-29T03:07:06+00:00 | ok | src/elspeth/plugins/infrastructure/__init__.py | docs/bugs/generated/plugins/infrastructure/__init__.py.md |  | 65.56 |  |
+| 2026-03-29T03:07:45+00:00 | ok | src/elspeth/plugins/infrastructure/azure_auth.py | docs/bugs/generated/plugins/infrastructure/azure_auth.py.md |  | 105.49 |  |
+| 2026-03-29T03:08:13+00:00 | ok | src/elspeth/mcp/types.py | docs/bugs/generated/mcp/types.py.md |  | 133.18 |  |
+| 2026-03-29T03:08:16+00:00 | ok | src/elspeth/mcp/analyzers/diagnostics.py | docs/bugs/generated/mcp/analyzers/diagnostics.py.md |  | 136.57 |  |
+| 2026-03-29T03:08:25+00:00 | ok | src/elspeth/mcp/analyzers/queries.py | docs/bugs/generated/mcp/analyzers/queries.py.md |  | 145.44 |  |
+| 2026-03-29T03:08:37+00:00 | ok | src/elspeth/plugins/infrastructure/base.py | docs/bugs/generated/plugins/infrastructure/base.py.md |  | 157.02 |  |
+| 2026-03-29T03:09:06+00:00 | ok | src/elspeth/mcp/server.py | docs/bugs/generated/mcp/server.py.md |  | 186.22 |  |
+| 2026-03-29T03:09:58+00:00 | ok | src/elspeth/mcp/analyzers/reports.py | docs/bugs/generated/mcp/analyzers/reports.py.md |  | 238.29 |  |
+| 2026-03-29T03:11:42+00:00 | ok | src/elspeth/plugins/infrastructure/clients/__init__.py | docs/bugs/generated/plugins/infrastructure/clients/__init__.py.md |  | 103.99 |  |
+| 2026-03-29T03:11:52+00:00 | ok | src/elspeth/plugins/infrastructure/clients/base.py | docs/bugs/generated/plugins/infrastructure/clients/base.py.md |  | 113.36 |  |
+| 2026-03-29T03:12:06+00:00 | ok | src/elspeth/plugins/infrastructure/batching/ports.py | docs/bugs/generated/plugins/infrastructure/batching/ports.py.md |  | 127.98 |  |
+| 2026-03-29T03:12:14+00:00 | ok | src/elspeth/plugins/infrastructure/clients/dataverse.py | docs/bugs/generated/plugins/infrastructure/clients/dataverse.py.md |  | 136.00 |  |
+| 2026-03-29T03:12:23+00:00 | ok | src/elspeth/plugins/infrastructure/clients/fingerprinting.py | docs/bugs/generated/plugins/infrastructure/clients/fingerprinting.py.md |  | 144.30 |  |
+| 2026-03-29T03:12:31+00:00 | ok | src/elspeth/plugins/infrastructure/clients/llm.py | docs/bugs/generated/plugins/infrastructure/clients/llm.py.md |  | 152.59 |  |
+| 2026-03-29T03:12:31+00:00 | ok | src/elspeth/plugins/infrastructure/batching/row_reorder_buffer.py | docs/bugs/generated/plugins/infrastructure/batching/row_reorder_buffer.py.md |  | 152.88 |  |
+| 2026-03-29T03:12:39+00:00 | ok | src/elspeth/plugins/infrastructure/clients/http.py | docs/bugs/generated/plugins/infrastructure/clients/http.py.md |  | 160.44 |  |
+| 2026-03-29T03:12:53+00:00 | ok | src/elspeth/plugins/infrastructure/batching/mixin.py | docs/bugs/generated/plugins/infrastructure/batching/mixin.py.md |  | 175.01 |  |
+| 2026-03-29T03:14:04+00:00 | ok | src/elspeth/plugins/infrastructure/clients/json_utils.py | docs/bugs/generated/plugins/infrastructure/clients/json_utils.py.md |  | 246.26 |  |
+| 2026-03-29T03:15:45+00:00 | ok | src/elspeth/plugins/infrastructure/clients/retrieval/__init__.py | docs/bugs/generated/plugins/infrastructure/clients/retrieval/__init__.py.md |  | 100.07 |  |
+| 2026-03-29T03:16:01+00:00 | ok | src/elspeth/plugins/infrastructure/clients/retrieval/azure_search.py | docs/bugs/generated/plugins/infrastructure/clients/retrieval/azure_search.py.md |  | 116.50 |  |
+| 2026-03-29T03:16:03+00:00 | ok | src/elspeth/plugins/infrastructure/config_base.py | docs/bugs/generated/plugins/infrastructure/config_base.py.md |  | 117.96 |  |
+| 2026-03-29T03:16:03+00:00 | ok | src/elspeth/plugins/infrastructure/clients/retrieval/base.py | docs/bugs/generated/plugins/infrastructure/clients/retrieval/base.py.md |  | 118.10 |  |
+| 2026-03-29T03:16:16+00:00 | ok | src/elspeth/plugins/infrastructure/clients/replayer.py | docs/bugs/generated/plugins/infrastructure/clients/replayer.py.md |  | 132.00 |  |
+| 2026-03-29T03:16:36+00:00 | ok | src/elspeth/plugins/infrastructure/clients/retrieval/types.py | docs/bugs/generated/plugins/infrastructure/clients/retrieval/types.py.md |  | 151.59 |  |
+| 2026-03-29T03:16:41+00:00 | ok | src/elspeth/plugins/infrastructure/clients/verifier.py | docs/bugs/generated/plugins/infrastructure/clients/verifier.py.md |  | 156.44 |  |
+| 2026-03-29T03:17:02+00:00 | ok | src/elspeth/plugins/infrastructure/clients/retrieval/chroma.py | docs/bugs/generated/plugins/infrastructure/clients/retrieval/chroma.py.md |  | 177.80 |  |
+| 2026-03-29T03:17:36+00:00 | ok | src/elspeth/plugins/infrastructure/discovery.py | docs/bugs/generated/plugins/infrastructure/discovery.py.md |  | 211.72 |  |
+| 2026-03-29T03:17:48+00:00 | ok | src/elspeth/plugins/infrastructure/clients/retrieval/connection.py | docs/bugs/generated/plugins/infrastructure/clients/retrieval/connection.py.md |  | 223.04 |  |
+| 2026-03-29T03:18:39+00:00 | ok | src/elspeth/plugins/infrastructure/pooling/__init__.py | docs/bugs/generated/plugins/infrastructure/pooling/__init__.py.md |  | 51.73 |  |
+| 2026-03-29T03:19:13+00:00 | ok | src/elspeth/plugins/infrastructure/hookspecs.py | docs/bugs/generated/plugins/infrastructure/hookspecs.py.md |  | 85.58 |  |
+| 2026-03-29T03:19:22+00:00 | ok | src/elspeth/plugins/infrastructure/pooling/errors.py | docs/bugs/generated/plugins/infrastructure/pooling/errors.py.md |  | 94.44 |  |
+| 2026-03-29T03:19:48+00:00 | ok | src/elspeth/plugins/infrastructure/probe_factory.py | docs/bugs/generated/plugins/infrastructure/probe_factory.py.md |  | 120.08 |  |
+| 2026-03-29T03:19:55+00:00 | ok | src/elspeth/plugins/infrastructure/display_headers.py | docs/bugs/generated/plugins/infrastructure/display_headers.py.md |  | 127.04 |  |
+| 2026-03-29T03:20:05+00:00 | ok | src/elspeth/plugins/infrastructure/pooling/reorder_buffer.py | docs/bugs/generated/plugins/infrastructure/pooling/reorder_buffer.py.md |  | 137.17 |  |
+| 2026-03-29T03:20:14+00:00 | ok | src/elspeth/plugins/infrastructure/pooling/throttle.py | docs/bugs/generated/plugins/infrastructure/pooling/throttle.py.md |  | 146.71 |  |
+| 2026-03-29T03:20:17+00:00 | ok | src/elspeth/plugins/infrastructure/pooling/executor.py | docs/bugs/generated/plugins/infrastructure/pooling/executor.py.md |  | 149.68 |  |
+| 2026-03-29T03:20:23+00:00 | ok | src/elspeth/plugins/infrastructure/pooling/config.py | docs/bugs/generated/plugins/infrastructure/pooling/config.py.md |  | 155.15 |  |
+| 2026-03-29T03:20:33+00:00 | ok | src/elspeth/plugins/infrastructure/manager.py | docs/bugs/generated/plugins/infrastructure/manager.py.md |  | 165.07 |  |
+| 2026-03-29T03:21:27+00:00 | ok | src/elspeth/plugins/infrastructure/results.py | docs/bugs/generated/plugins/infrastructure/results.py.md |  | 53.90 |  |
+| 2026-03-29T03:21:43+00:00 | ok | src/elspeth/plugins/sinks/__init__.py | docs/bugs/generated/plugins/sinks/__init__.py.md |  | 70.19 |  |
+| 2026-03-29T03:21:48+00:00 | ok | src/elspeth/plugins/infrastructure/sentinels.py | docs/bugs/generated/plugins/infrastructure/sentinels.py.md |  | 75.39 |  |
+| 2026-03-29T03:22:34+00:00 | ok | src/elspeth/plugins/infrastructure/utils.py | docs/bugs/generated/plugins/infrastructure/utils.py.md |  | 121.35 |  |
+| 2026-03-29T03:23:04+00:00 | ok | src/elspeth/plugins/sinks/csv_sink.py | docs/bugs/generated/plugins/sinks/csv_sink.py.md |  | 151.40 |  |
+| 2026-03-29T03:23:12+00:00 | ok | src/elspeth/plugins/infrastructure/schema_factory.py | docs/bugs/generated/plugins/infrastructure/schema_factory.py.md |  | 159.70 |  |
+| 2026-03-29T03:23:21+00:00 | ok | src/elspeth/plugins/infrastructure/validation.py | docs/bugs/generated/plugins/infrastructure/validation.py.md |  | 168.00 |  |
+| 2026-03-29T03:24:26+00:00 | ok | src/elspeth/plugins/sinks/chroma_sink.py | docs/bugs/generated/plugins/sinks/chroma_sink.py.md |  | 232.71 |  |
+| 2026-03-29T03:24:33+00:00 | ok | src/elspeth/plugins/infrastructure/templates.py | docs/bugs/generated/plugins/infrastructure/templates.py.md |  | 239.80 |  |
+| 2026-03-29T03:24:56+00:00 | ok | src/elspeth/plugins/sinks/azure_blob_sink.py | docs/bugs/generated/plugins/sinks/azure_blob_sink.py.md |  | 263.48 |  |
+| 2026-03-29T03:26:01+00:00 | ok | src/elspeth/plugins/sources/__init__.py | docs/bugs/generated/plugins/sources/__init__.py.md |  | 65.00 |  |
+| 2026-03-29T03:26:40+00:00 | ok | src/elspeth/plugins/sources/null_source.py | docs/bugs/generated/plugins/sources/null_source.py.md |  | 103.28 |  |
+| 2026-03-29T03:27:15+00:00 | ok | src/elspeth/plugins/sources/json_source.py | docs/bugs/generated/plugins/sources/json_source.py.md |  | 138.50 |  |
+| 2026-03-29T03:27:22+00:00 | ok | src/elspeth/plugins/sources/csv_source.py | docs/bugs/generated/plugins/sources/csv_source.py.md |  | 146.00 |  |
+| 2026-03-29T03:27:35+00:00 | ok | src/elspeth/plugins/sinks/json_sink.py | docs/bugs/generated/plugins/sinks/json_sink.py.md |  | 159.12 |  |
+| 2026-03-29T03:27:40+00:00 | ok | src/elspeth/plugins/sources/azure_blob_source.py | docs/bugs/generated/plugins/sources/azure_blob_source.py.md |  | 163.77 |  |
+| 2026-03-29T03:28:05+00:00 | ok | src/elspeth/plugins/sinks/dataverse.py | docs/bugs/generated/plugins/sinks/dataverse.py.md |  | 188.43 |  |
+| 2026-03-29T03:28:05+00:00 | ok | src/elspeth/plugins/sources/field_normalization.py | docs/bugs/generated/plugins/sources/field_normalization.py.md |  | 188.53 |  |
+| 2026-03-29T03:28:13+00:00 | ok | src/elspeth/plugins/sinks/database_sink.py | docs/bugs/generated/plugins/sinks/database_sink.py.md |  | 197.00 |  |
+| 2026-03-29T03:28:15+00:00 | ok | src/elspeth/plugins/sources/dataverse.py | docs/bugs/generated/plugins/sources/dataverse.py.md |  | 199.15 |  |
+| 2026-03-29T03:29:21+00:00 | ok | src/elspeth/plugins/transforms/azure/__init__.py | docs/bugs/generated/plugins/transforms/azure/__init__.py.md |  | 65.13 |  |
+| 2026-03-29T03:29:25+00:00 | ok | src/elspeth/plugins/transforms/field_collision.py | docs/bugs/generated/plugins/transforms/field_collision.py.md |  | 68.99 |  |
+| 2026-03-29T03:29:37+00:00 | ok | src/elspeth/plugins/transforms/azure/errors.py | docs/bugs/generated/plugins/transforms/azure/errors.py.md |  | 81.21 |  |
+| 2026-03-29T03:29:45+00:00 | ok | src/elspeth/plugins/transforms/__init__.py | docs/bugs/generated/plugins/transforms/__init__.py.md |  | 89.30 |  |
+| 2026-03-29T03:30:16+00:00 | ok | src/elspeth/plugins/transforms/azure/content_safety.py | docs/bugs/generated/plugins/transforms/azure/content_safety.py.md |  | 120.17 |  |
+| 2026-03-29T03:30:31+00:00 | ok | src/elspeth/plugins/transforms/batch_stats.py | docs/bugs/generated/plugins/transforms/batch_stats.py.md |  | 135.29 |  |
+| 2026-03-29T03:30:38+00:00 | ok | src/elspeth/plugins/transforms/azure/base.py | docs/bugs/generated/plugins/transforms/azure/base.py.md |  | 142.37 |  |
+| 2026-03-29T03:30:43+00:00 | ok | src/elspeth/plugins/transforms/field_mapper.py | docs/bugs/generated/plugins/transforms/field_mapper.py.md |  | 147.31 |  |
+| 2026-03-29T03:30:48+00:00 | ok | src/elspeth/plugins/transforms/azure/prompt_shield.py | docs/bugs/generated/plugins/transforms/azure/prompt_shield.py.md |  | 152.26 |  |
+| 2026-03-29T03:31:10+00:00 | ok | src/elspeth/plugins/transforms/batch_replicate.py | docs/bugs/generated/plugins/transforms/batch_replicate.py.md |  | 174.53 |  |
+| 2026-03-29T03:32:19+00:00 | ok | src/elspeth/plugins/transforms/llm/providers/__init__.py | docs/bugs/generated/plugins/transforms/llm/providers/__init__.py.md |  | 68.23 |  |
+| 2026-03-29T03:32:46+00:00 | ok | src/elspeth/plugins/transforms/keyword_filter.py | docs/bugs/generated/plugins/transforms/keyword_filter.py.md |  | 95.84 |  |
+| 2026-03-29T03:33:17+00:00 | ok | src/elspeth/plugins/transforms/llm/langfuse.py | docs/bugs/generated/plugins/transforms/llm/langfuse.py.md |  | 127.18 |  |
+| 2026-03-29T03:33:25+00:00 | ok | src/elspeth/plugins/transforms/llm/provider.py | docs/bugs/generated/plugins/transforms/llm/provider.py.md |  | 134.41 |  |
+| 2026-03-29T03:33:42+00:00 | ok | src/elspeth/plugins/transforms/llm/multi_query.py | docs/bugs/generated/plugins/transforms/llm/multi_query.py.md |  | 151.55 |  |
+| 2026-03-29T03:33:55+00:00 | ok | src/elspeth/plugins/transforms/llm/azure_batch.py | docs/bugs/generated/plugins/transforms/llm/azure_batch.py.md |  | 164.33 |  |
+| 2026-03-29T03:34:19+00:00 | ok | src/elspeth/plugins/transforms/llm/__init__.py | docs/bugs/generated/plugins/transforms/llm/__init__.py.md |  | 188.91 |  |
+| 2026-03-29T03:34:30+00:00 | ok | src/elspeth/plugins/transforms/llm/openrouter_batch.py | docs/bugs/generated/plugins/transforms/llm/openrouter_batch.py.md |  | 199.94 |  |
+| 2026-03-29T03:35:13+00:00 | ok | src/elspeth/plugins/transforms/json_explode.py | docs/bugs/generated/plugins/transforms/json_explode.py.md |  | 243.14 |  |
+| 2026-03-29T03:35:35+00:00 | ok | src/elspeth/plugins/transforms/llm/base.py | docs/bugs/generated/plugins/transforms/llm/base.py.md |  | 265.01 |  |
+| 2026-03-29T03:35:57+00:00 | failed | src/elspeth/plugins/transforms/llm/providers/azure.py | docs/bugs/generated/plugins/transforms/llm/providers/azure.py.md |  | 22.02 | codex exec failed for src/elspeth/plugins/transforms/llm/providers/azure.py with code 1\nstderr: OpenAI Codex v0.117.0 (research preview)\n--------\nworkdir: /home/john/elspeth\nmodel: gpt-5.4\nprovider: o |
+| 2026-03-29T03:35:58+00:00 | failed | src/elspeth/plugins/transforms/passthrough.py | docs/bugs/generated/plugins/transforms/passthrough.py.md |  | 22.48 | codex exec failed for src/elspeth/plugins/transforms/passthrough.py with code 1\nstderr: OpenAI Codex v0.117.0 (research preview)\n--------\nworkdir: /home/john/elspeth\nmodel: gpt-5.4\nprovider: openai\nap |
+| 2026-03-29T03:35:58+00:00 | failed | src/elspeth/plugins/transforms/rag/__init__.py | docs/bugs/generated/plugins/transforms/rag/__init__.py.md |  | 22.56 | codex exec failed for src/elspeth/plugins/transforms/rag/__init__.py with code 1\nstderr: OpenAI Codex v0.117.0 (research preview)\n--------\nworkdir: /home/john/elspeth\nmodel: gpt-5.4\nprovider: openai\na |
+| 2026-03-29T03:35:58+00:00 | failed | src/elspeth/plugins/transforms/rag/formatter.py | docs/bugs/generated/plugins/transforms/rag/formatter.py.md |  | 22.69 | codex exec failed for src/elspeth/plugins/transforms/rag/formatter.py with code 1\nstderr: OpenAI Codex v0.117.0 (research preview)\n--------\nworkdir: /home/john/elspeth\nmodel: gpt-5.4\nprovider: openai\n |
+| 2026-03-29T03:35:58+00:00 | failed | src/elspeth/plugins/transforms/llm/transform.py | docs/bugs/generated/plugins/transforms/llm/transform.py.md |  | 22.83 | codex exec failed for src/elspeth/plugins/transforms/llm/transform.py with code 1\nstderr: OpenAI Codex v0.117.0 (research preview)\n--------\nworkdir: /home/john/elspeth\nmodel: gpt-5.4\nprovider: openai\n |
+| 2026-03-29T03:35:59+00:00 | failed | src/elspeth/plugins/transforms/llm/templates.py | docs/bugs/generated/plugins/transforms/llm/templates.py.md |  | 23.54 | codex exec failed for src/elspeth/plugins/transforms/llm/templates.py with code 1\nstderr: OpenAI Codex v0.117.0 (research preview)\n--------\nworkdir: /home/john/elspeth\nmodel: gpt-5.4\nprovider: openai\n |
+| 2026-03-29T03:36:00+00:00 | failed | src/elspeth/plugins/transforms/llm/validation.py | docs/bugs/generated/plugins/transforms/llm/validation.py.md |  | 24.18 | codex exec failed for src/elspeth/plugins/transforms/llm/validation.py with code 1\nstderr: OpenAI Codex v0.117.0 (research preview)\n--------\nworkdir: /home/john/elspeth\nmodel: gpt-5.4\nprovider: openai |
+| 2026-03-29T03:36:00+00:00 | failed | src/elspeth/plugins/transforms/llm/providers/openrouter.py | docs/bugs/generated/plugins/transforms/llm/providers/openrouter.py.md |  | 24.32 | codex exec failed for src/elspeth/plugins/transforms/llm/providers/openrouter.py with code 1\nstderr: OpenAI Codex v0.117.0 (research preview)\n--------\nworkdir: /home/john/elspeth\nmodel: gpt-5.4\nprovid |
+| 2026-03-29T03:36:01+00:00 | failed | src/elspeth/plugins/transforms/llm/tracing.py | docs/bugs/generated/plugins/transforms/llm/tracing.py.md |  | 26.00 | codex exec failed for src/elspeth/plugins/transforms/llm/tracing.py with code 1\nstderr: OpenAI Codex v0.117.0 (research preview)\n--------\nworkdir: /home/john/elspeth\nmodel: gpt-5.4\nprovider: openai\nap |
+| 2026-03-29T03:36:11+00:00 | failed | src/elspeth/plugins/transforms/rag/config.py | docs/bugs/generated/plugins/transforms/rag/config.py.md |  | 35.70 | codex exec failed for src/elspeth/plugins/transforms/rag/config.py with code 1\nstderr: OpenAI Codex v0.117.0 (research preview)\n--------\nworkdir: /home/john/elspeth\nmodel: gpt-5.4\nprovider: openai\napp |
+| 2026-03-29T03:36:31+00:00 | failed | src/elspeth/plugins/transforms/safety_utils.py | docs/bugs/generated/plugins/transforms/safety_utils.py.md |  | 19.84 | codex exec failed for src/elspeth/plugins/transforms/safety_utils.py with code 1\nstderr: OpenAI Codex v0.117.0 (research preview)\n--------\nworkdir: /home/john/elspeth\nmodel: gpt-5.4\nprovider: openai\na |
+| 2026-03-29T03:36:32+00:00 | failed | src/elspeth/telemetry/__init__.py | docs/bugs/generated/telemetry/__init__.py.md |  | 20.62 | codex exec failed for src/elspeth/telemetry/__init__.py with code 1\nstderr: OpenAI Codex v0.117.0 (research preview)\n--------\nworkdir: /home/john/elspeth\nmodel: gpt-5.4\nprovider: openai\napproval: neve |
+| 2026-03-29T03:36:32+00:00 | failed | src/elspeth/plugins/transforms/truncate.py | docs/bugs/generated/plugins/transforms/truncate.py.md |  | 21.36 | codex exec failed for src/elspeth/plugins/transforms/truncate.py with code 1\nstderr: OpenAI Codex v0.117.0 (research preview)\n--------\nworkdir: /home/john/elspeth\nmodel: gpt-5.4\nprovider: openai\nappro |
+| 2026-03-29T03:36:33+00:00 | failed | src/elspeth/plugins/transforms/web_scrape.py | docs/bugs/generated/plugins/transforms/web_scrape.py.md |  | 21.64 | codex exec failed for src/elspeth/plugins/transforms/web_scrape.py with code 1\nstderr: OpenAI Codex v0.117.0 (research preview)\n--------\nworkdir: /home/john/elspeth\nmodel: gpt-5.4\nprovider: openai\napp |
+| 2026-03-29T03:36:33+00:00 | failed | src/elspeth/plugins/transforms/web_scrape_fingerprint.py | docs/bugs/generated/plugins/transforms/web_scrape_fingerprint.py.md |  | 21.81 | codex exec failed for src/elspeth/plugins/transforms/web_scrape_fingerprint.py with code 1\nstderr: OpenAI Codex v0.117.0 (research preview)\n--------\nworkdir: /home/john/elspeth\nmodel: gpt-5.4\nprovider |
+| 2026-03-29T03:36:33+00:00 | failed | src/elspeth/plugins/transforms/rag/transform.py | docs/bugs/generated/plugins/transforms/rag/transform.py.md |  | 22.24 | codex exec failed for src/elspeth/plugins/transforms/rag/transform.py with code 1\nstderr: OpenAI Codex v0.117.0 (research preview)\n--------\nworkdir: /home/john/elspeth\nmodel: gpt-5.4\nprovider: openai\n |
+| 2026-03-29T03:36:33+00:00 | failed | src/elspeth/plugins/transforms/rag/query.py | docs/bugs/generated/plugins/transforms/rag/query.py.md |  | 22.33 | codex exec failed for src/elspeth/plugins/transforms/rag/query.py with code 1\nstderr: OpenAI Codex v0.117.0 (research preview)\n--------\nworkdir: /home/john/elspeth\nmodel: gpt-5.4\nprovider: openai\nappr |
+| 2026-03-29T03:36:35+00:00 | failed | src/elspeth/telemetry/errors.py | docs/bugs/generated/telemetry/errors.py.md |  | 23.61 | codex exec failed for src/elspeth/telemetry/errors.py with code 1\nstderr: OpenAI Codex v0.117.0 (research preview)\n--------\nworkdir: /home/john/elspeth\nmodel: gpt-5.4\nprovider: openai\napproval: never\n |
+| 2026-03-29T03:36:37+00:00 | failed | src/elspeth/plugins/transforms/web_scrape_extraction.py | docs/bugs/generated/plugins/transforms/web_scrape_extraction.py.md |  | 25.94 | codex exec failed for src/elspeth/plugins/transforms/web_scrape_extraction.py with code 1\nstderr: OpenAI Codex v0.117.0 (research preview)\n--------\nworkdir: /home/john/elspeth\nmodel: gpt-5.4\nprovider: |
+| 2026-03-29T03:36:39+00:00 | failed | src/elspeth/plugins/transforms/web_scrape_errors.py | docs/bugs/generated/plugins/transforms/web_scrape_errors.py.md |  | 27.97 | codex exec failed for src/elspeth/plugins/transforms/web_scrape_errors.py with code 1\nstderr: OpenAI Codex v0.117.0 (research preview)\n--------\nworkdir: /home/john/elspeth\nmodel: gpt-5.4\nprovider: ope |
+| 2026-03-29T03:36:59+00:00 | failed | src/elspeth/telemetry/exporters/azure_monitor.py | docs/bugs/generated/telemetry/exporters/azure_monitor.py.md |  | 20.29 | codex exec failed for src/elspeth/telemetry/exporters/azure_monitor.py with code 1\nstderr: OpenAI Codex v0.117.0 (research preview)\n--------\nworkdir: /home/john/elspeth\nmodel: gpt-5.4\nprovider: openai |
+| 2026-03-29T03:37:00+00:00 | failed | src/elspeth/telemetry/filtering.py | docs/bugs/generated/telemetry/filtering.py.md |  | 20.47 | codex exec failed for src/elspeth/telemetry/filtering.py with code 1\nstderr: OpenAI Codex v0.117.0 (research preview)\n--------\nworkdir: /home/john/elspeth\nmodel: gpt-5.4\nprovider: openai\napproval: nev |
+| 2026-03-29T03:37:00+00:00 | failed | src/elspeth/telemetry/hookspecs.py | docs/bugs/generated/telemetry/hookspecs.py.md |  | 20.80 | codex exec failed for src/elspeth/telemetry/hookspecs.py with code 1\nstderr: OpenAI Codex v0.117.0 (research preview)\n--------\nworkdir: /home/john/elspeth\nmodel: gpt-5.4\nprovider: openai\napproval: nev |
+| 2026-03-29T03:37:01+00:00 | failed | src/elspeth/telemetry/manager.py | docs/bugs/generated/telemetry/manager.py.md |  | 21.49 | codex exec failed for src/elspeth/telemetry/manager.py with code 1\nstderr: OpenAI Codex v0.117.0 (research preview)\n--------\nworkdir: /home/john/elspeth\nmodel: gpt-5.4\nprovider: openai\napproval: never |
+| 2026-03-29T03:37:01+00:00 | failed | src/elspeth/telemetry/exporters/datadog.py | docs/bugs/generated/telemetry/exporters/datadog.py.md |  | 21.93 | codex exec failed for src/elspeth/telemetry/exporters/datadog.py with code 1\nstderr: OpenAI Codex v0.117.0 (research preview)\n--------\nworkdir: /home/john/elspeth\nmodel: gpt-5.4\nprovider: openai\nappro |
+| 2026-03-29T03:37:02+00:00 | failed | src/elspeth/telemetry/exporters/__init__.py | docs/bugs/generated/telemetry/exporters/__init__.py.md |  | 22.47 | codex exec failed for src/elspeth/telemetry/exporters/__init__.py with code 1\nstderr: OpenAI Codex v0.117.0 (research preview)\n--------\nworkdir: /home/john/elspeth\nmodel: gpt-5.4\nprovider: openai\nappr |
+| 2026-03-29T03:37:04+00:00 | failed | src/elspeth/telemetry/factory.py | docs/bugs/generated/telemetry/factory.py.md |  | 25.12 | codex exec failed for src/elspeth/telemetry/factory.py with code 1\nstderr: OpenAI Codex v0.117.0 (research preview)\n--------\nworkdir: /home/john/elspeth\nmodel: gpt-5.4\nprovider: openai\napproval: never |
+| 2026-03-29T03:37:05+00:00 | failed | src/elspeth/telemetry/exporters/console.py | docs/bugs/generated/telemetry/exporters/console.py.md |  | 26.34 | codex exec failed for src/elspeth/telemetry/exporters/console.py with code 1\nstderr: OpenAI Codex v0.117.0 (research preview)\n--------\nworkdir: /home/john/elspeth\nmodel: gpt-5.4\nprovider: openai\nappro |
+| 2026-03-29T03:37:06+00:00 | failed | src/elspeth/telemetry/exporters/otlp.py | docs/bugs/generated/telemetry/exporters/otlp.py.md |  | 26.99 | codex exec failed for src/elspeth/telemetry/exporters/otlp.py with code 1\nstderr: OpenAI Codex v0.117.0 (research preview)\n--------\nworkdir: /home/john/elspeth\nmodel: gpt-5.4\nprovider: openai\napproval |
+| 2026-03-29T03:37:07+00:00 | failed | src/elspeth/telemetry/protocols.py | docs/bugs/generated/telemetry/protocols.py.md |  | 27.89 | codex exec failed for src/elspeth/telemetry/protocols.py with code 1\nstderr: OpenAI Codex v0.117.0 (research preview)\n--------\nworkdir: /home/john/elspeth\nmodel: gpt-5.4\nprovider: openai\napproval: nev |
+| 2026-03-29T03:37:29+00:00 | failed | src/elspeth/tui/widgets/lineage_tree.py | docs/bugs/generated/tui/widgets/lineage_tree.py.md |  | 21.37 | codex exec failed for src/elspeth/tui/widgets/lineage_tree.py with code 1\nstderr: OpenAI Codex v0.117.0 (research preview)\n--------\nworkdir: /home/john/elspeth\nmodel: gpt-5.4\nprovider: openai\napproval |
+| 2026-03-29T03:37:29+00:00 | failed | src/elspeth/tui/screens/explain_screen.py | docs/bugs/generated/tui/screens/explain_screen.py.md |  | 22.17 | codex exec failed for src/elspeth/tui/screens/explain_screen.py with code 1\nstderr: OpenAI Codex v0.117.0 (research preview)\n--------\nworkdir: /home/john/elspeth\nmodel: gpt-5.4\nprovider: openai\napprov |
+| 2026-03-29T03:37:29+00:00 | failed | src/elspeth/tui/widgets/node_detail.py | docs/bugs/generated/tui/widgets/node_detail.py.md |  | 22.20 | codex exec failed for src/elspeth/tui/widgets/node_detail.py with code 1\nstderr: OpenAI Codex v0.117.0 (research preview)\n--------\nworkdir: /home/john/elspeth\nmodel: gpt-5.4\nprovider: openai\napproval: |
+| 2026-03-29T03:37:30+00:00 | failed | src/elspeth/tui/widgets/__init__.py | docs/bugs/generated/tui/widgets/__init__.py.md |  | 22.42 | codex exec failed for src/elspeth/tui/widgets/__init__.py with code 1\nstderr: OpenAI Codex v0.117.0 (research preview)\n--------\nworkdir: /home/john/elspeth\nmodel: gpt-5.4\nprovider: openai\napproval: ne |
+| 2026-03-29T03:37:30+00:00 | failed | src/elspeth/tui/__init__.py | docs/bugs/generated/tui/__init__.py.md |  | 22.57 | codex exec failed for src/elspeth/tui/__init__.py with code 1\nstderr: OpenAI Codex v0.117.0 (research preview)\n--------\nworkdir: /home/john/elspeth\nmodel: gpt-5.4\nprovider: openai\napproval: never\nsand |
+| 2026-03-29T03:37:30+00:00 | failed | src/elspeth/testing/__init__.py | docs/bugs/generated/testing/__init__.py.md |  | 22.71 | codex exec failed for src/elspeth/testing/__init__.py with code 1\nstderr: OpenAI Codex v0.117.0 (research preview)\n--------\nworkdir: /home/john/elspeth\nmodel: gpt-5.4\nprovider: openai\napproval: never\n |
+| 2026-03-29T03:37:32+00:00 | failed | src/elspeth/tui/types.py | docs/bugs/generated/tui/types.py.md |  | 24.68 | codex exec failed for src/elspeth/tui/types.py with code 1\nstderr: OpenAI Codex v0.117.0 (research preview)\n--------\nworkdir: /home/john/elspeth\nmodel: gpt-5.4\nprovider: openai\napproval: never\nsandbox |
+| 2026-03-29T03:37:32+00:00 | failed | src/elspeth/tui/screens/__init__.py | docs/bugs/generated/tui/screens/__init__.py.md |  | 24.87 | codex exec failed for src/elspeth/tui/screens/__init__.py with code 1\nstderr: OpenAI Codex v0.117.0 (research preview)\n--------\nworkdir: /home/john/elspeth\nmodel: gpt-5.4\nprovider: openai\napproval: ne |
+| 2026-03-29T03:37:32+00:00 | failed | src/elspeth/tui/explain_app.py | docs/bugs/generated/tui/explain_app.py.md |  | 24.95 | codex exec failed for src/elspeth/tui/explain_app.py with code 1\nstderr: OpenAI Codex v0.117.0 (research preview)\n--------\nworkdir: /home/john/elspeth\nmodel: gpt-5.4\nprovider: openai\napproval: never\ns |
+| 2026-03-29T03:37:40+00:00 | failed | src/elspeth/tui/constants.py | docs/bugs/generated/tui/constants.py.md |  | 32.91 | codex exec failed for src/elspeth/tui/constants.py with code 1\nstderr: OpenAI Codex v0.117.0 (research preview)\n--------\nworkdir: /home/john/elspeth\nmodel: gpt-5.4\nprovider: openai\napproval: never\nsan |
+| 2026-03-29T03:38:01+00:00 | failed | src/elspeth/web/__init__.py | docs/bugs/generated/web/__init__.py.md |  | 20.81 | codex exec failed for src/elspeth/web/__init__.py with code 1\nstderr: OpenAI Codex v0.117.0 (research preview)\n--------\nworkdir: /home/john/elspeth\nmodel: gpt-5.4\nprovider: openai\napproval: never\nsand |
+| 2026-03-29T03:38:01+00:00 | failed | src/elspeth/web/app.py | docs/bugs/generated/web/app.py.md |  | 20.92 | codex exec failed for src/elspeth/web/app.py with code 1\nstderr: OpenAI Codex v0.117.0 (research preview)\n--------\nworkdir: /home/john/elspeth\nmodel: gpt-5.4\nprovider: openai\napproval: never\nsandbox:  |
+| 2026-03-29T03:38:01+00:00 | failed | src/elspeth/web/auth/local.py | docs/bugs/generated/web/auth/local.py.md |  | 20.97 | codex exec failed for src/elspeth/web/auth/local.py with code 1\nstderr: OpenAI Codex v0.117.0 (research preview)\n--------\nworkdir: /home/john/elspeth\nmodel: gpt-5.4\nprovider: openai\napproval: never\nsa |
+| 2026-03-29T03:38:01+00:00 | failed | src/elspeth/web/auth/protocol.py | docs/bugs/generated/web/auth/protocol.py.md |  | 21.14 | codex exec failed for src/elspeth/web/auth/protocol.py with code 1\nstderr: OpenAI Codex v0.117.0 (research preview)\n--------\nworkdir: /home/john/elspeth\nmodel: gpt-5.4\nprovider: openai\napproval: never |
+| 2026-03-29T03:38:02+00:00 | failed | src/elspeth/web/auth/oidc.py | docs/bugs/generated/web/auth/oidc.py.md |  | 21.76 | codex exec failed for src/elspeth/web/auth/oidc.py with code 1\nstderr: OpenAI Codex v0.117.0 (research preview)\n--------\nworkdir: /home/john/elspeth\nmodel: gpt-5.4\nprovider: openai\napproval: never\nsan |
+| 2026-03-29T03:38:02+00:00 | failed | src/elspeth/web/auth/entra.py | docs/bugs/generated/web/auth/entra.py.md |  | 22.08 | codex exec failed for src/elspeth/web/auth/entra.py with code 1\nstderr: OpenAI Codex v0.117.0 (research preview)\n--------\nworkdir: /home/john/elspeth\nmodel: gpt-5.4\nprovider: openai\napproval: never\nsa |
+| 2026-03-29T03:38:02+00:00 | failed | src/elspeth/web/auth/routes.py | docs/bugs/generated/web/auth/routes.py.md |  | 22.10 | codex exec failed for src/elspeth/web/auth/routes.py with code 1\nstderr: OpenAI Codex v0.117.0 (research preview)\n--------\nworkdir: /home/john/elspeth\nmodel: gpt-5.4\nprovider: openai\napproval: never\ns |
+| 2026-03-29T03:38:03+00:00 | failed | src/elspeth/web/auth/middleware.py | docs/bugs/generated/web/auth/middleware.py.md |  | 22.84 | codex exec failed for src/elspeth/web/auth/middleware.py with code 1\nstderr: OpenAI Codex v0.117.0 (research preview)\n--------\nworkdir: /home/john/elspeth\nmodel: gpt-5.4\nprovider: openai\napproval: nev |
+| 2026-03-29T03:38:03+00:00 | failed | src/elspeth/web/auth/__init__.py | docs/bugs/generated/web/auth/__init__.py.md |  | 22.93 | codex exec failed for src/elspeth/web/auth/__init__.py with code 1\nstderr: OpenAI Codex v0.117.0 (research preview)\n--------\nworkdir: /home/john/elspeth\nmodel: gpt-5.4\nprovider: openai\napproval: never |
+| 2026-03-29T03:38:03+00:00 | failed | src/elspeth/web/auth/models.py | docs/bugs/generated/web/auth/models.py.md |  | 23.03 | codex exec failed for src/elspeth/web/auth/models.py with code 1\nstderr: OpenAI Codex v0.117.0 (research preview)\n--------\nworkdir: /home/john/elspeth\nmodel: gpt-5.4\nprovider: openai\napproval: never\ns |
+| 2026-03-29T03:38:26+00:00 | failed | src/elspeth/web/catalog/routes.py | docs/bugs/generated/web/catalog/routes.py.md |  | 22.62 | codex exec failed for src/elspeth/web/catalog/routes.py with code 1\nstderr: OpenAI Codex v0.117.0 (research preview)\n--------\nworkdir: /home/john/elspeth\nmodel: gpt-5.4\nprovider: openai\napproval: neve |
+| 2026-03-29T03:38:26+00:00 | failed | src/elspeth/web/catalog/protocol.py | docs/bugs/generated/web/catalog/protocol.py.md |  | 22.90 | codex exec failed for src/elspeth/web/catalog/protocol.py with code 1\nstderr: OpenAI Codex v0.117.0 (research preview)\n--------\nworkdir: /home/john/elspeth\nmodel: gpt-5.4\nprovider: openai\napproval: ne |
+| 2026-03-29T03:38:27+00:00 | failed | src/elspeth/web/config.py | docs/bugs/generated/web/config.py.md |  | 23.88 | codex exec failed for src/elspeth/web/config.py with code 1\nstderr: OpenAI Codex v0.117.0 (research preview)\n--------\nworkdir: /home/john/elspeth\nmodel: gpt-5.4\nprovider: openai\napproval: never\nsandbo |
+| 2026-03-29T03:38:27+00:00 | failed | src/elspeth/web/catalog/service.py | docs/bugs/generated/web/catalog/service.py.md |  | 23.93 | codex exec failed for src/elspeth/web/catalog/service.py with code 1\nstderr: OpenAI Codex v0.117.0 (research preview)\n--------\nworkdir: /home/john/elspeth\nmodel: gpt-5.4\nprovider: openai\napproval: nev |
+| 2026-03-29T03:38:28+00:00 | failed | src/elspeth/web/sessions/protocol.py | docs/bugs/generated/web/sessions/protocol.py.md |  | 24.88 | codex exec failed for src/elspeth/web/sessions/protocol.py with code 1\nstderr: OpenAI Codex v0.117.0 (research preview)\n--------\nworkdir: /home/john/elspeth\nmodel: gpt-5.4\nprovider: openai\napproval: n |
+| 2026-03-29T03:38:29+00:00 | failed | src/elspeth/web/catalog/schemas.py | docs/bugs/generated/web/catalog/schemas.py.md |  | 25.54 | codex exec failed for src/elspeth/web/catalog/schemas.py with code 1\nstderr: OpenAI Codex v0.117.0 (research preview)\n--------\nworkdir: /home/john/elspeth\nmodel: gpt-5.4\nprovider: openai\napproval: nev |
+| 2026-03-29T03:38:29+00:00 | failed | src/elspeth/web/catalog/__init__.py | docs/bugs/generated/web/catalog/__init__.py.md |  | 25.73 | codex exec failed for src/elspeth/web/catalog/__init__.py with code 1\nstderr: OpenAI Codex v0.117.0 (research preview)\n--------\nworkdir: /home/john/elspeth\nmodel: gpt-5.4\nprovider: openai\napproval: ne |
+| 2026-03-29T03:38:31+00:00 | failed | src/elspeth/web/sessions/models.py | docs/bugs/generated/web/sessions/models.py.md |  | 27.57 | codex exec failed for src/elspeth/web/sessions/models.py with code 1\nstderr: OpenAI Codex v0.117.0 (research preview)\n--------\nworkdir: /home/john/elspeth\nmodel: gpt-5.4\nprovider: openai\napproval: nev |
+| 2026-03-29T03:38:31+00:00 | failed | src/elspeth/web/sessions/__init__.py | docs/bugs/generated/web/sessions/__init__.py.md |  | 27.79 | codex exec failed for src/elspeth/web/sessions/__init__.py with code 1\nstderr: OpenAI Codex v0.117.0 (research preview)\n--------\nworkdir: /home/john/elspeth\nmodel: gpt-5.4\nprovider: openai\napproval: n |
+| 2026-03-29T03:38:33+00:00 | failed | src/elspeth/web/dependencies.py | docs/bugs/generated/web/dependencies.py.md |  | 29.39 | codex exec failed for src/elspeth/web/dependencies.py with code 1\nstderr: OpenAI Codex v0.117.0 (research preview)\n--------\nworkdir: /home/john/elspeth\nmodel: gpt-5.4\nprovider: openai\napproval: never\n |
