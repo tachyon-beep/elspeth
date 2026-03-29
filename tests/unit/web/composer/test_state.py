@@ -7,6 +7,7 @@ from typing import Any
 import pytest
 
 from elspeth.web.composer.state import (
+    CompositionState,
     EdgeSpec,
     NodeSpec,
     OutputSpec,
@@ -331,3 +332,617 @@ class TestValidationSummary:
         v = ValidationSummary(is_valid=False, errors=("No source configured.",))
         assert v.is_valid is False
         assert len(v.errors) == 1
+
+
+class TestCompositionState:
+    def _empty_state(self) -> CompositionState:
+        return CompositionState(
+            source=None,
+            nodes=(),
+            edges=(),
+            outputs=(),
+            metadata=PipelineMetadata(),
+            version=1,
+        )
+
+    def _make_source(self) -> SourceSpec:
+        return SourceSpec(
+            plugin="csv",
+            on_success="transform_1",
+            options={"path": "/data/in.csv"},
+            on_validation_failure="quarantine",
+        )
+
+    def _make_node(self, id: str = "transform_1") -> NodeSpec:
+        return NodeSpec(
+            id=id,
+            node_type="transform",
+            plugin="uppercase",
+            input="source_out",
+            on_success="sink_main",
+            on_error=None,
+            options={},
+            condition=None,
+            routes=None,
+            fork_to=None,
+            branches=None,
+            policy=None,
+            merge=None,
+        )
+
+    def _make_edge(self, id: str = "e1") -> EdgeSpec:
+        return EdgeSpec(
+            id=id,
+            from_node="source",
+            to_node="transform_1",
+            edge_type="on_success",
+            label=None,
+        )
+
+    def _make_output(self, name: str = "main_output") -> OutputSpec:
+        return OutputSpec(
+            name=name,
+            plugin="csv",
+            options={"path": "/out.csv"},
+            on_write_failure="quarantine",
+        )
+
+    # --- Immutability ---
+
+    def test_frozen(self) -> None:
+        state = self._empty_state()
+        with pytest.raises(AttributeError):
+            state.version = 2  # type: ignore[misc]
+
+    def test_nodes_tuple_frozen(self) -> None:
+        """nodes is a tuple — cannot append."""
+        state = self._empty_state()
+        assert isinstance(state.nodes, tuple)
+
+    def test_metadata_frozen(self) -> None:
+        """metadata is a frozen dataclass — deep freeze via freeze_fields."""
+        state = self._empty_state()
+        with pytest.raises(AttributeError):
+            state.metadata.name = "mutated"  # type: ignore[misc]
+
+    # --- with_source ---
+
+    def test_with_source_returns_new_instance(self) -> None:
+        state = self._empty_state()
+        src = self._make_source()
+        new_state = state.with_source(src)
+        assert new_state is not state
+        assert new_state.source is src
+        assert state.source is None  # original unchanged
+
+    def test_with_source_increments_version(self) -> None:
+        state = self._empty_state()
+        new_state = state.with_source(self._make_source())
+        assert new_state.version == 2
+
+    # --- with_node ---
+
+    def test_with_node_adds(self) -> None:
+        state = self._empty_state()
+        node = self._make_node()
+        new_state = state.with_node(node)
+        assert len(new_state.nodes) == 1
+        assert new_state.nodes[0].id == "transform_1"
+        assert new_state.version == 2
+
+    def test_with_node_replaces_existing(self) -> None:
+        state = self._empty_state()
+        node1 = self._make_node("t1")
+        node2 = self._make_node("t1")  # same ID
+        state2 = state.with_node(node1)
+        state3 = state2.with_node(node2)
+        assert len(state3.nodes) == 1
+        assert state3.version == 3
+
+    def test_with_node_preserves_order(self) -> None:
+        state = self._empty_state()
+        state = state.with_node(self._make_node("a"))
+        state = state.with_node(self._make_node("b"))
+        state = state.with_node(self._make_node("c"))
+        assert [n.id for n in state.nodes] == ["a", "b", "c"]
+
+    # --- without_node ---
+
+    def test_without_node_removes(self) -> None:
+        state = self._empty_state().with_node(self._make_node("t1"))
+        new_state = state.without_node("t1")
+        assert new_state is not None
+        assert len(new_state.nodes) == 0
+        assert new_state.version == 3
+
+    def test_without_node_nonexistent_returns_none(self) -> None:
+        state = self._empty_state()
+        result = state.without_node("nonexistent")
+        assert result is None
+
+    # --- with_edge ---
+
+    def test_with_edge_adds(self) -> None:
+        state = self._empty_state()
+        edge = self._make_edge()
+        new_state = state.with_edge(edge)
+        assert len(new_state.edges) == 1
+        assert new_state.version == 2
+
+    def test_with_edge_replaces_by_id(self) -> None:
+        state = self._empty_state()
+        e1 = EdgeSpec(id="e1", from_node="source", to_node="t1", edge_type="on_success", label=None)
+        e1_updated = EdgeSpec(id="e1", from_node="source", to_node="t2", edge_type="on_success", label=None)
+        state2 = state.with_edge(e1).with_edge(e1_updated)
+        assert len(state2.edges) == 1
+        assert state2.edges[0].to_node == "t2"
+
+    # --- without_edge ---
+
+    def test_without_edge_removes(self) -> None:
+        state = self._empty_state().with_edge(self._make_edge("e1"))
+        new_state = state.without_edge("e1")
+        assert new_state is not None
+        assert len(new_state.edges) == 0
+
+    def test_without_edge_nonexistent_returns_none(self) -> None:
+        state = self._empty_state()
+        result = state.without_edge("nonexistent")
+        assert result is None
+
+    # --- with_output ---
+
+    def test_with_output_adds(self) -> None:
+        state = self._empty_state()
+        output = self._make_output()
+        new_state = state.with_output(output)
+        assert len(new_state.outputs) == 1
+        assert new_state.version == 2
+
+    def test_with_output_replaces_by_name(self) -> None:
+        state = self._empty_state()
+        o1 = self._make_output("out")
+        o2 = OutputSpec(name="out", plugin="json", options={}, on_write_failure="discard")
+        state2 = state.with_output(o1).with_output(o2)
+        assert len(state2.outputs) == 1
+        assert state2.outputs[0].plugin == "json"
+
+    # --- without_output ---
+
+    def test_without_output_removes(self) -> None:
+        state = self._empty_state().with_output(self._make_output("out"))
+        new_state = state.without_output("out")
+        assert new_state is not None
+        assert len(new_state.outputs) == 0
+
+    def test_without_output_nonexistent_returns_none(self) -> None:
+        result = self._empty_state().without_output("nope")
+        assert result is None
+
+    # --- with_metadata ---
+
+    def test_with_metadata_partial_update(self) -> None:
+        state = self._empty_state()
+        new_state = state.with_metadata({"name": "My Pipeline"})
+        assert new_state.metadata.name == "My Pipeline"
+        assert new_state.metadata.description == ""  # unchanged
+        assert new_state.version == 2
+
+    def test_with_metadata_full_update(self) -> None:
+        state = self._empty_state()
+        new_state = state.with_metadata({"name": "P1", "description": "Desc"})
+        assert new_state.metadata.name == "P1"
+        assert new_state.metadata.description == "Desc"
+
+    # --- to_dict ---
+
+    def test_to_dict_unwraps_frozen_containers(self) -> None:
+        """to_dict() converts MappingProxyType -> dict and tuple -> list."""
+        state = self._empty_state()
+        src = SourceSpec(
+            plugin="csv",
+            on_success="t1",
+            options={"nested": {"k": "v"}},
+            on_validation_failure="discard",
+        )
+        state = state.with_source(src)
+        state = state.with_node(self._make_node("t1"))
+        state = state.with_output(self._make_output("out"))
+
+        d = state.to_dict()
+        assert isinstance(d, dict)
+        assert isinstance(d["nodes"], list)
+        assert isinstance(d["source"]["options"], dict)
+        assert isinstance(d["source"]["options"]["nested"], dict)
+        assert isinstance(d["outputs"], list)
+
+    def test_to_dict_roundtrip_yaml(self) -> None:
+        """to_dict() output is yaml.dump()-safe (no MappingProxyType errors)."""
+        import yaml
+
+        state = self._empty_state()
+        src = SourceSpec(
+            plugin="csv",
+            on_success="t1",
+            options={"nested": {"deep": {"k": "v"}}},
+            on_validation_failure="quarantine",
+        )
+        state = state.with_source(src)
+        d = state.to_dict()
+        yaml_str = yaml.dump(d, default_flow_style=False)
+        assert "csv" in yaml_str
+
+    def test_mutation_refreezes_containers(self) -> None:
+        """Mutation methods must re-freeze since dataclasses.replace() skips __post_init__."""
+        state = self._empty_state()
+        src = SourceSpec(
+            plugin="csv",
+            on_success="t1",
+            options={"nested": {"k": "v"}},
+            on_validation_failure="discard",
+        )
+        new_state = state.with_source(src)
+        assert isinstance(new_state.nodes, tuple)
+        with pytest.raises(TypeError):
+            new_state.source.options["new"] = "x"  # type: ignore[union-attr, index]
+
+    # --- from_dict round-trip ---
+
+    def test_from_dict_round_trip_empty(self) -> None:
+        """Empty state round-trips through to_dict/from_dict."""
+        state = self._empty_state()
+        restored = CompositionState.from_dict(state.to_dict())
+        assert restored == state
+
+    def test_from_dict_round_trip_fully_populated(self) -> None:
+        """Fully populated state round-trips through to_dict/from_dict."""
+        gate = NodeSpec(
+            id="gate_1",
+            node_type="gate",
+            plugin=None,
+            input="source_out",
+            on_success=None,
+            on_error=None,
+            options={},
+            condition="row['score'] >= 0.5",
+            routes={"high": "sink_good", "low": "sink_bad"},
+            fork_to=("path_a", "path_b"),
+            branches=None,
+            policy=None,
+            merge=None,
+        )
+        coalesce = NodeSpec(
+            id="coal_1",
+            node_type="coalesce",
+            plugin=None,
+            input="join_point",
+            on_success="main_output",
+            on_error=None,
+            options={},
+            condition=None,
+            routes=None,
+            fork_to=None,
+            branches=("path_a", "path_b"),
+            policy="require_all",
+            merge="nested",
+        )
+        state = CompositionState(
+            source=SourceSpec(
+                plugin="csv",
+                on_success="transform_1",
+                options={"path": "/data/in.csv", "nested": {"key": "val"}},
+                on_validation_failure="quarantine",
+            ),
+            nodes=(self._make_node("transform_1"), gate, coalesce),
+            edges=(
+                self._make_edge("e1"),
+                EdgeSpec(id="e2", from_node="gate_1", to_node="sink_good", edge_type="route_true", label="high"),
+            ),
+            outputs=(
+                self._make_output("main_output"),
+                OutputSpec(name="sink_good", plugin="json", options={"indent": 2}, on_write_failure="discard"),
+            ),
+            metadata=PipelineMetadata(name="Test Pipeline", description="A fully populated test state"),
+            version=42,
+        )
+        restored = CompositionState.from_dict(state.to_dict())
+        assert restored == state
+
+    def test_from_dict_round_trip_none_optional_fields(self) -> None:
+        """NodeSpec optional fields omitted by to_dict() reconstruct as None."""
+        node = self._make_node("t1")
+        state = self._empty_state().with_node(node)
+        restored = CompositionState.from_dict(state.to_dict())
+        restored_node = restored.nodes[0]
+        assert restored_node.condition is None
+        assert restored_node.routes is None
+        assert restored_node.fork_to is None
+        assert restored_node.branches is None
+        assert restored_node.policy is None
+        assert restored_node.merge is None
+
+    def test_from_dict_containers_are_frozen(self) -> None:
+        """from_dict() output has deep-frozen containers (not plain dicts)."""
+        state = self._empty_state()
+        src = SourceSpec(
+            plugin="csv",
+            on_success="t1",
+            options={"nested": {"k": "v"}},
+            on_validation_failure="discard",
+        )
+        state = state.with_source(src)
+        restored = CompositionState.from_dict(state.to_dict())
+        with pytest.raises(TypeError):
+            restored.source.options["new"] = "x"  # type: ignore[union-attr, index]
+        with pytest.raises(TypeError):
+            restored.source.options["nested"]["mutate"] = "y"  # type: ignore[union-attr, index]
+
+
+class TestStage1Validation:
+    def _empty_state(self) -> CompositionState:
+        return CompositionState(
+            source=None,
+            nodes=(),
+            edges=(),
+            outputs=(),
+            metadata=PipelineMetadata(),
+            version=1,
+        )
+
+    def _make_source(self, on_success: str = "t1") -> SourceSpec:
+        return SourceSpec(
+            plugin="csv",
+            on_success=on_success,
+            options={},
+            on_validation_failure="quarantine",
+        )
+
+    def _make_transform(self, id: str, input: str, on_success: str) -> NodeSpec:
+        return NodeSpec(
+            id=id,
+            node_type="transform",
+            plugin="uppercase",
+            input=input,
+            on_success=on_success,
+            on_error=None,
+            options={},
+            condition=None,
+            routes=None,
+            fork_to=None,
+            branches=None,
+            policy=None,
+            merge=None,
+        )
+
+    def _make_output(self, name: str = "main") -> OutputSpec:
+        return OutputSpec(name=name, plugin="csv", options={}, on_write_failure="discard")
+
+    def _make_edge(
+        self,
+        id: str,
+        from_node: str,
+        to_node: str,
+        edge_type: str = "on_success",
+    ) -> EdgeSpec:
+        return EdgeSpec(id=id, from_node=from_node, to_node=to_node, edge_type=edge_type, label=None)
+
+    def test_empty_state_has_errors(self) -> None:
+        result = self._empty_state().validate()
+        assert not result.is_valid
+        assert "No source configured." in result.errors
+        assert "No sinks configured." in result.errors
+
+    def test_minimal_valid_pipeline(self) -> None:
+        """source -> transform -> sink, fully connected."""
+        state = self._empty_state()
+        state = state.with_source(self._make_source(on_success="t1"))
+        state = state.with_node(self._make_transform("t1", "source_out", "main"))
+        state = state.with_output(self._make_output("main"))
+        state = state.with_edge(self._make_edge("e1", "source", "t1"))
+        state = state.with_edge(self._make_edge("e2", "t1", "main"))
+        result = state.validate()
+        assert result.is_valid, result.errors
+
+    def test_dangling_edge_from_node(self) -> None:
+        state = self._empty_state()
+        state = state.with_source(self._make_source())
+        state = state.with_output(self._make_output())
+        state = state.with_edge(self._make_edge("e1", "nonexistent", "main"))
+        result = state.validate()
+        assert not result.is_valid
+        assert any("nonexistent" in e and "from_node" in e for e in result.errors)
+
+    def test_dangling_edge_to_node(self) -> None:
+        state = self._empty_state()
+        state = state.with_source(self._make_source())
+        state = state.with_output(self._make_output())
+        state = state.with_edge(self._make_edge("e1", "source", "nonexistent"))
+        result = state.validate()
+        assert not result.is_valid
+        assert any("nonexistent" in e and "to_node" in e for e in result.errors)
+
+    def test_duplicate_node_ids(self) -> None:
+        """Two nodes with same id — caught by validation, not by with_node (which replaces)."""
+        node = self._make_transform("dup", "in", "out")
+        state = CompositionState(
+            source=self._make_source(),
+            nodes=(node, node),
+            edges=(),
+            outputs=(self._make_output(),),
+            metadata=PipelineMetadata(),
+            version=1,
+        )
+        result = state.validate()
+        assert not result.is_valid
+        assert any("Duplicate node ID" in e for e in result.errors)
+
+    def test_duplicate_output_names(self) -> None:
+        out = self._make_output("dup")
+        state = CompositionState(
+            source=self._make_source(),
+            nodes=(),
+            edges=(),
+            outputs=(out, out),
+            metadata=PipelineMetadata(),
+            version=1,
+        )
+        result = state.validate()
+        assert not result.is_valid
+        assert any("Duplicate output name" in e for e in result.errors)
+
+    def test_duplicate_edge_ids(self) -> None:
+        edge = self._make_edge("dup", "source", "main")
+        state = CompositionState(
+            source=self._make_source(),
+            nodes=(),
+            edges=(edge, edge),
+            outputs=(self._make_output(),),
+            metadata=PipelineMetadata(),
+            version=1,
+        )
+        result = state.validate()
+        assert not result.is_valid
+        assert any("Duplicate edge ID" in e for e in result.errors)
+
+    def test_gate_missing_condition(self) -> None:
+        gate = NodeSpec(
+            id="g1",
+            node_type="gate",
+            plugin=None,
+            input="in",
+            on_success=None,
+            on_error=None,
+            options={},
+            condition=None,
+            routes={"high": "s1"},
+            fork_to=None,
+            branches=None,
+            policy=None,
+            merge=None,
+        )
+        state = self._empty_state().with_source(self._make_source())
+        state = state.with_output(self._make_output())
+        state = state.with_node(gate)
+        state = state.with_edge(self._make_edge("e1", "source", "g1"))
+        result = state.validate()
+        assert not result.is_valid
+        assert any("condition" in e for e in result.errors)
+
+    def test_gate_missing_routes(self) -> None:
+        gate = NodeSpec(
+            id="g1",
+            node_type="gate",
+            plugin=None,
+            input="in",
+            on_success=None,
+            on_error=None,
+            options={},
+            condition="row['x'] > 1",
+            routes=None,
+            fork_to=None,
+            branches=None,
+            policy=None,
+            merge=None,
+        )
+        state = self._empty_state().with_source(self._make_source())
+        state = state.with_output(self._make_output())
+        state = state.with_node(gate)
+        state = state.with_edge(self._make_edge("e1", "source", "g1"))
+        result = state.validate()
+        assert not result.is_valid
+        assert any("routes" in e for e in result.errors)
+
+    def test_transform_with_condition_is_error(self) -> None:
+        node = NodeSpec(
+            id="t1",
+            node_type="transform",
+            plugin="uppercase",
+            input="in",
+            on_success="out",
+            on_error=None,
+            options={},
+            condition="row['x'] > 1",
+            routes=None,
+            fork_to=None,
+            branches=None,
+            policy=None,
+            merge=None,
+        )
+        state = self._empty_state().with_source(self._make_source())
+        state = state.with_output(self._make_output())
+        state = state.with_node(node)
+        state = state.with_edge(self._make_edge("e1", "source", "t1"))
+        result = state.validate()
+        assert not result.is_valid
+        assert any("condition" in e for e in result.errors)
+
+    def test_coalesce_missing_branches(self) -> None:
+        node = NodeSpec(
+            id="c1",
+            node_type="coalesce",
+            plugin=None,
+            input="join",
+            on_success="out",
+            on_error=None,
+            options={},
+            condition=None,
+            routes=None,
+            fork_to=None,
+            branches=None,
+            policy="require_all",
+            merge="nested",
+        )
+        state = self._empty_state().with_source(self._make_source())
+        state = state.with_output(self._make_output())
+        state = state.with_node(node)
+        state = state.with_edge(self._make_edge("e1", "source", "c1"))
+        result = state.validate()
+        assert not result.is_valid
+        assert any("branches" in e for e in result.errors)
+
+    def test_aggregation_missing_plugin(self) -> None:
+        node = NodeSpec(
+            id="a1",
+            node_type="aggregation",
+            plugin=None,
+            input="in",
+            on_success="out",
+            on_error=None,
+            options={},
+            condition=None,
+            routes=None,
+            fork_to=None,
+            branches=None,
+            policy=None,
+            merge=None,
+        )
+        state = self._empty_state().with_source(self._make_source())
+        state = state.with_output(self._make_output())
+        state = state.with_node(node)
+        state = state.with_edge(self._make_edge("e1", "source", "a1"))
+        result = state.validate()
+        assert not result.is_valid
+        assert any("plugin" in e for e in result.errors)
+
+    def test_unreachable_node(self) -> None:
+        """Node exists but no edge points to it and source.on_success doesn't match."""
+        state = self._empty_state()
+        state = state.with_source(self._make_source(on_success="other"))
+        state = state.with_node(self._make_transform("t1", "somewhere", "main"))
+        state = state.with_output(self._make_output())
+        result = state.validate()
+        assert not result.is_valid
+        assert any("not reachable" in e for e in result.errors)
+
+    def test_validate_after_from_dict_round_trip(self) -> None:
+        """W-4A-2: validate() on reconstructed state matches original."""
+        state = self._empty_state()
+        state = state.with_source(self._make_source(on_success="t1"))
+        state = state.with_node(self._make_transform("t1", "source_out", "main"))
+        state = state.with_output(self._make_output("main"))
+        state = state.with_edge(self._make_edge("e1", "source", "t1"))
+        state = state.with_edge(self._make_edge("e2", "t1", "main"))
+
+        restored = CompositionState.from_dict(state.to_dict())
+        result = restored.validate()
+        assert result.is_valid, result.errors
