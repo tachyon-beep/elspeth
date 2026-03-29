@@ -2,11 +2,11 @@
 
 from __future__ import annotations
 
-import asyncio
 import io
 import uuid
 from pathlib import Path
 
+import pytest
 from fastapi import FastAPI
 from sqlalchemy import create_engine
 from sqlalchemy.pool import StaticPool
@@ -293,25 +293,20 @@ class TestStateRoutes:
 class TestRevertEndpoint:
     """Tests for POST /api/sessions/{id}/state/revert (R1)."""
 
-    def test_revert_creates_new_version(self, tmp_path) -> None:
+    @pytest.mark.asyncio
+    async def test_revert_creates_new_version(self, tmp_path) -> None:
         app, service = _make_app(tmp_path)
         client = TestClient(app)
 
         # Create session and two state versions via the service
-        session = asyncio.run(
-            service.create_session("alice", "Pipeline", "local"),
+        session = await service.create_session("alice", "Pipeline", "local")
+        v1 = await service.save_composition_state(
+            session.id,
+            CompositionStateData(source={"type": "csv"}, is_valid=True),
         )
-        v1 = asyncio.run(
-            service.save_composition_state(
-                session.id,
-                CompositionStateData(source={"type": "csv"}, is_valid=True),
-            ),
-        )
-        asyncio.run(
-            service.save_composition_state(
-                session.id,
-                CompositionStateData(source={"type": "api"}, is_valid=True),
-            ),
+        await service.save_composition_state(
+            session.id,
+            CompositionStateData(source={"type": "api"}, is_valid=True),
         )
 
         # Revert to v1
@@ -327,24 +322,19 @@ class TestRevertEndpoint:
         # Lineage: new version derives from v1
         assert body["derived_from_state_id"] == str(v1.id)
 
-    def test_revert_injects_system_message(self, tmp_path) -> None:
+    @pytest.mark.asyncio
+    async def test_revert_injects_system_message(self, tmp_path) -> None:
         app, service = _make_app(tmp_path)
         client = TestClient(app)
 
-        session = asyncio.run(
-            service.create_session("alice", "Pipeline", "local"),
+        session = await service.create_session("alice", "Pipeline", "local")
+        v1 = await service.save_composition_state(
+            session.id,
+            CompositionStateData(is_valid=True),
         )
-        v1 = asyncio.run(
-            service.save_composition_state(
-                session.id,
-                CompositionStateData(is_valid=True),
-            ),
-        )
-        asyncio.run(
-            service.save_composition_state(
-                session.id,
-                CompositionStateData(is_valid=True),
-            ),
+        await service.save_composition_state(
+            session.id,
+            CompositionStateData(is_valid=True),
         )
 
         client.post(
@@ -359,7 +349,8 @@ class TestRevertEndpoint:
         assert len(system_msgs) == 1
         assert system_msgs[0]["content"] == "Pipeline reverted to version 1."
 
-    def test_revert_idor_protection(self, tmp_path) -> None:
+    @pytest.mark.asyncio
+    async def test_revert_idor_protection(self, tmp_path) -> None:
         """Revert to a state in another user's session returns 404."""
         engine = create_engine(
             "sqlite:///:memory:",
@@ -386,14 +377,10 @@ class TestRevertEndpoint:
         bob_client = TestClient(bob_app)
 
         # Alice creates a session with a state
-        session = asyncio.run(
-            service.create_session("alice", "Alice Only", "local"),
-        )
-        v1 = asyncio.run(
-            service.save_composition_state(
-                session.id,
-                CompositionStateData(is_valid=True),
-            ),
+        session = await service.create_session("alice", "Alice Only", "local")
+        v1 = await service.save_composition_state(
+            session.id,
+            CompositionStateData(is_valid=True),
         )
 
         # Bob tries to revert -- should be 404
@@ -403,22 +390,17 @@ class TestRevertEndpoint:
         )
         assert resp.status_code == 404
 
-    def test_revert_state_not_belonging_to_session(self, tmp_path) -> None:
+    @pytest.mark.asyncio
+    async def test_revert_state_not_belonging_to_session(self, tmp_path) -> None:
         """Revert with a state_id from a different session returns 404."""
         app, service = _make_app(tmp_path)
         client = TestClient(app)
 
-        s1 = asyncio.run(
-            service.create_session("alice", "Session 1", "local"),
-        )
-        s2 = asyncio.run(
-            service.create_session("alice", "Session 2", "local"),
-        )
-        v1_s2 = asyncio.run(
-            service.save_composition_state(
-                s2.id,
-                CompositionStateData(is_valid=True),
-            ),
+        s1 = await service.create_session("alice", "Session 1", "local")
+        s2 = await service.create_session("alice", "Session 2", "local")
+        v1_s2 = await service.save_composition_state(
+            s2.id,
+            CompositionStateData(is_valid=True),
         )
 
         # Try to revert s1 using s2's state -- should fail
@@ -550,19 +532,16 @@ class TestUploadRoute:
 class TestYamlStubEndpoint:
     """Tests for GET /api/sessions/{id}/state/yaml (501 stub for Sub-4)."""
 
-    def test_yaml_returns_501_when_state_exists(self, tmp_path) -> None:
+    @pytest.mark.asyncio
+    async def test_yaml_returns_501_when_state_exists(self, tmp_path) -> None:
         """Stub returns 501 until Sub-4 implements generate_yaml()."""
         app, service = _make_app(tmp_path)
         client = TestClient(app)
 
-        session = asyncio.run(
-            service.create_session("alice", "Pipeline", "local"),
-        )
-        asyncio.run(
-            service.save_composition_state(
-                session.id,
-                CompositionStateData(source={"type": "csv"}, is_valid=True),
-            ),
+        session = await service.create_session("alice", "Pipeline", "local")
+        await service.save_composition_state(
+            session.id,
+            CompositionStateData(source={"type": "csv"}, is_valid=True),
         )
 
         resp = client.get(f"/api/sessions/{session.id}/state/yaml")
@@ -589,23 +568,20 @@ class TestRunAlreadyActiveError:
     app-level exception propagation to verify the contract.
     """
 
-    def test_run_already_active_returns_409(self, tmp_path) -> None:
+    @pytest.mark.asyncio
+    async def test_run_already_active_returns_409(self, tmp_path) -> None:
         """RunAlreadyActiveError produces 409 with error_type field."""
         from elspeth.web.sessions.protocol import RunAlreadyActiveError
 
         app, service = _make_app(tmp_path)
 
-        session = asyncio.run(
-            service.create_session("alice", "Pipeline", "local"),
-        )
-        v1 = asyncio.run(
-            service.save_composition_state(
-                session.id,
-                CompositionStateData(is_valid=True),
-            ),
+        session = await service.create_session("alice", "Pipeline", "local")
+        v1 = await service.save_composition_state(
+            session.id,
+            CompositionStateData(is_valid=True),
         )
         # Create a run to block the session
-        asyncio.run(service.create_run(session.id, v1.id))
+        await service.create_run(session.id, v1.id)
 
         # Register the app-level exception handler (wired in create_app,
         # but our test app uses create_session_router directly). Wire it here.
@@ -637,18 +613,15 @@ class TestRunAlreadyActiveError:
 class TestNewStateHasNoLineage:
     """Test that fresh composition states have null derived_from_state_id."""
 
-    def test_fresh_state_has_null_derived_from(self, tmp_path) -> None:
+    @pytest.mark.asyncio
+    async def test_fresh_state_has_null_derived_from(self, tmp_path) -> None:
         app, service = _make_app(tmp_path)
         client = TestClient(app)
 
-        session = asyncio.run(
-            service.create_session("alice", "Pipeline", "local"),
-        )
-        asyncio.run(
-            service.save_composition_state(
-                session.id,
-                CompositionStateData(source={"type": "csv"}, is_valid=True),
-            ),
+        session = await service.create_session("alice", "Pipeline", "local")
+        await service.save_composition_state(
+            session.id,
+            CompositionStateData(source={"type": "csv"}, is_valid=True),
         )
 
         resp = client.get(f"/api/sessions/{session.id}/state")
@@ -731,19 +704,16 @@ class TestPaginationRoutes:
         resp = client.get(f"/api/sessions/{session_id}/messages?limit=501")
         assert resp.status_code == 422
 
-    def test_get_state_versions_pagination(self, tmp_path) -> None:
+    @pytest.mark.asyncio
+    async def test_get_state_versions_pagination(self, tmp_path) -> None:
         app, service = _make_app(tmp_path)
         client = TestClient(app)
 
-        session = asyncio.run(
-            service.create_session("alice", "Pipeline", "local"),
-        )
+        session = await service.create_session("alice", "Pipeline", "local")
         for _ in range(5):
-            asyncio.run(
-                service.save_composition_state(
-                    session.id,
-                    CompositionStateData(is_valid=False),
-                ),
+            await service.save_composition_state(
+                session.id,
+                CompositionStateData(is_valid=False),
             )
 
         resp = client.get(
