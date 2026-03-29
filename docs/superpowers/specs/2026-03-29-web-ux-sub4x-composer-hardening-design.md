@@ -10,11 +10,16 @@
 
 ## Overview
 
-Five post-review findings from the Sub-Plan 4 Composer. One P1 bug (partial state
-loss on convergence failure), three P2 issues (turn budget scaling, rate limiting
-not enforced, edge insertion order), and one P3 hygiene task (tool dispatcher
-pattern). All five are scoped to the `web/composer/` module and its route handler;
-none require changes to Sub-Plans 1-3 or the core engine.
+Five post-review findings from the Sub-Plan 4 Composer, plus eight cross-cutting
+hardening fixes from multi-reviewer feedback. One P1 bug (partial state loss on
+convergence failure), three P2 issues (turn budget scaling, rate limiting not
+enforced, edge insertion order), and one P3 hygiene task (tool dispatcher pattern).
+Hardening additions: discovery cache scoping (local variable, not instance field),
+`get_current_state` cache exclusion, convergence handler persistence/validation
+guards, rate limiter `Depends()` wiring and per-user locks, budget-at-classification
+loop guard, server timeout ordering, `freeze_fields` on exception dataclass, and
+multi-worker documentation. All changes are scoped to the `web/composer/` module
+and its route handler; none require changes to Sub-Plans 1-3 or the core engine.
 
 ---
 
@@ -68,20 +73,42 @@ auditable.
 `max_discovery_turns` from settings instead of `max_turns`.
 
 **`ComposerServiceImpl.compose`:** Replace the single `range(self._max_turns)` loop
-with a dual-counter loop. Track `composition_turns_used` and
-`discovery_turns_used` separately. On convergence failure, report which budget
-was exhausted.
+with a `while True` loop that checks budget exhaustion at classification time
+after each turn. Track `composition_turns_used` and `discovery_turns_used`
+separately. Do NOT use a conjunctive `while composition < max AND discovery < max`
+guard -- that exits the loop when either budget is exhausted, even if the other
+budget still has capacity and the current turn would charge the non-exhausted
+budget. Instead, after classifying each turn's tool calls, check whether the
+budget that would be charged is exhausted. Exit only when the specific budget
+being charged has no remaining capacity. On convergence failure, report which
+budget was exhausted.
 
-**`ComposerServiceImpl._discovery_cache`:** A `dict[str, Any]` keyed by a cache
-key derived from the tool name + arguments. Populated on first call, returned on
-subsequent calls. Cleared on each `compose()` invocation (cache is per-request,
-not per-session -- plugin catalog could change between requests).
+**`_CACHEABLE_DISCOVERY_TOOLS`:** A `frozenset` at module level containing only:
+`list_sources`, `list_transforms`, `list_sinks`, `get_plugin_schema`,
+`get_expression_grammar`. `get_current_state` is explicitly excluded -- it returns
+live state that changes with every mutation, so caching it would return stale
+snapshots. `get_current_state` remains in `_DISCOVERY_TOOLS` for budget
+classification purposes (it is a discovery turn, not a composition turn), but the
+cache check uses `_CACHEABLE_DISCOVERY_TOOLS` membership, not `_DISCOVERY_TOOLS`.
+
+**Discovery cache as local variable:** The cache is a `dict[str, Any]` local
+variable allocated at the top of `compose()`, keyed by a cache key derived from
+the tool name + arguments. It is threaded through helper methods as a parameter
+rather than stored as `self._discovery_cache`. This eliminates the
+concurrent-request race condition that would exist with an instance field -- two
+concurrent `compose()` calls on the same service instance each get their own
+independent cache dict. The cache is inherently per-request since it is a local
+variable scoped to the `compose()` call.
 
 **Discovery cache resolution:** Before calling the LLM, the service does NOT
 intercept tool calls. After the LLM responds with tool calls, before executing
-each tool, the service checks the cache. If the call is a cached discovery tool,
-the cached result is returned as the tool message and neither budget counter is
-incremented. The LLM still "sees" the result as a normal tool response.
+each tool, the service checks `_CACHEABLE_DISCOVERY_TOOLS` membership. If the
+tool is cacheable and the cache key exists, the cached result is returned as the
+tool message and neither budget counter is incremented. If the tool is cacheable
+but not yet cached, the result is executed, cached, and the discovery counter is
+incremented. `get_current_state` calls always execute (not cacheable) but still
+count against the discovery budget. The LLM still "sees" all results as normal
+tool responses.
 
 **`ComposerConvergenceError`:** Add `budget_exhausted: str` field ("composition"
 or "discovery") so the error message tells the user which limit was hit. The HTTP
@@ -90,7 +117,17 @@ or "discovery") so the error message tells the user which limit was hit. The HTT
 **WebSettings:** Replace `composer_max_turns: int = 20` with
 `composer_max_composition_turns: int = 15` and
 `composer_max_discovery_turns: int = 10`. Total possible turns = 25, but in
-practice caching means discovery turns are rarely consumed.
+practice caching means discovery turns are rarely consumed. Add
+`composer_timeout_seconds: float = 85.0` -- this must be strictly less than the
+frontend's 90-second timeout so the server returns a structured error before the
+frontend's fetch aborts. The timeout is enforced via `asyncio.wait_for()` around
+the compose loop. On timeout, raise `ComposerConvergenceError` with
+`budget_exhausted="timeout"`. **Timeout ordering:** frontend (90s) > server
+compose timeout (85s) > individual LLM call timeout (set by LiteLLM, typically
+30s). The server timeout catches runaway loops; the frontend timeout catches
+server hangs. Multi-worker note: rate limiting is per-process; deployments with
+multiple uvicorn workers require a shared store (e.g., Redis) for accurate
+cross-process rate limiting.
 
 **Backward compatibility:** Not applicable (CLAUDE.md: no legacy code policy).
 Remove `composer_max_turns` entirely.
@@ -131,9 +168,11 @@ Route handler:
 ### Fix
 
 **`ComposerConvergenceError`:** Add a `partial_state: CompositionState | None`
-field. The composer loop tracks the last state where `version > initial_version`
-(i.e., at least one successful mutation occurred). On convergence failure, this
-state is attached to the exception.
+field. When `partial_state` is not `None`, `__post_init__` must call
+`freeze_fields(self, "partial_state")` to satisfy the frozen dataclass
+immutability contract (CLAUDE.md: deep_freeze). The composer loop tracks the last
+state where `version > initial_version` (i.e., at least one successful mutation
+occurred). On convergence failure, this state is attached to the exception.
 
 **`ComposerServiceImpl.compose`:** Before raising `ComposerConvergenceError`,
 set `partial_state` to the current `state` variable if it differs from the input
@@ -164,14 +203,34 @@ except ComposerConvergenceError as exc:
         "budget_exhausted": exc.budget_exhausted,
     }
     if exc.partial_state is not None:
-        summary = exc.partial_state.validate()
-        await session_service.save_composition_state(
-            session_id,
-            CompositionStateData.from_state(exc.partial_state, summary),
-        )
-        response_body["partial_state"] = CompositionStateResponse.from_state(
-            exc.partial_state, summary
-        ).dict()
+        # Validate guard: if validation itself fails, persist with
+        # is_valid=False rather than losing the state entirely.
+        try:
+            summary = exc.partial_state.validate()
+        except Exception:
+            summary = ValidationSummary(is_valid=False, errors=["validation_failed"])
+
+        # Persistence guard: if save fails, log the error and return
+        # 422 without partial_state rather than crashing to 500.
+        try:
+            await session_service.save_composition_state(
+                session_id,
+                CompositionStateData.from_state(exc.partial_state, summary),
+            )
+            # Persistence succeeded: partial state is now the current
+            # version (advances the session state). Include it in the
+            # response so the frontend can display the partial pipeline.
+            response_body["partial_state"] = CompositionStateResponse.from_state(
+                exc.partial_state, summary
+            ).dict()
+        except Exception:
+            slog.error(
+                "convergence_partial_state_save_failed",
+                session_id=session_id,
+                exc_info=True,
+            )
+            # Do NOT include partial_state in response -- it was not
+            # persisted, so the frontend cannot resume from it.
     raise HTTPException(status_code=422, detail=response_body)
 ```
 
@@ -184,9 +243,13 @@ independently correct.
 ### Data Model Implications
 
 `ComposerConvergenceError` gains two fields (`partial_state`, `budget_exhausted`).
-This is a breaking change to the exception class, which is fine -- no legacy code
-policy applies. The 422 error body gains an optional `partial_state` field and a
-`budget_exhausted` field. The seam contracts document (Seam B) must be updated.
+`budget_exhausted` is one of `"composition"`, `"discovery"`, or `"timeout"`. When
+`partial_state` is not `None`, `__post_init__` calls
+`freeze_fields(self, "partial_state")` per the frozen dataclass immutability
+contract. This is a breaking change to the exception class, which is fine -- no
+legacy code policy applies. The 422 error body gains an optional `partial_state`
+field and a `budget_exhausted` field. The seam contracts document (Seam B) must be
+updated.
 
 ---
 
@@ -230,34 +293,66 @@ class ComposerRateLimiter:
     timestamps older than 60 seconds, then checks count against limit.
     Returns 429 if exceeded.
 
-    Thread-safe: uses a lock per user bucket. Async-safe: the lock is
-    an asyncio.Lock, not threading.Lock (FastAPI is single-threaded
-    async in the default uvicorn config).
+    Uses per-user asyncio.Lock instances to avoid contention between
+    unrelated users. asyncio.Lock guards coroutine suspension points
+    (e.g., between the prune-check-append sequence where another
+    coroutine could interleave), not thread safety. A top-level
+    _locks_lock (held for microseconds -- dict lookup only) serializes
+    creation/fetch of per-user locks.
     """
 
     def __init__(self, limit: int) -> None:
         self._limit = limit
         self._buckets: dict[str, list[float]] = {}
-        self._lock = asyncio.Lock()
+        self._user_locks: dict[str, asyncio.Lock] = {}
+        self._locks_lock = asyncio.Lock()
+
+    async def _get_user_lock(self, user_id: str) -> asyncio.Lock:
+        """Get or create a lock for the given user."""
+        async with self._locks_lock:
+            if user_id not in self._user_locks:
+                self._user_locks[user_id] = asyncio.Lock()
+            return self._user_locks[user_id]
 
     async def check(self, user_id: str) -> None:
         """Raise HTTPException(429) if rate limit exceeded."""
-        ...
+        lock = await self._get_user_lock(user_id)
+        async with lock:
+            ...
 ```
 
-**Route wiring:** The `POST /api/sessions/{id}/messages` route handler calls
-`rate_limiter.check(request.state.user.id)` before calling
-`composer_service.compose()`. The `ComposerRateLimiter` instance is created in the
-app factory lifespan using `settings.composer_rate_limit_per_minute` and stored on
-`app.state`.
+**Route wiring via `Depends()`:** The rate limiter is wired as a FastAPI
+dependency, matching the existing `Depends(get_current_user)` pattern. The
+`ComposerRateLimiter` instance is created in the app factory lifespan using
+`settings.composer_rate_limit_per_minute` and stored on `app.state`. A
+`get_rate_limiter` dependency function extracts it:
+
+```python
+async def get_rate_limiter(request: Request) -> ComposerRateLimiter:
+    return request.app.state.rate_limiter
+
+@router.post("/api/sessions/{session_id}/messages")
+async def post_message(
+    session_id: str,
+    body: ComposeRequest,
+    user: User = Depends(get_current_user),
+    rate_limiter: ComposerRateLimiter = Depends(get_rate_limiter),
+    ...
+):
+    await rate_limiter.check(user.id)
+    ...
+```
 
 **429 response body:** `{"error_type": "rate_limited", "detail": "Rate limit exceeded. Try again in N seconds.", "retry_after": N}`. The `Retry-After` HTTP
 header is also set.
 
 **No persistence:** The counter lives in memory. On server restart, all counters
-reset. This is acceptable for MVP (2-5 users). If multi-process deployment is
-needed later, move to Redis counters -- the `ComposerRateLimiter` interface does
-not change.
+reset. This is acceptable for MVP (2-5 users). Rate limiting is per-process: if
+the server runs with multiple uvicorn workers, each worker has its own counter and
+the effective limit is `N * limit` across the cluster. Multi-worker deployments
+need Redis or an equivalent shared store for accurate cross-process rate limiting.
+This limitation must be documented in the `WebSettings` docstring. The
+`ComposerRateLimiter` interface does not change when moving to Redis.
 
 ---
 
@@ -343,6 +438,18 @@ _DISCOVERY_TOOLS: dict[str, ToolHandler] = {
     "get_current_state": _handle_get_current_state,
 }
 
+# Only these discovery tools are safe to cache. get_current_state returns
+# live state that changes with every mutation -- caching it would return
+# stale snapshots. Budget classification still uses _DISCOVERY_TOOLS
+# (get_current_state IS a discovery turn for budget purposes).
+_CACHEABLE_DISCOVERY_TOOLS: frozenset[str] = frozenset({
+    "list_sources",
+    "list_transforms",
+    "list_sinks",
+    "get_plugin_schema",
+    "get_expression_grammar",
+})
+
 _MUTATION_TOOLS: dict[str, ToolHandler] = {
     "set_source": _execute_set_source,
     "upsert_node": _execute_upsert_node,
@@ -362,12 +469,18 @@ def execute_tool(
     if handler is None:
         return _failure_result(state, f"Unknown tool: {tool_name}")
     return handler(arguments, state, catalog)
+
+def is_cacheable_discovery_tool(name: str) -> bool:
+    return name in _CACHEABLE_DISCOVERY_TOOLS
 ```
 
-**Why two registries instead of one:** The discovery/mutation split matters for
-Finding 1's dual-counter budget. The compose loop needs to know whether a tool
+**Why two registries plus a cacheable set:** The discovery/mutation split matters
+for Finding 1's dual-counter budget. The compose loop needs to know whether a tool
 call is discovery or mutation to decide which counter to increment. Exposing
-`is_discovery_tool(name: str) -> bool` is trivial with separate registries.
+`is_discovery_tool(name: str) -> bool` is trivial with separate registries. The
+`_CACHEABLE_DISCOVERY_TOOLS` frozenset is the subset safe for caching -- the cache
+check uses this, not `_DISCOVERY_TOOLS`, because `get_current_state` must never be
+cached.
 
 ### Migration Approach
 
@@ -389,14 +502,14 @@ The handler functions already exist. The refactoring is mechanical:
 | Action | Path | Finding(s) |
 |--------|------|------------|
 | Modify | `src/elspeth/web/composer/state.py` | F4: `with_edge()` insertion order fix |
-| Modify | `src/elspeth/web/composer/tools.py` | F5: tool registry refactor, F1: `is_discovery_tool()` |
-| Modify | `src/elspeth/web/composer/service.py` | F1: dual-counter loop + discovery cache, F2: partial state on convergence |
+| Modify | `src/elspeth/web/composer/tools.py` | F5: tool registry refactor, F1: `is_discovery_tool()` + `_CACHEABLE_DISCOVERY_TOOLS` frozenset |
+| Modify | `src/elspeth/web/composer/service.py` | F1: dual-counter loop + local discovery cache + `asyncio.wait_for()` timeout, F2: partial state on convergence |
 | Modify | `src/elspeth/web/composer/protocol.py` | F1+F2: `ComposerConvergenceError` gains `partial_state` and `budget_exhausted` |
 | Create | `src/elspeth/web/middleware/__init__.py` | F3: module init |
 | Create | `src/elspeth/web/middleware/rate_limit.py` | F3: `ComposerRateLimiter` |
 | Modify | `src/elspeth/web/sessions/routes.py` | F2: partial state persistence on convergence, F3: rate limiter wiring |
 | Modify | `src/elspeth/web/app.py` (or equivalent app factory) | F3: `ComposerRateLimiter` instantiation in lifespan |
-| Modify | `src/elspeth/web/settings.py` (WebSettings) | F1: replace `composer_max_turns` with dual settings |
+| Modify | `src/elspeth/web/settings.py` (WebSettings) | F1: replace `composer_max_turns` with dual settings + `composer_timeout_seconds` (85.0) |
 | Modify | `tests/unit/web/composer/test_state.py` | F4: `test_with_edge_preserves_order` |
 | Modify | `tests/unit/web/composer/test_tools.py` | F5: verify registry dispatch matches if-chain behaviour |
 | Modify | `tests/unit/web/composer/test_service.py` | F1: dual-counter tests, F2: partial state on convergence |
@@ -421,7 +534,7 @@ changes to Sub-Plans 1-3 are required.
 | `composer/protocol.py` | F1+F2 add fields to `ComposerConvergenceError`. The route handler in `sessions/routes.py` must be updated to handle the new fields. |
 | `middleware/rate_limit.py` | New module. No existing code is affected. The route handler gains a dependency injection call. |
 | `sessions/routes.py` | F2 and F3 add new logic to the convergence error handler and the message endpoint respectively. These are additive changes within the existing route function. |
-| `settings.py` (WebSettings) | F1 replaces one field with two. Any code reading `composer_max_turns` breaks at import time (no silent failures). Only `ComposerServiceImpl.__init__` reads this field. |
+| `settings.py` (WebSettings) | F1 replaces one field with two budget fields and adds `composer_timeout_seconds` (default 85.0). Any code reading `composer_max_turns` breaks at import time (no silent failures). Only `ComposerServiceImpl.__init__` reads these fields. The 85.0s default is intentionally less than the frontend's 90s timeout -- see timeout ordering note in the WebSettings section. Multi-worker deployments need Redis for accurate cross-process rate limiting (documented in the WebSettings docstring). |
 
 ### Seam Contract Updates
 
@@ -435,39 +548,68 @@ The frontend already handles 422 responses; it needs to be updated to check for
 
 ## Acceptance Criteria
 
-1. Discovery tool results (list_sources, list_transforms, list_sinks,
-   get_plugin_schema, get_expression_grammar) are cached per-compose-call.
-   Repeated calls with the same arguments return the cached result without
-   incrementing any turn counter.
+1. Cacheable discovery tool results (list_sources, list_transforms, list_sinks,
+   get_plugin_schema, get_expression_grammar) are cached per-compose-call in a
+   local `dict` variable, not an instance field. `get_current_state` is explicitly
+   excluded from caching (returns live mutable state). Repeated cacheable calls
+   with the same arguments return the cached result without incrementing any turn
+   counter.
 
 2. The compose loop tracks composition turns and discovery turns separately.
+   Budget exhaustion is checked at classification time after each turn -- the loop
+   exits only when the specific budget being charged has no remaining capacity
+   (not a conjunctive `while A < max AND B < max` guard).
    `ComposerConvergenceError` reports which budget was exhausted.
 
-3. `WebSettings` exposes `composer_max_composition_turns` (default 15) and
-   `composer_max_discovery_turns` (default 10). The old `composer_max_turns`
+3. `WebSettings` exposes `composer_max_composition_turns` (default 15),
+   `composer_max_discovery_turns` (default 10), and `composer_timeout_seconds`
+   (default 85.0, enforced via `asyncio.wait_for()`). The 85.0s default is
+   strictly less than the frontend's 90s timeout. The old `composer_max_turns`
    field is removed entirely.
 
 4. On convergence failure, if any mutations were applied, the last valid
    `CompositionState` is attached to `ComposerConvergenceError.partial_state`
-   and persisted by the route handler before returning the 422 response.
+   and persisted by the route handler before returning the 422 response. If
+   `partial_state.validate()` raises, the state is persisted with
+   `is_valid=False` rather than being lost. If `save_composition_state()` fails,
+   the error is logged and the 422 response omits `partial_state` (no crash to
+   500).
 
-5. The 422 convergence error response body includes `budget_exhausted` (str)
-   and optionally `partial_state` (CompositionStateResponse dict or null).
+5. The 422 convergence error response body includes `budget_exhausted` (str, one
+   of "composition", "discovery", or "timeout") and optionally `partial_state`
+   (CompositionStateResponse dict or null).
 
 6. `POST /api/sessions/{id}/messages` enforces per-user rate limiting using
-   `WebSettings.composer_rate_limit_per_minute`. Returns HTTP 429 with
-   `Retry-After` header when the limit is exceeded.
+   `WebSettings.composer_rate_limit_per_minute`. The rate limiter is wired as a
+   FastAPI `Depends()` dependency, matching the existing `Depends(get_current_user)`
+   pattern. Returns HTTP 429 with `Retry-After` header when the limit is exceeded.
 
 7. `CompositionState.with_edge()` preserves insertion order on update (replace
    in-place), consistent with `with_node()`. A test verifies this property.
 
 8. `execute_tool()` dispatches via a registry dict, not an if-chain. Two
-   registries (`_DISCOVERY_TOOLS`, `_MUTATION_TOOLS`) support the
-   `is_discovery_tool()` query needed by the dual-counter loop.
+   registries (`_DISCOVERY_TOOLS`, `_MUTATION_TOOLS`) plus a
+   `_CACHEABLE_DISCOVERY_TOOLS` frozenset support both `is_discovery_tool()` and
+   `is_cacheable_discovery_tool()` queries.
 
-9. All existing Sub-Plan 4 tests continue to pass. New tests cover: dual-counter
-   convergence, partial state preservation, rate limiter allow/deny, edge order
-   preservation, and registry dispatch for all 12 tools.
+9. `ComposerConvergenceError` calls `freeze_fields(self, "partial_state")` in
+   `__post_init__` when `partial_state` is not `None`, per the frozen dataclass
+   immutability contract.
 
-10. `with_output()` is audited for the same insertion-order bug as `with_edge()`.
+10. `ComposerRateLimiter` uses per-user `asyncio.Lock` instances (not a single
+    global lock). A `_locks_lock` held for microseconds serializes lock
+    creation/fetch. The docstring correctly describes asyncio.Lock as guarding
+    coroutine suspension points, not thread safety.
+
+11. All existing Sub-Plan 4 tests continue to pass. New tests cover: dual-counter
+    convergence (including budget-at-classification-time semantics), partial state
+    preservation (including validate failure and persistence failure paths), rate
+    limiter allow/deny, edge order preservation, timeout enforcement, and registry
+    dispatch for all 12 tools.
+
+12. `with_output()` is audited for the same insertion-order bug as `with_edge()`.
     If the bug exists, it is fixed with the same pattern.
+
+13. `WebSettings` docstring documents that rate limiting is per-process;
+    multi-worker deployments require Redis or equivalent shared store for
+    cross-process accuracy.
