@@ -251,7 +251,7 @@ allowed_dict_patterns:
   - "src/elspeth/plugins/infrastructure/base.py:BaseSink._divert_row:row_data"
 
   # Plugin validation dispatcher — config is user YAML (Tier 3 boundary)
-  - "src/elspeth/plugins/infrastructure/validation.py:PluginConfigValidator._get_transform_config_model:config"
+  - "src/elspeth/plugins/infrastructure/validation.py:PluginConfigValidator.get_transform_config_model:config"
 
   # ═══════════════════════════════════════════════════════════════════════════
   # AZURE PLUGINS - External cloud service trust boundary
@@ -441,4 +441,3 @@ allowed_dict_patterns:
   # WEB AUTH — Session service protocol
   # tool_calls is pipeline composition data (Tier 2 — user-defined graph structure).
   # ═══════════════════════════════════════════════════════════════════════════
-  - "src/elspeth/web/sessions/protocol.py:SessionServiceProtocol.add_message:tool_calls"

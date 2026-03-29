@@ -198,29 +198,16 @@ allow_hits:
   expires: null
 
 # Auth routes — @router.get() false positives (FastAPI route decorators, not dict.get)
-- key: web/auth/routes.py:R1:create_auth_router:auth_config:fp=082ca992116be396
+- key: web/auth/routes.py:R1:create_auth_router:auth_config:fp=3f8fc32990ce6112
   owner: web-auth
   reason: "False positive — @router.get() is FastAPI HTTP route decorator, not dict.get()"
   safety: No dict access involved; decorator syntax triggers text-based pattern match
   expires: null
 
-- key: web/auth/routes.py:R1:create_auth_router:me:fp=92915d8d86aae15f
+- key: web/auth/routes.py:R1:create_auth_router:me:fp=4db7c70c9126b330
   owner: web-auth
   reason: "False positive — @router.get() is FastAPI HTTP route decorator, not dict.get()"
   safety: No dict access involved; decorator syntax triggers text-based pattern match
-  expires: null
-
-# Auth routes — isinstance() for route dispatch (narrows AuthProvider to LocalAuthProvider)
-- key: web/auth/routes.py:R5:create_auth_router:login:fp=e28a1843fa68a647
-  owner: web-auth
-  reason: "Route dispatch — narrows AuthProvider to LocalAuthProvider for local-only endpoints"
-  safety: "Non-local providers return 404; isinstance enables mypy type narrowing for login()/refresh()"
-  expires: null
-
-- key: web/auth/routes.py:R5:create_auth_router:refresh_token:fp=c5c9aafff36b7e51
-  owner: web-auth
-  reason: "Route dispatch — narrows AuthProvider to LocalAuthProvider for local-only endpoints"
-  safety: "Non-local providers return 404; isinstance enables mypy type narrowing for login()/refresh()"
   expires: null
 
 # SessionServiceImpl — _unwrap_envelope checks envelope structure (Tier 1 read boundary)
@@ -231,13 +218,13 @@ allow_hits:
   expires: null
 
 # App factory — @app.get() false positive (moved health route)
-- key: web/app.py:R1:create_app:fp=1fc678e07ca95b6c
+- key: web/app.py:R1:create_app:fp=c6dd2f57f3279528
   owner: web-app
-  reason: "False positive — list comprehension/return triggers text-based pattern match"
-  safety: No dict access involved
+  reason: "Tier 3 boundary — os.environ.get() for env var check, not dict.get() on pipeline data"
+  safety: "Guards dev-mode secret_key warning; no data flow impact"
   expires: null
 
-- key: web/app.py:R1:create_app:health:fp=4c8b1ed957dd54b3
+- key: web/app.py:R1:create_app:health:fp=7d08bc86914bca1b
   owner: web-app
   reason: "False positive — @app.get() is FastAPI HTTP route decorator, not dict.get()"
   safety: No dict access involved
@@ -285,4 +272,24 @@ allow_hits:
   owner: web-auth
   reason: "Tier 3 boundary — request.headers.get('Authorization') reads untrusted HTTP header"
   safety: "Missing header returns 401; malformed header returns 401; no default fabrication"
+  expires: null
+
+# Session service — IntegrityError handling for upsert-or-skip patterns
+- key: web/sessions/service.py:R6:SessionServiceImpl:save_composition_state:_sync:fp=c07f71670e637c5c
+  owner: web-sessions
+  reason: "Upsert-or-skip — IntegrityError on duplicate version is expected race condition, not a bug"
+  safety: "Returns None to caller; caller retries or skips; no data loss"
+  expires: null
+
+- key: web/sessions/service.py:R6:SessionServiceImpl:set_active_state:_sync:fp=7881a6e600190df3
+  owner: web-sessions
+  reason: "Upsert-or-skip — IntegrityError on duplicate active state is expected race condition"
+  safety: "Returns None to caller; caller retries or skips; no data loss"
+  expires: null
+
+# Catalog service — UnknownPluginTypeError handling for config model resolution
+- key: web/catalog/service.py:R6:CatalogServiceImpl:_resolve_config_model:fp=5e0056175f439976
+  owner: web-catalog
+  reason: "Graceful fallback — unknown plugin type returns None (no config model available)"
+  safety: "Caller treats None as 'no schema'; plugin still listed without config fields"
   expires: null

@@ -118,7 +118,10 @@ def create_session_router() -> APIRouter:
         service = request.app.state.session_service
         settings = request.app.state.settings
         sessions = await service.list_sessions(
-            user.user_id, settings.auth_provider, limit=limit, offset=offset,
+            user.user_id,
+            settings.auth_provider,
+            limit=limit,
+            offset=offset,
         )
         return [_session_response(s) for s in sessions]
 
