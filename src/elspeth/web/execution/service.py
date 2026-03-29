@@ -1,0 +1,496 @@
+"""ExecutionServiceImpl — background pipeline execution with thread safety.
+
+Thread safety fixes implemented here:
+- B2: Always pass shutdown_event=threading.Event() to Orchestrator.run()
+- B3: Construct LandscapeDB/PayloadStore from WebSettings resolvers
+- B7: except BaseException + future.add_done_callback() safety net
+- B8/C1: _call_async() bridges sync thread to async event loop for SessionService
+
+The _run_pipeline() method is the ONLY code that runs outside the asyncio
+event loop. Everything else runs in the main async context. Because
+SessionService methods are async, _run_pipeline() uses _call_async() to
+schedule coroutines on the main event loop from the background thread.
+"""
+
+from __future__ import annotations
+
+import asyncio
+import tempfile
+import threading
+from collections.abc import Coroutine
+from concurrent.futures import Future, ThreadPoolExecutor
+from datetime import UTC, datetime
+from pathlib import Path
+from typing import Any, TypeVar
+from uuid import UUID
+
+import structlog
+
+from elspeth.cli_helpers import instantiate_plugins_from_config
+from elspeth.contracts.cli import ProgressEvent
+from elspeth.core.config import load_settings
+from elspeth.core.dag.graph import ExecutionGraph
+from elspeth.core.events import EventBus
+from elspeth.core.landscape.database import LandscapeDB
+from elspeth.core.payload_store import FilesystemPayloadStore
+from elspeth.engine.orchestrator.core import Orchestrator
+from elspeth.engine.orchestrator.types import PipelineConfig
+from elspeth.web.execution.progress import ProgressBroadcaster
+from elspeth.web.execution.schemas import (
+    RunEvent,
+    RunStatusResponse,
+    ValidationCheck,
+    ValidationError,
+    ValidationResult,
+)
+from elspeth.web.sessions.converters import state_from_record
+from elspeth.web.sessions.protocol import RunAlreadyActiveError  # B1: canonical definition
+
+slog = structlog.get_logger()
+
+T = TypeVar("T")
+
+# B1 fix: RunAlreadyActiveError is NOT defined here — imported from
+# sessions.protocol where the canonical definition lives. Defining a
+# second class with the same name would prevent app.py's global
+# exception handler (which catches sessions.protocol.RunAlreadyActiveError)
+# from catching exceptions raised here.
+
+
+class ExecutionServiceImpl:
+    """Pipeline execution service with ThreadPoolExecutor backend.
+
+    Construction: Created inside the FastAPI lifespan async context manager
+    (after ProgressBroadcaster), NOT in the synchronous create_app() factory.
+    Stored as application state and injected into route handlers via FastAPI's
+    dependency injection. The event loop reference is obtained from
+    asyncio.get_running_loop() in the lifespan (same loop as ProgressBroadcaster).
+
+    Thread model: execute() submits _run_pipeline() to a ThreadPoolExecutor
+    with max_workers=1. The pipeline runs in a background thread. All other
+    methods run in the asyncio event loop thread.
+
+    B8/C1 fix: SessionService methods are async. _run_pipeline() runs in a
+    background thread and uses _call_async() to bridge async calls back to
+    the main event loop via asyncio.run_coroutine_threadsafe().
+    """
+
+    def __init__(
+        self,
+        *,
+        loop: asyncio.AbstractEventLoop,
+        broadcaster: ProgressBroadcaster,
+        settings: Any,  # WebSettings
+        session_service: Any,  # SessionService
+        yaml_generator: Any,  # YamlGenerator — injected, not module-level
+    ) -> None:
+        self._loop = loop
+        self._broadcaster = broadcaster
+        self._settings = settings
+        self._session_service = session_service
+        self._yaml_generator = yaml_generator
+        # AC #17: No run_repository — all Run CRUD delegates to SessionService
+        # via create_run(), update_run_status(), get_active_run(), get_run().
+        # R6 expanded params: landscape_run_id, pipeline_yaml, rows_processed,
+        # rows_failed.
+        self._executor = ThreadPoolExecutor(max_workers=1)
+        self._shutdown_events: dict[str, threading.Event] = {}
+
+    def _call_async(self, coro: Coroutine[Any, Any, T]) -> T:
+        """Bridge an async call from the background thread to the main event loop.
+
+        B8/C1 fix: SessionService methods are async, but _run_pipeline() runs
+        in a ThreadPoolExecutor worker thread. This helper schedules the
+        coroutine on the main event loop and blocks until it completes.
+
+        R6 fix: 30-second timeout prevents deadlock during shutdown — if the
+        event loop is blocked in executor.shutdown(wait=True), this will raise
+        TimeoutError instead of hanging forever.
+        """
+        future = asyncio.run_coroutine_threadsafe(coro, self._loop)
+        return future.result(timeout=30.0)
+
+    def shutdown(self) -> None:
+        """Shut down the thread pool. Called during app shutdown.
+
+        Sets all active shutdown events first so running pipelines can
+        terminate gracefully before blocking on executor.shutdown(wait=True).
+        """
+        for event in self._shutdown_events.values():
+            event.set()
+        self._executor.shutdown(wait=True)
+
+    async def execute(self, session_id: UUID, state_id: UUID | None = None) -> UUID:
+        """Start a background pipeline run.
+
+        B6 enforcement: raises RunAlreadyActiveError if a pending or running
+        run already exists for this session.
+
+        Returns the run_id immediately.
+
+        Note: async because SessionService methods are async. The pipeline
+        itself runs in a background thread — only setup is async.
+        """
+        # B6: One active run per session (AC #17: via SessionService)
+        active = await self._session_service.get_active_run(session_id)
+        if active is not None:
+            raise RunAlreadyActiveError(f"Session {session_id} already has an active run: {active.id}")
+
+        # B4 fix: get_composition_state() doesn't exist on SessionService.
+        # Use get_state() for explicit state_id, get_current_state() for latest.
+        if state_id is not None:
+            state_record = await self._session_service.get_state(state_id)
+            # Verify state belongs to the requested session (IDOR prevention)
+            if state_record.session_id != session_id:
+                raise ValueError(f"State {state_id} does not belong to session {session_id}")
+        else:
+            state_record = await self._session_service.get_current_state(session_id)
+            if state_record is None:
+                raise ValueError(f"No composition state exists for session {session_id}")
+
+        # Bridge CompositionStateRecord → CompositionState for generate_yaml().
+        # The record stores raw dicts; generate_yaml() needs the typed domain object.
+        composition_state = state_from_record(state_record)
+
+        # Path allowlist check — defense-in-depth. The validate endpoint also
+        # checks this, but /execute does not require /validate first. An
+        # authenticated user could skip validation and execute a state that
+        # reads files outside the uploads directory.
+        if composition_state.source is not None:
+            uploads_dir = Path(self._settings.data_dir) / "uploads"
+            for key in ("path", "file"):
+                value = composition_state.source.options.get(key)
+                if value is not None:
+                    resolved = Path(value).resolve()
+                    if not resolved.is_relative_to(uploads_dir.resolve()):
+                        raise ValueError(f"Source {key}='{value}' resolves outside allowed upload directory: {uploads_dir}")
+
+        pipeline_yaml = self._yaml_generator.generate_yaml(composition_state)
+
+        # B9 fix: create_run() generates its own UUID internally and returns
+        # a RunRecord. Read the run_id back from the returned record so our
+        # _shutdown_events key matches the DB record.
+        run_record = await self._session_service.create_run(
+            session_id=session_id,
+            state_id=state_record.id,  # From the record, not the domain object
+            pipeline_yaml=pipeline_yaml,
+        )
+        run_id = run_record.id  # Use the DB-generated UUID as canonical
+
+        # Create shutdown event for cancellation (B2/cancel support)
+        shutdown_event = threading.Event()
+        self._shutdown_events[str(run_id)] = shutdown_event
+
+        # Submit to thread pool — clean up shutdown event if submit fails
+        # (e.g. RuntimeError after executor.shutdown())
+        try:
+            future = self._executor.submit(self._run_pipeline, str(run_id), pipeline_yaml, shutdown_event)
+        except RuntimeError:
+            self._shutdown_events.pop(str(run_id), None)
+            raise
+        # B7 Layer 2: safety net callback
+        future.add_done_callback(self._on_pipeline_done)
+
+        return run_id
+
+    async def get_status(self, run_id: UUID) -> RunStatusResponse:
+        """Return current run status. AC #17: delegates to SessionService."""
+        run = await self._session_service.get_run(run_id)
+        return RunStatusResponse(
+            run_id=str(run.id),  # B7: RunRecord uses `id`, not `run_id`
+            status=run.status,
+            started_at=run.started_at,
+            finished_at=run.finished_at,
+            rows_processed=run.rows_processed,
+            rows_failed=run.rows_failed,
+            error=run.error,
+            landscape_run_id=run.landscape_run_id,
+        )
+
+    async def validate(self, session_id: UUID) -> ValidationResult:
+        """Dry-run validation using real engine code paths.
+
+        Wraps the sync validate_pipeline() call via run_in_executor
+        to avoid blocking the event loop (AC #16).
+        """
+        from elspeth.web.execution.validation import validate_pipeline
+
+        state_record = await self._session_service.get_current_state(session_id)
+        if state_record is None:
+            return ValidationResult(
+                is_valid=False,
+                checks=[
+                    ValidationCheck(
+                        name="state_exists",
+                        passed=False,
+                        detail="No composition state exists for this session",
+                    )
+                ],
+                errors=[
+                    ValidationError(
+                        component_id=None,
+                        component_type=None,
+                        message="No composition state exists for this session",
+                        suggestion="Use the composer to build a pipeline first.",
+                    )
+                ],
+            )
+
+        composition_state = state_from_record(state_record)
+        loop = asyncio.get_running_loop()
+        return await loop.run_in_executor(
+            None,
+            validate_pipeline,
+            composition_state,
+            self._settings,
+            self._yaml_generator,
+        )
+
+    async def verify_run_ownership(self, user: Any, run_id: str) -> bool:
+        """Verify that a run belongs to the authenticated user's session.
+
+        Used by the WebSocket handler for IDOR protection. Checks both
+        user_id and auth_provider_type to prevent cross-provider access
+        when user_id namespaces overlap between providers.
+        """
+        run = await self._session_service.get_run(UUID(run_id))
+        session = await self._session_service.get_session(run.session_id)
+        return str(session.user_id) == str(user.user_id) and session.auth_provider_type == self._settings.auth_provider
+
+    async def cancel(self, run_id: UUID) -> None:
+        """Cancel a run via the shutdown Event.
+
+        Active runs: sets the Event, Orchestrator detects during row processing.
+        Pending runs: sets the Event so _run_pipeline terminates immediately.
+        Terminal runs: no-op (idempotent).
+
+        Note: async because pending-run cancellation calls SessionService
+        directly (we're in the event loop thread, not the background thread,
+        so await is correct here — NOT _call_async).
+        """
+        event = self._shutdown_events.get(str(run_id))
+        if event is not None:
+            event.set()
+        else:
+            # No event means either pending (not yet started) or already done
+            run = await self._session_service.get_run(run_id)
+            if run.status not in ("completed", "failed", "cancelled"):
+                await self._session_service.update_run_status(run_id, status="cancelled")
+
+    # ── Background Thread ──────────────────────────────────────────────
+
+    def _run_pipeline(
+        self,
+        run_id: str,
+        pipeline_yaml: str,
+        shutdown_event: threading.Event,
+    ) -> None:
+        """Execute a pipeline in the background thread.
+
+        B7 fix: Wrapped in try/except BaseException/finally.
+        - except BaseException: Updates run to failed, re-raises.
+        - finally: Removes shutdown event from _shutdown_events.
+
+        B2 fix: shutdown_event is ALWAYS passed to orchestrator.run().
+        B3 fix: LandscapeDB and PayloadStore from WebSettings resolvers.
+        """
+        tmp_path: Path | None = None
+        landscape_db: LandscapeDB | None = None
+        run_uuid = UUID(run_id)
+        try:
+            # B8/C1: SessionService is async — bridge from background thread
+            self._call_async(self._session_service.update_run_status(run_uuid, status="running"))
+
+            # B3 fix: construct from WebSettings, not hardcoded paths
+            # NOTE: LandscapeDB is constructed per-run, not shared. This is safe
+            # with max_workers=1 (no concurrent access) but wasteful — each run
+            # creates a new SQLAlchemy engine. Acceptable for MVP; consider
+            # sharing a single instance if profiling shows connection overhead.
+            landscape_db = LandscapeDB(connection_string=self._settings.get_landscape_url())
+            payload_store = FilesystemPayloadStore(base_path=self._settings.get_payload_store_path())
+
+            # Write YAML to temp file — load_settings takes a path, NOT content
+            tmp_file = tempfile.NamedTemporaryFile(mode="w", suffix=".yaml", delete=False)  # noqa: SIM115
+            tmp_path = Path(tmp_file.name)
+            tmp_file.write(pipeline_yaml)
+            tmp_file.close()
+
+            settings = load_settings(tmp_path)
+            bundle = instantiate_plugins_from_config(settings)
+
+            graph = ExecutionGraph.from_plugin_instances(
+                source=bundle.source,
+                source_settings=bundle.source_settings,
+                transforms=bundle.transforms,
+                sinks=bundle.sinks,
+                aggregations=bundle.aggregations,
+                gates=list(settings.gates),
+                coalesce_settings=(list(settings.coalesce) if settings.coalesce else None),
+            )
+            graph.validate()
+
+            pipeline_config = PipelineConfig(
+                source=bundle.source,
+                transforms=[t.plugin for t in bundle.transforms],
+                sinks=bundle.sinks,
+                gates=list(settings.gates),
+                aggregation_settings={k: v[1] for k, v in bundle.aggregations.items()},
+                coalesce_settings=(list(settings.coalesce) if settings.coalesce else []),
+            )
+
+            # Set up EventBus to bridge ProgressEvent -> RunEvent -> broadcaster
+            def _safe_broadcast(evt: ProgressEvent) -> None:
+                try:
+                    self._broadcaster.broadcast(run_id, self._to_run_event(run_id, evt))
+                except Exception as broadcast_err:
+                    slog.error(
+                        "progress_broadcast_failed",
+                        run_id=run_id,
+                        error=str(broadcast_err),
+                    )
+
+            event_bus = EventBus()
+            event_bus.subscribe(ProgressEvent, _safe_broadcast)
+
+            orchestrator = Orchestrator(db=landscape_db, event_bus=event_bus)
+
+            # B2 fix: ALWAYS pass shutdown_event — suppresses signal handler
+            # installation from background thread (Python forbids
+            # signal.signal() from non-main threads)
+            result = orchestrator.run(
+                pipeline_config,
+                graph=graph,
+                settings=settings,
+                payload_store=payload_store,
+                shutdown_event=shutdown_event,  # B2: NEVER omit this
+            )
+
+            # AC #19: Check if shutdown was requested — if so, broadcast
+            # "cancelled" instead of "completed". The orchestrator returns
+            # normally after detecting the shutdown event, but the run was
+            # not completed by the user's intent.
+            if shutdown_event.is_set():
+                self._broadcaster.broadcast(
+                    run_id,
+                    RunEvent(
+                        run_id=run_id,
+                        timestamp=datetime.now(tz=UTC),
+                        event_type="cancelled",
+                        data={
+                            "rows_processed": result.rows_processed,
+                            "rows_failed": result.rows_failed,
+                        },
+                    ),
+                )
+                self._call_async(
+                    self._session_service.update_run_status(
+                        run_uuid,
+                        status="cancelled",
+                        rows_processed=result.rows_processed,
+                        rows_failed=result.rows_failed,
+                    )
+                )
+            else:
+                # Broadcast terminal completed event
+                self._broadcaster.broadcast(
+                    run_id,
+                    RunEvent(
+                        run_id=run_id,
+                        timestamp=datetime.now(tz=UTC),
+                        event_type="completed",
+                        data={
+                            "rows_processed": result.rows_processed,
+                            "rows_succeeded": result.rows_succeeded,
+                            "rows_failed": result.rows_failed,
+                            "rows_quarantined": result.rows_quarantined,
+                            "landscape_run_id": result.run_id,
+                        },
+                    ),
+                )
+                self._call_async(
+                    self._session_service.update_run_status(
+                        run_uuid,
+                        status="completed",
+                        landscape_run_id=result.run_id,
+                        rows_processed=result.rows_processed,
+                        rows_failed=result.rows_failed,
+                    )
+                )
+
+        except BaseException as exc:
+            # B7 fix: Catch BaseException (not Exception) to handle
+            # KeyboardInterrupt, SystemExit, and OOM-triggered exceptions.
+            # Without this, the Run record stays in 'running' forever.
+            # Broadcast "failed" (terminal) not "error" (non-terminal).
+            # "error" is for per-row exceptions during processing;
+            # "failed" means the pipeline itself crashed.
+            self._broadcaster.broadcast(
+                run_id,
+                RunEvent(
+                    run_id=run_id,
+                    timestamp=datetime.now(tz=UTC),
+                    event_type="failed",
+                    data={
+                        "detail": str(exc),
+                        "node_id": None,
+                        "row_id": None,
+                    },
+                ),
+            )
+            # R6 fix: Skip _call_async for KeyboardInterrupt/SystemExit — the event
+            # loop is likely shutting down. Let orphan cleanup handle the status.
+            if not isinstance(exc, (KeyboardInterrupt, SystemExit)):
+                try:
+                    self._call_async(self._session_service.update_run_status(run_uuid, status="failed", error=str(exc)))
+                except Exception as status_err:
+                    slog.error(
+                        "run_status_update_failed_in_except",
+                        run_id=run_id,
+                        original_error=str(exc),
+                        status_update_error=str(status_err),
+                    )
+            else:
+                slog.warning(
+                    "skipping_status_update_on_signal",
+                    run_id=run_id,
+                    exc_type=type(exc).__name__,
+                )
+            raise  # Re-raise so future.add_done_callback sees it
+        finally:
+            # Always clean up, regardless of success or failure
+            self._shutdown_events.pop(run_id, None)
+            if landscape_db is not None:
+                landscape_db.close()
+            if tmp_path is not None and tmp_path.exists():
+                tmp_path.unlink()
+            self._broadcaster.cleanup_run(run_id)
+
+    def _on_pipeline_done(self, future: Future[None]) -> None:
+        """B7 Layer 2: Safety net callback.
+
+        Fires when the Future completes, regardless of how. Logs any
+        exception that _run_pipeline() raised. Does NOT update the Run
+        record — that's Layer 1's job. This is purely diagnostic.
+        """
+        exc = future.exception()
+        if exc is not None:
+            slog.error(
+                "Pipeline thread raised exception (safety net)",
+                exc_info=exc,
+            )
+
+    def _to_run_event(self, run_id: str, progress: ProgressEvent) -> RunEvent:
+        """Translate engine ProgressEvent to web RunEvent.
+
+        Explicit mapping — unknown event types raise ValueError
+        (offensive programming, not silent drop).
+        """
+        return RunEvent(
+            run_id=run_id,
+            timestamp=datetime.now(tz=UTC),
+            event_type="progress",
+            data={
+                "rows_processed": progress.rows_processed,
+                "rows_failed": progress.rows_failed,
+            },
+        )

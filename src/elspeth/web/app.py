@@ -17,9 +17,13 @@ from elspeth.web.auth.local import LocalAuthProvider
 from elspeth.web.auth.protocol import AuthProvider
 from elspeth.web.auth.routes import create_auth_router
 from elspeth.web.catalog.routes import catalog_router
+from elspeth.web.composer import yaml_generator as yaml_generator_module
 from elspeth.web.composer.service import ComposerServiceImpl
 from elspeth.web.config import WebSettings
 from elspeth.web.dependencies import create_catalog_service
+from elspeth.web.execution.progress import ProgressBroadcaster
+from elspeth.web.execution.routes import create_execution_router
+from elspeth.web.execution.service import ExecutionServiceImpl
 from elspeth.web.middleware.rate_limit import ComposerRateLimiter
 from elspeth.web.sessions.models import metadata as session_metadata
 from elspeth.web.sessions.protocol import RunAlreadyActiveError
@@ -32,22 +36,44 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     """Async lifespan context manager for the FastAPI application.
 
     Services that require a running event loop must be constructed here,
-    not in the synchronous create_app() function.
-
-    Sub-5 will construct ProgressBroadcaster here using
-    asyncio.get_running_loop().
+    not in the synchronous create_app() function. The ProgressBroadcaster
+    captures asyncio.get_running_loop() and the ExecutionServiceImpl
+    depends on both the broadcaster and the loop.
     """
+    import asyncio
+
+    import structlog
+
+    slog = structlog.get_logger()
+
     # Cancel runs orphaned by a previous server crash (D5)
     settings: WebSettings = app.state.settings
-    service = app.state.session_service
-    cancelled = await service.cancel_all_orphaned_runs(
+    session_service = app.state.session_service
+    cancelled = await session_service.cancel_all_orphaned_runs(
         max_age_seconds=settings.orphan_run_max_age_seconds,
     )
     if cancelled:
-        import structlog
+        slog.info("cancelled_orphaned_runs", count=cancelled)
 
-        structlog.get_logger().info("cancelled_orphaned_runs", count=cancelled)
+    # Sub-5: Construct ProgressBroadcaster and ExecutionServiceImpl
+    # These require a running event loop, which is only available here.
+    loop = asyncio.get_running_loop()
+    broadcaster = ProgressBroadcaster(loop)
+    app.state.broadcaster = broadcaster
+
+    execution_service = ExecutionServiceImpl(
+        loop=loop,
+        broadcaster=broadcaster,
+        settings=settings,
+        session_service=session_service,
+        yaml_generator=yaml_generator_module,
+    )
+    app.state.execution_service = execution_service
+
     yield
+
+    # Shutdown execution service thread pool
+    execution_service.shutdown()
 
 
 def _settings_from_env() -> WebSettings:
@@ -150,9 +176,21 @@ def create_app(settings: WebSettings | None = None) -> FastAPI:
         limit=settings.composer_rate_limit_per_minute,
     )
 
+    # --- Multi-worker enforcement (W10 -> R6) ---
+    web_concurrency = int(os.environ.get("WEB_CONCURRENCY", "1"))
+    if web_concurrency > 1:
+        raise RuntimeError(
+            f"WEB_CONCURRENCY={web_concurrency} is not supported. "
+            "ProgressBroadcaster holds subscriber queues in process memory — "
+            "WebSocket progress streaming requires a single worker. "
+            "Set WEB_CONCURRENCY=1 or remove the variable. "
+            "For multi-worker deployment, replace ProgressBroadcaster with Redis Streams."
+        )
+
     # --- Register routers ---
     app.include_router(create_auth_router())
     app.include_router(create_session_router())
+    app.include_router(create_execution_router())
 
     # --- Seam contract D: RunAlreadyActiveError -> 409 with error_type ---
     @app.exception_handler(RunAlreadyActiveError)

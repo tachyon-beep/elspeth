@@ -1,0 +1,206 @@
+"""End-to-end integration test: CSV -> passthrough -> CSV through web layer.
+
+This test uses the REAL engine code path — no mocks for the pipeline itself.
+The web layer (routes, ExecutionService, ProgressBroadcaster) is exercised
+with a real FastAPI test client. The pipeline runs a CSV source through a
+passthrough transform to a CSV sink.
+
+Test strategy (confirmed by panel review):
+- REST for session creation (exercises auth + IDOR + route)
+- Programmatic CompositionState construction + save via session service
+  (bypasses LLM composer — we're testing execution, not composition)
+- REST for execute/poll/results (exercises the Sub-5 path end-to-end)
+"""
+
+from __future__ import annotations
+
+import asyncio
+import shutil
+import time
+from pathlib import Path
+from typing import Any
+from uuid import UUID
+
+import pytest
+from httpx import ASGITransport, AsyncClient
+
+FIXTURES_DIR = Path(__file__).parent / "fixtures"
+TEST_CSV = FIXTURES_DIR / "test_input.csv"
+
+
+@pytest.fixture
+def work_dir(tmp_path: Path) -> Path:
+    """Create a working directory with the test CSV and output dir."""
+    uploads_dir = tmp_path / "uploads"
+    uploads_dir.mkdir()
+    csv_dest = uploads_dir / "input.csv"
+    shutil.copy(TEST_CSV, csv_dest)
+    output_dir = tmp_path / "output"
+    output_dir.mkdir()
+    audit_dir = tmp_path / "runs"
+    audit_dir.mkdir()
+    payloads_dir = tmp_path / "payloads"
+    payloads_dir.mkdir()
+    return tmp_path
+
+
+@pytest.mark.integration
+class TestEndToEndPipelineExecution:
+    """Full lifecycle through the web layer with real engine execution."""
+
+    @pytest.mark.asyncio
+    async def test_csv_passthrough_csv(self, work_dir: Path) -> None:
+        """
+        1. Register + login test user
+        2. Create session via REST
+        3. Save CompositionState programmatically (bypass LLM composer)
+        4. Execute via REST -> get run_id
+        5. Poll status -> eventually 'completed'
+        6. Verify results: rows_processed > 0, rows_failed == 0
+        7. Verify landscape_run_id links to audit trail
+        """
+        from elspeth.web.app import create_app
+        from elspeth.web.composer.state import (
+            CompositionState,
+            OutputSpec,
+            PipelineMetadata,
+            SourceSpec,
+        )
+        from elspeth.web.config import WebSettings
+        from elspeth.web.sessions.protocol import CompositionStateData
+
+        settings = WebSettings(
+            data_dir=work_dir,
+            landscape_url=f"sqlite:///{work_dir}/runs/audit.db",
+            payload_store_path=work_dir / "payloads",
+        )
+        app = create_app(settings=settings)
+
+        # Create test user via the auth provider directly (no /register endpoint)
+        auth_provider = app.state.auth_provider
+        auth_provider.create_user("testuser", "testpass123", display_name="Test User")
+
+        from asgi_lifespan import LifespanManager
+
+        async with LifespanManager(app), AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+            # Authenticate via /login endpoint
+            resp = await client.post(
+                "/api/auth/login",
+                json={"username": "testuser", "password": "testpass123"},
+            )
+            assert resp.status_code == 200, f"Login failed: {resp.text}"
+            token = resp.json()["access_token"]
+            auth_headers = {"Authorization": f"Bearer {token}"}
+
+            # 1. Create session via REST
+            resp = await client.post(
+                "/api/sessions",
+                headers=auth_headers,
+                json={"title": "Integration test session"},
+            )
+            assert resp.status_code == 201, f"Session creation failed: {resp.text}"
+            session_id = resp.json()["id"]  # SessionResponse.id, NOT session_id
+
+            # 2. Save composition state programmatically
+            csv_path = str(work_dir / "uploads" / "input.csv")
+            output_path = str(work_dir / "output" / "result.csv")
+
+            state = CompositionState(
+                source=SourceSpec(
+                    plugin="csv",
+                    on_success="primary",
+                    options={
+                        "path": csv_path,
+                        "schema": {
+                            "mode": "fixed",
+                            "fields": ["id: int", "name: str", "value: int"],
+                        },
+                    },
+                    on_validation_failure="discard",
+                ),
+                nodes=(),
+                edges=(),
+                outputs=(
+                    OutputSpec(
+                        name="primary",
+                        plugin="csv",
+                        options={
+                            "path": output_path,
+                            "schema": {
+                                "mode": "fixed",
+                                "fields": ["id: int", "name: str", "value: int"],
+                            },
+                        },
+                        on_write_failure="discard",
+                    ),
+                ),
+                metadata=PipelineMetadata(
+                    name="Integration Test Pipeline",
+                    description="CSV passthrough for Sub-5 integration test",
+                ),
+                version=1,
+            )
+
+            # Convert to CompositionStateData for saving
+            state_d = state.to_dict()
+            state_data = CompositionStateData(
+                source=state_d["source"],
+                nodes=state_d["nodes"],
+                edges=state_d["edges"],
+                outputs=state_d["outputs"],
+                metadata_=state_d["metadata"],  # metadata_ (underscore)
+                is_valid=True,
+                validation_errors=None,
+            )
+            session_service = app.state.session_service
+            await session_service.save_composition_state(UUID(session_id), state_data)
+
+            # 3. Execute via REST
+            resp = await client.post(
+                f"/api/sessions/{session_id}/execute",
+                headers=auth_headers,
+            )
+            assert resp.status_code == 202, f"Execute failed: {resp.text}"
+            run_id = resp.json()["run_id"]
+
+            # 4. Poll to completion (timeout after 30s)
+            deadline = time.monotonic() + 30
+            status: dict[str, Any] = {}
+            while time.monotonic() < deadline:
+                resp = await client.get(
+                    f"/api/runs/{run_id}",
+                    headers=auth_headers,
+                )
+                assert resp.status_code == 200
+                status = resp.json()
+                if status["status"] in ("completed", "failed", "cancelled"):
+                    break
+                await asyncio.sleep(0.5)
+            else:
+                pytest.fail("Pipeline did not complete within 30 seconds")
+
+            # 5. Verify results
+            assert status["status"] == "completed", f"Pipeline failed: {status.get('error')}"
+            assert status["rows_processed"] > 0
+            assert status["rows_failed"] == 0
+
+            # 6. Verify landscape_run_id links to real audit trail
+            assert status["landscape_run_id"] is not None
+
+            # 7. Verify output file was created
+            output_file = work_dir / "output" / "result.csv"
+            assert output_file.exists()
+
+            # 8. Verify audit database exists
+            audit_db = work_dir / "runs" / "audit.db"
+            assert audit_db.exists()
+
+            # 9. Verify results endpoint
+            resp = await client.get(
+                f"/api/runs/{run_id}/results",
+                headers=auth_headers,
+            )
+            assert resp.status_code == 200
+            results = resp.json()
+            assert results["rows_processed"] > 0
+            assert results["landscape_run_id"] is not None
