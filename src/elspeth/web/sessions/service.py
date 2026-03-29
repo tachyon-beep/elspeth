@@ -112,13 +112,22 @@ class SessionServiceImpl:
             updated_at=row.updated_at,
         )
 
-    async def list_sessions(self, user_id: str) -> list[SessionRecord]:
+    async def list_sessions(
+        self,
+        user_id: str,
+        limit: int = 50,
+        offset: int = 0,
+    ) -> list[SessionRecord]:
         """List sessions for a user, ordered by updated_at descending."""
 
         def _sync() -> Any:
             with self._engine.begin() as conn:
                 return conn.execute(
-                    select(sessions_table).where(sessions_table.c.user_id == user_id).order_by(desc(sessions_table.c.updated_at))
+                    select(sessions_table)
+                    .where(sessions_table.c.user_id == user_id)
+                    .order_by(desc(sessions_table.c.updated_at))
+                    .limit(limit)
+                    .offset(offset)
                 ).fetchall()
 
         rows = await self._run_sync(_sync)
@@ -193,8 +202,10 @@ class SessionServiceImpl:
     async def get_messages(
         self,
         session_id: UUID,
+        limit: int = 100,
+        offset: int = 0,
     ) -> list[ChatMessageRecord]:
-        """Get all messages for a session, ordered by created_at ascending."""
+        """Get messages for a session, ordered by created_at ascending."""
 
         def _sync() -> Any:
             with self._engine.begin() as conn:
@@ -202,6 +213,8 @@ class SessionServiceImpl:
                     select(chat_messages_table)
                     .where(chat_messages_table.c.session_id == str(session_id))
                     .order_by(chat_messages_table.c.created_at)
+                    .limit(limit)
+                    .offset(offset)
                 ).fetchall()
 
         rows = await self._run_sync(_sync)
@@ -319,8 +332,10 @@ class SessionServiceImpl:
     async def get_state_versions(
         self,
         session_id: UUID,
+        limit: int = 50,
+        offset: int = 0,
     ) -> list[CompositionStateRecord]:
-        """Return all state versions for a session, ascending order."""
+        """Return state versions for a session, ascending order."""
 
         def _sync() -> Any:
             with self._engine.begin() as conn:
@@ -328,6 +343,8 @@ class SessionServiceImpl:
                     select(composition_states_table)
                     .where(composition_states_table.c.session_id == str(session_id))
                     .order_by(composition_states_table.c.version)
+                    .limit(limit)
+                    .offset(offset)
                 ).fetchall()
 
         rows = await self._run_sync(_sync)
@@ -700,6 +717,58 @@ class SessionServiceImpl:
                 for row in stale_rows:
                     conn.execute(update(runs_table).where(runs_table.c.id == row.id).values(status="cancelled", finished_at=now))
                 return len(stale_rows)
+
+        return await self._run_sync(_sync)
+
+    async def prune_state_versions(
+        self,
+        session_id: UUID,
+        keep_latest: int = 50,
+    ) -> int:
+        """Delete old composition state versions beyond keep_latest.
+
+        Preserves the most recent `keep_latest` versions and any versions
+        referenced by a run (via runs.state_id). Returns the count of
+        deleted versions.
+        """
+        sid = str(session_id)
+
+        def _sync() -> int:
+            with self._engine.begin() as conn:
+                # Get all version IDs ordered by version DESC
+                all_rows = conn.execute(
+                    select(
+                        composition_states_table.c.id,
+                        composition_states_table.c.version,
+                    )
+                    .where(composition_states_table.c.session_id == sid)
+                    .order_by(desc(composition_states_table.c.version))
+                ).fetchall()
+
+                if len(all_rows) <= keep_latest:
+                    return 0
+
+                # IDs to keep: the top keep_latest versions
+                keep_ids = {row.id for row in all_rows[:keep_latest]}
+
+                # IDs referenced by runs
+                run_referenced = {
+                    row.state_id
+                    for row in conn.execute(
+                        select(runs_table.c.state_id).where(
+                            runs_table.c.session_id == sid,
+                        )
+                    ).fetchall()
+                }
+
+                # Candidates for deletion: everything not kept and not referenced
+                delete_ids = [row.id for row in all_rows if row.id not in keep_ids and row.id not in run_referenced]
+
+                if not delete_ids:
+                    return 0
+
+                result = conn.execute(delete(composition_states_table).where(composition_states_table.c.id.in_(delete_ids)))
+                return result.rowcount
 
         return await self._run_sync(_sync)
 

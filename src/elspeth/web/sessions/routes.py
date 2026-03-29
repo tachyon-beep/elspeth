@@ -9,7 +9,7 @@ from __future__ import annotations
 from pathlib import Path
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, File, HTTPException, Request, UploadFile
+from fastapi import APIRouter, Depends, File, HTTPException, Query, Request, UploadFile
 
 from elspeth.contracts.freeze import deep_thaw
 from elspeth.web.auth.middleware import get_current_user
@@ -106,10 +106,12 @@ def create_session_router() -> APIRouter:
     async def list_sessions(
         request: Request,
         user: UserIdentity = Depends(get_current_user),  # noqa: B008
+        limit: int = Query(50, ge=1, le=200),
+        offset: int = Query(0, ge=0),
     ) -> list[SessionResponse]:
         """List sessions for the authenticated user."""
         service = request.app.state.session_service
-        sessions = await service.list_sessions(user.user_id)
+        sessions = await service.list_sessions(user.user_id, limit=limit, offset=offset)
         return [_session_response(s) for s in sessions]
 
     @router.get("/{session_id}", response_model=SessionResponse)
@@ -167,11 +169,13 @@ def create_session_router() -> APIRouter:
         session_id: UUID,
         request: Request,
         user: UserIdentity = Depends(get_current_user),  # noqa: B008
+        limit: int = Query(100, ge=1, le=500),
+        offset: int = Query(0, ge=0),
     ) -> list[ChatMessageResponse]:
         """Get conversation history for a session."""
         session = await _verify_session_ownership(session_id, user, request)
         service = request.app.state.session_service
-        messages = await service.get_messages(session.id)
+        messages = await service.get_messages(session.id, limit=limit, offset=offset)
         return [
             ChatMessageResponse(
                 id=str(m.id),
@@ -206,11 +210,13 @@ def create_session_router() -> APIRouter:
         session_id: UUID,
         request: Request,
         user: UserIdentity = Depends(get_current_user),  # noqa: B008
+        limit: int = Query(50, ge=1, le=200),
+        offset: int = Query(0, ge=0),
     ) -> list[CompositionStateResponse]:
-        """Get all composition state versions for a session."""
+        """Get composition state versions for a session."""
         session = await _verify_session_ownership(session_id, user, request)
         service = request.app.state.session_service
-        versions = await service.get_state_versions(session.id)
+        versions = await service.get_state_versions(session.id, limit=limit, offset=offset)
         return [_state_response(v) for v in versions]
 
     @router.post(
@@ -309,13 +315,18 @@ def create_session_router() -> APIRouter:
                 detail="Invalid filename",
             )
 
-        # Read file content into memory and check size
-        content = await file.read()
-        if len(content) > settings.max_upload_bytes:
-            raise HTTPException(
-                status_code=413,
-                detail=f"File exceeds maximum size of {settings.max_upload_bytes} bytes",
-            )
+        # Read in chunks, abort if size exceeds limit
+        chunks: list[bytes] = []
+        total_size = 0
+        while chunk := await file.read(8192):
+            total_size += len(chunk)
+            if total_size > settings.max_upload_bytes:
+                raise HTTPException(
+                    status_code=413,
+                    detail=f"File exceeds maximum size of {settings.max_upload_bytes} bytes",
+                )
+            chunks.append(chunk)
+        content = b"".join(chunks)
 
         # Create upload directory and save
         upload_dir = Path(settings.data_dir) / "uploads" / sanitized_user_id
@@ -323,8 +334,11 @@ def create_session_router() -> APIRouter:
         file_path = upload_dir / sanitized_filename
         file_path.write_bytes(content)
 
+        # Return relative path (not absolute) for portability
+        relative_path = file_path.relative_to(settings.data_dir)
+
         return UploadResponse(
-            path=str(file_path),
+            path=str(relative_path),
             filename=original_filename,
             size_bytes=len(content),
         )

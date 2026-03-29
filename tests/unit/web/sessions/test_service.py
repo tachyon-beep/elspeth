@@ -779,3 +779,136 @@ class TestGetMessagesNonexistentSession:
 
         result = await service.get_messages(uuid.uuid4())
         assert result == []
+
+
+class TestPagination:
+    """Tests for limit/offset pagination on list endpoints."""
+
+    @pytest.mark.asyncio
+    async def test_list_sessions_limit(self, service) -> None:
+        for i in range(5):
+            await service.create_session("alice", f"Session {i}", "local")
+        sessions = await service.list_sessions("alice", limit=2)
+        assert len(sessions) == 2
+
+    @pytest.mark.asyncio
+    async def test_list_sessions_offset(self, service) -> None:
+        for i in range(5):
+            await service.create_session("alice", f"Session {i}", "local")
+        all_sessions = await service.list_sessions("alice")
+        offset_sessions = await service.list_sessions("alice", limit=2, offset=2)
+        assert len(offset_sessions) == 2
+        assert offset_sessions[0].id == all_sessions[2].id
+        assert offset_sessions[1].id == all_sessions[3].id
+
+    @pytest.mark.asyncio
+    async def test_list_sessions_offset_past_end(self, service) -> None:
+        await service.create_session("alice", "Only One", "local")
+        sessions = await service.list_sessions("alice", offset=10)
+        assert sessions == []
+
+    @pytest.mark.asyncio
+    async def test_get_messages_limit(self, service) -> None:
+        session = await service.create_session("alice", "Chat", "local")
+        for i in range(5):
+            await service.add_message(session.id, "user", f"Message {i}")
+        messages = await service.get_messages(session.id, limit=3)
+        assert len(messages) == 3
+        assert messages[0].content == "Message 0"
+
+    @pytest.mark.asyncio
+    async def test_get_messages_offset(self, service) -> None:
+        session = await service.create_session("alice", "Chat", "local")
+        for i in range(5):
+            await service.add_message(session.id, "user", f"Message {i}")
+        messages = await service.get_messages(session.id, limit=2, offset=3)
+        assert len(messages) == 2
+        assert messages[0].content == "Message 3"
+        assert messages[1].content == "Message 4"
+
+    @pytest.mark.asyncio
+    async def test_get_state_versions_limit(self, service) -> None:
+        session = await service.create_session("alice", "Pipeline", "local")
+        for _ in range(5):
+            await service.save_composition_state(
+                session.id,
+                CompositionStateData(is_valid=False),
+            )
+        versions = await service.get_state_versions(session.id, limit=2)
+        assert len(versions) == 2
+        assert versions[0].version == 1
+        assert versions[1].version == 2
+
+    @pytest.mark.asyncio
+    async def test_get_state_versions_offset(self, service) -> None:
+        session = await service.create_session("alice", "Pipeline", "local")
+        for _ in range(5):
+            await service.save_composition_state(
+                session.id,
+                CompositionStateData(is_valid=False),
+            )
+        versions = await service.get_state_versions(session.id, limit=2, offset=3)
+        assert len(versions) == 2
+        assert versions[0].version == 4
+        assert versions[1].version == 5
+
+
+class TestPruneStateVersions:
+    """Tests for prune_state_versions -- delete old versions, preserve recent and run-referenced."""
+
+    @pytest.mark.asyncio
+    async def test_prune_deletes_old_versions(self, service) -> None:
+        session = await service.create_session("alice", "Pipeline", "local")
+        for _ in range(5):
+            await service.save_composition_state(
+                session.id,
+                CompositionStateData(is_valid=False),
+            )
+
+        deleted = await service.prune_state_versions(session.id, keep_latest=2)
+        assert deleted == 3
+
+        remaining = await service.get_state_versions(session.id)
+        assert len(remaining) == 2
+        assert [v.version for v in remaining] == [4, 5]
+
+    @pytest.mark.asyncio
+    async def test_prune_preserves_run_referenced_versions(self, service) -> None:
+        session = await service.create_session("alice", "Pipeline", "local")
+        v1 = await service.save_composition_state(
+            session.id,
+            CompositionStateData(is_valid=True),
+        )
+        await service.save_composition_state(
+            session.id,
+            CompositionStateData(is_valid=False),
+        )
+        await service.save_composition_state(
+            session.id,
+            CompositionStateData(is_valid=False),
+        )
+
+        # Create a run referencing v1
+        await service.create_run(session.id, v1.id)
+
+        # Prune keeping only latest 1 -- v1 should survive (run-referenced), v2 deleted
+        deleted = await service.prune_state_versions(session.id, keep_latest=1)
+        assert deleted == 1  # only v2 deleted
+
+        remaining = await service.get_state_versions(session.id)
+        remaining_versions = [v.version for v in remaining]
+        assert 1 in remaining_versions  # preserved by run reference
+        assert 2 not in remaining_versions  # deleted
+        assert 3 in remaining_versions  # kept as latest
+
+    @pytest.mark.asyncio
+    async def test_prune_returns_zero_when_nothing_to_prune(self, service) -> None:
+        session = await service.create_session("alice", "Pipeline", "local")
+        for _ in range(2):
+            await service.save_composition_state(
+                session.id,
+                CompositionStateData(is_valid=False),
+            )
+
+        deleted = await service.prune_state_versions(session.id, keep_latest=5)
+        assert deleted == 0

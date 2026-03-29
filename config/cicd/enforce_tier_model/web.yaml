@@ -224,7 +224,7 @@ allow_hits:
   expires: null
 
 # SessionServiceImpl — _unwrap_envelope checks envelope structure (Tier 1 read boundary)
-- key: web/sessions/service.py:R5:SessionServiceImpl:_unwrap_envelope:fp=3072a4d8278ecb9d
+- key: web/sessions/service.py:R5:SessionServiceImpl:_unwrap_envelope:fp=1f13048cd351a07f
   owner: web-sessions
   reason: "Tier 1 read boundary — validates JSON envelope structure before accessing _version key"
   safety: "Crashes on unknown version or missing envelope; no silent coercion"

@@ -181,7 +181,12 @@ class SessionServiceProtocol(Protocol):
 
     async def get_session(self, session_id: UUID) -> SessionRecord: ...
 
-    async def list_sessions(self, user_id: str) -> list[SessionRecord]: ...
+    async def list_sessions(
+        self,
+        user_id: str,
+        limit: int = 50,
+        offset: int = 0,
+    ) -> list[SessionRecord]: ...
 
     async def archive_session(self, session_id: UUID) -> None: ...
 
@@ -196,6 +201,8 @@ class SessionServiceProtocol(Protocol):
     async def get_messages(
         self,
         session_id: UUID,
+        limit: int = 100,
+        offset: int = 0,
     ) -> list[ChatMessageRecord]: ...
 
     async def save_composition_state(
@@ -214,6 +221,8 @@ class SessionServiceProtocol(Protocol):
     async def get_state_versions(
         self,
         session_id: UUID,
+        limit: int = 50,
+        offset: int = 0,
     ) -> list[CompositionStateRecord]: ...
 
     async def set_active_state(
@@ -261,6 +270,19 @@ class SessionServiceProtocol(Protocol):
         self,
         session_id: UUID,
     ) -> RunRecord | None: ...
+
+    async def prune_state_versions(
+        self,
+        session_id: UUID,
+        keep_latest: int = 50,
+    ) -> int:
+        """Delete old composition state versions beyond keep_latest.
+
+        Preserves the most recent `keep_latest` versions and any versions
+        referenced by a run (via runs.state_id). Returns the count of
+        deleted versions.
+        """
+        ...
 
     async def cancel_orphaned_runs(
         self,

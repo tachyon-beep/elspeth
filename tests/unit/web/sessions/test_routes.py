@@ -48,7 +48,8 @@ def _make_app(
     # Set up app state
     app.state.session_service = service
     app.state.settings = WebSettings(
-        data_dir=tmp_path, max_upload_bytes=max_upload_bytes,
+        data_dir=tmp_path,
+        max_upload_bytes=max_upload_bytes,
     )
 
     router = create_session_router()
@@ -449,8 +450,11 @@ class TestUploadRoute:
         assert body["size_bytes"] == len(file_content)
         assert "path" in body
 
-        # Verify the file exists on disk
-        saved_path = Path(body["path"])
+        # Path should be relative (not start with /)
+        assert not body["path"].startswith("/")
+
+        # Verify the file exists on disk via data_dir / relative path
+        saved_path = tmp_path / body["path"]
         assert saved_path.exists()
         assert saved_path.read_bytes() == file_content
 
@@ -468,13 +472,16 @@ class TestUploadRoute:
             files={"file": ("payload.txt", io.BytesIO(file_content), "text/plain")},
         )
         assert upload_resp.status_code == 200
-        saved_path = Path(upload_resp.json()["path"])
+        relative_path = upload_resp.json()["path"]
+        saved_path = Path(relative_path)
 
+        # Path should be relative (not start with /)
+        assert not relative_path.startswith("/")
         # The path should NOT contain ".." components
         assert ".." not in str(saved_path)
-        # Should be under data_dir/uploads/etc/ (sanitized)
+        # Should be under uploads/etc/ (sanitized)
         assert "etc" in saved_path.parts
-        assert saved_path.is_relative_to(tmp_path / "uploads")
+        assert (tmp_path / relative_path).is_relative_to(tmp_path / "uploads")
 
     def test_upload_path_traversal_filename_sanitized(self, tmp_path) -> None:
         """Filename containing path traversal is sanitized."""
@@ -496,7 +503,10 @@ class TestUploadRoute:
             },
         )
         assert upload_resp.status_code == 200
-        saved_path = Path(upload_resp.json()["path"])
+        relative_path = upload_resp.json()["path"]
+        saved_path = Path(relative_path)
+        # Path should be relative (not start with /)
+        assert not relative_path.startswith("/")
         # Filename should be just "passwd", not "../../etc/passwd"
         assert saved_path.name == "passwd"
         assert ".." not in str(saved_path)
@@ -603,7 +613,8 @@ class TestRunAlreadyActiveError:
 
         @app.exception_handler(RunAlreadyActiveError)
         async def handle_run_already_active(
-            request, exc: RunAlreadyActiveError,
+            request,
+            exc: RunAlreadyActiveError,
         ) -> JSONResponse:
             return JSONResponse(
                 status_code=409,
@@ -644,3 +655,126 @@ class TestNewStateHasNoLineage:
         assert resp.status_code == 200
         body = resp.json()
         assert body["derived_from_state_id"] is None
+
+
+class TestPaginationRoutes:
+    """Tests for limit/offset query parameters on list endpoints."""
+
+    def test_list_sessions_pagination(self, tmp_path) -> None:
+        app, _ = _make_app(tmp_path)
+        client = TestClient(app)
+
+        for i in range(5):
+            client.post("/api/sessions", json={"title": f"S{i}"})
+
+        resp = client.get("/api/sessions?limit=2")
+        assert resp.status_code == 200
+        assert len(resp.json()) == 2
+
+        resp = client.get("/api/sessions?limit=2&offset=3")
+        assert resp.status_code == 200
+        assert len(resp.json()) == 2
+
+    def test_list_sessions_pagination_validation(self, tmp_path) -> None:
+        app, _ = _make_app(tmp_path)
+        client = TestClient(app)
+
+        # limit < 1
+        resp = client.get("/api/sessions?limit=0")
+        assert resp.status_code == 422
+
+        # limit > 200
+        resp = client.get("/api/sessions?limit=201")
+        assert resp.status_code == 422
+
+        # offset < 0
+        resp = client.get("/api/sessions?offset=-1")
+        assert resp.status_code == 422
+
+    def test_get_messages_pagination(self, tmp_path) -> None:
+        app, _ = _make_app(tmp_path)
+        client = TestClient(app)
+
+        resp = client.post("/api/sessions", json={"title": "Chat"})
+        session_id = resp.json()["id"]
+
+        for i in range(5):
+            client.post(
+                f"/api/sessions/{session_id}/messages",
+                json={"content": f"Msg {i}"},
+            )
+
+        resp = client.get(f"/api/sessions/{session_id}/messages?limit=2")
+        assert resp.status_code == 200
+        messages = resp.json()
+        assert len(messages) == 2
+        assert messages[0]["content"] == "Msg 0"
+
+        resp = client.get(
+            f"/api/sessions/{session_id}/messages?limit=2&offset=3",
+        )
+        assert resp.status_code == 200
+        messages = resp.json()
+        assert len(messages) == 2
+        assert messages[0]["content"] == "Msg 3"
+
+    def test_get_messages_pagination_validation(self, tmp_path) -> None:
+        app, _ = _make_app(tmp_path)
+        client = TestClient(app)
+
+        resp = client.post("/api/sessions", json={"title": "Chat"})
+        session_id = resp.json()["id"]
+
+        resp = client.get(f"/api/sessions/{session_id}/messages?limit=0")
+        assert resp.status_code == 422
+
+        resp = client.get(f"/api/sessions/{session_id}/messages?limit=501")
+        assert resp.status_code == 422
+
+    def test_get_state_versions_pagination(self, tmp_path) -> None:
+        app, service = _make_app(tmp_path)
+        client = TestClient(app)
+
+        session = asyncio.run(
+            service.create_session("alice", "Pipeline", "local"),
+        )
+        for _ in range(5):
+            asyncio.run(
+                service.save_composition_state(
+                    session.id,
+                    CompositionStateData(is_valid=False),
+                ),
+            )
+
+        resp = client.get(
+            f"/api/sessions/{session.id}/state/versions?limit=2",
+        )
+        assert resp.status_code == 200
+        versions = resp.json()
+        assert len(versions) == 2
+        assert versions[0]["version"] == 1
+
+        resp = client.get(
+            f"/api/sessions/{session.id}/state/versions?limit=2&offset=3",
+        )
+        assert resp.status_code == 200
+        versions = resp.json()
+        assert len(versions) == 2
+        assert versions[0]["version"] == 4
+
+    def test_get_state_versions_pagination_validation(self, tmp_path) -> None:
+        app, _ = _make_app(tmp_path)
+        client = TestClient(app)
+
+        resp = client.post("/api/sessions", json={"title": "Test"})
+        session_id = resp.json()["id"]
+
+        resp = client.get(
+            f"/api/sessions/{session_id}/state/versions?limit=0",
+        )
+        assert resp.status_code == 422
+
+        resp = client.get(
+            f"/api/sessions/{session_id}/state/versions?limit=201",
+        )
+        assert resp.status_code == 422
