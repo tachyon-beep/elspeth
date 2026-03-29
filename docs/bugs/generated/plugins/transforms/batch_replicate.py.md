@@ -48,7 +48,7 @@ output_contract = narrow_contract_to_output(
 )
 ```
 
-Source: `/home/john/elspeth/src/elspeth/plugins/transforms/web_scrape.py:362`  
+Source: `/home/john/elspeth/src/elspeth/plugins/transforms/web_scrape.py:362`
 Source: `/home/john/elspeth/src/elspeth/plugins/transforms/field_mapper.py:169`
 
 That preservation matters because sink header restoration in `ORIGINAL` mode reads `field.original_name` from the contract:

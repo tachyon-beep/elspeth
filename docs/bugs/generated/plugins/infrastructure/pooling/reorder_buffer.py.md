@@ -23,7 +23,7 @@ self._next_emit: int = 0
 self._complete_counter: int = 0
 ```
 
-[/home/john/elspeth/src/elspeth/plugins/infrastructure/pooling/reorder_buffer.py:71](/home/john/elspeth/src/elspeth/plugins/infrastructure/pooling/reorder_buffer.py#L71)  
+[/home/john/elspeth/src/elspeth/plugins/infrastructure/pooling/reorder_buffer.py:71](/home/john/elspeth/src/elspeth/plugins/infrastructure/pooling/reorder_buffer.py#L71)
 [/home/john/elspeth/src/elspeth/plugins/infrastructure/pooling/reorder_buffer.py:73](/home/john/elspeth/src/elspeth/plugins/infrastructure/pooling/reorder_buffer.py#L73)
 
 `submit()` returns the current `_next_submit` and increments it, with no path that resets it when the buffer becomes empty:
@@ -34,7 +34,7 @@ self._entries[idx] = _InternalEntry(...)
 self._next_submit += 1
 ```
 
-[/home/john/elspeth/src/elspeth/plugins/infrastructure/pooling/reorder_buffer.py:89](/home/john/elspeth/src/elspeth/plugins/infrastructure/pooling/reorder_buffer.py#L89)  
+[/home/john/elspeth/src/elspeth/plugins/infrastructure/pooling/reorder_buffer.py:89](/home/john/elspeth/src/elspeth/plugins/infrastructure/pooling/reorder_buffer.py#L89)
 [/home/john/elspeth/src/elspeth/plugins/infrastructure/pooling/reorder_buffer.py:94](/home/john/elspeth/src/elspeth/plugins/infrastructure/pooling/reorder_buffer.py#L94)
 
 Likewise `complete()` assigns `complete_index` from `_complete_counter` and increments it forever:
@@ -45,7 +45,7 @@ entry.complete_index = self._complete_counter
 self._complete_counter += 1
 ```
 
-[/home/john/elspeth/src/elspeth/plugins/infrastructure/pooling/reorder_buffer.py:117](/home/john/elspeth/src/elspeth/plugins/infrastructure/pooling/reorder_buffer.py#L117)  
+[/home/john/elspeth/src/elspeth/plugins/infrastructure/pooling/reorder_buffer.py:117](/home/john/elspeth/src/elspeth/plugins/infrastructure/pooling/reorder_buffer.py#L117)
 [/home/john/elspeth/src/elspeth/plugins/infrastructure/pooling/reorder_buffer.py:120](/home/john/elspeth/src/elspeth/plugins/infrastructure/pooling/reorder_buffer.py#L120)
 
 `get_ready_results()` deletes emitted entries and advances `_next_emit`, but also never resets state when the buffer is drained:
@@ -55,7 +55,7 @@ del self._entries[self._next_emit]
 self._next_emit += 1
 ```
 
-[/home/john/elspeth/src/elspeth/plugins/infrastructure/pooling/reorder_buffer.py:167](/home/john/elspeth/src/elspeth/plugins/infrastructure/pooling/reorder_buffer.py#L167)  
+[/home/john/elspeth/src/elspeth/plugins/infrastructure/pooling/reorder_buffer.py:167](/home/john/elspeth/src/elspeth/plugins/infrastructure/pooling/reorder_buffer.py#L167)
 [/home/john/elspeth/src/elspeth/plugins/infrastructure/pooling/reorder_buffer.py:168](/home/john/elspeth/src/elspeth/plugins/infrastructure/pooling/reorder_buffer.py#L168)
 
 This matters in real integration because the executor deliberately reuses one shared buffer across many `execute_batch()` calls:
@@ -84,7 +84,7 @@ So row 1 might record `submit_index` `[0,1,2]`, but row 2 on the same transform 
 assert submit_indices == [0, 1, 2, 3, 4]
 ```
 
-[/home/john/elspeth/tests/unit/plugins/llm/test_pooled_executor.py:750](/home/john/elspeth/tests/unit/plugins/llm/test_pooled_executor.py#L750)  
+[/home/john/elspeth/tests/unit/plugins/llm/test_pooled_executor.py:750](/home/john/elspeth/tests/unit/plugins/llm/test_pooled_executor.py#L750)
 [/home/john/elspeth/tests/unit/plugins/llm/test_pooled_executor.py:752](/home/john/elspeth/tests/unit/plugins/llm/test_pooled_executor.py#L752)
 
 ## Root Cause Hypothesis
