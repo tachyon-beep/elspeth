@@ -1,6 +1,9 @@
 # Superpowers brainstorming artifacts
 .superpowers/
 
+# Staging area for pre-built components
+.staging/
+
 # Byte-compiled / optimized / DLL files
 __pycache__/
 *.py[cod]

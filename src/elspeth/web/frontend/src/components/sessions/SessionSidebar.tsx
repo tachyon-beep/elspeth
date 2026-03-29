@@ -1,0 +1,152 @@
+// src/components/sessions/SessionSidebar.tsx
+//
+// Session list sidebar. Always renders at full width -- collapse/expand
+// is controlled by Layout.tsx via CSS grid column sizing.
+import { useSession } from "@/hooks/useSession";
+
+/** Format a date string as a relative time ("2 min ago", "yesterday"). */
+function relativeTime(dateStr: string): string {
+  const date = new Date(dateStr);
+  const now = new Date();
+  const diffMs = now.getTime() - date.getTime();
+  const diffSec = Math.floor(diffMs / 1000);
+  const diffMin = Math.floor(diffSec / 60);
+  const diffHr = Math.floor(diffMin / 60);
+  const diffDay = Math.floor(diffHr / 24);
+
+  if (diffSec < 60) return "just now";
+  if (diffMin < 60) return `${diffMin} min ago`;
+  if (diffHr < 24) return `${diffHr}h ago`;
+  if (diffDay === 1) return "yesterday";
+  return `${diffDay}d ago`;
+}
+
+export function SessionSidebar() {
+  const { sessions, activeSessionId, createSession, selectSession } =
+    useSession();
+
+  return (
+    <aside
+      className="session-sidebar"
+      style={{
+        display: "flex",
+        flexDirection: "column",
+        height: "100%",
+        overflow: "hidden",
+      }}
+      aria-label="Sessions sidebar"
+    >
+      {/* Header */}
+      <div
+        style={{
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "space-between",
+          padding: "12px 12px 8px",
+          borderBottom: "1px solid var(--color-border)",
+        }}
+      >
+        <span
+          style={{
+            fontWeight: 600,
+            fontSize: 14,
+            color: "var(--color-text)",
+          }}
+        >
+          Sessions
+        </span>
+      </div>
+
+      {/* Session list */}
+      <nav
+        style={{ flex: 1, overflowY: "auto" }}
+        aria-label="Session list"
+      >
+        {sessions.length === 0 ? (
+          <div
+            style={{
+              padding: 16,
+              color: "var(--color-text-muted)",
+              fontSize: 13,
+              textAlign: "center",
+            }}
+          >
+            No sessions yet. Click the button below to start.
+          </div>
+        ) : (
+          <ul style={{ listStyle: "none", margin: 0, padding: 0 }}>
+            {sessions.map((session) => {
+              const isActive = session.id === activeSessionId;
+              return (
+                <li key={session.id}>
+                  <button
+                    onClick={() => selectSession(session.id)}
+                    aria-current={isActive ? "true" : undefined}
+                    aria-label={`Session: ${session.title}, ${relativeTime(session.updated_at)}`}
+                    style={{
+                      display: "block",
+                      width: "100%",
+                      padding: "10px 12px",
+                      border: "none",
+                      borderLeft: isActive
+                        ? "3px solid var(--color-focus-ring)"
+                        : "3px solid transparent",
+                      backgroundColor: isActive
+                        ? "var(--color-surface-hover)"
+                        : "transparent",
+                      cursor: "pointer",
+                      textAlign: "left",
+                      fontSize: 13,
+                      color: "var(--color-text)",
+                    }}
+                  >
+                    <div
+                      style={{
+                        overflow: "hidden",
+                        textOverflow: "ellipsis",
+                        whiteSpace: "nowrap",
+                        fontWeight: isActive ? 600 : 400,
+                      }}
+                    >
+                      {session.title}
+                    </div>
+                    <div
+                      style={{
+                        fontSize: 11,
+                        color: "var(--color-text-muted)",
+                        marginTop: 2,
+                      }}
+                    >
+                      {relativeTime(session.updated_at)}
+                    </div>
+                  </button>
+                </li>
+              );
+            })}
+          </ul>
+        )}
+      </nav>
+
+      {/* New session button */}
+      <div style={{ padding: 8, borderTop: "1px solid var(--color-border)" }}>
+        <button
+          onClick={createSession}
+          aria-label="Create new session"
+          style={{
+            display: "block",
+            width: "100%",
+            padding: "8px 12px",
+            backgroundColor: "var(--color-focus-ring)",
+            color: "var(--color-text)",
+            border: "none",
+            borderRadius: 4,
+            cursor: "pointer",
+            fontSize: 13,
+          }}
+        >
+          + New Session
+        </button>
+      </div>
+    </aside>
+  );
+}

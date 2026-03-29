@@ -17,7 +17,7 @@
 | Modify | `src/elspeth/web/composer/tools.py` | T2: tool registry refactor + `is_discovery_tool()` + `is_cacheable_discovery_tool()` |
 | Modify | `src/elspeth/web/composer/protocol.py` | T3/T4: `ComposerConvergenceError` gains `partial_state` and `budget_exhausted` |
 | Modify | `src/elspeth/web/composer/service.py` | T3: dual-counter loop + local discovery cache + `asyncio.wait_for()` timeout |
-| Modify | `src/elspeth/web/settings.py` | T3: replace `composer_max_turns` with dual settings + `composer_timeout_seconds` |
+| Modify | `src/elspeth/web/config.py` | T3: replace `composer_max_turns` with dual settings + `composer_timeout_seconds` |
 | Create | `src/elspeth/web/middleware/__init__.py` | T5: module init |
 | Create | `src/elspeth/web/middleware/rate_limit.py` | T5: `ComposerRateLimiter` |
 | Modify | `src/elspeth/web/sessions/routes.py` | T4: partial state persistence on convergence, T5: rate limiter wiring |
@@ -157,23 +157,24 @@ git commit -m "fix(web/composer): preserve insertion order in with_edge() and wi
 class TestToolRegistry:
     """Tests for the tool registry pattern — two dicts + cacheable frozenset."""
 
-    def test_discovery_tools_has_six_entries(self) -> None:
+    def test_discovery_tools_has_five_entries(self) -> None:
         from elspeth.web.composer.tools import _DISCOVERY_TOOLS
 
-        assert len(_DISCOVERY_TOOLS) == 6
+        assert len(_DISCOVERY_TOOLS) == 5
         expected = {
             "list_sources", "list_transforms", "list_sinks",
-            "get_plugin_schema", "get_expression_grammar", "get_current_state",
+            "get_plugin_schema", "get_expression_grammar",
         }
         assert set(_DISCOVERY_TOOLS.keys()) == expected
 
-    def test_mutation_tools_has_six_entries(self) -> None:
+    def test_mutation_tools_has_eight_entries(self) -> None:
         from elspeth.web.composer.tools import _MUTATION_TOOLS
 
-        assert len(_MUTATION_TOOLS) == 6
+        assert len(_MUTATION_TOOLS) == 8
         expected = {
             "set_source", "upsert_node", "upsert_edge",
             "remove_node", "remove_edge", "set_metadata",
+            "set_output", "remove_output",
         }
         assert set(_MUTATION_TOOLS.keys()) == expected
 
@@ -183,15 +184,14 @@ class TestToolRegistry:
         overlap = set(_DISCOVERY_TOOLS.keys()) & set(_MUTATION_TOOLS.keys())
         assert overlap == set(), f"Registry overlap: {overlap}"
 
-    def test_cacheable_discovery_excludes_get_current_state(self) -> None:
-        from elspeth.web.composer.tools import _CACHEABLE_DISCOVERY_TOOLS
+    def test_cacheable_discovery_equals_discovery(self) -> None:
+        """All discovery tools are cacheable (get_current_state was removed)."""
+        from elspeth.web.composer.tools import (
+            _CACHEABLE_DISCOVERY_TOOLS,
+            _DISCOVERY_TOOLS,
+        )
 
-        assert "get_current_state" not in _CACHEABLE_DISCOVERY_TOOLS
-        expected = {
-            "list_sources", "list_transforms", "list_sinks",
-            "get_plugin_schema", "get_expression_grammar",
-        }
-        assert _CACHEABLE_DISCOVERY_TOOLS == expected
+        assert _CACHEABLE_DISCOVERY_TOOLS == frozenset(_DISCOVERY_TOOLS.keys())
 
     def test_cacheable_is_subset_of_discovery(self) -> None:
         from elspeth.web.composer.tools import (
@@ -205,7 +205,7 @@ class TestToolRegistry:
         from elspeth.web.composer.tools import is_discovery_tool
 
         assert is_discovery_tool("list_sources") is True
-        assert is_discovery_tool("get_current_state") is True
+        assert is_discovery_tool("get_expression_grammar") is True
         assert is_discovery_tool("set_source") is False
         assert is_discovery_tool("nonexistent") is False
 
@@ -213,7 +213,7 @@ class TestToolRegistry:
         from elspeth.web.composer.tools import is_cacheable_discovery_tool
 
         assert is_cacheable_discovery_tool("list_sources") is True
-        assert is_cacheable_discovery_tool("get_current_state") is False
+        assert is_cacheable_discovery_tool("get_plugin_schema") is True
         assert is_cacheable_discovery_tool("set_source") is False
 
     def test_registry_dispatch_matches_original_behaviour(self) -> None:
@@ -224,7 +224,7 @@ class TestToolRegistry:
         # All discovery tools should succeed
         for tool_name in [
             "list_sources", "list_transforms", "list_sinks",
-            "get_expression_grammar", "get_current_state",
+            "get_expression_grammar",
         ]:
             result = execute_tool(tool_name, {}, state, catalog)
             assert result.success is True, f"{tool_name} failed"
@@ -277,7 +277,9 @@ Expected: FAIL -- `_DISCOVERY_TOOLS`, `_MUTATION_TOOLS`, etc. not defined.
 
 - [ ] **Step 3: Refactor tools.py to use registry pattern**
 
-Replace the if/elif chain in `execute_tool()` and add the registry infrastructure. The handler functions already exist; this is a mechanical refactoring. Normalize handler signatures so all accept `(arguments, state, catalog) -> ToolResult`.
+Replace the if/elif chain in `execute_tool()` and add the registry infrastructure. The handler functions already exist; this is a mechanical refactoring. Normalize handler signatures so all accept `(arguments, state, catalog, data_dir) -> ToolResult`. The `data_dir` parameter is needed by `_execute_set_source` for S2 path allowlist enforcement; other handlers ignore it.
+
+**WIP delta:** The WIP commit (`f3d33839`) removed `get_current_state` from both `get_tool_definitions()` and the if-chain. The registries reflect this — 5 discovery tools, 8 mutation tools (13 total). The `_CACHEABLE_DISCOVERY_TOOLS` frozenset is now identical to the discovery registry keys since the only non-cacheable discovery tool was `get_current_state`.
 
 ```python
 # src/elspeth/web/composer/tools.py — add after the existing handler functions,
@@ -286,7 +288,7 @@ Replace the if/elif chain in `execute_tool()` and add the registry infrastructur
 from collections.abc import Callable
 
 ToolHandler = Callable[
-    [dict[str, Any], CompositionState, CatalogServiceProtocol],
+    [dict[str, Any], CompositionState, CatalogServiceProtocol, str | None],
     ToolResult,
 ]
 
@@ -297,6 +299,7 @@ def _handle_list_sources(
     arguments: dict[str, Any],
     state: CompositionState,
     catalog: CatalogServiceProtocol,
+    data_dir: str | None = None,
 ) -> ToolResult:
     return _discovery_result(state, catalog.list_sources())
 
@@ -305,6 +308,7 @@ def _handle_list_transforms(
     arguments: dict[str, Any],
     state: CompositionState,
     catalog: CatalogServiceProtocol,
+    data_dir: str | None = None,
 ) -> ToolResult:
     return _discovery_result(state, catalog.list_transforms())
 
@@ -313,6 +317,7 @@ def _handle_list_sinks(
     arguments: dict[str, Any],
     state: CompositionState,
     catalog: CatalogServiceProtocol,
+    data_dir: str | None = None,
 ) -> ToolResult:
     return _discovery_result(state, catalog.list_sinks())
 
@@ -321,11 +326,14 @@ def _handle_get_plugin_schema(
     arguments: dict[str, Any],
     state: CompositionState,
     catalog: CatalogServiceProtocol,
+    data_dir: str | None = None,
 ) -> ToolResult:
     try:
         schema = catalog.get_schema(arguments["plugin_type"], arguments["name"])
         return _discovery_result(state, schema)
     except (ValueError, KeyError) as exc:
+        # ValueError: catalog contract for "unknown plugin/type"
+        # KeyError: LLM omitted required argument (Tier 3)
         return _failure_result(state, str(exc))
 
 
@@ -333,35 +341,23 @@ def _handle_get_expression_grammar(
     arguments: dict[str, Any],
     state: CompositionState,
     catalog: CatalogServiceProtocol,
+    data_dir: str | None = None,
 ) -> ToolResult:
     return _discovery_result(state, get_expression_grammar())
 
 
-def _handle_get_current_state(
-    arguments: dict[str, Any],
-    state: CompositionState,
-    catalog: CatalogServiceProtocol,
-) -> ToolResult:
-    serialized = _serialize_state(state)
-    validation = state.validate()
-    serialized["validation"] = {
-        "is_valid": validation.is_valid,
-        "errors": list(validation.errors),
-    }
-    return _discovery_result(state, serialized)
-
-
 # --- Mutation tool handlers (signatures already normalized) ---
-# _execute_set_source, _execute_upsert_node already accept
-# (args, state, catalog) -> ToolResult.
+# _execute_set_source already accepts (args, state, catalog, data_dir).
+# _execute_upsert_node, _execute_set_output accept (args, state, catalog).
 # _execute_upsert_edge, _execute_remove_node, _execute_remove_edge,
-# _execute_set_metadata accept (args, state) -> ToolResult.
-# Normalize the 2-arg handlers to accept catalog (ignored):
+# _execute_set_metadata, _execute_remove_output accept (args, state).
+# Normalize all to accept (args, state, catalog, data_dir):
 
 def _handle_upsert_edge(
     arguments: dict[str, Any],
     state: CompositionState,
     catalog: CatalogServiceProtocol,
+    data_dir: str | None = None,
 ) -> ToolResult:
     return _execute_upsert_edge(arguments, state)
 
@@ -370,6 +366,7 @@ def _handle_remove_node(
     arguments: dict[str, Any],
     state: CompositionState,
     catalog: CatalogServiceProtocol,
+    data_dir: str | None = None,
 ) -> ToolResult:
     return _execute_remove_node(arguments, state)
 
@@ -378,6 +375,7 @@ def _handle_remove_edge(
     arguments: dict[str, Any],
     state: CompositionState,
     catalog: CatalogServiceProtocol,
+    data_dir: str | None = None,
 ) -> ToolResult:
     return _execute_remove_edge(arguments, state)
 
@@ -386,8 +384,36 @@ def _handle_set_metadata(
     arguments: dict[str, Any],
     state: CompositionState,
     catalog: CatalogServiceProtocol,
+    data_dir: str | None = None,
 ) -> ToolResult:
     return _execute_set_metadata(arguments, state)
+
+
+def _handle_upsert_node(
+    arguments: dict[str, Any],
+    state: CompositionState,
+    catalog: CatalogServiceProtocol,
+    data_dir: str | None = None,
+) -> ToolResult:
+    return _execute_upsert_node(arguments, state, catalog)
+
+
+def _handle_set_output(
+    arguments: dict[str, Any],
+    state: CompositionState,
+    catalog: CatalogServiceProtocol,
+    data_dir: str | None = None,
+) -> ToolResult:
+    return _execute_set_output(arguments, state, catalog)
+
+
+def _handle_remove_output(
+    arguments: dict[str, Any],
+    state: CompositionState,
+    catalog: CatalogServiceProtocol,
+    data_dir: str | None = None,
+) -> ToolResult:
+    return _execute_remove_output(arguments, state)
 
 
 # --- Registries ---
@@ -398,28 +424,23 @@ _DISCOVERY_TOOLS: dict[str, ToolHandler] = {
     "list_sinks": _handle_list_sinks,
     "get_plugin_schema": _handle_get_plugin_schema,
     "get_expression_grammar": _handle_get_expression_grammar,
-    "get_current_state": _handle_get_current_state,
 }
 
-# Only these discovery tools are safe to cache. get_current_state returns
-# live state that changes with every mutation — caching it would return
-# stale snapshots. Budget classification still uses _DISCOVERY_TOOLS
-# (get_current_state IS a discovery turn for budget purposes).
-_CACHEABLE_DISCOVERY_TOOLS: frozenset[str] = frozenset({
-    "list_sources",
-    "list_transforms",
-    "list_sinks",
-    "get_plugin_schema",
-    "get_expression_grammar",
-})
+# All discovery tools are cacheable. Previously get_current_state was
+# excluded (returns live mutable state), but that tool was removed in
+# the WIP review-fixes commit. If a non-cacheable discovery tool is
+# re-added in future, add it to _DISCOVERY_TOOLS but NOT here.
+_CACHEABLE_DISCOVERY_TOOLS: frozenset[str] = frozenset(_DISCOVERY_TOOLS.keys())
 
 _MUTATION_TOOLS: dict[str, ToolHandler] = {
     "set_source": _execute_set_source,
-    "upsert_node": _execute_upsert_node,
+    "upsert_node": _handle_upsert_node,
     "upsert_edge": _handle_upsert_edge,
     "remove_node": _handle_remove_node,
     "remove_edge": _handle_remove_edge,
     "set_metadata": _handle_set_metadata,
+    "set_output": _handle_set_output,
+    "remove_output": _handle_remove_output,
 }
 
 # Module-level assertion: registries must not overlap.
@@ -451,17 +472,23 @@ def execute_tool(
     arguments: dict[str, Any],
     state: CompositionState,
     catalog: CatalogServiceProtocol,
+    data_dir: str | None = None,
 ) -> ToolResult:
     """Execute a composition tool by name.
 
     Dispatches via registry dict. Discovery tools return data without
     modifying state. Mutation tools return ToolResult with updated state
     and validation. Unknown tool names return a failure result.
+
+    Args:
+        data_dir: Base data directory for S2 path allowlist enforcement.
+            When provided, source options containing ``path`` or ``file``
+            keys are restricted to ``{data_dir}/uploads/``.
     """
     handler = _DISCOVERY_TOOLS.get(tool_name) or _MUTATION_TOOLS.get(tool_name)
     if handler is None:
         return _failure_result(state, f"Unknown tool: {tool_name}")
-    return handler(arguments, state, catalog)
+    return handler(arguments, state, catalog, data_dir)
 ```
 
 - [ ] **Step 4: Run tests -- expect PASS**
@@ -489,7 +516,7 @@ git commit -m "refactor(web/composer): replace if-chain with tool registry dicts
 - Modify: `tests/unit/web/composer/test_service.py`
 - Modify: `src/elspeth/web/composer/protocol.py`
 - Modify: `src/elspeth/web/composer/service.py`
-- Modify: `src/elspeth/web/settings.py` (or wherever `WebSettings` is defined)
+- Modify: `src/elspeth/web/config.py` (WebSettings lives here)
 
 - [ ] **Step 1: Update `ComposerConvergenceError` in protocol.py**
 
@@ -530,10 +557,34 @@ class ComposerConvergenceError(ComposerServiceError):
 
 Note: `ComposerConvergenceError` inherits from `Exception`, not a frozen dataclass. The `partial_state` field is a frozen `CompositionState` instance (already deeply frozen by its own `__post_init__`). No `freeze_fields` call is needed on the exception itself -- it is not a dataclass. The spec's mention of `freeze_fields` on the exception's `__post_init__` applies only if the exception were a `@dataclass(frozen=True)`, which it is not (exceptions cannot be frozen dataclasses in standard Python). The `CompositionState` stored in `partial_state` is already immutable.
 
+Also update the `ComposerSettings` protocol in the same file — replace `composer_max_turns` with the dual settings:
+
+```python
+# src/elspeth/web/composer/protocol.py — replace ComposerSettings protocol
+
+class ComposerSettings(Protocol):
+    """Protocol for the settings the composer service needs."""
+
+    @property
+    def composer_model(self) -> str: ...
+
+    @property
+    def composer_max_composition_turns(self) -> int: ...
+
+    @property
+    def composer_max_discovery_turns(self) -> int: ...
+
+    @property
+    def composer_timeout_seconds(self) -> float: ...
+
+    @property
+    def data_dir(self) -> Any: ...
+```
+
 - [ ] **Step 2: Update WebSettings**
 
 ```python
-# src/elspeth/web/settings.py — replace composer_max_turns with dual settings
+# src/elspeth/web/config.py — replace composer_max_turns with dual settings
 
 class WebSettings:
     """Web application settings.
@@ -716,8 +767,8 @@ class TestDiscoveryCache:
         assert catalog.list_sources.call_count == 1
 
     @pytest.mark.asyncio
-    async def test_get_current_state_never_cached(self) -> None:
-        """get_current_state is excluded from caching — always executes."""
+    async def test_mutation_tools_never_cached(self) -> None:
+        """Mutation tool results are never cached — always execute."""
         catalog = _mock_catalog()
         settings = _make_settings()
         settings.composer_max_composition_turns = 15
@@ -726,26 +777,23 @@ class TestDiscoveryCache:
         service = ComposerServiceImpl(catalog=catalog, settings=settings)
         state = _empty_state()
 
-        # Turn 1: get_current_state (always executes — discovery: 1)
-        # Turn 2: set_metadata (mutation — composition: 1)
-        # Turn 3: get_current_state (NOT cached — discovery: 2)
-        # Turn 4: text
-        gcs1 = _make_llm_response(
-            tool_calls=[{"id": "c1", "name": "get_current_state", "arguments": {}}],
+        # Turn 1: set_metadata (mutation — always executes)
+        # Turn 2: set_metadata again (should also execute, not cache)
+        # Turn 3: text
+        mut1 = _make_llm_response(
+            tool_calls=[{"id": "c1", "name": "set_metadata", "arguments": {"patch": {"name": "X"}}}],
         )
-        mut = _make_llm_response(
-            tool_calls=[{"id": "c2", "name": "set_metadata", "arguments": {"patch": {"name": "X"}}}],
-        )
-        gcs2 = _make_llm_response(
-            tool_calls=[{"id": "c3", "name": "get_current_state", "arguments": {}}],
+        mut2 = _make_llm_response(
+            tool_calls=[{"id": "c2", "name": "set_metadata", "arguments": {"patch": {"name": "Y"}}}],
         )
         text = _make_llm_response(content="Done.")
 
         with patch.object(service, "_call_llm", new_callable=AsyncMock) as mock_llm:
-            mock_llm.side_effect = [gcs1, mut, gcs2, text]
-            result = await service.compose("Check state", [], state)
+            mock_llm.side_effect = [mut1, mut2, text]
+            result = await service.compose("Update metadata", [], state)
 
-        assert result.message == "Done."
+        # Both mutations should have executed — name should be "Y"
+        assert result.state.metadata.name == "Y"
 
     @pytest.mark.asyncio
     async def test_cache_key_includes_arguments(self) -> None:
@@ -824,6 +872,7 @@ def _make_settings() -> MagicMock:
     settings.composer_max_composition_turns = 15
     settings.composer_max_discovery_turns = 10
     settings.composer_timeout_seconds = 85.0
+    settings.data_dir = "/tmp/test-data"
     return settings
 ```
 
@@ -846,16 +895,27 @@ class TestComposerConvergence:
         tool_response = _make_llm_response(
             tool_calls=[{
                 "id": "call_loop",
-                "name": "get_current_state",
+                "name": "list_sources",
                 "arguments": {},
             }],
         )
 
         with patch.object(service, "_call_llm", new_callable=AsyncMock) as mock_llm:
-            mock_llm.return_value = tool_response
+            # First call returns tool_response (discovery, cached after first).
+            # Second call returns tool_response again — cache hit, no budget charge.
+            # Since list_sources is cacheable, only the first call charges
+            # budget. Use list_transforms for the second to avoid cache hits.
+            tool_response_2 = _make_llm_response(
+                tool_calls=[{
+                    "id": "call_loop_2",
+                    "name": "list_transforms",
+                    "arguments": {},
+                }],
+            )
+            mock_llm.side_effect = [tool_response, tool_response_2]
             with pytest.raises(ComposerConvergenceError) as exc_info:
                 await service.compose("Loop forever", [], state)
-            assert exc_info.value.budget_exhausted in ("discovery", "composition")
+            assert exc_info.value.budget_exhausted == "discovery"
 ```
 
 - [ ] **Step 4: Implement dual-counter loop + discovery cache in service.py**
@@ -872,12 +932,12 @@ import litellm
 from elspeth.web.composer.protocol import (
     ComposerConvergenceError,
     ComposerResult,
+    ComposerSettings,
 )
 from elspeth.web.composer.prompts import build_messages
 from elspeth.web.composer.state import CompositionState
 from elspeth.web.composer.tools import (
     CatalogServiceProtocol,
-    ToolResult,
     execute_tool,
     get_tool_definitions,
     is_cacheable_discovery_tool,
@@ -900,33 +960,35 @@ class ComposerServiceImpl:
 
     Args:
         catalog: CatalogService for discovery tool delegation.
-        settings: WebSettings with composer_max_composition_turns,
+        settings: ComposerSettings with composer_max_composition_turns,
             composer_max_discovery_turns, composer_timeout_seconds,
-            composer_model.
+            composer_model, data_dir.
     """
 
     def __init__(
         self,
         catalog: CatalogServiceProtocol,
-        settings: Any,
+        settings: ComposerSettings,
     ) -> None:
         self._catalog = catalog
         self._model = settings.composer_model
         self._max_composition_turns = settings.composer_max_composition_turns
         self._max_discovery_turns = settings.composer_max_discovery_turns
         self._timeout_seconds = settings.composer_timeout_seconds
+        self._data_dir = str(settings.data_dir)
 
     async def compose(
         self,
         message: str,
-        messages: list[Any],
+        messages: list[dict[str, Any]],
         state: CompositionState,
     ) -> ComposerResult:
         """Run the LLM composition loop with dual-counter budget.
 
         Args:
             message: The user's chat message.
-            messages: Pre-fetched chat history (from route handler).
+            messages: Chat history as plain dicts (pre-converted from
+                ChatMessageRecord by route handler; seam contract B).
             state: The current CompositionState.
 
         Returns:
@@ -936,14 +998,20 @@ class ComposerServiceImpl:
             ComposerConvergenceError: If a budget is exhausted or
                 the timeout is exceeded.
         """
+        # Mutable container so _compose_loop can publish its latest
+        # state to the outer scope. On TimeoutError, compose() reads
+        # this to build partial_state — the local `state` variable
+        # inside _compose_loop is unreachable after cancellation.
+        state_ref: list[CompositionState] = [state]
+        initial_version = state.version
         try:
             return await asyncio.wait_for(
-                self._compose_loop(message, messages, state),
+                self._compose_loop(message, messages, state, state_ref),
                 timeout=self._timeout_seconds,
             )
         except asyncio.TimeoutError:
-            initial_version = state.version
-            partial = state if state.version > initial_version else None
+            latest = state_ref[0]
+            partial = latest if latest.version > initial_version else None
             raise ComposerConvergenceError(
                 max_turns=0,
                 budget_exhausted="timeout",
@@ -953,10 +1021,17 @@ class ComposerServiceImpl:
     async def _compose_loop(
         self,
         message: str,
-        messages: list[Any],
+        messages: list[dict[str, Any]],
         state: CompositionState,
+        state_ref: list[CompositionState],
     ) -> ComposerResult:
-        """Inner composition loop with dual-counter budget tracking."""
+        """Inner composition loop with dual-counter budget tracking.
+
+        Args:
+            state_ref: Single-element mutable list. Updated after every
+                successful tool execution so the outer compose() can
+                read the latest state on timeout.
+        """
         initial_version = state.version
         llm_messages = self._build_messages(messages, state, message)
         tools = self._get_litellm_tools()
@@ -981,21 +1056,23 @@ class ComposerServiceImpl:
                 )
 
             # Append the assistant message (with tool_calls metadata)
-            llm_messages.append({
-                "role": "assistant",
-                "content": assistant_message.content,
-                "tool_calls": [
-                    {
-                        "id": tc.id,
-                        "type": "function",
-                        "function": {
-                            "name": tc.function.name,
-                            "arguments": tc.function.arguments,
-                        },
-                    }
-                    for tc in assistant_message.tool_calls
-                ],
-            })
+            llm_messages.append(
+                {
+                    "role": "assistant",
+                    "content": assistant_message.content,
+                    "tool_calls": [
+                        {
+                            "id": tc.id,
+                            "type": "function",
+                            "function": {
+                                "name": tc.function.name,
+                                "arguments": tc.function.arguments,
+                            },
+                        }
+                        for tc in assistant_message.tool_calls
+                    ],
+                }
+            )
 
             # Execute each tool call, tracking whether this turn has
             # any mutation calls for budget classification.
@@ -1007,13 +1084,17 @@ class ComposerServiceImpl:
                 try:
                     arguments = json.loads(tool_call.function.arguments)
                 except (json.JSONDecodeError, TypeError) as exc:
-                    llm_messages.append({
-                        "role": "tool",
-                        "tool_call_id": tool_call.id,
-                        "content": json.dumps({
-                            "error": f"Invalid JSON in arguments: {exc}",
-                        }),
-                    })
+                    llm_messages.append(
+                        {
+                            "role": "tool",
+                            "tool_call_id": tool_call.id,
+                            "content": json.dumps(
+                                {
+                                    "error": f"Invalid JSON in arguments: {exc}",
+                                }
+                            ),
+                        }
+                    )
                     all_cache_hits = False
                     continue
 
@@ -1022,45 +1103,64 @@ class ComposerServiceImpl:
                     cache_key = _make_cache_key(tool_name, arguments)
                     if cache_key in discovery_cache:
                         # Cache hit — return cached result, no budget charge
-                        llm_messages.append({
-                            "role": "tool",
-                            "tool_call_id": tool_call.id,
-                            "content": discovery_cache[cache_key],
-                        })
+                        llm_messages.append(
+                            {
+                                "role": "tool",
+                                "tool_call_id": tool_call.id,
+                                "content": discovery_cache[cache_key],
+                            }
+                        )
                         continue
 
                 all_cache_hits = False
 
-                # Execute the tool
+                # execute_tool() is system code, but the arguments dict
+                # comes from LLM output (Tier 3). Missing/wrong-type keys
+                # in LLM-provided arguments are expected failures — return
+                # the error to the LLM so it can self-correct. Bugs in
+                # execute_tool's own logic will raise other exceptions and
+                # crash as intended (Amendment 2).
                 try:
                     result = execute_tool(
-                        tool_name, arguments, state, self._catalog
+                        tool_name,
+                        arguments,
+                        state,
+                        self._catalog,
+                        data_dir=self._data_dir,
                     )
-                    state = result.updated_state
-                    result_json = json.dumps(result.to_dict())
+                except (KeyError, TypeError) as exc:
+                    llm_messages.append(
+                        {
+                            "role": "tool",
+                            "tool_call_id": tool_call.id,
+                            "content": json.dumps(
+                                {
+                                    "error": f"Tool '{tool_name}' failed: {exc}",
+                                }
+                            ),
+                        }
+                    )
+                    continue
 
-                    # Cache cacheable discovery results
-                    if is_cacheable_discovery_tool(tool_name):
-                        cache_key = _make_cache_key(tool_name, arguments)
-                        discovery_cache[cache_key] = result_json
+                state = result.updated_state
+                state_ref[0] = state  # Publish for timeout capture
+                result_json = json.dumps(result.to_dict())
 
-                    llm_messages.append({
+                # Cache cacheable discovery results
+                if is_cacheable_discovery_tool(tool_name):
+                    cache_key = _make_cache_key(tool_name, arguments)
+                    discovery_cache[cache_key] = result_json
+
+                llm_messages.append(
+                    {
                         "role": "tool",
                         "tool_call_id": tool_call.id,
                         "content": result_json,
-                    })
+                    }
+                )
 
-                    if not is_discovery_tool(tool_name):
-                        turn_has_mutation = True
-
-                except Exception as exc:
-                    llm_messages.append({
-                        "role": "tool",
-                        "tool_call_id": tool_call.id,
-                        "content": json.dumps({
-                            "error": f"Tool execution error: {exc}",
-                        }),
-                    })
+                if not is_discovery_tool(tool_name):
+                    turn_has_mutation = True
 
             # If ALL tool calls in this turn were cache hits, no budget
             # charge — continue to next turn without incrementing.
@@ -1072,6 +1172,17 @@ class ComposerServiceImpl:
             if turn_has_mutation:
                 composition_turns_used += 1
                 if composition_turns_used >= self._max_composition_turns:
+                    # B-4D-3 fix: give the LLM one last chance to see the
+                    # tool results and produce a text response. Without this,
+                    # a correction made on the final turn is applied to state
+                    # but the LLM never sees the confirmation.
+                    response = await self._call_llm(llm_messages, tools)
+                    assistant_message = response.choices[0].message
+                    if not assistant_message.tool_calls:
+                        return ComposerResult(
+                            message=assistant_message.content or "",
+                            state=state,
+                        )
                     partial = state if state.version > initial_version else None
                     raise ComposerConvergenceError(
                         max_turns=composition_turns_used + discovery_turns_used,
@@ -1090,11 +1201,16 @@ class ComposerServiceImpl:
 
     def _build_messages(
         self,
-        chat_history: list[Any],
+        chat_history: list[dict[str, Any]],
         state: CompositionState,
         user_message: str,
     ) -> list[dict[str, Any]]:
-        """Build the message list. Returns a NEW list on every call."""
+        """Build the message list. Returns a NEW list on every call.
+
+        This is critical: the tool-use loop appends to this list during
+        iteration. Returning a cached reference would cause cross-turn
+        contamination.
+        """
         return build_messages(
             chat_history=chat_history,
             state=state,
@@ -1158,7 +1274,7 @@ git commit -m "feat(web/composer): dual-counter loop with discovery cache and se
 If `WebSettings` was also modified:
 
 ```bash
-git add src/elspeth/web/settings.py
+git add src/elspeth/web/config.py
 git commit --amend --no-edit
 ```
 
@@ -1228,10 +1344,12 @@ class TestPartialStatePreservation:
         state = _empty_state()
 
         # Turn 1: discovery only — discovery budget exhausted (1/1)
+        # list_sources is cacheable, so use two different discovery tools
+        # to avoid cache-hit-no-budget-charge on the second call.
         disc_turn = _make_llm_response(
             tool_calls=[{
                 "id": "c1",
-                "name": "get_current_state",
+                "name": "list_sources",
                 "arguments": {},
             }],
         )
@@ -1686,14 +1804,14 @@ git commit -m "feat(web/middleware): add per-user sliding window rate limiter wi
 
 | # | Acceptance Criterion | Task | Verified |
 |---|---------------------|------|----------|
-| 1 | Cacheable discovery tool results cached in local `dict` variable, not instance field. `get_current_state` excluded from caching. Repeated cacheable calls return cached result without incrementing any counter. | T3 | `discovery_cache` is a local variable in `_compose_loop()`. `_CACHEABLE_DISCOVERY_TOOLS` excludes `get_current_state`. `TestDiscoveryCache.test_cacheable_tool_returns_cached_result` verifies cache hits do not charge budget. |
+| 1 | Cacheable discovery tool results cached in local `dict` variable, not instance field. All 5 discovery tools are cacheable (`get_current_state` was removed in WIP). Repeated cacheable calls return cached result without incrementing any counter. | T3 | `discovery_cache` is a local variable in `_compose_loop()`. `_CACHEABLE_DISCOVERY_TOOLS == frozenset(_DISCOVERY_TOOLS.keys())`. `TestDiscoveryCache.test_cacheable_tool_returns_cached_result` verifies cache hits do not charge budget. |
 | 2 | Dual-counter loop with budget-at-classification-time checking. Exits only when the specific budget being charged is exhausted. Error reports which budget was exhausted. | T3 | `while True` loop with post-classification budget check. `test_budget_checked_at_classification_time` verifies a mutation turn succeeds even when discovery budget is exhausted. |
 | 3 | `WebSettings` exposes `composer_max_composition_turns` (15), `composer_max_discovery_turns` (10), `composer_timeout_seconds` (85.0). Old `composer_max_turns` removed. | T3 | Settings replaced. 85.0 < 90.0 (frontend timeout). |
 | 4 | Partial state attached to `ComposerConvergenceError` when mutations occurred. Route handler validates, persists, returns 422 with partial state. Validation failure degrades to `is_valid=False`. Persistence failure degrades gracefully (omits partial state). | T4 | `test_convergence_includes_partial_state_when_mutated`, `test_convergence_no_partial_state_when_no_mutations`. Route handler has both validation guard and persistence guard. |
 | 5 | 422 response body includes `budget_exhausted` and optional `partial_state`. | T3/T4 | Response body construction includes both fields. `budget_exhausted` is one of `"composition"`, `"discovery"`, `"timeout"`. |
 | 6 | Rate limiting enforced via `Depends()` on `POST /api/sessions/{id}/messages`. Returns 429 with `Retry-After` header. | T5 | `get_rate_limiter` dependency. `test_429_response_body_shape` verifies response. |
 | 7 | `with_edge()` preserves insertion order. Test verifies. | T1 | `test_with_edge_preserves_order` — index-and-replace pattern. |
-| 8 | `execute_tool()` dispatches via registry dict. Two registries + cacheable frozenset. `is_discovery_tool()` and `is_cacheable_discovery_tool()` exposed. | T2 | `_DISCOVERY_TOOLS`, `_MUTATION_TOOLS`, `_CACHEABLE_DISCOVERY_TOOLS`. Module-level assertions prevent overlap. |
+| 8 | `execute_tool()` dispatches via registry dict. Two registries (5 discovery + 8 mutation = 13 tools) + cacheable frozenset. `is_discovery_tool()` and `is_cacheable_discovery_tool()` exposed. `data_dir` parameter threaded through `ToolHandler` signature. | T2 | `_DISCOVERY_TOOLS`, `_MUTATION_TOOLS`, `_CACHEABLE_DISCOVERY_TOOLS`. Module-level assertions prevent overlap. |
 | 9 | `ComposerConvergenceError` immutability: `partial_state` is a frozen `CompositionState` (already deeply frozen by its own `__post_init__`). The exception is not a dataclass, so no `freeze_fields` call on the exception itself. | T3 | `CompositionState` handles its own deep freezing. |
 | 10 | `ComposerRateLimiter` uses per-user `asyncio.Lock` instances. `_locks_lock` held for microseconds. Docstring describes asyncio.Lock as guarding suspension points. | T5 | Per-user lock in `_get_user_lock()`. Docstring accurate. |
 | 11 | All existing Sub-Plan 4 tests pass. New tests cover dual-counter, partial state, rate limiter, edge order, timeout, registry dispatch. | T1-T5 | Each task runs the full test suite. `@pytest.mark.asyncio` on all async tests. |

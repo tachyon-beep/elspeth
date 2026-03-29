@@ -1,0 +1,623 @@
+/* =============================================================================
+   ELSPETH Web UX — Global Styles (Dark Theme)
+   =============================================================================
+   CSS custom properties used consistently across all components.
+   Other agents writing components in parallel MUST reference these variable names.
+   ============================================================================= */
+
+/* ---------------------------------------------------------------------------
+   Colour Palette
+   --------------------------------------------------------------------------- */
+:root {
+  /* Backgrounds */
+  --color-bg: #1a1a2e;
+  --color-surface: #1e1e34;
+  --color-surface-sidebar: #16162a;
+  --color-surface-inspector: #1c1c32;
+  --color-surface-elevated: #242440;
+  --color-surface-hover: rgba(255, 255, 255, 0.04);
+
+  /* Text */
+  --color-text: #e0e0e0;
+  --color-text-secondary: #b0b0c0;
+  --color-text-muted: #b0b0c8;
+  --color-text-inverse: #1a1a2e;
+
+  /* Borders */
+  --color-border: rgba(255, 255, 255, 0.08);
+  --color-border-strong: rgba(255, 255, 255, 0.15);
+
+  /* Chat bubbles */
+  --color-bubble-user: rgba(102, 204, 255, 0.08);
+  --color-bubble-user-border: rgba(102, 204, 255, 0.25);
+  --color-bubble-assistant: rgba(255, 255, 255, 0.05);
+  --color-bubble-assistant-border: rgba(255, 255, 255, 0.10);
+  --color-bubble-system: rgba(255, 255, 255, 0.03);
+
+  /* Component type badges */
+  --color-badge-source: #6c9;        /* green */
+  --color-badge-transform: #fc6;     /* amber */
+  --color-badge-gate: #c9f;          /* purple */
+  --color-badge-sink: #f96;          /* orange */
+
+  /* Semantic colours */
+  --color-success: #6c9;
+  --color-error: #f66;
+  --color-warning: #fc6;
+  --color-info: #6cf;
+
+  /* Interactive */
+  --color-highlight: rgba(204, 153, 255, 0.1);
+  --color-selected-ring: rgba(204, 153, 255, 0.5);
+  --color-focus-ring: #7c8fff;
+  --color-link: #8ab4ff;
+
+  /* Status badges */
+  --color-status-pending: #999;
+  --color-status-running: #6cf;
+  --color-status-completed: #6c9;
+  --color-status-failed: #f66;
+  --color-status-cancelled: #fc6;
+
+  /* Dimming for unrelated components in click-to-highlight */
+  --opacity-dimmed: 0.35;
+
+  /* Scrollbar */
+  --color-scrollbar-track: transparent;
+  --color-scrollbar-thumb: rgba(255, 255, 255, 0.12);
+  --color-scrollbar-thumb-hover: rgba(255, 255, 255, 0.22);
+
+  /* Sizing */
+  --sidebar-expanded-width: 200px;
+  --sidebar-collapsed-width: 40px;
+  --inspector-default-width: 320px;
+  --inspector-min-width: 240px;
+
+  /* Typography */
+  --font-sans: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto,
+    Oxygen, Ubuntu, Cantarell, "Helvetica Neue", sans-serif;
+  --font-mono: "JetBrains Mono", "Fira Code", "SF Mono", "Cascadia Code",
+    "Source Code Pro", Menlo, Monaco, Consolas, "Liberation Mono", monospace;
+
+  --font-size-xs: 11px;
+  --font-size-sm: 12px;
+  --font-size-base: 14px;
+  --font-size-lg: 16px;
+  --font-size-xl: 18px;
+
+  --line-height-tight: 1.3;
+  --line-height-normal: 1.5;
+  --line-height-relaxed: 1.7;
+
+  /* Spacing */
+  --space-xs: 4px;
+  --space-sm: 8px;
+  --space-md: 12px;
+  --space-lg: 16px;
+  --space-xl: 24px;
+  --space-2xl: 32px;
+
+  /* Radius */
+  --radius-sm: 4px;
+  --radius-md: 6px;
+  --radius-lg: 8px;
+  --radius-xl: 12px;
+
+  /* Transitions */
+  --transition-fast: 100ms ease;
+  --transition-normal: 150ms ease;
+  --transition-slow: 250ms ease;
+}
+
+/* ---------------------------------------------------------------------------
+   Reset & Base
+   --------------------------------------------------------------------------- */
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  margin: 0;
+  padding: 0;
+  height: 100%;
+  width: 100%;
+  overflow: hidden;
+  background-color: var(--color-bg);
+  color: var(--color-text);
+  font-family: var(--font-sans);
+  font-size: var(--font-size-base);
+  line-height: var(--line-height-normal);
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+#root {
+  height: 100%;
+  width: 100%;
+}
+
+/* ---------------------------------------------------------------------------
+   Typography — Code & Monospace
+   --------------------------------------------------------------------------- */
+code,
+pre,
+kbd,
+samp,
+.mono {
+  font-family: var(--font-mono);
+  font-size: var(--font-size-sm);
+  line-height: var(--line-height-relaxed);
+}
+
+pre {
+  margin: 0;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+/* ---------------------------------------------------------------------------
+   Scrollbar Styling
+   --------------------------------------------------------------------------- */
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+::-webkit-scrollbar-track {
+  background: var(--color-scrollbar-track);
+}
+
+::-webkit-scrollbar-thumb {
+  background: var(--color-scrollbar-thumb);
+  border-radius: 4px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: var(--color-scrollbar-thumb-hover);
+}
+
+/* Firefox scrollbar */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: var(--color-scrollbar-thumb) var(--color-scrollbar-track);
+}
+
+/* ---------------------------------------------------------------------------
+   Focus-Visible — Keyboard Navigation
+   --------------------------------------------------------------------------- */
+:focus-visible {
+  outline: 2px solid var(--color-focus-ring);
+  outline-offset: 2px;
+}
+
+/* Remove default focus ring for mouse users */
+:focus:not(:focus-visible) {
+  outline: none;
+}
+
+summary:focus-visible {
+  outline: 2px solid var(--color-focus-ring);
+  outline-offset: 2px;
+  border-radius: var(--radius-sm);
+}
+
+/* Screen-reader-only utility */
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+/* ---------------------------------------------------------------------------
+   Keyframe Animations
+   --------------------------------------------------------------------------- */
+
+/* Composing dots — staggered bounce animation.
+   Apply .composing-dot to each dot, with animation-delay of 0s, 0.15s, 0.3s. */
+@keyframes composing-bounce {
+  0%,
+  60%,
+  100% {
+    transform: translateY(0);
+    opacity: 0.4;
+  }
+  30% {
+    transform: translateY(-6px);
+    opacity: 1;
+  }
+}
+
+.composing-dot {
+  display: inline-block;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background-color: var(--color-text-muted);
+  margin: 0 2px;
+  animation: composing-bounce 1.2s ease-in-out infinite;
+}
+
+.composing-dot:nth-child(1) {
+  animation-delay: 0s;
+}
+
+.composing-dot:nth-child(2) {
+  animation-delay: 0.15s;
+}
+
+.composing-dot:nth-child(3) {
+  animation-delay: 0.3s;
+}
+
+/* Indeterminate progress bar stripe animation.
+   Applied to .progress-bar-stripe inside a progress container. */
+@keyframes progress-stripe {
+  0% {
+    background-position: 0 0;
+  }
+  100% {
+    background-position: 40px 0;
+  }
+}
+
+.progress-bar {
+  width: 100%;
+  height: 4px;
+  background-color: var(--color-surface-elevated);
+  border-radius: 2px;
+  overflow: hidden;
+  position: relative;
+}
+
+.progress-bar-stripe {
+  width: 100%;
+  height: 100%;
+  background-image: linear-gradient(
+    45deg,
+    var(--color-info) 25%,
+    transparent 25%,
+    transparent 50%,
+    var(--color-info) 50%,
+    var(--color-info) 75%,
+    transparent 75%,
+    transparent
+  );
+  background-size: 40px 40px;
+  animation: progress-stripe 0.8s linear infinite;
+}
+
+.progress-bar-complete {
+  width: 100%;
+  height: 100%;
+  background-color: var(--color-success);
+  transition: background-color var(--transition-normal);
+}
+
+/* Spinner for button loading states (Validate, etc.) */
+@keyframes spin {
+  from {
+    transform: rotate(0deg);
+  }
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.spinner {
+  display: inline-block;
+  width: 14px;
+  height: 14px;
+  border: 2px solid var(--color-text-muted);
+  border-top-color: transparent;
+  border-radius: 50%;
+  animation: spin 0.6s linear infinite;
+}
+
+/* ---------------------------------------------------------------------------
+   Component Type Badge Utility Classes
+   --------------------------------------------------------------------------- */
+
+/* Base badge style */
+.type-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-xs);
+  padding: 2px 8px;
+  border-radius: var(--radius-sm);
+  font-family: var(--font-mono);
+  font-size: var(--font-size-xs);
+  font-weight: 600;
+  letter-spacing: 0.5px;
+  text-transform: uppercase;
+  white-space: nowrap;
+  line-height: 1.4;
+}
+
+/* Source — green */
+.type-badge-source {
+  background-color: rgba(102, 204, 153, 0.15);
+  color: var(--color-badge-source);
+  border: 1px solid rgba(102, 204, 153, 0.3);
+}
+
+/* Transform — amber */
+.type-badge-transform {
+  background-color: rgba(255, 204, 102, 0.15);
+  color: var(--color-badge-transform);
+  border: 1px solid rgba(255, 204, 102, 0.3);
+}
+
+/* Gate — purple */
+.type-badge-gate {
+  background-color: rgba(204, 153, 255, 0.15);
+  color: var(--color-badge-gate);
+  border: 1px solid rgba(204, 153, 255, 0.3);
+}
+
+/* Sink — orange */
+.type-badge-sink {
+  background-color: rgba(255, 153, 102, 0.15);
+  color: var(--color-badge-sink);
+  border: 1px solid rgba(255, 153, 102, 0.3);
+}
+
+/* ---------------------------------------------------------------------------
+   Status Badge Utility Classes
+   --------------------------------------------------------------------------- */
+.status-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-xs);
+  padding: 2px 8px;
+  border-radius: var(--radius-sm);
+  font-size: var(--font-size-xs);
+  font-weight: 500;
+  text-transform: uppercase;
+  letter-spacing: 0.3px;
+}
+
+.status-badge-pending {
+  background-color: rgba(153, 153, 153, 0.15);
+  color: var(--color-status-pending);
+}
+
+.status-badge-running {
+  background-color: rgba(102, 204, 255, 0.15);
+  color: var(--color-status-running);
+}
+
+.status-badge-completed {
+  background-color: rgba(102, 204, 153, 0.15);
+  color: var(--color-status-completed);
+}
+
+.status-badge-failed {
+  background-color: rgba(255, 102, 102, 0.15);
+  color: var(--color-status-failed);
+}
+
+.status-badge-cancelled {
+  background-color: rgba(255, 204, 102, 0.15);
+  color: var(--color-status-cancelled);
+}
+
+/* ---------------------------------------------------------------------------
+   Interactive Component Highlight (click-to-highlight in Spec tab)
+   --------------------------------------------------------------------------- */
+.component-card {
+  background-color: var(--color-surface-elevated);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  padding: var(--space-md);
+  cursor: pointer;
+  transition: background-color var(--transition-fast),
+    border-color var(--transition-fast),
+    opacity var(--transition-normal);
+}
+
+.component-card:hover {
+  background-color: var(--color-surface-hover);
+  border-color: var(--color-border-strong);
+}
+
+.component-card-selected {
+  border-color: var(--color-selected-ring);
+  box-shadow: 0 0 0 2px var(--color-selected-ring);
+}
+
+.component-card-dimmed {
+  background-color: rgba(36, 36, 64, var(--opacity-dimmed));
+}
+
+/* Text inside dimmed cards stays fully readable */
+.component-card-dimmed * {
+  opacity: 1;
+}
+
+.component-card-input {
+  border-left: 3px solid var(--color-info);
+}
+
+.component-card-output {
+  border-left: 3px solid var(--color-success);
+}
+
+/* ---------------------------------------------------------------------------
+   Button Base Styles
+   --------------------------------------------------------------------------- */
+.btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-xs);
+  padding: var(--space-sm) var(--space-lg);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  background-color: var(--color-surface-elevated);
+  color: var(--color-text);
+  font-family: var(--font-sans);
+  font-size: var(--font-size-sm);
+  font-weight: 500;
+  cursor: pointer;
+  transition: background-color var(--transition-fast),
+    border-color var(--transition-fast);
+  white-space: nowrap;
+}
+
+.btn:hover:not(:disabled) {
+  background-color: var(--color-surface-hover);
+  border-color: var(--color-border-strong);
+}
+
+.btn:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.btn-primary {
+  background-color: rgba(102, 204, 153, 0.2);
+  border-color: var(--color-success);
+  color: var(--color-success);
+}
+
+.btn-primary:hover:not(:disabled) {
+  background-color: rgba(102, 204, 153, 0.3);
+}
+
+.btn-danger {
+  background-color: rgba(255, 102, 102, 0.15);
+  border-color: var(--color-error);
+  color: var(--color-error);
+}
+
+.btn-danger:hover:not(:disabled) {
+  background-color: rgba(255, 102, 102, 0.25);
+}
+
+/* ---------------------------------------------------------------------------
+   Tab Strip Styles
+   --------------------------------------------------------------------------- */
+.tab-strip {
+  display: flex;
+  gap: 0;
+  border-bottom: 1px solid var(--color-border);
+}
+
+.tab-strip-tab {
+  padding: var(--space-sm) var(--space-lg);
+  border: none;
+  border-bottom: 2px solid transparent;
+  background: transparent;
+  color: var(--color-text-muted);
+  font-family: var(--font-sans);
+  font-size: var(--font-size-sm);
+  font-weight: 500;
+  cursor: pointer;
+  transition: color var(--transition-fast),
+    border-color var(--transition-fast);
+}
+
+.tab-strip-tab:hover {
+  color: var(--color-text);
+}
+
+.tab-strip-tab-active {
+  color: var(--color-text);
+  border-bottom-color: var(--color-focus-ring);
+}
+
+/* ---------------------------------------------------------------------------
+   Chat Bubble Base Styles
+   --------------------------------------------------------------------------- */
+.bubble {
+  max-width: 85%;
+  padding: var(--space-md) var(--space-lg);
+  border-radius: var(--radius-lg);
+  word-break: break-word;
+  white-space: pre-wrap;
+  line-height: var(--line-height-normal);
+}
+
+.bubble-user {
+  align-self: flex-end;
+  background-color: var(--color-bubble-user);
+  border: 1px solid var(--color-bubble-user-border);
+}
+
+.bubble-assistant {
+  align-self: flex-start;
+  background-color: var(--color-bubble-assistant);
+  border: 1px solid var(--color-bubble-assistant-border);
+}
+
+.bubble-system {
+  align-self: center;
+  width: 100%;
+  text-align: center;
+  background-color: var(--color-bubble-system);
+  color: var(--color-text-muted);
+  font-style: italic;
+  font-size: var(--font-size-sm);
+}
+
+/* ---------------------------------------------------------------------------
+   Validation Banner
+   --------------------------------------------------------------------------- */
+.validation-banner {
+  padding: var(--space-sm) var(--space-lg);
+  border-radius: var(--radius-sm);
+  font-size: var(--font-size-sm);
+  margin: var(--space-sm);
+}
+
+.validation-banner-pass {
+  background-color: rgba(102, 204, 153, 0.12);
+  border: 1px solid rgba(102, 204, 153, 0.3);
+  color: var(--color-success);
+}
+
+.validation-banner-fail {
+  background-color: rgba(255, 102, 102, 0.12);
+  border: 1px solid rgba(255, 102, 102, 0.3);
+  color: var(--color-error);
+}
+
+/* ---------------------------------------------------------------------------
+   Empty State
+   --------------------------------------------------------------------------- */
+.empty-state {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: var(--space-2xl);
+  color: var(--color-text-muted);
+  font-size: var(--font-size-sm);
+  text-align: center;
+  line-height: var(--line-height-relaxed);
+}
+
+/* ---------------------------------------------------------------------------
+   Resize Handle Hover Feedback
+   --------------------------------------------------------------------------- */
+.resize-handle:hover {
+  background-color: var(--color-focus-ring) !important;
+  opacity: 0.5;
+  transition: background-color var(--transition-normal);
+}
+
+/* ---------------------------------------------------------------------------
+   Selection — prevent text selection during resize drag
+   --------------------------------------------------------------------------- */
+.no-select {
+  user-select: none;
+  -webkit-user-select: none;
+}
