@@ -28,11 +28,11 @@ from elspeth.web.composer.state import (
     SourceSpec,
 )
 from elspeth.web.composer.yaml_generator import generate_yaml
+from elspeth.web.sessions.converters import state_from_record as _state_from_record
 from elspeth.web.sessions.protocol import (
     CompositionStateData,
     CompositionStateRecord,
 )
-from elspeth.web.sessions.routes import _state_from_record
 
 # ---------------------------------------------------------------------------
 # Fixtures

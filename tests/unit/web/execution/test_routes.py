@@ -15,6 +15,7 @@ from unittest.mock import AsyncMock, MagicMock
 from uuid import uuid4
 
 import pytest
+from fastapi import FastAPI
 from httpx import ASGITransport, AsyncClient
 
 from elspeth.web.execution.schemas import (
@@ -32,7 +33,7 @@ _TEST_USER_ID = "test-user-123"
 def _create_test_app(
     execution_service: MagicMock | None = None,
     broadcaster: MagicMock | None = None,
-) -> object:
+) -> FastAPI:
     """Create a minimal FastAPI app with execution routes wired.
 
     Bypasses the full create_app() to avoid real DB setup, auth provider
@@ -40,8 +41,6 @@ def _create_test_app(
     to return a fake user for auth. Sets up mock session_service for
     ownership verification.
     """
-    from fastapi import FastAPI
-
     from elspeth.web.auth.middleware import get_current_user
     from elspeth.web.auth.models import UserIdentity
     from elspeth.web.execution.routes import create_execution_router

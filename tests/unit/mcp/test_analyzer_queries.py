@@ -20,7 +20,7 @@ Tests for explain_token that hit this path are marked xfail.
 
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, cast
 
 import pytest
 
@@ -41,6 +41,7 @@ from elspeth.mcp.analyzer import LandscapeAnalyzer
 from elspeth.mcp.analyzers.diagnostics import get_failure_context
 from elspeth.mcp.analyzers.queries import explain_token, list_runs
 from elspeth.mcp.analyzers.reports import get_error_analysis, get_run_summary
+from elspeth.mcp.types import ErrorResult
 from tests.fixtures.landscape import (
     make_recorder_with_run,
     register_test_node,
@@ -325,7 +326,8 @@ class TestGetFailureContext:
         result = get_failure_context(setup.db, setup.recorder, "nonexistent-run")
 
         assert "error" in result
-        assert "not found" in result["error"]  # type: ignore[typeddict-item]  # ErrorResult variant
+        error_result = cast(ErrorResult, result)
+        assert "not found" in error_result["error"]
 
     def test_empty_failure_context_for_clean_run(self) -> None:
         """get_failure_context returns empty lists when run has no failures."""
@@ -947,7 +949,8 @@ class TestExplainTokenErrorHandling:
         result = analyzer.explain_token("et-err")
 
         assert "error" in result
-        assert "Must provide either token_id or row_id" in result["error"]
+        error_result = cast(ErrorResult, result)
+        assert "Must provide either token_id or row_id" in error_result["error"]
 
     def test_ambiguous_row_returns_error(self) -> None:
         """explain_token returns ErrorResult for row with multiple terminal tokens."""

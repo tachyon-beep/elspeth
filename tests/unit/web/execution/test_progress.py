@@ -9,6 +9,7 @@ from __future__ import annotations
 import asyncio
 import threading
 from datetime import UTC, datetime
+from typing import Literal
 from unittest.mock import MagicMock
 
 import pytest
@@ -17,11 +18,14 @@ from elspeth.web.execution.progress import ProgressBroadcaster
 from elspeth.web.execution.schemas import RunEvent
 
 
-def _make_event(run_id: str = "run-1", event_type: str = "progress") -> RunEvent:
+def _make_event(
+    run_id: str = "run-1",
+    event_type: Literal["progress", "error", "completed", "cancelled", "failed"] = "progress",
+) -> RunEvent:
     return RunEvent(
         run_id=run_id,
         timestamp=datetime.now(tz=UTC),
-        event_type=event_type,  # type: ignore[arg-type]
+        event_type=event_type,
         data={"rows_processed": 10, "rows_failed": 0},
     )
 

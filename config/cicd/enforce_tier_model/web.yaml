@@ -225,13 +225,19 @@ allow_hits:
   expires: null
 
 # App factory — os.environ.get() and @app.get() false positives
-- key: web/app.py:R1:create_app:fp=8c3b81b8e730d734
+- key: web/app.py:R1:create_app:fp=fffa82ecffb3c21f
   owner: web-app
   reason: "Tier 3 boundary — os.environ.get() for env var check, not dict.get() on pipeline data"
   safety: "Guards dev-mode secret_key warning; no data flow impact"
   expires: null
 
-- key: web/app.py:R1:create_app:health:fp=e7882b0a865f247a
+- key: web/app.py:R1:create_app:fp=589a29cd0b6b4bd7
+  owner: web-app
+  reason: "Tier 3 boundary — WEB_CONCURRENCY comes from process environment, where absence is expected"
+  safety: "Default of 1 preserves the single-worker invariant required for in-memory WebSocket progress delivery"
+  expires: null
+
+- key: web/app.py:R1:create_app:health:fp=ae2fec5bf2c4ab21
   owner: web-app
   reason: "False positive — @app.get() is FastAPI HTTP route decorator, not dict.get()"
   safety: No dict access involved
@@ -260,6 +266,136 @@ allow_hits:
   owner: web-sessions
   reason: "False positive — @router.get() is FastAPI HTTP route decorator, not dict.get()"
   safety: No dict access involved
+  expires: null
+
+# Execution routes — FastAPI decorators and WebSocket transport/auth handling
+- key: web/execution/routes.py:R1:create_execution_router:get_run_status:fp=d08d1e4253439ed0
+  owner: web-execution
+  reason: "False positive — @router.get() is FastAPI HTTP route decorator, not dict.get()"
+  safety: No dict access involved
+  expires: null
+
+- key: web/execution/routes.py:R1:create_execution_router:get_run_results:fp=f7d5bcef727d0b7d
+  owner: web-execution
+  reason: "False positive — @router.get() is FastAPI HTTP route decorator, not dict.get()"
+  safety: No dict access involved
+  expires: null
+
+- key: web/execution/routes.py:R4:create_execution_router:websocket_run_progress:fp=39b0b5f635b0c602
+  owner: web-execution
+  reason: "WebSocket auth boundary — auth providers may fail with provider-specific exceptions beyond AuthenticationError"
+  safety: "Any failure is handled by denying the connection with close code 4001 before websocket.accept()"
+  expires: null
+
+- key: web/execution/routes.py:R4:create_execution_router:websocket_run_progress:fp=f39f2a57045dcacd
+  owner: web-execution
+  reason: "Run-ownership gate on WebSocket setup treats backend lookup failures as not-found to avoid leaking run existence"
+  safety: "Failure closes the socket with 4004 and does not expose run metadata"
+  expires: null
+
+- key: web/execution/routes.py:R1:create_execution_router:websocket_run_progress:fp=edcad716854e9464
+  owner: web-execution
+  reason: "False positive — asyncio.Queue.get() is an async queue method, not dict.get()"
+  safety: "Queue timeout is handled explicitly by heartbeat logic"
+  expires: null
+
+- key: web/execution/routes.py:R6:create_execution_router:websocket_run_progress:fp=ca6a807e18a9c081
+  owner: web-execution
+  reason: "Heartbeat timeout is an expected idle path, not an error swallow"
+  safety: "The handler emits an explicit heartbeat frame and continues waiting, so clients get a visible keepalive signal"
+  expires: null
+
+- key: web/execution/routes.py:R4:create_execution_router:websocket_run_progress:fp=c4039cf10d17cb30
+  owner: web-execution
+  reason: "WebSocket transport writes can fail with varied connection-state exceptions across ASGI servers"
+  safety: "Failure breaks the loop and cleanup runs in finally; no run data is lost or fabricated"
+  expires: null
+
+- key: web/execution/routes.py:R6:create_execution_router:websocket_run_progress:fp=f70460a861072998
+  owner: web-execution
+  reason: "WebSocketDisconnect is the expected disconnect control-flow path"
+  safety: "Disconnect falls through to finally for unsubscribe cleanup; no error is hidden from callers"
+  expires: null
+
+- key: web/execution/routes.py:R4:create_execution_router:websocket_run_progress:fp=8051d9a2c963899b
+  owner: web-execution
+  reason: "Top-level WebSocket handler guard converts unexpected transport/runtime failures into a clean 1011 close"
+  safety: "The error is logged and the client receives an explicit internal-error close code"
+  expires: null
+
+- key: web/execution/routes.py:R4:create_execution_router:websocket_run_progress:fp=3e188822ed707289
+  owner: web-execution
+  reason: "Best-effort websocket.close() can raise transport-specific exceptions after a primary handler failure"
+  safety: "Secondary close failure is logged only after the original failure path is already established"
+  expires: null
+
+# Execution service — optional config keys and concurrent shutdown-event lifecycle
+- key: web/execution/service.py:R1:ExecutionServiceImpl:execute:fp=05f6bf7c01106310
+  owner: web-execution
+  reason: "Session composition state may legitimately omit optional source path/file keys"
+  safety: "Only present keys are checked against the uploads allowlist; missing keys skip the check without fabricating values"
+  expires: null
+
+- key: web/execution/service.py:R9:ExecutionServiceImpl:execute:fp=52f2e397f8f0ae3f
+  owner: web-execution
+  reason: "Shutdown-event cleanup is idempotent because submit failure can race with cancellation/lifecycle cleanup"
+  safety: "Missing key means there is no active event to clean; run creation aborts immediately"
+  expires: null
+
+- key: web/execution/service.py:R1:ExecutionServiceImpl:cancel:fp=efc0a289072bef70
+  owner: web-execution
+  reason: "Cancellation checks whether a live shutdown event exists before falling back to pending/terminal-run handling"
+  safety: "Missing event routes to an explicit database-backed status update path"
+  expires: null
+
+- key: web/execution/service.py:R4:ExecutionServiceImpl:_run_pipeline:_safe_broadcast:fp=1f95d33248434c3d
+  owner: web-execution
+  reason: "Progress broadcasting is operational visibility and may fail with transport/runtime exceptions outside pipeline correctness"
+  safety: "Broadcast failure is logged while run status and audit updates continue on the authoritative path"
+  expires: null
+
+- key: web/execution/service.py:R5:ExecutionServiceImpl:_run_pipeline:fp=33fc2673c9f0be24
+  owner: web-execution
+  reason: "BaseException split distinguishes process-termination control flow from ordinary failures"
+  safety: "KeyboardInterrupt/SystemExit are re-raised and skip the best-effort failed-status write to preserve shutdown semantics"
+  expires: null
+
+- key: web/execution/service.py:R4:ExecutionServiceImpl:_run_pipeline:fp=75a503441a2f61b8
+  owner: web-execution
+  reason: "Failure while marking a crashed run as failed is a secondary cleanup error on an already-failing path"
+  safety: "Secondary failure is logged and the original exception continues to propagate"
+  expires: null
+
+- key: web/execution/service.py:R9:ExecutionServiceImpl:_run_pipeline:fp=e25340ab9894eff7
+  owner: web-execution
+  reason: "Final shutdown-event cleanup is intentionally idempotent because completion and cancellation can race"
+  safety: "Removing a missing key is harmless and avoids masking the primary pipeline outcome"
+  expires: null
+
+# Execution progress — subscriber map lifecycle helpers
+- key: web/execution/progress.py:R8:ProgressBroadcaster:subscribe:fp=4e52b3400d28695a
+  owner: web-execution
+  reason: "Subscriber map creates the per-run queue set lazily on first subscription"
+  safety: "Mutation is guarded by the broadcaster lock and only initializes empty internal state"
+  expires: null
+
+- key: web/execution/progress.py:R1:ProgressBroadcaster:broadcast:fp=9e876f45c424ae5e
+  owner: web-execution
+  reason: "Broadcast treats an absent run entry as 'no subscribers' for that run"
+  safety: "A missing subscriber set results in a no-op broadcast, which is the correct behavior"
+  expires: null
+
+- key: web/execution/progress.py:R9:ProgressBroadcaster:cleanup_run:fp=743167bc43d078f7
+  owner: web-execution
+  reason: "Run cleanup is idempotent because unsubscribe and explicit cleanup can both remove the same run entry"
+  safety: "Missing key simply means there are no remaining subscribers to clean up"
+  expires: null
+
+# Execution validation — optional path/file keys in user-authored source config
+- key: web/execution/validation.py:R1:validate_pipeline:fp=f4448c9a506ce863
+  owner: web-execution
+  reason: "Validation checks optional source path/file keys supplied by composition state"
+  safety: "Absent keys are treated honestly as 'no path provided' and the check is recorded as skipped/passed"
   expires: null
 
 - key: web/sessions/routes.py:R1:create_session_router:get_state_versions:fp=6e1f4f1fc01319f9

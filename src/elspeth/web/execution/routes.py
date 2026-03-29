@@ -15,7 +15,7 @@ run's parent session.
 from __future__ import annotations
 
 import asyncio
-from typing import Any
+from typing import cast
 from uuid import UUID
 
 import structlog
@@ -23,7 +23,9 @@ from fastapi import APIRouter, Depends, HTTPException, Request, WebSocket, WebSo
 
 from elspeth.web.auth.middleware import get_current_user
 from elspeth.web.auth.models import AuthenticationError, UserIdentity
-from elspeth.web.execution.schemas import RunStatusResponse, ValidationResult
+from elspeth.web.execution.protocol import ExecutionService
+from elspeth.web.execution.schemas import RunResultsResponse, RunStatusResponse, ValidationResult
+from elspeth.web.sessions.protocol import SessionServiceProtocol
 
 slog = structlog.get_logger()
 
@@ -31,12 +33,12 @@ slog = structlog.get_logger()
 # ── Dependency providers (using app.state, matching existing pattern) ──
 
 
-def _get_execution_service(request: Request) -> Any:
-    return request.app.state.execution_service
+def _get_execution_service(request: Request) -> ExecutionService:
+    return cast(ExecutionService, request.app.state.execution_service)
 
 
-def _get_session_service(request: Request) -> Any:
-    return request.app.state.session_service
+def _get_session_service(request: Request) -> SessionServiceProtocol:
+    return cast(SessionServiceProtocol, request.app.state.session_service)
 
 
 # ── Ownership verification helpers ────────────────────────────────────
@@ -48,7 +50,7 @@ async def _verify_session_ownership(session_id: UUID, user: UserIdentity, reques
     Returns 404 (not 403) to avoid leaking session existence (IDOR).
     Matches the pattern in sessions/routes.py.
     """
-    session_service = request.app.state.session_service
+    session_service: SessionServiceProtocol = request.app.state.session_service
     settings = request.app.state.settings
     try:
         session = await session_service.get_session(session_id)
@@ -65,7 +67,7 @@ async def _verify_run_ownership(run_id: UUID, user: UserIdentity, request: Reque
     Looks up the run's parent session and checks ownership.
     Returns 404 (not 403) to avoid leaking run existence (IDOR).
     """
-    session_service = request.app.state.session_service
+    session_service: SessionServiceProtocol = request.app.state.session_service
     settings = request.app.state.settings
     try:
         run = await session_service.get_run(run_id)
@@ -98,7 +100,7 @@ def create_execution_router() -> APIRouter:
         session_id: UUID,
         request: Request,
         user: UserIdentity = Depends(get_current_user),  # noqa: B008
-        service: Any = Depends(_get_execution_service),  # noqa: B008
+        service: ExecutionService = Depends(_get_execution_service),  # noqa: B008
     ) -> ValidationResult:
         """Dry-run validation using real engine code paths."""
         await _verify_session_ownership(session_id, user, request)
@@ -114,7 +116,7 @@ def create_execution_router() -> APIRouter:
         request: Request,
         state_id: UUID | None = None,
         user: UserIdentity = Depends(get_current_user),  # noqa: B008
-        service: Any = Depends(_get_execution_service),  # noqa: B008
+        service: ExecutionService = Depends(_get_execution_service),  # noqa: B008
     ) -> dict[str, str]:
         """Start a background pipeline run. Returns run_id immediately.
 
@@ -136,7 +138,7 @@ def create_execution_router() -> APIRouter:
         run_id: UUID,
         request: Request,
         user: UserIdentity = Depends(get_current_user),  # noqa: B008
-        service: Any = Depends(_get_execution_service),  # noqa: B008
+        service: ExecutionService = Depends(_get_execution_service),  # noqa: B008
     ) -> RunStatusResponse:
         """Return current run status."""
         await _verify_run_ownership(run_id, user, request)
@@ -147,7 +149,7 @@ def create_execution_router() -> APIRouter:
         run_id: UUID,
         request: Request,
         user: UserIdentity = Depends(get_current_user),  # noqa: B008
-        service: Any = Depends(_get_execution_service),  # noqa: B008
+        service: ExecutionService = Depends(_get_execution_service),  # noqa: B008
     ) -> dict[str, str]:
         """Cancel a run. Idempotent on terminal runs."""
         await _verify_run_ownership(run_id, user, request)
@@ -155,13 +157,16 @@ def create_execution_router() -> APIRouter:
         status = await service.get_status(run_id)
         return {"status": status.status}
 
-    @router.get("/api/runs/{run_id}/results")
+    @router.get(
+        "/api/runs/{run_id}/results",
+        response_model=RunResultsResponse,
+    )
     async def get_run_results(
         run_id: UUID,
         request: Request,
         user: UserIdentity = Depends(get_current_user),  # noqa: B008
-        service: Any = Depends(_get_execution_service),  # noqa: B008
-    ) -> dict[str, Any]:
+        service: ExecutionService = Depends(_get_execution_service),  # noqa: B008
+    ) -> RunResultsResponse:
         """Return final run results. 409 if run is not terminal."""
         await _verify_run_ownership(run_id, user, request)
         status = await service.get_status(run_id)
@@ -170,14 +175,14 @@ def create_execution_router() -> APIRouter:
                 status_code=409,
                 detail=f"Run is still {status.status}",
             )
-        return {
-            "run_id": status.run_id,
-            "status": status.status,
-            "rows_processed": status.rows_processed,
-            "rows_failed": status.rows_failed,
-            "landscape_run_id": status.landscape_run_id,
-            "error": status.error,
-        }
+        return RunResultsResponse(
+            run_id=status.run_id,
+            status=status.status,
+            rows_processed=status.rows_processed,
+            rows_failed=status.rows_failed,
+            landscape_run_id=status.landscape_run_id,
+            error=status.error,
+        )
 
     # ── WebSocket Endpoint ─────────────────────────────────────────────
 
@@ -195,7 +200,7 @@ def create_execution_router() -> APIRouter:
         """
         broadcaster = websocket.app.state.broadcaster
         auth_provider = websocket.app.state.auth_provider
-        service = websocket.app.state.execution_service
+        service: ExecutionService = websocket.app.state.execution_service
 
         # Auth: validate JWT from query parameter
         if token is None:

@@ -5,6 +5,7 @@ from __future__ import annotations
 from typing import Protocol
 from uuid import UUID
 
+from elspeth.web.auth.models import UserIdentity
 from elspeth.web.execution.schemas import RunStatusResponse, ValidationResult
 
 
@@ -51,4 +52,8 @@ class ExecutionService(Protocol):
         SessionService.update_run_status() directly (not via _call_async,
         since we're in the event loop thread).
         """
+        ...
+
+    async def verify_run_ownership(self, user: UserIdentity, run_id: str) -> bool:
+        """Verify that a run belongs to the authenticated user's session."""
         ...

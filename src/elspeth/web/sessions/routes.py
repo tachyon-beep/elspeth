@@ -22,6 +22,7 @@ from elspeth.web.composer.protocol import ComposerConvergenceError, ComposerServ
 from elspeth.web.composer.state import CompositionState, PipelineMetadata
 from elspeth.web.composer.yaml_generator import generate_yaml
 from elspeth.web.middleware.rate_limit import ComposerRateLimiter, get_rate_limiter
+from elspeth.web.sessions.converters import state_from_record as _state_from_record
 from elspeth.web.sessions.protocol import (
     CompositionStateData,
     CompositionStateRecord,
@@ -73,9 +74,6 @@ def _state_response(state: CompositionStateRecord) -> CompositionStateResponse:
         derived_from_state_id=str(state.derived_from_state_id) if state.derived_from_state_id is not None else None,
         created_at=state.created_at,
     )
-
-
-from elspeth.web.sessions.converters import state_from_record as _state_from_record
 
 
 async def _verify_session_ownership(

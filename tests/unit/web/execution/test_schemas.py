@@ -165,7 +165,7 @@ class TestRunEvent:
             RunEvent(
                 run_id="run-123",
                 timestamp=datetime.now(tz=UTC),
-                event_type="unknown",  # type: ignore[arg-type]
+                event_type="unknown",
                 data={},
             )
 

@@ -177,7 +177,7 @@ class TestExecutionWiring:
 
     def test_execution_routes_registered(self, tmp_path) -> None:
         app = create_app(_settings(tmp_path))
-        route_paths = [route.path for route in app.routes]
+        route_paths = [path for route in app.routes if isinstance(path := getattr(route, "path", None), str)]
         assert "/api/sessions/{session_id}/validate" in route_paths
         assert "/api/sessions/{session_id}/execute" in route_paths
         assert "/api/runs/{run_id}" in route_paths

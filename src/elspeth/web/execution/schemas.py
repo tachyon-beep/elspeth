@@ -55,3 +55,14 @@ class RunStatusResponse(BaseModel):
     rows_failed: int
     error: str | None
     landscape_run_id: str | None
+
+
+class RunResultsResponse(BaseModel):
+    """REST response for terminal run results."""
+
+    run_id: str
+    status: Literal["completed", "failed", "cancelled"]
+    rows_processed: int
+    rows_failed: int
+    landscape_run_id: str | None
+    error: str | None

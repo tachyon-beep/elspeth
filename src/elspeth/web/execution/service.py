@@ -21,7 +21,7 @@ from collections.abc import Coroutine
 from concurrent.futures import Future, ThreadPoolExecutor
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any, TypeVar
+from typing import Any, TypeVar, cast
 from uuid import UUID
 
 import structlog
@@ -44,7 +44,7 @@ from elspeth.web.execution.schemas import (
     ValidationResult,
 )
 from elspeth.web.sessions.converters import state_from_record
-from elspeth.web.sessions.protocol import RunAlreadyActiveError  # B1: canonical definition
+from elspeth.web.sessions.protocol import RunAlreadyActiveError, SessionServiceProtocol  # B1: canonical definition
 
 slog = structlog.get_logger()
 
@@ -81,7 +81,7 @@ class ExecutionServiceImpl:
         loop: asyncio.AbstractEventLoop,
         broadcaster: ProgressBroadcaster,
         settings: Any,  # WebSettings
-        session_service: Any,  # SessionService
+        session_service: SessionServiceProtocol,
         yaml_generator: Any,  # YamlGenerator — injected, not module-level
     ) -> None:
         self._loop = loop
@@ -138,6 +138,7 @@ class ExecutionServiceImpl:
 
         # B4 fix: get_composition_state() doesn't exist on SessionService.
         # Use get_state() for explicit state_id, get_current_state() for latest.
+        state_record = None
         if state_id is not None:
             state_record = await self._session_service.get_state(state_id)
             # Verify state belongs to the requested session (IDOR prevention)
@@ -147,6 +148,8 @@ class ExecutionServiceImpl:
             state_record = await self._session_service.get_current_state(session_id)
             if state_record is None:
                 raise ValueError(f"No composition state exists for session {session_id}")
+
+        assert state_record is not None
 
         # Bridge CompositionStateRecord → CompositionState for generate_yaml().
         # The record stores raw dicts; generate_yaml() needs the typed domain object.
@@ -238,12 +241,15 @@ class ExecutionServiceImpl:
 
         composition_state = state_from_record(state_record)
         loop = asyncio.get_running_loop()
-        return await loop.run_in_executor(
-            None,
-            validate_pipeline,
-            composition_state,
-            self._settings,
-            self._yaml_generator,
+        return cast(
+            ValidationResult,
+            await loop.run_in_executor(
+                None,
+                validate_pipeline,
+                composition_state,
+                self._settings,
+                self._yaml_generator,
+            ),
         )
 
     async def verify_run_ownership(self, user: Any, run_id: str) -> bool:

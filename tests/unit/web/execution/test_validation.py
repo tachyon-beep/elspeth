@@ -10,6 +10,7 @@ W18 fix: Only typed exceptions are caught — no bare except Exception.
 from __future__ import annotations
 
 from pathlib import Path
+from typing import Any
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -22,7 +23,7 @@ from elspeth.web.execution.validation import validate_pipeline
 class FakeSourceSpec:
     """Minimal stand-in for SourceSpec during validation tests."""
 
-    def __init__(self, options: dict | None = None) -> None:
+    def __init__(self, options: dict[str, Any] | None = None) -> None:
         self.options = options or {}
 
 
@@ -33,7 +34,7 @@ class FakeCompositionState:
     object with an .options attribute, not a raw dict.
     """
 
-    def __init__(self, yaml_content: str = "", source_options: dict | None = None) -> None:
+    def __init__(self, yaml_content: str = "", source_options: dict[str, Any] | None = None) -> None:
         self.yaml_content = yaml_content
         self.source: FakeSourceSpec | None = FakeSourceSpec(source_options) if source_options is not None else None
 
@@ -161,7 +162,6 @@ class TestValidatePipelineSettingsFailure:
                 {
                     "type": "missing",
                     "loc": ("source",),
-                    "msg": "Field required",
                     "input": {},
                 }
             ],

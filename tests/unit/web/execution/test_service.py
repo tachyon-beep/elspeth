@@ -15,9 +15,11 @@ from __future__ import annotations
 import asyncio
 import concurrent.futures
 import threading
+from collections.abc import Coroutine
 from concurrent.futures import Future
 from datetime import UTC, datetime
 from pathlib import Path
+from typing import Any, cast
 from unittest.mock import AsyncMock, MagicMock, patch
 from uuid import UUID, uuid4
 
@@ -94,7 +96,7 @@ def service(
     # TestB8AsyncBridging tests _call_async itself with its own mocking.
     _real_loop = asyncio.new_event_loop()
 
-    def _mock_call_async(coro):  # type: ignore[no-untyped-def]
+    def _mock_call_async(coro: Coroutine[Any, Any, Any]) -> Any:
         try:
             return _real_loop.run_until_complete(coro)
         except RuntimeError:
@@ -102,7 +104,7 @@ def service(
             coro.close()
             return None
 
-    svc._call_async = _mock_call_async  # type: ignore[assignment]
+    cast(Any, svc)._call_async = _mock_call_async
     return svc
 
 
@@ -612,14 +614,14 @@ class TestRunningStatusFailure:
         original_call_async = service._call_async
         call_count = 0
 
-        def failing_call_async(coro):  # type: ignore[no-untyped-def]
+        def failing_call_async(coro: Coroutine[Any, Any, Any]) -> Any:
             nonlocal call_count
             call_count += 1
             if call_count == 1:  # First call = update to "running"
                 raise ConnectionError("DB connection lost")
             return original_call_async(coro)
 
-        service._call_async = failing_call_async  # type: ignore[assignment]
+        cast(Any, service)._call_async = failing_call_async
 
         with pytest.raises(ConnectionError):
             service._run_pipeline(str(uuid4()), "yaml", threading.Event())
