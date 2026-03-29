@@ -62,18 +62,12 @@ export const useAuthStore = create<AuthState>((set) => ({
   logout() {
     localStorage.removeItem(TOKEN_KEY);
     set({ token: null, user: null, loginError: null, isLoading: false });
-    // Reset other stores on logout. Dynamic require breaks the circular
-    // dependency (authStore is imported by sessionStore and executionStore).
-    // eslint-disable-next-line @typescript-eslint/no-require-imports
-    const { useSessionStore } = require("./sessionStore") as {
-      useSessionStore: { getState: () => { reset?: () => void } };
-    };
-    // eslint-disable-next-line @typescript-eslint/no-require-imports
-    const { useExecutionStore } = require("./executionStore") as {
-      useExecutionStore: { getState: () => { reset?: () => void } };
-    };
-    useSessionStore.getState().reset?.();
-    useExecutionStore.getState().reset?.();
+    void import("./sessionStore").then(({ useSessionStore }) => {
+      useSessionStore.getState().reset?.();
+    });
+    void import("./executionStore").then(({ useExecutionStore }) => {
+      useExecutionStore.getState().reset?.();
+    });
   },
 
   async loadFromStorage() {

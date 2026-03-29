@@ -74,6 +74,7 @@ export interface ChatMessage {
   content: string;
   tool_calls: ToolCall[] | null;
   created_at: string;
+  local_status?: "pending" | "failed";
 }
 
 // ── Composition State ───────────────────────────────────────────────────────
@@ -289,6 +290,14 @@ export interface ApiError {
   detail: string;
   error_type?: string;
   validation_errors?: ValidationError[];
+}
+
+export interface SystemStatus {
+  composer_available: boolean;
+  composer_model: string;
+  composer_provider: string | null;
+  composer_reason: string | null;
+  composer_missing_keys: string[];
 }
 
 // ── File Upload ─────────────────────────────────────────────────────────────

@@ -151,7 +151,6 @@ export function GraphView() {
   }
 
   const nodeCount = compositionState.nodes.length;
-  const edgeCount = compositionState.edges.length;
   const ariaLabel = `Pipeline graph with ${nodeCount} component${nodeCount !== 1 ? "s" : ""}. Use the Spec tab for keyboard-accessible detail.`;
 
   return (

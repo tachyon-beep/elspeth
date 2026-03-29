@@ -231,13 +231,13 @@ allow_hits:
   safety: "Guards dev-mode secret_key warning; no data flow impact"
   expires: null
 
-- key: web/app.py:R1:create_app:fp=589a29cd0b6b4bd7
+- key: web/app.py:R1:create_app:health:fp=9f0230766ffa4cd3
   owner: web-app
-  reason: "Tier 3 boundary — WEB_CONCURRENCY comes from process environment, where absence is expected"
-  safety: "Default of 1 preserves the single-worker invariant required for in-memory WebSocket progress delivery"
+  reason: "False positive — @app.get() is FastAPI HTTP route decorator, not dict.get()"
+  safety: No dict access involved
   expires: null
 
-- key: web/app.py:R1:create_app:health:fp=ae2fec5bf2c4ab21
+- key: web/app.py:R1:create_app:system_status:fp=5b72498a2aa7b56d
   owner: web-app
   reason: "False positive — @app.get() is FastAPI HTTP route decorator, not dict.get()"
   safety: No dict access involved

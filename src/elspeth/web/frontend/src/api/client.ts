@@ -20,6 +20,7 @@ import type {
   UploadResult,
   UserProfile,
   ValidationResult,
+  SystemStatus,
 } from "@/types/index";
 
 // ── Token Management ────────────────────────────────────────────────────────
@@ -78,9 +79,26 @@ async function parseResponse<T>(response: Response): Promise<T> {
     let validationErrors: ApiError["validation_errors"];
     try {
       const body = await response.json();
-      errorType = body.error_type;
-      detail = body.detail ?? detail;
-      validationErrors = body.validation_errors;
+      const nestedDetail =
+        typeof body.detail === "object" && body.detail !== null
+          ? body.detail
+          : null;
+
+      errorType =
+        typeof body.error_type === "string"
+          ? body.error_type
+          : typeof nestedDetail?.error_type === "string"
+            ? nestedDetail.error_type
+            : undefined;
+
+      if (typeof nestedDetail?.detail === "string") {
+        detail = nestedDetail.detail;
+      } else if (typeof body.detail === "string") {
+        detail = body.detail;
+      }
+
+      validationErrors =
+        body.validation_errors ?? nestedDetail?.validation_errors;
     } catch {
       // Response body wasn't JSON -- use statusText as detail fallback
     }
@@ -146,6 +164,12 @@ export async function fetchCurrentUser(): Promise<UserProfile> {
   return parseResponse<UserProfile>(response);
 }
 
+/** Return boot-time system readiness for the web UX. */
+export async function fetchSystemStatus(): Promise<SystemStatus> {
+  const response = await fetch("/api/system/status");
+  return parseResponse<SystemStatus>(response);
+}
+
 // ── Sessions ────────────────────────────────────────────────────────────────
 
 /** List all sessions for the current user. */
@@ -161,6 +185,7 @@ export async function createSession(): Promise<Session> {
   const response = await fetch("/api/sessions", {
     method: "POST",
     headers: authHeaders("application/json"),
+    body: JSON.stringify({ title: "New session" }),
   });
   return parseResponse<Session>(response);
 }

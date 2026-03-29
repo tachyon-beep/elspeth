@@ -4,6 +4,23 @@ All notable changes to ELSPETH are documented here.
 
 ---
 
+## [Unreleased]
+
+### Added
+
+- **Web UX Composer MVP** — `elspeth web` now starts the new FastAPI web
+  application for chat-first pipeline composition, validation, execution, and
+  run-history inspection.
+- **React frontend bundle** — the web app serves the built SPA from
+  `src/elspeth/web/frontend/dist/`, with Vite development support and proxying
+  for `/api` and `/ws`.
+
+### Changed
+
+- **README web startup docs** — added explicit instructions for installing the
+  `.[webui]` extra, building the frontend, setting `ELSPETH_WEB__SECRET_KEY`,
+  creating a local auth user, and running the MVP locally.
+
 ## [0.4.1] (RC-4.1 — RAG Ingestion Pipeline)
 
 Complete RAG ingestion story: ChromaSink for vector store population, pipeline `depends_on` for run sequencing, commencement gates for pre-flight go/no-go checks, and readiness contracts on retrieval providers. First pipeline-level orchestration primitives. Designed as a generic multi-stage pipeline pattern — RAG is the first consumer, but any plugin needing pre-populated external state can use the same mechanisms.

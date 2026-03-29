@@ -16,9 +16,11 @@ from __future__ import annotations
 
 import asyncio
 import json
+from dataclasses import dataclass
 from typing import Any
 
 import litellm
+from litellm.exceptions import BadRequestError as LiteLLMBadRequestError
 
 from elspeth.web.composer.prompts import build_messages
 from elspeth.web.composer.protocol import (
@@ -34,6 +36,17 @@ from elspeth.web.composer.tools import (
     is_cacheable_discovery_tool,
     is_discovery_tool,
 )
+
+
+@dataclass(frozen=True, slots=True)
+class ComposerAvailability:
+    """Boot-time availability snapshot for the composer service."""
+
+    available: bool
+    model: str
+    provider: str | None
+    reason: str | None = None
+    missing_keys: tuple[str, ...] = ()
 
 
 class ComposerServiceImpl:
@@ -67,6 +80,11 @@ class ComposerServiceImpl:
         self._max_discovery_turns = settings.composer_max_discovery_turns
         self._timeout_seconds = settings.composer_timeout_seconds
         self._data_dir = str(settings.data_dir)
+        self._availability = self._compute_availability()
+
+    def get_availability(self) -> ComposerAvailability:
+        """Return the boot-time composer availability snapshot."""
+        return self._availability
 
     async def compose(
         self,
@@ -338,6 +356,55 @@ class ComposerServiceImpl:
             messages=messages,
             tools=tools,
         )
+
+    def _compute_availability(self) -> ComposerAvailability:
+        """Infer whether the configured model has the required env at boot.
+
+        This is a configuration/readiness signal, not a network health check.
+        """
+        try:
+            _, provider, _, _ = litellm.get_llm_provider(model=self._model)
+        except LiteLLMBadRequestError:
+            provider = _infer_provider_from_model_name(self._model)
+
+        try:
+            env_status = litellm.validate_environment(model=self._model)
+        except LiteLLMBadRequestError as exc:
+            return ComposerAvailability(
+                available=False,
+                model=self._model,
+                provider=provider,
+                reason=f"Unable to validate composer environment: {exc}",
+            )
+
+        missing_keys = tuple(sorted(set(env_status["missing_keys"])))
+        if env_status["keys_in_environment"]:
+            return ComposerAvailability(
+                available=True,
+                model=self._model,
+                provider=provider,
+            )
+
+        if missing_keys:
+            missing = ", ".join(missing_keys)
+            reason = f"Composer model {self._model} is unavailable: missing {missing}."
+        else:
+            reason = f"Composer model {self._model} is unavailable: provider environment validation failed."
+
+        return ComposerAvailability(
+            available=False,
+            model=self._model,
+            provider=provider,
+            reason=reason,
+            missing_keys=missing_keys,
+        )
+
+
+def _infer_provider_from_model_name(model: str) -> str | None:
+    """Infer provider from a provider-prefixed model string."""
+    if "/" not in model:
+        return None
+    return model.split("/", 1)[0]
 
 
 def _pydantic_default(obj: Any) -> Any:

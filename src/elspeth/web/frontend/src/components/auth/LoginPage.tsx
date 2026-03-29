@@ -1,7 +1,7 @@
 import { useState, useEffect, type FormEvent } from "react";
 import { useAuth } from "../../hooks/useAuth";
 import * as api from "../../api/client";
-import type { AuthConfig } from "../../api/client";
+import type { AuthConfig } from "../../types/index";
 
 /**
  * Login page that adapts to the configured auth provider.
@@ -33,7 +33,11 @@ export function LoginPage() {
       })
       .catch(() => {
         // If config fetch fails, fall back to local auth
-        setAuthConfig({ provider: "local" });
+        setAuthConfig({
+          provider: "local",
+          oidc_issuer: null,
+          oidc_client_id: null,
+        });
         setConfigLoading(false);
       });
   }, []);

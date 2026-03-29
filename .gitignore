@@ -152,6 +152,10 @@ examples/**/chroma_data/*
 # Local test databases and logs
 state/
 
+# Local web app data - keep only the placeholder directory marker
+data/*
+!data/.gitkeep
+
 # Real/production/example data - never commit
 real/
 examples/large_scale_test/input.csv

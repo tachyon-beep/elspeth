@@ -13,7 +13,7 @@ import { useSessionStore } from "@/stores/sessionStore";
 interface ChatInputProps {
   onSend: (content: string) => void;
   disabled: boolean;
-  inputRef: React.RefObject<HTMLTextAreaElement | null>;
+  inputRef: React.RefObject<HTMLTextAreaElement>;
 }
 
 export function ChatInput({ onSend, disabled, inputRef }: ChatInputProps) {

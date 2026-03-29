@@ -14,6 +14,7 @@ Auditable Sense/Decide/Act pipelines for high-stakes data processing. Every deci
 
 - [Features](#features)
 - [Quick Start](#quick-start)
+- [Web UI](#web-ui)
 - [The Sense/Decide/Act Model](#the-sensedecideact-model)
 - [Data Trust Model](#data-trust-model)
 - [Example Use Cases](#example-use-cases)
@@ -73,6 +74,86 @@ elspeth resume <run_id>
 ```
 
 See [Your First Pipeline](docs/guides/your-first-pipeline.md) for a complete walkthrough.
+
+---
+
+## Web UI
+
+The Web UX Composer MVP is available via `elspeth web`. It runs a FastAPI
+backend and serves the built React frontend from
+`src/elspeth/web/frontend/dist/`.
+
+### Run the Composer MVP
+
+```bash
+# 1) Install backend web dependencies
+uv pip install -e ".[webui,dev]"
+
+# 2) Build the frontend bundle once
+cd src/elspeth/web/frontend
+npm install
+npm run build
+cd ../../../../
+
+# 3) Set a non-default JWT signing key
+export ELSPETH_WEB__SECRET_KEY="local-dev-secret-key"
+
+# 4) Create a local login user (only needed the first time)
+python - <<'PY'
+import os
+from pathlib import Path
+from elspeth.web.auth.local import LocalAuthProvider
+
+provider = LocalAuthProvider(
+    db_path=Path("data/auth.db"),
+    secret_key=os.environ["ELSPETH_WEB__SECRET_KEY"],
+)
+try:
+    provider.create_user(
+        user_id="demo",
+        password="demo12345",
+        display_name="Demo User",
+        email="demo@example.com",
+    )
+    print("Created demo user: demo / demo12345")
+except ValueError:
+    print("Demo user already exists: demo / demo12345")
+PY
+
+# 5) Start the web app
+elspeth web --host 127.0.0.1 --port 8000
+```
+
+Open `http://127.0.0.1:8000` and sign in with `demo` / `demo12345`.
+
+### Development Mode
+
+For frontend iteration, run the API server and the Vite dev server separately.
+Vite proxies `/api` and `/ws` to the backend on port 8000.
+
+```bash
+# Terminal 1
+export ELSPETH_WEB__SECRET_KEY="local-dev-secret-key"
+elspeth web --host 127.0.0.1 --port 8000
+
+# Terminal 2
+cd src/elspeth/web/frontend
+npm install
+npm run dev
+```
+
+Then open `http://localhost:5173`.
+
+### Notes
+
+- `elspeth web` requires the `.[webui]` extra. Without it, the CLI exits with
+  an install hint.
+- The app refuses to start with the default
+  `ELSPETH_WEB__SECRET_KEY=change-me-in-production` outside test mode.
+- Local auth does not expose a `/register` endpoint. Create users directly in
+  `data/auth.db` through `LocalAuthProvider.create_user(...)` as shown above.
+- Session state is stored in `data/sessions.db`; local auth users are stored in
+  `data/auth.db`.
 
 ---
 

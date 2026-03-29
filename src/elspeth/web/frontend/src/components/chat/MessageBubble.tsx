@@ -4,9 +4,10 @@ import type { ChatMessage } from "@/types/api";
 
 interface MessageBubbleProps {
   message: ChatMessage;
+  onRetry?: (messageId: string) => void;
 }
 
-export function MessageBubble({ message }: MessageBubbleProps) {
+export function MessageBubble({ message, onRetry }: MessageBubbleProps) {
   const isUser = message.role === "user";
   const isSystem = message.role === "system";
   const [toolsExpanded, setToolsExpanded] = useState(false);
@@ -54,6 +55,52 @@ export function MessageBubble({ message }: MessageBubbleProps) {
         }}
       >
         {message.content}
+
+        {isUser && message.local_status === "failed" && onRetry && (
+          <div
+            style={{
+              marginTop: 8,
+              display: "flex",
+              alignItems: "center",
+              gap: 8,
+            }}
+          >
+            <span
+              style={{
+                fontSize: 12,
+                color: "var(--color-error)",
+              }}
+            >
+              No LLM available. Message not processed.
+            </span>
+            <button
+              onClick={() => onRetry(message.id)}
+              style={{
+                border: "1px solid var(--color-border-strong)",
+                backgroundColor: "transparent",
+                color: "var(--color-text)",
+                borderRadius: 4,
+                cursor: "pointer",
+                fontSize: 12,
+                padding: "4px 8px",
+              }}
+            >
+              Retry
+            </button>
+          </div>
+        )}
+
+        {isUser && message.local_status === "pending" && (
+          <div
+            style={{
+              marginTop: 8,
+              fontSize: 12,
+              color: "var(--color-text-muted)",
+            }}
+          >
+            Sending...
+          </div>
+        )}
 
         {/* Tool calls section (assistant messages only) */}
         {message.tool_calls && message.tool_calls.length > 0 && (

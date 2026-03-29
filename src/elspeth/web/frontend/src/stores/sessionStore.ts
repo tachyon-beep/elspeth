@@ -8,14 +8,9 @@ import type {
   ApiError,
 } from "@/types/api";
 import * as api from "@/api/client";
+import { useExecutionStore } from "./executionStore";
 
-// Lazy accessor to break circular import (sessionStore <-> executionStore).
-// The actual store is resolved at call time, not at module load time.
 function getExecutionStore() {
-  // eslint-disable-next-line @typescript-eslint/no-require-imports
-  const { useExecutionStore } = require("./executionStore") as {
-    useExecutionStore: { getState: () => { clearValidation: () => void } };
-  };
   return useExecutionStore.getState();
 }
 
@@ -33,6 +28,7 @@ interface SessionState {
   selectSession: (id: string) => Promise<void>;
   archiveSession: (id: string) => Promise<void>;
   sendMessage: (content: string, signal?: AbortSignal) => Promise<void>;
+  retryMessage: (messageId: string, signal?: AbortSignal) => Promise<void>;
   loadStateVersions: () => Promise<void>;
   isLoadingVersions: boolean;
   revertToVersion: (stateId: string) => Promise<void>;
@@ -133,7 +129,21 @@ export const useSessionStore = create<SessionState>((set, get) => ({
     const { activeSessionId } = get();
     if (!activeSessionId) return;
 
-    set({ isComposing: true, error: null });
+    const optimisticMessage: ChatMessage = {
+      id: `local-${crypto.randomUUID()}`,
+      session_id: activeSessionId,
+      role: "user",
+      content,
+      tool_calls: null,
+      created_at: new Date().toISOString(),
+      local_status: "pending",
+    };
+
+    set((state) => ({
+      isComposing: true,
+      error: null,
+      messages: [...state.messages, optimisticMessage],
+    }));
 
     try {
       const result = await api.sendMessage(activeSessionId, content, signal);
@@ -151,7 +161,11 @@ export const useSessionStore = create<SessionState>((set, get) => ({
         }
 
         return {
-          messages: [...s.messages, message],
+          messages: s.messages.map((existing) =>
+            existing.id === optimisticMessage.id
+              ? { ...existing, local_status: undefined }
+              : existing,
+          ).concat(message),
           compositionState: state ?? s.compositionState,
           isComposing: false,
         };
@@ -179,7 +193,78 @@ export const useSessionStore = create<SessionState>((set, get) => ({
         errorMessage =
           apiErr.detail ?? "Failed to send message. Please try again.";
       }
-      set({ isComposing: false, error: errorMessage });
+      set((state) => ({
+        isComposing: false,
+        error: errorMessage,
+        messages: state.messages.map((existing) =>
+          existing.id === optimisticMessage.id
+            ? { ...existing, local_status: "failed" }
+            : existing,
+        ),
+      }));
+    }
+  },
+
+  async retryMessage(messageId: string, signal?: AbortSignal) {
+    const { activeSessionId, messages } = get();
+    if (!activeSessionId) return;
+
+    const message = messages.find((entry) => entry.id === messageId);
+    if (!message || message.role !== "user") return;
+
+    set((state) => ({
+      isComposing: true,
+      error: null,
+      messages: state.messages.map((existing) =>
+        existing.id === messageId
+          ? { ...existing, local_status: "pending" }
+          : existing,
+      ),
+    }));
+
+    try {
+      const result = await api.sendMessage(activeSessionId, message.content, signal);
+      const { message: assistantMessage, state } = result;
+      set((s) => {
+        const previousVersion = s.compositionState?.version ?? null;
+        const newVersion = state?.version ?? null;
+        const versionChanged =
+          newVersion !== null && newVersion !== previousVersion;
+
+        if (versionChanged) {
+          getExecutionStore().clearValidation();
+        }
+
+        return {
+          messages: s.messages.map((existing) =>
+            existing.id === messageId
+              ? { ...existing, local_status: undefined }
+              : existing,
+          ).concat(assistantMessage),
+          compositionState: state ?? s.compositionState,
+          isComposing: false,
+        };
+      });
+    } catch (err) {
+      const apiErr = err as ApiError;
+      const errorMessage =
+        apiErr.status === 502 && apiErr.error_type === "llm_unavailable"
+          ? "No LLM is available for the composer right now."
+          : apiErr.status === 502 && apiErr.error_type === "llm_auth_error"
+            ? "The AI service configuration is invalid. Please contact your administrator."
+            : apiErr.status === 422 && apiErr.error_type === "convergence"
+              ? "ELSPETH couldn't complete the composition after multiple attempts. Try breaking your request into smaller steps."
+              : apiErr.detail ?? "Failed to send message. Please try again.";
+
+      set((state) => ({
+        isComposing: false,
+        error: errorMessage,
+        messages: state.messages.map((existing) =>
+          existing.id === messageId
+            ? { ...existing, local_status: "failed" }
+            : existing,
+        ),
+      }));
     }
   },
 

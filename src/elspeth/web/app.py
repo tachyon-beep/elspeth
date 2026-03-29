@@ -170,6 +170,7 @@ def create_app(settings: WebSettings | None = None) -> FastAPI:
         catalog=app.state.catalog_service,
         settings=settings,
     )
+    app.state.composer_availability = app.state.composer_service.get_availability()
 
     # --- Rate limiter (per-process in-memory) ---
     app.state.rate_limiter = ComposerRateLimiter(
@@ -177,7 +178,10 @@ def create_app(settings: WebSettings | None = None) -> FastAPI:
     )
 
     # --- Multi-worker enforcement (W10 -> R6) ---
-    web_concurrency = int(os.environ.get("WEB_CONCURRENCY", "1"))
+    if "WEB_CONCURRENCY" in os.environ:
+        web_concurrency = int(os.environ["WEB_CONCURRENCY"])
+    else:
+        web_concurrency = 1
     if web_concurrency > 1:
         raise RuntimeError(
             f"WEB_CONCURRENCY={web_concurrency} is not supported. "
@@ -206,6 +210,17 @@ def create_app(settings: WebSettings | None = None) -> FastAPI:
     @app.get("/api/health")
     async def health() -> dict[str, str]:
         return {"status": "ok"}
+
+    @app.get("/api/system/status")
+    async def system_status() -> dict[str, object]:
+        composer = app.state.composer_availability
+        return {
+            "composer_available": composer.available,
+            "composer_model": composer.model,
+            "composer_provider": composer.provider,
+            "composer_reason": composer.reason,
+            "composer_missing_keys": list(composer.missing_keys),
+        }
 
     # --- Static file serving for the React SPA (production) ---
     # Mount frontend/dist/ AFTER all API and WS routes so /api/* takes precedence.

@@ -16,7 +16,7 @@ export function ChatPanel() {
   const messages = useSessionStore((s) => s.messages);
   const activeSessionId = useSessionStore((s) => s.activeSessionId);
   const clearError = useSessionStore((s) => s.clearError);
-  const { sendMessage, isComposing, error } = useComposer();
+  const { sendMessage, retryMessage, isComposing, error } = useComposer();
 
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const scrollContainerRef = useRef<HTMLDivElement>(null);
@@ -153,7 +153,11 @@ export function ChatPanel() {
           </div>
         ) : (
           messages.map((msg) => (
-            <MessageBubble key={msg.id} message={msg} />
+            <MessageBubble
+              key={msg.id}
+              message={msg}
+              onRetry={msg.role === "user" ? retryMessage : undefined}
+            />
           ))
         )}
         {isComposing && <ComposingIndicator />}
