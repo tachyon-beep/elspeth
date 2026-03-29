@@ -19,6 +19,7 @@ from elspeth.web.catalog.routes import catalog_router
 from elspeth.web.composer.service import ComposerServiceImpl
 from elspeth.web.config import WebSettings
 from elspeth.web.dependencies import create_catalog_service
+from elspeth.web.middleware.rate_limit import ComposerRateLimiter
 from elspeth.web.sessions.models import metadata as session_metadata
 from elspeth.web.sessions.protocol import RunAlreadyActiveError
 from elspeth.web.sessions.routes import create_session_router
@@ -141,6 +142,11 @@ def create_app(settings: WebSettings | None = None) -> FastAPI:
     app.state.composer_service = ComposerServiceImpl(
         catalog=app.state.catalog_service,
         settings=settings,
+    )
+
+    # --- Rate limiter (per-process in-memory) ---
+    app.state.rate_limiter = ComposerRateLimiter(
+        limit=settings.composer_rate_limit_per_minute,
     )
 
     # --- Register routers ---

@@ -30,13 +30,31 @@ class ComposerServiceError(Exception):
 
 
 class ComposerConvergenceError(ComposerServiceError):
-    """Raised when the LLM tool-use loop exceeds max_turns."""
+    """Raised when the LLM tool-use loop exhausts its budget or times out.
 
-    def __init__(self, max_turns: int) -> None:
+    Attributes:
+        max_turns: Total turns used before exhaustion.
+        budget_exhausted: Which budget was exhausted — one of
+            "composition", "discovery", or "timeout".
+        partial_state: The last CompositionState with version > initial,
+            or None if no mutations occurred.
+    """
+
+    def __init__(
+        self,
+        max_turns: int,
+        *,
+        budget_exhausted: str = "composition",
+        partial_state: CompositionState | None = None,
+    ) -> None:
         super().__init__(
-            f"Composer did not converge within {max_turns} turns. The LLM kept making tool calls without producing a final response."
+            f"Composer did not converge within {max_turns} turns "
+            f"(budget exhausted: {budget_exhausted}). "
+            f"The LLM kept making tool calls without producing a final response."
         )
         self.max_turns = max_turns
+        self.budget_exhausted = budget_exhausted
+        self.partial_state = partial_state
 
 
 class ComposerSettings(Protocol):
@@ -51,7 +69,10 @@ class ComposerSettings(Protocol):
     def composer_model(self) -> str: ...
 
     @property
-    def composer_max_turns(self) -> int: ...
+    def composer_max_composition_turns(self) -> int: ...
+
+    @property
+    def composer_max_discovery_turns(self) -> int: ...
 
     @property
     def composer_timeout_seconds(self) -> float: ...

@@ -10,9 +10,10 @@ import asyncio
 from pathlib import Path
 from uuid import UUID
 
+import structlog
 from fastapi import APIRouter, Depends, File, HTTPException, Query, Request, UploadFile
-
-import litellm
+from litellm.exceptions import APIError as LiteLLMAPIError
+from litellm.exceptions import AuthenticationError as LiteLLMAuthError
 
 from elspeth.contracts.freeze import deep_thaw
 from elspeth.web.auth.middleware import get_current_user
@@ -20,6 +21,7 @@ from elspeth.web.auth.models import UserIdentity
 from elspeth.web.composer.protocol import ComposerConvergenceError, ComposerService
 from elspeth.web.composer.state import CompositionState, PipelineMetadata
 from elspeth.web.composer.yaml_generator import generate_yaml
+from elspeth.web.middleware.rate_limit import ComposerRateLimiter, get_rate_limiter
 from elspeth.web.sessions.protocol import (
     CompositionStateData,
     CompositionStateRecord,
@@ -36,6 +38,8 @@ from elspeth.web.sessions.schemas import (
     SessionResponse,
     UploadResponse,
 )
+
+slog = structlog.get_logger()
 
 
 def _session_response(session: SessionRecord) -> SessionResponse:
@@ -187,17 +191,22 @@ def create_session_router() -> APIRouter:
         body: SendMessageRequest,
         request: Request,
         user: UserIdentity = Depends(get_current_user),  # noqa: B008
+        rate_limiter: ComposerRateLimiter = Depends(get_rate_limiter),  # noqa: B008
     ) -> MessageWithStateResponse:
         """Send a user message, run the LLM composer, persist results.
 
-        1. Persist the user message.
-        2. Load or create the current CompositionState.
-        3. Pre-fetch chat history for the composer.
-        4. Run the LLM composition loop.
-        5. Persist the assistant response message.
-        6. If state changed, save the new composition state version.
-        7. Return the assistant message and (optionally) the new state.
+        1. Rate limit check (per-user).
+        2. Persist the user message.
+        3. Load or create the current CompositionState.
+        4. Pre-fetch chat history for the composer.
+        5. Run the LLM composition loop.
+        6. Persist the assistant response message.
+        7. If state changed, save the new composition state version.
+        8. Return the assistant message and (optionally) the new state.
         """
+        # 0. Rate limit check — before any work
+        await rate_limiter.check(user.user_id)
+
         session = await _verify_session_ownership(session_id, user, request)
         service: SessionServiceProtocol = request.app.state.session_service
 
@@ -227,20 +236,53 @@ def create_session_router() -> APIRouter:
         try:
             result = await composer.compose(body.content, chat_messages, state)
         except ComposerConvergenceError as exc:
-            raise HTTPException(
-                status_code=422,
-                detail={
-                    "error_type": "convergence",
-                    "detail": str(exc),
-                    "turns_used": exc.max_turns,
-                },
-            ) from exc
-        except litellm.AuthenticationError as exc:
+            response_body: dict[str, object] = {
+                "error_type": "convergence",
+                "detail": str(exc),
+                "turns_used": exc.max_turns,
+                "budget_exhausted": exc.budget_exhausted,
+            }
+            if exc.partial_state is not None:
+                # Validate guard: if validation itself fails, persist with
+                # is_valid=False rather than losing the state entirely.
+                try:
+                    validation = exc.partial_state.validate()
+                except Exception:
+                    from elspeth.web.composer.state import ValidationSummary
+
+                    validation = ValidationSummary(is_valid=False, errors=("validation_failed",))
+
+                # Persistence guard: if save fails, log the error and return
+                # 422 without partial_state rather than crashing to 500.
+                try:
+                    state_d = exc.partial_state.to_dict()
+                    state_data = CompositionStateData(
+                        source=state_d["source"],
+                        nodes=state_d["nodes"],
+                        edges=state_d["edges"],
+                        outputs=state_d["outputs"],
+                        metadata_=state_d["metadata"],
+                        is_valid=validation.is_valid,
+                        validation_errors=list(validation.errors) if validation.errors else None,
+                    )
+                    await service.save_composition_state(session.id, state_data)
+                    response_body["partial_state"] = state_d
+                except Exception:
+                    slog.error(
+                        "convergence_partial_state_save_failed",
+                        session_id=str(session_id),
+                        exc_info=True,
+                    )
+                    # Do NOT include partial_state in response — it was not
+                    # persisted, so the frontend cannot resume from it.
+
+            raise HTTPException(status_code=422, detail=response_body) from exc
+        except LiteLLMAuthError as exc:
             raise HTTPException(
                 status_code=502,
                 detail={"error_type": "llm_auth_error", "detail": str(exc)},
             ) from exc
-        except litellm.APIError as exc:
+        except LiteLLMAPIError as exc:
             raise HTTPException(
                 status_code=502,
                 detail={"error_type": "llm_unavailable", "detail": str(exc)},

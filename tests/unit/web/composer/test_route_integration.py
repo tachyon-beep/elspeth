@@ -14,8 +14,9 @@ from datetime import UTC, datetime
 from types import MappingProxyType
 from uuid import UUID, uuid4
 
-import litellm
 import pytest
+from litellm.exceptions import APIError as LiteLLMAPIError
+from litellm.exceptions import AuthenticationError as LiteLLMAuthError
 
 from elspeth.web.composer.protocol import ComposerConvergenceError, ComposerResult
 from elspeth.web.composer.state import (
@@ -382,9 +383,9 @@ class TestLlmErrorHandling:
         assert exc.max_turns == 20
 
     def test_auth_error_type_available(self) -> None:
-        """litellm.AuthenticationError exists for HTTP 502 auth error path."""
-        assert hasattr(litellm, "AuthenticationError")
+        """litellm.exceptions.AuthenticationError is importable for HTTP 502 auth error path."""
+        assert LiteLLMAuthError is not None
 
     def test_api_error_type_available(self) -> None:
-        """litellm.APIError exists for HTTP 502 unavailable path."""
-        assert hasattr(litellm, "APIError")
+        """litellm.exceptions.APIError is importable for HTTP 502 unavailable path."""
+        assert LiteLLMAPIError is not None

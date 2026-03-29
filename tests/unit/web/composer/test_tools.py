@@ -641,3 +641,132 @@ class TestToolResultValidation:
         # Source is set but no sinks — should have validation error
         assert not result.validation.is_valid
         assert any("No sinks" in e for e in result.validation.errors)
+
+
+class TestToolRegistry:
+    """Tests for the tool registry pattern — two dicts + cacheable frozenset."""
+
+    def test_discovery_tools_has_five_entries(self) -> None:
+        from elspeth.web.composer.tools import _DISCOVERY_TOOLS
+
+        assert len(_DISCOVERY_TOOLS) == 5
+        expected = {
+            "list_sources",
+            "list_transforms",
+            "list_sinks",
+            "get_plugin_schema",
+            "get_expression_grammar",
+        }
+        assert set(_DISCOVERY_TOOLS.keys()) == expected
+
+    def test_mutation_tools_has_eight_entries(self) -> None:
+        from elspeth.web.composer.tools import _MUTATION_TOOLS
+
+        assert len(_MUTATION_TOOLS) == 8
+        expected = {
+            "set_source",
+            "upsert_node",
+            "upsert_edge",
+            "remove_node",
+            "remove_edge",
+            "set_metadata",
+            "set_output",
+            "remove_output",
+        }
+        assert set(_MUTATION_TOOLS.keys()) == expected
+
+    def test_no_overlap_between_registries(self) -> None:
+        from elspeth.web.composer.tools import _DISCOVERY_TOOLS, _MUTATION_TOOLS
+
+        overlap = set(_DISCOVERY_TOOLS.keys()) & set(_MUTATION_TOOLS.keys())
+        assert overlap == set(), f"Registry overlap: {overlap}"
+
+    def test_cacheable_discovery_equals_discovery(self) -> None:
+        """All discovery tools are cacheable (get_current_state was removed)."""
+        from elspeth.web.composer.tools import (
+            _CACHEABLE_DISCOVERY_TOOLS,
+            _DISCOVERY_TOOLS,
+        )
+
+        assert frozenset(_DISCOVERY_TOOLS.keys()) == _CACHEABLE_DISCOVERY_TOOLS
+
+    def test_cacheable_is_subset_of_discovery(self) -> None:
+        from elspeth.web.composer.tools import (
+            _CACHEABLE_DISCOVERY_TOOLS,
+            _DISCOVERY_TOOLS,
+        )
+
+        assert set(_DISCOVERY_TOOLS.keys()) >= _CACHEABLE_DISCOVERY_TOOLS
+
+    def test_is_discovery_tool(self) -> None:
+        from elspeth.web.composer.tools import is_discovery_tool
+
+        assert is_discovery_tool("list_sources") is True
+        assert is_discovery_tool("get_expression_grammar") is True
+        assert is_discovery_tool("set_source") is False
+        assert is_discovery_tool("nonexistent") is False
+
+    def test_is_cacheable_discovery_tool(self) -> None:
+        from elspeth.web.composer.tools import is_cacheable_discovery_tool
+
+        assert is_cacheable_discovery_tool("list_sources") is True
+        assert is_cacheable_discovery_tool("get_plugin_schema") is True
+        assert is_cacheable_discovery_tool("set_source") is False
+
+    def test_registry_dispatch_matches_original_behaviour(self) -> None:
+        """Every tool in the registries dispatches correctly via execute_tool."""
+        state = _empty_state()
+        catalog = _mock_catalog()
+
+        # All discovery tools should succeed
+        for tool_name in [
+            "list_sources",
+            "list_transforms",
+            "list_sinks",
+            "get_expression_grammar",
+        ]:
+            result = execute_tool(tool_name, {}, state, catalog)
+            assert result.success is True, f"{tool_name} failed"
+
+        # get_plugin_schema needs arguments
+        result = execute_tool(
+            "get_plugin_schema",
+            {"plugin_type": "source", "name": "csv"},
+            state,
+            catalog,
+        )
+        assert result.success is True
+
+        # Mutation tools that work on empty state
+        result = execute_tool(
+            "set_source",
+            {
+                "plugin": "csv",
+                "on_success": "t1",
+                "options": {},
+                "on_validation_failure": "quarantine",
+            },
+            state,
+            catalog,
+        )
+        assert result.success is True
+
+        result = execute_tool(
+            "set_metadata",
+            {"patch": {"name": "Test"}},
+            state,
+            catalog,
+        )
+        assert result.success is True
+
+        # Unknown tool returns failure
+        result = execute_tool("nonexistent", {}, state, catalog)
+        assert result.success is False
+
+    def test_module_level_assertion_no_overlap(self) -> None:
+        """Importing the module should not raise — the overlap assertion passes."""
+        import importlib
+
+        import elspeth.web.composer.tools as mod
+
+        importlib.reload(mod)  # Force re-evaluation of module-level assertion

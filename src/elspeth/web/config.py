@@ -29,8 +29,9 @@ class WebSettings(BaseModel):
     cors_origins: tuple[str, ...] = ("http://localhost:5173",)
     data_dir: Path = Path("data")
     composer_model: str = "gpt-4o"
-    composer_max_turns: int = Field(default=20, ge=1)
-    composer_timeout_seconds: float = Field(default=120.0, gt=0)
+    composer_max_composition_turns: int = Field(default=15, ge=1)
+    composer_max_discovery_turns: int = Field(default=10, ge=1)
+    composer_timeout_seconds: float = Field(default=85.0, gt=0)
     composer_rate_limit_per_minute: int = Field(default=10, ge=1)
     secret_key: str = (
         "change-me-in-production"  # Security rule S3 (seam-contracts.md): Sub-2 startup guard enforces non-default in production

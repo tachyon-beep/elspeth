@@ -476,6 +476,22 @@ class TestCompositionState:
         assert len(state2.edges) == 1
         assert state2.edges[0].to_node == "t2"
 
+    def test_with_edge_preserves_order(self) -> None:
+        """Updating an existing edge must preserve its position, not append."""
+        state = self._empty_state()
+        e1 = EdgeSpec(id="e1", from_node="source", to_node="t1", edge_type="on_success", label=None)
+        e2 = EdgeSpec(id="e2", from_node="t1", to_node="t2", edge_type="on_success", label=None)
+        e3 = EdgeSpec(id="e3", from_node="t2", to_node="sink", edge_type="on_success", label=None)
+        state = state.with_edge(e1).with_edge(e2).with_edge(e3)
+        assert [e.id for e in state.edges] == ["e1", "e2", "e3"]
+
+        # Update e2 — should stay at index 1, not move to end
+        e2_updated = EdgeSpec(id="e2", from_node="t1", to_node="t2_new", edge_type="on_success", label="updated")
+        updated = state.with_edge(e2_updated)
+        assert [e.id for e in updated.edges] == ["e1", "e2", "e3"]
+        assert updated.edges[1].to_node == "t2_new"
+        assert updated.edges[1].label == "updated"
+
     # --- without_edge ---
 
     def test_without_edge_removes(self) -> None:
@@ -505,6 +521,21 @@ class TestCompositionState:
         state2 = state.with_output(o1).with_output(o2)
         assert len(state2.outputs) == 1
         assert state2.outputs[0].plugin == "json"
+
+    def test_with_output_preserves_order(self) -> None:
+        """Updating an existing output must preserve its position, not append."""
+        state = self._empty_state()
+        o1 = self._make_output("alpha")
+        o2 = self._make_output("beta")
+        o3 = self._make_output("gamma")
+        state = state.with_output(o1).with_output(o2).with_output(o3)
+        assert [o.name for o in state.outputs] == ["alpha", "beta", "gamma"]
+
+        # Update beta — should stay at index 1, not move to end
+        o2_updated = OutputSpec(name="beta", plugin="json", options={"format": "lines"}, on_write_failure="discard")
+        updated = state.with_output(o2_updated)
+        assert [o.name for o in updated.outputs] == ["alpha", "beta", "gamma"]
+        assert updated.outputs[1].plugin == "json"
 
     # --- without_output ---
 

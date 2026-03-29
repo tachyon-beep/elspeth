@@ -37,13 +37,17 @@ class TestWebSettingsDefaults:
         settings = WebSettings()
         assert settings.composer_model == "gpt-4o"
 
-    def test_composer_max_turns_default(self) -> None:
+    def test_composer_max_composition_turns_default(self) -> None:
         settings = WebSettings()
-        assert settings.composer_max_turns == 20
+        assert settings.composer_max_composition_turns == 15
+
+    def test_composer_max_discovery_turns_default(self) -> None:
+        settings = WebSettings()
+        assert settings.composer_max_discovery_turns == 10
 
     def test_composer_timeout_seconds_default(self) -> None:
         settings = WebSettings()
-        assert settings.composer_timeout_seconds == 120.0
+        assert settings.composer_timeout_seconds == 85.0
 
     def test_composer_rate_limit_per_minute_default(self) -> None:
         settings = WebSettings()
@@ -144,9 +148,13 @@ class TestWebSettingsValidation:
         with pytest.raises(ValueError):
             WebSettings(port=65536)
 
-    def test_composer_max_turns_zero_rejected(self) -> None:
+    def test_composer_max_composition_turns_zero_rejected(self) -> None:
         with pytest.raises(ValueError):
-            WebSettings(composer_max_turns=0)
+            WebSettings(composer_max_composition_turns=0)
+
+    def test_composer_max_discovery_turns_zero_rejected(self) -> None:
+        with pytest.raises(ValueError):
+            WebSettings(composer_max_discovery_turns=0)
 
     def test_composer_timeout_zero_rejected(self) -> None:
         with pytest.raises(ValueError):

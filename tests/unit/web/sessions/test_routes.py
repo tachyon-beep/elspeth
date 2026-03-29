@@ -83,6 +83,10 @@ def _make_app(
     # must replace it with a mock before sending requests.
     app.state.composer_service = None
 
+    from elspeth.web.middleware.rate_limit import ComposerRateLimiter
+
+    app.state.rate_limiter = ComposerRateLimiter(limit=100)
+
     router = create_session_router()
     app.include_router(router)
 
@@ -194,6 +198,10 @@ class TestIDORProtection:
             app.state.session_service = service
             app.state.settings = WebSettings(data_dir=tmp_path)
             app.state.catalog_service = None
+
+            from elspeth.web.middleware.rate_limit import ComposerRateLimiter
+
+            app.state.rate_limiter = ComposerRateLimiter(limit=100)
             app.include_router(create_session_router())
             return app
 
@@ -412,6 +420,10 @@ class TestRevertEndpoint:
             app.dependency_overrides[get_current_user] = mock_user
             app.state.session_service = service
             app.state.settings = WebSettings(data_dir=tmp_path)
+
+            from elspeth.web.middleware.rate_limit import ComposerRateLimiter
+
+            app.state.rate_limiter = ComposerRateLimiter(limit=100)
             app.include_router(create_session_router())
             return app
 

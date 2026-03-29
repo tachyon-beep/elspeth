@@ -4,11 +4,17 @@ Uses LiteLLM for provider abstraction. Model configured via
 WebSettings.composer_model. Tool calls are executed against
 CompositionState + CatalogService.
 
+Dual-counter budget: separate limits for discovery and composition turns.
+Discovery cache: cacheable discovery tool results cached per-compose-call
+in a local dict variable (not an instance field) to avoid concurrent-request
+races.
+
 Layer: L3 (application).
 """
 
 from __future__ import annotations
 
+import asyncio
 import json
 from typing import Any
 
@@ -25,21 +31,29 @@ from elspeth.web.composer.tools import (
     CatalogServiceProtocol,
     execute_tool,
     get_tool_definitions,
+    is_cacheable_discovery_tool,
+    is_discovery_tool,
 )
 
 
 class ComposerServiceImpl:
-    """LLM-driven pipeline composer.
+    """LLM-driven pipeline composer with dual-counter budget and discovery caching.
 
-    Runs a bounded tool-use loop: sends messages to the LLM, executes
-    any tool calls against the CompositionState, appends results, and
-    repeats until the LLM produces a text-only response or max_turns
-    is exceeded.
+    Runs a bounded tool-use loop with separate budgets for discovery
+    and composition turns. Cacheable discovery tool results are cached
+    per-compose-call in a local dict (not an instance field) to avoid
+    concurrent-request races.
+
+    Budget classification: a turn containing at least one mutation tool
+    call charges the composition budget. A turn containing only discovery
+    tool calls charges the discovery budget. Cache hits do not charge
+    any budget.
 
     Args:
         catalog: CatalogService for discovery tool delegation.
-        settings: WebSettings with composer_model, composer_max_turns,
-            composer_timeout_seconds.
+        settings: ComposerSettings with composer_max_composition_turns,
+            composer_max_discovery_turns, composer_timeout_seconds,
+            composer_model, data_dir.
     """
 
     def __init__(
@@ -49,8 +63,9 @@ class ComposerServiceImpl:
     ) -> None:
         self._catalog = catalog
         self._model = settings.composer_model
-        self._max_turns = settings.composer_max_turns
-        self._timeout = settings.composer_timeout_seconds
+        self._max_composition_turns = settings.composer_max_composition_turns
+        self._max_discovery_turns = settings.composer_max_discovery_turns
+        self._timeout_seconds = settings.composer_timeout_seconds
         self._data_dir = str(settings.data_dir)
 
     async def compose(
@@ -59,7 +74,7 @@ class ComposerServiceImpl:
         messages: list[dict[str, Any]],
         state: CompositionState,
     ) -> ComposerResult:
-        """Run the LLM composition loop.
+        """Run the LLM composition loop with dual-counter budget.
 
         Args:
             message: The user's chat message.
@@ -71,12 +86,56 @@ class ComposerServiceImpl:
             ComposerResult with assistant message and updated state.
 
         Raises:
-            ComposerConvergenceError: If the loop exceeds max_turns.
+            ComposerConvergenceError: If a budget is exhausted or
+                the timeout is exceeded.
         """
+        # Mutable container so _compose_loop can publish its latest
+        # state to the outer scope. On TimeoutError, compose() reads
+        # this to build partial_state — the local `state` variable
+        # inside _compose_loop is unreachable after cancellation.
+        state_ref: list[CompositionState] = [state]
+        initial_version = state.version
+        try:
+            return await asyncio.wait_for(
+                self._compose_loop(message, messages, state, state_ref),
+                timeout=self._timeout_seconds,
+            )
+        except TimeoutError:
+            latest = state_ref[0]
+            partial = latest if latest.version > initial_version else None
+            raise ComposerConvergenceError(
+                max_turns=0,
+                budget_exhausted="timeout",
+                partial_state=partial,
+            ) from None
+
+    async def _compose_loop(
+        self,
+        message: str,
+        messages: list[dict[str, Any]],
+        state: CompositionState,
+        state_ref: list[CompositionState],
+    ) -> ComposerResult:
+        """Inner composition loop with dual-counter budget tracking.
+
+        Args:
+            state_ref: Single-element mutable list. Updated after every
+                successful tool execution so the outer compose() can
+                read the latest state on timeout.
+        """
+        initial_version = state.version
         llm_messages = self._build_messages(messages, state, message)
         tools = self._get_litellm_tools()
 
-        for _turn in range(self._max_turns):
+        composition_turns_used = 0
+        discovery_turns_used = 0
+
+        # Discovery cache: local variable scoped to this compose() call.
+        # Keyed by (tool_name, canonical_args_json). Each concurrent
+        # compose() call gets its own independent cache dict.
+        discovery_cache: dict[str, Any] = {}
+
+        while True:
             response = await self._call_llm(llm_messages, tools)
             assistant_message = response.choices[0].message
 
@@ -106,13 +165,16 @@ class ComposerServiceImpl:
                 }
             )
 
-            # Execute each tool call
+            # Execute each tool call, tracking whether this turn has
+            # any mutation calls for budget classification.
+            turn_has_mutation = False
+            all_cache_hits = True
+
             for tool_call in assistant_message.tool_calls:
                 tool_name = tool_call.function.name
                 try:
                     arguments = json.loads(tool_call.function.arguments)
                 except (json.JSONDecodeError, TypeError) as exc:
-                    # Malformed arguments — return error to LLM
                     llm_messages.append(
                         {
                             "role": "tool",
@@ -124,7 +186,24 @@ class ComposerServiceImpl:
                             ),
                         }
                     )
+                    all_cache_hits = False
                     continue
+
+                # Check discovery cache before executing
+                if is_cacheable_discovery_tool(tool_name):
+                    cache_key = _make_cache_key(tool_name, arguments)
+                    if cache_key in discovery_cache:
+                        # Cache hit — return cached result, no budget charge
+                        llm_messages.append(
+                            {
+                                "role": "tool",
+                                "tool_call_id": tool_call.id,
+                                "content": discovery_cache[cache_key],
+                            }
+                        )
+                        continue
+
+                all_cache_hits = False
 
                 # execute_tool() is system code, but the arguments dict
                 # comes from LLM output (Tier 3). Missing/wrong-type keys
@@ -153,32 +232,66 @@ class ComposerServiceImpl:
                         }
                     )
                     continue
-                # Update state if mutation succeeded
+
                 state = result.updated_state
-                # Return tool result to LLM
+                state_ref[0] = state  # Publish for timeout capture
+                result_json = _serialize_tool_result(result)
+
+                # Cache cacheable discovery results
+                if is_cacheable_discovery_tool(tool_name):
+                    cache_key = _make_cache_key(tool_name, arguments)
+                    discovery_cache[cache_key] = result_json
+
                 llm_messages.append(
                     {
                         "role": "tool",
                         "tool_call_id": tool_call.id,
-                        "content": json.dumps(result.to_dict()),
+                        "content": result_json,
                     }
                 )
 
-        # B-4D-3 fix: After exhausting max_turns with tool calls on the
-        # final iteration, give the LLM one last chance to see the tool
-        # results and produce a text response. Without this, a correction
-        # made on the final turn is applied to state but the LLM never
-        # sees the confirmation — the user gets a convergence error even
-        # though the state may be valid.
-        response = await self._call_llm(llm_messages, tools)
-        assistant_message = response.choices[0].message
-        if not assistant_message.tool_calls:
-            return ComposerResult(
-                message=assistant_message.content or "",
-                state=state,
-            )
+                if not is_discovery_tool(tool_name):
+                    turn_has_mutation = True
 
-        raise ComposerConvergenceError(self._max_turns)
+            # If ALL tool calls in this turn were cache hits, no budget
+            # charge — continue to next turn without incrementing.
+            if all_cache_hits:
+                continue
+
+            # Classify turn and charge the appropriate budget.
+            # The current turn has already been executed (tool results
+            # are in the message history). We increment first, then
+            # check whether the budget is now exhausted. If so, we give
+            # the LLM one last chance (B-4D-3) for composition, or
+            # raise immediately for discovery (discovery exhaustion
+            # doesn't benefit from a bonus call — no state was mutated).
+            if turn_has_mutation:
+                composition_turns_used += 1
+                if composition_turns_used >= self._max_composition_turns:
+                    # B-4D-3 fix: give the LLM one last chance to see the
+                    # tool results and produce a text response.
+                    response = await self._call_llm(llm_messages, tools)
+                    assistant_message = response.choices[0].message
+                    if not assistant_message.tool_calls:
+                        return ComposerResult(
+                            message=assistant_message.content or "",
+                            state=state,
+                        )
+                    partial = state if state.version > initial_version else None
+                    raise ComposerConvergenceError(
+                        max_turns=composition_turns_used + discovery_turns_used,
+                        budget_exhausted="composition",
+                        partial_state=partial,
+                    )
+            else:
+                discovery_turns_used += 1
+                if discovery_turns_used >= self._max_discovery_turns:
+                    partial = state if state.version > initial_version else None
+                    raise ComposerConvergenceError(
+                        max_turns=composition_turns_used + discovery_turns_used,
+                        budget_exhausted="discovery",
+                        partial_state=partial,
+                    )
 
     def _build_messages(
         self,
@@ -224,5 +337,24 @@ class ComposerServiceImpl:
             model=self._model,
             messages=messages,
             tools=tools,
-            timeout=self._timeout,
         )
+
+
+def _pydantic_default(obj: Any) -> Any:
+    """JSON serializer fallback for Pydantic models in tool results."""
+    try:
+        return obj.model_dump()
+    except AttributeError:
+        raise TypeError(f"Object of type {type(obj).__name__} is not JSON serializable") from None
+
+
+def _serialize_tool_result(result: Any) -> str:
+    """Serialize a ToolResult to JSON, handling Pydantic models in data."""
+    return json.dumps(result.to_dict(), default=_pydantic_default)
+
+
+def _make_cache_key(tool_name: str, arguments: dict[str, Any]) -> str:
+    """Build a deterministic cache key from tool name + arguments."""
+    # Sort keys for determinism. Arguments are simple JSON-serializable
+    # dicts from the LLM — no MappingProxyType or frozen containers.
+    return f"{tool_name}:{json.dumps(arguments, sort_keys=True)}"

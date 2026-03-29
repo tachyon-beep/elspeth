@@ -473,13 +473,29 @@ allowed_dict_patterns:
   - "src/elspeth/web/composer/tools.py:_execute_set_metadata:args"
   - "src/elspeth/web/composer/tools.py:_execute_set_output:args"
   - "src/elspeth/web/composer/tools.py:_execute_remove_output:args"
+  # Handler wrappers normalize signatures for the tool registry (Sub-4x).
+  # Arguments are LLM-provided JSON dicts — inherently dynamic.
+  - "src/elspeth/web/composer/tools.py:_handle_list_sources:arguments"
+  - "src/elspeth/web/composer/tools.py:_handle_list_transforms:arguments"
+  - "src/elspeth/web/composer/tools.py:_handle_list_sinks:arguments"
+  - "src/elspeth/web/composer/tools.py:_handle_get_plugin_schema:arguments"
+  - "src/elspeth/web/composer/tools.py:_handle_get_expression_grammar:arguments"
+  - "src/elspeth/web/composer/tools.py:_handle_upsert_node:arguments"
+  - "src/elspeth/web/composer/tools.py:_handle_upsert_edge:arguments"
+  - "src/elspeth/web/composer/tools.py:_handle_remove_node:arguments"
+  - "src/elspeth/web/composer/tools.py:_handle_remove_edge:arguments"
+  - "src/elspeth/web/composer/tools.py:_handle_set_metadata:arguments"
+  - "src/elspeth/web/composer/tools.py:_handle_set_output:arguments"
+  - "src/elspeth/web/composer/tools.py:_handle_remove_output:arguments"
 
   # WEB COMPOSER — Service, protocol, prompts (LLM message lists)
   # LiteLLM message format is list[dict[str, Any]] by API contract.
   # Chat history arrives as plain dicts from the route handler (seam contract B).
   - "src/elspeth/web/composer/protocol.py:ComposerService.compose:messages (list)"
   - "src/elspeth/web/composer/service.py:ComposerServiceImpl.compose:messages (list)"
+  - "src/elspeth/web/composer/service.py:ComposerServiceImpl._compose_loop:messages (list)"
   - "src/elspeth/web/composer/service.py:ComposerServiceImpl._build_messages:chat_history (list)"
+  - "src/elspeth/web/composer/service.py:_make_cache_key:arguments"
   - "src/elspeth/web/composer/service.py:ComposerServiceImpl._build_messages:return (list)"
   - "src/elspeth/web/composer/service.py:ComposerServiceImpl._get_litellm_tools:return (list)"
   - "src/elspeth/web/composer/service.py:ComposerServiceImpl._call_llm:messages (list)"

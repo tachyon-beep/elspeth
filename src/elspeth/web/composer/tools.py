@@ -9,6 +9,7 @@ L3 (web/composer/state, web/catalog/protocol).
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -288,75 +289,134 @@ def get_tool_definitions() -> list[dict[str, Any]]:
     ]
 
 
-# --- Tool Executor ---
+# --- Tool Registry ---
+
+# Unified handler signature: (arguments, state, catalog, data_dir) -> ToolResult.
+# Handlers that don't need all parameters ignore them.
+ToolHandler = Callable[
+    [dict[str, Any], CompositionState, CatalogServiceProtocol, str | None],
+    ToolResult,
+]
 
 
-def execute_tool(
-    tool_name: str,
+# Discovery tool handlers (normalized signatures)
+
+
+def _handle_list_sources(
     arguments: dict[str, Any],
     state: CompositionState,
     catalog: CatalogServiceProtocol,
     data_dir: str | None = None,
 ) -> ToolResult:
-    """Execute a composition tool by name.
+    return _discovery_result(state, catalog.list_sources())
 
-    Discovery tools return data without modifying state.
-    Mutation tools return ToolResult with updated state and validation.
-    Invalid tool names return a failure result with an error message.
 
-    Args:
-        data_dir: Base data directory for S2 path allowlist enforcement.
-            When provided, source options containing ``path`` or ``file``
-            keys are restricted to ``{data_dir}/uploads/``.
-    """
-    # Discovery tools
-    if tool_name == "list_sources":
-        return _discovery_result(state, catalog.list_sources())
+def _handle_list_transforms(
+    arguments: dict[str, Any],
+    state: CompositionState,
+    catalog: CatalogServiceProtocol,
+    data_dir: str | None = None,
+) -> ToolResult:
+    return _discovery_result(state, catalog.list_transforms())
 
-    if tool_name == "list_transforms":
-        return _discovery_result(state, catalog.list_transforms())
 
-    if tool_name == "list_sinks":
-        return _discovery_result(state, catalog.list_sinks())
+def _handle_list_sinks(
+    arguments: dict[str, Any],
+    state: CompositionState,
+    catalog: CatalogServiceProtocol,
+    data_dir: str | None = None,
+) -> ToolResult:
+    return _discovery_result(state, catalog.list_sinks())
 
-    if tool_name == "get_plugin_schema":
-        try:
-            schema = catalog.get_schema(arguments["plugin_type"], arguments["name"])
-            return _discovery_result(state, schema)
-        except (ValueError, KeyError) as exc:
-            # ValueError: catalog contract for "unknown plugin/type"
-            # KeyError: LLM omitted required argument (Tier 3)
-            return _failure_result(state, str(exc))
 
-    if tool_name == "get_expression_grammar":
-        return _discovery_result(state, get_expression_grammar())
+def _handle_get_plugin_schema(
+    arguments: dict[str, Any],
+    state: CompositionState,
+    catalog: CatalogServiceProtocol,
+    data_dir: str | None = None,
+) -> ToolResult:
+    try:
+        schema = catalog.get_schema(arguments["plugin_type"], arguments["name"])
+        return _discovery_result(state, schema)
+    except (ValueError, KeyError) as exc:
+        # ValueError: catalog contract for "unknown plugin/type"
+        # KeyError: LLM omitted required argument (Tier 3)
+        return _failure_result(state, str(exc))
 
-    # Mutation tools
-    if tool_name == "set_source":
-        return _execute_set_source(arguments, state, catalog, data_dir)
 
-    if tool_name == "upsert_node":
-        return _execute_upsert_node(arguments, state, catalog)
+def _handle_get_expression_grammar(
+    arguments: dict[str, Any],
+    state: CompositionState,
+    catalog: CatalogServiceProtocol,
+    data_dir: str | None = None,
+) -> ToolResult:
+    return _discovery_result(state, get_expression_grammar())
 
-    if tool_name == "upsert_edge":
-        return _execute_upsert_edge(arguments, state)
 
-    if tool_name == "remove_node":
-        return _execute_remove_node(arguments, state)
+# Mutation tool handler wrappers (normalize 2/3-arg handlers to 4-arg)
 
-    if tool_name == "remove_edge":
-        return _execute_remove_edge(arguments, state)
 
-    if tool_name == "set_metadata":
-        return _execute_set_metadata(arguments, state)
+def _handle_upsert_node(
+    arguments: dict[str, Any],
+    state: CompositionState,
+    catalog: CatalogServiceProtocol,
+    data_dir: str | None = None,
+) -> ToolResult:
+    return _execute_upsert_node(arguments, state, catalog)
 
-    if tool_name == "set_output":
-        return _execute_set_output(arguments, state, catalog)
 
-    if tool_name == "remove_output":
-        return _execute_remove_output(arguments, state)
+def _handle_upsert_edge(
+    arguments: dict[str, Any],
+    state: CompositionState,
+    catalog: CatalogServiceProtocol,
+    data_dir: str | None = None,
+) -> ToolResult:
+    return _execute_upsert_edge(arguments, state)
 
-    return _failure_result(state, f"Unknown tool: {tool_name}")
+
+def _handle_remove_node(
+    arguments: dict[str, Any],
+    state: CompositionState,
+    catalog: CatalogServiceProtocol,
+    data_dir: str | None = None,
+) -> ToolResult:
+    return _execute_remove_node(arguments, state)
+
+
+def _handle_remove_edge(
+    arguments: dict[str, Any],
+    state: CompositionState,
+    catalog: CatalogServiceProtocol,
+    data_dir: str | None = None,
+) -> ToolResult:
+    return _execute_remove_edge(arguments, state)
+
+
+def _handle_set_metadata(
+    arguments: dict[str, Any],
+    state: CompositionState,
+    catalog: CatalogServiceProtocol,
+    data_dir: str | None = None,
+) -> ToolResult:
+    return _execute_set_metadata(arguments, state)
+
+
+def _handle_set_output(
+    arguments: dict[str, Any],
+    state: CompositionState,
+    catalog: CatalogServiceProtocol,
+    data_dir: str | None = None,
+) -> ToolResult:
+    return _execute_set_output(arguments, state, catalog)
+
+
+def _handle_remove_output(
+    arguments: dict[str, Any],
+    state: CompositionState,
+    catalog: CatalogServiceProtocol,
+    data_dir: str | None = None,
+) -> ToolResult:
+    return _execute_remove_output(arguments, state)
 
 
 def _discovery_result(state: CompositionState, data: Any) -> ToolResult:
@@ -610,3 +670,75 @@ def _execute_remove_output(
     if new_state is None:
         return _failure_result(state, f"Output '{sink_name}' not found.")
     return _mutation_result(new_state, (sink_name,))
+
+
+# --- Registries ---
+# Must be after all handler definitions to avoid NameError.
+
+_DISCOVERY_TOOLS: dict[str, ToolHandler] = {
+    "list_sources": _handle_list_sources,
+    "list_transforms": _handle_list_transforms,
+    "list_sinks": _handle_list_sinks,
+    "get_plugin_schema": _handle_get_plugin_schema,
+    "get_expression_grammar": _handle_get_expression_grammar,
+}
+
+# All discovery tools are cacheable. If a non-cacheable discovery tool is
+# re-added in future (e.g. get_current_state which returns live mutable
+# state), add it to _DISCOVERY_TOOLS but NOT to this frozenset.
+_CACHEABLE_DISCOVERY_TOOLS: frozenset[str] = frozenset(_DISCOVERY_TOOLS.keys())
+
+_MUTATION_TOOLS: dict[str, ToolHandler] = {
+    "set_source": _execute_set_source,
+    "upsert_node": _handle_upsert_node,
+    "upsert_edge": _handle_upsert_edge,
+    "remove_node": _handle_remove_node,
+    "remove_edge": _handle_remove_edge,
+    "set_metadata": _handle_set_metadata,
+    "set_output": _handle_set_output,
+    "remove_output": _handle_remove_output,
+}
+
+# Module-level assertions: registries must not overlap.
+assert not (set(_DISCOVERY_TOOLS) & set(_MUTATION_TOOLS)), f"Tool registry overlap: {set(_DISCOVERY_TOOLS) & set(_MUTATION_TOOLS)}"
+
+assert set(_DISCOVERY_TOOLS) >= _CACHEABLE_DISCOVERY_TOOLS, (
+    f"Cacheable tools not in discovery registry: {_CACHEABLE_DISCOVERY_TOOLS - set(_DISCOVERY_TOOLS)}"
+)
+
+
+def is_discovery_tool(name: str) -> bool:
+    """Return True if the tool is a discovery (read-only) tool."""
+    return name in _DISCOVERY_TOOLS
+
+
+def is_cacheable_discovery_tool(name: str) -> bool:
+    """Return True if the tool's results can be cached within a compose() call."""
+    return name in _CACHEABLE_DISCOVERY_TOOLS
+
+
+# --- Tool Executor ---
+
+
+def execute_tool(
+    tool_name: str,
+    arguments: dict[str, Any],
+    state: CompositionState,
+    catalog: CatalogServiceProtocol,
+    data_dir: str | None = None,
+) -> ToolResult:
+    """Execute a composition tool by name.
+
+    Dispatches via registry dict. Discovery tools return data without
+    modifying state. Mutation tools return ToolResult with updated state
+    and validation. Unknown tool names return a failure result.
+
+    Args:
+        data_dir: Base data directory for S2 path allowlist enforcement.
+            When provided, source options containing ``path`` or ``file``
+            keys are restricted to ``{data_dir}/uploads/``.
+    """
+    handler = _DISCOVERY_TOOLS.get(tool_name) or _MUTATION_TOOLS.get(tool_name)
+    if handler is None:
+        return _failure_result(state, f"Unknown tool: {tool_name}")
+    return handler(arguments, state, catalog, data_dir)
