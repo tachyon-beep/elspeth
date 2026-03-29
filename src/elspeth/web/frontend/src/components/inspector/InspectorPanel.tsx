@@ -35,6 +35,7 @@ export function InspectorPanel() {
   const activeSessionId = useSessionStore((s) => s.activeSessionId);
   const compositionState = useSessionStore((s) => s.compositionState);
   const stateVersions = useSessionStore((s) => s.stateVersions);
+  const isLoadingVersions = useSessionStore((s) => s.isLoadingVersions);
   const revertToVersion = useSessionStore((s) => s.revertToVersion);
   const loadStateVersions = useSessionStore((s) => s.loadStateVersions);
 
@@ -81,7 +82,9 @@ export function InspectorPanel() {
     if (selectedVersion !== null && selectedVersion !== compositionState?.version) {
       const entry = stateVersions.find((v) => v.version === selectedVersion);
       if (entry) {
-        revertToVersion(entry.id);
+        if (window.confirm(`Revert pipeline to version ${selectedVersion}? This will replace the current composition.`)) {
+          revertToVersion(entry.id);
+        }
       }
     }
   }
@@ -194,6 +197,9 @@ export function InspectorPanel() {
                   <option value={compositionState.version}>
                     v{compositionState.version}
                   </option>
+                  {isLoadingVersions && stateVersions.length === 0 && (
+                    <option disabled>Loading versions...</option>
+                  )}
                   {stateVersions
                     .filter((v) => v.version !== compositionState.version)
                     .map((v) => (

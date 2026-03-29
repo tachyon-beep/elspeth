@@ -63,7 +63,11 @@ export function ProgressView() {
         </span>
         {!isTerminal && (
           <button
-            onClick={() => cancel(activeRunId)}
+            onClick={() => {
+              if (window.confirm("Cancel the running pipeline? This cannot be undone.")) {
+                cancel(activeRunId);
+              }
+            }}
             aria-label="Cancel pipeline execution"
             className="btn btn-danger"
             style={{

@@ -31,8 +31,10 @@ interface SessionState {
   loadSessions: () => Promise<void>;
   createSession: () => Promise<void>;
   selectSession: (id: string) => Promise<void>;
+  archiveSession: (id: string) => Promise<void>;
   sendMessage: (content: string, signal?: AbortSignal) => Promise<void>;
   loadStateVersions: () => Promise<void>;
+  isLoadingVersions: boolean;
   revertToVersion: (stateId: string) => Promise<void>;
   clearError: () => void;
   reset: () => void;
@@ -45,6 +47,7 @@ const initialState = {
   compositionState: null as CompositionState | null,
   isComposing: false,
   stateVersions: [] as CompositionStateVersion[],
+  isLoadingVersions: false,
   error: null as string | null,
 };
 
@@ -73,6 +76,31 @@ export const useSessionStore = create<SessionState>((set, get) => ({
       }));
     } catch {
       set({ error: "Failed to create session. Please try again." });
+    }
+  },
+
+  async archiveSession(id: string) {
+    try {
+      await api.archiveSession(id);
+      set((state) => {
+        const sessions = state.sessions.filter((s) => s.id !== id);
+        // If we archived the active session, clear selection
+        const wasActive = state.activeSessionId === id;
+        return {
+          sessions,
+          ...(wasActive
+            ? {
+                activeSessionId: null,
+                messages: [],
+                compositionState: null,
+                stateVersions: [],
+                isComposing: false,
+              }
+            : {}),
+        };
+      });
+    } catch {
+      set({ error: "Failed to archive session. Please try again." });
     }
   },
 
@@ -159,11 +187,13 @@ export const useSessionStore = create<SessionState>((set, get) => ({
     const { activeSessionId } = get();
     if (!activeSessionId) return;
 
+    set({ isLoadingVersions: true });
     try {
       const versions = await api.fetchStateVersions(activeSessionId);
-      set({ stateVersions: versions });
+      set({ stateVersions: versions, isLoadingVersions: false });
     } catch {
       // Version history is non-critical -- fail silently
+      set({ isLoadingVersions: false });
     }
   },
 

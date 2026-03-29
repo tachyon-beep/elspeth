@@ -24,7 +24,7 @@ function relativeTime(dateStr: string): string {
 }
 
 export function SessionSidebar() {
-  const { sessions, activeSessionId, createSession, selectSession } =
+  const { sessions, activeSessionId, createSession, selectSession, archiveSession } =
     useSession();
   const { user, logout } = useAuth();
   const [isCreating, setIsCreating] = useState(false);
@@ -92,14 +92,21 @@ export function SessionSidebar() {
             {sessions.map((session) => {
               const isActive = session.id === activeSessionId;
               return (
-                <li key={session.id}>
+                <li
+                  key={session.id}
+                  style={{
+                    display: "flex",
+                    alignItems: "stretch",
+                  }}
+                >
                   <button
                     onClick={() => selectSession(session.id)}
                     aria-current={isActive ? "true" : undefined}
                     aria-label={`Session: ${session.title}, ${relativeTime(session.updated_at)}`}
                     style={{
                       display: "block",
-                      width: "100%",
+                      flex: 1,
+                      minWidth: 0,
                       padding: "10px 12px",
                       border: "none",
                       borderLeft: isActive
@@ -133,6 +140,38 @@ export function SessionSidebar() {
                     >
                       {relativeTime(session.updated_at)}
                     </div>
+                  </button>
+                  <button
+                    onClick={() => {
+                      if (window.confirm(`Archive session "${session.title}"?`)) {
+                        archiveSession(session.id);
+                      }
+                    }}
+                    aria-label={`Archive session: ${session.title}`}
+                    title="Archive session"
+                    style={{
+                      display: "flex",
+                      alignItems: "center",
+                      justifyContent: "center",
+                      width: 32,
+                      border: "none",
+                      backgroundColor: "transparent",
+                      color: "var(--color-text-muted)",
+                      cursor: "pointer",
+                      fontSize: 14,
+                      opacity: 0.5,
+                      flexShrink: 0,
+                    }}
+                    onMouseEnter={(e) => {
+                      e.currentTarget.style.opacity = "1";
+                      e.currentTarget.style.color = "var(--color-error)";
+                    }}
+                    onMouseLeave={(e) => {
+                      e.currentTarget.style.opacity = "0.5";
+                      e.currentTarget.style.color = "var(--color-text-muted)";
+                    }}
+                  >
+                    {"\u00D7"}
                   </button>
                 </li>
               );
