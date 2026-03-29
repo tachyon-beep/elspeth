@@ -473,3 +473,16 @@ allowed_dict_patterns:
   - "src/elspeth/web/composer/tools.py:_execute_set_metadata:args"
   - "src/elspeth/web/composer/tools.py:_execute_set_output:args"
   - "src/elspeth/web/composer/tools.py:_execute_remove_output:args"
+
+  # WEB COMPOSER — Service, protocol, prompts (LLM message lists)
+  # LiteLLM message format is list[dict[str, Any]] by API contract.
+  # Chat history arrives as plain dicts from the route handler (seam contract B).
+  - "src/elspeth/web/composer/protocol.py:ComposerService.compose:messages (list)"
+  - "src/elspeth/web/composer/service.py:ComposerServiceImpl.compose:messages (list)"
+  - "src/elspeth/web/composer/service.py:ComposerServiceImpl._build_messages:chat_history (list)"
+  - "src/elspeth/web/composer/service.py:ComposerServiceImpl._build_messages:return (list)"
+  - "src/elspeth/web/composer/service.py:ComposerServiceImpl._get_litellm_tools:return (list)"
+  - "src/elspeth/web/composer/service.py:ComposerServiceImpl._call_llm:messages (list)"
+  - "src/elspeth/web/composer/service.py:ComposerServiceImpl._call_llm:tools (list)"
+  - "src/elspeth/web/composer/prompts.py:build_messages:chat_history (list)"
+  - "src/elspeth/web/composer/prompts.py:build_messages:return (list)"

@@ -383,3 +383,9 @@ per_file_rules:
   - R5
   reason: "Tier 3 boundary — LLM tool call arguments are external data with optional fields per JSON schema"
   expires: null
+
+- pattern: web/composer/service.py
+  rules:
+  - R6
+  reason: "Tier 3 boundary — LLM tool call arguments may contain malformed JSON (JSONDecodeError) or missing required keys (KeyError/TypeError). Errors returned to LLM for self-correction, not swallowed."
+  expires: null
