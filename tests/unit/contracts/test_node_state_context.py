@@ -207,12 +207,12 @@ class TestRequireIntValidation:
 
     def test_pool_config_snapshot_rejects_bool_pool_size(self) -> None:
         with pytest.raises(TypeError, match="pool_size must be int"):
-            PoolConfigSnapshot(pool_size=True, max_capacity_retry_seconds=30.0, dispatch_delay_at_completion_ms=10.0)  # type: ignore[arg-type]
+            PoolConfigSnapshot(pool_size=True, max_capacity_retry_seconds=30.0, dispatch_delay_at_completion_ms=10.0)
 
     def test_pool_stats_snapshot_rejects_bool_capacity_retries(self) -> None:
         with pytest.raises(TypeError, match="capacity_retries must be int"):
             PoolStatsSnapshot(
-                capacity_retries=True,  # type: ignore[arg-type]
+                capacity_retries=True,
                 successes=0,
                 peak_delay_ms=0.0,
                 current_delay_ms=0.0,
@@ -224,7 +224,7 @@ class TestRequireIntValidation:
         with pytest.raises(TypeError, match="successes must be int"):
             PoolStatsSnapshot(
                 capacity_retries=0,
-                successes=False,  # type: ignore[arg-type]
+                successes=False,
                 peak_delay_ms=0.0,
                 current_delay_ms=0.0,
                 total_throttle_time_ms=0.0,
@@ -239,20 +239,20 @@ class TestRequireIntValidation:
                 peak_delay_ms=0.0,
                 current_delay_ms=0.0,
                 total_throttle_time_ms=0.0,
-                max_concurrent_reached=True,  # type: ignore[arg-type]
+                max_concurrent_reached=True,
             )
 
     def test_query_order_entry_rejects_bool_submit_index(self) -> None:
         with pytest.raises(TypeError, match="submit_index must be int"):
-            QueryOrderEntry(submit_index=True, complete_index=0, buffer_wait_ms=0.0)  # type: ignore[arg-type]
+            QueryOrderEntry(submit_index=True, complete_index=0, buffer_wait_ms=0.0)
 
     def test_query_order_entry_rejects_bool_complete_index(self) -> None:
         with pytest.raises(TypeError, match="complete_index must be int"):
-            QueryOrderEntry(submit_index=0, complete_index=False, buffer_wait_ms=0.0)  # type: ignore[arg-type]
+            QueryOrderEntry(submit_index=0, complete_index=False, buffer_wait_ms=0.0)
 
     def test_aggregation_flush_context_rejects_bool_buffer_size(self) -> None:
         with pytest.raises(TypeError, match="buffer_size must be int"):
-            AggregationFlushContext(trigger_type="COUNT", buffer_size=True, batch_id="b1")  # type: ignore[arg-type]
+            AggregationFlushContext(trigger_type="COUNT", buffer_size=True, batch_id="b1")
 
 
 class TestFromExecutorStats:

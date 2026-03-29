@@ -5,6 +5,8 @@ Retry-specific tests only. Common tests (frozen, slots, protocol, orphan fields)
 are in test_runtime_common.py.
 """
 
+from types import MappingProxyType
+
 import pytest
 
 # NOTE: Protocol compliance, orphan detection, frozen/slots tests are in test_runtime_common.py
@@ -23,7 +25,7 @@ class TestRetryFieldNameMapping:
             "max_delay_seconds": "max_delay",
         }
 
-        actual_mappings = FIELD_MAPPINGS.get("RetrySettings", {})
+        actual_mappings: dict[str, str] | MappingProxyType[str, str] = FIELD_MAPPINGS.get("RetrySettings", {})
 
         assert actual_mappings == expected_mappings, (
             f"RetrySettings field mappings incorrect.\nExpected: {expected_mappings}\nActual: {actual_mappings}"
@@ -33,7 +35,7 @@ class TestRetryFieldNameMapping:
         """Fields with same name in Settings and Runtime should NOT be in FIELD_MAPPINGS."""
         from elspeth.contracts.config import FIELD_MAPPINGS
 
-        mappings = FIELD_MAPPINGS.get("RetrySettings", {})
+        mappings: dict[str, str] | MappingProxyType[str, str] = FIELD_MAPPINGS.get("RetrySettings", {})
 
         # These fields have the SAME name in both - should not be in mapping
         same_name_fields = {"max_attempts", "exponential_base"}
@@ -391,7 +393,7 @@ class TestRuntimeRetryValidation:
 
         with pytest.raises(TypeError, match="max_attempts must be int"):
             RuntimeRetryConfig(
-                max_attempts=True,  # type: ignore[arg-type]  # Intentional: testing bool rejection
+                max_attempts=True,
                 base_delay=1.0,
                 max_delay=60.0,
                 jitter=1.0,

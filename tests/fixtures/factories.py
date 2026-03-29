@@ -61,10 +61,12 @@ from elspeth.testing import (  # noqa: F401
     make_success_multi,
     make_success_reason,
     make_token_completed,
-    make_token_info,
     make_transform_completed,
     make_transform_error_token,
     make_validation_error_token,
+)
+from elspeth.testing import (
+    make_token_info as make_token_info,
 )
 
 # =============================================================================

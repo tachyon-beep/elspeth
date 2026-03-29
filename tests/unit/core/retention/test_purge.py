@@ -304,8 +304,8 @@ class TestPurgeResultValidation:
         from elspeth.core.retention.purge import PurgeResult
 
         result = PurgeResult(
-            deleted_count=0, skipped_count=0, failed_refs=["ref-a", "ref-b"], grade_update_failures=(), duration_seconds=0.0
-        )  # type: ignore[arg-type]
+            deleted_count=0, skipped_count=0, failed_refs=("ref-a", "ref-b"), grade_update_failures=(), duration_seconds=0.0
+        )
         assert isinstance(result.failed_refs, tuple)
         assert result.failed_refs == ("ref-a", "ref-b")
 

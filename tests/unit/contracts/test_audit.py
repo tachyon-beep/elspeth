@@ -2324,7 +2324,7 @@ class TestOperation:
         if status == "failed":
             kwargs["error_message"] = "error"
         with pytest.raises(ValueError, match="completed_at is None"):
-            Operation(**kwargs)  # type: ignore[arg-type]
+            Operation(**kwargs)
 
     @pytest.mark.parametrize("status", ["completed", "failed", "pending"])
     def test_terminal_status_requires_duration_ms(self, status: str) -> None:
@@ -2342,7 +2342,7 @@ class TestOperation:
         if status == "failed":
             kwargs["error_message"] = "error"
         with pytest.raises(ValueError, match="duration_ms is None"):
-            Operation(**kwargs)  # type: ignore[arg-type]
+            Operation(**kwargs)
 
     def test_failed_requires_error_message(self) -> None:
         """Status 'failed' must have error_message set."""
@@ -2515,7 +2515,7 @@ class TestRequireIntValidation:
                 row_id="row-1",
                 run_id="run-1",
                 source_node_id="node-1",
-                row_index=True,  # type: ignore[arg-type]
+                row_index=True,
                 source_data_hash="abc123",
                 created_at=datetime.now(UTC),
             )
@@ -2564,7 +2564,7 @@ class TestRequireIntValidation:
             Call(
                 call_id="call-1",
                 state_id="state-1",
-                call_index=False,  # type: ignore[arg-type]
+                call_index=False,
                 call_type=CallType.LLM,
                 status=CallStatus.SUCCESS,
                 request_hash="abc123",
@@ -2605,7 +2605,7 @@ class TestRequireIntValidation:
                 row_id="row-1",
                 created_at=datetime.now(UTC),
                 run_id="run-1",
-                step_in_pipeline=True,  # type: ignore[arg-type]
+                step_in_pipeline=True,
             )
 
     def test_token_step_in_pipeline_accepts_zero(self) -> None:
@@ -2657,7 +2657,7 @@ class TestRequireIntValidation:
                 token_id="tok-1",
                 node_id="node-1",
                 step_index=0,
-                attempt=True,  # type: ignore[arg-type]
+                attempt=True,
                 status=NodeStateStatus.OPEN,
                 input_hash="abc123",
                 started_at=datetime.now(UTC),

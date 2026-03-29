@@ -130,11 +130,11 @@ class TestWebSettingsValidation:
 
     def test_invalid_auth_provider_rejected(self) -> None:
         with pytest.raises(ValueError):
-            WebSettings(auth_provider="invalid")  # type: ignore[arg-type]
+            WebSettings(auth_provider="invalid")
 
     def test_invalid_auth_provider_kerberos_rejected(self) -> None:
         with pytest.raises(ValueError):
-            WebSettings(auth_provider="kerberos")  # type: ignore[arg-type]
+            WebSettings(auth_provider="kerberos")
 
     def test_port_zero_rejected(self) -> None:
         with pytest.raises(ValueError):

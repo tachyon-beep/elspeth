@@ -149,7 +149,7 @@ def _make_source_unlocked(config: dict[str, Any]) -> Any:
 
     mock_schema_cls = MagicMock()
 
-    def mock_validate(row: dict) -> MagicMock:
+    def mock_validate(row: dict[str, Any]) -> MagicMock:
         m = MagicMock()
         m.to_row.return_value = dict(row)
         return m
@@ -190,7 +190,7 @@ def _make_source_for_load(
         mock_schema_cls.model_validate = schema_validate_side_effect
     else:
 
-        def mock_validate(row: dict) -> MagicMock:
+        def mock_validate(row: dict[str, Any]) -> MagicMock:
             m = MagicMock()
             m.to_row.return_value = dict(row)
             return m
@@ -601,7 +601,7 @@ class TestDataverseSourceConstruction:
             source.on_start(lifecycle_ctx)
 
         assert source._client is not None
-        assert source._run_id == "test-run-123"
+        assert source._run_id == "test-run-123"  # type: ignore[unreachable]
 
     def test_additional_domains_stored_as_tuple(self) -> None:
         """additional_domains are stored as a tuple for immutability."""
@@ -817,14 +817,13 @@ class TestDataverseSourceLoadStructured:
         """Rows failing schema validation are quarantined."""
         from pydantic import ValidationError
 
-        def failing_validate(row: dict) -> None:
+        def failing_validate(row: dict[str, Any]) -> None:
             raise ValidationError.from_exception_data(
                 title="DataverseRowSchema",
                 line_errors=[
                     {
                         "type": "missing",
                         "loc": ("required_field",),
-                        "msg": "Field required",
                         "input": row,
                     }
                 ],
@@ -848,14 +847,13 @@ class TestDataverseSourceLoadStructured:
         """Schema validation failure with discard yields no rows."""
         from pydantic import ValidationError
 
-        def failing_validate(row: dict) -> None:
+        def failing_validate(row: dict[str, Any]) -> None:
             raise ValidationError.from_exception_data(
                 title="DataverseRowSchema",
                 line_errors=[
                     {
                         "type": "missing",
                         "loc": ("required_field",),
-                        "msg": "Field required",
                         "input": row,
                     }
                 ],
@@ -909,7 +907,7 @@ class TestDataverseSourceLoadStructured:
 
         call_count = 0
 
-        def sometimes_failing_validate(row: dict) -> MagicMock:
+        def sometimes_failing_validate(row: dict[str, Any]) -> MagicMock:
             nonlocal call_count
             call_count += 1
             if call_count == 2:
@@ -919,7 +917,6 @@ class TestDataverseSourceLoadStructured:
                         {
                             "type": "missing",
                             "loc": ("field",),
-                            "msg": "Field required",
                             "input": row,
                         }
                     ],

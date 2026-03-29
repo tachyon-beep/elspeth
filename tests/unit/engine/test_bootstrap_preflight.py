@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+from typing import Any
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -84,7 +85,7 @@ class TestBootstrapDependencyResultsFlow:
 
         captured_context = {}
 
-        def capture_gate_context(gates: object, context: dict) -> list:
+        def capture_gate_context(gates: object, context: dict[str, Any]) -> list[Any]:
             captured_context.update(context)
             return []
 
@@ -251,7 +252,7 @@ class TestResolvePreflightDirect:
             context_snapshot={"collections": {"test": {"count": 10}}},
         )
 
-        mock_probes: list = []
+        mock_probes: list[Any] = []
 
         with (
             patch("elspeth.engine.commencement.evaluate_commencement_gates", return_value=[gate_result]) as mock_eval,
@@ -283,12 +284,12 @@ class TestResolvePreflightDirect:
 
         captured_context = {}
 
-        def capture_gate_context(gates: object, context: dict) -> list:
+        def capture_gate_context(gates: object, context: dict[str, Any]) -> list[Any]:
             captured_context.update(context)
             return []
 
         mock_runner = MagicMock()
-        mock_probes: list = []
+        mock_probes: list[Any] = []
 
         with (
             patch("elspeth.engine.dependency_resolver.detect_cycles"),
@@ -309,7 +310,7 @@ class TestResolvePreflightDirect:
         mock_config.depends_on = []
         mock_config.commencement_gates = [CommencementGateConfig(name="test_gate", condition="True")]
 
-        mock_probes: list = []
+        mock_probes: list[Any] = []
 
         with (
             patch(

@@ -520,8 +520,8 @@ class TestCoalesceFailureReasonSchema:
         assert dataclasses.is_dataclass(CoalesceFailureReason)
         error = CoalesceFailureReason(
             failure_reason="quorum_not_met",
-            expected_branches=["a", "b"],
-            branches_arrived=["a"],
+            expected_branches=("a", "b"),
+            branches_arrived=("a",),
             merge_policy="union",
         )
         with pytest.raises(dataclasses.FrozenInstanceError):
@@ -533,8 +533,8 @@ class TestCoalesceFailureReasonSchema:
 
         instance = CoalesceFailureReason(
             failure_reason="quorum_not_met",
-            expected_branches=["a", "b"],
-            branches_arrived=["a"],
+            expected_branches=("a", "b"),
+            branches_arrived=("a",),
             merge_policy="union",
         )
         assert not hasattr(instance, "__dict__"), "Slots dataclass should not have __dict__"
@@ -545,8 +545,8 @@ class TestCoalesceFailureReasonSchema:
 
         error = CoalesceFailureReason(
             failure_reason="incomplete_branches",
-            expected_branches=["path_a", "path_b"],
-            branches_arrived=["path_a"],
+            expected_branches=("path_a", "path_b"),
+            branches_arrived=("path_a",),
             merge_policy="union",
         )
         d = error.to_dict()
@@ -565,8 +565,8 @@ class TestCoalesceFailureReasonSchema:
 
         error = CoalesceFailureReason(
             failure_reason="quorum_not_met_at_timeout",
-            expected_branches=["a", "b", "c"],
-            branches_arrived=["a"],
+            expected_branches=("a", "b", "c"),
+            branches_arrived=("a",),
             merge_policy="nested",
             timeout_ms=30000,
         )
@@ -580,8 +580,8 @@ class TestCoalesceFailureReasonSchema:
 
         error = CoalesceFailureReason(
             failure_reason="select_branch_not_arrived",
-            expected_branches=["fast", "slow"],
-            branches_arrived=["slow"],
+            expected_branches=("fast", "slow"),
+            branches_arrived=("slow",),
             merge_policy="select",
             select_branch="fast",
         )
@@ -595,8 +595,8 @@ class TestCoalesceFailureReasonSchema:
 
         error = CoalesceFailureReason(
             failure_reason="select_branch_not_arrived",
-            expected_branches=["a", "b"],
-            branches_arrived=["b"],
+            expected_branches=("a", "b"),
+            branches_arrived=("b",),
             merge_policy="select",
             timeout_ms=5000,
             select_branch="a",

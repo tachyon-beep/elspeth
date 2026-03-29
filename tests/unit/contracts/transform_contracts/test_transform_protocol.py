@@ -193,8 +193,8 @@ class TransformContractTestBase(ABC):
         pipeline_row = make_pipeline_row(valid_input)
         result = transform.process(pipeline_row, ctx)
         if result.status == "success" and result.rows is not None:
-            assert isinstance(result.rows, list), f"TransformResult.rows is {type(result.rows).__name__}, expected list"
-            for i, row in enumerate(result.rows):
+            assert isinstance(result.rows, list), f"TransformResult.rows is {type(result.rows).__name__}, expected list"  # type: ignore[unreachable]
+            for i, row in enumerate(result.rows):  # type: ignore[unreachable]
                 assert isinstance(row, PipelineRow), f"TransformResult.rows[{i}] is {type(row).__name__}, expected PipelineRow"
 
     # =========================================================================

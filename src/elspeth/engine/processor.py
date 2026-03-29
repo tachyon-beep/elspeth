@@ -723,27 +723,6 @@ class RowProcessor:
             if "quarantined_indices" in metadata:
                 quarantined_index_set = set(metadata["quarantined_indices"])
 
-        # Record terminal outcomes for ALL buffered tokens (deferred from buffer time).
-        # Quarantined tokens get QUARANTINED; valid tokens get CONSUMED_IN_BATCH.
-        for i, token in enumerate(fctx.buffered_tokens):
-            if i in quarantined_index_set:
-                error_hash = hashlib.sha256(f"quarantined_in_batch:{fctx.batch_id}:{i}".encode()).hexdigest()[:16]
-                self._recorder.record_token_outcome(
-                    run_id=self._run_id,
-                    token_id=token.token_id,
-                    outcome=RowOutcome.QUARANTINED,
-                    error_hash=error_hash,
-                )
-                self._emit_token_completed(token, RowOutcome.QUARANTINED)
-            else:
-                self._recorder.record_token_outcome(
-                    run_id=self._run_id,
-                    token_id=token.token_id,
-                    outcome=RowOutcome.CONSUMED_IN_BATCH,
-                    batch_id=fctx.batch_id,
-                )
-                self._emit_token_completed(token, RowOutcome.CONSUMED_IN_BATCH)
-
         # Extract output rows
         if result.is_multi_row:
             if result.rows is None:
@@ -783,10 +762,33 @@ class RowProcessor:
                 record_parent_outcome=False,
             )
 
+            # Record terminal outcomes for ALL buffered tokens AFTER expand_token
+            # succeeds. Recording before validation/expansion would leave parent
+            # tokens in a terminal state (CONSUMED_IN_BATCH/QUARANTINED) with no
+            # child tokens if a later step fails — recovery would skip them.
+            for i, token in enumerate(fctx.buffered_tokens):
+                if i in quarantined_index_set:
+                    error_hash = hashlib.sha256(f"quarantined_in_batch:{fctx.batch_id}:{i}".encode()).hexdigest()[:16]
+                    self._recorder.record_token_outcome(
+                        run_id=self._run_id,
+                        token_id=token.token_id,
+                        outcome=RowOutcome.QUARANTINED,
+                        error_hash=error_hash,
+                    )
+                    self._emit_token_completed(token, RowOutcome.QUARANTINED)
+                else:
+                    self._recorder.record_token_outcome(
+                        run_id=self._run_id,
+                        token_id=token.token_id,
+                        outcome=RowOutcome.CONSUMED_IN_BATCH,
+                        batch_id=fctx.batch_id,
+                    )
+                    self._emit_token_completed(token, RowOutcome.CONSUMED_IN_BATCH)
+
             # Build triggering RowResult if applicable (count-triggered only).
             # The triggering token is always the last buffered token (buffered
             # immediately before flush), so its index is len(buffered_tokens) - 1.
-            # Its outcome must match what the recorder loop already recorded —
+            # Its outcome must match what the recorder loop recorded —
             # QUARANTINED if in quarantined_index_set, CONSUMED_IN_BATCH otherwise.
             if fctx.triggering_token is not None:
                 triggering_index = len(fctx.buffered_tokens) - 1

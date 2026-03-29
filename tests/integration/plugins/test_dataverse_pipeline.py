@@ -178,7 +178,7 @@ class TestDataverseSourceStructuredQuery:
         source._client = mock_client
 
         ctx = FakeSourceContext()
-        rows = list(source.load(ctx))
+        rows = list(source.load(ctx))  # type: ignore[arg-type]  # test fake context
 
         assert len(rows) == 2
         assert all(not r.is_quarantined for r in rows)
@@ -230,7 +230,7 @@ class TestDataverseSourceStructuredQuery:
         source._client = mock_client
 
         ctx = FakeSourceContext()
-        rows = list(source.load(ctx))
+        rows = list(source.load(ctx))  # type: ignore[arg-type]  # test fake context
 
         assert len(rows) == 2
         # Two pages = two audit call records
@@ -276,7 +276,7 @@ class TestDataverseSourceFetchXML:
         source._client = mock_client
 
         ctx = FakeSourceContext()
-        rows = list(source.load(ctx))
+        rows = list(source.load(ctx))  # type: ignore[arg-type]  # test fake context
 
         assert len(rows) == 1
         assert rows[0].row["fullname"] == "Alice"
@@ -315,7 +315,7 @@ class TestDataverseSourceSchemaLocking:
         source._client = mock_client
 
         ctx = FakeSourceContext()
-        rows = list(source.load(ctx))
+        rows = list(source.load(ctx))  # type: ignore[arg-type]  # test fake context
 
         assert len(rows) == 1
         # Contract should be locked after first valid row
@@ -353,7 +353,7 @@ class TestDataverseSourceSchemaLocking:
         source._client = mock_client
 
         ctx = FakeSourceContext()
-        rows = list(source.load(ctx))
+        rows = list(source.load(ctx))  # type: ignore[arg-type]  # test fake context
 
         assert len(rows) == 0
         contract = source.get_schema_contract()
@@ -402,7 +402,7 @@ class TestDataverseSourceODataStripping:
         source._client = mock_client
 
         ctx = FakeSourceContext()
-        rows = list(source.load(ctx))
+        rows = list(source.load(ctx))  # type: ignore[arg-type]  # test fake context
 
         assert len(rows) == 1
         row = rows[0].row
@@ -448,12 +448,13 @@ class TestDataverseSinkUpsert:
 
         ctx = FakeSinkContext()
         rows = [{"email": "alice@test.com", "name": "Alice"}]
-        result = sink.write(rows, ctx)
+        result = sink.write(rows, ctx)  # type: ignore[arg-type]  # test fake context
 
         assert isinstance(result, SinkWriteResult)
         descriptor = result.artifact
         assert descriptor.artifact_type == "webhook"
         assert "contact" in descriptor.path_or_uri
+        assert descriptor.metadata is not None
         assert descriptor.metadata["row_count"] == 1
         assert descriptor.metadata["mode"] == "upsert"
 
@@ -498,8 +499,9 @@ class TestDataverseSinkUpsert:
             {"email": "bob@test.com", "name": "Bob"},
             {"email": "charlie@test.com", "name": "Charlie"},
         ]
-        result = sink.write(rows, ctx)
+        result = sink.write(rows, ctx)  # type: ignore[arg-type]  # test fake context
 
+        assert result.artifact.metadata is not None
         assert result.artifact.metadata["row_count"] == 3
         assert mock_client.upsert.call_count == 3
         assert len(ctx.calls) == 3  # One audit record per row
@@ -550,7 +552,7 @@ class TestDataverseSinkUpsert:
         ]
 
         with pytest.raises(DataverseClientError, match="Conflict"):
-            sink.write(rows, ctx)
+            sink.write(rows, ctx)  # type: ignore[arg-type]  # test fake context
 
         # First row succeeded, second failed — both recorded
         assert len(ctx.calls) == 2
@@ -607,7 +609,7 @@ class TestDataverseSinkLookupBindings:
 
         ctx = FakeSinkContext()
         rows = [{"email": "alice@test.com", "name": "Alice", "parent_account_id": "abc-123-guid"}]
-        sink.write(rows, ctx)
+        sink.write(rows, ctx)  # type: ignore[arg-type]  # test fake context
 
         assert len(captured_bodies) == 1
         body = captured_bodies[0]
@@ -634,8 +636,9 @@ class TestDataverseSinkEmptyBatch:
         sink._client = mock_client
 
         ctx = FakeSinkContext()
-        result = sink.write([], ctx)
+        result = sink.write([], ctx)  # type: ignore[arg-type]  # test fake context
 
         assert isinstance(result, SinkWriteResult)
+        assert result.artifact.metadata is not None
         assert result.artifact.metadata["row_count"] == 0
         assert result.artifact.content_hash == hashlib.sha256(b"").hexdigest()

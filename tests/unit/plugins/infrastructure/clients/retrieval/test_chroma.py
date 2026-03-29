@@ -130,7 +130,7 @@ class TestToConnectionConfig:
 class TestChromaSearchProvider:
     """Tests using real ephemeral ChromaDB — no mocks."""
 
-    def _make_provider(self, documents=None, distance_function="cosine"):
+    def _make_provider(self, documents: list[dict[str, str]] | None = None, distance_function: str = "cosine") -> ChromaSearchProvider:
         # Use unique collection name: chromadb.Client() shares a global in-memory
         # backend, so reusing names across tests causes collection state to bleed.
         unique_name = f"tc-{uuid.uuid4().hex[:12]}"
@@ -148,7 +148,7 @@ class TestChromaSearchProvider:
             collection.add(
                 documents=[d["content"] for d in documents],
                 ids=[d["id"] for d in documents],
-                metadatas=metadatas,
+                metadatas=metadatas,  # type: ignore[arg-type]  # chromadb stubs expect Mapping but we pass list[str | None]
             )
 
         return provider
@@ -336,7 +336,7 @@ class TestChromaSearchProvider:
 
 
 class TestChromaScoreNormalization:
-    def _make_provider(self, distance_function):
+    def _make_provider(self, distance_function: str) -> ChromaSearchProvider:
         # Unique name per call — chromadb.Client() shares a global in-memory backend.
         unique_name = f"tsn-{uuid.uuid4().hex[:12]}"
         config = ChromaSearchProviderConfig(
@@ -490,7 +490,7 @@ class TestTier3ResultBoundary:
 class TestNonFiniteDistanceHandling:
     """Tests for elspeth-69632ec27f: NaN distance from corrupt index."""
 
-    def _make_provider(self):
+    def _make_provider(self) -> ChromaSearchProvider:
         unique_name = f"tnf-{uuid.uuid4().hex[:12]}"
         config = ChromaSearchProviderConfig(
             collection=unique_name,
@@ -611,7 +611,7 @@ class TestDocTypeValidation:
 class TestChromaSearchProviderReadiness:
     """Tests for ChromaSearchProvider.check_readiness()."""
 
-    def _make_provider(self, documents=None):
+    def _make_provider(self, documents: list[dict[str, str]] | None = None) -> ChromaSearchProvider:
         unique_name = f"tcr-{uuid.uuid4().hex[:12]}"
         config = ChromaSearchProviderConfig(
             collection=unique_name,

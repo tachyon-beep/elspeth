@@ -22,7 +22,7 @@ from elspeth.contracts.results import ArtifactDescriptor
 from elspeth.engine.executors.sink import SinkExecutor
 
 
-def _make_token(token_id: str, row_data: dict | None = None) -> MagicMock:
+def _make_token(token_id: str, row_data: dict[str, object] | None = None) -> MagicMock:
     token = MagicMock(spec=TokenInfo)
     token.token_id = token_id
     token.row_id = f"row-{token_id}"
@@ -81,7 +81,7 @@ def test_partition_completeness(batch_size: int, diverted_indices_raw: list[int]
 
     executor.write(
         sink=sink,
-        tokens=tokens,
+        tokens=tokens,  # type: ignore[arg-type]
         ctx=MagicMock(run_id="run-1"),
         step_in_pipeline=5,
         sink_name="primary",
@@ -114,7 +114,7 @@ def test_exactly_once_terminal_state(batch_size: int, diverted_indices_raw: list
 
     executor.write(
         sink=sink,
-        tokens=tokens,
+        tokens=tokens,  # type: ignore[arg-type]
         ctx=MagicMock(run_id="run-1"),
         step_in_pipeline=5,
         sink_name="primary",
@@ -169,7 +169,7 @@ def test_failsink_partition_completeness(batch_size: int, diverted_indices_raw: 
 
     executor.write(
         sink=sink,
-        tokens=tokens,
+        tokens=tokens,  # type: ignore[arg-type]
         ctx=MagicMock(run_id="run-1"),
         step_in_pipeline=5,
         sink_name="primary",
@@ -201,7 +201,7 @@ def test_failsink_exactly_once_terminal_state(batch_size: int, diverted_indices_
 
     executor.write(
         sink=sink,
-        tokens=tokens,
+        tokens=tokens,  # type: ignore[arg-type]
         ctx=MagicMock(run_id="run-1"),
         step_in_pipeline=5,
         sink_name="primary",

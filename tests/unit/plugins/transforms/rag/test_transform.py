@@ -1,6 +1,9 @@
 """Tests for RAGRetrievalTransform lifecycle and process flow."""
 
+from __future__ import annotations
+
 import json
+from typing import Any
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -12,12 +15,12 @@ from elspeth.plugins.transforms.rag.transform import RAGRetrievalTransform
 
 
 @pytest.fixture(autouse=True)
-def _set_fingerprint_key(monkeypatch):
+def _set_fingerprint_key(monkeypatch: pytest.MonkeyPatch) -> None:
     """Ensure ELSPETH_FINGERPRINT_KEY is set for all tests."""
     monkeypatch.setenv("ELSPETH_FINGERPRINT_KEY", "test-fingerprint-key-for-rag-tests")
 
 
-def _make_transform(**overrides):
+def _make_transform(**overrides: Any) -> RAGRetrievalTransform:
     """Create a transform with valid config."""
     config = {
         "output_prefix": "policy",
@@ -34,7 +37,7 @@ def _make_transform(**overrides):
     return RAGRetrievalTransform(config)
 
 
-def _mock_ctx(state_id="state-1", token_id="token-1"):
+def _mock_ctx(state_id: str = "state-1", token_id: str = "token-1") -> MagicMock:
     """Create a mock TransformContext."""
     ctx = MagicMock()
     ctx.state_id = state_id
@@ -46,7 +49,7 @@ def _mock_ctx(state_id="state-1", token_id="token-1"):
     return ctx
 
 
-def _mock_lifecycle_ctx():
+def _mock_lifecycle_ctx() -> MagicMock:
     """Create a mock LifecycleContext."""
     ctx = MagicMock()
     ctx.run_id = "run-1"
@@ -56,7 +59,7 @@ def _mock_lifecycle_ctx():
     return ctx
 
 
-def _make_row(data):
+def _make_row(data: dict[str, Any]) -> PipelineRow:
     """Create a real PipelineRow."""
     contract = SchemaContract(mode="OBSERVED", fields=())
     return PipelineRow(data, contract)
@@ -271,7 +274,7 @@ class TestNoResultsQuarantineContext:
 class TestRAGTransformReadinessGuard:
     """Tests for the readiness check in on_start()."""
 
-    def _make_mock_provider(self, *, reachable=True, count=10, collection="test-index"):
+    def _make_mock_provider(self, *, reachable: bool = True, count: int = 10, collection: str = "test-index") -> MagicMock:
         """Build a mock provider with check_readiness pre-configured."""
         from elspeth.contracts.probes import CollectionReadinessResult
 
@@ -291,7 +294,7 @@ class TestRAGTransformReadinessGuard:
         )
         return mock_provider
 
-    def _run_on_start_with_mock(self, mock_provider):
+    def _run_on_start_with_mock(self, mock_provider: MagicMock) -> RAGRetrievalTransform:
         """Patch PROVIDERS registry and call on_start()."""
         mock_config_cls = MagicMock(return_value=MagicMock())
         mock_factory = MagicMock(return_value=mock_provider)

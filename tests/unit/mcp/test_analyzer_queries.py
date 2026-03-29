@@ -34,7 +34,7 @@ from elspeth.contracts import (
     RunStatus,
 )
 from elspeth.contracts.call_data import RawCallPayload
-from elspeth.contracts.errors import TransformErrorReason
+from elspeth.contracts.errors import ExecutionError, TransformErrorReason
 from elspeth.core.landscape.lineage import explain
 from elspeth.mcp.analyzers.diagnostics import get_failure_context
 from elspeth.mcp.analyzers.queries import explain_token, list_runs
@@ -104,7 +104,7 @@ def _build_linear_pipeline(
             ns.state_id,
             NodeStateStatus.FAILED,
             duration_ms=50.0,
-            error={"reason": "test_failure", "message": "deliberately failed"},
+            error=ExecutionError(exception="deliberately failed", exception_type="TestFailure"),
         )
     else:
         recorder.complete_node_state(
@@ -244,7 +244,7 @@ class TestExplainTokenLineage:
         token = recorder.create_token(row.row_id)
 
         ns = recorder.begin_node_state(token.token_id, "xform", run_id, step_index=1, input_data={"x": 1})
-        error_reason: TransformErrorReason = {"reason": "value_error", "message": "division by zero"}
+        error_reason: TransformErrorReason = {"reason": "validation_failed", "message": "division by zero"}
         recorder.complete_node_state(ns.state_id, NodeStateStatus.FAILED, error=error_reason, duration_ms=5.0)
 
         recorder.record_transform_error(run_id, token.token_id, "xform", {"x": 1}, error_reason, "quarantine")
@@ -323,7 +323,7 @@ class TestGetFailureContext:
         result = get_failure_context(setup.db, setup.recorder, "nonexistent-run")
 
         assert "error" in result
-        assert "not found" in result["error"]
+        assert "not found" in result["error"]  # type: ignore[typeddict-item]  # ErrorResult variant
 
     def test_empty_failure_context_for_clean_run(self) -> None:
         """get_failure_context returns empty lists when run has no failures."""
@@ -378,6 +378,7 @@ class TestGetFailureContext:
         assert len(result["transform_errors"]) == 1
         te = result["transform_errors"][0]
         assert te["plugin"] == "llm_classifier"
+        assert te["details"] is not None
         assert te["details"]["reason"] == "llm_call_failed"
         assert result["patterns"]["transform_error_count"] == 1
 
@@ -417,15 +418,30 @@ class TestGetFailureContext:
 
         # Attempt 0: failed (initial)
         ns0 = recorder.begin_node_state(token.token_id, "xform", "retry-run", step_index=1, input_data={"x": 1}, attempt=0)
-        recorder.complete_node_state(ns0.state_id, NodeStateStatus.FAILED, duration_ms=10.0, error={"reason": "test_failure"})
+        recorder.complete_node_state(
+            ns0.state_id,
+            NodeStateStatus.FAILED,
+            duration_ms=10.0,
+            error=ExecutionError(exception="test_failure", exception_type="TestFailure"),
+        )
 
         # Attempt 1: failed (first retry)
         ns1 = recorder.begin_node_state(token.token_id, "xform", "retry-run", step_index=1, input_data={"x": 1}, attempt=1)
-        recorder.complete_node_state(ns1.state_id, NodeStateStatus.FAILED, duration_ms=10.0, error={"reason": "test_failure"})
+        recorder.complete_node_state(
+            ns1.state_id,
+            NodeStateStatus.FAILED,
+            duration_ms=10.0,
+            error=ExecutionError(exception="test_failure", exception_type="TestFailure"),
+        )
 
         # Attempt 2: failed (second retry — triggers has_retries detection)
         ns2 = recorder.begin_node_state(token.token_id, "xform", "retry-run", step_index=1, input_data={"x": 1}, attempt=2)
-        recorder.complete_node_state(ns2.state_id, NodeStateStatus.FAILED, duration_ms=10.0, error={"reason": "test_failure"})
+        recorder.complete_node_state(
+            ns2.state_id,
+            NodeStateStatus.FAILED,
+            duration_ms=10.0,
+            error=ExecutionError(exception="test_failure", exception_type="TestFailure"),
+        )
 
         recorder.record_token_outcome("retry-run", token.token_id, RowOutcome.FAILED, error_hash="d" * 64)
         recorder.complete_run("retry-run", RunStatus.FAILED)
@@ -433,9 +449,9 @@ class TestGetFailureContext:
         result = get_failure_context(db, recorder, "retry-run")
 
         assert "error" not in result
-        assert len(result["failed_node_states"]) == 3
-        assert result["patterns"]["has_retries"] is True
-        assert result["patterns"]["failure_count"] == 3
+        assert len(result["failed_node_states"]) == 3  # FailureContextReport variant
+        assert result["patterns"]["has_retries"] is True  # FailureContextReport variant
+        assert result["patterns"]["failure_count"] == 3  # FailureContextReport variant
 
     def test_failure_context_detects_first_retry(self) -> None:
         """has_retries is True when only the first retry (attempt=1) exists."""
@@ -449,18 +465,28 @@ class TestGetFailureContext:
 
         # Attempt 0: initial try
         ns0 = recorder.begin_node_state(token.token_id, "xform", "first-retry-run", step_index=1, input_data={"x": 1}, attempt=0)
-        recorder.complete_node_state(ns0.state_id, NodeStateStatus.FAILED, duration_ms=10.0, error={"reason": "test_failure"})
+        recorder.complete_node_state(
+            ns0.state_id,
+            NodeStateStatus.FAILED,
+            duration_ms=10.0,
+            error=ExecutionError(exception="test_failure", exception_type="TestFailure"),
+        )
 
         # Attempt 1: first retry — this alone should trigger has_retries
         ns1 = recorder.begin_node_state(token.token_id, "xform", "first-retry-run", step_index=1, input_data={"x": 1}, attempt=1)
-        recorder.complete_node_state(ns1.state_id, NodeStateStatus.FAILED, duration_ms=10.0, error={"reason": "test_failure"})
+        recorder.complete_node_state(
+            ns1.state_id,
+            NodeStateStatus.FAILED,
+            duration_ms=10.0,
+            error=ExecutionError(exception="test_failure", exception_type="TestFailure"),
+        )
 
         recorder.record_token_outcome("first-retry-run", token.token_id, RowOutcome.FAILED, error_hash="e" * 64)
         recorder.complete_run("first-retry-run", RunStatus.FAILED)
 
         result = get_failure_context(db, recorder, "first-retry-run")
 
-        assert result["patterns"]["has_retries"] is True
+        assert result["patterns"]["has_retries"] is True  # type: ignore[typeddict-item]  # FailureContextReport variant
 
     def test_failure_context_has_retries_false_for_single_attempt(self) -> None:
         """has_retries is False when all failures are attempt 0 (no retries)."""
@@ -488,7 +514,12 @@ class TestGetFailureContext:
         token_x = recorder.create_token(row_x.row_id)
 
         ns_x = recorder.begin_node_state(token_x.token_id, "xform", "run-X", step_index=1, input_data={"x": 1})
-        recorder.complete_node_state(ns_x.state_id, NodeStateStatus.FAILED, duration_ms=10.0, error={"reason": "test_failure"})
+        recorder.complete_node_state(
+            ns_x.state_id,
+            NodeStateStatus.FAILED,
+            duration_ms=10.0,
+            error=ExecutionError(exception="test_failure", exception_type="TestFailure"),
+        )
         recorder.record_token_outcome("run-X", token_x.token_id, RowOutcome.FAILED, error_hash="e" * 64)
         recorder.complete_run("run-X", RunStatus.FAILED)
 
@@ -501,7 +532,12 @@ class TestGetFailureContext:
         token_y = recorder.create_token(row_y.row_id)
 
         ns_y = recorder.begin_node_state(token_y.token_id, "xform", "run-Y", step_index=1, input_data={"y": 2})
-        recorder.complete_node_state(ns_y.state_id, NodeStateStatus.FAILED, duration_ms=20.0, error={"reason": "test_failure"})
+        recorder.complete_node_state(
+            ns_y.state_id,
+            NodeStateStatus.FAILED,
+            duration_ms=20.0,
+            error=ExecutionError(exception="test_failure", exception_type="TestFailure"),
+        )
         recorder.record_token_outcome("run-Y", token_y.token_id, RowOutcome.FAILED, error_hash="f" * 64)
         recorder.complete_run("run-Y", RunStatus.FAILED)
 
@@ -531,7 +567,7 @@ class TestGetFailureContext:
         register_test_node(recorder, "run-P", "xform", node_type=NodeType.TRANSFORM, plugin_name="slow_transform")
         row_p = recorder.create_row("run-P", "src", row_index=0, data={"p": 1})
         token_p = recorder.create_token(row_p.row_id)
-        error_reason: TransformErrorReason = {"reason": "timeout"}
+        error_reason: TransformErrorReason = {"reason": "retry_timeout"}
         recorder.record_transform_error("run-P", token_p.token_id, "xform", {"p": 1}, error_reason, "quarantine")
         recorder.record_token_outcome("run-P", token_p.token_id, RowOutcome.QUARANTINED, error_hash="a" * 64)
         recorder.complete_run("run-P", RunStatus.FAILED)
@@ -542,18 +578,18 @@ class TestGetFailureContext:
         register_test_node(recorder, "run-Q", "xform", node_type=NodeType.TRANSFORM, plugin_name="fast_transform")
         row_q = recorder.create_row("run-Q", "src", row_index=0, data={"q": 2})
         token_q = recorder.create_token(row_q.row_id)
-        error_reason_q: TransformErrorReason = {"reason": "bad_data"}
+        error_reason_q: TransformErrorReason = {"reason": "invalid_input"}
         recorder.record_transform_error("run-Q", token_q.token_id, "xform", {"q": 2}, error_reason_q, "quarantine")
         recorder.record_token_outcome("run-Q", token_q.token_id, RowOutcome.QUARANTINED, error_hash="b" * 64)
         recorder.complete_run("run-Q", RunStatus.FAILED)
 
         result_p = get_failure_context(db, recorder, "run-P")
-        assert len(result_p["transform_errors"]) == 1
-        assert result_p["transform_errors"][0]["plugin"] == "slow_transform"
+        assert len(result_p["transform_errors"]) == 1  # type: ignore[typeddict-item]  # FailureContextReport variant
+        assert result_p["transform_errors"][0]["plugin"] == "slow_transform"  # type: ignore[typeddict-item]  # FailureContextReport variant
 
         result_q = get_failure_context(db, recorder, "run-Q")
-        assert len(result_q["transform_errors"]) == 1
-        assert result_q["transform_errors"][0]["plugin"] == "fast_transform"
+        assert len(result_q["transform_errors"]) == 1  # type: ignore[typeddict-item]  # FailureContextReport variant
+        assert result_q["transform_errors"][0]["plugin"] == "fast_transform"  # type: ignore[typeddict-item]  # FailureContextReport variant
 
     def test_failure_context_limit_parameter(self) -> None:
         """get_failure_context respects the limit parameter."""
@@ -567,7 +603,12 @@ class TestGetFailureContext:
             row = recorder.create_row("limit-run", "src", row_index=i, data={"i": i})
             token = recorder.create_token(row.row_id)
             ns = recorder.begin_node_state(token.token_id, "xform", "limit-run", step_index=1, input_data={"i": i})
-            recorder.complete_node_state(ns.state_id, NodeStateStatus.FAILED, duration_ms=10.0, error={"reason": "test_failure"})
+            recorder.complete_node_state(
+                ns.state_id,
+                NodeStateStatus.FAILED,
+                duration_ms=10.0,
+                error=ExecutionError(exception="test_failure", exception_type="TestFailure"),
+            )
             recorder.record_token_outcome("limit-run", token.token_id, RowOutcome.FAILED, error_hash="a" * 64)
 
         recorder.complete_run("limit-run", RunStatus.FAILED)
@@ -590,14 +631,24 @@ class TestGetFailureContext:
         row0 = recorder.create_row("pattern-run", "src", row_index=0, data={"i": 0})
         token0 = recorder.create_token(row0.row_id)
         ns0 = recorder.begin_node_state(token0.token_id, "xform-a", "pattern-run", step_index=1, input_data={"i": 0})
-        recorder.complete_node_state(ns0.state_id, NodeStateStatus.FAILED, duration_ms=10.0, error={"reason": "test_failure"})
+        recorder.complete_node_state(
+            ns0.state_id,
+            NodeStateStatus.FAILED,
+            duration_ms=10.0,
+            error=ExecutionError(exception="test_failure", exception_type="TestFailure"),
+        )
         recorder.record_token_outcome("pattern-run", token0.token_id, RowOutcome.FAILED, error_hash="a" * 64)
 
         # Fail in xform-b
         row1 = recorder.create_row("pattern-run", "src", row_index=1, data={"i": 1})
         token1 = recorder.create_token(row1.row_id)
         ns1 = recorder.begin_node_state(token1.token_id, "xform-b", "pattern-run", step_index=2, input_data={"i": 1})
-        recorder.complete_node_state(ns1.state_id, NodeStateStatus.FAILED, duration_ms=10.0, error={"reason": "test_failure"})
+        recorder.complete_node_state(
+            ns1.state_id,
+            NodeStateStatus.FAILED,
+            duration_ms=10.0,
+            error=ExecutionError(exception="test_failure", exception_type="TestFailure"),
+        )
         recorder.record_token_outcome("pattern-run", token1.token_id, RowOutcome.FAILED, error_hash="b" * 64)
 
         recorder.complete_run("pattern-run", RunStatus.FAILED)
@@ -655,7 +706,7 @@ class TestGetRunSummary:
         # Record a transform error
         row = recorder.create_row("err-run", "src", row_index=0, data={"x": 1})
         token = recorder.create_token(row.row_id)
-        error_reason: TransformErrorReason = {"reason": "processing_error"}
+        error_reason: TransformErrorReason = {"reason": "api_error"}
         recorder.record_transform_error("err-run", token.token_id, "xform", {"x": 1}, error_reason, "quarantine")
         recorder.record_token_outcome("err-run", token.token_id, RowOutcome.QUARANTINED, error_hash="a" * 64)
         recorder.complete_run("err-run", RunStatus.COMPLETED)

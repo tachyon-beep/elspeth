@@ -8,6 +8,7 @@ tracer wiring, and multi-query partial failure atomicity.
 
 from __future__ import annotations
 
+from types import MappingProxyType
 from typing import Any
 from unittest.mock import Mock, patch
 
@@ -409,8 +410,8 @@ class TestTruncationDetection:
         result = transform._process_row(_make_row(), _make_ctx())
         assert result.status == "error"
         assert result.reason is not None
-        assert result.reason["reason"] == "unexpected_finish_reason"
-        assert result.reason["finish_reason"] == "moderation"
+        assert result.reason["reason"] == "unexpected_finish_reason"  # type: ignore[comparison-overlap]
+        assert result.reason["finish_reason"] == "moderation"  # type: ignore[unreachable]
         assert result.reason["query_name"] == "q2"
         assert result.reason["query_index"] == 1
 
@@ -1234,6 +1235,7 @@ class TestMultiQueryOutputSchemaConfig:
             )
         )
 
+        assert transform._output_schema_config is not None
         assert transform._output_schema_config.guaranteed_fields is not None
         guaranteed = set(transform._output_schema_config.guaranteed_fields)
         assert "quality_llm_response" in guaranteed
@@ -1260,6 +1262,7 @@ class TestMultiQueryOutputSchemaConfig:
         )
 
         # audit_fields should be None or empty — no audit fields in SchemaConfig
+        assert transform._output_schema_config is not None
         audit_fields = transform._output_schema_config.audit_fields
         assert audit_fields is None or len(audit_fields) == 0
 
@@ -1280,6 +1283,7 @@ class TestMultiQueryOutputSchemaConfig:
             )
         )
 
+        assert transform._output_schema_config is not None
         assert transform._output_schema_config.guaranteed_fields is not None
         guaranteed = set(transform._output_schema_config.guaranteed_fields)
 
@@ -1315,6 +1319,7 @@ class TestMultiQueryOutputSchemaConfig:
 
         transform = LLMTransform(_make_config())
 
+        assert transform._output_schema_config is not None
         assert transform._output_schema_config.guaranteed_fields is not None
         guaranteed = set(transform._output_schema_config.guaranteed_fields)
         assert "llm_response" in guaranteed
@@ -1335,6 +1340,7 @@ class TestMultiQueryOutputSchemaConfig:
             )
         )
 
+        assert transform._output_schema_config is not None
         assert transform._output_schema_config.guaranteed_fields is not None
         # audit_fields no longer set for multi-query (audit goes to success_reason)
         schema_fields = set(transform._output_schema_config.guaranteed_fields)
@@ -1363,6 +1369,7 @@ class TestMultiQueryOutputSchemaConfig:
             )
         )
 
+        assert transform._output_schema_config is not None
         assert transform._output_schema_config.guaranteed_fields is not None
         guaranteed = set(transform._output_schema_config.guaranteed_fields)
         assert "quality_score" in guaranteed
@@ -1895,7 +1902,7 @@ class TestMultiQuerySequentialReasonImmutability:
 
         # Capture direct references to reason dicts at TransformResult construction
         # (NOT copies — we want to detect in-place mutation)
-        captured_reason_refs: list[dict] = []
+        captured_reason_refs: list[dict[str, Any]] = []
         _original_error = TransformResult.error.__func__  # type: ignore[attr-defined]
 
         def tracking_error(cls, reason, *, retryable=False, context_after=None):
@@ -2554,7 +2561,7 @@ class TestParallelErrorReasonNotFabricated:
         mock_executor = Mock()
 
         query_specs = [
-            QuerySpec(name="quality", input_fields={"text_content": "text"}),
+            QuerySpec(name="quality", input_fields=MappingProxyType({"text_content": "text"})),
         ]
         template = PromptTemplate("{{ text_content }}")
         strategy = MultiQueryStrategy(
@@ -2573,7 +2580,7 @@ class TestParallelErrorReasonNotFabricated:
         # so we can't construct one directly with reason=None. Create a valid one
         # and then corrupt it to simulate a future regression or corruption.
         bogus_error_result = TransformResult.error(
-            {"reason": "placeholder"},
+            {"reason": "placeholder"},  # type: ignore[typeddict-item]  # throwaway; corrupted to None below
             retryable=False,
         )
         object.__setattr__(bogus_error_result, "reason", None)
@@ -2634,8 +2641,8 @@ class TestParallelAuditMetadataThreadSafety:
 
         mock_executor = Mock()
         query_specs = [
-            QuerySpec(name="sentiment", input_fields={"text": "text"}),
-            QuerySpec(name="topic", input_fields={"text": "text"}),
+            QuerySpec(name="sentiment", input_fields=MappingProxyType({"text": "text"})),
+            QuerySpec(name="topic", input_fields=MappingProxyType({"text": "text"})),
         ]
         template = PromptTemplate("Analyze: {{ row.text }}")
         strategy = MultiQueryStrategy(
@@ -2715,7 +2722,7 @@ class TestParallelAuditMetadataThreadSafety:
         barrier = threading.Barrier(NUM_QUERIES)
 
         mock_executor = Mock()
-        query_specs = [QuerySpec(name=f"q{i}", input_fields={"text": "text"}) for i in range(NUM_QUERIES)]
+        query_specs = [QuerySpec(name=f"q{i}", input_fields=MappingProxyType({"text": "text"})) for i in range(NUM_QUERIES)]
         template = PromptTemplate("Analyze: {{ row.text }}")
         strategy = MultiQueryStrategy(
             query_specs=query_specs,
@@ -2798,8 +2805,8 @@ class TestMultiQueryFinishReasonAudit:
         from elspeth.plugins.transforms.llm.transform import MultiQueryStrategy
 
         query_specs = [
-            QuerySpec(name="sentiment", input_fields={"text": "text"}),
-            QuerySpec(name="topic", input_fields={"text": "text"}),
+            QuerySpec(name="sentiment", input_fields=MappingProxyType({"text": "text"})),
+            QuerySpec(name="topic", input_fields=MappingProxyType({"text": "text"})),
         ]
         template = PromptTemplate("Analyze: {{ row.text }}")
         strategy = MultiQueryStrategy(
@@ -2843,7 +2850,7 @@ class TestMultiQueryFinishReasonAudit:
         from elspeth.plugins.transforms.llm.transform import MultiQueryStrategy
 
         query_specs = [
-            QuerySpec(name="analysis", input_fields={"text": "text"}),
+            QuerySpec(name="analysis", input_fields=MappingProxyType({"text": "text"})),
         ]
         template = PromptTemplate("Analyze: {{ row.text }}")
         strategy = MultiQueryStrategy(
@@ -2892,7 +2899,7 @@ class TestSequentialErrorReasonNotFabricated:
         from elspeth.plugins.transforms.llm.transform import MultiQueryStrategy
 
         query_specs = [
-            QuerySpec(name="quality", input_fields={"text": "text"}),
+            QuerySpec(name="quality", input_fields=MappingProxyType({"text": "text"})),
         ]
         template = PromptTemplate("Analyze: {{ row.text }}")
         strategy = MultiQueryStrategy(
@@ -2910,7 +2917,7 @@ class TestSequentialErrorReasonNotFabricated:
         # Patch _execute_one_query at the class level (frozen slots dataclass
         # prevents instance-level patching) to return a corrupted error result.
         bogus_error_result = TransformResult.error(
-            {"reason": "placeholder"},
+            {"reason": "placeholder"},  # type: ignore[typeddict-item]  # throwaway; corrupted to None below
             retryable=False,
         )
         object.__setattr__(bogus_error_result, "reason", None)

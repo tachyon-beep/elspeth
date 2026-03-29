@@ -65,13 +65,13 @@ class TestRequireIntValidation:
         import pytest
 
         with pytest.raises(TypeError, match="prompt_tokens must be int"):
-            TokenUsage(prompt_tokens=True, completion_tokens=None)  # type: ignore[arg-type]
+            TokenUsage(prompt_tokens=True, completion_tokens=None)
 
     def test_rejects_bool_completion_tokens(self) -> None:
         import pytest
 
         with pytest.raises(TypeError, match="completion_tokens must be int"):
-            TokenUsage(prompt_tokens=None, completion_tokens=False)  # type: ignore[arg-type]
+            TokenUsage(prompt_tokens=None, completion_tokens=False)
 
 
 class TestTokenUsageProperties:

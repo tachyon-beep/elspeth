@@ -14,7 +14,7 @@ import pytest
 from elspeth.contracts import RowOutcome, TokenInfo
 from elspeth.contracts.errors import OrchestrationInvariantError
 from elspeth.engine.orchestrator.outcomes import accumulate_row_outcomes
-from elspeth.engine.orchestrator.types import ExecutionCounters
+from elspeth.engine.orchestrator.types import ExecutionCounters, PendingTokenMap
 from elspeth.testing import make_token_info
 
 
@@ -32,7 +32,7 @@ def _make_result(
     return result
 
 
-def _make_pending() -> dict[str, list]:
+def _make_pending() -> PendingTokenMap:
     return {"sink1": [], "sink2": []}
 
 

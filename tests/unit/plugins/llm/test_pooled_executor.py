@@ -1101,6 +1101,7 @@ class TestPooledExecutorFutureException:
         # The exploding row should have an error result, not crash the batch
         error_entries = [e for e in entries if e.result.status == "error"]
         assert len(error_entries) == 1
+        assert error_entries[0].result.reason is not None
         assert "unexpected_pool_error" in error_entries[0].result.reason["reason"]
 
         # Other rows should succeed normally

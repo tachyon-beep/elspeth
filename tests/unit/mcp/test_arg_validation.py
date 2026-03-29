@@ -224,5 +224,5 @@ class TestToolDefImmutability:
             tool.schema_properties["injected"] = "evil"  # type: ignore[index]
 
         # Caller's original dict must be decoupled
-        original["injected"] = "evil"
+        original["injected"] = "evil"  # type: ignore[assignment]
         assert "injected" not in tool.schema_properties

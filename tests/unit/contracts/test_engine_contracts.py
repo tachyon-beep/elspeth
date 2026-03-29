@@ -122,15 +122,15 @@ class TestBufferEntryPostInit:
     def test_rejects_bool_submit_index(self) -> None:
         """bool is subclass of int — True (value 1) must not pass as index."""
         with pytest.raises(TypeError, match="submit_index must be int"):
-            BufferEntry(submit_index=True, complete_index=0, result="x", submit_timestamp=0.0, complete_timestamp=0.0, buffer_wait_ms=0.0)  # type: ignore[arg-type]
+            BufferEntry(submit_index=True, complete_index=0, result="x", submit_timestamp=0.0, complete_timestamp=0.0, buffer_wait_ms=0.0)
 
     def test_rejects_float_complete_index(self) -> None:
         with pytest.raises(TypeError, match="complete_index must be int"):
-            BufferEntry(submit_index=0, complete_index=1.5, result="x", submit_timestamp=0.0, complete_timestamp=0.0, buffer_wait_ms=0.0)  # type: ignore[arg-type]
+            BufferEntry(submit_index=0, complete_index=1.5, result="x", submit_timestamp=0.0, complete_timestamp=0.0, buffer_wait_ms=0.0)  # type: ignore[arg-type]  # intentionally invalid type
 
     def test_rejects_bool_complete_index(self) -> None:
         with pytest.raises(TypeError, match="complete_index must be int"):
-            BufferEntry(submit_index=0, complete_index=False, result="x", submit_timestamp=0.0, complete_timestamp=0.0, buffer_wait_ms=0.0)  # type: ignore[arg-type]
+            BufferEntry(submit_index=0, complete_index=False, result="x", submit_timestamp=0.0, complete_timestamp=0.0, buffer_wait_ms=0.0)
 
 
 class TestPendingOutcomePostInit:

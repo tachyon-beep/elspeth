@@ -9,6 +9,7 @@ import pytest
 from elspeth.web.composer.state import (
     CompositionState,
     EdgeSpec,
+    EdgeType,
     NodeSpec,
     OutputSpec,
     PipelineMetadata,
@@ -52,7 +53,7 @@ class TestSourceSpec:
             on_validation_failure="discard",
         )
         with pytest.raises(TypeError):
-            s.options["nested"]["mutate"] = "x"  # type: ignore[index]
+            s.options["nested"]["mutate"] = "x"
 
     def test_from_dict_round_trip(self) -> None:
         s = SourceSpec(
@@ -120,6 +121,7 @@ class TestNodeSpec:
     def test_create_gate(self) -> None:
         n = self._make_gate()
         assert n.condition == "row['score'] >= 0.5"
+        assert n.routes is not None
         assert n.routes["high"] == "sink_good"
 
     def test_frozen(self) -> None:
@@ -183,7 +185,7 @@ class TestNodeSpec:
 
     def test_from_dict_converts_list_to_tuple(self) -> None:
         """to_dict() serialises tuples as lists; from_dict() must convert back."""
-        d = {
+        d: dict[str, object] = {
             "id": "c1",
             "node_type": "coalesce",
             "plugin": None,
@@ -702,10 +704,12 @@ class TestCompositionState:
         )
         state = state.with_source(src)
         restored = CompositionState.from_dict(state.to_dict())
+        assert restored.source is not None
+        assert restored.source.options is not None
         with pytest.raises(TypeError):
-            restored.source.options["new"] = "x"  # type: ignore[union-attr, index]
+            restored.source.options["new"] = "x"  # type: ignore[index]
         with pytest.raises(TypeError):
-            restored.source.options["nested"]["mutate"] = "y"  # type: ignore[union-attr, index]
+            restored.source.options["nested"]["mutate"] = "y"
 
 
 class TestStage1Validation:
@@ -752,7 +756,7 @@ class TestStage1Validation:
         id: str,
         from_node: str,
         to_node: str,
-        edge_type: str = "on_success",
+        edge_type: EdgeType = "on_success",
     ) -> EdgeSpec:
         return EdgeSpec(id=id, from_node=from_node, to_node=to_node, edge_type=edge_type, label=None)
 

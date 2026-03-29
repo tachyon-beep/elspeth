@@ -24,6 +24,7 @@ import ast
 import sys
 from dataclasses import dataclass, field
 from pathlib import Path
+from types import MappingProxyType
 
 import yaml
 
@@ -983,7 +984,9 @@ def check_hardcode_documentation(runtime_path: Path) -> list[HardcodeViolation]:
             continue
 
         # Get the documented defaults for this subsystem
-        subsystem_defaults = INTERNAL_DEFAULTS.get(subsystem, {})
+        subsystem_defaults: dict[str, int | float | bool | str] | MappingProxyType[str, int | float | bool | str] = INTERNAL_DEFAULTS.get(
+            subsystem, {}
+        )
 
         # Check each hardcoded literal
         for runtime_field, literal_value in hardcodes:

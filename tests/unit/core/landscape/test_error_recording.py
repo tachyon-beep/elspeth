@@ -303,7 +303,7 @@ class TestRecordTransformError:
             token_id="tok-1",
             transform_id="transform-1",
             row_data={"name": "test"},
-            error_details={"reason": "division_by_zero", "field": "amount", "error": "ZeroDivisionError"},
+            error_details={"reason": "validation_failed", "field": "amount", "error": "ZeroDivisionError"},
             destination="quarantine",
         )
         assert error_id.startswith("terr_")
@@ -312,7 +312,7 @@ class TestRecordTransformError:
         _db, recorder = _setup_with_token()
         row_data = {"name": "test"}
         error_details = {
-            "reason": "division_by_zero",
+            "reason": "validation_failed",
             "field": "amount",
             "error": "ZeroDivisionError: division by zero",
         }
@@ -334,7 +334,7 @@ class TestRecordTransformError:
         assert record.destination == "quarantine"
         assert record.created_at is not None
         parsed_details = json.loads(record.error_details_json)
-        assert parsed_details["reason"] == "division_by_zero"
+        assert parsed_details["reason"] == "validation_failed"
         assert parsed_details["field"] == "amount"
 
     def test_stores_row_hash(self):
@@ -345,7 +345,7 @@ class TestRecordTransformError:
             token_id="tok-1",
             transform_id="transform-1",
             row_data=row_data,
-            error_details={"reason": "parse_error", "field": "date", "error": "ValueError"},
+            error_details={"reason": "invalid_input", "field": "date", "error": "ValueError"},
             destination="quarantine",
         )
         errors = recorder.get_transform_errors_for_token("tok-1")
@@ -361,7 +361,7 @@ class TestRecordTransformError:
             token_id="tok-1",
             transform_id="transform-1",
             row_data=row_data,
-            error_details={"reason": "overflow", "field": "value", "error": "OverflowError"},
+            error_details={"reason": "type_mismatch", "field": "value", "error": "OverflowError"},
             destination="quarantine",
         )
         errors = recorder.get_transform_errors_for_token("tok-1")
@@ -377,7 +377,7 @@ class TestRecordTransformError:
             token_id="tok-1",
             transform_id="transform-1",
             row_data={"name": "test"},
-            error_details={"reason": "err_a", "field": "f1", "error": "Error A"},
+            error_details={"reason": "api_error", "field": "f1", "error": "Error A"},
             destination="quarantine",
         )
         recorder.record_transform_error(
@@ -385,13 +385,13 @@ class TestRecordTransformError:
             token_id="tok-1",
             transform_id="transform-1",
             row_data={"name": "test"},
-            error_details={"reason": "err_b", "field": "f2", "error": "Error B"},
+            error_details={"reason": "network_error", "field": "f2", "error": "Error B"},
             destination="quarantine",
         )
         errors = recorder.get_transform_errors_for_token("tok-1")
         assert len(errors) == 2
         reasons = {json.loads(e.error_details_json)["reason"] for e in errors}
-        assert reasons == {"err_a", "err_b"}
+        assert reasons == {"api_error", "network_error"}
 
     def test_unique_error_ids_per_call(self):
         _db, recorder = _setup_with_token()
@@ -400,7 +400,7 @@ class TestRecordTransformError:
             token_id="tok-1",
             transform_id="transform-1",
             row_data={"name": "test"},
-            error_details={"reason": "a", "field": "x", "error": "A"},
+            error_details={"reason": "missing_field", "field": "x", "error": "A"},
             destination="quarantine",
         )
         id2 = recorder.record_transform_error(
@@ -408,7 +408,7 @@ class TestRecordTransformError:
             token_id="tok-1",
             transform_id="transform-1",
             row_data={"name": "test"},
-            error_details={"reason": "b", "field": "y", "error": "B"},
+            error_details={"reason": "permanent_error", "field": "y", "error": "B"},
             destination="quarantine",
         )
         assert id1 != id2
@@ -616,7 +616,7 @@ class TestGetTransformErrorsForToken:
             token_id="tok-1",
             transform_id="transform-1",
             row_data={"name": "test"},
-            error_details={"reason": "parse_error", "field": "date", "error": "ValueError"},
+            error_details={"reason": "invalid_input", "field": "date", "error": "ValueError"},
             destination="quarantine",
         )
         errors = recorder.get_transform_errors_for_token("tok-1")
@@ -630,7 +630,7 @@ class TestGetTransformErrorsForToken:
             token_id="tok-1",
             transform_id="transform-1",
             row_data={"name": "test"},
-            error_details={"reason": "err", "field": "f", "error": "E"},
+            error_details={"reason": "test_error", "field": "f", "error": "E"},
             destination="quarantine",
         )
         errors = recorder.get_transform_errors_for_token("tok-nonexistent")
@@ -646,7 +646,7 @@ class TestGetTransformErrorsForToken:
             token_id="tok-1",
             transform_id="transform-1",
             row_data={"name": "test"},
-            error_details={"reason": "err_tok1", "field": "f", "error": "E1"},
+            error_details={"reason": "api_call_failed", "field": "f", "error": "E1"},
             destination="quarantine",
         )
         recorder.record_transform_error(
@@ -654,15 +654,15 @@ class TestGetTransformErrorsForToken:
             token_id="tok-2",
             transform_id="transform-1",
             row_data={"name": "other"},
-            error_details={"reason": "err_tok2", "field": "f", "error": "E2"},
+            error_details={"reason": "llm_call_failed", "field": "f", "error": "E2"},
             destination="quarantine",
         )
         tok1_errors = recorder.get_transform_errors_for_token("tok-1")
         tok2_errors = recorder.get_transform_errors_for_token("tok-2")
         assert len(tok1_errors) == 1
-        assert json.loads(tok1_errors[0].error_details_json)["reason"] == "err_tok1"
+        assert json.loads(tok1_errors[0].error_details_json)["reason"] == "api_call_failed"
         assert len(tok2_errors) == 1
-        assert json.loads(tok2_errors[0].error_details_json)["reason"] == "err_tok2"
+        assert json.loads(tok2_errors[0].error_details_json)["reason"] == "llm_call_failed"
 
     def test_empty_when_no_errors_recorded(self):
         _db, recorder = _setup_with_token()
@@ -682,7 +682,7 @@ class TestGetTransformErrorsForRun:
             token_id="tok-1",
             transform_id="transform-1",
             row_data={"name": "test"},
-            error_details={"reason": "err_a", "field": "f1", "error": "A"},
+            error_details={"reason": "api_error", "field": "f1", "error": "A"},
             destination="quarantine",
         )
         recorder.record_transform_error(
@@ -690,13 +690,13 @@ class TestGetTransformErrorsForRun:
             token_id="tok-2",
             transform_id="transform-1",
             row_data={"name": "other"},
-            error_details={"reason": "err_b", "field": "f2", "error": "B"},
+            error_details={"reason": "network_error", "field": "f2", "error": "B"},
             destination="quarantine",
         )
         errors = recorder.get_transform_errors_for_run("run-1")
         assert len(errors) == 2
         reasons = {json.loads(e.error_details_json)["reason"] for e in errors}
-        assert reasons == {"err_a", "err_b"}
+        assert reasons == {"api_error", "network_error"}
 
     def test_empty_when_no_errors_exist(self):
         _db, recorder = _setup_with_token()
@@ -739,7 +739,7 @@ class TestGetTransformErrorsForRun:
             token_id="tok-r1",
             transform_id="transform-1",
             row_data={"n": "a"},
-            error_details={"reason": "run1_err", "field": "f", "error": "E"},
+            error_details={"reason": "api_error", "field": "f", "error": "E"},
             destination="quarantine",
         )
         recorder.record_transform_error(
@@ -747,25 +747,26 @@ class TestGetTransformErrorsForRun:
             token_id="tok-r2",
             transform_id="transform-1",
             row_data={"n": "b"},
-            error_details={"reason": "run2_err", "field": "f", "error": "E"},
+            error_details={"reason": "network_error", "field": "f", "error": "E"},
             destination="quarantine",
         )
         run1_errors = recorder.get_transform_errors_for_run("run-1")
         run2_errors = recorder.get_transform_errors_for_run("run-2")
         assert len(run1_errors) == 1
-        assert json.loads(run1_errors[0].error_details_json)["reason"] == "run1_err"
+        assert json.loads(run1_errors[0].error_details_json)["reason"] == "api_error"
         assert len(run2_errors) == 1
-        assert json.loads(run2_errors[0].error_details_json)["reason"] == "run2_err"
+        assert json.loads(run2_errors[0].error_details_json)["reason"] == "network_error"
 
     def test_ordered_by_created_at(self):
         _db, recorder = _setup_with_token()
+        valid_reasons = ["api_error", "network_error", "missing_field", "type_mismatch", "validation_failed"]
         for i in range(5):
             recorder.record_transform_error(
                 run_id="run-1",
                 token_id="tok-1",
                 transform_id="transform-1",
                 row_data={"idx": i},
-                error_details={"reason": f"err_{i}", "field": "f", "error": "E"},
+                error_details={"reason": valid_reasons[i], "field": "f", "error": "E"},
                 destination="quarantine",
             )
         errors = recorder.get_transform_errors_for_run("run-1")
@@ -790,7 +791,7 @@ class TestRecordTransformErrorNaNFallback:
             token_id="tok-1",
             transform_id="transform-1",
             row_data={"name": "test"},
-            error_details={"reason": "division_error", "field": "ratio", "error": "nan_result", "value": float("nan")},
+            error_details={"reason": "validation_failed", "field": "ratio", "error": "nan_result", "value": float("nan")},
             destination="quarantine",
         )
         assert error_id.startswith("terr_")
@@ -811,7 +812,7 @@ class TestRecordTransformErrorNaNFallback:
             token_id="tok-1",
             transform_id="transform-1",
             row_data={"name": "test"},
-            error_details={"reason": "overflow", "field": "big", "error": "inf", "value": float("inf")},
+            error_details={"reason": "type_mismatch", "field": "big", "error": "inf", "value": float("inf")},
             destination="quarantine",
         )
         assert error_id.startswith("terr_")
@@ -824,7 +825,7 @@ class TestRecordTransformErrorNaNFallback:
             token_id="tok-1",
             transform_id="transform-1",
             row_data={"name": "test"},
-            error_details={"reason": "parse_failed", "field": "date", "error": "invalid format"},
+            error_details={"reason": "invalid_input", "field": "date", "error": "invalid format"},
             destination="quarantine",
         )
         errors = recorder.get_transform_errors_for_run("run-1")
@@ -832,7 +833,7 @@ class TestRecordTransformErrorNaNFallback:
         details = json.loads(errors[0].error_details_json)
         # Normal JSON - no fallback metadata
         assert "__non_canonical__" not in details
-        assert details["reason"] == "parse_failed"
+        assert details["reason"] == "invalid_input"
 
 
 # ===========================================================================

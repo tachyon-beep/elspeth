@@ -824,7 +824,7 @@ class TestDatabaseSinkFalseSuccess:
 
             def tracking_record_call(**kwargs: object) -> None:
                 recorded_statuses.append(kwargs.get("status"))  # type: ignore[arg-type]
-                original_record_call(**kwargs)
+                original_record_call(**kwargs)  # type: ignore[arg-type]
 
             with (
                 patch.object(ctx, "record_call", side_effect=tracking_record_call),

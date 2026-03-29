@@ -20,6 +20,12 @@ from elspeth.contracts import Determinism, ReproducibilityGrade
 from elspeth.contracts.errors import AuditIntegrityError
 from elspeth.core.landscape.schema import nodes_table, runs_table
 
+__all__ = [
+    "ReproducibilityGrade",
+    "compute_grade",
+    "update_grade_after_purge",
+]
+
 if TYPE_CHECKING:
     from elspeth.core.landscape.database import LandscapeDB
 

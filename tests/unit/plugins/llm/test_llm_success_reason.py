@@ -8,6 +8,7 @@ payload purge deletes the output row data.
 from __future__ import annotations
 
 import json
+from types import MappingProxyType
 from typing import Any
 from unittest.mock import Mock
 
@@ -78,11 +79,11 @@ def _make_multi_query_strategy(*, executor: Mock | None = None) -> MultiQueryStr
     specs = [
         QuerySpec(
             name="sentiment",
-            input_fields={"text": "text"},
+            input_fields=MappingProxyType({"text": "text"}),
         ),
         QuerySpec(
             name="topic",
-            input_fields={"text": "text"},
+            input_fields=MappingProxyType({"text": "text"}),
         ),
     ]
     return MultiQueryStrategy(

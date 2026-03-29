@@ -309,7 +309,7 @@ class TestPipelineConfig:
     def test_tuple_fields_reject_append(self) -> None:
         config = self._make_config()
         with pytest.raises(AttributeError):
-            config.transforms.append(Mock())  # type: ignore[union-attr]
+            config.transforms.append(Mock())  # type: ignore[attr-defined]
 
     def test_mapping_proxy_fields_reject_assignment(self) -> None:
         config = self._make_config()

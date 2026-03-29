@@ -94,7 +94,9 @@ class TestChromaSinkIntegration:
         assert collection.count() == 3
 
         results = collection.get(ids=["d1", "d2", "d3"], include=["documents", "metadatas"])
+        assert results["documents"] is not None
         assert "Photosynthesis" in results["documents"][0]
+        assert results["metadatas"] is not None
         assert results["metadatas"][0]["topic"] == "biology"
 
     def test_upsert_is_idempotent(self, tmp_path: Path) -> None:
@@ -168,6 +170,7 @@ class TestChromaSinkIntegration:
         assert collection.count() == 2
 
         results = collection.get(ids=["d1"], include=["documents"])
+        assert results["documents"] is not None
         assert results["documents"][0] == "Original"  # Not "Updated"
 
     @pytest.mark.parametrize("on_duplicate", ["overwrite", "error"])

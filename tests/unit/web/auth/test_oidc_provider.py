@@ -16,7 +16,7 @@ ISSUER = "https://login.example.com"
 AUDIENCE = "my-app-client-id"
 
 
-def _valid_claims(overrides: dict | None = None) -> dict:
+def _valid_claims(overrides: dict[str, object] | None = None) -> dict[str, object]:
     """Return a valid JWT claims dict with optional overrides."""
     claims = {
         "sub": "user-123",

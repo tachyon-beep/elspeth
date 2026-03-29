@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from types import MappingProxyType
+from typing import Any
 
 import pytest
 
@@ -54,7 +55,7 @@ class TestEvaluateCommencementGates:
                 condition="collections['missing']['count'] > 0",
             )
         ]
-        context = {
+        context: dict[str, dict[str, object]] = {
             "dependency_runs": {},
             "collections": {},
             "env": {},
@@ -153,7 +154,7 @@ class TestEvaluateCommencementGates:
     def test_context_mutation_after_evaluation_does_not_affect_snapshot(self) -> None:
         """TOCTOU protection: mutating original context must not change recorded snapshots."""
         gate = CommencementGateConfig(name="always_pass", condition="True")
-        context = {
+        context: dict[str, Any] = {
             "dependency_runs": {"dep1": {"run_id": "r1"}},
             "collections": {"col1": {"count": 5, "reachable": True}},
             "env": {"KEY": "value"},
@@ -175,7 +176,7 @@ class TestEvaluateCommencementGates:
 class TestCommencementGateCrashThrough:
     """Programming errors must crash through, not be wrapped as gate failures."""
 
-    def _make_context(self) -> dict:
+    def _make_context(self) -> dict[str, object]:
         return {
             "dependency_runs": {},
             "collections": {},

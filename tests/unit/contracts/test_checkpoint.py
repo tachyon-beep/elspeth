@@ -283,7 +283,7 @@ def test_resume_point_rejects_bool_sequence_number() -> None:
             checkpoint=_checkpoint(),
             token_id="tok-001",
             node_id="node-001",
-            sequence_number=True,  # type: ignore[arg-type]
+            sequence_number=True,
         )
 
 
@@ -301,7 +301,7 @@ def test_resume_point_rejects_string_sequence_number() -> None:
 # === AggregationNodeCheckpoint.from_dict corruption tests ===
 
 
-def _valid_node_dict() -> dict:
+def _valid_node_dict() -> dict[str, object]:
     """Complete valid node checkpoint dict for mutation in corruption tests."""
     return {
         "tokens": [

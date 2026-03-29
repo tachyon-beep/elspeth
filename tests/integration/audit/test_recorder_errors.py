@@ -236,7 +236,7 @@ class TestTransformErrorRecording:
             token_id="tok_nan",
             transform_id="processor",
             row_data=row_data,
-            error_details={"reason": "division_by_zero", "error": "Cannot divide by zero"},
+            error_details={"reason": "division_by_zero", "error": "Cannot divide by zero"},  # type: ignore[typeddict-item]  # intentionally invalid reason
             destination="error_sink",
         )
 
@@ -278,7 +278,7 @@ class TestTransformErrorRecording:
             token_id="tok_inf",
             transform_id="processor",
             row_data=row_data,
-            error_details={"reason": "overflow", "error": "Value too large"},
+            error_details={"reason": "overflow", "error": "Value too large"},  # type: ignore[typeddict-item]  # intentionally invalid reason
             destination="discard",
         )
 

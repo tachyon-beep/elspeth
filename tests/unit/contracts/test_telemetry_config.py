@@ -367,6 +367,6 @@ class TestRuntimeTelemetryValidation:
                 granularity=TelemetryGranularity.LIFECYCLE,
                 backpressure_mode=BackpressureMode.BLOCK,
                 fail_on_total_exporter_failure=True,
-                max_consecutive_failures=True,  # type: ignore[arg-type]  # Intentional: testing bool rejection
+                max_consecutive_failures=True,
                 exporter_configs=(),
             )

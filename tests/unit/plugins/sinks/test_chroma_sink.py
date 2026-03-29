@@ -373,7 +373,7 @@ class TestChromaSinkAuditIntegrity:
         import chromadb.errors
 
         mock_collection = MagicMock()
-        mock_collection.upsert.side_effect = chromadb.errors.ChromaError("write failed")
+        mock_collection.upsert.side_effect = chromadb.errors.ChromaError("write failed")  # type: ignore[abstract]
         sink = _make_sink_with_collection(mock_collection)
 
         mock_ctx = MagicMock()
@@ -407,7 +407,7 @@ class TestChromaSinkClose:
         sink.close()
 
         assert sink._client is None
-        assert sink._collection is None
+        assert sink._collection is None  # type: ignore[unreachable]
         mock_client.clear_system_cache.assert_called_once()
 
 
@@ -452,7 +452,7 @@ class TestChromaSinkMetadataTypeValidation:
         sink._on_write_failure = "csv_failsink"
 
         mock_ctx = MagicMock()
-        rows = [
+        rows: list[dict[str, Any]] = [
             {"doc_id": "d1", "text": "good", "topic": "science"},
             {"doc_id": "d2", "text": "bad", "topic": {"nested": "dict"}},
             {"doc_id": "d3", "text": "good", "topic": "math"},
@@ -477,7 +477,7 @@ class TestChromaSinkMetadataTypeValidation:
         sink._on_write_failure = "csv_failsink"
 
         mock_ctx = MagicMock()
-        rows = [
+        rows: list[dict[str, Any]] = [
             {"doc_id": "d1", "text": "bad", "topic": ["a", "list"]},
             {"doc_id": "d2", "text": "bad", "topic": {"nested": "dict"}},
         ]
@@ -492,6 +492,7 @@ class TestChromaSinkMetadataTypeValidation:
         assert result.diversions[0].row_index == 0
         assert result.diversions[1].row_index == 1
 
+        assert result.artifact.metadata is not None
         assert result.artifact.metadata["row_count"] == 0
 
     @pytest.mark.parametrize(
@@ -543,7 +544,7 @@ class TestChromaSinkDivertRow:
         sink._on_write_failure = "csv_failsink"
 
         mock_ctx = MagicMock()
-        rows = [
+        rows: list[dict[str, Any]] = [
             {"doc_id": "d1", "text": "good", "topic": "science"},
             {"doc_id": "d2", "text": "bad", "topic": {"nested": "dict"}},
             {"doc_id": "d3", "text": "also bad", "topic": [1, 2, 3]},
@@ -585,7 +586,7 @@ class TestChromaSinkDivertRow:
         sink._on_write_failure = "csv_failsink"
 
         mock_ctx = MagicMock()
-        rows = [
+        rows: list[dict[str, Any]] = [
             {"doc_id": "d1", "text": "bad1", "topic": {"nested": True}},
             {"doc_id": "d2", "text": "bad2", "topic": [1, 2]},
             {"doc_id": "d3", "text": "bad3", "topic": (1, 2)},
@@ -601,4 +602,5 @@ class TestChromaSinkDivertRow:
         assert result.diversions[0].row_index == 0
         assert result.diversions[1].row_index == 1
         assert result.diversions[2].row_index == 2
+        assert result.artifact.metadata is not None
         assert result.artifact.metadata["row_count"] == 0

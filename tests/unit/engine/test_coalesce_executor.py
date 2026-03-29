@@ -20,6 +20,7 @@ from elspeth.contracts.coalesce_enums import CoalescePolicy, MergeStrategy
 from elspeth.contracts.enums import NodeStateStatus, RowOutcome
 from elspeth.contracts.errors import AuditIntegrityError, OrchestrationInvariantError
 from elspeth.contracts.schema_contract import PipelineRow, SchemaContract
+from elspeth.contracts.types import NodeID
 from elspeth.core.config import CoalesceSettings
 from elspeth.engine.clock import MockClock
 from elspeth.engine.coalesce_executor import CoalesceExecutor, CoalesceOutcome, _BranchEntry, _PendingCoalesce
@@ -54,12 +55,12 @@ def _make_contract(fields: list[Any] | None = None) -> SchemaContract:
 
 
 def _make_token(
-    row_id="row_1",
-    token_id="tok_1",
-    branch_name="branch_a",
-    data=None,
-    contract=None,
-):
+    row_id: str = "row_1",
+    token_id: str = "tok_1",
+    branch_name: str = "branch_a",
+    data: dict[str, Any] | None = None,
+    contract: SchemaContract | None = None,
+) -> TokenInfo:
     """Build a TokenInfo suitable for coalesce testing."""
     if data is None:
         data = {"amount": 100}
@@ -74,7 +75,9 @@ def _make_token(
     )
 
 
-def _make_executor(clock=None, max_completed_keys: int = 10000):
+def _make_executor(
+    clock: MockClock | None = None, max_completed_keys: int = 10000
+) -> tuple[CoalesceExecutor, MagicMock, MagicMock, MockClock]:
     """Build a CoalesceExecutor with mocked dependencies.
 
     Returns (executor, recorder, token_manager, clock).
@@ -113,14 +116,14 @@ def _make_executor(clock=None, max_completed_keys: int = 10000):
 
 
 def _settings(
-    name="merge",
-    branches=None,
-    policy="require_all",
-    merge="union",
-    timeout_seconds=None,
-    quorum_count=None,
-    select_branch=None,
-):
+    name: str = "merge",
+    branches: list[str] | None = None,
+    policy: str = "require_all",
+    merge: str = "union",
+    timeout_seconds: float | None = None,
+    quorum_count: int | None = None,
+    select_branch: str | None = None,
+) -> CoalesceSettings:
     """Shorthand for building CoalesceSettings."""
     if branches is None:
         branches = ["a", "b"]
@@ -1869,7 +1872,7 @@ class TestShouldMergeMutationGaps:
         """
         executor, _, _, _ = _make_executor()
         s = _settings(branches=["a", "b", "c"], policy="first")
-        executor.register_coalesce(s, "node_1")
+        executor.register_coalesce(s, NodeID("node_1"))
 
         # Create pending with 0 arrivals
         pending = _PendingCoalesce(branches={}, first_arrival=100.0)
@@ -1958,7 +1961,7 @@ class TestNestedMergeContractLocked:
     def test_nested_merge_produces_locked_contract(self) -> None:
         executor, _, _tm, _ = _make_executor()
         s = _settings(policy="first", merge="nested")
-        executor.register_coalesce(s, "node_1")
+        executor.register_coalesce(s, NodeID("node_1"))
 
         t = _make_token(branch_name="a", token_id="t1", data={"x": 1})
         o = executor.accept(t, "merge")
@@ -1989,7 +1992,7 @@ class TestSelectBranchNotArrivedFailure:
             select_branch="c",
             timeout_seconds=60.0,
         )
-        executor.register_coalesce(s, "node_1")
+        executor.register_coalesce(s, NodeID("node_1"))
 
         # Accept tokens for branches "a" and "b"
         executor.accept(_make_token(branch_name="a", token_id="t1"), "merge")

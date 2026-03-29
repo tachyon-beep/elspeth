@@ -16,7 +16,7 @@ AUDIENCE = "my-entra-app-id"
 ISSUER = f"https://login.microsoftonline.com/{TENANT_ID}/v2.0"
 
 
-def _valid_entra_claims(overrides: dict | None = None) -> dict:
+def _valid_entra_claims(overrides: dict[str, object] | None = None) -> dict[str, object]:
     """Return valid Entra ID JWT claims with optional overrides."""
     claims = {
         "sub": "entra-user-456",

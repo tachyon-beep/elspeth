@@ -14,6 +14,7 @@ from collections import OrderedDict
 from collections.abc import Iterator, Mapping
 from datetime import UTC, datetime
 from types import MappingProxyType
+from typing import Any
 
 import pytest
 
@@ -30,7 +31,7 @@ from elspeth.contracts.freeze import deep_freeze
 
 def _make_node(**kwargs: object) -> Node:
     """Minimal Node factory — override only what you're testing."""
-    defaults: dict = {
+    defaults: dict[str, Any] = {
         "node_id": "n1",
         "run_id": "r1",
         "plugin_name": "test",
@@ -46,7 +47,7 @@ def _make_node(**kwargs: object) -> Node:
 
 
 def _make_lineage(**kwargs: object) -> RowLineage:
-    defaults: dict = {
+    defaults: dict[str, Any] = {
         "row_id": "row-1",
         "run_id": "run-1",
         "source_node_id": "node-src",
@@ -60,7 +61,7 @@ def _make_lineage(**kwargs: object) -> RowLineage:
 
 
 def _make_checkpoint(template_errors: object) -> BatchCheckpointState:
-    # type: ignore[arg-type] suppression is intentional — we pass invalid types
+    # arg-type suppression below is intentional — we pass invalid types
     # to test that __post_init__ coerces them.
     return BatchCheckpointState(
         batch_id="batch-1",
@@ -73,10 +74,10 @@ def _make_checkpoint(template_errors: object) -> BatchCheckpointState:
     )
 
 
-class _CustomMapping(Mapping):
+class _CustomMapping(Mapping[str, object]):
     """A non-dict Mapping for testing deep_freeze's Mapping fallback."""
 
-    def __init__(self, data: dict) -> None:
+    def __init__(self, data: dict[str, object]) -> None:
         self._data = data
 
     def __getitem__(self, key: str) -> object:
@@ -131,10 +132,16 @@ class TestNodeSchemaFieldsDeepFreeze:
         assert isinstance(node.schema_fields, tuple)
         assert isinstance(node.schema_fields[0], MappingProxyType)
 
-    def test_already_frozen_is_identity_preserved(self) -> None:
+    def test_already_frozen_is_detached_copy(self) -> None:
+        """MappingProxyType inputs are detached (not identity-preserved).
+
+        MappingProxyType is a view, not a copy. deep_freeze always creates
+        a fresh detached mapping to prevent caller mutation leaks.
+        """
         frozen = (MappingProxyType({"name": "col_a"}),)
         node = _make_node(schema_fields=frozen)
-        assert node.schema_fields is frozen
+        assert node.schema_fields == frozen
+        assert isinstance(node.schema_fields[0], MappingProxyType)
 
     def test_empty_tuple_passes_through(self) -> None:
         node = _make_node(schema_fields=())
@@ -155,7 +162,7 @@ class TestRowLineageDeepFreeze:
     def test_nested_dict_is_deep_frozen(self) -> None:
         lineage = _make_lineage(source_data={"metadata": {"nested_key": "value"}})
         assert isinstance(lineage.source_data, MappingProxyType)
-        assert isinstance(lineage.source_data["metadata"], MappingProxyType)  # type: ignore[index]
+        assert isinstance(lineage.source_data["metadata"], MappingProxyType)
 
     def test_nested_dict_is_immutable(self) -> None:
         """Attempting to write into nested container raises TypeError."""
@@ -229,7 +236,7 @@ class TestHTTPCallResponseBodyFreeze:
             body=body,
         )
         assert isinstance(resp.body, MappingProxyType)
-        assert isinstance(resp.body["nested"], MappingProxyType)  # type: ignore[index]
+        assert isinstance(resp.body["nested"], MappingProxyType)
 
     def test_custom_mapping_body_gets_frozen(self) -> None:
         """Non-dict, non-OrderedDict Mapping must also be frozen."""
@@ -275,7 +282,8 @@ class TestHTTPCallResponseBodyFreeze:
         resp = HTTPCallResponse(status_code=200, headers={})
         assert resp.body is None
 
-    def test_already_frozen_body_identity_preserved(self) -> None:
+    def test_already_frozen_body_detached(self) -> None:
+        """MappingProxyType body is detached from caller's source dict."""
         frozen_body = MappingProxyType({"k": "v"})
         resp = HTTPCallResponse(
             status_code=200,
@@ -283,7 +291,8 @@ class TestHTTPCallResponseBodyFreeze:
             body_size=10,
             body=frozen_body,
         )
-        assert resp.body is frozen_body
+        assert resp.body == frozen_body
+        assert isinstance(resp.body, MappingProxyType)
 
 
 # ── GracefulShutdownError.routed_destinations ───────────────────────────────
@@ -405,14 +414,14 @@ class TestFreezeFieldsUtility:
         """freeze_fields replaces a mutable dict with a MappingProxyType."""
         lineage = _make_lineage(source_data={"key": {"nested": "val"}})
         assert isinstance(lineage.source_data, MappingProxyType)
-        assert isinstance(lineage.source_data["key"], MappingProxyType)  # type: ignore[index]
+        assert isinstance(lineage.source_data["key"], MappingProxyType)
 
-    def test_already_frozen_field_is_not_reset(self) -> None:
-        """freeze_fields skips object.__setattr__ when field is already frozen."""
+    def test_frozen_field_is_detached_from_caller(self) -> None:
+        """freeze_fields detaches MappingProxyType from caller's source dict."""
         frozen_data = MappingProxyType({"key": "val"})
         lineage = _make_lineage(source_data=frozen_data)
-        # Identity preserved — no unnecessary setattr
-        assert lineage.source_data is frozen_data
+        assert lineage.source_data == frozen_data
+        assert isinstance(lineage.source_data, MappingProxyType)
 
     def test_none_field_passes_through(self) -> None:
         """freeze_fields on a None-valued field is a no-op."""

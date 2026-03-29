@@ -6,6 +6,8 @@ Covers __post_init__ invariant enforcement and from_dict error paths.
 
 from __future__ import annotations
 
+from typing import Any
+
 import pytest
 
 from elspeth.contracts.coalesce_checkpoint import (
@@ -16,7 +18,7 @@ from elspeth.contracts.coalesce_checkpoint import (
 from elspeth.contracts.errors import AuditIntegrityError
 
 
-def _valid_token_kwargs() -> dict:
+def _valid_token_kwargs() -> dict[str, Any]:
     """Minimal valid kwargs for CoalesceTokenCheckpoint."""
     return {
         "token_id": "tok-1",
@@ -113,7 +115,7 @@ class TestCoalescePendingCheckpointPostInit:
     @pytest.mark.parametrize("field", ["coalesce_name", "row_id"])
     def test_rejects_empty_string(self, field: str) -> None:
         """Required string fields must be non-empty."""
-        kwargs = {
+        kwargs: dict[str, Any] = {
             "coalesce_name": "merge_1",
             "row_id": "row-1",
             "elapsed_age_seconds": 1.5,

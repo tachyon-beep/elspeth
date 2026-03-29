@@ -79,7 +79,7 @@ def test_extract_content_none_input_raises_valueerror():
     import pytest
 
     with pytest.raises(ValueError, match="malformed content"):
-        extract_content(None, format="markdown")  # type: ignore[arg-type]
+        extract_content(None, format="markdown")
 
 
 def test_html2text_deterministic_simple():

@@ -101,6 +101,42 @@ class SinkExecutor:
                 error=error,
             )
 
+    def _best_effort_cleanup(
+        self,
+        states: list[tuple[TokenInfo, NodeStateOpen]],
+        original_error: Exception,
+        phase: str,
+    ) -> None:
+        """Best-effort cleanup of OPEN states before re-raising a system error.
+
+        On FrameworkBugError/AuditIntegrityError, the system is crashing. But
+        leaving node_states permanently OPEN is itself a Tier 1 violation —
+        they falsely claim "in progress" when no processing is happening.
+        Attempt to close them as FAILED; if that also fails, log and let the
+        original error propagate.
+        """
+        cleanup_error = ExecutionError(
+            exception=str(original_error),
+            exception_type=type(original_error).__name__,
+            phase=phase,
+        )
+        try:
+            self._complete_states_failed(
+                states=states,
+                duration_ms=0.0,
+                error=cleanup_error,
+            )
+        except Exception as cleanup_exc:
+            logger.warning(
+                "Best-effort cleanup of %d OPEN states failed during %s crash — "
+                "states may remain OPEN. Original error: %s. Cleanup error: %s: %s",
+                len(states),
+                type(original_error).__name__,
+                original_error,
+                type(cleanup_exc).__name__,
+                cleanup_exc,
+            )
+
     def write(
         self,
         sink: SinkProtocol,
@@ -262,7 +298,9 @@ class SinkExecutor:
                         input_data=input_dict,
                     )
                     primary_states.append((token, state))
-            except (FrameworkBugError, AuditIntegrityError):
+            except (FrameworkBugError, AuditIntegrityError) as e:
+                if primary_states:
+                    self._best_effort_cleanup(primary_states, e, "begin_node_state")
                 raise
             except Exception as e:
                 if primary_states:
@@ -367,7 +405,13 @@ class SinkExecutor:
                         input_data=input_dict,
                     )
                     primary_divert_states.append((token, idx, state))
-            except (FrameworkBugError, AuditIntegrityError):
+            except (FrameworkBugError, AuditIntegrityError) as e:
+                if primary_divert_states:
+                    self._best_effort_cleanup(
+                        [(t, s) for t, _, s in primary_divert_states],
+                        e,
+                        "begin_node_state_divert",
+                    )
                 raise
             except Exception as e:
                 if primary_divert_states:
@@ -462,7 +506,11 @@ class SinkExecutor:
                             input_data=input_dict,
                         )
                         failsink_states.append((token, state))
-                except (FrameworkBugError, AuditIntegrityError):
+                except (FrameworkBugError, AuditIntegrityError) as e:
+                    # Best-effort: close partially-opened failsink states + primary divert states
+                    all_open = failsink_states + [(t, s) for t, _, s in primary_divert_states]
+                    if all_open:
+                        self._best_effort_cleanup(all_open, e, "begin_node_state_failsink")
                     raise
                 except Exception as e:
                     begin_error = ExecutionError(
@@ -542,8 +590,14 @@ class SinkExecutor:
                             duration_ms=0.0,
                         )
                         completed_failsink_indices.add(loop_idx)
-                except (FrameworkBugError, AuditIntegrityError):
-                    raise  # System bugs crash immediately — no cleanup possible
+                except (FrameworkBugError, AuditIntegrityError) as e:
+                    # Best-effort: close remaining OPEN states before crash.
+                    remaining = [(t, s) for i, (t, _, s) in enumerate(primary_divert_states) if i not in completed_primary_indices] + [
+                        (t, s) for i, (t, s) in enumerate(failsink_states) if i not in completed_failsink_indices
+                    ]
+                    if remaining:
+                        self._best_effort_cleanup(remaining, e, "failsink_audit_recording")
+                    raise
                 except Exception as e:
                     # Close any remaining OPEN states from tokens not yet processed.
                     loop_error = ExecutionError(

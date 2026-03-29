@@ -76,8 +76,8 @@ class TestDatabaseSinkProperties:
 
             engine = create_engine(url)
             with engine.connect() as conn:
-                result = conn.execute(text(f"SELECT COUNT(*) FROM {table_name}"))
-                count = result.scalar_one()
+                db_result = conn.execute(text(f"SELECT COUNT(*) FROM {table_name}"))
+                count = db_result.scalar_one()
             engine.dispose()
 
             assert count == len(rows)

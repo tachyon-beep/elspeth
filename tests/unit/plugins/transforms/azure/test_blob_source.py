@@ -668,6 +668,7 @@ class TestAzureBlobSourceErrors:
         rows = list(source.load(ctx))
         assert len(rows) == 1
         assert rows[0].is_quarantined
+        assert rows[0].quarantine_error is not None
         assert "Failed to decode" in rows[0].quarantine_error
 
     def test_csv_parse_error_quarantines(self, mock_blob_client: MagicMock, ctx: PluginContext) -> None:

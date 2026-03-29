@@ -224,11 +224,11 @@ class TestRequireIntValidation:
 
     def test_row_mapping_entry_rejects_bool_index(self) -> None:
         with pytest.raises(TypeError, match=r"RowMappingEntry\.index must be int"):
-            RowMappingEntry(index=True, variables_hash="hash")  # type: ignore[arg-type]
+            RowMappingEntry(index=True, variables_hash="hash")
 
     def test_batch_checkpoint_state_rejects_bool_row_count(self) -> None:
         with pytest.raises(TypeError, match=r"BatchCheckpointState\.row_count must be int"):
-            _make_state(row_count=True)  # type: ignore[arg-type]
+            _make_state(row_count=True)
 
 
 class TestBatchCheckpointTier1TypeGuards:

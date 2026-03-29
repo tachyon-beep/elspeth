@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from types import MappingProxyType
+from typing import Any
 
 import pytest
 
@@ -96,7 +97,7 @@ class TestCommencementGateFailedError:
 
     def test_context_snapshot_mutation_isolated(self) -> None:
         """Mutating the original dict after construction must not affect the error."""
-        original: dict = {"key": {"nested": 1}}
+        original: dict[str, Any] = {"key": {"nested": 1}}
         err = CommencementGateFailedError(
             gate_name="g",
             condition="True",

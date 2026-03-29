@@ -326,6 +326,7 @@ class TestArtifactDescriptor:
         assert descriptor.artifact.artifact_type == "webhook"
         assert descriptor.artifact.content_hash == hashlib.sha256(b"").hexdigest()
         assert descriptor.artifact.size_bytes == 0
+        assert descriptor.artifact.metadata is not None
         assert descriptor.artifact.metadata["row_count"] == 0
         assert descriptor.artifact.metadata["entity"] == "contacts"
         assert "dataverse://contacts@" in descriptor.artifact.path_or_uri
@@ -346,6 +347,7 @@ class TestArtifactDescriptor:
         assert descriptor.artifact.artifact_type == "webhook"
         assert descriptor.artifact.content_hash == expected_hash
         assert descriptor.artifact.size_bytes == len(expected_canonical)
+        assert descriptor.artifact.metadata is not None
         assert descriptor.artifact.metadata["row_count"] == 2
         assert descriptor.artifact.metadata["entity"] == "contacts"
         assert descriptor.artifact.metadata["mode"] == "upsert"

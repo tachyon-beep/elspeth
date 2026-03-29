@@ -13,6 +13,13 @@ from elspeth.contracts.header_modes import HeaderMode
 class _StubSink:
     """Minimal sink that satisfies DisplayHeaderHost protocol for testing."""
 
+    _headers_mode: HeaderMode
+    _headers_custom_mapping: dict[str, str] | None
+    _resolved_display_headers: dict[str, str] | None
+    _display_headers_resolved: bool
+    _needs_resume_field_resolution: bool
+    _output_contract: Any
+
     def __init__(
         self,
         headers_mode: HeaderMode,
@@ -368,4 +375,4 @@ class TestInitDisplayHeaders:
             pass  # No _output_contract — forgot super().__init__()
 
         with pytest.raises(AttributeError):
-            init_display_headers(_BadSink(), HeaderMode.NORMALIZED)
+            init_display_headers(_BadSink(), HeaderMode.NORMALIZED)  # type: ignore[arg-type]

@@ -163,3 +163,44 @@ class TestCoalesceMetadataFreezeGuards:
             union_field_collisions={"x": ("a", "b")},  # type: ignore[arg-type]
         )
         assert isinstance(meta.union_field_collisions, MappingProxyType)
+
+
+class TestCoalesceMetadataDetachment:
+    """Regression: factory methods must not alias caller-owned dicts.
+
+    Bug: for_failure() and for_merge() wrapped branches_lost with
+    MappingProxyType(branches_lost), creating a read-only VIEW of the
+    caller's dict. deep_freeze then returned it unchanged (identity
+    optimization), so caller mutations leaked into frozen audit metadata.
+    """
+
+    def test_for_failure_detaches_branches_lost(self) -> None:
+        caller_dict = {"branch_a": "timeout"}
+        meta = CoalesceMetadata.for_failure(
+            policy=CoalescePolicy.REQUIRE_ALL,
+            expected_branches=["branch_a", "branch_b"],
+            branches_arrived=["branch_b"],
+            branches_lost=caller_dict,
+        )
+        caller_dict["branch_a"] = "mutated"
+        caller_dict["branch_c"] = "added"
+
+        assert meta.branches_lost is not None
+        assert meta.branches_lost["branch_a"] == "timeout", "Caller mutation leaked into frozen CoalesceMetadata.branches_lost"
+        assert "branch_c" not in meta.branches_lost
+
+    def test_for_merge_detaches_branches_lost(self) -> None:
+        caller_dict: dict[str, str] = {"branch_a": "not_arrived"}
+        meta = CoalesceMetadata.for_merge(
+            policy=CoalescePolicy.BEST_EFFORT,
+            merge_strategy=MergeStrategy.UNION,
+            expected_branches=["branch_a", "branch_b"],
+            branches_arrived=["branch_b"],
+            branches_lost=caller_dict,
+            arrival_order=[],
+            wait_duration_ms=100.0,
+        )
+        caller_dict["branch_a"] = "mutated"
+
+        assert meta.branches_lost is not None
+        assert meta.branches_lost["branch_a"] == "not_arrived"

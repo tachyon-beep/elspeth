@@ -301,7 +301,7 @@ class TestPurgeResultInvariantProperties:
         duration: float,
     ) -> None:
         """Property: PurgeResult fields are non-negative."""
-        failed_refs = [f"ref_{i}" for i in range(num_failed)]
+        failed_refs = tuple(f"ref_{i}" for i in range(num_failed))
 
         result = PurgeResult(
             deleted_count=deleted,

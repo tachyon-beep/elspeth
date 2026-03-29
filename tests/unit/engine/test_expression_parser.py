@@ -1656,7 +1656,7 @@ class TestExpressionParserDictContext:
             "collections.get('missing', 0) == 0",
             allowed_names=["collections", "env"],
         )
-        context = {"collections": {}, "env": {}}
+        context: dict[str, dict[str, object]] = {"collections": {}, "env": {}}
         assert parser.evaluate(context) is True
 
     def test_single_allowed_name_uses_namespace_mode(self) -> None:

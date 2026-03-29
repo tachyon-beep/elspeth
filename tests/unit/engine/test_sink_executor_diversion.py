@@ -15,11 +15,12 @@ import pytest
 from elspeth.contracts import PendingOutcome, RowOutcome, TokenInfo
 from elspeth.contracts.diversion import RowDiversion, SinkWriteResult
 from elspeth.contracts.enums import NodeStateStatus, RoutingMode
+from elspeth.contracts.errors import AuditIntegrityError
 from elspeth.contracts.results import ArtifactDescriptor
 from elspeth.engine.executors.sink import SinkExecutor
 
 
-def _make_token(token_id: str = "tok-1", row_data: dict | None = None) -> MagicMock:
+def _make_token(token_id: str = "tok-1", row_data: dict[str, object] | None = None) -> MagicMock:
     """Create a minimal TokenInfo mock."""
     token = MagicMock(spec=TokenInfo)
     token.token_id = token_id
@@ -93,7 +94,7 @@ class TestNoDiversions:
         tokens = [_make_token("t0"), _make_token("t1"), _make_token("t2")]
         executor.write(
             sink=sink,
-            tokens=tokens,
+            tokens=tokens,  # type: ignore[arg-type]
             ctx=MagicMock(run_id="run-1"),
             step_in_pipeline=5,
             sink_name="primary",
@@ -112,7 +113,7 @@ class TestNoDiversions:
         tokens = [_make_token("t0")]
         executor.write(
             sink=sink,
-            tokens=tokens,
+            tokens=tokens,  # type: ignore[arg-type]
             ctx=MagicMock(run_id="run-1"),
             step_in_pipeline=5,
             sink_name="primary",
@@ -127,7 +128,7 @@ class TestNoDiversions:
         tokens = [_make_token("t0")]
         artifact, diversion_count = executor.write(
             sink=sink,
-            tokens=tokens,
+            tokens=tokens,  # type: ignore[arg-type]
             ctx=MagicMock(run_id="run-1"),
             step_in_pipeline=5,
             sink_name="primary",
@@ -147,7 +148,7 @@ class TestDiscardMode:
         tokens = [_make_token("t0"), _make_token("t1")]
         executor.write(
             sink=sink,
-            tokens=tokens,
+            tokens=tokens,  # type: ignore[arg-type]
             ctx=MagicMock(run_id="run-1"),
             step_in_pipeline=5,
             sink_name="primary",
@@ -173,7 +174,7 @@ class TestDiscardMode:
         tokens = [_make_token("t0")]
         executor.write(
             sink=sink,
-            tokens=tokens,
+            tokens=tokens,  # type: ignore[arg-type]
             ctx=MagicMock(run_id="run-1"),
             step_in_pipeline=5,
             sink_name="primary",
@@ -201,7 +202,7 @@ class TestDiscardMode:
         tokens = [_make_token("t0"), _make_token("t1")]
         executor.write(
             sink=sink,
-            tokens=tokens,
+            tokens=tokens,  # type: ignore[arg-type]
             ctx=MagicMock(run_id="run-1"),
             step_in_pipeline=5,
             sink_name="primary",
@@ -217,7 +218,7 @@ class TestDiscardMode:
         tokens = [_make_token("t0")]
         artifact, diversion_count = executor.write(
             sink=sink,
-            tokens=tokens,
+            tokens=tokens,  # type: ignore[arg-type]
             ctx=MagicMock(run_id="run-1"),
             step_in_pipeline=5,
             sink_name="primary",
@@ -238,7 +239,7 @@ class TestFailsinkMode:
         tokens = [_make_token("t0"), _make_token("t1")]
         executor.write(
             sink=sink,
-            tokens=tokens,
+            tokens=tokens,  # type: ignore[arg-type]
             ctx=MagicMock(run_id="run-1"),
             step_in_pipeline=5,
             sink_name="primary",
@@ -264,7 +265,7 @@ class TestFailsinkMode:
         tokens = [_make_token("t0")]
         executor.write(
             sink=sink,
-            tokens=tokens,
+            tokens=tokens,  # type: ignore[arg-type]
             ctx=MagicMock(run_id="run-1"),
             step_in_pipeline=5,
             sink_name="primary",
@@ -282,7 +283,7 @@ class TestFailsinkMode:
         tokens = [_make_token("t0")]
         executor.write(
             sink=sink,
-            tokens=tokens,
+            tokens=tokens,  # type: ignore[arg-type]
             ctx=MagicMock(run_id="run-1"),
             step_in_pipeline=5,
             sink_name="primary",
@@ -299,7 +300,7 @@ class TestFailsinkMode:
         tokens = [_make_token("t0")]
         executor.write(
             sink=sink,
-            tokens=tokens,
+            tokens=tokens,  # type: ignore[arg-type]
             ctx=MagicMock(run_id="run-1"),
             step_in_pipeline=5,
             sink_name="primary",
@@ -320,7 +321,7 @@ class TestFailsinkMode:
         tokens = [_make_token("t0")]
         executor.write(
             sink=sink,
-            tokens=tokens,
+            tokens=tokens,  # type: ignore[arg-type]
             ctx=MagicMock(run_id="run-1"),
             step_in_pipeline=5,
             sink_name="primary",
@@ -350,7 +351,7 @@ class TestFailsinkMode:
         tokens = [_make_token("t0"), _make_token("t1")]
         executor.write(
             sink=sink,
-            tokens=tokens,
+            tokens=tokens,  # type: ignore[arg-type]
             ctx=MagicMock(run_id="run-1"),
             step_in_pipeline=5,
             sink_name="primary",
@@ -371,7 +372,7 @@ class TestFailsinkMode:
         tokens = [_make_token("t0"), _make_token("t1")]
         executor.write(
             sink=sink,
-            tokens=tokens,
+            tokens=tokens,  # type: ignore[arg-type]
             ctx=MagicMock(run_id="run-1"),
             step_in_pipeline=5,
             sink_name="primary",
@@ -401,7 +402,7 @@ class TestFailsinkErrorHandling:
         with pytest.raises(OSError, match="disk full"):
             executor.write(
                 sink=sink,
-                tokens=tokens,
+                tokens=tokens,  # type: ignore[arg-type]
                 ctx=MagicMock(run_id="run-1"),
                 step_in_pipeline=5,
                 sink_name="primary",
@@ -431,7 +432,7 @@ class TestFailsinkCleanup:
         with pytest.raises(OSError):
             executor.write(
                 sink=sink,
-                tokens=tokens,
+                tokens=tokens,  # type: ignore[arg-type]
                 ctx=MagicMock(run_id="run-1"),
                 step_in_pipeline=5,
                 sink_name="primary",
@@ -469,7 +470,7 @@ class TestFailsinkCleanup:
         with pytest.raises(OSError):
             executor.write(
                 sink=sink,
-                tokens=tokens,
+                tokens=tokens,  # type: ignore[arg-type]
                 ctx=MagicMock(run_id="run-1"),
                 step_in_pipeline=5,
                 sink_name="primary",
@@ -503,7 +504,7 @@ class TestFailsinkCleanup:
         with pytest.raises(OSError, match="disk full"):
             executor.write(
                 sink=sink,
-                tokens=tokens,
+                tokens=tokens,  # type: ignore[arg-type]
                 ctx=MagicMock(run_id="run-1"),
                 step_in_pipeline=5,
                 sink_name="primary",
@@ -532,7 +533,7 @@ class TestNonContiguousDiversions:
         tokens = [_make_token("t0"), _make_token("t1"), _make_token("t2")]
         executor.write(
             sink=sink,
-            tokens=tokens,
+            tokens=tokens,  # type: ignore[arg-type]
             ctx=MagicMock(run_id="run-1"),
             step_in_pipeline=5,
             sink_name="primary",
@@ -586,7 +587,7 @@ class TestOnTokenWrittenWithDiversions:
         callback = MagicMock()
         executor.write(
             sink=sink,
-            tokens=tokens,
+            tokens=tokens,  # type: ignore[arg-type]
             ctx=MagicMock(run_id="run-1"),
             step_in_pipeline=5,
             sink_name="primary",
@@ -608,7 +609,7 @@ class TestOnTokenWrittenWithDiversions:
         callback = MagicMock()
         executor.write(
             sink=sink,
-            tokens=tokens,
+            tokens=tokens,  # type: ignore[arg-type]
             ctx=MagicMock(run_id="run-1"),
             step_in_pipeline=5,
             sink_name="primary",
@@ -632,7 +633,7 @@ class TestOnTokenWrittenWithDiversions:
         callback = MagicMock()
         executor.write(
             sink=sink,
-            tokens=tokens,
+            tokens=tokens,  # type: ignore[arg-type]
             ctx=MagicMock(run_id="run-1"),
             step_in_pipeline=5,
             sink_name="primary",
@@ -682,7 +683,7 @@ class TestMidLoopAuditRecordingCleanup:
         with pytest.raises(RuntimeError, match="DB connection lost"):
             executor.write(
                 sink=sink,
-                tokens=tokens,
+                tokens=tokens,  # type: ignore[arg-type]
                 ctx=MagicMock(run_id="run-1"),
                 step_in_pipeline=5,
                 sink_name="primary",
@@ -707,3 +708,124 @@ class TestMidLoopAuditRecordingCleanup:
         assert len(completed_state_ids) == 1
         # No overlap between FAILED and COMPLETED
         assert failed_state_ids & completed_state_ids == set()
+
+
+class TestSystemErrorStateCleanup:
+    """Regression: FrameworkBugError/AuditIntegrityError paths must close OPEN states.
+
+    Bug: The `except (FrameworkBugError, AuditIntegrityError): raise` handlers
+    in SinkExecutor.write() skipped cleanup, leaving node_states permanently
+    OPEN in the audit trail — a Tier 1 integrity violation. The non-system
+    exception handlers RIGHT BELOW each site show correct cleanup, but system
+    error paths just re-raised.
+
+    Fix: Best-effort cleanup before re-raising system errors. If cleanup itself
+    fails, log and preserve the original error.
+    """
+
+    def test_failsink_begin_node_state_system_error_cleans_up_open_states(self) -> None:
+        """When failsink begin_node_state raises AuditIntegrityError, all OPEN states close.
+
+        Setup: 2 diverted tokens. Failsink begin_node_state succeeds for token 0
+        then raises AuditIntegrityError for token 1. At that point:
+        - 2 primary divert states are OPEN (from Phase 3 begin_node_state)
+        - 1 failsink state is OPEN (token 0)
+        All 3 must be closed as FAILED before the error propagates.
+        """
+        executor, recorder = _make_executor()
+        sink = _make_sink(
+            diversions=(
+                RowDiversion(row_index=0, reason="bad-0", row_data={"field": "v0"}),
+                RowDiversion(row_index=1, reason="bad-1", row_data={"field": "v1"}),
+            ),
+        )
+        failsink = _make_failsink()
+        tokens = [_make_token("t0"), _make_token("t1")]
+
+        # begin_node_state: 2 primary divert states succeed, then 1 failsink
+        # state succeeds, then the 2nd failsink state raises AuditIntegrityError.
+        call_count = [0]
+        original_side_effect = recorder.begin_node_state.side_effect
+
+        def begin_state_with_error(**kwargs: Any) -> MagicMock:
+            call_count[0] += 1
+            # Calls 1-2: primary divert states (OK)
+            # Call 3: first failsink state (OK)
+            # Call 4: second failsink state (BOOM)
+            if call_count[0] == 4:
+                raise AuditIntegrityError("FK violation on failsink begin_node_state")
+            return original_side_effect(**kwargs)  # type: ignore[no-any-return]
+
+        recorder.begin_node_state.side_effect = begin_state_with_error
+
+        with pytest.raises(AuditIntegrityError, match="FK violation"):
+            executor.write(
+                sink=sink,
+                tokens=tokens,  # type: ignore[arg-type]
+                ctx=MagicMock(run_id="run-1"),
+                step_in_pipeline=5,
+                sink_name="primary",
+                pending_outcome=PendingOutcome(RowOutcome.COMPLETED),
+                failsink=failsink,
+                failsink_name="csv_failsink",
+                failsink_edge_id="edge-divert-1",
+            )
+
+        # All opened states (2 primary-divert + 1 failsink) must be closed as FAILED.
+        complete_calls = recorder.complete_node_state.call_args_list
+        failed_ids = {c.kwargs["state_id"] for c in complete_calls if c.kwargs.get("status") == NodeStateStatus.FAILED}
+        assert len(failed_ids) == 3, (
+            f"Expected 3 states closed as FAILED (2 primary-divert + 1 failsink), got {len(failed_ids)}: {failed_ids}"
+        )
+
+    def test_failsink_mid_loop_system_error_cleans_up_remaining_states(self) -> None:
+        """When the failsink completion loop raises AuditIntegrityError, remaining states close.
+
+        Setup: 2 diverted tokens. complete_node_state succeeds for token 0's
+        primary state, then raises AuditIntegrityError for token 0's failsink
+        state. At that point:
+        - Token 0: primary FAILED (completed), failsink OPEN (failed mid-loop)
+        - Token 1: primary OPEN, failsink OPEN (not yet processed)
+        The 3 remaining OPEN states must be closed as FAILED.
+        """
+        executor, recorder = _make_executor()
+        sink = _make_sink(
+            diversions=(
+                RowDiversion(row_index=0, reason="bad-0", row_data={"field": "v0"}),
+                RowDiversion(row_index=1, reason="bad-1", row_data={"field": "v1"}),
+            ),
+        )
+        failsink = _make_failsink()
+        tokens = [_make_token("t0"), _make_token("t1")]
+
+        # complete_node_state: let the first call succeed (token 0 primary → FAILED),
+        # then raise on the second call (token 0 failsink → AuditIntegrityError).
+        complete_count = [0]
+
+        def complete_with_error(**kwargs: Any) -> None:
+            complete_count[0] += 1
+            if complete_count[0] == 2:
+                raise AuditIntegrityError("DB error completing failsink state")
+
+        recorder.complete_node_state.side_effect = complete_with_error
+
+        with pytest.raises(AuditIntegrityError, match="DB error completing"):
+            executor.write(
+                sink=sink,
+                tokens=tokens,  # type: ignore[arg-type]
+                ctx=MagicMock(run_id="run-1"),
+                step_in_pipeline=5,
+                sink_name="primary",
+                pending_outcome=PendingOutcome(RowOutcome.COMPLETED),
+                failsink=failsink,
+                failsink_name="csv_failsink",
+                failsink_edge_id="edge-divert-1",
+            )
+
+        # After the error at call 2, the handler should attempt to close
+        # remaining OPEN states. Total complete_node_state calls should be > 2
+        # (the original 2 + cleanup calls for remaining states).
+        total_complete_calls = len(recorder.complete_node_state.call_args_list)
+        assert total_complete_calls > 2, (
+            f"Expected cleanup calls after mid-loop AuditIntegrityError, got only {total_complete_calls} complete_node_state calls"
+        )

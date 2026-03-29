@@ -7,6 +7,7 @@ resolve_queries() normalization, and provider-specific config classes.
 
 from __future__ import annotations
 
+from types import MappingProxyType
 from typing import Any
 
 import pytest
@@ -279,27 +280,27 @@ class TestQuerySpec:
         from elspeth.plugins.transforms.llm.multi_query import QuerySpec
 
         with pytest.raises(ValueError, match="name must be non-empty"):
-            QuerySpec(name="", input_fields={"text": "text"})
+            QuerySpec(name="", input_fields=MappingProxyType({"text": "text"}))
 
     def test_post_init_rejects_empty_input_fields(self) -> None:
         from elspeth.plugins.transforms.llm.multi_query import QuerySpec
 
         with pytest.raises(ValueError, match="input_fields must be non-empty"):
-            QuerySpec(name="q1", input_fields={})
+            QuerySpec(name="q1", input_fields=MappingProxyType({}))
 
     def test_frozen(self) -> None:
         from dataclasses import FrozenInstanceError
 
         from elspeth.plugins.transforms.llm.multi_query import QuerySpec
 
-        spec = QuerySpec(name="q1", input_fields={"text": "text_col"})
+        spec = QuerySpec(name="q1", input_fields=MappingProxyType({"text": "text_col"}))
         with pytest.raises(FrozenInstanceError):
             spec.name = "modified"  # type: ignore[misc]
 
     def test_defaults(self) -> None:
         from elspeth.plugins.transforms.llm.multi_query import QuerySpec, ResponseFormat
 
-        spec = QuerySpec(name="q1", input_fields={"text": "text_col"})
+        spec = QuerySpec(name="q1", input_fields=MappingProxyType({"text": "text_col"}))
         assert spec.response_format == ResponseFormat.STANDARD
         assert spec.output_fields is None
         assert spec.template is None
@@ -311,7 +312,7 @@ class TestQuerySpec:
 
         spec = QuerySpec(
             name="q1",
-            input_fields={"text_content": "text", "category_name": "category"},
+            input_fields=MappingProxyType({"text_content": "text", "category_name": "category"}),
         )
         row = {"text": "hello world", "category": "science", "extra": "ignored"}
         ctx = spec.build_template_context(row)
@@ -325,7 +326,7 @@ class TestQuerySpec:
 
         spec = QuerySpec(
             name="q1",
-            input_fields={"text_content": "text"},
+            input_fields=MappingProxyType({"text_content": "text"}),
         )
         with pytest.raises(KeyError, match="text"):
             spec.build_template_context({"other": "value"})
@@ -337,7 +338,7 @@ class TestQuerySpec:
         from elspeth.plugins.transforms.llm.multi_query import QuerySpec
 
         original = {"text": "text_col", "cat": "category_col"}
-        spec = QuerySpec(name="q1", input_fields=original)
+        spec = QuerySpec(name="q1", input_fields=MappingProxyType(original))
 
         assert isinstance(spec.input_fields, MappingProxyType)
         with pytest.raises(TypeError):
@@ -352,7 +353,7 @@ class TestQuerySpec:
         from elspeth.plugins.transforms.llm.multi_query import OutputFieldConfig, OutputFieldType, QuerySpec
 
         fields = [OutputFieldConfig(suffix="label", type=OutputFieldType.STRING)]
-        spec = QuerySpec(name="q1", input_fields={"text": "col"}, output_fields=fields)
+        spec = QuerySpec(name="q1", input_fields=MappingProxyType({"text": "col"}), output_fields=tuple(fields))
 
         assert isinstance(spec.output_fields, tuple)
         # Caller's original list must be decoupled
@@ -401,7 +402,7 @@ class TestResolveQueries:
         from elspeth.plugins.transforms.llm.multi_query import QuerySpec, resolve_queries
 
         specs = [
-            QuerySpec(name="q1", input_fields={"text": "text_col"}),
+            QuerySpec(name="q1", input_fields=MappingProxyType({"text": "text_col"})),
         ]
         result = resolve_queries(specs)
         assert len(result) == 1

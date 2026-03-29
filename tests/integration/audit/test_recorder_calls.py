@@ -469,6 +469,7 @@ class TestCallPayloadPersistence:
             # The response should be retrievable
             result = recorder.get_call_response_data(call.call_id)
             assert result.state == CallDataState.AVAILABLE
+            assert result.data is not None
             assert dict(result.data) == response_data
 
     def test_auto_persist_request_when_payload_store_configured(self, payload_store) -> None:

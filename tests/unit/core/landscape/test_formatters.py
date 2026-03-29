@@ -5,6 +5,7 @@ import json
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from enum import Enum
+from typing import Any
 
 import pytest
 
@@ -35,8 +36,8 @@ class TestSerializeDatetime:
     def test_recursively_handles_dict(self) -> None:
         """Dicts have datetime values converted recursively."""
         dt = datetime(2026, 1, 29, 12, 0, 0, tzinfo=UTC)
-        data = {"created_at": dt, "name": "test", "nested": {"time": dt}}
-        result = serialize_datetime(data)
+        data: dict[str, Any] = {"created_at": dt, "name": "test", "nested": {"time": dt}}
+        result: dict[str, Any] = serialize_datetime(data)
 
         assert result["created_at"] == "2026-01-29T12:00:00+00:00"
         assert result["name"] == "test"
@@ -45,8 +46,8 @@ class TestSerializeDatetime:
     def test_recursively_handles_list(self) -> None:
         """Lists have datetime values converted recursively."""
         dt = datetime(2026, 1, 29, 12, 0, 0, tzinfo=UTC)
-        data = [dt, "string", {"time": dt}]
-        result = serialize_datetime(data)
+        data: list[Any] = [dt, "string", {"time": dt}]
+        result: list[Any] = serialize_datetime(data)
 
         assert result[0] == "2026-01-29T12:00:00+00:00"
         assert result[1] == "string"
@@ -494,10 +495,10 @@ class TestLineageTextFormatter:
                 source_data={"id": 1, "name": "test"},
                 payload_available=True,
             ),
-            node_states=[],
-            routing_events=[],
-            calls=[],
-            parent_tokens=[],
+            node_states=(),
+            routing_events=(),
+            calls=(),
+            parent_tokens=(),
         )
 
         formatter = LineageTextFormatter()
@@ -526,10 +527,10 @@ class TestLineageTextFormatter:
                 source_data={"id": 1},
                 payload_available=True,
             ),
-            node_states=[],
-            routing_events=[],
-            calls=[],
-            parent_tokens=[],
+            node_states=(),
+            routing_events=(),
+            calls=(),
+            parent_tokens=(),
             outcome=TokenOutcome(
                 outcome_id="out-1",
                 token_id="tok-123",
@@ -566,9 +567,9 @@ class TestLineageTextFormatter:
                 source_data={"id": 1},
                 payload_available=True,
             ),
-            node_states=[],
-            routing_events=[],
-            calls=[
+            node_states=(),
+            routing_events=(),
+            calls=(
                 Call(
                     call_id="call-1",
                     state_id="state-1",
@@ -578,9 +579,9 @@ class TestLineageTextFormatter:
                     request_hash="req-hash",
                     created_at=now,
                     latency_ms=None,
-                )
-            ],
-            parent_tokens=[],
+                ),
+            ),
+            parent_tokens=(),
         )
 
         formatter = LineageTextFormatter()

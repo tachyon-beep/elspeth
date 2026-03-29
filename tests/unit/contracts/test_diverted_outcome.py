@@ -10,7 +10,7 @@ from elspeth.contracts.run_result import RunResult
 
 class TestDivertedOutcome:
     def test_diverted_value(self) -> None:
-        assert RowOutcome.DIVERTED == "diverted"
+        assert RowOutcome.DIVERTED == "diverted"  # type: ignore[comparison-overlap]
         assert RowOutcome.DIVERTED.value == "diverted"
 
     def test_diverted_is_terminal(self) -> None:

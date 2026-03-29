@@ -18,6 +18,7 @@ from elspeth.contracts import PipelineRow, RunStatus
 from elspeth.contracts.errors import GracefulShutdownError
 from elspeth.contracts.results import SourceRow
 from elspeth.contracts.schema_contract import FieldContract, SchemaContract
+from elspeth.contracts.types import AggregationName
 from elspeth.core.config import AggregationSettings, SourceSettings, TriggerConfig
 from elspeth.core.dag import ExecutionGraph
 from elspeth.engine.orchestrator import PipelineConfig
@@ -204,7 +205,7 @@ def _build_interruptible_aggregation_config(
         gates=[],
     )
 
-    agg_node_id = graph.get_aggregation_id_map()["sum_agg"]
+    agg_node_id = graph.get_aggregation_id_map()[AggregationName("sum_agg")]
     transform.node_id = agg_node_id
 
     config = PipelineConfig(
@@ -268,7 +269,7 @@ def _build_interruptible_coalesce_config(
         coalesce_settings=[coalesce],
     )
 
-    agg_node_id = graph.get_aggregation_id_map()["agg_branch_hold"]
+    agg_node_id = graph.get_aggregation_id_map()[AggregationName("agg_branch_hold")]
     batch_transform.node_id = agg_node_id
 
     config = PipelineConfig(

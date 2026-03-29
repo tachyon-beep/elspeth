@@ -289,7 +289,7 @@ class TestTransformErrorsWhereExactness:
                 token_id=tok.token_id,
                 transform_id=run.transform_node_id,
                 row_data={"val": f"err-{suffix}"},
-                error_details={"reason": f"failed-{suffix}"},
+                error_details={"reason": "test_error"},
                 destination="discard",
             )
 
@@ -312,7 +312,7 @@ class TestTransformErrorsWhereExactness:
                 token_id=tok.token_id,
                 transform_id=run.transform_node_id,
                 row_data={"v": suffix},
-                error_details={"reason": f"r-{suffix}"},
+                error_details={"reason": "api_error"},
                 destination="discard",
             )
 
@@ -336,7 +336,7 @@ class TestTransformErrorsWhereExactness:
                 token_id=tok.token_id,
                 transform_id=run_b.transform_node_id,
                 row_data={"t": tok.token_id},
-                error_details={"reason": f"fail-{tok.token_id}"},
+                error_details={"reason": "validation_failed"},
                 destination="discard",
             )
 
@@ -347,7 +347,7 @@ class TestTransformErrorsWhereExactness:
             token_id=run_a.tokens[0].token_id,
             transform_id=run_a.transform_node_id,
             row_data={"t": "decoy"},
-            error_details={"reason": "decoy"},
+            error_details={"reason": "network_error"},
             destination="discard",
         )
 

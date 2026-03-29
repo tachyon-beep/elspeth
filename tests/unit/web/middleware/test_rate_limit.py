@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import time
+from typing import Any
 
 import pytest
 from fastapi import HTTPException
@@ -37,6 +38,7 @@ class TestRateLimiterDeny:
         with pytest.raises(HTTPException) as exc_info:
             await limiter.check("user_1")
         assert exc_info.value.status_code == 429
+        assert exc_info.value.headers is not None
         assert "Retry-After" in exc_info.value.headers
 
     @pytest.mark.asyncio
@@ -45,7 +47,7 @@ class TestRateLimiterDeny:
         await limiter.check("user_1")
         with pytest.raises(HTTPException) as exc_info:
             await limiter.check("user_1")
-        detail = exc_info.value.detail
+        detail: dict[str, Any] = exc_info.value.detail  # type: ignore[assignment]
         assert detail["error_type"] == "rate_limited"
         assert "retry_after" in detail
         assert isinstance(detail["retry_after"], int)

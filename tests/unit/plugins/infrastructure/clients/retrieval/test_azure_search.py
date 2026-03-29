@@ -1,5 +1,8 @@
 """Tests for Azure AI Search provider."""
 
+from __future__ import annotations
+
+from typing import Any
 from unittest.mock import MagicMock, PropertyMock, patch
 
 import pytest
@@ -65,7 +68,7 @@ class TestAzureSearchProviderConfig:
 
 
 class TestAzureSearchProviderSearch:
-    def _make_provider(self, search_mode="hybrid"):
+    def _make_provider(self, search_mode: str = "hybrid") -> AzureSearchProvider:
         config = AzureSearchProviderConfig(
             endpoint="https://test.search.windows.net",
             index="test-index",
@@ -142,7 +145,7 @@ class TestAzureSearchProviderSearch:
 
 
 class TestScoreNormalization:
-    def _make_provider(self, search_mode="hybrid"):
+    def _make_provider(self, search_mode: str = "hybrid") -> AzureSearchProvider:
         config = AzureSearchProviderConfig(
             endpoint="https://test.search.windows.net",
             index="test-index",
@@ -213,7 +216,7 @@ class TestScoreNormalization:
 
 
 class TestBuildRequestBody:
-    def _make_provider(self, search_mode="hybrid", **overrides):
+    def _make_provider(self, search_mode: str = "hybrid", **overrides: Any) -> AzureSearchProvider:
         config_data = {
             "endpoint": "https://test.search.windows.net",
             "index": "test-index",
@@ -259,7 +262,7 @@ class TestBuildRequestBody:
 
 
 class TestParseResponse:
-    def _make_provider(self):
+    def _make_provider(self) -> AzureSearchProvider:
         config = AzureSearchProviderConfig(
             endpoint="https://test.search.windows.net",
             index="test-index",
@@ -350,7 +353,7 @@ class TestParseResponse:
 class TestAzureSearchProviderReadiness:
     """Tests for AzureSearchProvider.check_readiness()."""
 
-    def _make_provider(self):
+    def _make_provider(self) -> AzureSearchProvider:
         config = AzureSearchProviderConfig(
             endpoint="https://test.search.windows.net",
             index="test-index",
@@ -363,7 +366,7 @@ class TestAzureSearchProviderReadiness:
             telemetry_emit=MagicMock(),
         )
 
-    def _mock_response(self, *, status_code=200, text="0"):
+    def _mock_response(self, *, status_code: int = 200, text: str = "0") -> MagicMock:
         resp = MagicMock()
         type(resp).status_code = PropertyMock(return_value=status_code)
         type(resp).text = PropertyMock(return_value=text)

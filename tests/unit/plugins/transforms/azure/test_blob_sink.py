@@ -1228,8 +1228,8 @@ class TestAzureBlobSinkDisplayHeaders:
 
         # Set up a contract with original names
         contract = SchemaContract(
-            mode="observed",
-            fields=[
+            mode="OBSERVED",
+            fields=(
                 FieldContract(
                     normalized_name="user_id",
                     original_name="User ID",
@@ -1244,7 +1244,7 @@ class TestAzureBlobSinkDisplayHeaders:
                     required=True,
                     source="declared",
                 ),
-            ],
+            ),
         )
         # Inject contract via context (simulates orchestrator setting it)
         ctx.contract = contract

@@ -597,8 +597,8 @@ class TestCrossTypeConsistency:
             pytest.param(
                 CoalesceFailureReason(
                     failure_reason="quorum_not_met",
-                    expected_branches=["a", "b"],
-                    branches_arrived=["a"],
+                    expected_branches=("a", "b"),
+                    branches_arrived=("a",),
                     merge_policy="all_or_fail",
                 ),
                 id="coalesce_failure_reason",

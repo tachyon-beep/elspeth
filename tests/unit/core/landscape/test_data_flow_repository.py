@@ -364,6 +364,37 @@ class TestRecordTransformErrorDirect:
         )
         assert error_id.startswith("terr_")
 
+    def test_invalid_error_reason_crashes_at_tier1_boundary(self) -> None:
+        """Invalid TransformErrorCategory crashes — Tier 1 write guard.
+
+        TypedDict has zero runtime enforcement. If a plugin passes
+        {"reason": "banana"}, the Literal type annotation does nothing.
+        The Tier 1 write boundary must validate before persisting.
+        """
+        _db, repo, _rec, _row, tok = _make_repo_with_token()
+        with pytest.raises(AuditIntegrityError, match="Invalid TransformErrorCategory"):
+            repo.record_transform_error(
+                run_id="run-1",
+                token_id=tok,
+                transform_id="transform-1",
+                row_data={"name": "test"},
+                error_details={"reason": "banana_error", "error": "this is not a real category"},  # type: ignore[typeddict-item]  # intentionally invalid reason
+                destination="quarantine",
+            )
+
+    def test_valid_error_reason_passes_tier1_validation(self) -> None:
+        """Valid TransformErrorCategory is accepted at the Tier 1 boundary."""
+        _db, repo, _rec, _row, tok = _make_repo_with_token()
+        error_id = repo.record_transform_error(
+            run_id="run-1",
+            token_id=tok,
+            transform_id="transform-1",
+            row_data={"name": "test"},
+            error_details={"reason": "api_error", "error": "timeout"},
+            destination="quarantine",
+        )
+        assert error_id.startswith("terr_")
+
     def test_cross_run_contamination_raises(self) -> None:
         """record_transform_error rejects token from a different run."""
         _db, repo, rec, _row, tok = _make_repo_with_token(run_id="run-1")

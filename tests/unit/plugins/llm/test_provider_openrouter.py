@@ -258,7 +258,7 @@ class TestExecuteQuery:
                 return result
 
             with (
-                patch.object(mod.json, "loads", side_effect=patched_loads),
+                patch.object(mod.json, "loads", side_effect=patched_loads),  # type: ignore[attr-defined]
                 pytest.raises(LLMClientError, match="Non-finite value in usage"),
             ):
                 provider.execute_query(

@@ -223,10 +223,12 @@ sinks:
     assert isinstance(replaced, PluginBundle)
     assert replaced.source is null_source
 
-    # Unchanged fields preserved by identity
+    # Unchanged fields preserved by value (deep_freeze detaches MappingProxyType
+    # inputs, so identity is not preserved across __post_init__ re-freeze).
+    # transforms is a tuple (identity-preserved), sinks/aggregations are proxies (detached).
     assert replaced.transforms is bundle.transforms
-    assert replaced.sinks is bundle.sinks
-    assert replaced.aggregations is bundle.aggregations
+    assert replaced.sinks == bundle.sinks
+    assert replaced.aggregations == bundle.aggregations
     assert replaced.source_settings is bundle.source_settings
 
 

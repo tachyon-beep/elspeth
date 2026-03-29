@@ -125,12 +125,12 @@ class NodeStateGuard:
                 )
             except (FrameworkBugError, AuditIntegrityError):
                 raise  # System bugs and audit corruption must crash immediately
-            except Exception:
-                logger.error(
-                    "NodeStateGuard: failed to record FAILED for state %s after missing complete()",
-                    self.state_id,
-                    exc_info=True,
-                )
+            except Exception as db_err:
+                raise AuditIntegrityError(
+                    f"Cannot record FAILED for state {self.state_id} after missing complete() — "
+                    f"audit trail has permanent OPEN state (Tier 1 violation). "
+                    f"DB error: {type(db_err).__name__}: {db_err}"
+                ) from db_err
             raise OrchestrationInvariantError(
                 f"NodeStateGuard for state {self.state_id} exited without complete(). "
                 f"This is a bug in the calling executor — every code path must call "
@@ -155,15 +155,14 @@ class NodeStateGuard:
             raise  # System bugs and audit corruption must crash immediately
         except (TypeError, AttributeError, KeyError, NameError):
             raise  # Programming errors in recorder — crash to surface the bug
-        except Exception:
-            # If we cannot record the failure (e.g. DB is down), log but don't
-            # mask the original exception — the caller needs to see it.
-            logger.error(
-                "NodeStateGuard: failed to auto-complete state %s as FAILED while handling %s",
-                self.state_id,
-                exc_type.__name__,
-                exc_info=True,
-            )
+        except Exception as db_err:
+            # Audit trail corruption (permanent OPEN state) is MORE critical than
+            # the original exception. Raise AuditIntegrityError with both contexts.
+            raise AuditIntegrityError(
+                f"Cannot record FAILED for state {self.state_id} while handling "
+                f"{exc_type.__name__}: {exc_val} — audit trail has permanent OPEN state "
+                f"(Tier 1 violation). DB error: {type(db_err).__name__}: {db_err}"
+            ) from db_err
 
     # -- public API --------------------------------------------------------
 

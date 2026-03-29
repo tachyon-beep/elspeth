@@ -16,6 +16,7 @@ NOTE: AcceptResult tests deleted in aggregation structural cleanup.
 Aggregation is now engine-controlled via batch-aware transforms.
 """
 
+from types import MappingProxyType
 from typing import Any
 
 import pytest
@@ -294,7 +295,7 @@ class TestTransformResultErrorInvariants:
                 status="error",
                 row=None,
                 reason={"reason": "test_error"},
-                rows=[make_pipeline_row({"x": 1})],
+                rows=(make_pipeline_row({"x": 1}),),
             )
 
     def test_error_with_success_reason_raises(self) -> None:
@@ -556,7 +557,7 @@ class TestArtifactDescriptor:
             path_or_uri="db://table@url",
             content_hash="hash",
             size_bytes=100,
-            metadata={"table": "results", "row_count": 50},
+            metadata=MappingProxyType({"table": "results", "row_count": 50}),
         )
         assert descriptor.metadata == {"table": "results", "row_count": 50}
 
@@ -585,7 +586,7 @@ class TestArtifactDescriptor:
             path_or_uri="db://table@url",
             content_hash="hash",
             size_bytes=100,
-            metadata=original,
+            metadata=MappingProxyType(original),
         )
 
         # Mutating the metadata dict must raise TypeError
@@ -594,6 +595,7 @@ class TestArtifactDescriptor:
 
         # Mutating the original dict must NOT affect the descriptor (defensive copy)
         original["injected"] = "evil"
+        assert descriptor.metadata is not None
         assert "injected" not in descriptor.metadata
 
     def test_missing_required_fields_raises_type_error(self) -> None:
@@ -942,7 +944,7 @@ class TestArtifactDescriptorDeepFreeze:
             path_or_uri="/tmp/test.csv",
             content_hash="abc123",
             size_bytes=100,
-            metadata={"nested": {"inner_key": "inner_value"}},
+            metadata=MappingProxyType({"nested": {"inner_key": "inner_value"}}),
         )
         assert isinstance(descriptor.metadata, MappingProxyType)
         # The nested dict must also be frozen
@@ -957,7 +959,7 @@ class TestArtifactDescriptorDeepFreeze:
             path_or_uri="/tmp/test.csv",
             content_hash="abc123",
             size_bytes=100,
-            metadata={"tags": ["a", "b"]},
+            metadata=MappingProxyType({"tags": ["a", "b"]}),
         )
         assert isinstance(descriptor.metadata, MappingProxyType)
         assert isinstance(descriptor.metadata["tags"], tuple)

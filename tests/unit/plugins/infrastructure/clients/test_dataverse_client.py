@@ -125,7 +125,7 @@ def client(transport: MockTransport) -> DataverseClient:
     """Create a DataverseClient with mock transport and SSRF validation bypassed."""
     c = DataverseClient(
         environment_url=ENV_URL,
-        credential=FakeCredential(),
+        credential=FakeCredential(),  # type: ignore[arg-type]  # test fake
     )
     # Replace the internal httpx.Client with one using our mock transport
     c._client.close()
@@ -205,7 +205,7 @@ class TestDataverseAuthConfig:
 
     def test_invalid_method_rejected(self) -> None:
         with pytest.raises(ValueError):
-            DataverseAuthConfig(method="password")  # type: ignore[arg-type]
+            DataverseAuthConfig(method="password")
 
     def test_extra_fields_rejected(self) -> None:
         """extra='forbid' prevents unknown fields."""
@@ -329,14 +329,14 @@ class TestDomainAllowlist:
         with pytest.raises(DataverseClientError, match="does not match"):
             DataverseClient(
                 environment_url="https://evil.example.com",
-                credential=FakeCredential(),
+                credential=FakeCredential(),  # type: ignore[arg-type]  # test fake
             )
 
     def test_constructor_rejects_unparseable_url(self) -> None:
         with pytest.raises(DataverseClientError, match="Cannot extract hostname"):
             DataverseClient(
                 environment_url="not-a-url",
-                credential=FakeCredential(),
+                credential=FakeCredential(),  # type: ignore[arg-type]  # test fake
             )
 
 
@@ -839,7 +839,7 @@ class TestRetryAfterCap:
         """Custom retry_after_cap is respected."""
         c = DataverseClient(
             environment_url=ENV_URL,
-            credential=FakeCredential(),
+            credential=FakeCredential(),  # type: ignore[arg-type]  # test fake
             retry_after_cap=10.0,
         )
         c._client.close()
@@ -949,7 +949,7 @@ class TestRateLimiter:
 
         c = DataverseClient(
             environment_url=ENV_URL,
-            credential=FakeCredential(),
+            credential=FakeCredential(),  # type: ignore[arg-type]  # test fake
             limiter=FakeLimiter(),  # type: ignore[arg-type]
         )
         c._client.close()

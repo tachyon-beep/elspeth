@@ -1368,6 +1368,22 @@ class DataFlowRepository:
         # Validate token belongs to the specified run (Tier 1 invariant)
         self._validate_token_run_ownership(token_id, run_id)
 
+        # Validate reason is a known TransformErrorCategory (Tier 1 write guard).
+        # TypedDict has zero runtime enforcement — the Literal annotation only
+        # helps at compile time. Invalid reasons must crash before persisting.
+        from typing import get_args
+
+        from elspeth.contracts.errors import TransformErrorCategory
+
+        reason = error_details["reason"]
+        valid_reasons = get_args(TransformErrorCategory)
+        if reason not in valid_reasons:
+            raise AuditIntegrityError(
+                f"Invalid TransformErrorCategory '{reason}' at Tier 1 write boundary. "
+                f"This is a plugin bug — transforms must use a valid error category. "
+                f"Valid categories: {sorted(valid_reasons)}"
+            )
+
         error_id = f"terr_{generate_id()[:12]}"
 
         # error_details may contain NaN/Infinity or non-serializable values

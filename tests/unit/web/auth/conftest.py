@@ -36,7 +36,7 @@ def jwks_response(rsa_keypair):
     return {"keys": [key_dict]}
 
 
-def make_rs256_token(private_key, claims: dict) -> str:
+def make_rs256_token(private_key, claims: dict[str, object]) -> str:
     """Sign a JWT with an RSA private key (RS256, kid=test-key-1).
 
     Not a fixture — a plain helper function imported explicitly by

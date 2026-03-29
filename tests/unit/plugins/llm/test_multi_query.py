@@ -6,6 +6,7 @@ and multi-query transform instantiation via unified LLMTransform.
 
 from __future__ import annotations
 
+from types import MappingProxyType
 from typing import Any
 
 import pytest
@@ -234,8 +235,8 @@ class TestResolveQueriesDuplicateNames:
         with pytest.raises(ValueError, match="Duplicate query name"):
             resolve_queries(
                 [
-                    QuerySpec(name="scoring", input_fields={"x": "a"}),
-                    QuerySpec(name="scoring", input_fields={"x": "b"}),
+                    QuerySpec(name="scoring", input_fields=MappingProxyType({"x": "a"})),
+                    QuerySpec(name="scoring", input_fields=MappingProxyType({"x": "b"})),
                 ]
             )
 

@@ -1018,6 +1018,160 @@ class TestAggregationFailureMatrix:
         assert RowOutcome.CONSUMED_IN_BATCH in recorded_outcomes
 
 
+class TestTransformModeOutcomeOrdering:
+    """Regression tests for P0: parent outcomes must NOT be recorded before downstream validation.
+
+    Bug: _route_transform_results recorded CONSUMED_IN_BATCH/QUARANTINED for parent
+    tokens BEFORE validating expected_output_count and before expand_token(). If either
+    of those failed, the audit trail showed terminal outcomes for parents with no child
+    token — recovery would skip the row (silent data loss).
+
+    Fix: outcome recording must happen AFTER both cardinality validation and expand_token
+    succeed. On failure, parent tokens must remain BUFFERED (non-terminal) so recovery
+    can retry them.
+    """
+
+    def _setup_batch_processor(
+        self,
+        *,
+        expected_output_count: int | None = None,
+    ) -> tuple[LandscapeDB, LandscapeRecorder, RowProcessor, Mock, NodeID]:
+        """Create a transform-mode batch processor with optional expected_output_count."""
+        db, recorder = _make_recorder()
+        source_node = NodeID("source-0")
+        agg_node = NodeID("agg-1")
+
+        transform = _make_mock_transform(
+            node_id=str(agg_node),
+            name="agg-transform",
+            is_batch_aware=True,
+            on_success="agg_sink",
+        )
+
+        processor = _make_processor(
+            recorder,
+            node_step_map={source_node: 0, agg_node: 1},
+            node_to_next={source_node: agg_node, agg_node: None},
+            first_transform_node_id=agg_node,
+            node_to_plugin={agg_node: transform},
+            aggregation_settings={
+                agg_node: AggregationSettings(
+                    name="batch_agg",
+                    plugin="agg-transform",
+                    input="default",
+                    on_error="discard",
+                    trigger={"count": 1},
+                    output_mode="transform",
+                    expected_output_count=expected_output_count,
+                ),
+            },
+        )
+        return db, recorder, processor, transform, agg_node
+
+    def test_cardinality_mismatch_does_not_record_parent_terminal_outcome(self) -> None:
+        """Parent tokens must NOT be CONSUMED_IN_BATCH when expected_output_count fails.
+
+        If the cardinality check raises after outcomes are recorded, recovery
+        sees terminal parents with no children — silent data loss.
+        """
+        _db, recorder, processor, transform, _agg_node = self._setup_batch_processor(
+            expected_output_count=5,  # Will mismatch: transform returns 1 row
+        )
+        source_row = _make_source_row({"value": 10})
+        ctx = make_context(landscape=recorder)
+        captured: dict[str, TokenInfo] = {}
+
+        # Transform returns 1 output row but expected_output_count=5 → RuntimeError
+        flush_result = TransformResult.success(
+            make_row({"value": 999}, contract=_make_contract()),
+            success_reason={"action": "batch_processed"},
+        )
+
+        def buffer_row_side_effect(node_id: NodeID, token: TokenInfo) -> None:
+            captured["token"] = token
+
+        def execute_flush_side_effect(*, node_id, transform, ctx, trigger_type):
+            return flush_result, [captured["token"]], "batch-1"
+
+        with (
+            patch.object(processor._aggregation_executor, "buffer_row", side_effect=buffer_row_side_effect),
+            patch.object(processor._aggregation_executor, "get_batch_id", return_value="batch-1"),
+            patch.object(processor._aggregation_executor, "should_flush", return_value=True),
+            patch.object(processor._aggregation_executor, "get_trigger_type", return_value=TriggerType.COUNT),
+            patch.object(processor._aggregation_executor, "execute_flush", side_effect=execute_flush_side_effect),
+            patch.object(recorder, "record_token_outcome") as record_outcome,
+            patch.object(processor, "_emit_transform_completed"),
+            patch.object(processor, "_emit_token_completed"),
+            pytest.raises(RuntimeError, match="expected_output_count=5"),
+        ):
+            processor.process_row(
+                row_index=0,
+                source_row=source_row,
+                transforms=[transform],
+                ctx=ctx,
+            )
+
+        # Parent tokens must NOT have been recorded as terminal before the error.
+        # Only BUFFERED is acceptable (non-terminal, allows recovery retry).
+        recorded_outcomes = [call.kwargs["outcome"] for call in record_outcome.call_args_list]
+        assert RowOutcome.CONSUMED_IN_BATCH not in recorded_outcomes, (
+            f"CONSUMED_IN_BATCH was recorded before cardinality check failed — "
+            f"recovery would skip this row. Recorded outcomes: {recorded_outcomes}"
+        )
+
+    def test_expand_token_failure_does_not_record_parent_terminal_outcome(self) -> None:
+        """Parent tokens must NOT be CONSUMED_IN_BATCH when expand_token raises.
+
+        If expand_token fails after outcomes are recorded, the audit trail shows
+        terminal parents with no expanded children — silent data loss on recovery.
+        """
+        _db, recorder, processor, transform, _agg_node = self._setup_batch_processor()
+        source_row = _make_source_row({"value": 10})
+        ctx = make_context(landscape=recorder)
+        captured: dict[str, TokenInfo] = {}
+
+        flush_result = TransformResult.success(
+            make_row({"value": 999}, contract=_make_contract()),
+            success_reason={"action": "batch_processed"},
+        )
+
+        def buffer_row_side_effect(node_id: NodeID, token: TokenInfo) -> None:
+            captured["token"] = token
+
+        def execute_flush_side_effect(*, node_id, transform, ctx, trigger_type):
+            return flush_result, [captured["token"]], "batch-1"
+
+        with (
+            patch.object(processor._aggregation_executor, "buffer_row", side_effect=buffer_row_side_effect),
+            patch.object(processor._aggregation_executor, "get_batch_id", return_value="batch-1"),
+            patch.object(processor._aggregation_executor, "should_flush", return_value=True),
+            patch.object(processor._aggregation_executor, "get_trigger_type", return_value=TriggerType.COUNT),
+            patch.object(processor._aggregation_executor, "execute_flush", side_effect=execute_flush_side_effect),
+            patch.object(recorder, "record_token_outcome") as record_outcome,
+            patch.object(processor, "_emit_transform_completed"),
+            patch.object(processor, "_emit_token_completed"),
+            patch.object(
+                processor._token_manager,
+                "expand_token",
+                side_effect=RuntimeError("expand_token DB integrity error"),
+            ),
+            pytest.raises(RuntimeError, match="expand_token DB integrity error"),
+        ):
+            processor.process_row(
+                row_index=0,
+                source_row=source_row,
+                transforms=[transform],
+                ctx=ctx,
+            )
+
+        # Parent tokens must NOT have terminal outcomes recorded before expand_token.
+        recorded_outcomes = [call.kwargs["outcome"] for call in record_outcome.call_args_list]
+        assert RowOutcome.CONSUMED_IN_BATCH not in recorded_outcomes, (
+            f"CONSUMED_IN_BATCH was recorded before expand_token failed — "
+            f"recovery would skip this row. Recorded outcomes: {recorded_outcomes}"
+        )
+
+
 class TestProcessRowGateBranching:
     """Tests for non-linear gate branching through next_node_id."""
 
@@ -2589,7 +2743,7 @@ class TestRoutingInvariantFailures:
             updated_token=make_token_info(data={"value": 10}),
             sink_name=None,
             next_node_id=None,
-            child_tokens=[],
+            child_tokens=(),
         )
 
         with (
@@ -3558,9 +3712,9 @@ class TestProcessorOutcomeTypes:
         from elspeth.engine.processor import _TransformTerminal
 
         mock_results = cast("list[RowResult]", [Mock(spec=RowResult), Mock(spec=RowResult)])
-        outcome = _TransformTerminal(result=mock_results)
-        assert isinstance(outcome.result, list)
-        assert len(outcome.result) == 2
+        outcome = _TransformTerminal(result=mock_results)  # type: ignore[arg-type]  # intentionally passing list to test runtime behavior
+        assert isinstance(outcome.result, list)  # type: ignore[unreachable]
+        assert len(outcome.result) == 2  # type: ignore[unreachable]
 
     def test_transform_outcome_isinstance_dispatch(self) -> None:
         """Verify isinstance works for discriminated union dispatch."""
@@ -3646,7 +3800,7 @@ class TestFlushContextImmutability:
             node_id=NodeID("node-1"),
             transform=Mock(),
             settings=Mock(),
-            buffered_tokens=original_list,
+            buffered_tokens=tuple(original_list),
             batch_id="batch-1",
             error_msg="test",
             expand_parent_token=token,

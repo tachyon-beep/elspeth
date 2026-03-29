@@ -359,7 +359,7 @@ class TestShutdownGuards:
 # =============================================================================
 
 
-def _small_queue_defaults() -> MappingProxyType:
+def _small_queue_defaults() -> MappingProxyType[str, object]:
     """INTERNAL_DEFAULTS with telemetry queue_size=2 for backpressure tests."""
     return MappingProxyType(
         {

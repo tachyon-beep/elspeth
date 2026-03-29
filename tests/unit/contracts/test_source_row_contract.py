@@ -85,9 +85,9 @@ class TestSourceRowImmutability:
     def test_frozen_rejects_field_reassignment(self) -> None:
         source_row = SourceRow.valid({"id": 1})
         with pytest.raises(AttributeError):
-            source_row.row = {"id": 2}
+            source_row.row = {"id": 2}  # type: ignore[misc]
 
     def test_frozen_rejects_quarantine_field_reassignment(self) -> None:
         source_row = SourceRow.quarantined(row={"bad": "data"}, error="failed", destination="quarantine")
         with pytest.raises(AttributeError):
-            source_row.is_quarantined = False
+            source_row.is_quarantined = False  # type: ignore[misc]

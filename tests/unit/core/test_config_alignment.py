@@ -24,6 +24,7 @@ If a test fails after adding a new field to a Settings class:
 3. If the field is internal-only: Add it to internal_fields with explanation
 """
 
+from types import MappingProxyType
 from typing import ClassVar
 
 from tests.fixtures.landscape import make_landscape_db
@@ -437,7 +438,7 @@ class TestRuntimeFieldOrigins:
         settings_fields = set(RetrySettings.model_fields.keys())
 
         # Map Settings fields to their Runtime names
-        field_mappings = FIELD_MAPPINGS.get("RetrySettings", {})
+        field_mappings: dict[str, str] | MappingProxyType[str, str] = FIELD_MAPPINGS.get("RetrySettings", {})
         settings_as_runtime = {field_mappings.get(f, f) for f in settings_fields}
 
         # Get internal-only fields for retry subsystem
@@ -465,7 +466,7 @@ class TestRuntimeFieldOrigins:
         settings_fields = set(RateLimitSettings.model_fields.keys())
 
         # Map Settings fields to their Runtime names
-        field_mappings = FIELD_MAPPINGS.get("RateLimitSettings", {})
+        field_mappings: dict[str, str] | MappingProxyType[str, str] = FIELD_MAPPINGS.get("RateLimitSettings", {})
         settings_as_runtime = {field_mappings.get(f, f) for f in settings_fields}
 
         # Get internal-only fields (if any)
@@ -491,7 +492,7 @@ class TestRuntimeFieldOrigins:
         runtime_fields = set(RuntimeConcurrencyConfig.__dataclass_fields__.keys())
         settings_fields = set(ConcurrencySettings.model_fields.keys())
 
-        field_mappings = FIELD_MAPPINGS.get("ConcurrencySettings", {})
+        field_mappings: dict[str, str] | MappingProxyType[str, str] = FIELD_MAPPINGS.get("ConcurrencySettings", {})
         settings_as_runtime = {field_mappings.get(f, f) for f in settings_fields}
         internal_fields = set(INTERNAL_DEFAULTS.get("concurrency", {}).keys())
 
@@ -515,7 +516,7 @@ class TestRuntimeFieldOrigins:
         runtime_fields = set(RuntimeCheckpointConfig.__dataclass_fields__.keys())
         settings_fields = set(CheckpointSettings.model_fields.keys())
 
-        field_mappings = FIELD_MAPPINGS.get("CheckpointSettings", {})
+        field_mappings: dict[str, str] | MappingProxyType[str, str] = FIELD_MAPPINGS.get("CheckpointSettings", {})
         settings_as_runtime = {field_mappings.get(f, f) for f in settings_fields}
         internal_fields = set(INTERNAL_DEFAULTS.get("checkpoint", {}).keys())
 

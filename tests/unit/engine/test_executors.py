@@ -269,7 +269,7 @@ class TestGateOutcome:
         outcome = GateOutcome(
             result=result,
             updated_token=token,
-            child_tokens=[child],
+            child_tokens=(child,),
             sink_name="error_sink",
         )
         assert len(outcome.child_tokens) == 1
@@ -283,7 +283,7 @@ class TestGateOutcome:
         token = _make_token()
         outcome = GateOutcome(result=result, updated_token=token)
         with pytest.raises(AttributeError):
-            outcome.sink_name = "mutated"
+            outcome.sink_name = "mutated"  # type: ignore[misc]
 
     def test_child_tokens_is_tuple(self) -> None:
         """child_tokens is converted to tuple for deep immutability."""
@@ -293,7 +293,7 @@ class TestGateOutcome:
         outcome = GateOutcome(
             result=result,
             updated_token=token,
-            child_tokens=[child],
+            child_tokens=(child,),
         )
         assert isinstance(outcome.child_tokens, tuple)
 
@@ -966,7 +966,7 @@ class TestTransformExecutor:
         transform = _make_transform(on_error="discard")
         # Construct a valid error result, then corrupt it to bypass __post_init__
         # This simulates a hypothetical bug in TransformResult construction.
-        result = TransformResult.error(reason={"reason": "placeholder"})
+        result = TransformResult.error(reason={"reason": "placeholder"})  # type: ignore[typeddict-item]  # throwaway; corrupted to None below
         object.__setattr__(result, "reason", None)
         transform.process.return_value = result
         token = _make_token()
@@ -1600,8 +1600,8 @@ class TestDispatchResolvedDestinationPerVariant:
         )
 
         assert outcome.action.kind == RoutingKind.CONTINUE
-        assert outcome.action.kind != RoutingKind.ROUTE
-        assert outcome.action.kind != RoutingKind.FORK_TO_PATHS
+        assert outcome.action.kind != RoutingKind.ROUTE  # type: ignore[comparison-overlap]
+        assert outcome.action.kind != RoutingKind.FORK_TO_PATHS  # type: ignore[comparison-overlap]
         assert outcome.sink_name is None
         assert outcome.next_node_id is None
         assert outcome.child_tokens == ()
@@ -1628,7 +1628,7 @@ class TestDispatchResolvedDestinationPerVariant:
         )
 
         assert outcome.action.kind == RoutingKind.ROUTE
-        assert outcome.action.kind != RoutingKind.CONTINUE
+        assert outcome.action.kind != RoutingKind.CONTINUE  # type: ignore[comparison-overlap]
         assert outcome.action.destinations == ("continue",)
         assert outcome.sink_name is None
         assert outcome.next_node_id is None
@@ -1664,8 +1664,8 @@ class TestDispatchResolvedDestinationPerVariant:
         )
 
         assert outcome.action.kind == RoutingKind.FORK_TO_PATHS
-        assert outcome.action.kind != RoutingKind.CONTINUE
-        assert outcome.action.kind != RoutingKind.ROUTE
+        assert outcome.action.kind != RoutingKind.CONTINUE  # type: ignore[comparison-overlap]
+        assert outcome.action.kind != RoutingKind.ROUTE  # type: ignore[comparison-overlap]
         assert len(outcome.child_tokens) == 2
         assert outcome.sink_name is None
         assert outcome.next_node_id is None
@@ -1880,7 +1880,7 @@ class TestDispatchResolvedDestinationPerVariant:
 
         # Must be FORK_TO_PATHS, definitely not CONTINUE
         assert outcome.action.kind == RoutingKind.FORK_TO_PATHS
-        assert outcome.action.kind != RoutingKind.CONTINUE
+        assert outcome.action.kind != RoutingKind.CONTINUE  # type: ignore[comparison-overlap]
         assert len(outcome.child_tokens) == 2
         # fork_token must have been called (not skipped by hitting CONTINUE branch)
         tm.fork_token.assert_called_once()
@@ -1917,7 +1917,7 @@ class TestDispatchResolvedDestinationPerVariant:
         assert outcome_as_route.action.kind == RoutingKind.ROUTE
         assert outcome_as_route.action.destinations == ("continue",)
         # They must differ
-        assert outcome_normal.action.kind != outcome_as_route.action.kind
+        assert outcome_normal.action.kind != outcome_as_route.action.kind  # type: ignore[comparison-overlap]
 
 
 # =============================================================================
@@ -3476,8 +3476,15 @@ class TestNodeStateGuard:
         with pytest.raises(OrchestrationInvariantError, match="before __enter__"):
             _ = guard.state_id
 
-    def test_auto_fail_when_recorder_down_logs_and_propagates(self) -> None:
-        """If recorder.complete_node_state fails during auto-fail, original exception propagates."""
+    def test_auto_fail_when_recorder_down_raises_audit_integrity_error(self) -> None:
+        """If recorder.complete_node_state fails during auto-fail, AuditIntegrityError raised.
+
+        Regression: Previously the original exception propagated and the DB failure
+        was silently logged. This violates crash-on-anomaly: the audit trail has a
+        permanent OPEN state (Tier 1 violation) which is more critical than the
+        original transform error.
+        """
+        from elspeth.contracts.errors import AuditIntegrityError
         from elspeth.engine.executors import NodeStateGuard
 
         recorder = _make_recorder()
@@ -3490,8 +3497,8 @@ class TestNodeStateGuard:
             step_index=1,
             input_data={"v": 1},
         )
-        # Original exception must propagate, not the recorder error
-        with pytest.raises(ValueError, match="original error"), guard:
+        # AuditIntegrityError must be raised — DB failure is more critical than original error
+        with pytest.raises(AuditIntegrityError, match=r"Cannot record FAILED.*DB is down"), guard:
             raise ValueError("original error")
 
     def test_attempt_passed_to_begin_node_state(self) -> None:
@@ -3562,13 +3569,15 @@ class TestNodeStateGuard:
         with pytest.raises(AuditIntegrityError, match="corrupt state table"), guard:
             pass
 
-    def test_regular_recorder_error_on_clean_exit_still_raises_invariant(self) -> None:
-        """Non-system recorder error on clean exit → OrchestrationInvariantError still raised.
+    def test_regular_recorder_error_on_clean_exit_raises_audit_integrity(self) -> None:
+        """Non-system recorder error on clean exit → AuditIntegrityError raised.
 
         When recorder.complete_node_state fails with a regular exception (e.g., DB
-        down), the guard logs it and still raises OrchestrationInvariantError for
-        the missing complete() bug.  The recorder failure is swallowed (logged).
+        down) during the clean-exit path, AuditIntegrityError supersedes the
+        OrchestrationInvariantError that would have been raised for missing complete().
+        Audit corruption is always the highest-priority failure signal.
         """
+        from elspeth.contracts.errors import AuditIntegrityError
         from elspeth.engine.executors import NodeStateGuard
 
         recorder = _make_recorder()
@@ -3581,7 +3590,7 @@ class TestNodeStateGuard:
             step_index=1,
             input_data={"v": 1},
         )
-        with pytest.raises(OrchestrationInvariantError, match="exited without complete"), guard:
+        with pytest.raises(AuditIntegrityError, match=r"Cannot record FAILED.*DB connection lost"), guard:
             pass
 
     # -- Re-raise guard tests: exception path (auto-fail) --------------------
@@ -4188,7 +4197,10 @@ class TestReRaiseGuardPattern:
 
     # Files where the handler intentionally does MORE than bare re-raise.
     # cli.py is the outermost boundary — it formats errors and sets exit codes.
-    _HANDLER_ALLOWLIST = frozenset({"cli.py"})
+    # sink.py has best-effort cleanup of OPEN node_states before re-raise —
+    # without this, a system error leaves states permanently OPEN (a Tier 1
+    # violation worse than the original error). See _best_effort_cleanup().
+    _HANDLER_ALLOWLIST = frozenset({"cli.py", "sink.py"})
 
     def test_all_reraise_guards_have_bare_raise(self) -> None:
         """Every except (FrameworkBugError, AuditIntegrityError) must contain only 'raise'.
