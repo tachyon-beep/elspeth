@@ -162,12 +162,36 @@ class RunLifecycleRepository:
         if reproducibility_grade is not None:
             values["reproducibility_grade"] = reproducibility_grade
 
-        self._ops.execute_update(runs_table.update().where(runs_table.c.run_id == run_id).values(**values))
+        # Atomic conditional UPDATE: only succeeds when current status is NOT
+        # already terminal.  Once a run reaches COMPLETED/FAILED/INTERRUPTED,
+        # its terminal status and completed_at are the legal record and must
+        # not be overwritten (Bug 3c77199a70).  The resume path transitions
+        # FAILED/INTERRUPTED → RUNNING via update_run_status() first, so by the
+        # time complete_run() is called the status is RUNNING.
+        _terminal_values = [s.value for s in _TERMINAL_RUN_STATUSES]
+        with self._db.connection() as conn:
+            result = conn.execute(
+                runs_table.update()
+                .where(runs_table.c.run_id == run_id)
+                .where(runs_table.c.status.notin_(_terminal_values))
+                .values(**values)
+            )
+            if result.rowcount == 0:
+                existing = conn.execute(select(runs_table.c.status).where(runs_table.c.run_id == run_id)).fetchone()
+                if existing is not None and existing.status in _terminal_values:
+                    raise AuditIntegrityError(
+                        f"Cannot complete run {run_id}: already terminal "
+                        f"(status={existing.status!r}). Terminal runs are immutable — "
+                        f"the audit record's status and completed_at timestamp cannot "
+                        f"be overwritten. Resume path must transition to RUNNING via "
+                        f"update_run_status() before re-completing."
+                    )
+                raise AuditIntegrityError(f"Cannot complete run {run_id}: run not found")
 
-        result = self.get_run(run_id)
-        if result is None:
-            raise AuditIntegrityError(f"Run {run_id} not found after INSERT/UPDATE - database corruption or transaction failure")
-        return result
+        run = self.get_run(run_id)
+        if run is None:
+            raise AuditIntegrityError(f"Run {run_id} not found after UPDATE - database corruption or transaction failure")
+        return run
 
     def get_run(self, run_id: str) -> Run | None:
         """Get a run by ID.

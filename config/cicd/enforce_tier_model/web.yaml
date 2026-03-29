@@ -218,13 +218,13 @@ allow_hits:
   expires: null
 
 # App factory — @app.get() false positive (moved health route)
-- key: web/app.py:R1:create_app:fp=c6dd2f57f3279528
+- key: web/app.py:R1:create_app:fp=0ac04e8b084fbb9c
   owner: web-app
   reason: "Tier 3 boundary — os.environ.get() for env var check, not dict.get() on pipeline data"
   safety: "Guards dev-mode secret_key warning; no data flow impact"
   expires: null
 
-- key: web/app.py:R1:create_app:health:fp=7d08bc86914bca1b
+- key: web/app.py:R1:create_app:health:fp=c9fc1c5eac98aa71
   owner: web-app
   reason: "False positive — @app.get() is FastAPI HTTP route decorator, not dict.get()"
   safety: No dict access involved

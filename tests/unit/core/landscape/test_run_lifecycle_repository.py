@@ -546,13 +546,9 @@ class TestCompleteRunCrashPath:
     """Tests for complete_run edge cases and crash paths."""
 
     def test_nonexistent_run_raises(self) -> None:
-        """Completing a nonexistent run must crash.
-
-        DatabaseOps.execute_update raises AuditIntegrityError on zero rows affected,
-        which fires before the post-update AuditIntegrityError check.
-        """
+        """Completing a nonexistent run must crash."""
         _, repo = _make_repo()
-        with pytest.raises(AuditIntegrityError, match="zero rows affected"):
+        with pytest.raises(AuditIntegrityError, match="run not found"):
             repo.complete_run("nonexistent-run", RunStatus.COMPLETED)
 
     def test_complete_preserves_existing_grade_when_none_passed(self) -> None:
@@ -568,6 +564,47 @@ class TestCompleteRunCrashPath:
         run = repo.complete_run("run-1", RunStatus.COMPLETED)
         assert run.status == RunStatus.COMPLETED
         assert run.reproducibility_grade == ReproducibilityGrade.FULL_REPRODUCIBLE
+
+    def test_double_completion_rejected(self) -> None:
+        """Already-terminal run cannot be completed again.
+
+        Bug 3c77199a70: complete_run() must enforce terminal immutability.
+        Once a run reaches COMPLETED/FAILED/INTERRUPTED, the terminal status
+        and completed_at timestamp are the legal record and must not be
+        overwritten.
+        """
+        _, repo = _make_repo()
+        repo.complete_run("run-1", RunStatus.COMPLETED)
+        with pytest.raises(AuditIntegrityError, match="already terminal"):
+            repo.complete_run("run-1", RunStatus.FAILED)
+
+    def test_completed_to_completed_rejected(self) -> None:
+        """Even same-status double completion is rejected (timestamp overwrite)."""
+        _, repo = _make_repo()
+        repo.complete_run("run-1", RunStatus.COMPLETED)
+        with pytest.raises(AuditIntegrityError, match="already terminal"):
+            repo.complete_run("run-1", RunStatus.COMPLETED)
+
+    def test_failed_to_completed_rejected(self) -> None:
+        """FAILED run cannot be re-completed as COMPLETED (outcome falsification)."""
+        _, repo = _make_repo()
+        repo.complete_run("run-1", RunStatus.FAILED)
+        with pytest.raises(AuditIntegrityError, match="already terminal"):
+            repo.complete_run("run-1", RunStatus.COMPLETED)
+
+    def test_interrupted_then_resume_then_complete_allowed(self) -> None:
+        """Resume path: INTERRUPTED → RUNNING (via update_run_status) → COMPLETED.
+
+        The resume path transitions out of terminal state first, then
+        complete_run sees RUNNING and succeeds.
+        """
+        _, repo = _make_repo()
+        repo.complete_run("run-1", RunStatus.INTERRUPTED)
+        # Resume: transition back to RUNNING first
+        repo.update_run_status("run-1", RunStatus.RUNNING)
+        # Now complete_run should succeed
+        run = repo.complete_run("run-1", RunStatus.COMPLETED)
+        assert run.status == RunStatus.COMPLETED
 
 
 # ---------------------------------------------------------------------------

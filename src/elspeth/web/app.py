@@ -6,6 +6,7 @@ import os
 import sys
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
+from pathlib import Path
 
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
@@ -154,5 +155,14 @@ def create_app(settings: WebSettings | None = None) -> FastAPI:
     @app.get("/api/health")
     async def health() -> dict[str, str]:
         return {"status": "ok"}
+
+    # --- Static file serving for the React SPA (production) ---
+    # Mount frontend/dist/ AFTER all API and WS routes so /api/* takes precedence.
+    # Only active when the build output exists (i.e., after `npm run build`).
+    frontend_dist = Path(__file__).parent / "frontend" / "dist"
+    if frontend_dist.is_dir():
+        from starlette.staticfiles import StaticFiles
+
+        app.mount("/", StaticFiles(directory=str(frontend_dist), html=True), name="spa")
 
     return app
