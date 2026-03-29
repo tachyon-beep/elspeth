@@ -62,9 +62,9 @@ function App() {
             role="alert"
             style={{
               padding: "10px 14px",
-              backgroundColor: "rgba(255, 102, 102, 0.12)",
+              backgroundColor: "var(--color-error-bg)",
               color: "var(--color-error)",
-              borderBottom: "1px solid rgba(255, 102, 102, 0.3)",
+              borderBottom: "1px solid var(--color-error-border)",
               fontSize: 13,
             }}
           >

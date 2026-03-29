@@ -24,33 +24,7 @@ import {
 import dagre from "@dagrejs/dagre";
 import "@xyflow/react/dist/style.css";
 import { useSessionStore } from "@/stores/sessionStore";
-import type { NodeSpec } from "@/types/index";
-
-// ── Node colours matching App.css type badge colours ─────────────────────────
-// React Flow requires inline style values -- CSS variables cannot be used.
-// These values mirror the App.css custom properties:
-// #f66 = --color-error, #999 = --color-text-muted, #b0b0c0 = --color-text-secondary
-
-const NODE_COLORS: Record<NodeSpec["type"], string> = {
-  source: "rgba(102, 204, 153, 0.15)",
-  transform: "rgba(255, 204, 102, 0.15)",
-  gate: "rgba(204, 153, 255, 0.15)",
-  sink: "rgba(255, 153, 102, 0.15)",
-};
-
-const NODE_BORDER_COLORS: Record<NodeSpec["type"], string> = {
-  source: "#6c9",
-  transform: "#fc6",
-  gate: "#c9f",
-  sink: "#f96",
-};
-
-const NODE_TEXT_COLORS: Record<NodeSpec["type"], string> = {
-  source: "#6c9",
-  transform: "#fc6",
-  gate: "#c9f",
-  sink: "#f96",
-};
+import { BADGE_COLORS, BADGE_BACKGROUNDS, EDGE_COLORS, EDGE_LABEL_COLOR } from "@/styles/tokens";
 
 const NODE_WIDTH = 180;
 const NODE_HEIGHT = 50;
@@ -107,9 +81,9 @@ export function GraphView() {
       data: { label: node.name },
       position: { x: 0, y: 0 }, // Will be set by dagre
       style: {
-        backgroundColor: NODE_COLORS[node.type],
-        border: `2px solid ${NODE_BORDER_COLORS[node.type]}`,
-        color: NODE_TEXT_COLORS[node.type],
+        backgroundColor: BADGE_BACKGROUNDS[node.type],
+        border: `2px solid ${BADGE_COLORS[node.type]}`,
+        color: BADGE_COLORS[node.type],
         borderRadius: 6,
         padding: "8px 12px",
         fontSize: 12,
@@ -126,10 +100,10 @@ export function GraphView() {
       label: edge.label ?? undefined,
       animated: edge.edge_type === "error",
       style: {
-        stroke: edge.edge_type === "error" ? "#f66" : "#999",
+        stroke: edge.edge_type === "error" ? EDGE_COLORS.error : EDGE_COLORS.normal,
         strokeWidth: 1.5,
       },
-      labelStyle: { fontSize: 10, fill: "#b0b0c0" },
+      labelStyle: { fontSize: 10, fill: EDGE_LABEL_COLOR },
     }));
 
     return layoutGraph(rfNodes, rfEdges);

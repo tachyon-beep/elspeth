@@ -99,7 +99,7 @@ export function ChatPanel() {
           role="alert"
           style={{
             padding: "8px 12px",
-            backgroundColor: "rgba(255, 102, 102, 0.12)",
+            backgroundColor: "var(--color-error-bg)",
             color: "var(--color-error)",
             fontSize: 13,
             display: "flex",

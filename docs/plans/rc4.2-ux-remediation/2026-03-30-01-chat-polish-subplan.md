@@ -26,6 +26,11 @@ Primary files:
 This plan is intentionally frontend-only. No REST/API changes are required for
 the initial pass.
 
+Prerequisite:
+
+- install a frontend test framework before implementation begins
+  (`vitest` + `@testing-library/react` or equivalent)
+
 ---
 
 ## 2. Current State
@@ -229,6 +234,14 @@ Expected changes:
    - Tool disclosure content is excluded.
 
 ### Unit/component tests
+
+Test prerequisite:
+
+- the repo does not currently have a frontend unit/component test runner
+- before implementing this subplan, add and standardize:
+  - `vitest`
+  - `@testing-library/react`
+  - a Zustand store test pattern for isolated state-machine tests
 
 Add focused tests around:
 

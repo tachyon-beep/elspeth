@@ -94,6 +94,10 @@ Recommended layering:
 
 This keeps CLI, web execution, and future non-web runners from drifting apart.
 
+The implementation should prefer extending or wrapping the existing
+`SecretLoader` / `CompositeSecretLoader` model in `core.security`, not creating
+an unrelated parallel hierarchy with overlapping names and semantics.
+
 ### AD-2: Secret references are inventory-visible but value-invisible
 
 The browser may list that a secret reference is available, but it must never
@@ -284,6 +288,13 @@ The resolver should compose multiple backends, for example:
 This mirrors the existing `CompositeSecretLoader` pattern rather than replacing
 it.
 
+Naming/shape constraint:
+
+- avoid introducing a second conflicting `SecretRef` abstraction unless the
+  distinction is explicit and necessary
+- if separate browser-inventory and runtime-resolution records are needed, they
+  should have distinct names
+
 ### 6.3 Execution integration
 
 During web execution:
@@ -302,18 +313,20 @@ persisted session state.
 ### 6.4 Audit integration
 
 The current audit contract `SecretResolutionInput` only allows `source="keyvault"`.
-The secret-reference rollout needs a compatible extension so web-resolved
-secrets can also be recorded safely.
+The secret-reference rollout needs a compatible extension before any web secret
+resolution work can be considered executable.
 
-Expected follow-up:
+This is not a follow-up nicety; it is a phase-1 blocker.
+
+Expected early change:
 
 - extend allowed audit sources to include at least `env`, `user`, and later
   `org`
 - keep fingerprint semantics intact
 - record scope/backend without ever storing the raw value
 
-This is a shared contract change and should be called out explicitly in the
-implementation.
+This is a shared contract change and should be completed before runtime secret
+resolution is wired into execution.
 
 ---
 
@@ -336,6 +349,14 @@ The exact storage backend may be:
 
 For RC4.2, an encrypted server-side persistence layer is acceptable if it is
 clearly isolated behind the resolver interface.
+
+Execution seam note:
+
+- because `_run_pipeline()` executes in a worker thread, the user-secret
+  backend used there should present a synchronous access surface or an explicit
+  thread-bridge design
+- do not implicitly assume async request-handler patterns are safe in the
+  runtime resolution hot path
 
 ### 7.2 Server-scoped secrets
 
@@ -386,14 +407,15 @@ Recommended initial tools:
 
 - `list_secret_refs`
 - `validate_secret_ref`
-- `set_secret_ref`
+- `wire_secret_ref`
 
 Rules:
 
 - no tool may return plaintext secret values
-- `set_secret_ref` should set an opaque ref in pipeline state, not write a
+- `wire_secret_ref` should set an opaque ref in pipeline state, not write a
   literal secret
 - secret-creation itself is better handled by dedicated UI/API than by chat
+- user-secret storage is a dedicated REST/UI operation, not a composer/chat tool
 
 ---
 
@@ -479,6 +501,8 @@ Implications:
 - define resolver protocol in shared layers
 - define browser-safe inventory models
 - extend audit source model for non-Key Vault secret references
+- decide explicitly whether the resolver is an extension of existing
+  `SecretLoader` semantics or a superset wrapper around them
 
 Deliverable:
 
@@ -489,6 +513,11 @@ Deliverable:
 - implement user-secret persistence backend
 - implement curated server-secret inventory/resolution backend
 - compose them behind a resolver service
+- ensure the execution-facing user-secret backend is safe to call from the
+  worker-thread execution path
+- define chained inventory behavior:
+  - deduplicate by secret name
+  - highest-priority scope wins when the same name exists in multiple backends
 
 Deliverable:
 
@@ -499,6 +528,8 @@ Deliverable:
 - add secret routes and schemas
 - add dedicated UI for write-only entry and inventory display
 - ensure the browser clears secret inputs after submission
+- keep secret creation/update on REST/UI only; never route plaintext secret
+  entry through chat/composer tooling
 
 Deliverable:
 
@@ -509,6 +540,10 @@ Deliverable:
 - add secret-ref composer tools
 - add validation checks for secret refs
 - update system-status readiness logic to account for resolver-backed secrets
+- define `resolve_secret_refs()` failure semantics:
+  - collect all missing/unresolvable refs in one pass where practical
+  - raise one clear error listing the missing refs rather than failing one name
+    at a time
 
 Deliverable:
 
@@ -549,6 +584,13 @@ Potential new files:
 
 - `src/elspeth/contracts/secrets.py`
 - `src/elspeth/core/security/runtime_secret_resolver.py`
+
+Implementation notes:
+
+- any runtime `ResolvedSecret` type must override `__repr__`/debug rendering so
+  plaintext values cannot leak via logs or tracebacks
+- audit extension tests should verify existing Key Vault sources still validate
+  while new `env`/`user` sources are accepted
 
 ### Web backend
 
@@ -594,6 +636,13 @@ Expected modified files:
 - resolution follows the configured scope order
 - execution receives resolved secrets without persisting them
 - audit records capture provenance without plaintext values
+- `resolve_secret_refs()` tree-walk unit tests cover nested structures and
+  aggregate missing-ref errors
+- chained inventory tests verify dedup by name with highest-priority scope
+  winning
+- worker-thread safety tests cover execution-path reads from the user-secret
+  backend
+- audit contract regression tests verify old and new secret source types
 
 ### Frontend tests
 

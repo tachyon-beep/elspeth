@@ -85,7 +85,7 @@ function getRelBadge(
   downstream: Map<string, string | null>,
 ): { label: string; color: string } | null {
   if (nodeId === selectedId) {
-    return { label: "SELECTED", color: "var(--color-focus-ring)" };
+    return { label: "SELECTED", color: "var(--color-accent)" };
   }
   if (upstream.has(nodeId)) {
     return { label: "INPUT", color: "var(--color-success)" };
@@ -236,11 +236,11 @@ export function SpecView() {
             role="alert"
             style={{
               padding: "8px 12px",
-              backgroundColor: "rgba(255, 204, 102, 0.15)",
+              backgroundColor: "var(--color-warning-bg)",
               borderRadius: 6,
               fontSize: 13,
               color: "var(--color-warning)",
-              border: "1px solid rgba(255, 204, 102, 0.3)",
+              border: "1px solid var(--color-warning-border)",
             }}
           >
             <div style={{ fontWeight: 600, marginBottom: 4 }}>

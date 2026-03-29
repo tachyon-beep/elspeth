@@ -9,104 +9,117 @@
    Colour Palette
    --------------------------------------------------------------------------- */
 :root {
-  /* Backgrounds */
-  --color-bg: #1a1a2e;
-  --color-surface: #1e1e34;
-  --color-surface-sidebar: #16162a;
-  --color-surface-inspector: #1c1c32;
-  --color-surface-elevated: #242440;
-  --color-surface-hover: rgba(255, 255, 255, 0.04);
+  /* ── Backgrounds — DTA deep teal family ──────────────────────────────────── */
+  --color-bg:                #0f2d35;
+  --color-surface:           #122f37;
+  --color-surface-sidebar:   #0c2830;
+  --color-surface-inspector: #112e36;
+  --color-surface-elevated:  #1a3d47;
+  --color-surface-hover:     rgba(255, 255, 255, 0.04);
 
-  /* Text */
-  --color-text: #e0e0e0;
-  --color-text-secondary: #b0b0c0;
-  --color-text-muted: #b0b0c8;
-  --color-text-inverse: #1a1a2e;
+  /* ── Text ────────────────────────────────────────────────────────────────── */
+  --color-text:              #dff0ee;
+  --color-text-secondary:    #8db8b8;
+  --color-text-muted:        #6a9898;
+  --color-text-inverse:      #ffffff;
 
-  /* Borders */
-  --color-border: rgba(255, 255, 255, 0.08);
-  --color-border-strong: rgba(255, 255, 255, 0.15);
+  /* ── Borders — teal-tinted ───────────────────────────────────────────────── */
+  --color-border:            rgba(143, 200, 200, 0.12);
+  --color-border-strong:     rgba(143, 200, 200, 0.25);
 
-  /* Chat bubbles */
-  --color-bubble-user: rgba(102, 204, 255, 0.08);
-  --color-bubble-user-border: rgba(102, 204, 255, 0.25);
-  --color-bubble-assistant: rgba(255, 255, 255, 0.05);
+  /* ── Chat bubbles ────────────────────────────────────────────────────────── */
+  --color-bubble-user:           rgba(40, 130, 100, 0.14);
+  --color-bubble-user-border:    rgba(40, 130, 100, 0.35);
+  --color-bubble-assistant:      rgba(255, 255, 255, 0.05);
   --color-bubble-assistant-border: rgba(255, 255, 255, 0.10);
-  --color-bubble-system: rgba(255, 255, 255, 0.03);
+  --color-bubble-system:         rgba(255, 255, 255, 0.03);
 
-  /* Component type badges */
-  --color-badge-source: #6c9;        /* green */
-  --color-badge-transform: #fc6;     /* amber */
-  --color-badge-gate: #c9f;          /* purple */
-  --color-badge-sink: #f96;          /* orange */
+  /* ── Component type badges — functional colour coding ────────────────────── */
+  --color-badge-source:      #4db89a;
+  --color-badge-transform:   #e8a030;
+  --color-badge-gate:        #c390f9;
+  --color-badge-sink:        #e07040;
 
-  /* Semantic colours */
-  --color-success: #6c9;
-  --color-error: #f66;
-  --color-warning: #fc6;
-  --color-info: #6cf;
+  /* ── Semantic colours — DTA/GOLD dark theme ──────────────────────────────── */
+  --color-success:           #14b0ae;
+  --color-error:             #e85653;
+  --color-warning:           #e38444;
+  --color-info:              #61daff;
 
-  /* Interactive */
-  --color-highlight: rgba(204, 153, 255, 0.1);
-  --color-selected-ring: rgba(204, 153, 255, 0.5);
-  --color-focus-ring: #7c8fff;
-  --color-link: #8ab4ff;
+  /* ── Semantic backgrounds — for inline alert/banner components ────────────── */
+  --color-success-bg:        rgba(20, 176, 174, 0.12);
+  --color-success-border:    rgba(20, 176, 174, 0.30);
+  --color-error-bg:          rgba(232, 86, 83, 0.12);
+  --color-error-border:      rgba(232, 86, 83, 0.30);
+  --color-warning-bg:        rgba(227, 132, 68, 0.14);
+  --color-warning-border:    rgba(227, 132, 68, 0.30);
+  --color-info-bg:           rgba(97, 218, 255, 0.10);
+  --color-info-border:       rgba(97, 218, 255, 0.25);
 
-  /* Status badges */
-  --color-status-pending: #999;
-  --color-status-running: #6cf;
-  --color-status-completed: #6c9;
-  --color-status-failed: #f66;
-  --color-status-cancelled: #fc6;
+  /* ── Interactive / accent ────────────────────────────────────────────────── */
+  --color-accent:            #29b480;
+  --color-focus-ring:        #c390f9;
+  --color-btn-primary-bg:    #1c7c58;
+  --color-btn-primary-bg-hover: #206850;
+  --color-link:              #61daff;
+  --color-highlight:         rgba(41, 180, 128, 0.10);
+  --color-selected-ring:     rgba(41, 180, 128, 0.50);
 
-  /* Dimming for unrelated components in click-to-highlight */
+  /* ── Status badges ───────────────────────────────────────────────────────── */
+  --color-status-pending:    #7a9a9a;
+  --color-status-running:    #61daff;
+  --color-status-completed:  #14b0ae;
+  --color-status-failed:     #e85653;
+  --color-status-cancelled:  #e38444;
+
+  /* ── Dimming ─────────────────────────────────────────────────────────────── */
   --opacity-dimmed: 0.35;
 
-  /* Scrollbar */
-  --color-scrollbar-track: transparent;
-  --color-scrollbar-thumb: rgba(255, 255, 255, 0.12);
-  --color-scrollbar-thumb-hover: rgba(255, 255, 255, 0.22);
+  /* ── Scrollbar — teal-tinted ─────────────────────────────────────────────── */
+  --color-scrollbar-track:       transparent;
+  --color-scrollbar-thumb:       rgba(143, 200, 200, 0.15);
+  --color-scrollbar-thumb-hover: rgba(143, 200, 200, 0.28);
 
-  /* Sizing */
-  --sidebar-expanded-width: 200px;
+  /* ── Sizing ──────────────────────────────────────────────────────────────── */
+  --sidebar-expanded-width:  200px;
   --sidebar-collapsed-width: 40px;
   --inspector-default-width: 320px;
-  --inspector-min-width: 240px;
+  --inspector-min-width:     240px;
 
-  /* Typography */
-  --font-sans: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto,
+  /* ── Typography — Inter for body, system fallback ────────────────────────── */
+  --font-sans: "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto,
     Oxygen, Ubuntu, Cantarell, "Helvetica Neue", sans-serif;
   --font-mono: "JetBrains Mono", "Fira Code", "SF Mono", "Cascadia Code",
     "Source Code Pro", Menlo, Monaco, Consolas, "Liberation Mono", monospace;
 
-  --font-size-xs: 12px;
-  --font-size-sm: 13px;
+  --font-size-xs:   12px;
+  --font-size-sm:   13px;
   --font-size-base: 14px;
-  --font-size-lg: 16px;
-  --font-size-xl: 18px;
+  --font-size-lg:   16px;
+  --font-size-xl:   18px;
 
-  --line-height-tight: 1.3;
-  --line-height-normal: 1.5;
+  --line-height-tight:   1.3;
+  --line-height-normal:  1.5;
   --line-height-relaxed: 1.7;
 
-  /* Spacing */
-  --space-xs: 4px;
-  --space-sm: 8px;
-  --space-md: 12px;
-  --space-lg: 16px;
-  --space-xl: 24px;
+  /* ── Spacing ─────────────────────────────────────────────────────────────── */
+  --space-xs:  4px;
+  --space-sm:  8px;
+  --space-md:  12px;
+  --space-lg:  16px;
+  --space-xl:  24px;
   --space-2xl: 32px;
 
-  /* Radius */
+  /* ── Radius ──────────────────────────────────────────────────────────────── */
   --radius-sm: 4px;
   --radius-md: 6px;
   --radius-lg: 8px;
   --radius-xl: 12px;
 
-  /* Transitions */
-  --transition-fast: 100ms ease;
+  /* ── Transitions ─────────────────────────────────────────────────────────── */
+  --transition-fast:   100ms ease;
   --transition-normal: 150ms ease;
-  --transition-slow: 250ms ease;
+  --transition-slow:   250ms ease;
 }
 
 /* ---------------------------------------------------------------------------
@@ -211,8 +224,8 @@ summary:focus-visible {
   left: 0;
   z-index: 1000;
   padding: var(--space-sm) var(--space-lg);
-  background-color: var(--color-focus-ring);
-  color: var(--color-text);
+  background-color: var(--color-accent);
+  color: var(--color-text-inverse);
   font-size: var(--font-size-base);
   font-weight: 600;
   text-decoration: none;
@@ -385,32 +398,32 @@ summary:focus-visible {
   line-height: 1.4;
 }
 
-/* Source — green */
+/* Source — aqua-green */
 .type-badge-source {
-  background-color: rgba(102, 204, 153, 0.15);
+  background-color: rgba(77, 184, 154, 0.15);
   color: var(--color-badge-source);
-  border: 1px solid rgba(102, 204, 153, 0.3);
+  border: 1px solid rgba(77, 184, 154, 0.3);
 }
 
 /* Transform — amber */
 .type-badge-transform {
-  background-color: rgba(255, 204, 102, 0.15);
+  background-color: rgba(232, 160, 48, 0.15);
   color: var(--color-badge-transform);
-  border: 1px solid rgba(255, 204, 102, 0.3);
+  border: 1px solid rgba(232, 160, 48, 0.3);
 }
 
 /* Gate — purple */
 .type-badge-gate {
-  background-color: rgba(204, 153, 255, 0.15);
+  background-color: rgba(195, 144, 249, 0.15);
   color: var(--color-badge-gate);
-  border: 1px solid rgba(204, 153, 255, 0.3);
+  border: 1px solid rgba(195, 144, 249, 0.3);
 }
 
-/* Sink — orange */
+/* Sink — orange-red */
 .type-badge-sink {
-  background-color: rgba(255, 153, 102, 0.15);
+  background-color: rgba(224, 112, 64, 0.15);
   color: var(--color-badge-sink);
-  border: 1px solid rgba(255, 153, 102, 0.3);
+  border: 1px solid rgba(224, 112, 64, 0.3);
 }
 
 /* ---------------------------------------------------------------------------
@@ -429,27 +442,27 @@ summary:focus-visible {
 }
 
 .status-badge-pending {
-  background-color: rgba(153, 153, 153, 0.15);
+  background-color: rgba(122, 154, 154, 0.15);
   color: var(--color-status-pending);
 }
 
 .status-badge-running {
-  background-color: rgba(102, 204, 255, 0.15);
+  background-color: rgba(97, 218, 255, 0.15);
   color: var(--color-status-running);
 }
 
 .status-badge-completed {
-  background-color: rgba(102, 204, 153, 0.15);
+  background-color: rgba(20, 176, 174, 0.15);
   color: var(--color-status-completed);
 }
 
 .status-badge-failed {
-  background-color: rgba(255, 102, 102, 0.15);
+  background-color: rgba(232, 86, 83, 0.15);
   color: var(--color-status-failed);
 }
 
 .status-badge-cancelled {
-  background-color: rgba(255, 204, 102, 0.15);
+  background-color: rgba(227, 132, 68, 0.15);
   color: var(--color-status-cancelled);
 }
 
@@ -478,7 +491,7 @@ summary:focus-visible {
 }
 
 .component-card-dimmed {
-  background-color: rgba(36, 36, 64, var(--opacity-dimmed));
+  background-color: rgba(26, 61, 71, var(--opacity-dimmed));
 }
 
 /* Text inside dimmed cards stays fully readable */
@@ -527,23 +540,23 @@ summary:focus-visible {
 }
 
 .btn-primary {
-  background-color: rgba(102, 204, 153, 0.2);
+  background-color: rgba(20, 176, 174, 0.2);
   border-color: var(--color-success);
   color: var(--color-success);
 }
 
 .btn-primary:hover:not(:disabled) {
-  background-color: rgba(102, 204, 153, 0.3);
+  background-color: rgba(20, 176, 174, 0.3);
 }
 
 .btn-danger {
-  background-color: rgba(255, 102, 102, 0.15);
+  background-color: var(--color-error-bg);
   border-color: var(--color-error);
   color: var(--color-error);
 }
 
 .btn-danger:hover:not(:disabled) {
-  background-color: rgba(255, 102, 102, 0.25);
+  background-color: rgba(232, 86, 83, 0.25);
 }
 
 /* ---------------------------------------------------------------------------
@@ -575,7 +588,7 @@ summary:focus-visible {
 
 .tab-strip-tab-active {
   color: var(--color-text);
-  border-bottom-color: var(--color-focus-ring);
+  border-bottom-color: var(--color-accent);
 }
 
 /* ---------------------------------------------------------------------------
@@ -623,14 +636,14 @@ summary:focus-visible {
 }
 
 .validation-banner-pass {
-  background-color: rgba(102, 204, 153, 0.12);
-  border: 1px solid rgba(102, 204, 153, 0.3);
+  background-color: var(--color-success-bg);
+  border: 1px solid var(--color-success-border);
   color: var(--color-success);
 }
 
 .validation-banner-fail {
-  background-color: rgba(255, 102, 102, 0.12);
-  border: 1px solid rgba(255, 102, 102, 0.3);
+  background-color: var(--color-error-bg);
+  border: 1px solid var(--color-error-border);
   color: var(--color-error);
 }
 

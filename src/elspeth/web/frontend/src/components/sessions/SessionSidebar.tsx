@@ -110,7 +110,7 @@ export function SessionSidebar() {
                       padding: "10px 12px",
                       border: "none",
                       borderLeft: isActive
-                        ? "3px solid var(--color-focus-ring)"
+                        ? "3px solid var(--color-accent)"
                         : "3px solid transparent",
                       backgroundColor: isActive
                         ? "var(--color-surface-hover)"
@@ -191,9 +191,11 @@ export function SessionSidebar() {
             width: "100%",
             padding: "8px 12px",
             backgroundColor: isCreating
+              ? "var(--color-surface-elevated)"
+              : "var(--color-accent)",
+            color: isCreating
               ? "var(--color-text-muted)"
-              : "var(--color-focus-ring)",
-            color: "var(--color-text)",
+              : "var(--color-text-inverse)",
             border: "none",
             borderRadius: 4,
             cursor: isCreating ? "not-allowed" : "pointer",

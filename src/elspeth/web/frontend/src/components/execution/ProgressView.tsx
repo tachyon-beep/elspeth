@@ -31,9 +31,9 @@ export function ProgressView() {
           style={{
             padding: "6px 10px",
             marginBottom: 8,
-            backgroundColor: "rgba(255, 204, 102, 0.15)",
+            backgroundColor: "var(--color-warning-bg)",
             color: "var(--color-warning)",
-            border: "1px solid rgba(255, 204, 102, 0.3)",
+            border: "1px solid var(--color-warning-border)",
             borderRadius: 4,
             fontSize: 12,
           }}
@@ -117,7 +117,7 @@ export function ProgressView() {
         <div>
           <div
             style={{
-              fontSize: 11,
+              fontSize: 12,
               color: "var(--color-text-muted)",
               marginBottom: 2,
             }}
@@ -137,7 +137,7 @@ export function ProgressView() {
         <div>
           <div
             style={{
-              fontSize: 11,
+              fontSize: 12,
               color: "var(--color-text-muted)",
               marginBottom: 2,
             }}
@@ -166,11 +166,11 @@ export function ProgressView() {
           style={{
             padding: "8px 12px",
             marginBottom: 8,
-            backgroundColor: "rgba(255, 204, 102, 0.15)",
+            backgroundColor: "var(--color-warning-bg)",
             color: "var(--color-warning)",
             borderRadius: 4,
             fontSize: 13,
-            border: "1px solid rgba(255, 204, 102, 0.3)",
+            border: "1px solid var(--color-warning-border)",
           }}
         >
           Pipeline execution was cancelled.
@@ -194,12 +194,12 @@ export function ProgressView() {
             style={{
               maxHeight: 200,
               overflowY: "auto",
-              fontSize: 11,
+              fontSize: 12,
               fontFamily: "var(--font-mono)",
-              backgroundColor: "rgba(255, 102, 102, 0.12)",
+              backgroundColor: "var(--color-error-bg)",
               borderRadius: 4,
               padding: 8,
-              border: "1px solid rgba(255, 102, 102, 0.3)",
+              border: "1px solid var(--color-error-border)",
             }}
           >
             {progress.recent_errors.map((err, i) => (
@@ -210,7 +210,7 @@ export function ProgressView() {
                   paddingBottom: 4,
                   borderBottom:
                     i < progress.recent_errors.length - 1
-                      ? "1px solid rgba(255, 102, 102, 0.2)"
+                      ? "1px solid var(--color-error-border)"
                       : "none",
                 }}
               >

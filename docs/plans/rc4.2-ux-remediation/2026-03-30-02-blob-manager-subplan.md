@@ -115,7 +115,28 @@ makes cleanup rules clearer.
 The legacy `/upload` endpoint should be treated as a migration surface, not the
 long-term product model.
 
-### AD-4: PayloadStore remains the audit system; blobs remain the UX system
+### AD-4: Source-path allowlist migration must be consolidated before blob wiring ships
+
+The current codebase has three separate source-path guards that hardcode
+`{data_dir}/uploads/`:
+
+- composer tool validation
+- execution validation
+- execution runtime guard
+
+Blob rollout must not update these independently. Introduce one shared helper,
+for example:
+
+- `_allowed_source_directories(settings) -> tuple[Path, ...]`
+
+and have all three call sites use it. This helper should include `uploads/`
+for legacy compatibility and `blobs/` for managed blob storage from the start
+of blob implementation.
+
+This prevents a migration window where blob-backed sources are accepted by one
+layer and rejected by another.
+
+### AD-5: PayloadStore remains the audit system; blobs remain the UX system
 
 Blobs are not a replacement for Landscape/PayloadStore.
 
@@ -125,10 +146,23 @@ Rules:
 - execution continues to record payload hashes and audit artifacts through the
   existing engine/runtime path
 - when a blob is used as pipeline input or output, its `content_hash` should be
-  compatible with the corresponding payload hash when the underlying bytes are
-  identical
+  computed by the same shared hash helper used by PayloadStore when the
+  underlying bytes are identical
 
-### AD-5: Output blobs use placeholder records updated after execution
+### AD-6: Run linkage should use a join table, not JSON lists on blob rows
+
+Blob-to-run relationships are naturally many-to-many over time and should not
+be modeled as a read-modify-write JSON array on the blob row.
+
+Preferred shape:
+
+- `blob_run_links(blob_id, run_id, direction)`
+
+where `direction` is something like `input` or `output`.
+
+This avoids non-atomic JSON appends and gives cleaner query behavior.
+
+### AD-7: Output blobs use placeholder records updated after execution
 
 For run-produced files, the sink target must exist before execution begins.
 
@@ -140,7 +174,7 @@ Pattern:
 3. execution completion updates the blob to `ready` or `error`
 4. metadata such as size and content hash is filled in post-write
 
-### AD-6: Schema inference is explicit, not implicit on every upload
+### AD-8: Schema inference is explicit, not implicit on every upload
 
 Blob creation should remain cheap and predictable. Schema inference can be
 requested separately when needed.
@@ -148,13 +182,22 @@ requested separately when needed.
 This keeps upload latency down and avoids forcing content sniffing for binary
 or large files.
 
-### AD-7: Fork compatibility uses copy-on-fork
+### AD-9: Fork compatibility uses copy-on-fork
 
 This plan assumes the later fork implementation will copy blob records and
 backing files into the new session rather than sharing ownership across
 sessions.
 
 This keeps deletion, audit, and session archive semantics straightforward.
+
+### AD-10: Blob growth needs a balancing mechanism before forking ships
+
+Copy-on-fork is the correct ownership model, but it creates predictable disk
+growth. Add a session-level quota before fork support lands, for example:
+
+- `max_blob_storage_per_session_bytes`
+
+Blob creation and blob copy-on-fork should both enforce it.
 
 ---
 
@@ -176,14 +219,26 @@ Minimum fields:
 - `source_description`
 - `schema_info`
 - `status` (`ready`, `pending`, `error`)
-- `input_to_run_ids`
-- `output_from_run_id`
 
 Notes:
 
 - `storage_path` is never returned to the browser
 - `schema_info` is nullable and populated only after explicit inference
-- `input_to_run_ids` is UX/reporting metadata, not an authorization primitive
+- `content_hash` is a SHA-256 hex string computed by a shared helper
+- container fields on frozen dataclasses must use explicit freeze guards in
+  `__post_init__`, following the existing session record patterns
+
+### Blob-run linkage
+
+Use a normalized join table:
+
+- `blob_run_links`
+  - `blob_id`
+  - `run_id`
+  - `direction` (`input` or `output`)
+
+This replaces `input_to_run_ids` and `output_from_run_id` as direct blob-row
+fields.
 
 ### Filesystem layout
 
@@ -197,6 +252,23 @@ Rules:
   current upload path
 - the blob ID prefixes the stored filename to avoid collisions
 - storage directories are created lazily per session
+
+### MIME and content policy
+
+Blob creation must not trust the client-provided content type blindly.
+
+First-pass policy:
+
+- accept a narrow allowlist of data-oriented types such as CSV, JSON, JSONL,
+  and plain text
+- record both declared MIME type and server-detected type when detection is
+  available
+- if declared and detected MIME types differ, record both and accept only when
+  the detected type is still within the allowed data-oriented set; otherwise
+  reject the upload
+- reject clearly disallowed executable/archive types in the initial product UX
+- treat unknown but non-dangerous text-like uploads conservatively, with a
+  validation warning rather than silent trust
 
 ---
 
@@ -266,6 +338,7 @@ Recommended components:
 - `BlobCreateData`
 - `BlobServiceProtocol`
 - `BlobServiceImpl`
+- `BlobNotFoundError`
 
 Core service operations:
 
@@ -279,6 +352,15 @@ Core service operations:
 - reserve output blob
 - mark blob ready/error after execution
 - link blob to run usage
+
+Implementation notes:
+
+- `BlobRecord` and any other frozen dataclass with container fields must freeze
+  them in `__post_init__`
+- schema inference must return structured warnings rather than propagating
+  parser-specific 500s for bad user files
+- `mime_type` should be validated/detected server-side rather than accepted as
+  a trusted client assertion
 
 ### 7.3 Route integration
 
@@ -318,9 +400,11 @@ There are currently three separate places that assume source files live under
 
 The blob rollout needs a coordinated migration:
 
-1. keep raw-path validation for legacy upload compatibility
-2. add blob-native source wiring that bypasses user-provided filesystem paths
-3. update validation/runtime checks so blob-backed sources are validated by
+1. extract a shared allowed-source-directories helper and update all three
+   guards together
+2. keep raw-path validation for legacy upload compatibility
+3. add blob-native source wiring that bypasses user-provided filesystem paths
+4. update validation/runtime checks so blob-backed sources are validated by
    blob ownership/resolution, not by a direct `uploads/` path comparison
 
 The preferred end state is:
@@ -339,13 +423,31 @@ Required behaviors:
   - final `size_bytes`
   - `content_hash`
   - `status: "ready"`
-  - `output_from_run_id`
+  - output-direction run linkage in `blob_run_links`
 - when a run fails before writing the output:
+  - final `size_bytes`
   - blob is marked `error`
   - partial file cleanup policy is explicit
 
 For input blobs used by a run, execution should also record linkage so the UX
 can say which runs consumed a given blob.
+
+Placement rule:
+
+- the blob lifecycle finalization hook should run in the terminal-state/finally
+  path of `_run_pipeline()`
+- it must not mask the original run exception if blob finalization itself fails
+- if async session/blob services are touched from the worker thread, use the
+  existing `_call_async()` bridge explicitly
+
+Deletion policy:
+
+- blob deletion during an active run must be explicitly defined before the
+  delete endpoint ships
+- preferred first-pass behavior: reject deletion of blobs linked to an active
+  run with a clear user-facing error
+- pending output blobs older than a configured threshold and not linked to an
+  active run are eligible for cleanup/reconciliation on startup
 
 ### 7.7 Schema inference
 
@@ -434,9 +536,11 @@ wiring on day one.
 ### Phase 1: Data model and service foundation
 
 - add `blobs` table
+- add `blob_run_links` join table
 - add blob record/protocol types
 - implement blob service with filesystem-backed storage
 - implement filename sanitization and delete semantics
+- add MIME/content validation policy
 
 Deliverable:
 
@@ -481,6 +585,8 @@ Deliverable:
 - update output blobs after run completion/failure
 - link input/output blobs to runs
 - align blob lifecycle with execution validation/runtime checks
+- place terminal blob finalization in `_run_pipeline()` finally/finalization
+  path with non-masking error handling
 
 Deliverable:
 
@@ -504,6 +610,7 @@ Deliverable:
 
 Expected new files:
 
+- `src/elspeth/web/blobs/__init__.py`
 - `src/elspeth/web/blobs/routes.py`
 - `src/elspeth/web/blobs/protocol.py`
 - `src/elspeth/web/blobs/service.py`
@@ -546,8 +653,26 @@ Expected modified files:
 - ownership failures return 404
 - filename traversal attempts are rejected/sanitized safely
 - large-upload limits still enforced
+- MIME/content validation tests cover declared-vs-detected type mismatches
 - output blob reservation and completion updates
 - blob-backed source wiring resolves only to owned session blobs
+- full integration path:
+  - blob creation
+  - `set_source_from_blob`
+  - validate
+  - execute
+- blob/PayloadStore hash consistency via the shared content-hash helper
+- active-run delete rejection behavior
+- blob IDOR matrix covering:
+  - owned session + owned blob
+  - owned session + foreign blob
+  - foreign session + guessed blob
+  - foreign session + foreign blob
+- orphaned-pending-blob cleanup or reconciliation behavior after crashes
+- schema inference edge cases:
+  - empty CSV
+  - heterogeneous rows
+  - binary file upload
 
 ### Frontend tests
 
@@ -564,6 +689,9 @@ Expected modified files:
    downloadable after completion.
 4. Try cross-session blob access and confirm it fails with 404 semantics.
 
+5. Fork a session with blob-backed state and confirm copy-on-fork respects the
+   session blob quota and produces new blob IDs/paths in the target session.
+
 ---
 
 ## 12. Risks
@@ -571,10 +699,11 @@ Expected modified files:
 | Risk | Severity | Mitigation |
 |------|----------|------------|
 | Blob scope creeps toward a cross-session file system | High | Keep ownership strictly session-scoped for RC4.2 |
-| Path-allowlist migration leaves inconsistent behavior | High | Update composer, validation, and execution guards as one coordinated change |
+| Path-allowlist migration leaves inconsistent behavior | High | Introduce one shared allowed-source-directories helper before blob-native source wiring |
 | Output blobs require sink integration details not yet exposed | Medium | Phase output reservation after basic CRUD/UI work |
 | Blob manager UI grows into a full document browser | Medium | Keep the initial scope to lifecycle actions and input/output mapping |
 | Schema inference adds latency or brittle parsing | Low | Make inference explicit and bounded, not automatic |
+| Copy-on-fork grows disk usage without a balancing mechanism | Medium | Enforce a per-session blob quota before forking ships |
 
 ---
 
@@ -582,7 +711,7 @@ Expected modified files:
 
 Recommended order inside this subplan:
 
-1. Data model and blob service
+1. Data model, shared hash helper, and shared allowed-source-directories helper
 2. REST API
 3. Frontend upload/blob manager migration
 4. Composer blob tools

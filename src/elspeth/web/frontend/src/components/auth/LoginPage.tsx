@@ -139,7 +139,7 @@ export function LoginPage() {
           padding: 32,
           backgroundColor: "var(--color-surface)",
           borderRadius: 8,
-          boxShadow: "0 2px 8px rgba(0,0,0,0.3)",
+          boxShadow: "0 2px 8px rgba(10, 40, 50, 0.4)",
         }}
       >
         <h1
@@ -159,11 +159,11 @@ export function LoginPage() {
             style={{
               padding: "8px 12px",
               marginBottom: 16,
-              backgroundColor: "rgba(255, 102, 102, 0.12)",
+              backgroundColor: "var(--color-error-bg)",
               color: "var(--color-error)",
               borderRadius: 4,
               fontSize: 14,
-              border: "1px solid rgba(255, 102, 102, 0.3)",
+              border: "1px solid var(--color-error-border)",
             }}
           >
             {loginError}
@@ -180,8 +180,8 @@ export function LoginPage() {
               display: "block",
               width: "100%",
               padding: "10px 16px",
-              backgroundColor: "var(--color-focus-ring)",
-              color: "var(--color-text)",
+              backgroundColor: "var(--color-accent)",
+              color: "var(--color-text-inverse)",
               border: "none",
               borderRadius: 4,
               fontSize: 14,
@@ -266,9 +266,11 @@ export function LoginPage() {
                 width: "100%",
                 padding: "10px 16px",
                 backgroundColor: isSubmitting
+                  ? "var(--color-surface-elevated)"
+                  : "var(--color-accent)",
+                color: isSubmitting
                   ? "var(--color-text-muted)"
-                  : "var(--color-focus-ring)",
-                color: "var(--color-text)",
+                  : "var(--color-text-inverse)",
                 border: "none",
                 borderRadius: 4,
                 fontSize: 14,

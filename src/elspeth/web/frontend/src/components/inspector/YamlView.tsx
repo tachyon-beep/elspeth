@@ -125,7 +125,7 @@ export function YamlView() {
           padding: "4px 10px",
           fontSize: 12,
           backgroundColor: copied
-            ? "rgba(102, 204, 153, 0.15)"
+            ? "var(--color-success-bg)"
             : "var(--color-surface-elevated)",
           color: copied
             ? "var(--color-success)"

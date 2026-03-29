@@ -88,11 +88,11 @@ export function ChatInput({ onSend, disabled, inputRef }: ChatInputProps) {
           style={{
             padding: "6px 10px",
             marginBottom: 8,
-            backgroundColor: "rgba(255, 102, 102, 0.12)",
+            backgroundColor: "var(--color-error-bg)",
             color: "var(--color-error)",
             borderRadius: 4,
             fontSize: 12,
-            border: "1px solid rgba(255, 102, 102, 0.3)",
+            border: "1px solid var(--color-error-border)",
           }}
         >
           {uploadError}
@@ -162,9 +162,11 @@ export function ChatInput({ onSend, disabled, inputRef }: ChatInputProps) {
           style={{
             padding: "8px 16px",
             backgroundColor: canSend
-              ? "var(--color-focus-ring)"
+              ? "var(--color-accent)"
+              : "var(--color-surface-elevated)",
+            color: canSend
+              ? "var(--color-text-inverse)"
               : "var(--color-text-muted)",
-            color: "var(--color-text)",
             border: "none",
             borderRadius: 6,
             cursor: canSend ? "pointer" : "not-allowed",
