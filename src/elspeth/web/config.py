@@ -26,7 +26,7 @@ class WebSettings(BaseModel):
     host: str = "127.0.0.1"
     port: int = Field(default=8000, ge=1, le=65535)
     auth_provider: Literal["local", "oidc", "entra"] = "local"
-    cors_origins: list[str] = ["http://localhost:5173"]
+    cors_origins: tuple[str, ...] = ("http://localhost:5173",)
     data_dir: Path = Path("data")
     composer_model: str = "gpt-4o"
     composer_max_turns: int = Field(default=20, ge=1)
@@ -36,6 +36,7 @@ class WebSettings(BaseModel):
         "change-me-in-production"  # Security rule S3 (seam-contracts.md): Sub-2 startup guard enforces non-default in production
     )
     max_upload_bytes: int = Field(default=100 * 1024 * 1024, ge=1)
+    orphan_run_max_age_seconds: int = Field(default=3600, ge=60)
 
     # Execution infrastructure — defaults derive from data_dir when not explicitly set
     landscape_url: str | None = None
@@ -50,6 +51,32 @@ class WebSettings(BaseModel):
     # Session database (sessions, messages, composition states, runs)
     # Separate from landscape_url (audit DB)
     session_db_url: str | None = None
+
+    @model_validator(mode="after")
+    def _validate_auth_fields(self) -> WebSettings:
+        """Enforce that OIDC/Entra providers have their required fields."""
+        if self.auth_provider == "oidc":
+            missing = [
+                name for name, val in (
+                    ("oidc_issuer", self.oidc_issuer),
+                    ("oidc_audience", self.oidc_audience),
+                    ("oidc_client_id", self.oidc_client_id),
+                ) if val is None
+            ]
+            if missing:
+                raise ValueError(f"OIDC auth requires: {', '.join(missing)}")
+        elif self.auth_provider == "entra":
+            missing = [
+                name for name, val in (
+                    ("oidc_issuer", self.oidc_issuer),
+                    ("oidc_audience", self.oidc_audience),
+                    ("oidc_client_id", self.oidc_client_id),
+                    ("entra_tenant_id", self.entra_tenant_id),
+                ) if val is None
+            ]
+            if missing:
+                raise ValueError(f"Entra auth requires: {', '.join(missing)}")
+        return self
 
     @model_validator(mode="after")
     def _enforce_secret_key_in_production(self) -> WebSettings:

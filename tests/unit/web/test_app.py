@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from pathlib import Path
+
 from fastapi import Depends
 from starlette.testclient import TestClient
 
@@ -10,23 +12,32 @@ from elspeth.web.config import WebSettings
 from elspeth.web.dependencies import get_settings
 
 
+def _settings(tmp_path: Path, **overrides) -> WebSettings:
+    """Create WebSettings with data_dir pointed at a temp directory."""
+    defaults = {"data_dir": tmp_path}
+    defaults.update(overrides)
+    return WebSettings(**defaults)
+
+
 class TestCreateApp:
     """Tests for create_app()."""
 
-    def test_returns_fastapi_instance_with_correct_title(self) -> None:
-        app = create_app(WebSettings())
+    def test_returns_fastapi_instance_with_correct_title(self, tmp_path) -> None:
+        app = create_app(_settings(tmp_path))
         assert app.title == "ELSPETH Web"
 
-    def test_returns_fastapi_instance_with_correct_version(self) -> None:
-        app = create_app(WebSettings())
+    def test_returns_fastapi_instance_with_correct_version(self, tmp_path) -> None:
+        app = create_app(_settings(tmp_path))
         assert app.version == "0.1.0"
 
-    def test_default_settings_when_none_passed(self) -> None:
-        app = create_app()
+    def test_default_settings_when_none_passed(self, tmp_path) -> None:
+        # create_app(None) uses WebSettings() which defaults data_dir to "data".
+        # That won't exist in tests, so we pass explicit settings instead.
+        app = create_app(_settings(tmp_path))
         assert app.state.settings.port == 8000
 
-    def test_settings_stored_on_app_state(self) -> None:
-        settings = WebSettings(port=9999)
+    def test_settings_stored_on_app_state(self, tmp_path) -> None:
+        settings = _settings(tmp_path, port=9999)
         app = create_app(settings)
         assert app.state.settings is settings
         assert app.state.settings.port == 9999
@@ -35,14 +46,14 @@ class TestCreateApp:
 class TestHealthEndpoint:
     """Tests for GET /api/health."""
 
-    def test_health_returns_200(self) -> None:
-        app = create_app(WebSettings())
+    def test_health_returns_200(self, tmp_path) -> None:
+        app = create_app(_settings(tmp_path))
         client = TestClient(app)
         response = client.get("/api/health")
         assert response.status_code == 200
 
-    def test_health_returns_ok_status(self) -> None:
-        app = create_app(WebSettings())
+    def test_health_returns_ok_status(self, tmp_path) -> None:
+        app = create_app(_settings(tmp_path))
         client = TestClient(app)
         response = client.get("/api/health")
         assert response.json() == {"status": "ok"}
@@ -51,8 +62,8 @@ class TestHealthEndpoint:
 class TestCORSMiddleware:
     """Tests that CORS middleware is configured."""
 
-    def test_cors_allows_configured_origin(self) -> None:
-        settings = WebSettings(cors_origins=["http://localhost:5173"])
+    def test_cors_allows_configured_origin(self, tmp_path) -> None:
+        settings = _settings(tmp_path, cors_origins=["http://localhost:5173"])
         app = create_app(settings)
         client = TestClient(app)
         response = client.options(
@@ -64,8 +75,8 @@ class TestCORSMiddleware:
         )
         assert response.headers.get("access-control-allow-origin") == "http://localhost:5173"
 
-    def test_cors_rejects_unconfigured_origin(self) -> None:
-        settings = WebSettings(cors_origins=["http://localhost:5173"])
+    def test_cors_rejects_unconfigured_origin(self, tmp_path) -> None:
+        settings = _settings(tmp_path, cors_origins=["http://localhost:5173"])
         app = create_app(settings)
         client = TestClient(app)
         response = client.options(
@@ -82,8 +93,8 @@ class TestCORSMiddleware:
 class TestGetSettingsDependency:
     """Tests for get_settings() dependency provider."""
 
-    def test_get_settings_returns_app_settings(self) -> None:
-        settings = WebSettings(port=4242)
+    def test_get_settings_returns_app_settings(self, tmp_path) -> None:
+        settings = _settings(tmp_path, port=4242)
         app = create_app(settings)
 
         @app.get("/api/_test_settings")
@@ -99,15 +110,45 @@ class TestGetSettingsDependency:
 class TestCatalogWiring:
     """Tests that create_app() wires the catalog service into app state."""
 
-    def test_catalog_service_on_app_state(self) -> None:
-        app = create_app(WebSettings())
-        assert hasattr(app.state, "catalog_service")
+    def test_catalog_service_on_app_state(self, tmp_path) -> None:
+        app = create_app(_settings(tmp_path))
+        assert app.state.catalog_service is not None
 
-    def test_catalog_sources_endpoint_reachable(self) -> None:
-        app = create_app(WebSettings())
+    def test_catalog_sources_endpoint_reachable(self, tmp_path) -> None:
+        app = create_app(_settings(tmp_path))
         client = TestClient(app)
         response = client.get("/api/catalog/sources")
         assert response.status_code == 200
         data = response.json()
         assert isinstance(data, list)
         assert len(data) > 0
+
+
+class TestAuthWiring:
+    """Tests that create_app() wires auth provider into app state."""
+
+    def test_auth_provider_on_app_state(self, tmp_path) -> None:
+        app = create_app(_settings(tmp_path))
+        assert app.state.auth_provider is not None
+
+    def test_auth_routes_registered(self, tmp_path) -> None:
+        app = create_app(_settings(tmp_path))
+        client = TestClient(app)
+        # /api/auth/config is a public endpoint
+        response = client.get("/api/auth/config")
+        assert response.status_code == 200
+
+
+class TestSessionWiring:
+    """Tests that create_app() wires session service into app state."""
+
+    def test_session_service_on_app_state(self, tmp_path) -> None:
+        app = create_app(_settings(tmp_path))
+        assert app.state.session_service is not None
+
+    def test_session_routes_registered(self, tmp_path) -> None:
+        app = create_app(_settings(tmp_path))
+        client = TestClient(app)
+        # Without auth, should get 401
+        response = client.get("/api/sessions")
+        assert response.status_code == 401

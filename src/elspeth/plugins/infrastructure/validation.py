@@ -28,6 +28,10 @@ if TYPE_CHECKING:
     from elspeth.plugins.infrastructure.config_base import PluginConfig
 
 
+class UnknownPluginTypeError(ValueError):
+    """Raised when a plugin type string is not in the validator's mapping."""
+
+
 @dataclass(frozen=True, slots=True)
 class ValidationError:
     """Structured validation error.
@@ -74,7 +78,7 @@ class PluginConfigValidator:
             List of validation errors (empty if valid)
         """
         # Get config model for source type
-        config_model = self._get_source_config_model(source_type)
+        config_model = self.get_source_config_model(source_type)
 
         # Handle special case: null_source has no config class
         if config_model is None:
@@ -89,7 +93,7 @@ class PluginConfigValidator:
         except PluginConfigError as e:
             return self._extract_wrapped_plugin_config_error(e, config)
 
-    def _get_source_config_model(self, source_type: str) -> type["PluginConfig"] | None:
+    def get_source_config_model(self, source_type: str) -> type["PluginConfig"] | None:
         """Get Pydantic config model for source type.
 
         Returns:
@@ -113,7 +117,7 @@ class PluginConfigValidator:
             # Return None to signal "no validation needed"
             return None
         else:
-            raise ValueError(f"Unknown source type: {source_type}")
+            raise UnknownPluginTypeError(f"Unknown source type: {source_type}")
 
     def validate_transform_config(
         self,
@@ -130,7 +134,7 @@ class PluginConfigValidator:
             List of validation errors (empty if valid)
         """
         # Get config model for transform type (config needed for provider dispatch)
-        config_model = self._get_transform_config_model(transform_type, config)
+        config_model = self.get_transform_config_model(transform_type, config)
 
         # Validate using Pydantic
         try:
@@ -156,7 +160,7 @@ class PluginConfigValidator:
             List of validation errors (empty if valid)
         """
         # Get config model for sink type
-        config_model = self._get_sink_config_model(sink_type)
+        config_model = self.get_sink_config_model(sink_type)
 
         # Validate using Pydantic
         try:
@@ -227,7 +231,7 @@ class PluginConfigValidator:
         # that should crash immediately per CLAUDE.md - not be silently converted
         # to a "validation error" that hides the real problem.
 
-    def _get_transform_config_model(
+    def get_transform_config_model(
         self,
         transform_type: str,
         config: dict[str, Any] | None = None,
@@ -306,9 +310,9 @@ class PluginConfigValidator:
 
             return WebScrapeConfig
         else:
-            raise ValueError(f"Unknown transform type: {transform_type}")
+            raise UnknownPluginTypeError(f"Unknown transform type: {transform_type}")
 
-    def _get_sink_config_model(self, sink_type: str) -> type["PluginConfig"]:
+    def get_sink_config_model(self, sink_type: str) -> type["PluginConfig"]:
         """Get Pydantic config model for sink type.
 
         Returns:
@@ -332,7 +336,7 @@ class PluginConfigValidator:
 
             return AzureBlobSinkConfig
         else:
-            raise ValueError(f"Unknown sink type: {sink_type}")
+            raise UnknownPluginTypeError(f"Unknown sink type: {sink_type}")
 
     def _extract_errors(
         self,

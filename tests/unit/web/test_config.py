@@ -27,7 +27,7 @@ class TestWebSettingsDefaults:
 
     def test_cors_origins_default(self) -> None:
         settings = WebSettings()
-        assert settings.cors_origins == ["http://localhost:5173"]
+        assert settings.cors_origins == ("http://localhost:5173",)
 
     def test_data_dir_default(self) -> None:
         settings = WebSettings()
@@ -89,11 +89,22 @@ class TestWebSettingsCustomValues:
         assert settings.host == "0.0.0.0"
 
     def test_auth_provider_oidc(self) -> None:
-        settings = WebSettings(auth_provider="oidc")
+        settings = WebSettings(
+            auth_provider="oidc",
+            oidc_issuer="https://issuer.example.com",
+            oidc_audience="my-audience",
+            oidc_client_id="my-client-id",
+        )
         assert settings.auth_provider == "oidc"
 
     def test_auth_provider_entra(self) -> None:
-        settings = WebSettings(auth_provider="entra")
+        settings = WebSettings(
+            auth_provider="entra",
+            oidc_issuer="https://login.microsoftonline.com/t/v2.0",
+            oidc_audience="my-audience",
+            oidc_client_id="my-client-id",
+            entra_tenant_id="my-tenant-id",
+        )
         assert settings.auth_provider == "entra"
 
     def test_custom_cors_origins(self) -> None:
@@ -234,3 +245,63 @@ class TestSecretKeyGuard:
     def test_custom_secret_key_allowed_on_any_host(self) -> None:
         settings = WebSettings(host="0.0.0.0", secret_key="my-real-secret")
         assert settings.secret_key == "my-real-secret"
+
+
+class TestAuthFieldValidation:
+    """Tests for OIDC/Entra conditional field requirements."""
+
+    def test_local_provider_no_oidc_fields_required(self) -> None:
+        """Local auth (default) should work without any OIDC fields."""
+        settings = WebSettings(auth_provider="local")
+        assert settings.auth_provider == "local"
+
+    def test_oidc_provider_missing_fields_raises(self) -> None:
+        """OIDC provider without required fields should raise."""
+        with pytest.raises(ValidationError, match="OIDC auth requires"):
+            WebSettings(auth_provider="oidc")
+
+    def test_oidc_provider_with_all_fields_valid(self) -> None:
+        """OIDC provider with all required fields should succeed."""
+        settings = WebSettings(
+            auth_provider="oidc",
+            oidc_issuer="https://issuer.example.com",
+            oidc_audience="my-audience",
+            oidc_client_id="my-client-id",
+        )
+        assert settings.auth_provider == "oidc"
+        assert settings.oidc_issuer == "https://issuer.example.com"
+
+    def test_oidc_provider_partial_fields_raises(self) -> None:
+        """OIDC provider with only some fields should name the missing ones."""
+        with pytest.raises(ValidationError, match="oidc_audience"):
+            WebSettings(
+                auth_provider="oidc",
+                oidc_issuer="https://issuer.example.com",
+            )
+
+    def test_entra_provider_missing_fields_raises(self) -> None:
+        """Entra provider without required fields should raise."""
+        with pytest.raises(ValidationError, match="Entra auth requires"):
+            WebSettings(auth_provider="entra")
+
+    def test_entra_provider_missing_tenant_id_raises(self) -> None:
+        """Entra with OIDC fields but no tenant_id should raise."""
+        with pytest.raises(ValidationError, match="entra_tenant_id"):
+            WebSettings(
+                auth_provider="entra",
+                oidc_issuer="https://login.microsoftonline.com/t/v2.0",
+                oidc_audience="my-audience",
+                oidc_client_id="my-client-id",
+            )
+
+    def test_entra_provider_with_all_fields_valid(self) -> None:
+        """Entra provider with all required fields should succeed."""
+        settings = WebSettings(
+            auth_provider="entra",
+            oidc_issuer="https://login.microsoftonline.com/t/v2.0",
+            oidc_audience="my-audience",
+            oidc_client_id="my-client-id",
+            entra_tenant_id="my-tenant-id",
+        )
+        assert settings.auth_provider == "entra"
+        assert settings.entra_tenant_id == "my-tenant-id"

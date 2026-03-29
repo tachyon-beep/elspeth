@@ -1,0 +1,914 @@
+"""Tests for SessionServiceImpl -- CRUD, state versioning, active run enforcement."""
+
+from __future__ import annotations
+
+import uuid
+from datetime import datetime
+
+import pytest
+from sqlalchemy import create_engine
+from sqlalchemy.pool import StaticPool
+
+from elspeth.web.sessions.models import (
+    metadata,
+)
+from elspeth.web.sessions.protocol import (
+    ChatMessageRecord,
+    CompositionStateData,
+    CompositionStateRecord,
+    RunAlreadyActiveError,
+    RunRecord,
+    SessionRecord,
+)
+from elspeth.web.sessions.service import SessionServiceImpl
+
+
+@pytest.fixture
+def engine():
+    """Create an in-memory SQLite engine with all tables.
+
+    Uses StaticPool so that run_in_executor threads share the same
+    in-memory database connection.
+    """
+    eng = create_engine(
+        "sqlite:///:memory:",
+        connect_args={"check_same_thread": False},
+        poolclass=StaticPool,
+    )
+    metadata.create_all(eng)
+    return eng
+
+
+@pytest.fixture
+def service(engine):
+    """Create a SessionServiceImpl backed by the in-memory engine."""
+    return SessionServiceImpl(engine)
+
+
+class TestSessionCRUD:
+    """Tests for session create, get, list, and archive."""
+
+    @pytest.mark.asyncio
+    async def test_create_session(self, service) -> None:
+        session = await service.create_session("alice", "My Session", "local")
+        assert isinstance(session, SessionRecord)
+        assert session.user_id == "alice"
+        assert session.auth_provider_type == "local"
+        assert session.title == "My Session"
+        assert isinstance(session.id, uuid.UUID)
+        assert isinstance(session.created_at, datetime)
+
+    @pytest.mark.asyncio
+    async def test_get_session(self, service) -> None:
+        created = await service.create_session("alice", "Test", "local")
+        fetched = await service.get_session(created.id)
+        assert fetched.id == created.id
+        assert fetched.user_id == "alice"
+        assert fetched.title == "Test"
+
+    @pytest.mark.asyncio
+    async def test_get_session_not_found_raises(self, service) -> None:
+        with pytest.raises(ValueError, match="not found"):
+            await service.get_session(uuid.uuid4())
+
+    @pytest.mark.asyncio
+    async def test_list_sessions_user_scoped(self, service) -> None:
+        await service.create_session("alice", "Session A", "local")
+        await service.create_session("alice", "Session B", "local")
+        await service.create_session("bob", "Session C", "local")
+
+        alice_sessions = await service.list_sessions("alice", "local")
+        assert len(alice_sessions) == 2
+        assert all(s.user_id == "alice" for s in alice_sessions)
+
+        bob_sessions = await service.list_sessions("bob", "local")
+        assert len(bob_sessions) == 1
+
+    @pytest.mark.asyncio
+    async def test_list_sessions_ordered_by_updated_at_desc(self, service) -> None:
+        s1 = await service.create_session("alice", "First", "local")
+        await service.create_session("alice", "Second", "local")
+        # Add a message to s1 to update its updated_at
+        await service.add_message(s1.id, "user", "hello")
+
+        sessions = await service.list_sessions("alice", "local")
+        # s1 should be first (most recently updated)
+        assert sessions[0].id == s1.id
+
+    @pytest.mark.asyncio
+    async def test_archive_session(self, service) -> None:
+        session = await service.create_session("alice", "To Archive", "local")
+        await service.add_message(session.id, "user", "hello")
+        await service.archive_session(session.id)
+
+        with pytest.raises(ValueError):
+            await service.get_session(session.id)
+
+        messages = await service.get_messages(session.id)
+        assert len(messages) == 0
+
+
+class TestMessagePersistence:
+    """Tests for chat message add and retrieval."""
+
+    @pytest.mark.asyncio
+    async def test_add_and_get_messages(self, service) -> None:
+        session = await service.create_session("alice", "Chat", "local")
+        msg1 = await service.add_message(session.id, "user", "Hello")
+        await service.add_message(session.id, "assistant", "Hi there")
+
+        assert isinstance(msg1, ChatMessageRecord)
+        assert msg1.role == "user"
+        assert msg1.content == "Hello"
+
+        messages = await service.get_messages(session.id)
+        assert len(messages) == 2
+        assert messages[0].role == "user"
+        assert messages[1].role == "assistant"
+
+    @pytest.mark.asyncio
+    async def test_messages_ordered_by_created_at_asc(self, service) -> None:
+        session = await service.create_session("alice", "Chat", "local")
+        await service.add_message(session.id, "user", "First")
+        await service.add_message(session.id, "assistant", "Second")
+        await service.add_message(session.id, "user", "Third")
+
+        messages = await service.get_messages(session.id)
+        assert [m.content for m in messages] == ["First", "Second", "Third"]
+
+    @pytest.mark.asyncio
+    async def test_add_message_with_tool_calls(self, service) -> None:
+        session = await service.create_session("alice", "Chat", "local")
+        tool_calls_data = {"name": "set_source", "arguments": {"type": "csv"}}
+        msg = await service.add_message(
+            session.id,
+            "assistant",
+            "Setting source",
+            tool_calls=tool_calls_data,
+        )
+        assert msg.tool_calls is not None
+
+    @pytest.mark.asyncio
+    async def test_add_message_updates_session_updated_at(self, service) -> None:
+        session = await service.create_session("alice", "Chat", "local")
+        original_updated = session.updated_at.replace(tzinfo=None)
+        await service.add_message(session.id, "user", "hello")
+        refreshed = await service.get_session(session.id)
+        # SQLite strips timezone info; compare naive datetimes (both are UTC)
+        refreshed_updated = refreshed.updated_at.replace(tzinfo=None)
+        assert refreshed_updated >= original_updated
+
+
+class TestCompositionStateVersioning:
+    """Tests for immutable state snapshots with monotonic versioning."""
+
+    @pytest.mark.asyncio
+    async def test_first_state_version_is_1(self, service) -> None:
+        session = await service.create_session("alice", "Pipeline", "local")
+        state_data = CompositionStateData(is_valid=False)
+        state = await service.save_composition_state(session.id, state_data)
+        assert isinstance(state, CompositionStateRecord)
+        assert state.version == 1
+        # New states (not reverts) have no lineage (D2/D7)
+        assert state.derived_from_state_id is None
+
+    @pytest.mark.asyncio
+    async def test_version_increments_monotonically(self, service) -> None:
+        session = await service.create_session("alice", "Pipeline", "local")
+        s1 = await service.save_composition_state(
+            session.id,
+            CompositionStateData(is_valid=False),
+        )
+        s2 = await service.save_composition_state(
+            session.id,
+            CompositionStateData(is_valid=True),
+        )
+        assert s1.version == 1
+        assert s2.version == 2
+
+    @pytest.mark.asyncio
+    async def test_get_current_state_returns_highest_version(
+        self,
+        service,
+    ) -> None:
+        session = await service.create_session("alice", "Pipeline", "local")
+        await service.save_composition_state(
+            session.id,
+            CompositionStateData(
+                source={"type": "csv", "path": "old.csv"},
+                is_valid=False,
+            ),
+        )
+        await service.save_composition_state(
+            session.id,
+            CompositionStateData(
+                source={"type": "csv", "path": "new.csv"},
+                is_valid=True,
+            ),
+        )
+        current = await service.get_current_state(session.id)
+        assert current is not None
+        assert current.version == 2
+        assert current.is_valid is True
+
+    @pytest.mark.asyncio
+    async def test_get_current_state_returns_none_when_empty(
+        self,
+        service,
+    ) -> None:
+        session = await service.create_session("alice", "Empty", "local")
+        current = await service.get_current_state(session.id)
+        assert current is None
+
+    @pytest.mark.asyncio
+    async def test_get_state_versions_returns_all_ascending(
+        self,
+        service,
+    ) -> None:
+        session = await service.create_session("alice", "Pipeline", "local")
+        await service.save_composition_state(
+            session.id,
+            CompositionStateData(is_valid=False),
+        )
+        await service.save_composition_state(
+            session.id,
+            CompositionStateData(is_valid=False),
+        )
+        await service.save_composition_state(
+            session.id,
+            CompositionStateData(is_valid=True),
+        )
+        versions = await service.get_state_versions(session.id)
+        assert len(versions) == 3
+        assert [v.version for v in versions] == [1, 2, 3]
+
+    @pytest.mark.asyncio
+    async def test_state_preserves_pipeline_data(self, service) -> None:
+        session = await service.create_session("alice", "Pipeline", "local")
+        state_data = CompositionStateData(
+            source={"type": "csv", "path": "/data/input.csv"},
+            nodes=[{"name": "classify", "type": "transform"}],
+            edges=[{"from": "source", "to": "classify"}],
+            outputs=[{"name": "results", "type": "csv_sink"}],
+            metadata_={"pipeline_name": "Test Pipeline"},
+            is_valid=True,
+            validation_errors=None,
+        )
+        state = await service.save_composition_state(session.id, state_data)
+        assert state.is_valid is True
+
+
+class TestOneActiveRunEnforcement:
+    """Tests for B6 -- one active run per session."""
+
+    @pytest.mark.asyncio
+    async def test_second_pending_run_raises(self, service) -> None:
+        session = await service.create_session("alice", "Pipeline", "local")
+        state = await service.save_composition_state(
+            session.id,
+            CompositionStateData(is_valid=True),
+        )
+        # First run should succeed
+        await service.create_run(session.id, state.id)
+        # Second run should fail
+        with pytest.raises(RunAlreadyActiveError):
+            await service.create_run(session.id, state.id)
+
+    @pytest.mark.asyncio
+    async def test_create_run_returns_run_record(self, service) -> None:
+        session = await service.create_session("alice", "Pipeline", "local")
+        state = await service.save_composition_state(
+            session.id,
+            CompositionStateData(is_valid=True),
+        )
+        run = await service.create_run(session.id, state.id)
+        assert isinstance(run, RunRecord)
+        assert run.status == "pending"
+        assert run.session_id == session.id
+        assert run.state_id == state.id
+        assert run.pipeline_yaml is None
+
+    @pytest.mark.asyncio
+    async def test_create_run_with_pipeline_yaml(self, service) -> None:
+        session = await service.create_session("alice", "Pipeline", "local")
+        state = await service.save_composition_state(
+            session.id,
+            CompositionStateData(is_valid=True),
+        )
+        run = await service.create_run(
+            session.id,
+            state.id,
+            pipeline_yaml="source:\n  type: csv",
+        )
+        assert run.pipeline_yaml == "source:\n  type: csv"
+
+    @pytest.mark.asyncio
+    async def test_completed_run_allows_new_run(self, service) -> None:
+        session = await service.create_session("alice", "Pipeline", "local")
+        state = await service.save_composition_state(
+            session.id,
+            CompositionStateData(is_valid=True),
+        )
+        run = await service.create_run(session.id, state.id)
+        # Transition through legal path: pending -> running -> completed
+        await service.update_run_status(run.id, "running")
+        await service.update_run_status(run.id, "completed")
+        # New run should succeed
+        run2 = await service.create_run(session.id, state.id)
+        assert run2.status == "pending"
+
+    @pytest.mark.asyncio
+    async def test_failed_run_allows_new_run(self, service) -> None:
+        session = await service.create_session("alice", "Pipeline", "local")
+        state = await service.save_composition_state(
+            session.id,
+            CompositionStateData(is_valid=True),
+        )
+        run = await service.create_run(session.id, state.id)
+        # Transition through legal path: pending -> running -> failed
+        await service.update_run_status(run.id, "running")
+        await service.update_run_status(run.id, "failed")
+        run2 = await service.create_run(session.id, state.id)
+        assert run2.status == "pending"
+
+    @pytest.mark.asyncio
+    async def test_running_run_blocks_new_run(self, service) -> None:
+        session = await service.create_session("alice", "Pipeline", "local")
+        state = await service.save_composition_state(
+            session.id,
+            CompositionStateData(is_valid=True),
+        )
+        run = await service.create_run(session.id, state.id)
+        await service.update_run_status(run.id, "running")
+        with pytest.raises(RunAlreadyActiveError):
+            await service.create_run(session.id, state.id)
+
+
+class TestGetState:
+    """Tests for get_state -- fetch a specific CompositionStateRecord by UUID."""
+
+    @pytest.mark.asyncio
+    async def test_get_state_by_id(self, service) -> None:
+        session = await service.create_session("alice", "Pipeline", "local")
+        saved = await service.save_composition_state(
+            session.id,
+            CompositionStateData(
+                source={"type": "csv"},
+                is_valid=True,
+            ),
+        )
+        fetched = await service.get_state(saved.id)
+        assert fetched.id == saved.id
+        assert fetched.version == saved.version
+
+    @pytest.mark.asyncio
+    async def test_get_state_not_found_raises(self, service) -> None:
+        with pytest.raises(ValueError, match="not found"):
+            await service.get_state(uuid.uuid4())
+
+
+class TestSetActiveState:
+    """Tests for set_active_state -- revert by copying a prior version."""
+
+    @pytest.mark.asyncio
+    async def test_revert_creates_new_version(self, service) -> None:
+        session = await service.create_session("alice", "Pipeline", "local")
+        v1 = await service.save_composition_state(
+            session.id,
+            CompositionStateData(source={"type": "csv"}, is_valid=True),
+        )
+        await service.save_composition_state(
+            session.id,
+            CompositionStateData(source={"type": "api"}, is_valid=True),
+        )
+        # Revert to v1 -- should create v3 as a copy of v1
+        reverted = await service.set_active_state(session.id, v1.id)
+        assert reverted.version == 3
+        # Content should match v1, not v2
+        assert reverted.source == v1.source
+        # Lineage: reverted state records where it came from (D6)
+        assert reverted.derived_from_state_id == v1.id
+
+    @pytest.mark.asyncio
+    async def test_revert_preserves_history(self, service) -> None:
+        session = await service.create_session("alice", "Pipeline", "local")
+        await service.save_composition_state(
+            session.id,
+            CompositionStateData(is_valid=False),
+        )
+        v2 = await service.save_composition_state(
+            session.id,
+            CompositionStateData(is_valid=True),
+        )
+        await service.set_active_state(session.id, v2.id)
+        versions = await service.get_state_versions(session.id)
+        # All three versions should exist (v1, v2, v3)
+        assert len(versions) == 3
+        assert [v.version for v in versions] == [1, 2, 3]
+
+    @pytest.mark.asyncio
+    async def test_revert_state_not_found_raises(self, service) -> None:
+        session = await service.create_session("alice", "Pipeline", "local")
+        with pytest.raises(ValueError, match="not found"):
+            await service.set_active_state(session.id, uuid.uuid4())
+
+    @pytest.mark.asyncio
+    async def test_revert_state_wrong_session_raises(self, service) -> None:
+        s1 = await service.create_session("alice", "Session 1", "local")
+        s2 = await service.create_session("alice", "Session 2", "local")
+        state = await service.save_composition_state(
+            s1.id,
+            CompositionStateData(is_valid=True),
+        )
+        with pytest.raises(ValueError, match="does not belong"):
+            await service.set_active_state(s2.id, state.id)
+
+
+class TestGetRun:
+    """Tests for get_run -- fetch a RunRecord by UUID."""
+
+    @pytest.mark.asyncio
+    async def test_get_run_returns_record(self, service) -> None:
+        session = await service.create_session("alice", "Pipeline", "local")
+        state = await service.save_composition_state(
+            session.id,
+            CompositionStateData(is_valid=True),
+        )
+        created = await service.create_run(session.id, state.id)
+        fetched = await service.get_run(created.id)
+        assert isinstance(fetched, RunRecord)
+        assert fetched.id == created.id
+        assert fetched.status == "pending"
+
+    @pytest.mark.asyncio
+    async def test_get_run_not_found_raises(self, service) -> None:
+        with pytest.raises(ValueError, match="not found"):
+            await service.get_run(uuid.uuid4())
+
+
+class TestGetActiveRun:
+    """Tests for get_active_run -- pending/running run for a session."""
+
+    @pytest.mark.asyncio
+    async def test_returns_active_run(self, service) -> None:
+        session = await service.create_session("alice", "Pipeline", "local")
+        state = await service.save_composition_state(
+            session.id,
+            CompositionStateData(is_valid=True),
+        )
+        run = await service.create_run(session.id, state.id)
+        active = await service.get_active_run(session.id)
+        assert active is not None
+        assert active.id == run.id
+
+    @pytest.mark.asyncio
+    async def test_returns_none_when_no_active_run(self, service) -> None:
+        session = await service.create_session("alice", "Pipeline", "local")
+        active = await service.get_active_run(session.id)
+        assert active is None
+
+    @pytest.mark.asyncio
+    async def test_returns_none_after_completion(self, service) -> None:
+        session = await service.create_session("alice", "Pipeline", "local")
+        state = await service.save_composition_state(
+            session.id,
+            CompositionStateData(is_valid=True),
+        )
+        run = await service.create_run(session.id, state.id)
+        await service.update_run_status(run.id, "running")
+        await service.update_run_status(run.id, "completed")
+        active = await service.get_active_run(session.id)
+        assert active is None
+
+
+class TestUpdateRunStatusExpanded:
+    """Tests for expanded update_run_status signature (R6)."""
+
+    @pytest.mark.asyncio
+    async def test_update_with_error(self, service) -> None:
+        session = await service.create_session("alice", "Pipeline", "local")
+        state = await service.save_composition_state(
+            session.id,
+            CompositionStateData(is_valid=True),
+        )
+        run = await service.create_run(session.id, state.id)
+        await service.update_run_status(run.id, "running")
+        await service.update_run_status(
+            run.id,
+            "failed",
+            error="Source file not found",
+        )
+        fetched = await service.get_run(run.id)
+        assert fetched.status == "failed"
+        assert fetched.error == "Source file not found"
+        assert fetched.finished_at is not None
+
+    @pytest.mark.asyncio
+    async def test_update_with_landscape_run_id(self, service) -> None:
+        session = await service.create_session("alice", "Pipeline", "local")
+        state = await service.save_composition_state(
+            session.id,
+            CompositionStateData(is_valid=True),
+        )
+        run = await service.create_run(session.id, state.id)
+        await service.update_run_status(run.id, "running")
+        await service.update_run_status(
+            run.id,
+            "completed",
+            landscape_run_id="lscp-abc-123",
+            rows_processed=100,
+            rows_failed=3,
+        )
+        fetched = await service.get_run(run.id)
+        assert fetched.landscape_run_id == "lscp-abc-123"
+        assert fetched.rows_processed == 100
+        assert fetched.rows_failed == 3
+
+    @pytest.mark.asyncio
+    async def test_update_not_found_raises(self, service) -> None:
+        with pytest.raises(ValueError, match="not found"):
+            await service.update_run_status(uuid.uuid4(), "completed")
+
+
+class TestRunTransitionEnforcement:
+    """Tests for D3 -- LEGAL_RUN_TRANSITIONS enforcement."""
+
+    @pytest.mark.asyncio
+    async def test_legal_transition_pending_to_running(self, service) -> None:
+        session = await service.create_session("alice", "Pipeline", "local")
+        state = await service.save_composition_state(
+            session.id,
+            CompositionStateData(is_valid=True),
+        )
+        run = await service.create_run(session.id, state.id)
+        await service.update_run_status(run.id, "running")
+        fetched = await service.get_run(run.id)
+        assert fetched.status == "running"
+
+    @pytest.mark.asyncio
+    async def test_legal_transition_pending_to_cancelled(self, service) -> None:
+        session = await service.create_session("alice", "Pipeline", "local")
+        state = await service.save_composition_state(
+            session.id,
+            CompositionStateData(is_valid=True),
+        )
+        run = await service.create_run(session.id, state.id)
+        await service.update_run_status(run.id, "cancelled")
+        fetched = await service.get_run(run.id)
+        assert fetched.status == "cancelled"
+        assert fetched.finished_at is not None
+
+    @pytest.mark.asyncio
+    async def test_illegal_transition_pending_to_completed_raises(
+        self,
+        service,
+    ) -> None:
+        session = await service.create_session("alice", "Pipeline", "local")
+        state = await service.save_composition_state(
+            session.id,
+            CompositionStateData(is_valid=True),
+        )
+        run = await service.create_run(session.id, state.id)
+        with pytest.raises(ValueError, match=r"Illegal.*transition"):
+            await service.update_run_status(run.id, "completed")
+
+    @pytest.mark.asyncio
+    async def test_illegal_transition_completed_to_running_raises(
+        self,
+        service,
+    ) -> None:
+        session = await service.create_session("alice", "Pipeline", "local")
+        state = await service.save_composition_state(
+            session.id,
+            CompositionStateData(is_valid=True),
+        )
+        run = await service.create_run(session.id, state.id)
+        await service.update_run_status(run.id, "running")
+        await service.update_run_status(run.id, "completed")
+        with pytest.raises(ValueError, match=r"Illegal.*transition"):
+            await service.update_run_status(run.id, "running")
+
+
+class TestLandscapeRunIdWriteOnce:
+    """Tests for D4 -- landscape_run_id is write-once."""
+
+    @pytest.mark.asyncio
+    async def test_set_landscape_run_id(self, service) -> None:
+        session = await service.create_session("alice", "Pipeline", "local")
+        state = await service.save_composition_state(
+            session.id,
+            CompositionStateData(is_valid=True),
+        )
+        run = await service.create_run(session.id, state.id)
+        await service.update_run_status(
+            run.id,
+            "running",
+            landscape_run_id="lscp-001",
+        )
+        fetched = await service.get_run(run.id)
+        assert fetched.landscape_run_id == "lscp-001"
+
+    @pytest.mark.asyncio
+    async def test_overwrite_landscape_run_id_raises(self, service) -> None:
+        session = await service.create_session("alice", "Pipeline", "local")
+        state = await service.save_composition_state(
+            session.id,
+            CompositionStateData(is_valid=True),
+        )
+        run = await service.create_run(session.id, state.id)
+        await service.update_run_status(
+            run.id,
+            "running",
+            landscape_run_id="lscp-001",
+        )
+        with pytest.raises(ValueError, match=r"landscape_run_id.*already set"):
+            await service.update_run_status(
+                run.id,
+                "completed",
+                landscape_run_id="lscp-002",
+            )
+
+    @pytest.mark.asyncio
+    async def test_none_landscape_run_id_does_not_overwrite(
+        self,
+        service,
+    ) -> None:
+        session = await service.create_session("alice", "Pipeline", "local")
+        state = await service.save_composition_state(
+            session.id,
+            CompositionStateData(is_valid=True),
+        )
+        run = await service.create_run(session.id, state.id)
+        await service.update_run_status(
+            run.id,
+            "running",
+            landscape_run_id="lscp-001",
+        )
+        # Passing None (default) should not trigger the write-once guard
+        await service.update_run_status(run.id, "completed")
+        fetched = await service.get_run(run.id)
+        assert fetched.landscape_run_id == "lscp-001"
+
+
+class TestCancelOrphanedRuns:
+    """Tests for D5 -- cancel_orphaned_runs."""
+
+    @pytest.mark.asyncio
+    async def test_cancels_stale_running_run(self, service) -> None:
+        session = await service.create_session("alice", "Pipeline", "local")
+        state = await service.save_composition_state(
+            session.id,
+            CompositionStateData(is_valid=True),
+        )
+        run = await service.create_run(session.id, state.id)
+        await service.update_run_status(run.id, "running")
+        # Cancel with max_age_seconds=0 so ANY running run is considered stale
+        cancelled = await service.cancel_orphaned_runs(
+            session.id,
+            max_age_seconds=0,
+        )
+        assert len(cancelled) == 1
+        assert cancelled[0].id == run.id
+        assert cancelled[0].status == "cancelled"
+
+    @pytest.mark.asyncio
+    async def test_does_not_cancel_recent_running_run(self, service) -> None:
+        session = await service.create_session("alice", "Pipeline", "local")
+        state = await service.save_composition_state(
+            session.id,
+            CompositionStateData(is_valid=True),
+        )
+        run = await service.create_run(session.id, state.id)
+        await service.update_run_status(run.id, "running")
+        # max_age_seconds=3600 -- run was just created, so not stale
+        cancelled = await service.cancel_orphaned_runs(
+            session.id,
+            max_age_seconds=3600,
+        )
+        assert len(cancelled) == 0
+
+    @pytest.mark.asyncio
+    async def test_does_not_cancel_completed_runs(self, service) -> None:
+        session = await service.create_session("alice", "Pipeline", "local")
+        state = await service.save_composition_state(
+            session.id,
+            CompositionStateData(is_valid=True),
+        )
+        run = await service.create_run(session.id, state.id)
+        await service.update_run_status(run.id, "running")
+        await service.update_run_status(run.id, "completed")
+        cancelled = await service.cancel_orphaned_runs(
+            session.id,
+            max_age_seconds=0,
+        )
+        assert len(cancelled) == 0
+
+    @pytest.mark.asyncio
+    async def test_cancel_unblocks_session_for_new_run(self, service) -> None:
+        session = await service.create_session("alice", "Pipeline", "local")
+        state = await service.save_composition_state(
+            session.id,
+            CompositionStateData(is_valid=True),
+        )
+        run = await service.create_run(session.id, state.id)
+        await service.update_run_status(run.id, "running")
+        await service.cancel_orphaned_runs(session.id, max_age_seconds=0)
+        # Session should now accept a new run
+        run2 = await service.create_run(session.id, state.id)
+        assert run2.status == "pending"
+
+    @pytest.mark.asyncio
+    async def test_cancel_includes_pending_orphans(self, service) -> None:
+        """A run stuck in 'pending' (crash before transition to running) is also cleaned."""
+        session = await service.create_session("alice", "Pipeline", "local")
+        state = await service.save_composition_state(
+            session.id,
+            CompositionStateData(is_valid=True),
+        )
+        # Create run that stays in pending (simulates crash before running transition)
+        await service.create_run(session.id, state.id)
+        cancelled = await service.cancel_orphaned_runs(session.id, max_age_seconds=0)
+        assert len(cancelled) == 1
+        assert cancelled[0].status == "cancelled"
+
+    @pytest.mark.asyncio
+    async def test_cancel_does_not_touch_completed_runs(self, service) -> None:
+        """Completed runs are never cancelled regardless of age."""
+        session = await service.create_session("alice", "Pipeline", "local")
+        state = await service.save_composition_state(
+            session.id,
+            CompositionStateData(is_valid=True),
+        )
+        run = await service.create_run(session.id, state.id)
+        await service.update_run_status(run.id, "running")
+        await service.update_run_status(run.id, "completed")
+        cancelled = await service.cancel_orphaned_runs(session.id, max_age_seconds=0)
+        assert len(cancelled) == 0
+
+
+class TestArchiveSessionWithActiveRun:
+    """Tests for archive_session when a run is active."""
+
+    @pytest.mark.asyncio
+    async def test_archive_cascades_through_active_run(self, service) -> None:
+        """Archiving a session with an active run deletes everything including the run."""
+        session = await service.create_session("alice", "Pipeline", "local")
+        state = await service.save_composition_state(
+            session.id,
+            CompositionStateData(is_valid=True),
+        )
+        await service.create_run(session.id, state.id)
+        # Archive should succeed — cascade deletes the run
+        await service.archive_session(session.id)
+        with pytest.raises(ValueError, match="Session not found"):
+            await service.get_session(session.id)
+
+
+class TestGetMessagesNonexistentSession:
+    """Tests for get_messages behavior with a nonexistent session."""
+
+    @pytest.mark.asyncio
+    async def test_get_messages_returns_empty_for_nonexistent_session(self, service) -> None:
+        """get_messages silently returns [] for a nonexistent session_id.
+
+        This is by design — the WHERE clause filters by session_id and
+        returns no rows. Callers (routes) should verify session existence
+        via _verify_session_ownership before calling get_messages.
+        """
+        import uuid
+
+        result = await service.get_messages(uuid.uuid4())
+        assert result == []
+
+
+class TestPagination:
+    """Tests for limit/offset pagination on list endpoints."""
+
+    @pytest.mark.asyncio
+    async def test_list_sessions_limit(self, service) -> None:
+        for i in range(5):
+            await service.create_session("alice", f"Session {i}", "local")
+        sessions = await service.list_sessions("alice", "local", limit=2)
+        assert len(sessions) == 2
+
+    @pytest.mark.asyncio
+    async def test_list_sessions_offset(self, service) -> None:
+        for i in range(5):
+            await service.create_session("alice", f"Session {i}", "local")
+        all_sessions = await service.list_sessions("alice", "local")
+        offset_sessions = await service.list_sessions("alice", "local", limit=2, offset=2)
+        assert len(offset_sessions) == 2
+        assert offset_sessions[0].id == all_sessions[2].id
+        assert offset_sessions[1].id == all_sessions[3].id
+
+    @pytest.mark.asyncio
+    async def test_list_sessions_offset_past_end(self, service) -> None:
+        await service.create_session("alice", "Only One", "local")
+        sessions = await service.list_sessions("alice", "local", offset=10)
+        assert sessions == []
+
+    @pytest.mark.asyncio
+    async def test_get_messages_limit(self, service) -> None:
+        session = await service.create_session("alice", "Chat", "local")
+        for i in range(5):
+            await service.add_message(session.id, "user", f"Message {i}")
+        messages = await service.get_messages(session.id, limit=3)
+        assert len(messages) == 3
+        assert messages[0].content == "Message 0"
+
+    @pytest.mark.asyncio
+    async def test_get_messages_offset(self, service) -> None:
+        session = await service.create_session("alice", "Chat", "local")
+        for i in range(5):
+            await service.add_message(session.id, "user", f"Message {i}")
+        messages = await service.get_messages(session.id, limit=2, offset=3)
+        assert len(messages) == 2
+        assert messages[0].content == "Message 3"
+        assert messages[1].content == "Message 4"
+
+    @pytest.mark.asyncio
+    async def test_get_state_versions_limit(self, service) -> None:
+        session = await service.create_session("alice", "Pipeline", "local")
+        for _ in range(5):
+            await service.save_composition_state(
+                session.id,
+                CompositionStateData(is_valid=False),
+            )
+        versions = await service.get_state_versions(session.id, limit=2)
+        assert len(versions) == 2
+        assert versions[0].version == 1
+        assert versions[1].version == 2
+
+    @pytest.mark.asyncio
+    async def test_get_state_versions_offset(self, service) -> None:
+        session = await service.create_session("alice", "Pipeline", "local")
+        for _ in range(5):
+            await service.save_composition_state(
+                session.id,
+                CompositionStateData(is_valid=False),
+            )
+        versions = await service.get_state_versions(session.id, limit=2, offset=3)
+        assert len(versions) == 2
+        assert versions[0].version == 4
+        assert versions[1].version == 5
+
+
+class TestPruneStateVersions:
+    """Tests for prune_state_versions -- delete old versions, preserve recent and run-referenced."""
+
+    @pytest.mark.asyncio
+    async def test_prune_deletes_old_versions(self, service) -> None:
+        session = await service.create_session("alice", "Pipeline", "local")
+        for _ in range(5):
+            await service.save_composition_state(
+                session.id,
+                CompositionStateData(is_valid=False),
+            )
+
+        deleted = await service.prune_state_versions(session.id, keep_latest=2)
+        assert deleted == 3
+
+        remaining = await service.get_state_versions(session.id)
+        assert len(remaining) == 2
+        assert [v.version for v in remaining] == [4, 5]
+
+    @pytest.mark.asyncio
+    async def test_prune_preserves_run_referenced_versions(self, service) -> None:
+        session = await service.create_session("alice", "Pipeline", "local")
+        v1 = await service.save_composition_state(
+            session.id,
+            CompositionStateData(is_valid=True),
+        )
+        await service.save_composition_state(
+            session.id,
+            CompositionStateData(is_valid=False),
+        )
+        await service.save_composition_state(
+            session.id,
+            CompositionStateData(is_valid=False),
+        )
+
+        # Create a run referencing v1
+        await service.create_run(session.id, v1.id)
+
+        # Prune keeping only latest 1 -- v1 should survive (run-referenced), v2 deleted
+        deleted = await service.prune_state_versions(session.id, keep_latest=1)
+        assert deleted == 1  # only v2 deleted
+
+        remaining = await service.get_state_versions(session.id)
+        remaining_versions = [v.version for v in remaining]
+        assert 1 in remaining_versions  # preserved by run reference
+        assert 2 not in remaining_versions  # deleted
+        assert 3 in remaining_versions  # kept as latest
+
+    @pytest.mark.asyncio
+    async def test_prune_returns_zero_when_nothing_to_prune(self, service) -> None:
+        session = await service.create_session("alice", "Pipeline", "local")
+        for _ in range(2):
+            await service.save_composition_state(
+                session.id,
+                CompositionStateData(is_valid=False),
+            )
+
+        deleted = await service.prune_state_versions(session.id, keep_latest=5)
+        assert deleted == 0

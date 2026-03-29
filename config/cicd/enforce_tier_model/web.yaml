@@ -1,10 +1,4 @@
 allow_hits:
-- key: web/app.py:R1:create_app:health:fp=09d5b0878cd851c8
-  owner: architecture
-  reason: "False positive — @app.get() is FastAPI HTTP route decorator, not dict.get()"
-  safety: No dict access involved; decorator syntax triggers text-based pattern match
-  expires: null
-
 # Catalog routes — @router.get() false positives (FastAPI route decorators, not dict.get)
 - key: web/catalog/routes.py:R1:list_sources:fp=ccdc6bb55bdef578
   owner: web-catalog
@@ -227,6 +221,63 @@ allow_hits:
   owner: web-auth
   reason: "Route dispatch — narrows AuthProvider to LocalAuthProvider for local-only endpoints"
   safety: "Non-local providers return 404; isinstance enables mypy type narrowing for login()/refresh()"
+  expires: null
+
+# SessionServiceImpl — _unwrap_envelope checks envelope structure (Tier 1 read boundary)
+- key: web/sessions/service.py:R5:SessionServiceImpl:_unwrap_envelope:fp=1f13048cd351a07f
+  owner: web-sessions
+  reason: "Tier 1 read boundary — validates JSON envelope structure before accessing _version key"
+  safety: "Crashes on unknown version or missing envelope; no silent coercion"
+  expires: null
+
+# App factory — @app.get() false positive (moved health route)
+- key: web/app.py:R1:create_app:fp=1fc678e07ca95b6c
+  owner: web-app
+  reason: "False positive — list comprehension/return triggers text-based pattern match"
+  safety: No dict access involved
+  expires: null
+
+- key: web/app.py:R1:create_app:health:fp=4c8b1ed957dd54b3
+  owner: web-app
+  reason: "False positive — @app.get() is FastAPI HTTP route decorator, not dict.get()"
+  safety: No dict access involved
+  expires: null
+
+# Session routes — @router.get() false positives (FastAPI route decorators)
+- key: web/sessions/routes.py:R1:create_session_router:list_sessions:fp=566a63b023413715
+  owner: web-sessions
+  reason: "False positive — @router.get() is FastAPI HTTP route decorator, not dict.get()"
+  safety: No dict access involved
+  expires: null
+
+- key: web/sessions/routes.py:R1:create_session_router:get_session:fp=06676354866805bb
+  owner: web-sessions
+  reason: "False positive — @router.get() is FastAPI HTTP route decorator, not dict.get()"
+  safety: No dict access involved
+  expires: null
+
+- key: web/sessions/routes.py:R1:create_session_router:get_messages:fp=e4cd750dba8b0605
+  owner: web-sessions
+  reason: "False positive — @router.get() is FastAPI HTTP route decorator, not dict.get()"
+  safety: No dict access involved
+  expires: null
+
+- key: web/sessions/routes.py:R1:create_session_router:get_current_state:fp=cef5502322f77a56
+  owner: web-sessions
+  reason: "False positive — @router.get() is FastAPI HTTP route decorator, not dict.get()"
+  safety: No dict access involved
+  expires: null
+
+- key: web/sessions/routes.py:R1:create_session_router:get_state_versions:fp=2488944a97b94499
+  owner: web-sessions
+  reason: "False positive — @router.get() is FastAPI HTTP route decorator, not dict.get()"
+  safety: No dict access involved
+  expires: null
+
+- key: web/sessions/routes.py:R1:create_session_router:get_state_yaml:fp=8c4e496653f21fcd
+  owner: web-sessions
+  reason: "False positive — @router.get() is FastAPI HTTP route decorator, not dict.get()"
+  safety: No dict access involved
   expires: null
 
 # Auth middleware — Tier 3 HTTP header access (Authorization header from client)

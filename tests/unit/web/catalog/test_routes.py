@@ -11,19 +11,19 @@ from elspeth.web.catalog.routes import catalog_router
 from elspeth.web.catalog.service import CatalogServiceImpl
 
 
-@pytest.fixture(scope="module")
+@pytest.fixture
 def plugin_manager() -> PluginManager:
     pm = PluginManager()
     pm.register_builtin_plugins()
     return pm
 
 
-@pytest.fixture(scope="module")
+@pytest.fixture
 def catalog(plugin_manager: PluginManager) -> CatalogServiceImpl:
     return CatalogServiceImpl(plugin_manager)
 
 
-@pytest.fixture(scope="module")
+@pytest.fixture
 def client(catalog: CatalogServiceImpl) -> TestClient:
     """TestClient with catalog router mounted."""
     app = FastAPI()

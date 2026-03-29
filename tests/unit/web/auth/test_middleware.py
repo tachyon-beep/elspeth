@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from unittest.mock import AsyncMock
 
-from fastapi import Depends, FastAPI
+from fastapi import Depends, FastAPI, Request
 from starlette.testclient import TestClient
 
 from elspeth.web.auth.middleware import get_current_user
@@ -17,8 +17,12 @@ def _create_test_app(auth_provider) -> FastAPI:
     app.state.auth_provider = auth_provider
 
     @app.get("/protected")
-    async def protected(user: UserIdentity = Depends(get_current_user)):  # noqa: B008
-        return {"user_id": user.user_id, "username": user.username}
+    async def protected(request: Request, user: UserIdentity = Depends(get_current_user)):  # noqa: B008
+        return {
+            "user_id": user.user_id,
+            "username": user.username,
+            "auth_token": request.state.auth_token,
+        }
 
     return app
 
@@ -40,7 +44,9 @@ class TestGetCurrentUser:
             headers={"Authorization": "Bearer valid-token-here"},
         )
         assert response.status_code == 200
-        assert response.json()["user_id"] == "alice"
+        body = response.json()
+        assert body["user_id"] == "alice"
+        assert body["auth_token"] == "valid-token-here"
         mock_provider.authenticate.assert_called_once_with("valid-token-here")
 
     def test_missing_authorization_header(self) -> None:

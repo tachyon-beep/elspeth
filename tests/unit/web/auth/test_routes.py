@@ -12,6 +12,13 @@ from elspeth.web.auth.models import AuthenticationError, UserIdentity
 from elspeth.web.auth.routes import create_auth_router
 from elspeth.web.config import WebSettings
 
+_OIDC_FIELDS = {
+    "oidc_issuer": "https://issuer.example.com",
+    "oidc_audience": "test-audience",
+    "oidc_client_id": "test-client-id",
+}
+_ENTRA_FIELDS = {**_OIDC_FIELDS, "entra_tenant_id": "test-tenant-id"}
+
 
 def _create_test_app(provider, auth_provider_type: str = "local", **settings_overrides) -> FastAPI:
     """Create a FastAPI app with auth routes for testing."""
@@ -63,7 +70,7 @@ class TestLoginEndpoint:
 
     def test_login_not_available_for_oidc(self, tmp_path) -> None:
         provider = AsyncMock()
-        app = _create_test_app(provider, auth_provider_type="oidc")
+        app = _create_test_app(provider, auth_provider_type="oidc", **_OIDC_FIELDS)
         client = TestClient(app)
 
         response = client.post(
@@ -74,7 +81,7 @@ class TestLoginEndpoint:
 
     def test_login_not_available_for_entra(self) -> None:
         provider = AsyncMock()
-        app = _create_test_app(provider, auth_provider_type="entra")
+        app = _create_test_app(provider, auth_provider_type="entra", **_ENTRA_FIELDS)
         client = TestClient(app)
         response = client.post(
             "/api/auth/login",
@@ -197,6 +204,7 @@ class TestAuthConfigEndpoint:
             provider,
             auth_provider_type="oidc",
             oidc_issuer="https://login.example.com",
+            oidc_audience="test-audience",
             oidc_client_id="my-client-id",
         )
         client = TestClient(app)
@@ -225,7 +233,7 @@ class TestTokenRefreshNonLocal:
     def test_token_refresh_not_available_for_oidc(self) -> None:
         provider = AsyncMock()
         provider.authenticate.return_value = UserIdentity(user_id="alice", username="alice")
-        app = _create_test_app(provider, auth_provider_type="oidc")
+        app = _create_test_app(provider, auth_provider_type="oidc", **_OIDC_FIELDS)
         client = TestClient(app)
         response = client.post(
             "/api/auth/token",
@@ -242,7 +250,7 @@ class TestMeErrorPath:
         mock_provider = AsyncMock()
         mock_provider.authenticate.return_value = UserIdentity(user_id="alice", username="alice")
         mock_provider.get_user_info.side_effect = AuthenticationError("Profile lookup failed")
-        app = _create_test_app(mock_provider, auth_provider_type="oidc")
+        app = _create_test_app(mock_provider, auth_provider_type="oidc", **_OIDC_FIELDS)
         client = TestClient(app)
         response = client.get(
             "/api/auth/me",

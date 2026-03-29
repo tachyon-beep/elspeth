@@ -135,4 +135,5 @@ class TestRunAlreadyActiveError:
 
 class TestSessionServiceProtocol:
     def test_is_runtime_checkable(self) -> None:
-        assert hasattr(SessionServiceProtocol, "__protocol_attrs__") or hasattr(SessionServiceProtocol, "_is_runtime_protocol")
+        # Verify @runtime_checkable works by checking a non-conforming object fails
+        assert not isinstance(object(), SessionServiceProtocol)
