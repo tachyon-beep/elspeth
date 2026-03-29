@@ -80,11 +80,11 @@ class TestValidatePipelinePathAllowlist:
         settings = FakeWebSettings(data_dir="/tmp/test_data")
         # Path check passes — validation continues to settings_load
         # (which will fail because no real engine, but the path check itself passes)
-        with patch("elspeth.web.execution.validation.yaml_generator") as mock_gen, \
-             patch("elspeth.web.execution.validation.load_settings") as mock_load:
-            mock_gen.generate_yaml.return_value = "source:\n  plugin: csv_source"
+        mock_yaml_gen = MagicMock()
+        mock_yaml_gen.generate_yaml.return_value = "source:\n  plugin: csv_source"
+        with patch("elspeth.web.execution.validation.load_settings") as mock_load:
             mock_load.side_effect = FileNotFoundError("no temp file")
-            result = validate_pipeline(state, settings)
+            result = validate_pipeline(state, settings, mock_yaml_gen)
         # B11: path check is always recorded — verify it passed
         path_check = next(c for c in result.checks if c.name == "source_path_allowlist")
         assert path_check.passed is True
@@ -94,7 +94,8 @@ class TestValidatePipelinePathAllowlist:
             source_options={"path": "/etc/passwd"},
         )
         settings = FakeWebSettings(data_dir="/tmp/test_data")
-        result = validate_pipeline(state, settings)
+        mock_yaml_gen = MagicMock()
+        result = validate_pipeline(state, settings, mock_yaml_gen)
         assert result.is_valid is False
         assert result.checks[0].name == "source_path_allowlist"
         assert result.checks[0].passed is False
@@ -105,18 +106,19 @@ class TestValidatePipelinePathAllowlist:
             source_options={"path": "/tmp/test_data/uploads/../../secret.csv"},
         )
         settings = FakeWebSettings(data_dir="/tmp/test_data")
-        result = validate_pipeline(state, settings)
+        mock_yaml_gen = MagicMock()
+        result = validate_pipeline(state, settings, mock_yaml_gen)
         assert result.is_valid is False
 
     def test_no_path_option_records_skipped_check(self) -> None:
         """B11 fix: path allowlist check is always recorded, even when skipped."""
         state = FakeCompositionState(source_options={})
         settings = FakeWebSettings(data_dir="/tmp/test_data")
-        with patch("elspeth.web.execution.validation.yaml_generator") as mock_gen, \
-             patch("elspeth.web.execution.validation.load_settings") as mock_load:
-            mock_gen.generate_yaml.return_value = "source:\n  plugin: csv_source"
+        mock_yaml_gen = MagicMock()
+        mock_yaml_gen.generate_yaml.return_value = "source:\n  plugin: csv_source"
+        with patch("elspeth.web.execution.validation.load_settings") as mock_load:
             mock_load.side_effect = FileNotFoundError("no temp file")
-            result = validate_pipeline(state, settings)
+            result = validate_pipeline(state, settings, mock_yaml_gen)
         # B11: check IS recorded with passed=True and "skipped" detail
         path_check = next(c for c in result.checks if c.name == "source_path_allowlist")
         assert path_check.passed is True
@@ -124,7 +126,6 @@ class TestValidatePipelinePathAllowlist:
 
 
 class TestValidatePipelineSuccess:
-    @patch("elspeth.web.execution.validation.yaml_generator")
     @patch("elspeth.web.execution.validation.load_settings")
     @patch("elspeth.web.execution.validation.instantiate_plugins_from_config")
     @patch("elspeth.web.execution.validation.ExecutionGraph")
@@ -133,8 +134,8 @@ class TestValidatePipelineSuccess:
         mock_graph_cls: MagicMock,
         mock_instantiate: MagicMock,
         mock_load: MagicMock,
-        mock_yaml_gen: MagicMock,
     ) -> None:
+        mock_yaml_gen = MagicMock()
         mock_yaml_gen.generate_yaml.return_value = "source:\n  plugin: csv_source"
         mock_settings = MagicMock()
         mock_load.return_value = mock_settings
@@ -152,7 +153,7 @@ class TestValidatePipelineSuccess:
 
         state = FakeCompositionState()
         settings = FakeWebSettings()
-        result = validate_pipeline(state, settings)
+        result = validate_pipeline(state, settings, mock_yaml_gen)
 
         assert result.is_valid is True
         assert len(result.checks) == 5
@@ -171,14 +172,16 @@ class TestValidatePipelineSuccess:
 
 
 class TestValidatePipelineSettingsFailure:
-    @patch("elspeth.web.execution.validation.yaml_generator")
     @patch("elspeth.web.execution.validation.load_settings")
     def test_pydantic_validation_error_short_circuits(
         self,
         mock_load: MagicMock,
-        mock_yaml_gen: MagicMock,
     ) -> None:
+        mock_yaml_gen = MagicMock()
         mock_yaml_gen.generate_yaml.return_value = "bad: yaml"
+        # Note: from_exception_data() is a Pydantic v2 internal API. If this breaks
+        # on a Pydantic upgrade, replace with: `ElspethSettings(bad_field="x")` to
+        # trigger a real PydanticValidationError.
         mock_load.side_effect = PydanticValidationError.from_exception_data(
             title="ElspethSettings",
             line_errors=[
@@ -193,7 +196,7 @@ class TestValidatePipelineSettingsFailure:
 
         state = FakeCompositionState()
         settings = FakeWebSettings()
-        result = validate_pipeline(state, settings)
+        result = validate_pipeline(state, settings, mock_yaml_gen)
 
         assert result.is_valid is False
         # B11: index 0 is source_path_allowlist (passed), index 1 is settings_load
@@ -206,19 +209,18 @@ class TestValidatePipelineSettingsFailure:
         assert any("Skipped" in c.detail for c in result.checks[2:])
         assert len(result.errors) >= 1
 
-    @patch("elspeth.web.execution.validation.yaml_generator")
     @patch("elspeth.web.execution.validation.load_settings")
     def test_file_not_found_error_from_settings(
         self,
         mock_load: MagicMock,
-        mock_yaml_gen: MagicMock,
     ) -> None:
+        mock_yaml_gen = MagicMock()
         mock_yaml_gen.generate_yaml.return_value = "source: {}"
         mock_load.side_effect = FileNotFoundError("temp file missing")
 
         state = FakeCompositionState()
         settings = FakeWebSettings()
-        result = validate_pipeline(state, settings)
+        result = validate_pipeline(state, settings, mock_yaml_gen)
 
         assert result.is_valid is False
         # B11: index 1 is settings_load (index 0 is source_path_allowlist)
@@ -226,15 +228,14 @@ class TestValidatePipelineSettingsFailure:
 
 
 class TestValidatePipelinePluginFailure:
-    @patch("elspeth.web.execution.validation.yaml_generator")
     @patch("elspeth.web.execution.validation.load_settings")
     @patch("elspeth.web.execution.validation.instantiate_plugins_from_config")
     def test_unknown_plugin_returns_attributed_error(
         self,
         mock_instantiate: MagicMock,
         mock_load: MagicMock,
-        mock_yaml_gen: MagicMock,
     ) -> None:
+        mock_yaml_gen = MagicMock()
         mock_yaml_gen.generate_yaml.return_value = "source:\n  plugin: unknown"
         mock_load.return_value = MagicMock()
         mock_instantiate.side_effect = ValueError(
@@ -243,7 +244,7 @@ class TestValidatePipelinePluginFailure:
 
         state = FakeCompositionState()
         settings = FakeWebSettings()
-        result = validate_pipeline(state, settings)
+        result = validate_pipeline(state, settings, mock_yaml_gen)
 
         assert result.is_valid is False
         # B11: index 0=path_allowlist, 1=settings_load, 2=plugin_instantiation
@@ -253,7 +254,6 @@ class TestValidatePipelinePluginFailure:
 
 
 class TestValidatePipelineGraphFailure:
-    @patch("elspeth.web.execution.validation.yaml_generator")
     @patch("elspeth.web.execution.validation.load_settings")
     @patch("elspeth.web.execution.validation.instantiate_plugins_from_config")
     @patch("elspeth.web.execution.validation.ExecutionGraph")
@@ -262,8 +262,8 @@ class TestValidatePipelineGraphFailure:
         mock_graph_cls: MagicMock,
         mock_instantiate: MagicMock,
         mock_load: MagicMock,
-        mock_yaml_gen: MagicMock,
     ) -> None:
+        mock_yaml_gen = MagicMock()
         mock_yaml_gen.generate_yaml.return_value = "source:\n  plugin: csv_source"
         mock_load.return_value = MagicMock()
         mock_bundle = MagicMock()
@@ -282,14 +282,13 @@ class TestValidatePipelineGraphFailure:
 
         state = FakeCompositionState()
         settings = FakeWebSettings()
-        result = validate_pipeline(state, settings)
+        result = validate_pipeline(state, settings, mock_yaml_gen)
 
         assert result.is_valid is False
         # B11: index 0=path_allowlist, 1=settings_load, 2=plugins, 3=graph_structure
         assert result.checks[3].passed is False  # graph_structure failed
         assert len(result.errors) >= 1
 
-    @patch("elspeth.web.execution.validation.yaml_generator")
     @patch("elspeth.web.execution.validation.load_settings")
     @patch("elspeth.web.execution.validation.instantiate_plugins_from_config")
     @patch("elspeth.web.execution.validation.ExecutionGraph")
@@ -298,8 +297,8 @@ class TestValidatePipelineGraphFailure:
         mock_graph_cls: MagicMock,
         mock_instantiate: MagicMock,
         mock_load: MagicMock,
-        mock_yaml_gen: MagicMock,
     ) -> None:
+        mock_yaml_gen = MagicMock()
         mock_yaml_gen.generate_yaml.return_value = "source:\n  plugin: csv_source"
         mock_load.return_value = MagicMock()
         mock_bundle = MagicMock()
@@ -319,7 +318,7 @@ class TestValidatePipelineGraphFailure:
 
         state = FakeCompositionState()
         settings = FakeWebSettings()
-        result = validate_pipeline(state, settings)
+        result = validate_pipeline(state, settings, mock_yaml_gen)
 
         assert result.is_valid is False
         # B11: index 0=path_allowlist, 1=settings, 2=plugins, 3=graph, 4=schema
@@ -330,13 +329,12 @@ class TestValidatePipelineGraphFailure:
 class TestValidatePipelineNoBareCatch:
     """W18 fix: unexpected exceptions propagate — no bare except Exception."""
 
-    @patch("elspeth.web.execution.validation.yaml_generator")
     @patch("elspeth.web.execution.validation.load_settings")
     def test_unexpected_exception_propagates(
         self,
         mock_load: MagicMock,
-        mock_yaml_gen: MagicMock,
     ) -> None:
+        mock_yaml_gen = MagicMock()
         mock_yaml_gen.generate_yaml.return_value = "source:\n  plugin: csv_source"
         mock_load.side_effect = RuntimeError("Unexpected engine bug")
 
@@ -345,13 +343,12 @@ class TestValidatePipelineNoBareCatch:
         settings = FakeWebSettings()
         # RuntimeError is NOT in the typed exception list — it must propagate
         with pytest.raises(RuntimeError, match="Unexpected engine bug"):
-            validate_pipeline(state, settings)
+            validate_pipeline(state, settings, mock_yaml_gen)
 
 
 class TestValidatePipelineTempFileCleanup:
     """Verify temp file is created and cleaned up in finally block."""
 
-    @patch("elspeth.web.execution.validation.yaml_generator")
     @patch("elspeth.web.execution.validation.load_settings")
     @patch("elspeth.web.execution.validation.instantiate_plugins_from_config")
     @patch("elspeth.web.execution.validation.ExecutionGraph")
@@ -360,9 +357,9 @@ class TestValidatePipelineTempFileCleanup:
         mock_graph_cls: MagicMock,
         mock_instantiate: MagicMock,
         mock_load: MagicMock,
-        mock_yaml_gen: MagicMock,
         tmp_path: Path,
     ) -> None:
+        mock_yaml_gen = MagicMock()
         mock_yaml_gen.generate_yaml.return_value = "source:\n  plugin: csv_source"
         mock_settings = MagicMock()
         mock_load.return_value = mock_settings
@@ -378,7 +375,7 @@ class TestValidatePipelineTempFileCleanup:
 
         state = FakeCompositionState()
         settings = FakeWebSettings()
-        result = validate_pipeline(state, settings)
+        result = validate_pipeline(state, settings, mock_yaml_gen)
 
         # load_settings was called with a Path, not YAML content
         call_args = mock_load.call_args
@@ -409,6 +406,7 @@ and the file is deleted in a finally block.
 """
 from __future__ import annotations
 
+import re
 import tempfile
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
@@ -427,9 +425,6 @@ from elspeth.web.execution.schemas import (
 
 if TYPE_CHECKING:
     from elspeth.web.composer.yaml_generator import YamlGenerator
-
-# Module-level reference — set by the app factory or overridden in tests
-yaml_generator: YamlGenerator
 
 
 # ── Check names (ordered) ─────────────────────────────────────────────
@@ -468,8 +463,10 @@ def _extract_component_id(message: str) -> tuple[str | None, str | None]:
     engine error messages. Returns (component_id, component_type) or
     (None, None) for structural errors.
     """
-    import re
-
+    # NOTE: This relies on error message string format from the engine.
+    # Long-term, the engine should raise structured exceptions with
+    # component_id as a field, not embedded in message strings. For MVP
+    # this is acceptable — attribution degrades to (None, None), not failure.
     # Common patterns: "in gate_1", "node gate_1", "'gate_1'"
     patterns = [
         r"(?:in |node |'|\")((?:gate|transform|sink|source|aggregation)_\w+)",
@@ -486,7 +483,9 @@ def _extract_component_id(message: str) -> tuple[str | None, str | None]:
     return None, None
 
 
-def validate_pipeline(state: Any, settings: Any) -> ValidationResult:
+def validate_pipeline(
+    state: Any, settings: Any, yaml_generator: YamlGenerator
+) -> ValidationResult:
     """Dry-run validation through the real engine code path.
 
     Steps:
@@ -503,6 +502,7 @@ def validate_pipeline(state: Any, settings: Any) -> ValidationResult:
     Args:
         state: CompositionState from the session.
         settings: WebSettings — used for path allowlist check.
+        yaml_generator: YamlGenerator instance for converting state to YAML.
     """
     checks: list[ValidationCheck] = []
     errors: list[ValidationError] = []
@@ -585,7 +585,7 @@ def validate_pipeline(state: Any, settings: Any) -> ValidationResult:
                 detail="Settings loaded successfully",
             )
         )
-    except (PydanticValidationError, FileNotFoundError) as exc:
+    except (PydanticValidationError, FileNotFoundError, ValueError) as exc:
         checks.append(
             ValidationCheck(
                 name=_CHECK_SETTINGS,

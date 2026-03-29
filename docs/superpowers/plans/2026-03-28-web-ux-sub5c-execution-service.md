@@ -111,33 +111,37 @@ def service(
         broadcaster=broadcaster,
         settings=mock_settings,
         session_service=mock_session_service,
+        yaml_generator=MagicMock(),
     )
 
 
 # ── Basic Lifecycle ────────────────────────────────────────────────────
 
 class TestExecutionFlow:
-    def test_execute_returns_run_id_immediately(
+    @pytest.mark.asyncio
+    async def test_execute_returns_run_id_immediately(
         self, service: ExecutionServiceImpl
     ) -> None:
         """execute() returns a UUID without blocking on pipeline completion."""
         with patch.object(service, "_run_pipeline"):
-            run_id = service.execute(session_id=uuid4())
+            run_id = await service.execute(session_id=uuid4())
         assert isinstance(run_id, UUID)
 
-    def test_execute_creates_run_via_session_service(
+    @pytest.mark.asyncio
+    async def test_execute_creates_run_via_session_service(
         self, service: ExecutionServiceImpl, mock_session_service: MagicMock
     ) -> None:
         """AC #17: Run creation delegates to session_service.create_run()
         with R6 expanded params (session_id, state_id, pipeline_yaml)."""
         with patch.object(service, "_run_pipeline"):
-            run_id = service.execute(session_id=uuid4())
+            run_id = await service.execute(session_id=uuid4())
         mock_session_service.create_run.assert_called_once()
         create_call = mock_session_service.create_run.call_args
         assert "session_id" in create_call[1] or len(create_call[0]) >= 1
         assert "pipeline_yaml" in create_call[1] or len(create_call[0]) >= 2
 
-    def test_get_status_returns_run_status(
+    @pytest.mark.asyncio
+    async def test_get_status_returns_run_status(
         self, service: ExecutionServiceImpl, mock_session_service: MagicMock
     ) -> None:
         run_id = uuid4()
@@ -151,7 +155,7 @@ class TestExecutionFlow:
             error=None,
             landscape_run_id=None,
         )
-        status = service.get_status(run_id)
+        status = await service.get_status(run_id)
         assert status.status == "running"
         assert status.rows_processed == 50
 
@@ -171,10 +175,8 @@ class TestB2ShutdownEvent:
     @patch("elspeth.web.execution.service.ExecutionGraph")
     @patch("elspeth.web.execution.service.LandscapeDB")
     @patch("elspeth.web.execution.service.FilesystemPayloadStore")
-    @patch("elspeth.web.execution.service.yaml_generator")
     def test_shutdown_event_passed_to_orchestrator_run(
         self,
-        mock_yaml_gen: MagicMock,
         mock_payload: MagicMock,
         mock_landscape: MagicMock,
         mock_graph_cls: MagicMock,
@@ -183,7 +185,6 @@ class TestB2ShutdownEvent:
         mock_orch_cls: MagicMock,
         service: ExecutionServiceImpl,
     ) -> None:
-        mock_yaml_gen.generate_yaml.return_value = "source:\n  plugin: csv"
         mock_load.return_value = MagicMock()
         mock_bundle = MagicMock()
         mock_bundle.source = MagicMock()
@@ -228,10 +229,8 @@ class TestB3Construction:
     @patch("elspeth.web.execution.service.ExecutionGraph")
     @patch("elspeth.web.execution.service.LandscapeDB")
     @patch("elspeth.web.execution.service.FilesystemPayloadStore")
-    @patch("elspeth.web.execution.service.yaml_generator")
     def test_landscape_db_constructed_from_settings(
         self,
-        mock_yaml_gen: MagicMock,
         mock_payload_cls: MagicMock,
         mock_landscape_cls: MagicMock,
         mock_graph_cls: MagicMock,
@@ -241,7 +240,6 @@ class TestB3Construction:
         service: ExecutionServiceImpl,
         mock_settings: MagicMock,
     ) -> None:
-        mock_yaml_gen.generate_yaml.return_value = "source:\n  plugin: csv"
         mock_load.return_value = MagicMock()
         mock_bundle = MagicMock()
         mock_bundle.source = MagicMock()
@@ -278,44 +276,39 @@ class TestB7ExceptionHandling:
 
     @patch("elspeth.web.execution.service.LandscapeDB")
     @patch("elspeth.web.execution.service.FilesystemPayloadStore")
-    @patch("elspeth.web.execution.service.yaml_generator")
-    def test_keyboard_interrupt_sets_failed_status(
+    def test_keyboard_interrupt_skips_status_update(
         self,
-        mock_yaml_gen: MagicMock,
         mock_payload: MagicMock,
         mock_landscape: MagicMock,
         service: ExecutionServiceImpl,
         mock_session_service: MagicMock,
     ) -> None:
-        mock_yaml_gen.generate_yaml.return_value = "yaml"
+        """R6 fix: KeyboardInterrupt skips _call_async — event loop is shutting down."""
         mock_landscape.side_effect = KeyboardInterrupt("ctrl-c")
 
         with pytest.raises(KeyboardInterrupt):
             service._run_pipeline(str(uuid4()), "yaml", threading.Event())
 
-        # Run status must be updated to failed despite KeyboardInterrupt
-        mock_session_service.update_run_status.assert_called()
-        last_call = mock_session_service.update_run_status.call_args
-        assert "failed" in str(last_call)
+        # R6: status update skipped for KeyboardInterrupt — orphan cleanup handles it
+        mock_session_service.update_run_status.assert_not_called()
 
     @patch("elspeth.web.execution.service.LandscapeDB")
     @patch("elspeth.web.execution.service.FilesystemPayloadStore")
-    @patch("elspeth.web.execution.service.yaml_generator")
-    def test_system_exit_sets_failed_status(
+    def test_system_exit_skips_status_update(
         self,
-        mock_yaml_gen: MagicMock,
         mock_payload: MagicMock,
         mock_landscape: MagicMock,
         service: ExecutionServiceImpl,
         mock_session_service: MagicMock,
     ) -> None:
-        mock_yaml_gen.generate_yaml.return_value = "yaml"
+        """R6 fix: SystemExit skips _call_async — event loop is shutting down."""
         mock_landscape.side_effect = SystemExit(1)
 
         with pytest.raises(SystemExit):
             service._run_pipeline(str(uuid4()), "yaml", threading.Event())
 
-        mock_session_service.update_run_status.assert_called()
+        # R6: status update skipped for SystemExit — orphan cleanup handles it
+        mock_session_service.update_run_status.assert_not_called()
 
     def test_shutdown_event_cleaned_up_in_finally(
         self,
@@ -362,21 +355,23 @@ class TestB7ExceptionHandling:
 # ── Cancel Mechanism ───────────────────────────────────────────────────
 
 class TestCancelMechanism:
-    def test_cancel_active_run_sets_event(
+    @pytest.mark.asyncio
+    async def test_cancel_active_run_sets_event(
         self, service: ExecutionServiceImpl
     ) -> None:
         run_id = uuid4()
         event = threading.Event()
         service._shutdown_events[str(run_id)] = event
 
-        service.cancel(run_id)
+        await service.cancel(run_id)
 
         assert event.is_set(), (
             "cancel() must set the threading.Event so the Orchestrator "
             "detects it during row processing"
         )
 
-    def test_cancel_pending_run_updates_status(
+    @pytest.mark.asyncio
+    async def test_cancel_pending_run_updates_status(
         self,
         service: ExecutionServiceImpl,
         mock_session_service: MagicMock,
@@ -384,10 +379,11 @@ class TestCancelMechanism:
         """When no shutdown event exists (pending), update status directly."""
         run_id = uuid4()
         # No event in _shutdown_events — run is pending
-        service.cancel(run_id)
+        await service.cancel(run_id)
         mock_session_service.update_run_status.assert_called()
 
-    def test_cancel_terminal_run_is_noop(
+    @pytest.mark.asyncio
+    async def test_cancel_terminal_run_is_noop(
         self,
         service: ExecutionServiceImpl,
         mock_session_service: MagicMock,
@@ -395,11 +391,13 @@ class TestCancelMechanism:
         """Cancelling completed/failed/cancelled run does nothing."""
         run_id = uuid4()
         mock_session_service.get_run.return_value = MagicMock(status="completed")
-        service.cancel(run_id)
-        # Should not attempt status update for terminal runs
+        await service.cancel(run_id)
+        mock_session_service.update_run_status.assert_not_called()
+
         # (exact assertion depends on implementation checking status first)
 
-    def test_cancel_idempotent_on_set_event(
+    @pytest.mark.asyncio
+    async def test_cancel_idempotent_on_set_event(
         self, service: ExecutionServiceImpl
     ) -> None:
         """Setting an already-set event is safe."""
@@ -409,7 +407,7 @@ class TestCancelMechanism:
         service._shutdown_events[str(run_id)] = event
 
         # Should not raise
-        service.cancel(run_id)
+        await service.cancel(run_id)
         assert event.is_set()
 
     @patch("elspeth.web.execution.service.Orchestrator")
@@ -418,10 +416,8 @@ class TestCancelMechanism:
     @patch("elspeth.web.execution.service.ExecutionGraph")
     @patch("elspeth.web.execution.service.LandscapeDB")
     @patch("elspeth.web.execution.service.FilesystemPayloadStore")
-    @patch("elspeth.web.execution.service.yaml_generator")
     def test_cancelled_run_broadcasts_cancelled_event(
         self,
-        mock_yaml_gen: MagicMock,
         mock_payload: MagicMock,
         mock_landscape: MagicMock,
         mock_graph_cls: MagicMock,
@@ -433,7 +429,6 @@ class TestCancelMechanism:
     ) -> None:
         """AC #19: When shutdown_event is set, _run_pipeline broadcasts
         a 'cancelled' terminal event instead of 'completed'."""
-        mock_yaml_gen.generate_yaml.return_value = "source:\n  plugin: csv"
         mock_load.return_value = MagicMock()
         mock_bundle = MagicMock()
         mock_bundle.source = MagicMock()
@@ -483,7 +478,8 @@ class TestCancelMechanism:
 # ── One Active Run (B6) ───────────────────────────────────────────────
 
 class TestOneActiveRun:
-    def test_second_execute_raises_run_already_active(
+    @pytest.mark.asyncio
+    async def test_second_execute_raises_run_already_active(
         self,
         service: ExecutionServiceImpl,
         mock_session_service: MagicMock,
@@ -495,9 +491,10 @@ class TestOneActiveRun:
         )
 
         with pytest.raises(RunAlreadyActiveError):
-            service.execute(session_id=session_id)
+            await service.execute(session_id=session_id)
 
-    def test_execute_after_completed_run_succeeds(
+    @pytest.mark.asyncio
+    async def test_execute_after_completed_run_succeeds(
         self,
         service: ExecutionServiceImpl,
         mock_session_service: MagicMock,
@@ -505,7 +502,7 @@ class TestOneActiveRun:
         """After a run completes, a new one can start."""
         mock_session_service.get_active_run.return_value = None
         with patch.object(service, "_run_pipeline"):
-            run_id = service.execute(session_id=uuid4())
+            run_id = await service.execute(session_id=uuid4())
         assert isinstance(run_id, UUID)
 
 
@@ -535,6 +532,91 @@ class TestEventBusBridge:
         assert run_event.data["rows_processed"] == 100
         assert run_event.data["rows_failed"] == 5
         assert run_event.run_id == "run-123"
+
+
+# ── B10: _call_async() Bridge Tests ──────────────────────────────────
+
+class TestB8AsyncBridging:
+    """B8/C1 fix: _call_async() bridges sync thread to async event loop."""
+
+    def test_call_async_returns_coroutine_result(
+        self, service: ExecutionServiceImpl
+    ) -> None:
+        """_call_async() schedules coroutine and returns its result."""
+        mock_future = MagicMock()
+        mock_future.result.return_value = "test_result"
+        service._loop.run_coroutine_threadsafe = MagicMock(return_value=mock_future)
+
+        async def dummy_coro() -> str:
+            return "test_result"
+
+        result = service._call_async(dummy_coro())
+        assert result == "test_result"
+        mock_future.result.assert_called_once_with(timeout=30.0)
+
+    def test_call_async_propagates_coroutine_exception(
+        self, service: ExecutionServiceImpl
+    ) -> None:
+        """If the coroutine raises, _call_async re-raises from future.result()."""
+        mock_future = MagicMock()
+        mock_future.result.side_effect = ValueError("db error")
+        service._loop.run_coroutine_threadsafe = MagicMock(return_value=mock_future)
+
+        async def failing_coro() -> None:
+            raise ValueError("db error")
+
+        with pytest.raises(ValueError, match="db error"):
+            service._call_async(failing_coro())
+
+    def test_call_async_raises_timeout_error(
+        self, service: ExecutionServiceImpl
+    ) -> None:
+        """R6 fix: _call_async raises TimeoutError after 30s, preventing deadlock."""
+        import concurrent.futures
+        mock_future = MagicMock()
+        mock_future.result.side_effect = concurrent.futures.TimeoutError()
+        service._loop.run_coroutine_threadsafe = MagicMock(return_value=mock_future)
+
+        async def hanging_coro() -> None:
+            pass
+
+        with pytest.raises(concurrent.futures.TimeoutError):
+            service._call_async(hanging_coro())
+
+
+# ── W15: Running Status Failure Path ─────────────────────────────────
+
+class TestRunningStatusFailure:
+    """W15: What happens when the initial status update to 'running' fails."""
+
+    @patch("elspeth.web.execution.service.LandscapeDB")
+    @patch("elspeth.web.execution.service.FilesystemPayloadStore")
+    def test_running_status_failure_marks_run_failed(
+        self,
+        mock_payload: MagicMock,
+        mock_landscape: MagicMock,
+        service: ExecutionServiceImpl,
+        mock_session_service: MagicMock,
+    ) -> None:
+        """If update_run_status('running') fails, the except BaseException
+        block attempts to set 'failed'. Run stays 'pending' if both fail."""
+        # Make the first _call_async raise (simulating event loop issues)
+        original_call_async = service._call_async
+        call_count = 0
+        def failing_call_async(coro):
+            nonlocal call_count
+            call_count += 1
+            if call_count == 1:  # First call = update to "running"
+                raise ConnectionError("DB connection lost")
+            return original_call_async(coro)
+
+        service._call_async = failing_call_async
+
+        with pytest.raises(ConnectionError):
+            service._run_pipeline(str(uuid4()), "yaml", threading.Event())
+
+        # The except block tried to set "failed" via the second _call_async call
+        assert call_count >= 2
 ```
 
 - [ ] **Step 2: Implement ExecutionServiceImpl**
@@ -562,7 +644,7 @@ import threading
 from concurrent.futures import Future, ThreadPoolExecutor
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Coroutine, TypeVar
+from typing import Any, Coroutine, TypeVar
 from uuid import UUID
 
 import structlog
@@ -580,15 +662,9 @@ from elspeth.web.execution.progress import ProgressBroadcaster
 from elspeth.web.execution.schemas import RunEvent, RunStatusResponse
 from elspeth.web.sessions.protocol import RunAlreadyActiveError  # B1: canonical definition
 
-if TYPE_CHECKING:
-    from elspeth.web.composer.yaml_generator import YamlGenerator
-
 slog = structlog.get_logger()
 
 T = TypeVar("T")
-
-# Module-level reference — set by the app factory
-yaml_generator: YamlGenerator
 
 # B1 fix: RunAlreadyActiveError is NOT defined here — imported from
 # sessions.protocol where the canonical definition lives. Defining a
@@ -622,11 +698,13 @@ class ExecutionServiceImpl:
         broadcaster: ProgressBroadcaster,
         settings: Any,  # WebSettings
         session_service: Any,  # SessionService
+        yaml_generator: Any,  # YamlGenerator — injected, not module-level
     ) -> None:
         self._loop = loop
         self._broadcaster = broadcaster
         self._settings = settings
         self._session_service = session_service
+        self._yaml_generator = yaml_generator
         # AC #17: No run_repository — all Run CRUD delegates to SessionService
         # via create_run(), update_run_status(), get_active_run(), get_run().
         # R6 expanded params: landscape_run_id, pipeline_yaml, rows_processed,
@@ -640,12 +718,22 @@ class ExecutionServiceImpl:
         B8/C1 fix: SessionService methods are async, but _run_pipeline() runs
         in a ThreadPoolExecutor worker thread. This helper schedules the
         coroutine on the main event loop and blocks until it completes.
+
+        R6 fix: 30-second timeout prevents deadlock during shutdown — if the
+        event loop is blocked in executor.shutdown(wait=True), this will raise
+        TimeoutError instead of hanging forever.
         """
         future = asyncio.run_coroutine_threadsafe(coro, self._loop)
-        return future.result()
+        return future.result(timeout=30.0)
 
     def shutdown(self) -> None:
-        """Shut down the thread pool. Called during app shutdown."""
+        """Shut down the thread pool. Called during app shutdown.
+
+        Sets all active shutdown events first so running pipelines can
+        terminate gracefully before blocking on executor.shutdown(wait=True).
+        """
+        for event in self._shutdown_events.values():
+            event.set()
         self._executor.shutdown(wait=True)
 
     async def execute(
@@ -676,14 +764,14 @@ class ExecutionServiceImpl:
             state = await self._session_service.get_current_state(session_id)
             if state is None:
                 raise ValueError(f"No composition state exists for session {session_id}")
-        pipeline_yaml = yaml_generator.generate_yaml(state)
+        pipeline_yaml = self._yaml_generator.generate_yaml(state)
 
         # B9 fix: create_run() generates its own UUID internally and returns
         # a RunRecord. Read the run_id back from the returned record so our
         # _shutdown_events key matches the DB record.
         run_record = await self._session_service.create_run(
             session_id=session_id,
-            state_id=state_id,
+            state_id=state.id,  # Always use resolved state's ID, not the possibly-None parameter
             pipeline_yaml=pipeline_yaml,
         )
         run_id = run_record.id  # Use the DB-generated UUID as canonical
@@ -692,10 +780,15 @@ class ExecutionServiceImpl:
         shutdown_event = threading.Event()
         self._shutdown_events[str(run_id)] = shutdown_event
 
-        # Submit to thread pool
-        future = self._executor.submit(
-            self._run_pipeline, str(run_id), pipeline_yaml, shutdown_event
-        )
+        # Submit to thread pool — clean up shutdown event if submit fails
+        # (e.g. RuntimeError after executor.shutdown())
+        try:
+            future = self._executor.submit(
+                self._run_pipeline, str(run_id), pipeline_yaml, shutdown_event
+            )
+        except RuntimeError:
+            self._shutdown_events.pop(str(run_id), None)
+            raise
         # B7 Layer 2: safety net callback
         future.add_done_callback(self._on_pipeline_done)
 
@@ -755,13 +848,19 @@ class ExecutionServiceImpl:
         B3 fix: LandscapeDB and PayloadStore from WebSettings resolvers.
         """
         tmp_path: Path | None = None
+        landscape_db: LandscapeDB | None = None
+        run_uuid = UUID(run_id)
         try:
             # B8/C1: SessionService is async — bridge from background thread
             self._call_async(
-                self._session_service.update_run_status(run_id, status="running")
+                self._session_service.update_run_status(run_uuid, status="running")
             )
 
             # B3 fix: construct from WebSettings, not hardcoded paths
+            # NOTE: LandscapeDB is constructed per-run, not shared. This is safe
+            # with max_workers=1 (no concurrent access) but wasteful — each run
+            # creates a new SQLAlchemy engine. Acceptable for MVP; consider
+            # sharing a single instance if profiling shows connection overhead.
             landscape_db = LandscapeDB(
                 connection_string=self._settings.get_landscape_url()
             )
@@ -807,13 +906,18 @@ class ExecutionServiceImpl:
             )
 
             # Set up EventBus to bridge ProgressEvent -> RunEvent -> broadcaster
+            def _safe_broadcast(evt: ProgressEvent) -> None:
+                try:
+                    self._broadcaster.broadcast(run_id, self._to_run_event(run_id, evt))
+                except Exception as broadcast_err:
+                    slog.error(
+                        "progress_broadcast_failed",
+                        run_id=run_id,
+                        error=str(broadcast_err),
+                    )
+
             event_bus = EventBus()
-            event_bus.subscribe(
-                ProgressEvent,
-                lambda evt: self._broadcaster.broadcast(
-                    run_id, self._to_run_event(run_id, evt)
-                ),
-            )
+            event_bus.subscribe(ProgressEvent, _safe_broadcast)
 
             orchestrator = Orchestrator(
                 db=landscape_db, event_bus=event_bus
@@ -848,7 +952,7 @@ class ExecutionServiceImpl:
                     ),
                 )
                 self._call_async(self._session_service.update_run_status(
-                    run_id,
+                    run_uuid,
                     status="cancelled",
                     rows_processed=result.rows_processed,
                     rows_failed=result.rows_failed,
@@ -871,14 +975,12 @@ class ExecutionServiceImpl:
                     ),
                 )
                 self._call_async(self._session_service.update_run_status(
-                    run_id,
+                    run_uuid,
                     status="completed",
                     landscape_run_id=result.run_id,
                     rows_processed=result.rows_processed,
                     rows_failed=result.rows_failed,
                 ))
-
-            landscape_db.close()
 
         except BaseException as exc:
             # B7 fix: Catch BaseException (not Exception) to handle
@@ -897,33 +999,37 @@ class ExecutionServiceImpl:
                     },
                 ),
             )
-            # B6 fix: Wrap _call_async in nested try/except. If _call_async
-            # itself raises (event loop shut down, connection error), the new
-            # exception would replace the original, losing the root cause.
-            # KNOWN GAP: If this status update fails, the Run record stays
-            # "running" permanently. The orphan run cleanup (D5, Sub-2) is
-            # the recovery mechanism.
-            try:
-                self._call_async(
-                    self._session_service.update_run_status(
-                        run_id, status="failed", error=str(exc)
+            # R6 fix: Skip _call_async for KeyboardInterrupt/SystemExit — the event
+            # loop is likely shutting down. Let orphan cleanup handle the status.
+            if not isinstance(exc, (KeyboardInterrupt, SystemExit)):
+                try:
+                    self._call_async(
+                        self._session_service.update_run_status(
+                            run_uuid, status="failed", error=str(exc)
+                        )
                     )
+                except Exception as status_err:
+                    slog.error(
+                        "run_status_update_failed_in_except",
+                        run_id=run_id,
+                        original_error=str(exc),
+                        status_update_error=str(status_err),
+                    )
+            else:
+                slog.warning(
+                    "skipping_status_update_on_signal",
+                    run_id=run_id,
+                    exc_type=type(exc).__name__,
                 )
-            except Exception as status_err:
-                # _call_async failed — Run record is permanently stuck in "running".
-                # Log the failure but preserve the original exception for re-raise.
-                slog.error(
-                    "run_status_update_failed_in_except",
-                    run_id=str(run_id),
-                    original_error=str(exc),
-                    status_update_error=str(status_err),
-                )
-            raise  # Re-raise so future.add_done_callback sees it
+            raise
         finally:
             # Always clean up, regardless of success or failure
             self._shutdown_events.pop(run_id, None)
+            if landscape_db is not None:
+                landscape_db.close()
             if tmp_path is not None and tmp_path.exists():
                 tmp_path.unlink()
+            self._broadcaster.cleanup_run(run_id)
 
     def _on_pipeline_done(self, future: Future[None]) -> None:
         """B7 Layer 2: Safety net callback.
@@ -983,6 +1089,16 @@ After completing all steps, verify:
 - [ ] `execute()` delegates Run creation to `session_service.create_run()` with R6 expanded params (AC #17). No direct DB access.
 - [ ] `_to_run_event()` translates `ProgressEvent` to `RunEvent` with explicit field mapping. `pytest tests/unit/web/execution/test_service.py::TestEventBusBridge`
 - [ ] `ThreadPoolExecutor(max_workers=1)` — single worker ensures sequential pipeline execution.
+- [ ] `_call_async()` has 30-second timeout preventing deadlock during shutdown (R6). `pytest tests/unit/web/execution/test_service.py::TestB8AsyncBridging::test_call_async_raises_timeout_error`
+- [ ] `shutdown()` sets all active shutdown events BEFORE calling `executor.shutdown(wait=True)` (W-5C-1).
+- [ ] `create_run()` receives `state.id` (resolved state), never `None` (B5).
+- [ ] `landscape_db.close()` is in the `finally` block, not on the happy path only (B6 resource leak).
+- [ ] `_run_pipeline()` converts `run_id` string to `UUID` for `update_run_status()` calls (B7 type fix).
+- [ ] `yaml_generator` is a constructor parameter, not a module-level variable (W2).
+- [ ] `except BaseException` skips `_call_async` for `KeyboardInterrupt`/`SystemExit` (W3/R6).
+- [ ] EventBus lambda wrapped in `_safe_broadcast` with try/except (W14).
+- [ ] `test_cancel_terminal_run_is_noop` has assertion: `update_run_status.assert_not_called()` (B8).
+- [ ] All tests calling async methods (`execute`, `cancel`, `get_status`) use `@pytest.mark.asyncio` + `await` (B2).
 - [ ] mypy passes on `src/elspeth/web/execution/service.py`.
 
 ```bash
@@ -1006,10 +1122,23 @@ After completing all steps, verify:
 | **B6** | `_call_async()` failure in `except BaseException` clause shadows original exception | Wrapped `_call_async(update_run_status(...))` in nested `try/except Exception`. Logs failure via `slog.error` but preserves original exception for re-raise. |
 | **B7** | `RunRecord.run_id` doesn't exist -- field is `id: UUID` | Changed all `run.run_id` to `run.id`, `active.run_id` to `active.id`. Updated test mock attributes. |
 | **B9** | `run_id = uuid4()` generated locally but `create_run()` generates its own UUID internally -- `_shutdown_events` key wouldn't match DB record | Removed local `uuid4()` call. Read `run_id` back from returned `RunRecord`: `run_id = run_record.id`. Removed unused `uuid4` import from implementation. |
+| **B4** (timeout) | `_call_async()` deadlock on shutdown -- `future.result()` blocks indefinitely if event loop is busy | Added `timeout=30.0` to `future.result()` call. R6 fix. |
+| **B5** | `create_run()` receives `state_id=None` violating protocol when no explicit state_id passed | Changed to `state_id=state.id` -- always use the resolved state's ID. |
+| **B6** (resource) | `landscape_db.close()` only on happy path -- resource leak on exceptions | Added `landscape_db: LandscapeDB | None = None` variable, moved `close()` to `finally` block. |
+| **B7** (type) | `run_id` is `str` but `update_run_status()` takes `UUID` | Added `run_uuid = UUID(run_id)` conversion, changed all `update_run_status` calls to use `run_uuid`. |
+| **B8** | `test_cancel_terminal_run_is_noop` has no assertion | Added `mock_session_service.update_run_status.assert_not_called()`. |
+| **B10** | `_call_async()` never tested | Added `TestB8AsyncBridging` class with result, exception, and timeout tests. |
+| **W2** | Module-level `yaml_generator` is fragile | Moved to constructor parameter `yaml_generator: Any`. Removed `TYPE_CHECKING` import. Updated fixture. Removed `@patch` decorators. |
+| **W3** | `except BaseException` handler calls `_call_async` for `KeyboardInterrupt`/`SystemExit` | Added `isinstance` check -- skips `_call_async` for signal exceptions, logs warning instead. |
+| **W6** | `shutdown()` must set shutdown events before `executor.shutdown` | Added `for event in self._shutdown_events.values(): event.set()` before `executor.shutdown(wait=True)`. |
+| **W13** | B7 status assertion too loose; now wrong after W3 fix | Renamed tests to `test_keyboard_interrupt_skips_status_update` / `test_system_exit_skips_status_update`. Changed assertions to `assert_not_called()`. |
+| **W14** | EventBus handler exception propagation kills pipeline | Wrapped EventBus lambda in `_safe_broadcast()` with try/except that logs errors. |
+| **W15** | `update_run_status("running")` failure path untested | Added `TestRunningStatusFailure` class. |
+| **B2** (tests) | Most `test_service.py` tests call async methods without `await` | Added `@pytest.mark.asyncio` and `async def` to all tests calling `execute()`, `cancel()`, `get_status()`. |
 
 ### Warnings (not yet fixed -- add to self-review checklist)
 
 | ID | Summary | Mitigation |
 |----|---------|------------|
-| **W-5C-1** | `shutdown()` calls `executor.shutdown(wait=True)` which blocks indefinitely if a pipeline is running. Should set all active shutdown events before calling `executor.shutdown()`. | Add to self-review checklist: verify shutdown ordering sets events first. |
-| **W-5C-2** | Even with the B6 nested `try/except` fix, if `_call_async(update_run_status(...))` fails, the Run record stays "running" permanently. | Documented as `# KNOWN GAP:` comment inline. The orphan run cleanup (D5, implemented in Sub-2) is the recovery mechanism. |
+| **W-5C-1** | ~~`shutdown()` calls `executor.shutdown(wait=True)` which blocks indefinitely if a pipeline is running.~~ | **Fixed:** `shutdown()` now sets all active shutdown events before calling `executor.shutdown(wait=True)`. Combined with the R6 `_call_async()` 30-second timeout, shutdown cannot deadlock. |
+| **W-5C-2** | Even with the B6 nested `try/except` fix, if `_call_async(update_run_status(...))` fails, the Run record stays "running" permanently. | **Partially mitigated:** R6 fix skips `_call_async` for `KeyboardInterrupt`/`SystemExit` (the event loop is likely shutting down in those cases). For other `BaseException` subclasses, the nested `try/except` still applies and orphan run cleanup (D5, Sub-2) remains the recovery mechanism. |

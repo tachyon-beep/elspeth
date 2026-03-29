@@ -309,8 +309,7 @@ class TestWebSocketProgress:
     # does not. These tests should use starlette.testclient.TestClient
     # (sync) or a dedicated WebSocket test helper.
 
-    @pytest.mark.asyncio
-    async def test_websocket_receives_progress_events(
+    def test_websocket_receives_progress_events(
         self,
         mock_broadcaster: MagicMock,
     ) -> None:
@@ -331,8 +330,8 @@ class TestWebSocketProgress:
 
         run_id = uuid4()
         queue: asyncio.Queue[RunEvent] = asyncio.Queue()
-        await queue.put(RunEvent(event_type="progress", run_id=str(run_id), data={"rows": 5}))
-        await queue.put(RunEvent(event_type="completed", run_id=str(run_id), data={}))
+        queue.put_nowait(RunEvent(event_type="progress", run_id=str(run_id), data={"rows": 5}, timestamp=datetime.now(tz=timezone.utc)))
+        queue.put_nowait(RunEvent(event_type="completed", run_id=str(run_id), data={}, timestamp=datetime.now(tz=timezone.utc)))
         mock_broadcaster.subscribe.return_value = queue
 
         app = create_app(broadcaster=mock_broadcaster)
@@ -346,8 +345,7 @@ class TestWebSocketProgress:
             assert msg2["event_type"] == "completed"
         mock_broadcaster.unsubscribe.assert_called_once()
 
-    @pytest.mark.asyncio
-    async def test_websocket_closes_1011_on_internal_error(
+    def test_websocket_closes_1011_on_internal_error(
         self,
         mock_broadcaster: MagicMock,
     ) -> None:
@@ -368,8 +366,7 @@ class TestWebSocketProgress:
             data = ws.receive()
             assert data.get("code") == 1011
 
-    @pytest.mark.asyncio
-    async def test_websocket_auth_failure_closes_4001(
+    def test_websocket_auth_failure_closes_4001(
         self,
         mock_broadcaster: MagicMock,
     ) -> None:
@@ -385,8 +382,7 @@ class TestWebSocketProgress:
             data = ws.receive()
             assert data.get("code") == 4001
 
-    @pytest.mark.asyncio
-    async def test_websocket_unsubscribes_on_disconnect(
+    def test_websocket_unsubscribes_on_disconnect(
         self,
         mock_broadcaster: MagicMock,
     ) -> None:
@@ -423,12 +419,12 @@ WS   /ws/runs/{run_id}                  — live progress stream
 """
 from __future__ import annotations
 
+import asyncio
 from typing import Any
 from uuid import UUID
 
 import structlog
 from fastapi import APIRouter, Depends, HTTPException, WebSocket, WebSocketDisconnect
-from fastapi.responses import JSONResponse
 
 from elspeth.web.auth.models import AuthenticationError
 from elspeth.web.execution.progress import ProgressBroadcaster
@@ -485,13 +481,9 @@ async def execute_pipeline(
     try:
         run_id = await service.execute(session_id, state_id)
     except RunAlreadyActiveError as exc:
-        # Seam contract D: structured error envelope for 409
-        return JSONResponse(
+        raise HTTPException(
             status_code=409,
-            content={
-                "error_type": "run_already_active",
-                "detail": str(exc),
-            },
+            detail={"error_type": "run_already_active", "detail": str(exc)},
         )
     return {"run_id": str(run_id)}
 
@@ -555,6 +547,7 @@ async def websocket_run_progress(
     token: str | None = None,
     broadcaster: ProgressBroadcaster = Depends(get_broadcaster),
     auth_provider: Any = Depends(get_auth_provider),
+    service: ExecutionServiceImpl = Depends(get_execution_service),
 ) -> None:
     """Stream RunEvent JSON payloads for a specific run.
 
@@ -582,14 +575,30 @@ async def websocket_run_progress(
         return
 
     await websocket.accept()
+
+    # IDOR protection: verify authenticated user owns this run's session
+    try:
+        run_ownership = await service.verify_run_ownership(user, run_id)
+        if not run_ownership:
+            await websocket.close(code=4004, reason="Run not found")
+            return
+    except Exception:
+        await websocket.close(code=4004, reason="Run not found")
+        return
+
     queue = broadcaster.subscribe(run_id)
     try:
         while True:
-            # If _run_pipeline crashes without broadcasting a terminal event,
-            # queue.get() will block until the client disconnects or a
-            # timeout occurs. Consider adding asyncio.wait_for() with a
-            # heartbeat timeout if this becomes an issue in production.
-            event = await queue.get()
+            try:
+                event = await asyncio.wait_for(queue.get(), timeout=60.0)
+            except asyncio.TimeoutError:
+                # Heartbeat timeout — pipeline may have crashed without terminal event.
+                # Send a ping to verify the client is still connected.
+                try:
+                    await websocket.send_json({"type": "heartbeat"})
+                except Exception:
+                    break  # Client disconnected
+                continue
             await websocket.send_json(event.model_dump(mode="json"))
             # "error" events are non-terminal — they represent per-row
             # exceptions while the pipeline continues processing. Only
@@ -624,7 +633,7 @@ git commit -m "feat(web/execution): add REST endpoints and WebSocket for executi
 
 ---
 
-### Task 5.7: Multi-Worker Warning (W10)
+### Task 5.7: Multi-Worker Enforcement (W10 -> R6)
 
 **Files:**
 - Modify: app factory (wherever `create_app()` lives, from Sub-Spec 2)
@@ -634,61 +643,48 @@ git commit -m "feat(web/execution): add REST endpoints and WebSocket for executi
 ```python
 # Add to tests/unit/web/execution/test_service.py
 
-class TestMultiWorkerWarning:
-    """W10: Warn if WEB_CONCURRENCY > 1 at startup."""
+class TestMultiWorkerEnforcement:
+    """W10 -> R6: Hard-enforce single worker instead of warning."""
 
     @patch.dict("os.environ", {"WEB_CONCURRENCY": "4"})
-    def test_warns_on_multi_worker(self, caplog: pytest.LogCaptureFixture) -> None:
-        """Application factory logs warning about WebSocket limitations."""
-        import structlog
+    def test_raises_on_multi_worker(self) -> None:
+        """Application factory rejects WEB_CONCURRENCY > 1."""
         from elspeth.web.app import create_app
 
-        # Capture structlog output through stdlib logging for test assertion
-        with caplog.at_level("WARNING"):
-            app = create_app()
-        assert any(
-            "WEB_CONCURRENCY" in record.message
-            for record in caplog.records
-        ), "Expected warning about WEB_CONCURRENCY > 1"
+        with pytest.raises(RuntimeError, match="WEB_CONCURRENCY=4 is not supported"):
+            create_app()
 
     @patch.dict("os.environ", {"WEB_CONCURRENCY": "1"})
-    def test_no_warning_for_single_worker(self, caplog: pytest.LogCaptureFixture) -> None:
-        """No warning when running with a single worker."""
+    def test_single_worker_accepted(self) -> None:
+        """No error when running with a single worker."""
         from elspeth.web.app import create_app
-
-        with caplog.at_level("WARNING"):
-            app = create_app()
-        assert not any(
-            "WEB_CONCURRENCY" in record.message
-            for record in caplog.records
-        ), "Should not warn when WEB_CONCURRENCY == 1"
+        # Should not raise
+        app = create_app()
+        assert app is not None
 ```
 
-- [ ] **Step 2: Implement warning in app factory**
+- [ ] **Step 2: Implement enforcement in app factory**
 
 Add to the app factory (`create_app()`):
 
 ```python
 import os
-import structlog
-
-slog = structlog.get_logger()
 
 web_concurrency = int(os.environ.get("WEB_CONCURRENCY", "1"))
 if web_concurrency > 1:
-    slog.warning(
-        "WEB_CONCURRENCY > 1 detected — WebSocket progress streaming "
-        "will not work correctly with multiple workers. The "
-        "ProgressBroadcaster holds subscriber queues in process memory. "
-        "Use WEB_CONCURRENCY=1 or replace with Redis Streams.",
-        web_concurrency=web_concurrency,
+    raise RuntimeError(
+        f"WEB_CONCURRENCY={web_concurrency} is not supported. "
+        "ProgressBroadcaster holds subscriber queues in process memory — "
+        "WebSocket progress streaming requires a single worker. "
+        "Set WEB_CONCURRENCY=1 or remove the variable. "
+        "For multi-worker deployment, replace ProgressBroadcaster with Redis Streams."
     )
 ```
 
 - [ ] **Step 3: Commit**
 
 ```bash
-git commit -m "feat(web): add multi-worker WebSocket warning (W10)"
+git commit -m "feat(web): hard-enforce single worker for WebSocket (W10 -> R6)"
 ```
 
 ---
@@ -749,7 +745,9 @@ TEST_CSV = FIXTURES_DIR / "test_input.csv"
 @pytest.fixture
 def work_dir(tmp_path: Path) -> Path:
     """Create a working directory with the test CSV and output dir."""
-    csv_dest = tmp_path / "input.csv"
+    uploads_dir = tmp_path / "uploads"
+    uploads_dir.mkdir()
+    csv_dest = uploads_dir / "input.csv"
     shutil.copy(TEST_CSV, csv_dest)
     output_dir = tmp_path / "output"
     output_dir.mkdir()
@@ -766,7 +764,7 @@ def _make_pipeline_yaml(work_dir: Path) -> str:
 source:
   plugin: csv_source
   options:
-    path: "{work_dir / 'input.csv'}"
+    path: "{work_dir / 'uploads' / 'input.csv'}"
   on_success: primary
 
 transforms: []
@@ -812,8 +810,22 @@ class TestEndToEndPipelineExecution:
         async with AsyncClient(
             transport=ASGITransport(app=app), base_url="http://test"
         ) as client:
-            # 1. Create session
-            resp = await client.post("/api/sessions")
+            # Register and authenticate test user
+            resp = await client.post(
+                "/api/auth/register",
+                json={"username": "testuser", "password": "testpass123"},
+            )
+            assert resp.status_code == 201
+            resp = await client.post(
+                "/api/auth/login",
+                json={"username": "testuser", "password": "testpass123"},
+            )
+            assert resp.status_code == 200
+            token = resp.json()["token"]
+            auth_headers = {"Authorization": f"Bearer {token}"}
+
+            # 1. Create session (with auth)
+            resp = await client.post("/api/sessions", headers=auth_headers)
             assert resp.status_code == 201
             session_id = resp.json()["session_id"]
 
@@ -821,12 +833,14 @@ class TestEndToEndPipelineExecution:
             resp = await client.post(
                 f"/api/sessions/{session_id}/states",
                 json={"pipeline_yaml": pipeline_yaml},
+                headers=auth_headers,
             )
             assert resp.status_code == 201
 
             # 3. Validate — AC #16: route handler uses run_in_executor
             resp = await client.post(
-                f"/api/sessions/{session_id}/validate"
+                f"/api/sessions/{session_id}/validate",
+                headers=auth_headers,
             )
             assert resp.status_code == 200
             validation = resp.json()
@@ -836,7 +850,8 @@ class TestEndToEndPipelineExecution:
 
             # 4. Execute
             resp = await client.post(
-                f"/api/sessions/{session_id}/execute"
+                f"/api/sessions/{session_id}/execute",
+                headers=auth_headers,
             )
             assert resp.status_code == 202
             run_id = resp.json()["run_id"]
@@ -845,7 +860,10 @@ class TestEndToEndPipelineExecution:
             deadline = time.monotonic() + 30
             status: dict[str, Any] = {}
             while time.monotonic() < deadline:
-                resp = await client.get(f"/api/runs/{run_id}")
+                resp = await client.get(
+                    f"/api/runs/{run_id}",
+                    headers=auth_headers,
+                )
                 assert resp.status_code == 200
                 status = resp.json()
                 if status["status"] in ("completed", "failed", "cancelled"):
@@ -873,7 +891,10 @@ class TestEndToEndPipelineExecution:
             assert audit_db.exists()
 
             # 10. Verify results endpoint — AC #20 cross-module
-            resp = await client.get(f"/api/runs/{run_id}/results")
+            resp = await client.get(
+                f"/api/runs/{run_id}/results",
+                headers=auth_headers,
+            )
             assert resp.status_code == 200
             results = resp.json()
             assert results["rows_processed"] > 0
@@ -902,8 +923,8 @@ git commit -m "test(web): add end-to-end pipeline execution integration test"
 - [ ] WebSocket closes with code 1011 on internal server error (H6)
 - [ ] WebSocket `finally` block calls `broadcaster.unsubscribe()` for cleanup on disconnect
 - [ ] IDOR protection: run ownership verified, returns 404 (not 403) for non-owned runs (AC #13)
-- [ ] Multi-worker warning (W10): `create_app()` logs warning when `WEB_CONCURRENCY > 1`
-- [ ] No warning emitted when `WEB_CONCURRENCY == 1`
+- [ ] Multi-worker enforcement (W10 -> R6): `create_app()` raises `RuntimeError` when `WEB_CONCURRENCY > 1`
+- [ ] No error raised when `WEB_CONCURRENCY == 1`
 - [ ] Integration test uses REAL engine code path -- no mocks for pipeline execution
 - [ ] Integration test exercises full lifecycle: create session, save state, validate, execute, poll, verify results
 - [ ] Integration test verifies `rows_processed > 0`, `rows_failed == 0`, `landscape_run_id` is not None
@@ -937,10 +958,20 @@ git commit -m "test(web): add end-to-end pipeline execution integration test"
 - Added `slog.error("websocket_handler_error", ...)` in the outer exception handler
 - Implemented multi-worker warning tests (`test_warns_on_multi_worker`, `test_no_warning_for_single_worker`) using `caplog` instead of `pass` stubs
 
-### Warnings (new findings)
+### Additional fixes applied (Round 6)
+
+| ID | Finding | Fix |
+|----|---------|-----|
+| **W5** | `execute_pipeline` return type annotation lies — returns `JSONResponse` on 409 but declares `-> dict[str, str]` | Changed to `raise HTTPException(status_code=409, detail=...)` so FastAPI handles the error response. Removed unused `JSONResponse` import |
+| **W4** | WebSocket IDOR — run ownership not verified after authentication | Added `service.verify_run_ownership(user, run_id)` check after `websocket.accept()` and before `broadcaster.subscribe()`. Closes with code 4004 on ownership failure. Added `service` dependency to WebSocket handler parameters |
+| **W7** | Multi-worker check was a warning instead of hard enforcement | Changed from `slog.warning()` to `raise RuntimeError()` in `create_app()`. Updated test to use `pytest.raises(RuntimeError)` instead of `caplog` assertions |
+| **W1** | Unbounded `asyncio.Queue` — `queue.get()` blocks forever if pipeline crashes without terminal event | Wrapped `queue.get()` in `asyncio.wait_for(timeout=60.0)`. On timeout, sends heartbeat ping to verify client connectivity. Added `import asyncio` to routes.py |
+| **W16** | WebSocket tests mix `@pytest.mark.asyncio` with sync `TestClient` | Removed `@pytest.mark.asyncio` from all four WebSocket test methods. Changed `await queue.put()` to `queue.put_nowait()` in `test_websocket_receives_progress_events` |
+| **B9** | Integration test has no auth headers — all API calls would fail authentication | Added user registration and login before test lifecycle. Added `headers=auth_headers` to all subsequent API calls |
+| **W17** | Integration test CSV path bypasses allowlist — file placed directly in `tmp_path` | Placed CSV under `uploads/` subdirectory. Updated `_make_pipeline_yaml` to reference `uploads/input.csv` |
+
+### Warnings (remaining)
 
 | ID | Severity | Finding |
 |----|----------|---------|
-| **W-5D-1** | Medium | **WebSocket IDOR -- run ownership not verified.** The WebSocket handler authenticates the user via JWT but does not verify that the requested `run_id` belongs to the authenticated user's session. An authenticated user could subscribe to any run_id and observe another user's pipeline progress. The route should call `verify_run_ownership(user, run_id)` or inline an ownership check against the session store before accepting the connection. |
 | **W-5D-2** | Low | **Integration test has no WebSocket coverage.** `test_execute_pipeline.py` exercises the full REST lifecycle (create, validate, execute, poll, results) but does not test WebSocket progress streaming. This leaves the real-time progress path untested end-to-end. |
-| **W-5D-3** | Low | **Multi-worker warning tests were `pass` stubs.** Now implemented with `caplog` assertions. |

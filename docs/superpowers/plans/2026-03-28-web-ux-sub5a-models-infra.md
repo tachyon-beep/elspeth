@@ -294,7 +294,9 @@ class RunEvent(BaseModel):
     """WebSocket event payload for live progress streaming."""
 
     run_id: str
-    timestamp: datetime
+    timestamp: datetime  # NOTE: Fast pipelines may produce identical timestamps.
+    # Event ordering is guaranteed by the asyncio.Queue FIFO, not by timestamp.
+    # Frontend must NOT sort by timestamp — use arrival order instead.
     event_type: Literal["progress", "error", "completed", "cancelled"]
     data: dict[str, Any]
 
@@ -346,12 +348,15 @@ class ExecutionService(Protocol):
     execute() returns immediately; the pipeline runs in a background thread.
     """
 
-    def validate(self, session_id: UUID) -> ValidationResult:
+    async def validate(self, session_id: UUID) -> ValidationResult:
         """Dry-run validation using real engine code paths.
 
         Loads the current CompositionState for the session, generates YAML,
         and runs it through load_settings -> instantiate_plugins_from_config
         -> ExecutionGraph.from_plugin_instances -> graph.validate().
+
+        Async because the implementation wraps the sync validate_pipeline()
+        call via run_in_executor to avoid blocking the event loop.
         """
         ...
 
@@ -521,11 +526,10 @@ class TestProgressBroadcasterThreadSafety:
         from a ThreadPoolExecutor worker thread, and the WebSocket handler
         awaits queue.get() on the event loop thread.
         """
-        loop = asyncio.get_event_loop()
+        loop = asyncio.get_running_loop()
         broadcaster = ProgressBroadcaster(loop)
         queue = broadcaster.subscribe("run-1")
         event = _make_event()
-        delivered = asyncio.Event()
 
         def background_broadcast() -> None:
             """Simulate _run_pipeline() calling broadcast from worker thread."""
@@ -545,7 +549,7 @@ class TestProgressBroadcasterThreadSafety:
     @pytest.mark.asyncio
     async def test_multiple_broadcasts_from_thread_arrive_in_order(self) -> None:
         """Events broadcast from a single thread arrive in FIFO order."""
-        loop = asyncio.get_event_loop()
+        loop = asyncio.get_running_loop()
         broadcaster = ProgressBroadcaster(loop)
         queue = broadcaster.subscribe("run-1")
 
@@ -629,6 +633,7 @@ create_app(), because it depends on the broadcaster instance.
 from __future__ import annotations
 
 import asyncio
+import threading
 
 from elspeth.web.execution.schemas import RunEvent
 
@@ -640,13 +645,17 @@ class ProgressBroadcaster:
     to the async WebSocket handlers (where clients receive events).
 
     Thread safety contract:
-    - subscribe() and unsubscribe() are called from the asyncio event loop thread.
+    - subscribe() and unsubscribe() may be called from the asyncio event loop thread.
     - broadcast() is called from the background pipeline thread.
     - broadcast() uses self._loop.call_soon_threadsafe() for every queue.put_nowait().
+    - All mutations to and iterations over self._subscribers are protected by
+      self._lock (a threading.Lock). This ensures correctness regardless of
+      GIL presence (safe under PEP 703 / free-threaded Python).
     """
 
     def __init__(self, loop: asyncio.AbstractEventLoop) -> None:
         self._loop = loop
+        self._lock = threading.Lock()
         self._subscribers: dict[str, set[asyncio.Queue[RunEvent]]] = {}
 
     def subscribe(self, run_id: str) -> asyncio.Queue[RunEvent]:
@@ -656,7 +665,8 @@ class ProgressBroadcaster:
         Returns the queue that the handler awaits on.
         """
         queue: asyncio.Queue[RunEvent] = asyncio.Queue()
-        self._subscribers.setdefault(run_id, set()).add(queue)
+        with self._lock:
+            self._subscribers.setdefault(run_id, set()).add(queue)
         return queue
 
     def unsubscribe(self, run_id: str, queue: asyncio.Queue[RunEvent]) -> None:
@@ -664,8 +674,9 @@ class ProgressBroadcaster:
 
         Always called from a finally block to ensure cleanup.
         """
-        if run_id in self._subscribers:
-            self._subscribers[run_id].discard(queue)
+        with self._lock:
+            if run_id in self._subscribers:
+                self._subscribers[run_id].discard(queue)
 
     def broadcast(self, run_id: str, event: RunEvent) -> None:
         """Thread-safe broadcast — callable from background threads.
@@ -675,9 +686,12 @@ class ProgressBroadcaster:
         Python pattern for pushing data from a synchronous thread into
         an asyncio context.
 
-        Safe to call with no subscribers — iterates over an empty set.
+        B3 fix: Copies the subscriber set under the lock before iterating,
+        so concurrent subscribe/unsubscribe cannot cause RuntimeError.
         """
-        for queue in self._subscribers.get(run_id, set()):
+        with self._lock:
+            subs = set(self._subscribers.get(run_id, ()))
+        for queue in subs:
             self._loop.call_soon_threadsafe(queue.put_nowait, event)
 
     def cleanup_run(self, run_id: str) -> None:
@@ -686,7 +700,8 @@ class ProgressBroadcaster:
         Called after the terminal event has been broadcast and all
         WebSocket handlers have disconnected.
         """
-        self._subscribers.pop(run_id, None)
+        with self._lock:
+            self._subscribers.pop(run_id, None)
 ```
 
 - [ ] **Step 3: Run tests, commit**
@@ -705,10 +720,10 @@ git commit -m "feat(web/execution): add ProgressBroadcaster with B1 thread safet
 - [ ] `RunStatusResponse.status` is `Literal["pending", "running", "completed", "failed", "cancelled"]`
 - [ ] `ValidationError` supports `component_id=None` for structural (non-component) errors
 - [ ] `protocol.py` defines `ExecutionService` as a `Protocol` with `validate`, `execute`, `get_status`, `cancel`
-- [ ] `validate()` is sync (CPU-bound); `execute()`, `get_status()`, `cancel()` are async
+- [ ] `validate()` is async (wraps sync call via `run_in_executor`); `execute()`, `get_status()`, `cancel()` are async
 - [ ] `ProgressBroadcaster.__init__` captures the event loop reference
 - [ ] `broadcast()` uses `self._loop.call_soon_threadsafe(queue.put_nowait, event)` -- never direct `put_nowait()`
-- [ ] `subscribe()` / `unsubscribe()` are called from the event loop thread only
+- [ ] `subscribe()` / `unsubscribe()` / `broadcast()` / `cleanup_run()` all acquire `self._lock` before mutating or iterating `_subscribers`
 - [ ] `unsubscribe()` with unknown run_id is a no-op (no KeyError)
 - [ ] `cleanup_run()` removes the entire subscriber set for a run_id
 - [ ] Thread safety test verifies `call_soon_threadsafe` is used via mock loop
@@ -723,6 +738,6 @@ git commit -m "feat(web/execution): add ProgressBroadcaster with B1 thread safet
 
 **No blocking issues.**
 
-**Warnings:**
-- **W-5A-1: Concurrent subscribe/broadcast not thread-safe.** `ProgressBroadcaster._subscribers` is a `dict[str, set[asyncio.Queue]]`. `subscribe()`/`unsubscribe()` run on the event loop thread; `broadcast()` runs on the background thread. Set iteration during concurrent modification can raise `RuntimeError`. Either add a `threading.Lock` around subscriber mutations and iterations, or document the GIL reliance explicitly in a code comment.
-- **W-5A-2: GIL reliance undocumented.** If the implementation relies on CPython's GIL for thread safety of dict/set operations, add an explicit comment stating this and noting it would break under a GIL-free Python (PEP 703).
+**Warnings (fixed):**
+- **W-5A-1: Concurrent subscribe/broadcast not thread-safe.** Fixed: Added `threading.Lock` (`self._lock`) to protect all mutations and iterations of `self._subscribers`. `broadcast()` copies the subscriber set under the lock before iterating. All four methods (`subscribe`, `unsubscribe`, `broadcast`, `cleanup_run`) acquire the lock.
+- **W-5A-2: GIL reliance undocumented.** Fixed: No longer relies on GIL. The `threading.Lock` provides explicit synchronization, safe under PEP 703 / free-threaded Python. Class docstring documents the locking strategy.

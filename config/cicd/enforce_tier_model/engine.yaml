@@ -81,26 +81,20 @@ allow_hits:
   reason: 'Tier 3 validation: raw YAML from operator files — isinstance checks validate each entry is a mapping'
   safety: Raises ValueError with index and type info on malformed entry
   expires: null
-- key: engine/executors/sink.py:R4:SinkExecutor:write:fp=f4b797746420aea6
+- key: engine/executors/sink.py:R4:SinkExecutor:_best_effort_cleanup:fp=969cb02b411813bf
+  owner: architecture
+  reason: Best-effort cleanup of OPEN node_states before system error crash — broad catch prevents cleanup failure from masking original FrameworkBugError/AuditIntegrityError
+  safety: Logs warning with cleanup exception details; always re-raises the original system error
+  expires: null
+- key: engine/executors/sink.py:R4:SinkExecutor:write:fp=2413582fe62e5eea
   owner: architecture
   reason: Cleanup of OPEN primary states after begin_node_state failure must not mask original error
   safety: Logs warning with cleanup exception details; always re-raises the original error
   expires: null
-- key: engine/executors/sink.py:R4:SinkExecutor:write:fp=16d836eedf375856
+- key: engine/executors/sink.py:R4:SinkExecutor:write:fp=a9c50be16144303d
   owner: architecture
   reason: Cleanup of OPEN divert states after begin_node_state failure must not mask original error
   safety: Logs warning with cleanup exception details; always re-raises the original error
-  expires: null
-- key: engine/executors/state_guard.py:R4:NodeStateGuard:__exit__:fp=b15e639a7bc1936b
-  owner: architecture
-  reason: Guard records FAILED when block exits without complete() — wraps recorder call to avoid masking the OrchestrationInvariantError
-    raised afterward
-  safety: Logs failure but always raises OrchestrationInvariantError; audit state is preserved or crash occurs
-  expires: null
-- key: engine/executors/state_guard.py:R4:NodeStateGuard:__exit__:fp=bd48ed04609f9dca
-  owner: architecture
-  reason: Guard auto-completes node_state as FAILED on unhandled exception — structural audit integrity guarantee
-  safety: Wraps complete_node_state in try/except; logs failure but never masks original exception
   expires: null
 - key: engine/processor.py:TC:_module_:fp=873d5f90adf363e0
   owner: architecture

@@ -60,6 +60,11 @@ class TestValidationResult:
             is_valid=True,
             checks=[
                 ValidationCheck(
+                    name="source_path_allowlist",
+                    passed=True,
+                    detail="No path option — check skipped",
+                ),
+                ValidationCheck(
                     name="settings_load",
                     passed=True,
                     detail="Settings loaded successfully",
@@ -83,7 +88,7 @@ class TestValidationResult:
             errors=[],
         )
         assert result.is_valid is True
-        assert len(result.checks) == 4
+        assert len(result.checks) == 5
         assert all(c.passed for c in result.checks)
 
     def test_invalid_result_with_attributed_error(self) -> None:
@@ -348,8 +353,8 @@ class ExecutionService(Protocol):
     execute() returns immediately; the pipeline runs in a background thread.
     """
 
-    def validate(self, session_id: UUID) -> ValidationResult:
-        """Dry-run validation using real engine code paths.
+    async def validate(self, session_id: UUID) -> ValidationResult:
+        """Async dry-run validation using real engine code paths.
 
         Loads the current CompositionState for the session, generates YAML,
         and runs it through load_settings -> instantiate_plugins_from_config
