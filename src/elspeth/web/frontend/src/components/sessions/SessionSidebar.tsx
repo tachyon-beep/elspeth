@@ -2,7 +2,9 @@
 //
 // Session list sidebar. Always renders at full width -- collapse/expand
 // is controlled by Layout.tsx via CSS grid column sizing.
+import { useState, useCallback } from "react";
 import { useSession } from "@/hooks/useSession";
+import { useAuth } from "@/hooks/useAuth";
 
 /** Format a date string as a relative time ("2 min ago", "yesterday"). */
 function relativeTime(dateStr: string): string {
@@ -24,6 +26,18 @@ function relativeTime(dateStr: string): string {
 export function SessionSidebar() {
   const { sessions, activeSessionId, createSession, selectSession } =
     useSession();
+  const { user, logout } = useAuth();
+  const [isCreating, setIsCreating] = useState(false);
+
+  const handleCreateSession = useCallback(async () => {
+    if (isCreating) return;
+    setIsCreating(true);
+    try {
+      await createSession();
+    } finally {
+      setIsCreating(false);
+    }
+  }, [isCreating, createSession]);
 
   return (
     <aside
@@ -130,23 +144,70 @@ export function SessionSidebar() {
       {/* New session button */}
       <div style={{ padding: 8, borderTop: "1px solid var(--color-border)" }}>
         <button
-          onClick={createSession}
-          aria-label="Create new session"
+          onClick={handleCreateSession}
+          disabled={isCreating}
+          aria-label={isCreating ? "Creating session" : "Create new session"}
           style={{
             display: "block",
             width: "100%",
             padding: "8px 12px",
-            backgroundColor: "var(--color-focus-ring)",
+            backgroundColor: isCreating
+              ? "var(--color-text-muted)"
+              : "var(--color-focus-ring)",
             color: "var(--color-text)",
             border: "none",
             borderRadius: 4,
-            cursor: "pointer",
+            cursor: isCreating ? "not-allowed" : "pointer",
             fontSize: 13,
           }}
         >
-          + New Session
+          {isCreating ? "Creating..." : "+ New Session"}
         </button>
       </div>
+
+      {/* User identity + logout */}
+      {user && (
+        <div
+          style={{
+            padding: "8px 12px",
+            borderTop: "1px solid var(--color-border)",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "space-between",
+            gap: 8,
+          }}
+        >
+          <span
+            style={{
+              fontSize: 12,
+              color: "var(--color-text-secondary)",
+              overflow: "hidden",
+              textOverflow: "ellipsis",
+              whiteSpace: "nowrap",
+            }}
+            title={user.username}
+          >
+            {user.display_name || user.username}
+          </span>
+          <button
+            onClick={logout}
+            aria-label="Sign out"
+            style={{
+              background: "none",
+              border: "none",
+              cursor: "pointer",
+              fontSize: 12,
+              color: "var(--color-text-muted)",
+              padding: "4px 8px",
+              borderRadius: 4,
+              whiteSpace: "nowrap",
+              flexShrink: 0,
+            }}
+          >
+            Sign out
+          </button>
+        </div>
+      )}
     </aside>
   );
 }
