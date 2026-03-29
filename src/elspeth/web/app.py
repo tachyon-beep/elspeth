@@ -25,7 +25,7 @@ from elspeth.web.execution.progress import ProgressBroadcaster
 from elspeth.web.execution.routes import create_execution_router
 from elspeth.web.execution.service import ExecutionServiceImpl
 from elspeth.web.middleware.rate_limit import ComposerRateLimiter
-from elspeth.web.sessions.models import metadata as session_metadata
+from elspeth.web.sessions.migrations import run_migrations
 from elspeth.web.sessions.protocol import RunAlreadyActiveError
 from elspeth.web.sessions.routes import create_session_router
 from elspeth.web.sessions.service import SessionServiceImpl
@@ -160,7 +160,7 @@ def create_app(settings: WebSettings | None = None) -> FastAPI:
     # --- Session database setup ---
     session_db_url = settings.get_session_db_url()
     session_engine = create_engine(session_db_url)
-    session_metadata.create_all(session_engine)
+    run_migrations(session_engine)
 
     session_service = SessionServiceImpl(session_engine)
     app.state.session_service = session_service

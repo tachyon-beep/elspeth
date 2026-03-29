@@ -1,16 +1,28 @@
 // src/components/chat/MessageBubble.tsx
-import { useState } from "react";
+import { useState, useCallback } from "react";
 import type { ChatMessage } from "@/types/api";
 
 interface MessageBubbleProps {
   message: ChatMessage;
+  isComposing?: boolean;
   onRetry?: (messageId: string) => void;
 }
 
-export function MessageBubble({ message, onRetry }: MessageBubbleProps) {
+export function MessageBubble({ message, isComposing, onRetry }: MessageBubbleProps) {
   const isUser = message.role === "user";
   const isSystem = message.role === "system";
   const [toolsExpanded, setToolsExpanded] = useState(false);
+  const [copied, setCopied] = useState(false);
+
+  const handleCopy = useCallback(async () => {
+    try {
+      await navigator.clipboard.writeText(message.content);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    } catch {
+      // Clipboard API may fail in insecure contexts
+    }
+  }, [message.content]);
 
   // System messages: centre-aligned full-width banner, muted colour,
   // italic text, no sender label. Used for audit markers like
@@ -52,8 +64,33 @@ export function MessageBubble({ message, onRetry }: MessageBubbleProps) {
           lineHeight: 1.5,
           whiteSpace: "pre-wrap",
           wordBreak: "break-word",
+          position: "relative",
         }}
       >
+        {/* Copy button — visible on hover via CSS, always accessible on touch */}
+        {!isSystem && (
+          <button
+            onClick={handleCopy}
+            aria-label={copied ? "Copied to clipboard" : "Copy message"}
+            className="bubble-copy-btn"
+            style={{
+              position: "absolute",
+              top: 4,
+              right: 4,
+              background: "none",
+              border: "none",
+              cursor: "pointer",
+              fontSize: 12,
+              color: "var(--color-text-muted)",
+              padding: "2px 6px",
+              borderRadius: 4,
+              opacity: copied ? 1 : undefined,
+            }}
+          >
+            {copied ? "Copied!" : "\u2398"}
+          </button>
+        )}
+
         {message.content}
 
         {isUser && message.local_status === "failed" && onRetry && (
@@ -90,7 +127,7 @@ export function MessageBubble({ message, onRetry }: MessageBubbleProps) {
           </div>
         )}
 
-        {isUser && message.local_status === "pending" && (
+        {isUser && message.local_status === "pending" && !isComposing && (
           <div
             style={{
               marginTop: 8,

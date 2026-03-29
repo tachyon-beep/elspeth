@@ -99,6 +99,11 @@ class TestGetSettingsDependency:
         settings = _settings(tmp_path, port=4242)
         app = create_app(settings)
 
+        # Remove the SPA catch-all mount so the dynamically added test
+        # route is reachable (the SPA mount at "/" with html=True serves
+        # index.html for any unmatched path, swallowing late-added routes).
+        app.routes[:] = [r for r in app.routes if getattr(r, "name", None) != "spa"]
+
         @app.get("/api/_test_settings")
         async def _test_endpoint(s: WebSettings = Depends(get_settings)) -> dict[str, int]:  # noqa: B008
             return {"port": s.port}

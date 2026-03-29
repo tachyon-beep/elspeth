@@ -1,5 +1,5 @@
 // src/components/chat/ChatPanel.tsx
-import { useEffect, useRef, useCallback } from "react";
+import { useEffect, useRef, useCallback, useState } from "react";
 import { useSessionStore } from "@/stores/sessionStore";
 import { useComposer } from "@/hooks/useComposer";
 import { MessageBubble } from "./MessageBubble";
@@ -21,7 +21,12 @@ export function ChatPanel() {
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const scrollContainerRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
-  const isUserScrolledUp = useRef(false);
+  const [showScrollButton, setShowScrollButton] = useState(false);
+
+  function scrollToBottom() {
+    messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
+    setShowScrollButton(false);
+  }
 
   // Track whether the user has scrolled up from the bottom
   function handleScroll() {
@@ -31,15 +36,15 @@ export function ChatPanel() {
     const atBottom =
       container.scrollHeight - container.scrollTop - container.clientHeight <
       threshold;
-    isUserScrolledUp.current = !atBottom;
+    setShowScrollButton(!atBottom);
   }
 
   // Auto-scroll to bottom when new messages arrive (unless user scrolled up)
   useEffect(() => {
-    if (!isUserScrolledUp.current) {
+    if (!showScrollButton) {
       messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
     }
-  }, [messages, isComposing]);
+  }, [messages, isComposing, showScrollButton]);
 
   // Return focus to input when composing ends (assistant response arrived)
   useEffect(() => {
@@ -51,6 +56,10 @@ export function ChatPanel() {
   const handleSend = useCallback(
     (content: string) => {
       sendMessage(content);
+      // Explicit send means user has returned to live conversation —
+      // force-scroll to bottom and resume auto-scroll.
+      setShowScrollButton(false);
+      messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
     },
     [sendMessage],
   );
@@ -89,6 +98,7 @@ export function ChatPanel() {
         flexDirection: "column",
         height: "100%",
         overflow: "hidden",
+        position: "relative",
       }}
       role="main"
       aria-label="Chat panel"
@@ -156,6 +166,7 @@ export function ChatPanel() {
             <MessageBubble
               key={msg.id}
               message={msg}
+              isComposing={isComposing}
               onRetry={msg.role === "user" ? retryMessage : undefined}
             />
           ))
@@ -163,6 +174,29 @@ export function ChatPanel() {
         {isComposing && <ComposingIndicator />}
         <div ref={messagesEndRef} />
       </div>
+
+      {/* Scroll-to-bottom button */}
+      {showScrollButton && (
+        <button
+          onClick={scrollToBottom}
+          aria-label="Scroll to bottom"
+          className="btn scroll-to-bottom-btn"
+          style={{
+            position: "absolute",
+            bottom: 80,
+            left: "50%",
+            transform: "translateX(-50%)",
+            zIndex: 10,
+            borderRadius: 20,
+            padding: "6px 16px",
+            fontSize: 13,
+            cursor: "pointer",
+            boxShadow: "0 2px 8px rgba(0,0,0,0.15)",
+          }}
+        >
+          {"\u2193"} Jump to latest
+        </button>
+      )}
 
       {/* Input */}
       <ChatInput
