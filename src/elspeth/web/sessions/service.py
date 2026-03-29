@@ -1,0 +1,608 @@
+"""SessionService implementation -- CRUD, state versioning, active run enforcement.
+
+Uses SQLAlchemy Core with a synchronous engine. Each method executes SQL
+within a single transaction.
+"""
+
+from __future__ import annotations
+
+import uuid
+from collections.abc import Mapping, Sequence
+from datetime import UTC, datetime
+from typing import Any
+from uuid import UUID
+
+from sqlalchemy import Engine, delete, desc, func, insert, select, update
+
+from elspeth.web.sessions.models import (
+    chat_messages_table,
+    composition_states_table,
+    run_events_table,
+    runs_table,
+    sessions_table,
+)
+from elspeth.web.sessions.protocol import (
+    LEGAL_RUN_TRANSITIONS,
+    ChatMessageRecord,
+    CompositionStateData,
+    CompositionStateRecord,
+    RunAlreadyActiveError,
+    RunRecord,
+    SessionRecord,
+)
+
+
+class SessionServiceImpl:
+    """Concrete session service backed by SQLAlchemy Core."""
+
+    def __init__(self, engine: Engine) -> None:
+        self._engine = engine
+
+    def _now(self) -> datetime:
+        return datetime.now(UTC)
+
+    async def create_session(
+        self,
+        user_id: str,
+        title: str,
+        auth_provider_type: str,
+    ) -> SessionRecord:
+        """Create a new session and return its record."""
+        session_id = uuid.uuid4()
+        now = self._now()
+
+        with self._engine.begin() as conn:
+            conn.execute(
+                insert(sessions_table).values(
+                    id=str(session_id),
+                    user_id=user_id,
+                    auth_provider_type=auth_provider_type,
+                    title=title,
+                    created_at=now,
+                    updated_at=now,
+                )
+            )
+
+        return SessionRecord(
+            id=session_id,
+            user_id=user_id,
+            auth_provider_type=auth_provider_type,
+            title=title,
+            created_at=now,
+            updated_at=now,
+        )
+
+    async def get_session(self, session_id: UUID) -> SessionRecord:
+        """Fetch a session by ID. Raises ValueError if not found."""
+        with self._engine.begin() as conn:
+            row = conn.execute(select(sessions_table).where(sessions_table.c.id == str(session_id))).fetchone()
+
+        if row is None:
+            raise ValueError(f"Session not found: {session_id}")
+
+        return SessionRecord(
+            id=UUID(row.id),
+            user_id=row.user_id,
+            auth_provider_type=row.auth_provider_type,
+            title=row.title,
+            created_at=row.created_at,
+            updated_at=row.updated_at,
+        )
+
+    async def list_sessions(self, user_id: str) -> list[SessionRecord]:
+        """List sessions for a user, ordered by updated_at descending."""
+        with self._engine.begin() as conn:
+            rows = conn.execute(
+                select(sessions_table).where(sessions_table.c.user_id == user_id).order_by(desc(sessions_table.c.updated_at))
+            ).fetchall()
+
+        return [
+            SessionRecord(
+                id=UUID(row.id),
+                user_id=row.user_id,
+                auth_provider_type=row.auth_provider_type,
+                title=row.title,
+                created_at=row.created_at,
+                updated_at=row.updated_at,
+            )
+            for row in rows
+        ]
+
+    async def archive_session(self, session_id: UUID) -> None:
+        """Delete a session and cascade to all related records."""
+        sid = str(session_id)
+        with self._engine.begin() as conn:
+            # Delete in dependency order (children first for non-CASCADE DBs)
+            # Get run IDs for this session to delete run_events
+            run_ids = [r.id for r in conn.execute(select(runs_table.c.id).where(runs_table.c.session_id == sid)).fetchall()]
+            if run_ids:
+                conn.execute(delete(run_events_table).where(run_events_table.c.run_id.in_(run_ids)))
+            conn.execute(delete(runs_table).where(runs_table.c.session_id == sid))
+            conn.execute(delete(composition_states_table).where(composition_states_table.c.session_id == sid))
+            conn.execute(delete(chat_messages_table).where(chat_messages_table.c.session_id == sid))
+            conn.execute(delete(sessions_table).where(sessions_table.c.id == sid))
+
+    async def add_message(
+        self,
+        session_id: UUID,
+        role: str,
+        content: str,
+        tool_calls: Mapping[str, Any] | None = None,
+    ) -> ChatMessageRecord:
+        """Add a chat message and update the session's updated_at."""
+        msg_id = uuid.uuid4()
+        now = self._now()
+        sid = str(session_id)
+
+        with self._engine.begin() as conn:
+            conn.execute(
+                insert(chat_messages_table).values(
+                    id=str(msg_id),
+                    session_id=sid,
+                    role=role,
+                    content=content,
+                    tool_calls=tool_calls,
+                    created_at=now,
+                )
+            )
+            conn.execute(update(sessions_table).where(sessions_table.c.id == sid).values(updated_at=now))
+
+        return ChatMessageRecord(
+            id=msg_id,
+            session_id=session_id,
+            role=role,
+            content=content,
+            tool_calls=tool_calls,
+            created_at=now,
+        )
+
+    async def get_messages(
+        self,
+        session_id: UUID,
+    ) -> list[ChatMessageRecord]:
+        """Get all messages for a session, ordered by created_at ascending."""
+        with self._engine.begin() as conn:
+            rows = conn.execute(
+                select(chat_messages_table)
+                .where(chat_messages_table.c.session_id == str(session_id))
+                .order_by(chat_messages_table.c.created_at)
+            ).fetchall()
+
+        return [
+            ChatMessageRecord(
+                id=UUID(row.id),
+                session_id=UUID(row.session_id),
+                role=row.role,
+                content=row.content,
+                tool_calls=row.tool_calls,
+                created_at=row.created_at,
+            )
+            for row in rows
+        ]
+
+    async def save_composition_state(
+        self,
+        session_id: UUID,
+        state: CompositionStateData,
+    ) -> CompositionStateRecord:
+        """Save a new immutable composition state snapshot.
+
+        Version is max(existing versions for session) + 1, starting at 1.
+        """
+        state_id = uuid.uuid4()
+        now = self._now()
+        sid = str(session_id)
+
+        with self._engine.begin() as conn:
+            # Get the current max version for this session
+            result = conn.execute(
+                select(func.max(composition_states_table.c.version)).where(composition_states_table.c.session_id == sid)
+            ).scalar()
+            version = (result or 0) + 1
+
+            # Unfreeze data for JSON serialization (MappingProxyType is not
+            # JSON-serializable). Recursively convert back to plain
+            # dicts/lists, handling deeply-frozen structures from
+            # freeze_fields().
+            def _to_json(val: Any) -> Any:
+                if val is None:
+                    return None
+                if isinstance(val, str):
+                    return val
+                if isinstance(val, Mapping):
+                    return {k: _to_json(v) for k, v in val.items()}
+                if isinstance(val, (list, tuple, Sequence)):
+                    return [_to_json(item) for item in val]
+                return val
+
+            # Seam contract A: wrap JSON columns with _version envelope
+            # for schema evolution. Version 1 is the initial format.
+            def _enveloped(val: Any) -> Any:
+                raw = _to_json(val)
+                if raw is None:
+                    return None
+                return {"_version": 1, "data": raw}
+
+            conn.execute(
+                insert(composition_states_table).values(
+                    id=str(state_id),
+                    session_id=sid,
+                    version=version,
+                    source=_enveloped(state.source),
+                    nodes=_enveloped(state.nodes),
+                    edges=_enveloped(state.edges),
+                    outputs=_enveloped(state.outputs),
+                    metadata_=_enveloped(state.metadata_),
+                    is_valid=state.is_valid,
+                    validation_errors=_to_json(state.validation_errors),
+                    derived_from_state_id=None,
+                    created_at=now,
+                )
+            )
+
+        return CompositionStateRecord(
+            id=state_id,
+            session_id=session_id,
+            version=version,
+            source=state.source,
+            nodes=state.nodes,
+            edges=state.edges,
+            outputs=state.outputs,
+            metadata_=state.metadata_,
+            is_valid=state.is_valid,
+            validation_errors=state.validation_errors,
+            created_at=now,
+            derived_from_state_id=None,
+        )
+
+    async def get_current_state(
+        self,
+        session_id: UUID,
+    ) -> CompositionStateRecord | None:
+        """Return the highest-version state for a session, or None."""
+        with self._engine.begin() as conn:
+            row = conn.execute(
+                select(composition_states_table)
+                .where(composition_states_table.c.session_id == str(session_id))
+                .order_by(desc(composition_states_table.c.version))
+                .limit(1)
+            ).fetchone()
+
+        if row is None:
+            return None
+
+        return self._row_to_state_record(row)
+
+    async def get_state_versions(
+        self,
+        session_id: UUID,
+    ) -> list[CompositionStateRecord]:
+        """Return all state versions for a session, ascending order."""
+        with self._engine.begin() as conn:
+            rows = conn.execute(
+                select(composition_states_table)
+                .where(composition_states_table.c.session_id == str(session_id))
+                .order_by(composition_states_table.c.version)
+            ).fetchall()
+
+        return [self._row_to_state_record(row) for row in rows]
+
+    @staticmethod
+    def _unwrap_envelope(val: Any) -> Any:
+        """Unwrap _version envelope from a JSON column value.
+
+        Seam contract A: JSON columns are stored with {"_version": 1, "data": ...}.
+        Raises ValueError on unknown versions. Returns None for NULL columns.
+        """
+        if val is None:
+            return None
+        if isinstance(val, dict) and "_version" in val:
+            if val["_version"] != 1:
+                raise ValueError(f"Unknown composition state envelope version: {val['_version']}")
+            return val["data"]
+        # Legacy data without envelope -- pass through as-is
+        return val
+
+    def _row_to_state_record(self, row: Any) -> CompositionStateRecord:
+        """Convert a SQLAlchemy row to a CompositionStateRecord.
+
+        Seam contract A: metadata_ maps DB column metadata_ back to the
+        dataclass field. JSON columns are unwrapped from their _version envelope.
+        When Sub-4 provides CompositionState.from_dict(), this method becomes
+        the swap point for domain object reconstruction.
+        """
+        # TODO(sub-4): Replace raw dict fields with CompositionState.from_dict()
+        # call once Sub-4 defines it. The swap should be a single-line change.
+        return CompositionStateRecord(
+            id=UUID(row.id),
+            session_id=UUID(row.session_id),
+            version=row.version,
+            source=self._unwrap_envelope(row.source),
+            nodes=self._unwrap_envelope(row.nodes),
+            edges=self._unwrap_envelope(row.edges),
+            outputs=self._unwrap_envelope(row.outputs),
+            metadata_=self._unwrap_envelope(row.metadata_),
+            is_valid=row.is_valid,
+            validation_errors=row.validation_errors,
+            created_at=row.created_at,
+            derived_from_state_id=(UUID(row.derived_from_state_id) if row.derived_from_state_id is not None else None),
+        )
+
+    async def create_run(
+        self,
+        session_id: UUID,
+        state_id: UUID,
+        pipeline_yaml: str | None = None,
+    ) -> RunRecord:
+        """Create a new pending run, enforcing one active run per session (B6).
+
+        The check-and-set runs within the same database transaction.
+        Raises RunAlreadyActiveError if a pending or running run exists.
+        If pipeline_yaml is provided, stores the generated YAML at creation time.
+        """
+        run_id = uuid.uuid4()
+        now = self._now()
+        sid = str(session_id)
+
+        with self._engine.begin() as conn:
+            # Check for existing active runs
+            active = conn.execute(
+                select(runs_table.c.id).where(
+                    runs_table.c.session_id == sid,
+                    runs_table.c.status.in_(["pending", "running"]),
+                )
+            ).fetchone()
+
+            if active is not None:
+                raise RunAlreadyActiveError(sid)
+
+            conn.execute(
+                insert(runs_table).values(
+                    id=str(run_id),
+                    session_id=sid,
+                    state_id=str(state_id),
+                    status="pending",
+                    started_at=now,
+                    rows_processed=0,
+                    rows_failed=0,
+                    pipeline_yaml=pipeline_yaml,
+                )
+            )
+
+        return RunRecord(
+            id=run_id,
+            session_id=session_id,
+            state_id=state_id,
+            status="pending",
+            started_at=now,
+            finished_at=None,
+            rows_processed=0,
+            rows_failed=0,
+            error=None,
+            landscape_run_id=None,
+            pipeline_yaml=pipeline_yaml,
+        )
+
+    async def get_run(self, run_id: UUID) -> RunRecord:
+        """Fetch a run by ID. Raises ValueError if not found."""
+        with self._engine.begin() as conn:
+            row = conn.execute(select(runs_table).where(runs_table.c.id == str(run_id))).fetchone()
+
+        if row is None:
+            raise ValueError(f"Run not found: {run_id}")
+
+        return self._row_to_run_record(row)
+
+    async def update_run_status(
+        self,
+        run_id: UUID,
+        status: str,
+        error: str | None = None,
+        landscape_run_id: str | None = None,
+        rows_processed: int | None = None,
+        rows_failed: int | None = None,
+    ) -> None:
+        """Update a run's status and optional fields.
+
+        Enforces LEGAL_RUN_TRANSITIONS (D3). Enforces landscape_run_id
+        write-once semantics (D4). Sets finished_at for terminal states
+        (completed, failed, cancelled). Optional parameters only update
+        the column when not None. Raises ValueError if run not found or
+        transition is illegal.
+        """
+        now = self._now()
+        rid = str(run_id)
+
+        with self._engine.begin() as conn:
+            # Read current state for transition + write-once validation
+            current = conn.execute(
+                select(
+                    runs_table.c.status,
+                    runs_table.c.landscape_run_id,
+                ).where(runs_table.c.id == rid)
+            ).fetchone()
+
+            if current is None:
+                raise ValueError(f"Run not found: {run_id}")
+
+            # D3: Enforce legal transitions
+            current_status = current.status
+            allowed = LEGAL_RUN_TRANSITIONS.get(current_status, frozenset())
+            if status not in allowed:
+                raise ValueError(f"Illegal run transition: {current_status!r} \u2192 {status!r}. Allowed: {sorted(allowed)}")
+
+            # D4: landscape_run_id is write-once
+            if landscape_run_id is not None and current.landscape_run_id is not None:
+                raise ValueError(f"landscape_run_id already set to {current.landscape_run_id!r}; cannot overwrite")
+
+            values: dict[str, Any] = {"status": status}
+            if status in ("completed", "failed", "cancelled"):
+                values["finished_at"] = now
+            if error is not None:
+                values["error"] = error
+            if landscape_run_id is not None:
+                values["landscape_run_id"] = landscape_run_id
+            if rows_processed is not None:
+                values["rows_processed"] = rows_processed
+            if rows_failed is not None:
+                values["rows_failed"] = rows_failed
+
+            conn.execute(update(runs_table).where(runs_table.c.id == rid).values(**values))
+
+    async def get_active_run(
+        self,
+        session_id: UUID,
+    ) -> RunRecord | None:
+        """Return the pending/running run for a session, or None."""
+        with self._engine.begin() as conn:
+            row = conn.execute(
+                select(runs_table).where(
+                    runs_table.c.session_id == str(session_id),
+                    runs_table.c.status.in_(["pending", "running"]),
+                )
+            ).fetchone()
+
+        if row is None:
+            return None
+
+        return self._row_to_run_record(row)
+
+    async def get_state(self, state_id: UUID) -> CompositionStateRecord:
+        """Fetch a composition state by its primary key. Raises ValueError if not found."""
+        with self._engine.begin() as conn:
+            row = conn.execute(select(composition_states_table).where(composition_states_table.c.id == str(state_id))).fetchone()
+
+        if row is None:
+            raise ValueError(f"State not found: {state_id}")
+
+        return self._row_to_state_record(row)
+
+    async def set_active_state(
+        self,
+        session_id: UUID,
+        state_id: UUID,
+    ) -> CompositionStateRecord:
+        """Revert to a prior state by copying it as a new version.
+
+        Creates a new version record that is a copy of the specified prior
+        version (looked up by state_id). The new record gets
+        version = max(existing) + 1. Raises ValueError if state_id not
+        found or does not belong to the session.
+        """
+        sid = str(session_id)
+
+        with self._engine.begin() as conn:
+            # Look up the prior state
+            prior_row = conn.execute(select(composition_states_table).where(composition_states_table.c.id == str(state_id))).fetchone()
+
+            if prior_row is None:
+                raise ValueError(f"State not found: {state_id}")
+            if prior_row.session_id != sid:
+                raise ValueError(f"State {state_id} does not belong to session {session_id}")
+
+            # Get next version number
+            max_version = conn.execute(
+                select(func.max(composition_states_table.c.version)).where(composition_states_table.c.session_id == sid)
+            ).scalar()
+            new_version = (max_version or 0) + 1
+
+            new_state_id = uuid.uuid4()
+            now = self._now()
+
+            conn.execute(
+                insert(composition_states_table).values(
+                    id=str(new_state_id),
+                    session_id=sid,
+                    version=new_version,
+                    source=prior_row.source,
+                    nodes=prior_row.nodes,
+                    edges=prior_row.edges,
+                    outputs=prior_row.outputs,
+                    metadata_=prior_row.metadata_,
+                    is_valid=prior_row.is_valid,
+                    validation_errors=prior_row.validation_errors,
+                    derived_from_state_id=str(state_id),
+                    created_at=now,
+                )
+            )
+
+        return CompositionStateRecord(
+            id=new_state_id,
+            session_id=session_id,
+            version=new_version,
+            source=self._unwrap_envelope(prior_row.source),
+            nodes=self._unwrap_envelope(prior_row.nodes),
+            edges=self._unwrap_envelope(prior_row.edges),
+            outputs=self._unwrap_envelope(prior_row.outputs),
+            metadata_=self._unwrap_envelope(prior_row.metadata_),
+            is_valid=prior_row.is_valid,
+            validation_errors=prior_row.validation_errors,
+            created_at=now,
+            derived_from_state_id=state_id,
+        )
+
+    async def cancel_orphaned_runs(
+        self,
+        session_id: UUID,
+        max_age_seconds: int = 3600,
+    ) -> list[RunRecord]:
+        """Force-cancel runs stuck in 'running' status beyond max_age_seconds.
+
+        Returns the list of cancelled RunRecords. Called by the execution
+        service on startup and periodically to prevent orphaned runs from
+        permanently blocking sessions (D5).
+        """
+        sid = str(session_id)
+        now = self._now()
+        cutoff = datetime.fromtimestamp(
+            now.timestamp() - max_age_seconds,
+            tz=UTC,
+        )
+
+        cancelled: list[RunRecord] = []
+
+        with self._engine.begin() as conn:
+            # Find running runs older than the cutoff
+            stale_rows = conn.execute(
+                select(runs_table).where(
+                    runs_table.c.session_id == sid,
+                    runs_table.c.status == "running",
+                    runs_table.c.started_at <= cutoff,
+                )
+            ).fetchall()
+
+            for row in stale_rows:
+                conn.execute(update(runs_table).where(runs_table.c.id == row.id).values(status="cancelled", finished_at=now))
+                cancelled.append(
+                    RunRecord(
+                        id=UUID(row.id),
+                        session_id=UUID(row.session_id),
+                        state_id=UUID(row.state_id),
+                        status="cancelled",
+                        started_at=row.started_at,
+                        finished_at=now,
+                        rows_processed=row.rows_processed,
+                        rows_failed=row.rows_failed,
+                        error=row.error,
+                        landscape_run_id=row.landscape_run_id,
+                        pipeline_yaml=row.pipeline_yaml,
+                    )
+                )
+
+        return cancelled
+
+    def _row_to_run_record(self, row: Any) -> RunRecord:
+        """Convert a SQLAlchemy row to a RunRecord."""
+        return RunRecord(
+            id=UUID(row.id),
+            session_id=UUID(row.session_id),
+            state_id=UUID(row.state_id),
+            status=row.status,
+            started_at=row.started_at,
+            finished_at=row.finished_at,
+            rows_processed=row.rows_processed,
+            rows_failed=row.rows_failed,
+            error=row.error,
+            landscape_run_id=row.landscape_run_id,
+            pipeline_yaml=row.pipeline_yaml,
+        )

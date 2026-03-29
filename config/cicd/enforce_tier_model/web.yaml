@@ -229,6 +229,39 @@ allow_hits:
   safety: "Non-local providers return 404; isinstance enables mypy type narrowing for login()/refresh()"
   expires: null
 
+# SessionServiceImpl — _to_json unfreezes MappingProxyType/tuple for JSON serialization
+- key: web/sessions/service.py:R5:SessionServiceImpl:save_composition_state:_to_json:fp=a648319705b64991
+  owner: web-sessions
+  reason: "Serialization boundary — isinstance(str) guards against str being Sequence (infinite recursion)"
+  safety: "Only used in _to_json for JSON column serialization; no type masking"
+  expires: null
+
+- key: web/sessions/service.py:R5:SessionServiceImpl:save_composition_state:_to_json:fp=c3d0fde02b8705fe
+  owner: web-sessions
+  reason: "Serialization boundary — isinstance(Mapping) detects MappingProxyType from freeze_fields()"
+  safety: "Converts frozen Mapping back to dict for JSON serialization; no bug masking"
+  expires: null
+
+- key: web/sessions/service.py:R5:SessionServiceImpl:save_composition_state:_to_json:fp=0da8ca8137ef3e1e
+  owner: web-sessions
+  reason: "Serialization boundary — isinstance(Sequence) detects tuples from freeze_fields()"
+  safety: "Converts frozen tuple back to list for JSON serialization; no bug masking"
+  expires: null
+
+# SessionServiceImpl — _unwrap_envelope checks envelope structure (Tier 1 read boundary)
+- key: web/sessions/service.py:R5:SessionServiceImpl:_unwrap_envelope:fp=10f09cb713013d46
+  owner: web-sessions
+  reason: "Tier 1 read boundary — validates JSON envelope structure before accessing _version key"
+  safety: "Crashes on unknown version; pass-through for legacy data; no silent coercion"
+  expires: null
+
+# SessionServiceImpl — LEGAL_RUN_TRANSITIONS.get() with explicit empty default
+- key: web/sessions/service.py:R1:SessionServiceImpl:update_run_status:fp=892ec6d55b1cf1cf
+  owner: web-sessions
+  reason: "Defensive lookup on constant transition table — unknown status produces empty set, rejected immediately"
+  safety: "frozenset() default means unknown statuses have no legal transitions; ValueError raised on next line"
+  expires: null
+
 # Auth middleware — Tier 3 HTTP header access (Authorization header from client)
 - key: web/auth/middleware.py:R1:get_current_user:fp=27850ac518f1116d
   owner: web-auth
