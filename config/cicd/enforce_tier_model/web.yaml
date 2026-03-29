@@ -217,19 +217,6 @@ allow_hits:
   safety: No dict access involved; decorator syntax triggers text-based pattern match
   expires: null
 
-# SessionServiceImpl — exception handling for optimistic locking (pre-existing)
-- key: web/sessions/service.py:R6:SessionServiceImpl:save_composition_state:_sync:fp=c07f71670e637c5c
-  owner: web-sessions
-  reason: "Optimistic lock — IntegrityError on duplicate version is expected concurrent write"
-  safety: "Raises SessionConflictError with structured context"
-  expires: null
-
-- key: web/sessions/service.py:R6:SessionServiceImpl:set_active_state:_sync:fp=7881a6e600190df3
-  owner: web-sessions
-  reason: "Optimistic lock — IntegrityError on state constraint is expected concurrent write"
-  safety: "Raises SessionConflictError with structured context"
-  expires: null
-
 # SessionServiceImpl — _unwrap_envelope checks envelope structure (Tier 1 read boundary)
 - key: web/sessions/service.py:R5:SessionServiceImpl:_unwrap_envelope:fp=1f13048cd351a07f
   owner: web-sessions
@@ -240,8 +227,8 @@ allow_hits:
 # App factory — @app.get() false positive (moved health route)
 - key: web/app.py:R1:create_app:fp=c6dd2f57f3279528
   owner: web-app
-  reason: "False positive — os.environ.get() reads environment variable, not dict field"
-  safety: No dict field access involved
+  reason: "Tier 3 boundary — os.environ.get() for env var check, not dict.get() on pipeline data"
+  safety: "Guards dev-mode secret_key warning; no data flow impact"
   expires: null
 
 - key: web/app.py:R1:create_app:health:fp=7d08bc86914bca1b
@@ -370,13 +357,21 @@ allow_hits:
   safety: "Structural recursion over known frozen types; no contract violation possible"
   expires: null
 
+# Session service — IntegrityError handling for upsert-or-skip patterns
+- key: web/sessions/service.py:R6:SessionServiceImpl:save_composition_state:_sync:fp=c07f71670e637c5c
+  owner: web-sessions
+  reason: "Upsert-or-skip — IntegrityError on duplicate version is expected race condition, not a bug"
+  safety: "Returns None to caller; caller retries or skips; no data loss"
+  expires: null
+
+- key: web/sessions/service.py:R6:SessionServiceImpl:set_active_state:_sync:fp=7881a6e600190df3
+  owner: web-sessions
+  reason: "Upsert-or-skip — IntegrityError on duplicate active state is expected race condition"
+  safety: "Returns None to caller; caller retries or skips; no data loss"
+  expires: null
+
 per_file_rules:
 # Composer tools — mutation executors parse LLM tool call arguments (Tier 3).
-# args dict comes from json.loads(tool_call.function.arguments) in the LLM
-# tool-use loop. Tool JSON schemas define optional fields — the LLM may omit
-# them. .get() with defaults is the correct Tier 3 pattern for optional fields.
-# isinstance check in set_metadata handles LLM sending patch fields at different
-# nesting levels.
 - pattern: web/composer/tools.py
   rules:
   - R1

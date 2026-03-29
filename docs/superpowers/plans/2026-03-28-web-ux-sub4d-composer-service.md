@@ -278,6 +278,7 @@ git commit -m "feat(web/composer): add ComposerService protocol and prompt const
 from __future__ import annotations
 
 import json
+from pathlib import Path
 from typing import Any
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -357,6 +358,7 @@ def _make_settings() -> MagicMock:
     settings.composer_model = "gpt-4o"
     settings.composer_max_turns = 20
     settings.composer_timeout_seconds = 120.0
+    settings.data_dir = Path("/data")
     return settings
 
 
@@ -482,6 +484,59 @@ class TestComposerConvergence:
             with pytest.raises(ComposerConvergenceError) as exc_info:
                 await service.compose("Loop forever", [], state)
             assert exc_info.value.max_turns == 2
+
+    @pytest.mark.asyncio
+    async def test_self_correction_on_final_turn_succeeds(self) -> None:
+        """B-4D-3: LLM makes tool calls on final turn, then text on bonus call."""
+        catalog = _mock_catalog()
+        settings = _make_settings()
+        settings.composer_max_turns = 2
+        service = ComposerServiceImpl(catalog=catalog, settings=settings)
+        state = _empty_state()
+
+        # Turns 1-2: tool calls (exhausts max_turns)
+        tool_response = _make_llm_response(
+            tool_calls=[{
+                "id": "call_tool",
+                "name": "get_current_state",
+                "arguments": {},
+            }],
+        )
+        # Bonus call after loop: text response (self-correction succeeds)
+        text_response = _make_llm_response(content="Done after final correction.")
+
+        with patch.object(service, "_call_llm", new_callable=AsyncMock) as mock_llm:
+            mock_llm.side_effect = [tool_response, tool_response, text_response]
+            result = await service.compose("Do it", [], state)
+
+        assert result.message == "Done after final correction."
+        # 3 LLM calls: 2 in loop + 1 bonus
+        assert mock_llm.call_count == 3
+
+    @pytest.mark.asyncio
+    async def test_bonus_call_still_wants_tools_raises(self) -> None:
+        """B-4D-3: If bonus call still returns tool calls, raise convergence."""
+        catalog = _mock_catalog()
+        settings = _make_settings()
+        settings.composer_max_turns = 1
+        service = ComposerServiceImpl(catalog=catalog, settings=settings)
+        state = _empty_state()
+
+        tool_response = _make_llm_response(
+            tool_calls=[{
+                "id": "call_tool",
+                "name": "get_current_state",
+                "arguments": {},
+            }],
+        )
+
+        with patch.object(service, "_call_llm", new_callable=AsyncMock) as mock_llm:
+            # 1 in loop + 1 bonus = both return tool calls
+            mock_llm.return_value = tool_response
+            with pytest.raises(ComposerConvergenceError):
+                await service.compose("Loop", [], state)
+            # 2 calls: 1 in loop + 1 bonus
+            assert mock_llm.call_count == 2
 
 
 class TestComposerErrorHandling:
@@ -739,6 +794,20 @@ class ComposerServiceImpl:
                     "tool_call_id": tool_call.id,
                     "content": json.dumps(result.to_dict()),
                 })
+
+        # B-4D-3 fix: After exhausting max_turns with tool calls on the
+        # final iteration, give the LLM one last chance to see the tool
+        # results and produce a text response. Without this, a correction
+        # made on the final turn is applied to state but the LLM never
+        # sees the confirmation — the user gets a convergence error even
+        # though the state may be valid.
+        response = await self._call_llm(llm_messages, tools)
+        assistant_message = response.choices[0].message
+        if not assistant_message.tool_calls:
+            return ComposerResult(
+                message=assistant_message.content or "",
+                state=state,
+            )
 
         raise ComposerConvergenceError(self._max_turns)
 
@@ -1206,6 +1275,37 @@ provides a list (possibly empty), so the test should match the actual call patte
 **Fix:** Changed `service._build_messages(None, state, "Hello")` to
 `service._build_messages([], state, "Hello")` in `TestBuildMessages`.
 
+### Amendment 5: Fix `_make_settings()` mock missing `data_dir` — B-4D-1 (2026-03-29)
+
+**Problem:** Round 5 review identified that `_make_settings()` in `test_service.py`
+creates a `MagicMock` without setting `data_dir`. `ComposerServiceImpl.__init__()`
+stores `self._data_dir = str(settings.data_dir)`. `str(MagicMock())` produces
+`"<MagicMock ...>"`, causing the S2 path allowlist prefix to be nonsensical. Every
+`set_source` test silently passes S2 validation even for paths like `/etc/passwd`.
+
+**Fix:** Added `settings.data_dir = Path("/data")` to `_make_settings()`. Added
+`from pathlib import Path` to the test imports.
+
+### Amendment 6: Fix off-by-one in `max_turns` — B-4D-3 (2026-03-29)
+
+**Problem:** Round 5 review identified that the loop `for _turn in range(max_turns)`
+exits after the last iteration without giving the LLM a chance to see the tool
+results from the final turn. A correction made on the final turn is applied to
+state but the LLM never sees the confirmation — the user gets a convergence error
+even though the state may be valid.
+
+**Fix:** After the loop exhausts `max_turns`, make one additional LLM call. If that
+call produces a text response (no tool calls), return success. If it still wants
+more tool calls, THEN raise `ComposerConvergenceError`. Added two tests:
+`test_self_correction_on_final_turn_succeeds` (bonus call returns text → success)
+and `test_bonus_call_still_wants_tools_raises` (bonus call returns tool calls →
+convergence error).
+
+**Affected locations:**
+- `service.py`: `ComposerServiceImpl.compose()` — added bonus LLM call after loop
+- `test_service.py`: `_make_settings()` — added `data_dir`
+- `test_service.py`: Added two new tests in `TestComposerConvergence`
+
 ---
 
 ## Round 5 Review Findings
@@ -1215,14 +1315,9 @@ Three-reviewer panel (Reality, Architecture, Quality) examining Task-Plan 4D.
 
 ### BLOCKING
 
-**B-4D-1: `_make_settings()` mock missing `data_dir`.**
-In `test_service.py`, the `_make_settings()` helper creates a `MagicMock` but does
-not set `data_dir`. `ComposerServiceImpl.__init__()` stores
-`self._data_dir = str(settings.data_dir)`. `str(MagicMock())` produces
-`"<MagicMock ...>"`, which means the S2 path allowlist prefix becomes nonsensical.
-Every `set_source` tool call test will silently pass S2 validation even for paths
-like `/etc/passwd` because no real path starts with `"<MagicMock..."`.
-**Fix:** Add `settings.data_dir = Path("/data")` to `_make_settings()`.
+**B-4D-1: `_make_settings()` mock missing `data_dir`.** ✅ FIXED (Amendment 5)
+In `test_service.py`, the `_make_settings()` helper creates a `MagicMock` but did
+not set `data_dir`. Fixed by adding `settings.data_dir = Path("/data")`.
 
 **B-4D-2: Route HTTP contract tests are empty `pass` stubs.**
 The tests for the 422 convergence error shape and 502 LLM error shape
@@ -1235,18 +1330,9 @@ HTTP error shapes from the spec are entirely unverified as written.
 raises `ComposerConvergenceError` or a generic `Exception`. Verify the response
 status code, `error_type`, and `detail` fields.
 
-**B-4D-3: Off-by-one in max_turns -- LLM cannot self-correct on final turn.**
-The loop `for _turn in range(max_turns)` means on turn `max_turns - 1` (the last
-iteration), if the LLM returns tool calls, they are executed and results appended
-to messages, but then the loop exits and `raise ComposerConvergenceError` fires
-WITHOUT giving the LLM a chance to see the results. A correction made on the final
-turn is applied to state but the LLM never sees the confirmation. The user gets a
-convergence error even though the state is valid.
-**Fix:** After executing tool calls on the final iteration, make one additional LLM
-call before raising. If that call produces text (no tool calls), return success. If
-it still wants more tool calls, THEN raise convergence. Add a test:
-`test_self_correction_on_final_turn_succeeds` where the mock LLM returns a tool call
-error on turn N-1, a corrective tool call on turn N, and text on the bonus call.
+**B-4D-3: Off-by-one in max_turns -- LLM cannot self-correct on final turn.** ✅ FIXED (Amendment 6)
+After exhausting `max_turns` with tool calls on the final turn, a bonus LLM call
+now lets the LLM see the results before convergence error fires. Added two tests.
 
 **B-4D-4: Three protocol call mismatches in route handler template.**
 The route handler code template in Task 8 has three calls that don't match
