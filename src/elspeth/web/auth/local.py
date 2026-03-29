@@ -21,18 +21,13 @@ from elspeth.web.auth.models import AuthenticationError, UserIdentity, UserProfi
 class LocalAuthProvider:
     """Authenticates users against a local SQLite database with bcrypt + JWT."""
 
-    _dummy_hash: bytes | None = None
+    # Pre-computed dummy hash for constant-time comparison on failed lookups.
+    # Eagerly initialized to avoid a data race on first concurrent access.
+    # The ~200ms bcrypt cost is paid once at class load time.
+    _dummy_hash: bytes = bcrypt.hashpw(b"dummy", bcrypt.gensalt())
 
     @classmethod
     def _get_dummy_hash(cls) -> bytes:
-        """Lazily compute a dummy bcrypt hash for constant-time comparison.
-
-        Deferred to first use (not import time, not construction time)
-        so the ~200ms bcrypt cost is only paid if a login attempt
-        against a nonexistent user actually occurs.
-        """
-        if cls._dummy_hash is None:
-            cls._dummy_hash = bcrypt.hashpw(b"dummy", bcrypt.gensalt())
         return cls._dummy_hash
 
     def __init__(

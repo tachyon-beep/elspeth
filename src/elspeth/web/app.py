@@ -35,8 +35,11 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     asyncio.get_running_loop().
     """
     # Cancel runs orphaned by a previous server crash (D5)
+    settings: WebSettings = app.state.settings
     service = app.state.session_service
-    cancelled = await service.cancel_all_orphaned_runs()
+    cancelled = await service.cancel_all_orphaned_runs(
+        max_age_seconds=settings.orphan_run_max_age_seconds,
+    )
     if cancelled:
         import structlog
 
@@ -44,17 +47,34 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     yield
 
 
+def _settings_from_env() -> WebSettings:
+    """Construct WebSettings from ELSPETH_WEB__* environment variables.
+
+    Called when create_app() is invoked without explicit settings (e.g.,
+    by uvicorn's factory protocol). The CLI sets these env vars before
+    calling uvicorn.run().
+    """
+    kwargs: dict[str, str] = {}
+    prefix = "ELSPETH_WEB__"
+    for key, value in os.environ.items():
+        if key.startswith(prefix):
+            field_name = key[len(prefix):].lower()
+            kwargs[field_name] = value
+    return WebSettings(**kwargs)
+
+
 def create_app(settings: WebSettings | None = None) -> FastAPI:
     """Create and configure the FastAPI application.
 
     Args:
-        settings: Web application settings. Constructs defaults if None.
+        settings: Web application settings. When None, reads from
+            ELSPETH_WEB__* environment variables (set by the CLI).
 
     Returns:
         Configured FastAPI instance with CORS middleware and health endpoint.
     """
     if settings is None:
-        settings = WebSettings()
+        settings = _settings_from_env()
 
     app = FastAPI(title="ELSPETH Web", version="0.1.0", lifespan=lifespan)
 

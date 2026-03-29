@@ -6,6 +6,7 @@ Session-scoped endpoints verify ownership before any business logic.
 
 from __future__ import annotations
 
+import asyncio
 from pathlib import Path
 from uuid import UUID
 
@@ -14,7 +15,11 @@ from fastapi import APIRouter, Depends, File, HTTPException, Query, Request, Upl
 from elspeth.contracts.freeze import deep_thaw
 from elspeth.web.auth.middleware import get_current_user
 from elspeth.web.auth.models import UserIdentity
-from elspeth.web.sessions.protocol import CompositionStateRecord, SessionRecord
+from elspeth.web.sessions.protocol import (
+    CompositionStateRecord,
+    SessionRecord,
+    SessionServiceProtocol,
+)
 from elspeth.web.sessions.schemas import (
     ChatMessageResponse,
     CompositionStateResponse,
@@ -25,7 +30,6 @@ from elspeth.web.sessions.schemas import (
     SessionResponse,
     UploadResponse,
 )
-from elspeth.web.sessions.service import SessionServiceImpl
 
 
 def _session_response(session: SessionRecord) -> SessionResponse:
@@ -70,13 +74,14 @@ async def _verify_session_ownership(
 
     Returns 404 (not 403) to avoid leaking session existence (IDOR, W5).
     """
-    service: SessionServiceImpl = request.app.state.session_service
+    service: SessionServiceProtocol = request.app.state.session_service
     try:
         session = await service.get_session(session_id)
     except ValueError:
         raise HTTPException(status_code=404, detail="Session not found") from None
 
-    if session.user_id != user.user_id:
+    settings = request.app.state.settings
+    if session.user_id != user.user_id or session.auth_provider_type != settings.auth_provider:
         raise HTTPException(status_code=404, detail="Session not found")
 
     return session
@@ -111,7 +116,10 @@ def create_session_router() -> APIRouter:
     ) -> list[SessionResponse]:
         """List sessions for the authenticated user."""
         service = request.app.state.session_service
-        sessions = await service.list_sessions(user.user_id, limit=limit, offset=offset)
+        settings = request.app.state.settings
+        sessions = await service.list_sessions(
+            user.user_id, settings.auth_provider, limit=limit, offset=offset,
+        )
         return [_session_response(s) for s in sessions]
 
     @router.get("/{session_id}", response_model=SessionResponse)
@@ -332,7 +340,7 @@ def create_session_router() -> APIRouter:
         upload_dir = Path(settings.data_dir) / "uploads" / sanitized_user_id
         upload_dir.mkdir(parents=True, exist_ok=True)
         file_path = upload_dir / sanitized_filename
-        file_path.write_bytes(content)
+        await asyncio.to_thread(file_path.write_bytes, content)
 
         # Return relative path (not absolute) for portability
         relative_path = file_path.relative_to(settings.data_dir)

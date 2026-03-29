@@ -13,10 +13,9 @@ import asyncio
 from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel
 
-from elspeth.web.auth.local import LocalAuthProvider
 from elspeth.web.auth.middleware import get_current_user
 from elspeth.web.auth.models import AuthenticationError, UserIdentity
-from elspeth.web.auth.protocol import AuthProvider
+from elspeth.web.auth.protocol import AuthProvider, CredentialAuthProvider
 from elspeth.web.config import WebSettings
 
 
@@ -67,10 +66,11 @@ def create_auth_router() -> APIRouter:
         cookies). If cookie-based sessions are added later, CSRF
         protection must be revisited.
         """
-        provider = request.app.state.auth_provider
-        if not isinstance(provider, LocalAuthProvider):
+        settings: WebSettings = request.app.state.settings
+        if settings.auth_provider != "local":
             raise HTTPException(status_code=404, detail="Not found")
 
+        provider: CredentialAuthProvider = request.app.state.auth_provider
         try:
             token = await asyncio.to_thread(
                 provider.login,
@@ -92,11 +92,12 @@ def create_auth_router() -> APIRouter:
         Uses the provider's public refresh() method rather than
         reaching into private attributes.
         """
-        provider = request.app.state.auth_provider
-        if not isinstance(provider, LocalAuthProvider):
+        settings: WebSettings = request.app.state.settings
+        if settings.auth_provider != "local":
             raise HTTPException(status_code=404, detail="Not found")
 
-        new_token = provider.refresh(user.user_id, user.username)
+        provider: CredentialAuthProvider = request.app.state.auth_provider
+        new_token = await asyncio.to_thread(provider.refresh, user.user_id, user.username)
         return TokenResponse(access_token=new_token)
 
     @router.get("/config", response_model=AuthConfigResponse)

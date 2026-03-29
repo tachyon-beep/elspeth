@@ -77,11 +77,11 @@ class TestSessionCRUD:
         await service.create_session("alice", "Session B", "local")
         await service.create_session("bob", "Session C", "local")
 
-        alice_sessions = await service.list_sessions("alice")
+        alice_sessions = await service.list_sessions("alice", "local")
         assert len(alice_sessions) == 2
         assert all(s.user_id == "alice" for s in alice_sessions)
 
-        bob_sessions = await service.list_sessions("bob")
+        bob_sessions = await service.list_sessions("bob", "local")
         assert len(bob_sessions) == 1
 
     @pytest.mark.asyncio
@@ -91,7 +91,7 @@ class TestSessionCRUD:
         # Add a message to s1 to update its updated_at
         await service.add_message(s1.id, "user", "hello")
 
-        sessions = await service.list_sessions("alice")
+        sessions = await service.list_sessions("alice", "local")
         # s1 should be first (most recently updated)
         assert sessions[0].id == s1.id
 
@@ -788,15 +788,15 @@ class TestPagination:
     async def test_list_sessions_limit(self, service) -> None:
         for i in range(5):
             await service.create_session("alice", f"Session {i}", "local")
-        sessions = await service.list_sessions("alice", limit=2)
+        sessions = await service.list_sessions("alice", "local", limit=2)
         assert len(sessions) == 2
 
     @pytest.mark.asyncio
     async def test_list_sessions_offset(self, service) -> None:
         for i in range(5):
             await service.create_session("alice", f"Session {i}", "local")
-        all_sessions = await service.list_sessions("alice")
-        offset_sessions = await service.list_sessions("alice", limit=2, offset=2)
+        all_sessions = await service.list_sessions("alice", "local")
+        offset_sessions = await service.list_sessions("alice", "local", limit=2, offset=2)
         assert len(offset_sessions) == 2
         assert offset_sessions[0].id == all_sessions[2].id
         assert offset_sessions[1].id == all_sessions[3].id
@@ -804,7 +804,7 @@ class TestPagination:
     @pytest.mark.asyncio
     async def test_list_sessions_offset_past_end(self, service) -> None:
         await service.create_session("alice", "Only One", "local")
-        sessions = await service.list_sessions("alice", offset=10)
+        sessions = await service.list_sessions("alice", "local", offset=10)
         assert sessions == []
 
     @pytest.mark.asyncio

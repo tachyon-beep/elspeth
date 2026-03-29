@@ -48,7 +48,7 @@ class SessionServiceImpl:
 
     async def _run_sync(self, func: Any, *args: Any, **kwargs: Any) -> Any:
         """Run a synchronous callable in the thread pool executor."""
-        loop = asyncio.get_event_loop()
+        loop = asyncio.get_running_loop()
         return await loop.run_in_executor(
             None,
             functools.partial(func, *args, **kwargs),
@@ -115,6 +115,7 @@ class SessionServiceImpl:
     async def list_sessions(
         self,
         user_id: str,
+        auth_provider_type: str,
         limit: int = 50,
         offset: int = 0,
     ) -> list[SessionRecord]:
@@ -124,7 +125,10 @@ class SessionServiceImpl:
             with self._engine.begin() as conn:
                 return conn.execute(
                     select(sessions_table)
-                    .where(sessions_table.c.user_id == user_id)
+                    .where(
+                        sessions_table.c.user_id == user_id,
+                        sessions_table.c.auth_provider_type == auth_provider_type,
+                    )
                     .order_by(desc(sessions_table.c.updated_at))
                     .limit(limit)
                     .offset(offset)
@@ -259,10 +263,10 @@ class SessionServiceImpl:
             for _attempt in range(3):
                 try:
                     return _try_insert_state()
-                except IntegrityError as exc:
-                    if "uq_composition_state_version" in str(exc):
-                        continue
-                    raise
+                except IntegrityError:
+                    # The only constraint on this insert is uq_composition_state_version
+                    # (PK is UUID4, FK is pre-validated). Retry with next version number.
+                    continue
             raise RuntimeError(f"Failed to allocate version for session {sid} after 3 attempts")
 
         def _try_insert_state() -> int:
@@ -437,9 +441,9 @@ class SessionServiceImpl:
                         )
                     )
                 except IntegrityError as exc:
-                    if "uq_runs_one_active_per_session" in str(exc):
-                        raise RunAlreadyActiveError(sid) from exc
-                    raise
+                    # The pre-check for active runs passed, but a concurrent insert
+                    # hit the partial unique index. This is genuinely "run already active."
+                    raise RunAlreadyActiveError(sid) from exc
 
         await self._run_sync(_sync)
 
@@ -588,10 +592,10 @@ class SessionServiceImpl:
             for _attempt in range(3):
                 try:
                     return _try_insert_revert()
-                except IntegrityError as exc:
-                    if "uq_composition_state_version" in str(exc):
-                        continue
-                    raise
+                except IntegrityError:
+                    # The only constraint on this insert is uq_composition_state_version
+                    # (PK is UUID4, FK is pre-validated). Retry with next version number.
+                    continue
             raise RuntimeError(f"Failed to allocate version for session {sid} after 3 attempts")
 
         def _try_insert_revert() -> tuple[Any, int]:

@@ -2205,17 +2205,12 @@ def web(
     # Validate CLI arguments against WebSettings (catches invalid auth_provider early).
     settings = WebSettings(port=port, host=host, auth_provider=auth)
 
-    # FIXME(Sub-2): uvicorn's factory protocol calls create_app() with no arguments,
-    # so only host/port (passed to uvicorn directly) take effect. The auth_provider
-    # and other WebSettings fields are lost — create_app() constructs WebSettings()
-    # with defaults. This is acceptable in Sub-1 (no auth middleware exists yet).
-    # Sub-2 must wire settings through to create_app(), e.g. via env vars or a
-    # module-level holder. See spec W7 note.
-    if auth != "local":
-        typer.echo(
-            f"Warning: --auth={auth} accepted but not yet effective. Auth middleware is added in Sub-2.",
-            err=True,
-        )
+    # Bridge CLI args to create_app() via environment variables.
+    # uvicorn's factory protocol calls create_app() with no arguments,
+    # so we set ELSPETH_WEB__* env vars that _settings_from_env() reads.
+    os.environ["ELSPETH_WEB__HOST"] = settings.host
+    os.environ["ELSPETH_WEB__PORT"] = str(settings.port)
+    os.environ["ELSPETH_WEB__AUTH_PROVIDER"] = settings.auth_provider
 
     uvicorn.run(
         "elspeth.web.app:create_app",

@@ -26,7 +26,7 @@ class WebSettings(BaseModel):
     host: str = "127.0.0.1"
     port: int = Field(default=8000, ge=1, le=65535)
     auth_provider: Literal["local", "oidc", "entra"] = "local"
-    cors_origins: list[str] = ["http://localhost:5173"]
+    cors_origins: tuple[str, ...] = ("http://localhost:5173",)
     data_dir: Path = Path("data")
     composer_model: str = "gpt-4o"
     composer_max_turns: int = Field(default=20, ge=1)
@@ -36,6 +36,7 @@ class WebSettings(BaseModel):
         "change-me-in-production"  # Security rule S3 (seam-contracts.md): Sub-2 startup guard enforces non-default in production
     )
     max_upload_bytes: int = Field(default=100 * 1024 * 1024, ge=1)
+    orphan_run_max_age_seconds: int = Field(default=3600, ge=60)
 
     # Execution infrastructure — defaults derive from data_dir when not explicitly set
     landscape_url: str | None = None

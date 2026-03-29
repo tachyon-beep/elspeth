@@ -27,7 +27,7 @@ class TestWebSettingsDefaults:
 
     def test_cors_origins_default(self) -> None:
         settings = WebSettings()
-        assert settings.cors_origins == ["http://localhost:5173"]
+        assert settings.cors_origins == ("http://localhost:5173",)
 
     def test_data_dir_default(self) -> None:
         settings = WebSettings()

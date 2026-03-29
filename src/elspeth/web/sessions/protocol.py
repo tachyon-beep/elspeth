@@ -184,6 +184,7 @@ class SessionServiceProtocol(Protocol):
     async def list_sessions(
         self,
         user_id: str,
+        auth_provider_type: str,
         limit: int = 50,
         offset: int = 0,
     ) -> list[SessionRecord]: ...
@@ -195,7 +196,7 @@ class SessionServiceProtocol(Protocol):
         session_id: UUID,
         role: str,
         content: str,
-        tool_calls: dict[str, Any] | None = None,
+        tool_calls: Mapping[str, Any] | None = None,
     ) -> ChatMessageRecord: ...
 
     async def get_messages(

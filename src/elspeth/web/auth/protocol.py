@@ -1,6 +1,9 @@
-"""Authentication provider protocol.
+"""Authentication provider protocols.
 
-Defines the two-method interface that all auth implementations must satisfy.
+AuthProvider: the two-method interface that all auth implementations satisfy.
+CredentialAuthProvider: extends AuthProvider with login() and refresh() for
+providers that support username/password authentication (e.g., LocalAuthProvider).
+
 No exception definitions here -- AuthenticationError lives in models.py.
 """
 
@@ -27,5 +30,29 @@ class AuthProvider(Protocol):
         """Get full user profile from a valid token.
 
         Raises AuthenticationError if the token is invalid.
+        """
+        ...
+
+
+@runtime_checkable
+class CredentialAuthProvider(AuthProvider, Protocol):
+    """AuthProvider that also supports username/password login and token refresh.
+
+    Used by local (and future LDAP) auth providers. Routes check
+    settings.auth_provider to determine if these methods are available,
+    then narrow the type to CredentialAuthProvider for method access.
+    """
+
+    def login(self, username: str, password: str) -> str:
+        """Authenticate with credentials and return a JWT.
+
+        Raises AuthenticationError on invalid credentials.
+        """
+        ...
+
+    def refresh(self, user_id: str, username: str) -> str:
+        """Issue a new JWT for an already-authenticated user.
+
+        Raises AuthenticationError if the user no longer exists.
         """
         ...
