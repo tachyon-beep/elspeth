@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 from pathlib import Path
+from unittest.mock import patch
 
+import pytest
 from fastapi import Depends
 from starlette.testclient import TestClient
 
@@ -152,3 +154,32 @@ class TestSessionWiring:
         # Without auth, should get 401
         response = client.get("/api/sessions")
         assert response.status_code == 401
+
+
+class TestMultiWorkerEnforcement:
+    """W10 -> R6: Hard-enforce single worker for WebSocket support."""
+
+    @patch.dict("os.environ", {"WEB_CONCURRENCY": "4"})
+    def test_raises_on_multi_worker(self, tmp_path) -> None:
+        """Application factory rejects WEB_CONCURRENCY > 1."""
+        with pytest.raises(RuntimeError, match="WEB_CONCURRENCY=4 is not supported"):
+            create_app(_settings(tmp_path))
+
+    @patch.dict("os.environ", {"WEB_CONCURRENCY": "1"})
+    def test_single_worker_accepted(self, tmp_path) -> None:
+        """No error when running with a single worker."""
+        app = create_app(_settings(tmp_path))
+        assert app is not None
+
+
+class TestExecutionWiring:
+    """Tests that create_app() wires execution routes."""
+
+    def test_execution_routes_registered(self, tmp_path) -> None:
+        app = create_app(_settings(tmp_path))
+        route_paths = [route.path for route in app.routes]
+        assert "/api/sessions/{session_id}/validate" in route_paths
+        assert "/api/sessions/{session_id}/execute" in route_paths
+        assert "/api/runs/{run_id}" in route_paths
+        assert "/api/runs/{run_id}/cancel" in route_paths
+        assert "/ws/runs/{run_id}" in route_paths

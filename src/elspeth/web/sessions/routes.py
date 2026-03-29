@@ -75,30 +75,7 @@ def _state_response(state: CompositionStateRecord) -> CompositionStateResponse:
     )
 
 
-def _state_from_record(record: CompositionStateRecord) -> CompositionState:
-    """Reconstruct a CompositionState from a CompositionStateRecord.
-
-    Thaws frozen container fields (MappingProxyType, tuple) back to plain
-    dicts/lists so CompositionState.from_dict() can re-freeze them.
-    """
-    # Tier 1: metadata_ must always be populated. A None here indicates
-    # database corruption or a migration gap — crash immediately.
-    if record.metadata_ is None:
-        msg = f"CompositionStateRecord {record.id} has None metadata_ — database corruption or migration gap"
-        raise ValueError(msg)
-
-    state_dict = {
-        "version": record.version,
-        "source": deep_thaw(record.source) if record.source is not None else None,
-        # nodes/edges/outputs: None is the legitimate initial state when no
-        # nodes have been added yet. Mapping None -> [] is meaning-preserving
-        # (empty collection, not fabricated data).
-        "nodes": [deep_thaw(n) for n in record.nodes] if record.nodes is not None else [],
-        "edges": [deep_thaw(e) for e in record.edges] if record.edges is not None else [],
-        "outputs": [deep_thaw(o) for o in record.outputs] if record.outputs is not None else [],
-        "metadata": deep_thaw(record.metadata_),
-    }
-    return CompositionState.from_dict(state_dict)
+from elspeth.web.sessions.converters import state_from_record as _state_from_record
 
 
 async def _verify_session_ownership(
