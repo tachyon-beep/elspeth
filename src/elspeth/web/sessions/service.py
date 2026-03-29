@@ -695,7 +695,8 @@ class SessionServiceImpl:
                     )
             return cancelled
 
-        return await self._run_sync(_sync)
+        result = await self._run_sync(_sync)
+        return list(result)
 
     async def cancel_all_orphaned_runs(
         self,
@@ -722,7 +723,8 @@ class SessionServiceImpl:
                     conn.execute(update(runs_table).where(runs_table.c.id == row.id).values(status="cancelled", finished_at=now))
                 return len(stale_rows)
 
-        return await self._run_sync(_sync)
+        result = await self._run_sync(_sync)
+        return int(result)
 
     async def prune_state_versions(
         self,
@@ -774,7 +776,8 @@ class SessionServiceImpl:
                 result = conn.execute(delete(composition_states_table).where(composition_states_table.c.id.in_(delete_ids)))
                 return result.rowcount
 
-        return await self._run_sync(_sync)
+        pruned = await self._run_sync(_sync)
+        return int(pruned)
 
     def _row_to_run_record(self, row: Any) -> RunRecord:
         """Convert a SQLAlchemy row to a RunRecord."""

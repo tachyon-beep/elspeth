@@ -57,22 +57,26 @@ class WebSettings(BaseModel):
         """Enforce that OIDC/Entra providers have their required fields."""
         if self.auth_provider == "oidc":
             missing = [
-                name for name, val in (
+                name
+                for name, val in (
                     ("oidc_issuer", self.oidc_issuer),
                     ("oidc_audience", self.oidc_audience),
                     ("oidc_client_id", self.oidc_client_id),
-                ) if val is None
+                )
+                if val is None
             ]
             if missing:
                 raise ValueError(f"OIDC auth requires: {', '.join(missing)}")
         elif self.auth_provider == "entra":
             missing = [
-                name for name, val in (
+                name
+                for name, val in (
                     ("oidc_issuer", self.oidc_issuer),
                     ("oidc_audience", self.oidc_audience),
                     ("oidc_client_id", self.oidc_client_id),
                     ("entra_tenant_id", self.entra_tenant_id),
-                ) if val is None
+                )
+                if val is None
             ]
             if missing:
                 raise ValueError(f"Entra auth requires: {', '.join(missing)}")

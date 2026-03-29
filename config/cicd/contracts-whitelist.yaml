@@ -251,7 +251,7 @@ allowed_dict_patterns:
   - "src/elspeth/plugins/infrastructure/base.py:BaseSink._divert_row:row_data"
 
   # Plugin validation dispatcher — config is user YAML (Tier 3 boundary)
-  - "src/elspeth/plugins/infrastructure/validation.py:PluginConfigValidator._get_transform_config_model:config"
+  - "src/elspeth/plugins/infrastructure/validation.py:PluginConfigValidator.get_transform_config_model:config"
 
   # ═══════════════════════════════════════════════════════════════════════════
   # AZURE PLUGINS - External cloud service trust boundary
@@ -441,4 +441,17 @@ allowed_dict_patterns:
   # WEB AUTH — Session service protocol
   # tool_calls is pipeline composition data (Tier 2 — user-defined graph structure).
   # ═══════════════════════════════════════════════════════════════════════════
-  - "src/elspeth/web/sessions/protocol.py:SessionServiceProtocol.add_message:tool_calls"
+  # ═══════════════════════════════════════════════════════════════════════════
+  # WEB COMPOSER — CompositionState serialization and factory methods
+  # from_dict() accepts plain dicts from JSON deserialization (Tier 1 read).
+  # to_dict() returns plain dicts for YAML/JSON serialization.
+  # with_metadata() accepts partial patch dicts from LLM tool calls.
+  # ═══════════════════════════════════════════════════════════════════════════
+  - "src/elspeth/web/composer/state.py:PipelineMetadata.from_dict:d"
+  - "src/elspeth/web/composer/state.py:SourceSpec.from_dict:d"
+  - "src/elspeth/web/composer/state.py:NodeSpec.from_dict:d"
+  - "src/elspeth/web/composer/state.py:EdgeSpec.from_dict:d"
+  - "src/elspeth/web/composer/state.py:OutputSpec.from_dict:d"
+  - "src/elspeth/web/composer/state.py:CompositionState.from_dict:d"
+  - "src/elspeth/web/composer/state.py:CompositionState.with_metadata:patch"
+  - "src/elspeth/web/composer/state.py:CompositionState.to_dict:return"

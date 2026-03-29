@@ -31,6 +31,13 @@ allow_hits:
   safety: "Returns None on miss, handled by 404 response"
   expires: null
 
+# CatalogServiceImpl — silent-except for unknown plugin type fallback (pre-existing)
+- key: web/catalog/service.py:R6:CatalogServiceImpl:_resolve_config_model:fp=5e0056175f439976
+  owner: web-catalog
+  reason: "Expected error path — UnknownPluginTypeError caught and returns None to caller"
+  safety: "Caller checks None return and skips config extraction; no silent data loss"
+  expires: null
+
 - key: web/catalog/service.py:R1:CatalogServiceImpl:_extract_config_fields:fp=4ff2ba785b505451
   owner: web-catalog
   reason: "Tier 3 boundary — Pydantic-generated JSON schema 'properties' key may be absent"
@@ -198,29 +205,29 @@ allow_hits:
   expires: null
 
 # Auth routes — @router.get() false positives (FastAPI route decorators, not dict.get)
-- key: web/auth/routes.py:R1:create_auth_router:auth_config:fp=082ca992116be396
+- key: web/auth/routes.py:R1:create_auth_router:auth_config:fp=3f8fc32990ce6112
   owner: web-auth
   reason: "False positive — @router.get() is FastAPI HTTP route decorator, not dict.get()"
   safety: No dict access involved; decorator syntax triggers text-based pattern match
   expires: null
 
-- key: web/auth/routes.py:R1:create_auth_router:me:fp=92915d8d86aae15f
+- key: web/auth/routes.py:R1:create_auth_router:me:fp=4db7c70c9126b330
   owner: web-auth
   reason: "False positive — @router.get() is FastAPI HTTP route decorator, not dict.get()"
   safety: No dict access involved; decorator syntax triggers text-based pattern match
   expires: null
 
-# Auth routes — isinstance() for route dispatch (narrows AuthProvider to LocalAuthProvider)
-- key: web/auth/routes.py:R5:create_auth_router:login:fp=e28a1843fa68a647
-  owner: web-auth
-  reason: "Route dispatch — narrows AuthProvider to LocalAuthProvider for local-only endpoints"
-  safety: "Non-local providers return 404; isinstance enables mypy type narrowing for login()/refresh()"
+# SessionServiceImpl — exception handling for optimistic locking (pre-existing)
+- key: web/sessions/service.py:R6:SessionServiceImpl:save_composition_state:_sync:fp=c07f71670e637c5c
+  owner: web-sessions
+  reason: "Optimistic lock — IntegrityError on duplicate version is expected concurrent write"
+  safety: "Raises SessionConflictError with structured context"
   expires: null
 
-- key: web/auth/routes.py:R5:create_auth_router:refresh_token:fp=c5c9aafff36b7e51
-  owner: web-auth
-  reason: "Route dispatch — narrows AuthProvider to LocalAuthProvider for local-only endpoints"
-  safety: "Non-local providers return 404; isinstance enables mypy type narrowing for login()/refresh()"
+- key: web/sessions/service.py:R6:SessionServiceImpl:set_active_state:_sync:fp=7881a6e600190df3
+  owner: web-sessions
+  reason: "Optimistic lock — IntegrityError on state constraint is expected concurrent write"
+  safety: "Raises SessionConflictError with structured context"
   expires: null
 
 # SessionServiceImpl — _unwrap_envelope checks envelope structure (Tier 1 read boundary)
@@ -231,13 +238,13 @@ allow_hits:
   expires: null
 
 # App factory — @app.get() false positive (moved health route)
-- key: web/app.py:R1:create_app:fp=1fc678e07ca95b6c
+- key: web/app.py:R1:create_app:fp=c6dd2f57f3279528
   owner: web-app
-  reason: "False positive — list comprehension/return triggers text-based pattern match"
-  safety: No dict access involved
+  reason: "False positive — os.environ.get() reads environment variable, not dict field"
+  safety: No dict field access involved
   expires: null
 
-- key: web/app.py:R1:create_app:health:fp=4c8b1ed957dd54b3
+- key: web/app.py:R1:create_app:health:fp=7d08bc86914bca1b
   owner: web-app
   reason: "False positive — @app.get() is FastAPI HTTP route decorator, not dict.get()"
   safety: No dict access involved
@@ -285,4 +292,80 @@ allow_hits:
   owner: web-auth
   reason: "Tier 3 boundary — request.headers.get('Authorization') reads untrusted HTTP header"
   safety: "Missing header returns 401; malformed header returns 401; no default fabrication"
+  expires: null
+
+# Composer state — PipelineMetadata.from_dict() uses .get() with dataclass defaults
+- key: web/composer/state.py:R1:PipelineMetadata:from_dict:fp=1df9a801ca159251
+  owner: web-composer
+  reason: "Forward compatibility — spec says missing fields use dataclass defaults"
+  safety: "Defaults match dataclass field defaults; no fabrication"
+  expires: null
+
+- key: web/composer/state.py:R1:PipelineMetadata:from_dict:fp=530d6e1763727797
+  owner: web-composer
+  reason: "Forward compatibility — spec says missing fields use dataclass defaults"
+  safety: "Defaults match dataclass field defaults; no fabrication"
+  expires: null
+
+# Composer state — NodeSpec.from_dict() uses .get() for optional fields absent from to_dict()
+- key: web/composer/state.py:R1:NodeSpec:from_dict:fp=53e4cdfda957bf45
+  owner: web-composer
+  reason: "Optional fields — to_dict() conditionally omits None fields; from_dict() defaults to None"
+  safety: "Missing = None; matches dataclass field default; round-trip invariant tested"
+  expires: null
+
+- key: web/composer/state.py:R1:NodeSpec:from_dict:fp=8dd2eecb87326a9b
+  owner: web-composer
+  reason: "Optional fields — to_dict() conditionally omits None fields; from_dict() defaults to None"
+  safety: "Missing = None; matches dataclass field default; round-trip invariant tested"
+  expires: null
+
+- key: web/composer/state.py:R1:NodeSpec:from_dict:fp=59fad012f83d1461
+  owner: web-composer
+  reason: "Optional fields — to_dict() conditionally omits None fields; from_dict() defaults to None"
+  safety: "Missing = None; matches dataclass field default; round-trip invariant tested"
+  expires: null
+
+- key: web/composer/state.py:R1:NodeSpec:from_dict:fp=e9514e49613b78bf
+  owner: web-composer
+  reason: "Optional fields — to_dict() conditionally omits None fields; from_dict() defaults to None"
+  safety: "Missing = None; matches dataclass field default; round-trip invariant tested"
+  expires: null
+
+- key: web/composer/state.py:R1:NodeSpec:from_dict:fp=52166171ee3570bd
+  owner: web-composer
+  reason: "Optional fields — to_dict() conditionally omits None fields; from_dict() defaults to None"
+  safety: "Missing = None; matches dataclass field default; round-trip invariant tested"
+  expires: null
+
+- key: web/composer/state.py:R1:NodeSpec:from_dict:fp=8302ed74e8f89327
+  owner: web-composer
+  reason: "Optional fields — to_dict() conditionally omits None fields; from_dict() defaults to None"
+  safety: "Missing = None; matches dataclass field default; round-trip invariant tested"
+  expires: null
+
+# Composer state — with_metadata() uses .get() for partial dict patch
+- key: web/composer/state.py:R1:CompositionState:with_metadata:fp=dad392bddbfd5561
+  owner: web-composer
+  reason: "Partial patch API — only provided fields are updated, others preserved"
+  safety: "Defaults are the current field values; no fabrication, no loss"
+  expires: null
+
+- key: web/composer/state.py:R1:CompositionState:with_metadata:fp=a0d698247f6dfdc6
+  owner: web-composer
+  reason: "Partial patch API — only provided fields are updated, others preserved"
+  safety: "Defaults are the current field values; no fabrication, no loss"
+  expires: null
+
+# Composer state — to_dict()._unfreeze() uses isinstance for recursive type unwrapping
+- key: web/composer/state.py:R5:CompositionState:to_dict:_unfreeze:fp=43c19f7376d35fbc
+  owner: web-composer
+  reason: "Type dispatch — must distinguish Mapping from tuple/list for recursive unwrapping"
+  safety: "Structural recursion over known frozen types; no contract violation possible"
+  expires: null
+
+- key: web/composer/state.py:R5:CompositionState:to_dict:_unfreeze:fp=9f92d9711fe6514f
+  owner: web-composer
+  reason: "Type dispatch — must distinguish tuple/list from scalar for recursive unwrapping"
+  safety: "Structural recursion over known frozen types; no contract violation possible"
   expires: null

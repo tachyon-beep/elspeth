@@ -58,7 +58,7 @@ def _settings_from_env() -> WebSettings:
     prefix = "ELSPETH_WEB__"
     for key, value in os.environ.items():
         if key.startswith(prefix):
-            field_name = key[len(prefix):].lower()
+            field_name = key[len(prefix) :].lower()
             kwargs[field_name] = value
     return WebSettings(**kwargs)
 

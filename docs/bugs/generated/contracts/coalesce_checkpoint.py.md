@@ -56,7 +56,7 @@ AttributeError
 
 Resume paths call this DTO during checkpoint recovery:
 
-[recovery.py](/home/john/elspeth/src/elspeth/core/checkpoint/recovery.py#L175)  
+[recovery.py](/home/john/elspeth/src/elspeth/core/checkpoint/recovery.py#L175)
 [recovery.py](/home/john/elspeth/src/elspeth/core/checkpoint/recovery.py#L177)
 
 So a corrupted checkpoint currently bypasses the contract’s intended Tier 1 corruption handling and crashes with a generic Python exception instead of an audit-integrity error. Existing tests only cover `branches`/`lost_branches` being non-dicts, not malformed nested token payloads:
@@ -108,8 +108,8 @@ The contract stores branch arrivals as `branches: Mapping[str, CoalesceTokenChec
 - keys are strings
 - each key matches `token.branch_name`
 
-[coalesce_checkpoint.py](/home/john/elspeth/src/elspeth/contracts/coalesce_checkpoint.py#L104)  
-[coalesce_checkpoint.py](/home/john/elspeth/src/elspeth/contracts/coalesce_checkpoint.py#L117)  
+[coalesce_checkpoint.py](/home/john/elspeth/src/elspeth/contracts/coalesce_checkpoint.py#L104)
+[coalesce_checkpoint.py](/home/john/elspeth/src/elspeth/contracts/coalesce_checkpoint.py#L117)
 [coalesce_checkpoint.py](/home/john/elspeth/src/elspeth/contracts/coalesce_checkpoint.py#L158)
 
 I verified the DTO accepts invalid state:
@@ -134,7 +134,7 @@ for branch_name, token_checkpoint in pending_entry.branches.items():
     branches[branch_name] = _BranchEntry(token=token, ...)
 ```
 
-[coalesce_executor.py](/home/john/elspeth/src/elspeth/engine/coalesce_executor.py#L272)  
+[coalesce_executor.py](/home/john/elspeth/src/elspeth/engine/coalesce_executor.py#L272)
 [coalesce_executor.py](/home/john/elspeth/src/elspeth/engine/coalesce_executor.py#L284)
 
 Downstream coalesce logic trusts the map key, not the token’s embedded branch name, for duplicate detection and merge accounting:
@@ -152,7 +152,7 @@ arrived_count = len(pending.branches)
 return arrived_count == expected_count
 ```
 
-[coalesce_executor.py](/home/john/elspeth/src/elspeth/engine/coalesce_executor.py#L465)  
+[coalesce_executor.py](/home/john/elspeth/src/elspeth/engine/coalesce_executor.py#L465)
 [coalesce_executor.py](/home/john/elspeth/src/elspeth/engine/coalesce_executor.py#L468)
 
 I reproduced the bad behavior with repo test helpers:
@@ -172,7 +172,7 @@ So the executor merged after seeing keys `[1, "a"]`, treating them as two arriva
 
 There are tests for preserving valid branch state after restore, but no test covering invalid branch keys or key/token mismatch:
 
-[test_coalesce_executor.py](/home/john/elspeth/tests/unit/engine/test_coalesce_executor.py#L2058)  
+[test_coalesce_executor.py](/home/john/elspeth/tests/unit/engine/test_coalesce_executor.py#L2058)
 [test_coalesce_executor.py](/home/john/elspeth/tests/unit/engine/test_coalesce_executor.py#L2117)
 
 ## Root Cause Hypothesis
