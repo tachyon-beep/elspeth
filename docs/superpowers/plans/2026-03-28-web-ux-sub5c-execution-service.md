@@ -59,10 +59,8 @@ import pytest
 
 from elspeth.web.execution.progress import ProgressBroadcaster
 from elspeth.web.execution.schemas import RunEvent
-from elspeth.web.execution.service import (
-    ExecutionServiceImpl,
-    RunAlreadyActiveError,
-)
+from elspeth.web.execution.service import ExecutionServiceImpl
+from elspeth.web.sessions.protocol import RunAlreadyActiveError
 
 
 # ── Fixtures ───────────────────────────────────────────────────────────
@@ -90,7 +88,9 @@ def mock_session_service() -> MagicMock:
     svc = MagicMock()
     state = MagicMock()
     state.yaml_content = "source:\n  plugin: csv_source"
-    svc.get_composition_state.return_value = state
+    # B4 fix: get_composition_state() doesn't exist — use get_state/get_current_state
+    svc.get_state.return_value = state
+    svc.get_current_state.return_value = state
     return svc
 
 
@@ -142,7 +142,7 @@ class TestExecutionFlow:
     ) -> None:
         run_id = uuid4()
         mock_session_service.get_run.return_value = MagicMock(
-            run_id=str(run_id),
+            id=run_id,  # B7: RunRecord uses `id`, not `run_id`
             status="running",
             started_at=datetime.now(tz=timezone.utc),
             finished_at=None,
@@ -563,7 +563,7 @@ from concurrent.futures import Future, ThreadPoolExecutor
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Coroutine, TypeVar
-from uuid import UUID, uuid4
+from uuid import UUID
 
 import structlog
 
@@ -578,6 +578,7 @@ from elspeth.engine.orchestrator.core import Orchestrator
 from elspeth.engine.orchestrator.types import PipelineConfig
 from elspeth.web.execution.progress import ProgressBroadcaster
 from elspeth.web.execution.schemas import RunEvent, RunStatusResponse
+from elspeth.web.sessions.protocol import RunAlreadyActiveError  # B1: canonical definition
 
 if TYPE_CHECKING:
     from elspeth.web.composer.yaml_generator import YamlGenerator
@@ -589,9 +590,11 @@ T = TypeVar("T")
 # Module-level reference — set by the app factory
 yaml_generator: YamlGenerator
 
-
-class RunAlreadyActiveError(Exception):
-    """Raised when a session already has a pending or running run."""
+# B1 fix: RunAlreadyActiveError is NOT defined here — imported from
+# sessions.protocol where the canonical definition lives. Defining a
+# second class with the same name would prevent app.py's global
+# exception handler (which catches sessions.protocol.RunAlreadyActiveError)
+# from catching exceptions raised here.
 
 
 class ExecutionServiceImpl:
@@ -662,22 +665,28 @@ class ExecutionServiceImpl:
         active = await self._session_service.get_active_run(session_id)
         if active is not None:
             raise RunAlreadyActiveError(
-                f"Session {session_id} already has an active run: {active.run_id}"
+                f"Session {session_id} already has an active run: {active.id}"
             )
 
-        # Load composition state
-        state = await self._session_service.get_composition_state(
-            session_id, state_id
-        )
+        # B4 fix: get_composition_state() doesn't exist on SessionService.
+        # Use get_state() for explicit state_id, get_current_state() for latest.
+        if state_id is not None:
+            state = await self._session_service.get_state(state_id)
+        else:
+            state = await self._session_service.get_current_state(session_id)
+            if state is None:
+                raise ValueError(f"No composition state exists for session {session_id}")
         pipeline_yaml = yaml_generator.generate_yaml(state)
 
-        # Create run record (AC #17: via SessionService with R6 expanded params)
-        run_id = uuid4()
-        await self._session_service.create_run(
+        # B9 fix: create_run() generates its own UUID internally and returns
+        # a RunRecord. Read the run_id back from the returned record so our
+        # _shutdown_events key matches the DB record.
+        run_record = await self._session_service.create_run(
             session_id=session_id,
             state_id=state_id,
             pipeline_yaml=pipeline_yaml,
         )
+        run_id = run_record.id  # Use the DB-generated UUID as canonical
 
         # Create shutdown event for cancellation (B2/cancel support)
         shutdown_event = threading.Event()
@@ -696,7 +705,7 @@ class ExecutionServiceImpl:
         """Return current run status. AC #17: delegates to SessionService."""
         run = await self._session_service.get_run(run_id)
         return RunStatusResponse(
-            run_id=str(run.run_id),
+            run_id=str(run.id),  # B7: RunRecord uses `id`, not `run_id`
             status=run.status,
             started_at=run.started_at,
             finished_at=run.finished_at,
@@ -888,9 +897,27 @@ class ExecutionServiceImpl:
                     },
                 ),
             )
-            self._call_async(self._session_service.update_run_status(
-                run_id, status="failed", error=str(exc)
-            ))
+            # B6 fix: Wrap _call_async in nested try/except. If _call_async
+            # itself raises (event loop shut down, connection error), the new
+            # exception would replace the original, losing the root cause.
+            # KNOWN GAP: If this status update fails, the Run record stays
+            # "running" permanently. The orphan run cleanup (D5, Sub-2) is
+            # the recovery mechanism.
+            try:
+                self._call_async(
+                    self._session_service.update_run_status(
+                        run_id, status="failed", error=str(exc)
+                    )
+                )
+            except Exception as status_err:
+                # _call_async failed — Run record is permanently stuck in "running".
+                # Log the failure but preserve the original exception for re-raise.
+                slog.error(
+                    "run_status_update_failed_in_except",
+                    run_id=str(run_id),
+                    original_error=str(exc),
+                    status_update_error=str(status_err),
+                )
             raise  # Re-raise so future.add_done_callback sees it
         finally:
             # Always clean up, regardless of success or failure
@@ -965,3 +992,24 @@ After completing all steps, verify:
 # Type checking
 .venv/bin/python -m mypy src/elspeth/web/execution/service.py
 ```
+
+---
+
+## Round 5 Review Findings
+
+### Fixed Inline
+
+| ID | Summary | Fix |
+|----|---------|-----|
+| **B1** | `RunAlreadyActiveError` double-definition in `service.py` would prevent `app.py`'s global exception handler from catching it | Deleted class definition, replaced with `from elspeth.web.sessions.protocol import RunAlreadyActiveError`. Updated test imports. |
+| **B4** (partial) | `get_composition_state()` doesn't exist on `SessionService` | Replaced with `get_state(state_id)` when explicit, `get_current_state(session_id)` when latest. Updated test fixture. |
+| **B6** | `_call_async()` failure in `except BaseException` clause shadows original exception | Wrapped `_call_async(update_run_status(...))` in nested `try/except Exception`. Logs failure via `slog.error` but preserves original exception for re-raise. |
+| **B7** | `RunRecord.run_id` doesn't exist -- field is `id: UUID` | Changed all `run.run_id` to `run.id`, `active.run_id` to `active.id`. Updated test mock attributes. |
+| **B9** | `run_id = uuid4()` generated locally but `create_run()` generates its own UUID internally -- `_shutdown_events` key wouldn't match DB record | Removed local `uuid4()` call. Read `run_id` back from returned `RunRecord`: `run_id = run_record.id`. Removed unused `uuid4` import from implementation. |
+
+### Warnings (not yet fixed -- add to self-review checklist)
+
+| ID | Summary | Mitigation |
+|----|---------|------------|
+| **W-5C-1** | `shutdown()` calls `executor.shutdown(wait=True)` which blocks indefinitely if a pipeline is running. Should set all active shutdown events before calling `executor.shutdown()`. | Add to self-review checklist: verify shutdown ordering sets events first. |
+| **W-5C-2** | Even with the B6 nested `try/except` fix, if `_call_async(update_run_status(...))` fails, the Run record stays "running" permanently. | Documented as `# KNOWN GAP:` comment inline. The orphan run cleanup (D5, implemented in Sub-2) is the recovery mechanism. |

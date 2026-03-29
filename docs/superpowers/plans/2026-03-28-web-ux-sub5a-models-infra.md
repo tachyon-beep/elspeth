@@ -716,3 +716,13 @@ git commit -m "feat(web/execution): add ProgressBroadcaster with B1 thread safet
 - [ ] FIFO ordering test confirms events arrive in broadcast order
 - [ ] All `__init__.py` files created for both `src/elspeth/web/execution/` and `tests/unit/web/execution/`
 - [ ] No defensive `.get()` with fabricated defaults on our own data structures
+
+---
+
+## Round 5 Review Findings
+
+**No blocking issues.**
+
+**Warnings:**
+- **W-5A-1: Concurrent subscribe/broadcast not thread-safe.** `ProgressBroadcaster._subscribers` is a `dict[str, set[asyncio.Queue]]`. `subscribe()`/`unsubscribe()` run on the event loop thread; `broadcast()` runs on the background thread. Set iteration during concurrent modification can raise `RuntimeError`. Either add a `threading.Lock` around subscriber mutations and iterations, or document the GIL reliance explicitly in a code comment.
+- **W-5A-2: GIL reliance undocumented.** If the implementation relies on CPython's GIL for thread safety of dict/set operations, add an explicit comment stating this and noting it would break under a GIL-free Python (PEP 703).

@@ -3039,3 +3039,49 @@ Tasks 5.1 and 5.2 can run in parallel. Task 5.3 depends on 5.1 (uses RunEvent sc
 4. **RunAlreadyActiveError error envelope — seam contract D.** The 409 response for `RunAlreadyActiveError` must include `{"error_type": "run_already_active", "detail": "A run is already in progress for this session."}`. Update the execute route handler.
 
 5. **Seam contracts reference.** The seam contracts document defines Seam D (Execution <> Sessions run lifecycle) and Seam E (WebSocket progress). Implementation should follow these contracts for async bridging, close codes, and `RunEvent` wire format.
+
+## Round 5 Review Findings
+
+Three-reviewer panel (Reality, Architecture, Quality) examining L3 task-plans 5A-5D.
+
+### Summary
+
+| Task-Plan | Blockers | Warnings | Status |
+|-----------|----------|----------|--------|
+| 5A (Models & Infrastructure) | 0 | 2 | Ready |
+| 5B (Validation) | 3 | 1 | **Fixes applied inline** |
+| 5C (Execution Service) | 5 | 2 | **Fixes applied inline** |
+| 5D (Routes & Integration) | 7 | 3 | **Fixes applied inline** |
+
+### Blocking Issues Fixed
+
+| ID | Issue | Fix |
+|----|-------|-----|
+| B1 | `RunAlreadyActiveError` double-definition in 5C — route catches wrong class | Import from `sessions.protocol`, delete duplicate |
+| B2 | Missing `await` on `execute()`, `cancel()`, `get_status()` in routes | Added `await` to all async service calls |
+| B3 | `validate_token()` stale method name in WebSocket handler | Changed to `await auth_provider.authenticate(token)` with typed `AuthenticationError` catch |
+| B4 | `get_composition_state()` doesn't exist on SessionService | Replaced with `get_current_state()` / `get_state()` |
+| B5 | Route tests are all `pass` stubs | Implemented real TestClient tests |
+| B6 | `_call_async()` failure in except clause shadows original exception | Nested try/except with structlog before re-raise |
+| B7 | `RunRecord.run_id` → `RunRecord.id` (2 locations) | Fixed field name |
+| B8 | `from elspeth.web.settings` → `from elspeth.web.config` | Fixed module path |
+| B9 | `run_id` generated locally, not passed to `create_run()` | Read `run_id` from returned `RunRecord.id` |
+| B10 | Route calls `service.get_composition_state()` / `service.get_settings()` — not in protocol | Route calls `service.validate(session_id)`, service handles internals |
+| B11 | Check count assertion `== 4` but implementation has 5 checks | Fixed assertion |
+
+### Seam Contract Reconciliation
+
+- **W8:** Seam contract E says "error" events close with 1011, but "error" RunEvents are non-terminal (per-row exceptions). WebSocket only closes on "completed" or "cancelled" (1000) or server crash (1011). Updated in 5D.
+
+### Execution Order
+
+```
+5A (Models + ProgressBroadcaster)
+  └── 5B (Validation) ── can start after 5A
+  └── 5C (ExecutionService) ── can start after 5A, needs Sub-4 for CompositionState
+        └── 5D (Routes + Integration) ── needs 5A, 5B, 5C + Sub-2 merged + Sub-4 merged
+```
+
+5B and 5C can run in parallel after 5A. 5D is the integration layer requiring everything.
+
+Detailed findings: see `## Round 5 Review Findings` in each task-plan (5A, 5B, 5C, 5D).

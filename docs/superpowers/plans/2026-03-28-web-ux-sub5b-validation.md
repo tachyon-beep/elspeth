@@ -51,11 +51,16 @@ from elspeth.web.execution.validation import validate_pipeline
 
 
 class FakeCompositionState:
-    """Minimal stand-in for CompositionState during validation tests."""
+    """Minimal stand-in for CompositionState during validation tests.
+
+    B-5B-3 fix: Uses state.source (a dict with "options" key) instead of
+    state.source_options, matching Sub-4's CompositionStateRecord structure.
+    """
 
     def __init__(self, yaml_content: str = "", source_options: dict | None = None) -> None:
         self.yaml_content = yaml_content
-        self.source_options = source_options or {}
+        # source is the full source dict; options is nested within it
+        self.source: dict | None = {"options": source_options} if source_options else None
 
 
 class FakeWebSettings:
@@ -80,8 +85,9 @@ class TestValidatePipelinePathAllowlist:
             mock_gen.generate_yaml.return_value = "source:\n  plugin: csv_source"
             mock_load.side_effect = FileNotFoundError("no temp file")
             result = validate_pipeline(state, settings)
-        # Path check passed — failure is from settings_load, not path_allowlist
-        assert not any(c.name == "source_path_allowlist" and not c.passed for c in result.checks)
+        # B11: path check is always recorded — verify it passed
+        path_check = next(c for c in result.checks if c.name == "source_path_allowlist")
+        assert path_check.passed is True
 
     def test_path_outside_uploads_blocked(self) -> None:
         state = FakeCompositionState(
@@ -102,7 +108,8 @@ class TestValidatePipelinePathAllowlist:
         result = validate_pipeline(state, settings)
         assert result.is_valid is False
 
-    def test_no_path_option_skips_check(self) -> None:
+    def test_no_path_option_records_skipped_check(self) -> None:
+        """B11 fix: path allowlist check is always recorded, even when skipped."""
         state = FakeCompositionState(source_options={})
         settings = FakeWebSettings(data_dir="/tmp/test_data")
         with patch("elspeth.web.execution.validation.yaml_generator") as mock_gen, \
@@ -110,8 +117,10 @@ class TestValidatePipelinePathAllowlist:
             mock_gen.generate_yaml.return_value = "source:\n  plugin: csv_source"
             mock_load.side_effect = FileNotFoundError("no temp file")
             result = validate_pipeline(state, settings)
-        # No path_allowlist failure — check was skipped
-        assert not any(c.name == "source_path_allowlist" for c in result.checks)
+        # B11: check IS recorded with passed=True and "skipped" detail
+        path_check = next(c for c in result.checks if c.name == "source_path_allowlist")
+        assert path_check.passed is True
+        assert "skipped" in path_check.detail.lower()
 
 
 class TestValidatePipelineSuccess:
@@ -146,8 +155,11 @@ class TestValidatePipelineSuccess:
         result = validate_pipeline(state, settings)
 
         assert result.is_valid is True
-        assert len(result.checks) == 4
+        assert len(result.checks) == 5
         assert all(c.passed for c in result.checks)
+        # B11 fix: source_path_allowlist check is always recorded
+        assert result.checks[0].name == "source_path_allowlist"
+        assert result.checks[0].passed is True
         assert result.errors == []
 
         # Verify real engine functions were called
@@ -184,11 +196,14 @@ class TestValidatePipelineSettingsFailure:
         result = validate_pipeline(state, settings)
 
         assert result.is_valid is False
-        assert result.checks[0].name == "settings_load"
-        assert result.checks[0].passed is False
+        # B11: index 0 is source_path_allowlist (passed), index 1 is settings_load
+        assert result.checks[0].name == "source_path_allowlist"
+        assert result.checks[0].passed is True
+        assert result.checks[1].name == "settings_load"
+        assert result.checks[1].passed is False
         # Downstream checks are skipped but recorded
-        assert all(not c.passed for c in result.checks[1:])
-        assert any("Skipped" in c.detail for c in result.checks[1:])
+        assert all(not c.passed for c in result.checks[2:])
+        assert any("Skipped" in c.detail for c in result.checks[2:])
         assert len(result.errors) >= 1
 
     @patch("elspeth.web.execution.validation.yaml_generator")
@@ -206,7 +221,8 @@ class TestValidatePipelineSettingsFailure:
         result = validate_pipeline(state, settings)
 
         assert result.is_valid is False
-        assert result.checks[0].passed is False
+        # B11: index 1 is settings_load (index 0 is source_path_allowlist)
+        assert result.checks[1].passed is False
 
 
 class TestValidatePipelinePluginFailure:
@@ -230,8 +246,9 @@ class TestValidatePipelinePluginFailure:
         result = validate_pipeline(state, settings)
 
         assert result.is_valid is False
-        assert result.checks[0].passed is True  # settings_load passed
-        assert result.checks[1].passed is False  # plugin_instantiation failed
+        # B11: index 0=path_allowlist, 1=settings_load, 2=plugin_instantiation
+        assert result.checks[1].passed is True  # settings_load passed
+        assert result.checks[2].passed is False  # plugin_instantiation failed
         assert any("unknown" in e.message.lower() for e in result.errors)
 
 
@@ -268,7 +285,8 @@ class TestValidatePipelineGraphFailure:
         result = validate_pipeline(state, settings)
 
         assert result.is_valid is False
-        assert result.checks[2].passed is False  # graph_structure failed
+        # B11: index 0=path_allowlist, 1=settings_load, 2=plugins, 3=graph_structure
+        assert result.checks[3].passed is False  # graph_structure failed
         assert len(result.errors) >= 1
 
     @patch("elspeth.web.execution.validation.yaml_generator")
@@ -304,8 +322,9 @@ class TestValidatePipelineGraphFailure:
         result = validate_pipeline(state, settings)
 
         assert result.is_valid is False
-        assert result.checks[2].passed is True  # graph_structure passed
-        assert result.checks[3].passed is False  # schema_compatibility failed
+        # B11: index 0=path_allowlist, 1=settings, 2=plugins, 3=graph, 4=schema
+        assert result.checks[3].passed is True  # graph_structure passed
+        assert result.checks[4].passed is False  # schema_compatibility failed
 
 
 class TestValidatePipelineNoBareCatch:
@@ -494,10 +513,17 @@ def validate_pipeline(state: Any, settings: Any) -> ValidationResult:
     # {settings.data_dir}/uploads/. This duplicates the composer tool
     # check as defense-in-depth.
     uploads_dir = Path(settings.data_dir) / "uploads"
-    source_options = getattr(state, "source_options", None) or {}
+    # B-5B-3 fix: Access state.source directly — this is Tier 1 data from our DB.
+    # The source dict structure is defined by Sub-4's SourceSpec.to_dict(), and the
+    # "options" key may legitimately be absent in the dict, so .get() is appropriate
+    # on the dict contents (not on the state object itself).
+    # TODO(sub-4): verify field path is state.source["options"] or state.source.options
+    source_options = state.source.get("options", {}) if state.source else {}
+    path_checked = False
     for key in ("path", "file"):
         value = source_options.get(key)
         if value is not None:
+            path_checked = True
             resolved = Path(value).resolve()
             if not resolved.is_relative_to(uploads_dir.resolve()):
                 return ValidationResult(
@@ -521,6 +547,23 @@ def validate_pipeline(state: Any, settings: Any) -> ValidationResult:
                         ),
                     ],
                 )
+    # B11 fix: Always record the source_path_allowlist check
+    if path_checked:
+        checks.append(
+            ValidationCheck(
+                name=_CHECK_PATH_ALLOWLIST,
+                passed=True,
+                detail="Source path within allowed upload directory",
+            )
+        )
+    else:
+        checks.append(
+            ValidationCheck(
+                name=_CHECK_PATH_ALLOWLIST,
+                passed=True,
+                detail="No path option — check skipped",
+            )
+        )
 
     # Step 2: Generate YAML
     pipeline_yaml = yaml_generator.generate_yaml(state)
@@ -534,7 +577,7 @@ def validate_pipeline(state: Any, settings: Any) -> ValidationResult:
         tmp_file.write(pipeline_yaml)
         tmp_file.close()
 
-        settings = load_settings(tmp_path)
+        elspeth_settings = load_settings(tmp_path)
         checks.append(
             ValidationCheck(
                 name=_CHECK_SETTINGS,
@@ -566,7 +609,7 @@ def validate_pipeline(state: Any, settings: Any) -> ValidationResult:
 
     # Step 3: Plugin instantiation
     try:
-        bundle = instantiate_plugins_from_config(settings)
+        bundle = instantiate_plugins_from_config(elspeth_settings)
         checks.append(
             ValidationCheck(
                 name=_CHECK_PLUGINS,
@@ -602,9 +645,9 @@ def validate_pipeline(state: Any, settings: Any) -> ValidationResult:
             transforms=bundle.transforms,
             sinks=bundle.sinks,
             aggregations=bundle.aggregations,
-            gates=list(settings.gates),
+            gates=list(elspeth_settings.gates),
             coalesce_settings=(
-                list(settings.coalesce) if settings.coalesce else None
+                list(elspeth_settings.coalesce) if elspeth_settings.coalesce else None
             ),
         )
         graph.validate()
@@ -689,3 +732,18 @@ git commit -m "feat(web/execution): add dry-run validation using real engine cod
 | 7 | Unexpected exceptions (e.g. RuntimeError) propagate -- not swallowed | 5.4 |
 | 8 | `validate_pipeline` is sync (called via `run_in_executor` from route handler in 5D) | 5.4 |
 | 9 | All test classes cover: success, settings failure, plugin failure, graph failure, edge compatibility failure, no-bare-catch, temp file cleanup, path allowlist | 5.4 |
+
+---
+
+## Round 5 Review Findings
+
+**Blocking issues (fixed inline above):**
+
+- **B11: Check count assertion mismatch.** `test_valid_pipeline_returns_all_checks_passed` asserted `len(result.checks) == 4` but the implementation has 5 checks (`source_path_allowlist` + 4 engine checks). The spec says "each check is recorded in checks regardless of whether it was reached." Fixed: assertion changed to `== 5`, implementation updated to always record the `source_path_allowlist` check (with `passed=True` and either a confirmation detail or `"No path option -- check skipped"` for the no-path case). All downstream test index references updated (+1 offset for the new check at index 0).
+
+- **B-5B-2: `settings` variable shadowed.** `validate_pipeline` did `settings = load_settings(tmp_path)`, shadowing the `settings: WebSettings` parameter. Fixed: renamed to `elspeth_settings = load_settings(tmp_path)` and updated all subsequent references (`instantiate_plugins_from_config(elspeth_settings)`, `elspeth_settings.gates`, `elspeth_settings.coalesce`).
+
+- **B-5B-3: `getattr(state, "source_options", None)` violates CLAUDE.md.** Replaced with direct attribute access: `state.source.get("options", {}) if state.source else {}`. The `state.source` is Tier 1 data from our DB, but the source dict structure is defined by Sub-4's `SourceSpec.to_dict()`, and the `options` key may legitimately be absent in the dict -- so `.get()` on the dict contents is appropriate here. Added explanatory comment and `TODO(sub-4)` marker. `FakeCompositionState` updated to use `self.source` (a dict with nested `"options"` key) instead of `self.source_options`.
+
+**Warnings:**
+- **W-5B-1: `source_options` attribute assumed on state.** The validation function accesses source options but the exact field path depends on Sub-4's `CompositionState` structure. When Sub-4 lands, verify the path is `state.source["options"]` (or `state.source.options` if it's a `SourceSpec` object). Mark with `# TODO(sub-4): verify field path`.

@@ -55,7 +55,7 @@ from elspeth.web.execution.schemas import (
     ValidationCheck,
     ValidationResult,
 )
-from elspeth.web.execution.service import RunAlreadyActiveError
+from elspeth.web.sessions.protocol import RunAlreadyActiveError
 
 
 # ── Test fixtures ──────────────────────────────────────────────────────
@@ -105,15 +105,26 @@ class TestValidateEndpoint:
         self,
         mock_execution_service: MagicMock,
     ) -> None:
-        # This test validates the route handler contract.
-        # When the app factory is available, create the test client:
-        #   app = create_app(execution_service=mock_execution_service)
-        #   async with AsyncClient(transport=ASGITransport(app=app)) as client:
-        #       resp = await client.post(f"/api/sessions/{uuid4()}/validate")
-        #       assert resp.status_code == 200
-        #       body = resp.json()
-        #       assert body["is_valid"] is True
-        pass  # Placeholder until app factory is wired
+        from elspeth.web.app import create_app
+
+        mock_execution_service.validate = AsyncMock(
+            return_value=ValidationResult(
+                is_valid=True,
+                checks=[
+                    ValidationCheck(name="settings_load", passed=True, detail="OK"),
+                ],
+                errors=[],
+            )
+        )
+        app = create_app(execution_service=mock_execution_service)
+        async with AsyncClient(
+            transport=ASGITransport(app=app), base_url="http://test"
+        ) as client:
+            resp = await client.post(f"/api/sessions/{uuid4()}/validate")
+            assert resp.status_code == 200
+            body = resp.json()
+            assert body["is_valid"] is True
+            assert len(body["checks"]) == 1
 
     @pytest.mark.asyncio
     async def test_validate_uses_run_in_executor(
@@ -123,22 +134,20 @@ class TestValidateEndpoint:
         """AC #16: validate route handler MUST NOT call validate_pipeline
         synchronously — it must use run_in_executor to avoid blocking the
         event loop."""
-        # When the app factory is available, verify that the route handler
-        # calls asyncio.get_running_loop().run_in_executor(None, validate_pipeline, state).
-        # The test inspects the route handler source or mocks the loop to
-        # verify the executor path is used:
-        #   with patch("elspeth.web.execution.routes.asyncio") as mock_asyncio:
-        #       mock_loop = MagicMock()
-        #       mock_asyncio.get_running_loop.return_value = mock_loop
-        #       mock_loop.run_in_executor = AsyncMock(return_value=ValidationResult(
-        #           is_valid=True, checks=[], errors=[],
-        #       ))
-        #       resp = await client.post(f"/api/sessions/{uuid4()}/validate")
-        #       assert resp.status_code == 200
-        #       mock_loop.run_in_executor.assert_called_once()
-        #       call_args = mock_loop.run_in_executor.call_args
-        #       assert call_args[0][0] is None  # default executor
-        pass  # Placeholder until app factory is wired
+        from elspeth.web.app import create_app
+
+        mock_execution_service.validate = AsyncMock(
+            return_value=ValidationResult(is_valid=True, checks=[], errors=[])
+        )
+        app = create_app(execution_service=mock_execution_service)
+        async with AsyncClient(
+            transport=ASGITransport(app=app), base_url="http://test"
+        ) as client:
+            resp = await client.post(f"/api/sessions/{uuid4()}/validate")
+            assert resp.status_code == 200
+            # The route delegates to service.validate() which handles
+            # run_in_executor internally. Verify the async mock was awaited.
+            mock_execution_service.validate.assert_awaited_once()
 
     @pytest.mark.asyncio
     async def test_invalid_pipeline_returns_200_with_errors(
@@ -154,10 +163,30 @@ class TestValidateEndpoint:
             ],
             errors=[],
         )
-        # Validation errors are NOT HTTP errors — the endpoint always
-        # returns 200 with the ValidationResult body. HTTP 4xx/5xx are
-        # reserved for infrastructure errors (auth, not found, etc.)
-        pass
+        from elspeth.web.app import create_app
+
+        mock_execution_service.validate = AsyncMock(
+            return_value=ValidationResult(
+                is_valid=False,
+                checks=[
+                    ValidationCheck(
+                        name="settings_load", passed=False, detail="Bad YAML"
+                    ),
+                ],
+                errors=[],
+            )
+        )
+        app = create_app(execution_service=mock_execution_service)
+        async with AsyncClient(
+            transport=ASGITransport(app=app), base_url="http://test"
+        ) as client:
+            # Validation errors are NOT HTTP errors — the endpoint always
+            # returns 200 with the ValidationResult body. HTTP 4xx/5xx are
+            # reserved for infrastructure errors (auth, not found, etc.)
+            resp = await client.post(f"/api/sessions/{uuid4()}/validate")
+            assert resp.status_code == 200
+            body = resp.json()
+            assert body["is_valid"] is False
 
 
 class TestExecuteEndpoint:
@@ -168,27 +197,39 @@ class TestExecuteEndpoint:
         self,
         mock_execution_service: MagicMock,
     ) -> None:
-        # resp = await client.post(f"/api/sessions/{uuid4()}/execute")
-        # assert resp.status_code == 202
-        # body = resp.json()
-        # assert "run_id" in body
-        pass
+        from elspeth.web.app import create_app
+
+        expected_run_id = uuid4()
+        mock_execution_service.execute = AsyncMock(return_value=expected_run_id)
+        app = create_app(execution_service=mock_execution_service)
+        async with AsyncClient(
+            transport=ASGITransport(app=app), base_url="http://test"
+        ) as client:
+            resp = await client.post(f"/api/sessions/{uuid4()}/execute")
+            assert resp.status_code == 202
+            body = resp.json()
+            assert body["run_id"] == str(expected_run_id)
 
     @pytest.mark.asyncio
     async def test_execute_with_active_run_returns_409(
         self,
         mock_execution_service: MagicMock,
     ) -> None:
-        mock_execution_service.execute.side_effect = RunAlreadyActiveError(
-            "Already active"
+        from elspeth.web.app import create_app
+
+        mock_execution_service.execute = AsyncMock(
+            side_effect=RunAlreadyActiveError("Already active")
         )
-        # resp = await client.post(f"/api/sessions/{uuid4()}/execute")
-        # assert resp.status_code == 409
-        # body = resp.json()
-        # Seam contract D: structured error envelope
-        # assert body["error_type"] == "run_already_active"
-        # assert "detail" in body
-        pass
+        app = create_app(execution_service=mock_execution_service)
+        async with AsyncClient(
+            transport=ASGITransport(app=app), base_url="http://test"
+        ) as client:
+            resp = await client.post(f"/api/sessions/{uuid4()}/execute")
+            assert resp.status_code == 409
+            body = resp.json()
+            # Seam contract D: structured error envelope
+            assert body["error_type"] == "run_already_active"
+            assert "detail" in body
 
 
 class TestRunStatusEndpoint:
@@ -199,11 +240,30 @@ class TestRunStatusEndpoint:
         self,
         mock_execution_service: MagicMock,
     ) -> None:
-        # resp = await client.get(f"/api/runs/{uuid4()}")
-        # assert resp.status_code == 200
-        # body = resp.json()
-        # assert body["status"] == "completed"
-        pass
+        from elspeth.web.app import create_app
+
+        run_id = uuid4()
+        mock_execution_service.get_status = AsyncMock(
+            return_value=RunStatusResponse(
+                run_id=str(run_id),
+                status="completed",
+                started_at=datetime.now(tz=timezone.utc),
+                finished_at=datetime.now(tz=timezone.utc),
+                rows_processed=10,
+                rows_failed=0,
+                error=None,
+                landscape_run_id="lscape-1",
+            )
+        )
+        app = create_app(execution_service=mock_execution_service)
+        async with AsyncClient(
+            transport=ASGITransport(app=app), base_url="http://test"
+        ) as client:
+            resp = await client.get(f"/api/runs/{run_id}")
+            assert resp.status_code == 200
+            body = resp.json()
+            assert body["status"] == "completed"
+            assert body["rows_processed"] == 10
 
 
 class TestCancelEndpoint:
@@ -214,27 +274,77 @@ class TestCancelEndpoint:
         self,
         mock_execution_service: MagicMock,
     ) -> None:
-        # resp = await client.post(f"/api/runs/{uuid4()}/cancel")
-        # assert resp.status_code == 200
-        pass
+        from elspeth.web.app import create_app
+
+        run_id = uuid4()
+        mock_execution_service.cancel = AsyncMock()
+        mock_execution_service.get_status = AsyncMock(
+            return_value=RunStatusResponse(
+                run_id=str(run_id),
+                status="cancelled",
+                started_at=datetime.now(tz=timezone.utc),
+                finished_at=datetime.now(tz=timezone.utc),
+                rows_processed=5,
+                rows_failed=0,
+                error=None,
+                landscape_run_id="lscape-1",
+            )
+        )
+        app = create_app(execution_service=mock_execution_service)
+        async with AsyncClient(
+            transport=ASGITransport(app=app), base_url="http://test"
+        ) as client:
+            resp = await client.post(f"/api/runs/{run_id}/cancel")
+            assert resp.status_code == 200
+            body = resp.json()
+            assert body["status"] == "cancelled"
 
 
 class TestWebSocketProgress:
     """WS /ws/runs/{run_id}"""
+
+    # TODO: WebSocket tests require httpx or starlette.testclient WebSocket
+    # support. The starlette TestClient supports WebSocket via
+    # `with client.websocket_connect(url) as ws:` but httpx AsyncClient
+    # does not. These tests should use starlette.testclient.TestClient
+    # (sync) or a dedicated WebSocket test helper.
 
     @pytest.mark.asyncio
     async def test_websocket_receives_progress_events(
         self,
         mock_broadcaster: MagicMock,
     ) -> None:
-        """Client connects, receives progress events, disconnects on terminal."""
-        # This test verifies the WebSocket handler contract:
-        # 1. subscribe(run_id) on connect
-        # 2. await queue.get() in a loop
-        # 3. send_json(event) for each event
-        # 4. close with code 1000 on terminal event (completed/error/cancelled)
-        # 5. unsubscribe(run_id, queue) in finally block
-        pass
+        """Client connects, receives progress events, disconnects on terminal.
+
+        Verifies the WebSocket handler contract:
+        1. subscribe(run_id) on connect
+        2. await queue.get() in a loop
+        3. send_json(event) for each event
+        4. close with code 1000 on terminal event (completed/cancelled)
+        5. unsubscribe(run_id, queue) in finally block
+
+        Note: "error" events are non-terminal (per-row exceptions, pipeline
+        continues). Only "completed" and "cancelled" are terminal close triggers.
+        """
+        from starlette.testclient import TestClient
+        from elspeth.web.app import create_app
+
+        run_id = uuid4()
+        queue: asyncio.Queue[RunEvent] = asyncio.Queue()
+        await queue.put(RunEvent(event_type="progress", run_id=str(run_id), data={"rows": 5}))
+        await queue.put(RunEvent(event_type="completed", run_id=str(run_id), data={}))
+        mock_broadcaster.subscribe.return_value = queue
+
+        app = create_app(broadcaster=mock_broadcaster)
+        client = TestClient(app)
+        with client.websocket_connect(
+            f"/ws/runs/{run_id}?token=valid-test-token"
+        ) as ws:
+            msg1 = ws.receive_json()
+            assert msg1["event_type"] == "progress"
+            msg2 = ws.receive_json()
+            assert msg2["event_type"] == "completed"
+        mock_broadcaster.unsubscribe.assert_called_once()
 
     @pytest.mark.asyncio
     async def test_websocket_closes_1011_on_internal_error(
@@ -242,10 +352,21 @@ class TestWebSocketProgress:
         mock_broadcaster: MagicMock,
     ) -> None:
         """H6: Internal server error sends close code 1011."""
-        # When app factory is available:
-        #   Inject a broadcaster that raises on queue.get()
-        #   Verify close code is 1011
-        pass
+        from starlette.testclient import TestClient
+        from elspeth.web.app import create_app
+
+        queue = AsyncMock()
+        queue.get.side_effect = RuntimeError("broadcaster failure")
+        mock_broadcaster.subscribe.return_value = queue
+
+        app = create_app(broadcaster=mock_broadcaster)
+        client = TestClient(app)
+        with client.websocket_connect(
+            f"/ws/runs/{uuid4()}?token=valid-test-token"
+        ) as ws:
+            # Server should close with 1011 on internal error
+            data = ws.receive()
+            assert data.get("code") == 1011
 
     @pytest.mark.asyncio
     async def test_websocket_auth_failure_closes_4001(
@@ -254,13 +375,15 @@ class TestWebSocketProgress:
     ) -> None:
         """AC #12: Missing or invalid ?token= query param closes with 4001.
         Client MUST NOT auto-reconnect on 4001."""
-        # When app factory is available:
-        #   async with client.websocket_connect(
-        #       f"/ws/runs/{uuid4()}"  # no ?token=
-        #   ) as ws:
-        #       # Connection should be closed with code 4001
-        #       assert ws.close_code == 4001
-        pass
+        from starlette.testclient import TestClient
+        from elspeth.web.app import create_app
+
+        app = create_app(broadcaster=mock_broadcaster)
+        client = TestClient(app)
+        # No ?token= query parameter — should close with 4001
+        with client.websocket_connect(f"/ws/runs/{uuid4()}") as ws:
+            data = ws.receive()
+            assert data.get("code") == 4001
 
     @pytest.mark.asyncio
     async def test_websocket_unsubscribes_on_disconnect(
@@ -268,7 +391,21 @@ class TestWebSocketProgress:
         mock_broadcaster: MagicMock,
     ) -> None:
         """Cleanup happens even on unexpected disconnect."""
-        pass
+        from starlette.testclient import TestClient
+        from elspeth.web.app import create_app
+
+        queue: asyncio.Queue[RunEvent] = asyncio.Queue()
+        # Don't put any events — client will disconnect before receiving
+        mock_broadcaster.subscribe.return_value = queue
+
+        app = create_app(broadcaster=mock_broadcaster)
+        client = TestClient(app)
+        with client.websocket_connect(
+            f"/ws/runs/{uuid4()}?token=valid-test-token"
+        ) as ws:
+            ws.close()
+        # Verify unsubscribe was called in finally block
+        mock_broadcaster.unsubscribe.assert_called_once()
 ```
 
 - [ ] **Step 2: Implement routes**
@@ -289,13 +426,17 @@ from __future__ import annotations
 from typing import Any
 from uuid import UUID
 
+import structlog
 from fastapi import APIRouter, Depends, HTTPException, WebSocket, WebSocketDisconnect
 from fastapi.responses import JSONResponse
 
+from elspeth.web.auth.models import AuthenticationError
 from elspeth.web.execution.progress import ProgressBroadcaster
 from elspeth.web.execution.schemas import RunStatusResponse, ValidationResult
-from elspeth.web.execution.service import ExecutionServiceImpl, RunAlreadyActiveError
-from elspeth.web.execution.validation import validate_pipeline
+from elspeth.web.execution.service import ExecutionServiceImpl
+from elspeth.web.sessions.protocol import RunAlreadyActiveError
+
+slog = structlog.get_logger()
 
 router = APIRouter()
 
@@ -324,15 +465,11 @@ async def validate_session_pipeline(
     """Dry-run validation using real engine code paths.
 
     AC #16: Validation is synchronous and takes 1-5 seconds depending on
-    plugin count. Running it directly would block the FastAPI event loop.
-    We use run_in_executor to offload it to a thread.
+    plugin count. The service.validate() method handles run_in_executor
+    internally to avoid blocking the event loop.
     """
-    import asyncio
-
-    loop = asyncio.get_running_loop()
-    state = service.get_composition_state(session_id)
-    settings = service.get_settings()
-    return await loop.run_in_executor(None, validate_pipeline, state, settings)
+    result = await service.validate(session_id)
+    return result
 
 
 @router.post(
@@ -346,7 +483,7 @@ async def execute_pipeline(
 ) -> dict[str, str]:
     """Start a background pipeline run. Returns run_id immediately."""
     try:
-        run_id = service.execute(session_id, state_id)
+        run_id = await service.execute(session_id, state_id)
     except RunAlreadyActiveError as exc:
         # Seam contract D: structured error envelope for 409
         return JSONResponse(
@@ -368,7 +505,8 @@ async def get_run_status(
     service: ExecutionServiceImpl = Depends(get_execution_service),
 ) -> RunStatusResponse:
     """Return current run status."""
-    return service.get_status(run_id)
+    status = await service.get_status(run_id)
+    return status
 
 
 @router.post("/api/runs/{run_id}/cancel")
@@ -377,8 +515,8 @@ async def cancel_run(
     service: ExecutionServiceImpl = Depends(get_execution_service),
 ) -> dict[str, str]:
     """Cancel a run. Idempotent on terminal runs."""
-    service.cancel(run_id)
-    status = service.get_status(run_id)
+    await service.cancel(run_id)
+    status = await service.get_status(run_id)
     return {"status": status.status}
 
 
@@ -388,7 +526,7 @@ async def get_run_results(
     service: ExecutionServiceImpl = Depends(get_execution_service),
 ) -> dict[str, Any]:
     """Return final run results. 409 if run is not terminal."""
-    status = service.get_status(run_id)
+    status = await service.get_status(run_id)
     if status.status in ("pending", "running"):
         raise HTTPException(
             status_code=409,
@@ -430,7 +568,7 @@ async def websocket_run_progress(
     3. Verify run exists and belongs to authenticated user (IDOR -> 404-equivalent close)
     4. Subscribe to broadcaster for this run_id
     5. Loop: await queue.get() -> send_json(event)
-    6. Close on terminal event (completed/error/cancelled)
+    6. Close on terminal event (completed/cancelled) — "error" is non-terminal
     7. Unsubscribe in finally block (ensures cleanup on disconnect)
     """
     # Auth: validate JWT from query parameter
@@ -438,8 +576,8 @@ async def websocket_run_progress(
         await websocket.close(code=4001, reason="Missing authentication token")
         return
     try:
-        user = auth_provider.validate_token(token)
-    except Exception:
+        user = await auth_provider.authenticate(token)
+    except AuthenticationError:
         await websocket.close(code=4001, reason="Invalid authentication token")
         return
 
@@ -447,21 +585,32 @@ async def websocket_run_progress(
     queue = broadcaster.subscribe(run_id)
     try:
         while True:
+            # If _run_pipeline crashes without broadcasting a terminal event,
+            # queue.get() will block until the client disconnects or a
+            # timeout occurs. Consider adding asyncio.wait_for() with a
+            # heartbeat timeout if this becomes an issue in production.
             event = await queue.get()
             await websocket.send_json(event.model_dump(mode="json"))
-            if event.event_type in ("completed", "error", "cancelled"):
-                # H6: Use specific close codes per seam contract E
-                # 1000 = normal closure after terminal event
+            # "error" events are non-terminal — they represent per-row
+            # exceptions while the pipeline continues processing. Only
+            # "completed" and "cancelled" are terminal events per seam
+            # contract E.
+            if event.event_type in ("completed", "cancelled"):
                 await websocket.close(code=1000)
                 break
     except WebSocketDisconnect:
         pass  # Client disconnected — fall through to finally
-    except Exception:
+    except Exception as exc:
         # H6: 1011 = internal server error
+        slog.error(
+            "websocket_handler_error",
+            run_id=run_id,
+            error=str(exc),
+        )
         try:
             await websocket.close(code=1011, reason="Internal server error")
-        except Exception:
-            pass  # Connection may already be closed
+        except Exception as close_err:
+            slog.error("websocket_close_failed", run_id=run_id, error=str(close_err))
     finally:
         broadcaster.unsubscribe(run_id, queue)
 ```
@@ -489,16 +638,30 @@ class TestMultiWorkerWarning:
     """W10: Warn if WEB_CONCURRENCY > 1 at startup."""
 
     @patch.dict("os.environ", {"WEB_CONCURRENCY": "4"})
-    def test_warns_on_multi_worker(self) -> None:
+    def test_warns_on_multi_worker(self, caplog: pytest.LogCaptureFixture) -> None:
         """Application factory logs warning about WebSocket limitations."""
-        # The warning should be emitted during create_app() or
-        # ExecutionServiceImpl construction when WEB_CONCURRENCY > 1.
-        # Exact assertion depends on app factory structure.
-        pass
+        import structlog
+        from elspeth.web.app import create_app
+
+        # Capture structlog output through stdlib logging for test assertion
+        with caplog.at_level("WARNING"):
+            app = create_app()
+        assert any(
+            "WEB_CONCURRENCY" in record.message
+            for record in caplog.records
+        ), "Expected warning about WEB_CONCURRENCY > 1"
 
     @patch.dict("os.environ", {"WEB_CONCURRENCY": "1"})
-    def test_no_warning_for_single_worker(self) -> None:
-        pass
+    def test_no_warning_for_single_worker(self, caplog: pytest.LogCaptureFixture) -> None:
+        """No warning when running with a single worker."""
+        from elspeth.web.app import create_app
+
+        with caplog.at_level("WARNING"):
+            app = create_app()
+        assert not any(
+            "WEB_CONCURRENCY" in record.message
+            for record in caplog.records
+        ), "Should not warn when WEB_CONCURRENCY == 1"
 ```
 
 - [ ] **Step 2: Implement warning in app factory**
@@ -637,7 +800,7 @@ class TestEndToEndPipelineExecution:
 
         # Create app with test settings pointing to work_dir
         from elspeth.web.app import create_app
-        from elspeth.web.settings import WebSettings
+        from elspeth.web.config import WebSettings
 
         settings = WebSettings(
             data_dir=work_dir,
@@ -729,13 +892,13 @@ git commit -m "test(web): add end-to-end pipeline execution integration test"
 ## Self-Review Checklist
 
 - [ ] `routes.py` defines all 5 REST endpoints + 1 WebSocket endpoint matching the spec
-- [ ] `validate_session_pipeline` uses `run_in_executor` (AC #16) -- does NOT call `validate_pipeline` synchronously
+- [ ] `validate_session_pipeline` delegates to `service.validate(session_id)` (AC #16) -- service handles run_in_executor internally
 - [ ] `execute_pipeline` returns 202 with `run_id`
 - [ ] `execute_pipeline` returns 409 with structured error envelope (`error_type`, `detail`) on `RunAlreadyActiveError` (seam contract D)
 - [ ] `get_run_results` returns 409 if run is not terminal
 - [ ] WebSocket authenticates via `?token=<jwt>` query parameter (AC #12)
 - [ ] WebSocket closes with code 4001 on missing or invalid token -- client MUST NOT auto-reconnect on 4001
-- [ ] WebSocket closes with code 1000 on terminal event (completed/error/cancelled) (H6, seam contract E)
+- [ ] WebSocket closes with code 1000 on terminal event (completed/cancelled) -- "error" is non-terminal (H6, seam contract E)
 - [ ] WebSocket closes with code 1011 on internal server error (H6)
 - [ ] WebSocket `finally` block calls `broadcaster.unsubscribe()` for cleanup on disconnect
 - [ ] IDOR protection: run ownership verified, returns 404 (not 403) for non-owned runs (AC #13)
@@ -750,3 +913,34 @@ git commit -m "test(web): add end-to-end pipeline execution integration test"
 - [ ] mypy passes: `.venv/bin/python -m mypy src/elspeth/web/execution/routes.py`
 - [ ] No defensive programming patterns (no `.get()` on typed fields, no `getattr` with defaults)
 - [ ] Layer dependency respected: `routes.py` imports from L0-L2 and sibling web modules only
+
+---
+
+## Round 5 Review Findings
+
+### Blocking fixes applied inline
+
+| ID | Finding | Fix |
+|----|---------|-----|
+| **B1** | `RunAlreadyActiveError` imported from `execution.service` instead of `sessions.protocol` | Changed import to `from elspeth.web.sessions.protocol import RunAlreadyActiveError` in both routes.py and test_routes.py |
+| **B2** | Missing `await` on async service calls in route handlers | Added `await` to all `service.execute()`, `service.cancel()`, `service.get_status()`, and `service.validate()` calls |
+| **B3** | `auth_provider.validate_token(token)` does not exist on auth protocol | Changed to `await auth_provider.authenticate(token)`, narrowed `except Exception` to `except AuthenticationError` (imported from `elspeth.web.auth.models`) |
+| **B5** | All route tests were `pass` stubs with no assertions | Implemented real test bodies using `AsyncClient`/`TestClient` with mock services: `test_valid_pipeline_returns_200`, `test_execute_returns_202_with_run_id`, `test_execute_with_active_run_returns_409`, `test_status_returns_200`, `test_cancel_returns_200`. WebSocket tests use `starlette.testclient.TestClient` |
+| **B8** | Integration test imports `from elspeth.web.settings import WebSettings` (wrong path) | Changed to `from elspeth.web.config import WebSettings` |
+| **B10** | Validate route calls `service.get_composition_state()` and `service.get_settings()` which do not exist on `ExecutionService` protocol | Route now calls `await service.validate(session_id)` -- service handles internals. Removed unused `validate_pipeline` import |
+| **W8** | WebSocket closes on "error" events, but "error" is non-terminal (per-row exception) | Removed "error" from terminal event set. Only "completed" and "cancelled" trigger close(1000). Added comment about queue.get() blocking if `_run_pipeline` crashes without broadcasting terminal event |
+
+### Additional fixes applied
+
+- Added `structlog` import and `slog` logger to routes.py for WebSocket error logging
+- Replaced bare `except Exception: pass` around `websocket.close(1011)` with `except Exception as close_err:` + `slog.error("websocket_close_failed", ...)` for observability
+- Added `slog.error("websocket_handler_error", ...)` in the outer exception handler
+- Implemented multi-worker warning tests (`test_warns_on_multi_worker`, `test_no_warning_for_single_worker`) using `caplog` instead of `pass` stubs
+
+### Warnings (new findings)
+
+| ID | Severity | Finding |
+|----|----------|---------|
+| **W-5D-1** | Medium | **WebSocket IDOR -- run ownership not verified.** The WebSocket handler authenticates the user via JWT but does not verify that the requested `run_id` belongs to the authenticated user's session. An authenticated user could subscribe to any run_id and observe another user's pipeline progress. The route should call `verify_run_ownership(user, run_id)` or inline an ownership check against the session store before accepting the connection. |
+| **W-5D-2** | Low | **Integration test has no WebSocket coverage.** `test_execute_pipeline.py` exercises the full REST lifecycle (create, validate, execute, poll, results) but does not test WebSocket progress streaming. This leaves the real-time progress path untested end-to-end. |
+| **W-5D-3** | Low | **Multi-worker warning tests were `pass` stubs.** Now implemented with `caplog` assertions. |
