@@ -455,3 +455,21 @@ allowed_dict_patterns:
   - "src/elspeth/web/composer/state.py:CompositionState.from_dict:d"
   - "src/elspeth/web/composer/state.py:CompositionState.with_metadata:patch"
   - "src/elspeth/web/composer/state.py:CompositionState.to_dict:return"
+
+  # ═══════════════════════════════════════════════════════════════════════════
+  # WEB COMPOSER — Tool executor (Tier 3 LLM tool call arguments)
+  # args dicts come from json.loads(tool_call.function.arguments) in the
+  # LLM tool-use loop. Tool JSON schemas define optional fields.
+  # ═══════════════════════════════════════════════════════════════════════════
+  - "src/elspeth/web/composer/tools.py:ToolResult.to_dict:return"
+  - "src/elspeth/web/composer/tools.py:get_tool_definitions:return (list)"
+  - "src/elspeth/web/composer/tools.py:execute_tool:arguments"
+  - "src/elspeth/web/composer/tools.py:_validate_source_path:options"
+  - "src/elspeth/web/composer/tools.py:_execute_set_source:args"
+  - "src/elspeth/web/composer/tools.py:_execute_upsert_node:args"
+  - "src/elspeth/web/composer/tools.py:_execute_upsert_edge:args"
+  - "src/elspeth/web/composer/tools.py:_execute_remove_node:args"
+  - "src/elspeth/web/composer/tools.py:_execute_remove_edge:args"
+  - "src/elspeth/web/composer/tools.py:_execute_set_metadata:args"
+  - "src/elspeth/web/composer/tools.py:_execute_set_output:args"
+  - "src/elspeth/web/composer/tools.py:_execute_remove_output:args"

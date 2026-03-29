@@ -369,3 +369,17 @@ allow_hits:
   reason: "Type dispatch — must distinguish tuple/list from scalar for recursive unwrapping"
   safety: "Structural recursion over known frozen types; no contract violation possible"
   expires: null
+
+per_file_rules:
+# Composer tools — mutation executors parse LLM tool call arguments (Tier 3).
+# args dict comes from json.loads(tool_call.function.arguments) in the LLM
+# tool-use loop. Tool JSON schemas define optional fields — the LLM may omit
+# them. .get() with defaults is the correct Tier 3 pattern for optional fields.
+# isinstance check in set_metadata handles LLM sending patch fields at different
+# nesting levels.
+- pattern: web/composer/tools.py
+  rules:
+  - R1
+  - R5
+  reason: "Tier 3 boundary — LLM tool call arguments are external data with optional fields per JSON schema"
+  expires: null
