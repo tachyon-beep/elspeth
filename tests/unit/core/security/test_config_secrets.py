@@ -847,3 +847,46 @@ landscape:
 
         with pytest.raises(ValueError, match="Settings YAML root must be a mapping/object, got list"):
             _load_settings_with_secrets(settings_file)
+
+
+class TestFingerprintValueErrorWrapping:
+    """ValueError from fingerprint computation must be wrapped as SecretLoadError."""
+
+    def test_valueerror_catch_present_in_secret_loading_loop(self) -> None:
+        """Verify that ValueError is caught and re-raised as SecretLoadError in the loop.
+
+        The function has complex Azure dependencies that are hard to mock in
+        unit tests. This structural test verifies the except clause exists.
+        """
+        import ast
+        from pathlib import Path
+
+        import elspeth.core.security.config_secrets as mod
+
+        source = Path(mod.__file__).read_text()
+        tree = ast.parse(source)
+
+        # Find all except handlers for ValueError in the module
+        found_valueerror_handler = False
+        for node in ast.walk(tree):
+            if (
+                isinstance(node, ast.ExceptHandler)
+                and node.type is not None
+                and isinstance(node.type, ast.Name)
+                and node.type.id == "ValueError"
+            ):
+                # Check that the body raises SecretLoadError
+                for stmt in ast.walk(node):
+                    if (
+                        isinstance(stmt, ast.Raise)
+                        and stmt.exc is not None
+                        and isinstance(stmt.exc, ast.Call)
+                        and isinstance(stmt.exc.func, ast.Name)
+                        and stmt.exc.func.id == "SecretLoadError"
+                    ):
+                        found_valueerror_handler = True
+
+        assert found_valueerror_handler, (
+            "load_secrets_from_config() must catch ValueError and re-raise as SecretLoadError "
+            "to prevent bare exceptions from fingerprint key validation"
+        )

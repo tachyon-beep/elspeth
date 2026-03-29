@@ -42,3 +42,45 @@ class TestAzureBlobSinkNonFiniteRejection:
     def test_serialize_jsonl_accepts_finite_floats(self, sink) -> None:
         result = sink._serialize_jsonl([{"id": 1, "value": 3.14}])
         assert b"3.14" in result
+
+
+class TestAzureBlobSinkCloseResourceRelease:
+    """close() must release Azure SDK resources, not just null the reference."""
+
+    def test_close_calls_client_close(self) -> None:
+        from unittest.mock import MagicMock
+
+        from elspeth.plugins.sinks.azure_blob_sink import AzureBlobSink
+
+        sink = AzureBlobSink(
+            {
+                "container": "test-container",
+                "blob_path": "test.json",
+                "format": "json",
+                "connection_string": "DefaultEndpointsProtocol=https;AccountName=fake;AccountKey=ZmFrZQ==;EndpointSuffix=core.windows.net",
+                "schema": {"mode": "observed"},
+            }
+        )
+
+        mock_client = MagicMock()
+        sink._container_client = mock_client
+
+        sink.close()
+
+        mock_client.close.assert_called_once()
+        assert sink._container_client is None
+
+    def test_close_without_client_is_safe(self) -> None:
+        from elspeth.plugins.sinks.azure_blob_sink import AzureBlobSink
+
+        sink = AzureBlobSink(
+            {
+                "container": "test-container",
+                "blob_path": "test.json",
+                "format": "json",
+                "connection_string": "DefaultEndpointsProtocol=https;AccountName=fake;AccountKey=ZmFrZQ==;EndpointSuffix=core.windows.net",
+                "schema": {"mode": "observed"},
+            }
+        )
+
+        sink.close()  # Should not raise when _container_client is None

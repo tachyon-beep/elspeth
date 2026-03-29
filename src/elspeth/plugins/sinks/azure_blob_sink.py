@@ -695,6 +695,8 @@ class AzureBlobSink(BaseSink):
 
     def close(self) -> None:
         """Release resources."""
+        if self._container_client is not None:
+            self._container_client.close()
         self._container_client = None
         self._buffered_rows = []
         self._resolved_blob_path = None

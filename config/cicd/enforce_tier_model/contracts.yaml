@@ -13,9 +13,9 @@ per_file_rules:
 - pattern: contracts/contract_records.py
   rules:
   - R5
-  reason: Violation type dispatch requires isinstance() for polymorphic serialization of ContractViolation subclasses
+  reason: Violation type dispatch requires isinstance() for polymorphic serialization of ContractViolation subclasses, plus Tier 1 structural validation of JSON shape in from_json()
   expires: null
-  max_hits: 3
+  max_hits: 6
 - pattern: contracts/type_normalization.py
   rules:
   - R5

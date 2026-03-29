@@ -161,6 +161,15 @@ class ContractAuditRecord:
         """
         data = json.loads(json_str)
 
+        # Tier 1 structural validation: crash on malformed JSON shape.
+        if not isinstance(data, dict):
+            raise AuditIntegrityError(f"Contract audit record must be a JSON object, got {type(data).__name__}")
+        if "fields" not in data or not isinstance(data["fields"], list):
+            raise AuditIntegrityError("Contract audit record missing or malformed 'fields' — expected a list")
+        for i, entry in enumerate(data["fields"]):
+            if not isinstance(entry, dict):
+                raise AuditIntegrityError(f"Contract audit record fields[{i}] must be a JSON object, got {type(entry).__name__}")
+
         # Tier 1 audit data: crash on invalid enum-like values.
         # Literal type hints are static-only; runtime validation is required
         # to reject corrupted/tampered records that would silently change

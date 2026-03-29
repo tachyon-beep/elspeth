@@ -717,3 +717,52 @@ class TestNullableAuditRoundTrip:
         assert record.nullable is True
         d = record.to_dict()
         assert d["nullable"] is True
+
+
+class TestContractAuditRecordStructuralValidation:
+    """Malformed Tier-1 JSON structure must raise AuditIntegrityError, not raw TypeError."""
+
+    def test_top_level_list_rejected(self) -> None:
+        import json
+
+        from elspeth.contracts.contract_records import ContractAuditRecord
+        from elspeth.contracts.errors import AuditIntegrityError
+
+        with pytest.raises(AuditIntegrityError, match="must be a JSON object"):
+            ContractAuditRecord.from_json(json.dumps([{"mode": "fixed"}]))
+
+    def test_top_level_string_rejected(self) -> None:
+        import json
+
+        from elspeth.contracts.contract_records import ContractAuditRecord
+        from elspeth.contracts.errors import AuditIntegrityError
+
+        with pytest.raises(AuditIntegrityError, match="must be a JSON object"):
+            ContractAuditRecord.from_json(json.dumps("not an object"))
+
+    def test_missing_fields_key_rejected(self) -> None:
+        import json
+
+        from elspeth.contracts.contract_records import ContractAuditRecord
+        from elspeth.contracts.errors import AuditIntegrityError
+
+        with pytest.raises(AuditIntegrityError, match="missing or malformed 'fields'"):
+            ContractAuditRecord.from_json(json.dumps({"mode": "fixed", "locked": True, "version_hash": "abc"}))
+
+    def test_fields_not_list_rejected(self) -> None:
+        import json
+
+        from elspeth.contracts.contract_records import ContractAuditRecord
+        from elspeth.contracts.errors import AuditIntegrityError
+
+        with pytest.raises(AuditIntegrityError, match="missing or malformed 'fields'"):
+            ContractAuditRecord.from_json(json.dumps({"mode": "fixed", "fields": "not_a_list"}))
+
+    def test_field_entry_not_dict_rejected(self) -> None:
+        import json
+
+        from elspeth.contracts.contract_records import ContractAuditRecord
+        from elspeth.contracts.errors import AuditIntegrityError
+
+        with pytest.raises(AuditIntegrityError, match="fields\\[0\\] must be a JSON object"):
+            ContractAuditRecord.from_json(json.dumps({"mode": "fixed", "fields": ["not_a_dict"]}))

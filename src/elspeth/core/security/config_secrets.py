@@ -204,6 +204,13 @@ def load_secrets_from_config(config: SecretsConfig) -> list[SecretResolutionInpu
                 f"Mapped from: {env_var_name}\n"
                 f"Error: {e}"
             ) from e
+        except ValueError as e:
+            raise SecretLoadError(
+                f"Fingerprint computation failed for secret '{keyvault_secret_name}' "
+                f"(env var: {env_var_name})\n"
+                f"Check ELSPETH_FINGERPRINT_KEY is set and non-empty.\n"
+                f"Error: {e}"
+            ) from e
 
     # Phase 2: All secrets fetched successfully — apply to os.environ atomically.
     for env_var_name, secret_value in pending_env:
