@@ -83,15 +83,23 @@ Tested in `tests/unit/web/composer/test_state.py`.
 # ComposerService protocol
 async def compose(
     message: str,
-    messages: list[ChatMessageRecord],  # pre-fetched chat history
-    state: CompositionState,            # reconstructed from DB via from_dict()
+    messages: list[dict[str, Any]],  # pre-fetched chat history as LLM message dicts
+    state: CompositionState,         # reconstructed from DB via from_dict()
 ) -> ComposerResult
 ```
 
 **`messages` parameter:** The route handler calls `session_service.get_messages(session_id)`
-and passes the result directly. ComposerService uses this to build the LLM message
-list via `_build_messages()`. ComposerService does NOT have a dependency on
-SessionService — the route handler mediates.
+to get `list[ChatMessageRecord]`, then converts each record to an LLM message dict
+(`{"role": record.role, "content": record.content}`). ComposerService receives
+pre-formatted LLM messages, not raw DB records. This keeps ComposerService
+decoupled from SessionService's record types. ComposerService does NOT have a
+dependency on SessionService — the route handler mediates.
+
+**Rationale for `list[dict]` over `list[ChatMessageRecord]`:** The ComposerService
+needs messages in LLM wire format (role + content dicts), not DB record format.
+Converting in the route handler means the service has no knowledge of the
+persistence layer's types. This was changed from the original `ChatMessageRecord`
+design in Sub-4 Amendment 1.
 
 ### State Persistence After Compose
 

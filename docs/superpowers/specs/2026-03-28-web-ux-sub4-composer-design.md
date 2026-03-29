@@ -283,7 +283,7 @@ node validity).
 
 ### ToolResult
 
-ToolResult is a frozen dataclass returned by every mutation tool.
+ToolResult is a frozen dataclass returned by every tool (discovery and mutation).
 
 | Field | Type | Description |
 |-------|------|-------------|

@@ -490,3 +490,17 @@ git commit -m "feat(web/composer): add deterministic YAML generator"
 - [ ] `on_validation_failure` is nested inside `source.options` (matches ELSPETH settings format)
 - [ ] mypy passes on `yaml_generator.py`
 - [ ] Commit uses conventional commit format
+
+---
+
+## Round 5 Review Findings
+
+**Warnings (implement during execution):**
+
+- **W-4C-1 (AC #8): `load_settings()` round-trip not tested.** The YAML generator tests verify that `yaml.safe_load()` can parse the output, but AC #8 in the spec requires a round-trip through ELSPETH's own `load_settings()`. If `load_settings()` has stricter requirements (required top-level keys, field validators), the YAML output could be syntactically valid but semantically rejected. Add a test that writes `generate_yaml(state)` to a temp file, calls `load_settings(tmp_path)`, and verifies no exception. This is the authoritative validation that the YAML is engine-compatible.
+
+- **W-4C-2: `on_write_failure` placement in YAML.** The YAML generator emits `on_write_failure` at the sink's top level rather than nested inside `options`. Verify this matches the engine's `load_settings()` parser for sinks. If the engine expects it inside `options`, the generated YAML will silently produce invalid configurations that pass unit tests but fail at execution time. The `load_settings()` round-trip test (W-4C-1) will catch this if implemented.
+
+**Parallelism note (W7):** 4C only imports from `elspeth.web.composer.state` (4A output), not from `tools.py` (4B output). **4B and 4C can run in parallel after 4A completes.** The 4B plan header overstates the dependency.
+
+**No blocking issues for 4C.**

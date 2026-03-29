@@ -1578,3 +1578,15 @@ line's work was wasted.
 **Fix:** Restructured to check existence first, then build the appropriate tuple
 once: replace-at-position for existing IDs, append for new IDs. No redundant
 intermediate tuple construction.
+
+---
+
+## Round 5 Review Findings
+
+**Warnings (implement during execution):**
+
+- **W-4A-1: `from_dict()` with extra unknown keys.** `NodeSpec.from_dict()` silently ignores extra keys in the input dict. This is correct for forward compatibility (a future schema version might add fields) but means malformed dicts won't crash. Since this is Tier 1 data (from our DB), consider adding a `_KNOWN_FIELDS` frozenset check that raises on unexpected keys -- but only if the round-trip invariant test covers this case. Low priority.
+
+- **W-4A-2: `validate()` after `from_dict()` round-trip not tested.** The round-trip tests compare `from_dict(s.to_dict()) == s` but don't call `validate()` on the reconstructed state. A state that round-trips correctly but fails validation would indicate a serialisation bug. Add `assert reconstructed.validate()[0]` to the round-trip test for valid states.
+
+**No blocking issues for 4A.** The data model plan is clean.

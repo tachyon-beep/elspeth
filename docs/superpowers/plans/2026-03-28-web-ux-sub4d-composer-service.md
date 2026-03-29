@@ -1205,3 +1205,98 @@ provides a list (possibly empty), so the test should match the actual call patte
 
 **Fix:** Changed `service._build_messages(None, state, "Hello")` to
 `service._build_messages([], state, "Hello")` in `TestBuildMessages`.
+
+---
+
+## Round 5 Review Findings
+
+Three-reviewer panel (Reality, Architecture, Quality) examining Task-Plan 4D.
+4 blocking issues, 4 warnings. Blockers must be fixed before or during implementation.
+
+### BLOCKING
+
+**B-4D-1: `_make_settings()` mock missing `data_dir`.**
+In `test_service.py`, the `_make_settings()` helper creates a `MagicMock` but does
+not set `data_dir`. `ComposerServiceImpl.__init__()` stores
+`self._data_dir = str(settings.data_dir)`. `str(MagicMock())` produces
+`"<MagicMock ...>"`, which means the S2 path allowlist prefix becomes nonsensical.
+Every `set_source` tool call test will silently pass S2 validation even for paths
+like `/etc/passwd` because no real path starts with `"<MagicMock..."`.
+**Fix:** Add `settings.data_dir = Path("/data")` to `_make_settings()`.
+
+**B-4D-2: Route HTTP contract tests are empty `pass` stubs.**
+The tests for the 422 convergence error shape and 502 LLM error shape
+(`test_convergence_error_returns_422`, `test_llm_failure_returns_502`) are stubs
+with `pass` bodies and comments saying "Integration test -- depends on route handler
+wiring." These are route unit tests that CAN be written using FastAPI's `TestClient`
+with mocked ComposerService dependency. AC #10 (route handler behaviour) and the
+HTTP error shapes from the spec are entirely unverified as written.
+**Fix:** Implement these tests using `TestClient` with a mock `ComposerService` that
+raises `ComposerConvergenceError` or a generic `Exception`. Verify the response
+status code, `error_type`, and `detail` fields.
+
+**B-4D-3: Off-by-one in max_turns -- LLM cannot self-correct on final turn.**
+The loop `for _turn in range(max_turns)` means on turn `max_turns - 1` (the last
+iteration), if the LLM returns tool calls, they are executed and results appended
+to messages, but then the loop exits and `raise ComposerConvergenceError` fires
+WITHOUT giving the LLM a chance to see the results. A correction made on the final
+turn is applied to state but the LLM never sees the confirmation. The user gets a
+convergence error even though the state is valid.
+**Fix:** After executing tool calls on the final iteration, make one additional LLM
+call before raising. If that call produces text (no tool calls), return success. If
+it still wants more tool calls, THEN raise convergence. Add a test:
+`test_self_correction_on_final_turn_succeeds` where the mock LLM returns a tool call
+error on turn N-1, a corrective tool call on turn N, and text on the bonus call.
+
+**B-4D-4: Three protocol call mismatches in route handler template.**
+The route handler code template in Task 8 has three calls that don't match
+`SessionServiceProtocol`:
+
+1. `session_service.get_session(session_id, current_user.id)` --
+   `get_session()` takes only `session_id: UUID` (one arg, not two). The ownership
+   check must compare `session.user_id == current_user.user_id` on the returned
+   record.
+2. `session_service.get_latest_state(session_id)` -- this method doesn't exist.
+   The correct method is `get_current_state(session_id: UUID)`.
+3. `session_service.save_composition_state(session_id, state=result.state, ...)` --
+   the protocol takes `(session_id: UUID, state: CompositionStateData)`. Must
+   construct a `CompositionStateData` DTO from `result.state.to_dict()` fields first.
+
+**Fix:** Update the code template in Task 8's implementation steps to use correct
+method names and argument shapes.
+
+### WARNINGS (address during implementation)
+
+**W-4D-1: `build_context_message()` untested.**
+The function that injects current state, validation status, and plugin names into
+every LLM prompt turn is only exercised when the full `compose()` loop runs. Bugs
+in context injection (e.g., calling `.name` on a plain dict instead of
+`PluginSummary`) will surface only at runtime. Add a direct unit test for
+`build_context_message()` with a known state and verify the output structure.
+
+**W-4D-2: LLM error discrimination uses string matching.**
+The route handler uses `"auth" in str(exc).lower()` to distinguish auth errors from
+network errors. LiteLLM provides typed exceptions (`litellm.AuthenticationError`,
+`litellm.RateLimitError`, etc.) that should be caught explicitly. String matching
+against exception messages is fragile against LiteLLM version changes.
+**Recommended fix:** Replace the broad `except Exception` with specific
+`except litellm.AuthenticationError` and `except litellm.exceptions.APIError`
+catches (or LiteLLM's base exception class).
+
+**W-4D-3: Zero observability.**
+None of the composer service code includes structlog calls. For a web service making
+external LLM API calls in a bounded loop, the absence of structured logging means
+operators have no way to detect degraded LLM availability, high convergence failure
+rates, or prompt engineering regressions. Per CLAUDE.md, the logger is NOT for
+pipeline activity -- but the composer is web infrastructure, not pipeline data flow.
+**Recommended:** Add `slog.warning("composer_convergence_failure", session_id=...,
+turns_used=...)` on convergence error, `slog.warning("composer_llm_error",
+error_type=..., model=...)` on LLM failures, and `slog.debug("composer_turn",
+turn=..., tool_calls=len(...))` for operational debugging.
+
+**W-4D-4: `User` type annotation still present in route handler template.**
+The route handler code in Task 8 uses
+`current_user: User = Depends(get_current_user)`. The correct type is
+`UserIdentity` from `elspeth.web.auth.models`. `User` is not defined anywhere.
+Update to `current_user: UserIdentity = Depends(get_current_user)` and add the
+import.

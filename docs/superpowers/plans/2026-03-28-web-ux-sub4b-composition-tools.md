@@ -6,7 +6,7 @@
 **Parent Plan:** `plans/2026-03-28-web-ux-sub4-composer.md`
 **Spec:** `specs/2026-03-28-web-ux-sub4-composer-design.md`
 **Depends On:** Task-Plan 4A (Data Models), Sub-Plan 3 (Catalog)
-**Blocks:** Task-Plan 4C (YAML Generator)
+**Blocks:** Task-Plan 4D (Composer Service)
 
 ---
 
@@ -1352,3 +1352,40 @@ serialization) and `ToolResult` is the unified return type for all tools.
 **Spec update needed:** Add `data` field to the ToolResult definition in
 `specs/2026-03-28-web-ux-sub4-composer-design.md`. Description: "Optional data
 payload for discovery tools. None for mutation tools."
+
+---
+
+## Round 5 Review Findings
+
+**No blocking issues.**
+
+### Warnings (implement during execution)
+
+**W-4B-1: `upsert_node` with unknown transform plugin untested.**
+`test_unknown_plugin_fails` covers `set_source`. `test_unknown_sink_plugin_fails`
+covers `set_output`. But `upsert_node` with a nonexistent transform plugin name
+has no corresponding test, leaving a gap in the "LLM hallucinates a plugin name"
+scenario for the most common mutation tool. Add
+`test_upsert_node_unknown_transform_plugin_fails` that calls `upsert_node` with
+`plugin="nonexistent_xyz"` and asserts `success=False`.
+
+**W-4B-2: `file` key traversal via S2 not tested.**
+The `TestSetSourcePathSecurity` class tests `path` key traversal but not `file`
+key traversal via a path that starts correctly then escapes (e.g.,
+`{data_dir}/uploads/../../etc/passwd`). Add
+`test_file_key_traversal_via_uploads_prefix_fails` that uses a path starting
+with the uploads directory but using `../` to escape.
+
+**W-4B-3: `_serialize_state()` is a trivial wrapper.**
+The function is a one-liner wrapper for `state.to_dict()` that exists only for a
+docstring comment about frozen container handling. Either inline it (it has
+exactly one call site) or give it a substantive contract. As written it is an
+abstraction with no content.
+
+### Dependency correction (W7)
+
+The plan header previously said "Blocks: Task-Plan 4C (YAML Generator)" but 4C
+only imports from `elspeth.web.composer.state` (4A output), not from `tools.py`
+(4B output). **4B does not block 4C.** 4B and 4C can run in parallel after 4A
+completes. Header updated to "Blocks: Task-Plan 4D (Composer Service)" since 4D
+needs the tool executor from 4B.

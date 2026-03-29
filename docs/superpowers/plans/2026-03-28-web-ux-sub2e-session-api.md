@@ -205,7 +205,8 @@ def _make_app(
     app.state.session_service = service
     app.state.settings = type(
         "FakeSettings", (),
-        {"data_dir": tmp_path, "max_upload_bytes": max_upload_bytes},
+        {"data_dir": tmp_path, "max_upload_bytes": max_upload_bytes,
+         "auth_provider": "local"},
     )()
 
     router = create_session_router()
@@ -332,7 +333,8 @@ class TestIDORProtection:
             app.dependency_overrides[get_current_user] = mock_user
             app.state.session_service = service
             app.state.settings = type(
-                "S", (), {"data_dir": tmp_path, "max_upload_bytes": 10_000_000},
+                "S", (), {"data_dir": tmp_path, "max_upload_bytes": 10_000_000,
+                 "auth_provider": "local"},
             )()
             app.include_router(create_session_router())
             return app
@@ -472,7 +474,7 @@ class TestRevertEndpoint:
         import asyncio
         loop = asyncio.new_event_loop()
         session = loop.run_until_complete(
-            service.create_session("alice", "Pipeline"),
+            service.create_session("alice", "Pipeline", "local"),
         )
         from elspeth.web.sessions.protocol import CompositionStateData
         v1 = loop.run_until_complete(
@@ -507,7 +509,7 @@ class TestRevertEndpoint:
         import asyncio
         loop = asyncio.new_event_loop()
         session = loop.run_until_complete(
-            service.create_session("alice", "Pipeline"),
+            service.create_session("alice", "Pipeline", "local"),
         )
         from elspeth.web.sessions.protocol import CompositionStateData
         v1 = loop.run_until_complete(
@@ -551,7 +553,8 @@ class TestRevertEndpoint:
             app.dependency_overrides[get_current_user] = mock_user
             app.state.session_service = service
             app.state.settings = type(
-                "S", (), {"data_dir": tmp_path, "max_upload_bytes": 10_000_000},
+                "S", (), {"data_dir": tmp_path, "max_upload_bytes": 10_000_000,
+                 "auth_provider": "local"},
             )()
             app.include_router(create_session_router())
             return app
@@ -566,7 +569,7 @@ class TestRevertEndpoint:
         import asyncio
         loop = asyncio.new_event_loop()
         session = loop.run_until_complete(
-            service.create_session("alice", "Alice Only"),
+            service.create_session("alice", "Alice Only", "local"),
         )
         from elspeth.web.sessions.protocol import CompositionStateData
         v1 = loop.run_until_complete(
@@ -591,10 +594,10 @@ class TestRevertEndpoint:
         import asyncio
         loop = asyncio.new_event_loop()
         s1 = loop.run_until_complete(
-            service.create_session("alice", "Session 1"),
+            service.create_session("alice", "Session 1", "local"),
         )
         s2 = loop.run_until_complete(
-            service.create_session("alice", "Session 2"),
+            service.create_session("alice", "Session 2", "local"),
         )
         from elspeth.web.sessions.protocol import CompositionStateData
         v1_s2 = loop.run_until_complete(
@@ -808,7 +811,10 @@ def create_session_router() -> APIRouter:
     ) -> SessionResponse:
         """Create a new session for the authenticated user."""
         service = request.app.state.session_service
-        session = await service.create_session(user.user_id, body.title)
+        settings = request.app.state.settings
+        session = await service.create_session(
+            user.user_id, body.title, settings.auth_provider,
+        )
         return _session_response(session)
 
     @router.get("", response_model=list[SessionResponse])

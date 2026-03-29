@@ -3779,3 +3779,47 @@ The following changes were identified during the Round 4 expert panel review. Fi
 
 7. **Rate limiting on POST /messages (H8p).** Use `WebSettings.composer_rate_limit_per_minute` (default 10) to enforce per-user rate limiting on the messages endpoint. Return HTTP 429 when the limit is exceeded. Implementation: per-user in-memory counter with sliding window. Affects:
    - Task 8 (route handler wiring): add rate limiting middleware/guard to `POST /api/sessions/{id}/messages`.
+
+---
+
+## Round 5 Review Findings
+
+Three-reviewer panel (Reality, Architecture, Quality) examining L3 task-plans 4A-4D.
+
+### Summary
+
+| Task-Plan | Blockers | Warnings | Status |
+|-----------|----------|----------|--------|
+| 4A (Data Models) | 0 | 2 | Ready |
+| 4B (Composition Tools) | 0 | 3 | Ready (dependency correction: 4B does not block 4C) |
+| 4C (YAML Generator) | 0 | 2 | Ready (can run parallel with 4B after 4A) |
+| 4D (Composer Service) | 4 | 4 | **Fix blockers before execution** |
+
+### Blocking Issues (all in 4D)
+
+| ID | Issue | Fix |
+|----|-------|-----|
+| B-4D-1 | `_make_settings()` mock missing `data_dir` — S2 path tests meaningless | Add `settings.data_dir = Path("/data")` |
+| B-4D-2 | Route HTTP contract tests (422/502) are `pass` stubs | Implement with TestClient + mocked ComposerService |
+| B-4D-3 | Off-by-one in max_turns — LLM can't self-correct on final turn | Add bonus LLM call after final tool execution |
+| B-4D-4 | 3 protocol call mismatches in route handler template | Fix method names and argument shapes |
+
+### Spec/Contract Fixes Applied
+
+- **B3 (seam contracts):** Updated `seam-contracts.md` Seam B signature from `list[ChatMessageRecord]` to `list[dict[str, Any]]` with conversion rationale.
+- **W8 (spec):** `ToolResult.data` field already present in spec (user-applied).
+- **W7 (dependency):** 4B does not block 4C — documented in 4B and 4C findings.
+
+### Execution Order (updated)
+
+```
+4A (Data Models)
+├── 4B (Tools)  ──┐
+├── 4C (YAML)  ───┤  ← 4B and 4C can run in parallel
+└──────────────────┘
+        └── 4D (Composer Service + Route Wiring)  ← depends on 4A, 4B, 4C
+```
+
+4D must not start Task 8 (route wiring) until Sub-2E has merged (`sessions/routes.py` must exist).
+
+Detailed findings: see `## Round 5 Review Findings` in each task-plan (4A, 4B, 4C, 4D).
