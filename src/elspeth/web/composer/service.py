@@ -18,6 +18,7 @@ from elspeth.web.composer.prompts import build_messages
 from elspeth.web.composer.protocol import (
     ComposerConvergenceError,
     ComposerResult,
+    ComposerSettings,
 )
 from elspeth.web.composer.state import CompositionState
 from elspeth.web.composer.tools import (
@@ -44,11 +45,12 @@ class ComposerServiceImpl:
     def __init__(
         self,
         catalog: CatalogServiceProtocol,
-        settings: Any,
+        settings: ComposerSettings,
     ) -> None:
         self._catalog = catalog
         self._model = settings.composer_model
         self._max_turns = settings.composer_max_turns
+        self._timeout = settings.composer_timeout_seconds
         self._data_dir = str(settings.data_dir)
 
     async def compose(
@@ -216,10 +218,11 @@ class ComposerServiceImpl:
         self,
         messages: list[dict[str, Any]],
         tools: list[dict[str, Any]],
-    ) -> Any:
+    ) -> litellm.ModelResponse:
         """Call the LLM via LiteLLM. Separated for test mocking."""
         return await litellm.acompletion(
             model=self._model,
             messages=messages,
             tools=tools,
+            timeout=self._timeout,
         )

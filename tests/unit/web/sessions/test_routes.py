@@ -5,7 +5,7 @@ from __future__ import annotations
 import io
 import uuid
 from pathlib import Path
-from unittest.mock import AsyncMock, patch
+from unittest.mock import AsyncMock
 
 import pytest
 from fastapi import FastAPI
@@ -79,9 +79,9 @@ def _make_app(
         data_dir=tmp_path,
         max_upload_bytes=max_upload_bytes,
     )
-    # Catalog service stub -- only needed by _get_composer, which is
-    # mocked in tests that POST messages.
-    app.state.catalog_service = None
+    # composer_service is set to None here; tests that POST messages
+    # must replace it with a mock before sending requests.
+    app.state.composer_service = None
 
     router = create_session_router()
     app.include_router(router)
@@ -253,12 +253,11 @@ class TestIDORProtection:
 class TestMessageRoutes:
     """Tests for message send and retrieval endpoints."""
 
-    @patch("elspeth.web.sessions.routes._get_composer")
-    def test_send_message(self, mock_get_composer, tmp_path) -> None:
+    def test_send_message(self, tmp_path) -> None:
         mock_composer = _make_composer_mock(response_text="Got it!")
-        mock_get_composer.return_value = mock_composer
 
         app, _ = _make_app(tmp_path)
+        app.state.composer_service = mock_composer
         client = TestClient(app)
 
         resp = client.post("/api/sessions", json={"title": "Chat"})
@@ -275,12 +274,11 @@ class TestMessageRoutes:
         # State unchanged (version stayed at 1) -> no state in response
         assert body["state"] is None
 
-    @patch("elspeth.web.sessions.routes._get_composer")
-    def test_get_messages(self, mock_get_composer, tmp_path) -> None:
+    def test_get_messages(self, tmp_path) -> None:
         mock_composer = _make_composer_mock()
-        mock_get_composer.return_value = mock_composer
 
         app, _ = _make_app(tmp_path)
+        app.state.composer_service = mock_composer
         client = TestClient(app)
 
         resp = client.post("/api/sessions", json={"title": "Chat"})
@@ -588,6 +586,7 @@ class TestYamlEndpoint:
             CompositionStateData(
                 source={"plugin": "csv", "on_success": "out", "options": {"path": "/data.csv"}, "on_validation_failure": "quarantine"},
                 outputs=[{"name": "out", "plugin": "csv", "options": {}, "on_write_failure": "quarantine"}],
+                metadata_={"name": "Test Pipeline", "description": ""},
                 is_valid=True,
             ),
         )

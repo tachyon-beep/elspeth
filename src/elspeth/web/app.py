@@ -16,6 +16,7 @@ from elspeth.web.auth.local import LocalAuthProvider
 from elspeth.web.auth.protocol import AuthProvider
 from elspeth.web.auth.routes import create_auth_router
 from elspeth.web.catalog.routes import catalog_router
+from elspeth.web.composer.service import ComposerServiceImpl
 from elspeth.web.config import WebSettings
 from elspeth.web.dependencies import create_catalog_service
 from elspeth.web.sessions.models import metadata as session_metadata
@@ -135,6 +136,12 @@ def create_app(settings: WebSettings | None = None) -> FastAPI:
 
     session_service = SessionServiceImpl(session_engine)
     app.state.session_service = session_service
+
+    # --- Composer service (singleton, not per-request) ---
+    app.state.composer_service = ComposerServiceImpl(
+        catalog=app.state.catalog_service,
+        settings=settings,
+    )
 
     # --- Register routers ---
     app.include_router(create_auth_router())

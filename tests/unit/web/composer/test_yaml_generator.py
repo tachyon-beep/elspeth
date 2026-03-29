@@ -319,4 +319,5 @@ class TestGenerateYaml:
         )
         yaml_str = generate_yaml(state)
         parsed = yaml.safe_load(yaml_str)
-        assert parsed.get("source") is None or "source" not in parsed
+        # Empty state should produce an empty YAML doc (no source, no sinks)
+        assert parsed is None or parsed == {}

@@ -21,35 +21,35 @@ natural-language description into a valid pipeline configuration using the \
 provided tools.
 
 Rules:
-1. Always check the current state (get_current_state) before making changes.
-2. Always check plugin schemas (get_plugin_schema) before configuring a plugin.
-3. Use list_sources/list_transforms/list_sinks to discover available plugins.
-4. After making changes, review the validation result in the tool response. \
+1. Always check plugin schemas (get_plugin_schema) before configuring a plugin.
+2. Use list_sources/list_transforms/list_sinks to discover available plugins.
+3. After making changes, review the validation result in the tool response. \
 If there are errors, fix them before responding to the user.
-5. When the pipeline is complete and valid, respond with a summary of what \
+4. When the pipeline is complete and valid, respond with a summary of what \
 was built.
-6. Do not fabricate plugin names or configuration fields. Only use plugins \
+5. Do not fabricate plugin names or configuration fields. Only use plugins \
 and fields that appear in the catalog.
-7. Use get_expression_grammar to understand gate expression syntax before \
+6. Use get_expression_grammar to understand gate expression syntax before \
 writing conditions.
-8. Connect nodes with edges using upsert_edge after creating nodes.
-9. Every pipeline needs at least: a source, one or more sinks, and edges \
+7. Connect nodes with edges using upsert_edge after creating nodes.
+8. Every pipeline needs at least: a source, one or more sinks, and edges \
 connecting them.
 """
 
 
-def build_context_message(
+def build_context_string(
     state: CompositionState,
     catalog: CatalogService,
-) -> dict[str, str]:
-    """Build the injected context message with current state and plugin summary.
+) -> str:
+    """Build the injected context string with current state and plugin summary.
 
     Args:
         state: Current composition state.
         catalog: For building the plugin summary.
 
     Returns:
-        A dict with "role" and "content" suitable for the LLM message list.
+        A string with state and plugin info, suitable for appending to the
+        system prompt.
     """
     serialized = state.to_dict()
     validation = state.validate()
@@ -73,10 +73,7 @@ def build_context_message(
         },
     }
 
-    return {
-        "role": "system",
-        "content": f"Current pipeline state and available plugins:\n{json.dumps(context, indent=2)}",
-    }
+    return f"Current pipeline state and available plugins:\n{json.dumps(context, indent=2)}"
 
 
 def build_messages(
@@ -93,10 +90,9 @@ def build_messages(
     contamination.
 
     Message sequence:
-    1. System message (static prompt)
-    2. Injected context (current state + plugin summary)
-    3. Chat history (previous messages in this session)
-    4. Current user message
+    1. System message (static prompt + injected context)
+    2. Chat history (previous messages in this session)
+    3. Current user message
 
     Args:
         chat_history: Chat history as plain dicts (role/content keys).
@@ -109,13 +105,11 @@ def build_messages(
     """
     messages: list[dict[str, Any]] = []
 
-    # 1. System prompt
-    messages.append({"role": "system", "content": SYSTEM_PROMPT})
+    # 1. System prompt with injected context (single system message)
+    context_str = build_context_string(state, catalog)
+    messages.append({"role": "system", "content": SYSTEM_PROMPT + "\n\n" + context_str})
 
-    # 2. Injected context
-    messages.append(build_context_message(state, catalog))
-
-    # 3. Chat history
+    # 2. Chat history
     if chat_history:
         messages.extend(chat_history)
 

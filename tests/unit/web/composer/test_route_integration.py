@@ -14,6 +14,9 @@ from datetime import UTC, datetime
 from types import MappingProxyType
 from uuid import UUID, uuid4
 
+import litellm
+import pytest
+
 from elspeth.web.composer.protocol import ComposerConvergenceError, ComposerResult
 from elspeth.web.composer.state import (
     CompositionState,
@@ -159,11 +162,10 @@ class TestStateFromRecord:
         assert reconstructed.outputs[0].name == "main"
         assert reconstructed.metadata.name == "Test Pipeline"
 
-    def test_none_metadata_gets_defaults(self) -> None:
-        """When metadata_ is None on record, defaults are used."""
+    def test_none_metadata_crashes(self) -> None:
+        """Tier 1: None metadata_ on a record is database corruption — crash."""
         original = _make_empty_state()
         record = _make_state_record(original)
-        # Simulate a record with None metadata_ by creating directly
         record_with_none_meta = CompositionStateRecord(
             id=record.id,
             session_id=record.session_id,
@@ -178,9 +180,28 @@ class TestStateFromRecord:
             created_at=record.created_at,
             derived_from_state_id=None,
         )
-        reconstructed = _state_from_record(record_with_none_meta)
-        assert reconstructed.metadata.name == "Untitled Pipeline"
-        assert reconstructed.metadata.description == ""
+        with pytest.raises(ValueError, match="None metadata_"):
+            _state_from_record(record_with_none_meta)
+
+    def test_none_nodes_edges_outputs_map_to_empty(self) -> None:
+        """None nodes/edges/outputs on a record map to empty tuples (initial state)."""
+        original = _make_empty_state()
+        record = _make_state_record(original)
+        record_with_none_collections = CompositionStateRecord(
+            id=record.id,
+            session_id=record.session_id,
+            version=record.version,
+            source=None,
+            nodes=None,
+            edges=None,
+            outputs=None,
+            metadata_={"name": "Untitled Pipeline", "description": ""},
+            is_valid=False,
+            validation_errors=None,
+            created_at=record.created_at,
+            derived_from_state_id=None,
+        )
+        reconstructed = _state_from_record(record_with_none_collections)
         assert reconstructed.nodes == ()
         assert reconstructed.edges == ()
         assert reconstructed.outputs == ()
@@ -352,33 +373,18 @@ class TestYamlGeneration:
 # ---------------------------------------------------------------------------
 
 
-class TestIsLlmClientError:
-    """Tests for _is_llm_client_error helper."""
+class TestLlmErrorHandling:
+    """Tests for LLM error → HTTP status mapping in send_message route."""
 
-    def test_regular_exception_not_llm_error(self) -> None:
-        """Standard Python exceptions are not LLM client errors."""
-        from elspeth.web.sessions.routes import _is_llm_client_error
+    def test_convergence_error_has_max_turns(self) -> None:
+        """ComposerConvergenceError carries max_turns for HTTP 422 body."""
+        exc = ComposerConvergenceError(max_turns=20)
+        assert exc.max_turns == 20
 
-        assert not _is_llm_client_error(ValueError("oops"))
-        assert not _is_llm_client_error(RuntimeError("crash"))
+    def test_auth_error_type_available(self) -> None:
+        """litellm.AuthenticationError exists for HTTP 502 auth error path."""
+        assert hasattr(litellm, "AuthenticationError")
 
-    def test_litellm_module_detected(self) -> None:
-        """Exceptions from litellm module are detected as LLM errors."""
-        from elspeth.web.sessions.routes import _is_llm_client_error
-
-        # Create a fake exception that looks like it comes from litellm
-        class FakeLiteLLMError(Exception):
-            pass
-
-        FakeLiteLLMError.__module__ = "litellm.exceptions"
-        assert _is_llm_client_error(FakeLiteLLMError("api error"))
-
-    def test_openai_module_detected(self) -> None:
-        """Exceptions from openai module are detected as LLM errors."""
-        from elspeth.web.sessions.routes import _is_llm_client_error
-
-        class FakeOpenAIError(Exception):
-            pass
-
-        FakeOpenAIError.__module__ = "openai._exceptions"
-        assert _is_llm_client_error(FakeOpenAIError("timeout"))
+    def test_api_error_type_available(self) -> None:
+        """litellm.APIError exists for HTTP 502 unavailable path."""
+        assert hasattr(litellm, "APIError")

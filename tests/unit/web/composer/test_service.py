@@ -3,12 +3,14 @@
 from __future__ import annotations
 
 import json
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
+from elspeth.web.catalog.protocol import CatalogService
 from elspeth.web.catalog.schemas import (
     PluginSchemaInfo,
     PluginSummary,
@@ -19,6 +21,34 @@ from elspeth.web.composer.state import (
     CompositionState,
     PipelineMetadata,
 )
+
+
+@dataclass
+class FakeFunction:
+    name: str
+    arguments: str
+
+
+@dataclass
+class FakeToolCall:
+    id: str
+    function: FakeFunction
+
+
+@dataclass
+class FakeMessage:
+    content: str | None
+    tool_calls: list[FakeToolCall] | None
+
+
+@dataclass
+class FakeChoice:
+    message: FakeMessage
+
+
+@dataclass
+class FakeLLMResponse:
+    choices: list[FakeChoice]
 
 
 def _empty_state() -> CompositionState:
@@ -38,7 +68,7 @@ def _mock_catalog() -> MagicMock:
     AC #16: Tests must use real PluginSummary and PluginSchemaInfo instances,
     not plain dicts. Mock return types must match the CatalogService protocol.
     """
-    catalog = MagicMock()
+    catalog = MagicMock(spec=CatalogService)
     catalog.list_sources.return_value = [
         PluginSummary(
             name="csv",
@@ -75,28 +105,27 @@ def _mock_catalog() -> MagicMock:
 def _make_llm_response(
     content: str | None = None,
     tool_calls: list[dict[str, Any]] | None = None,
-) -> MagicMock:
-    """Build a mock LiteLLM response."""
-    response = MagicMock()
-    choice = MagicMock()
-    message = MagicMock()
+) -> FakeLLMResponse:
+    """Build a typed fake LiteLLM response.
 
-    message.content = content
-    message.tool_calls = None
-
+    Uses typed dataclasses instead of MagicMock so tests fail if production
+    code accesses an attribute that doesn't exist on the real response shape.
+    """
+    fake_tool_calls: list[FakeToolCall] | None = None
     if tool_calls:
-        mock_tool_calls = []
-        for tc in tool_calls:
-            mock_tc = MagicMock()
-            mock_tc.id = tc["id"]
-            mock_tc.function.name = tc["name"]
-            mock_tc.function.arguments = json.dumps(tc["arguments"])
-            mock_tool_calls.append(mock_tc)
-        message.tool_calls = mock_tool_calls
+        fake_tool_calls = [
+            FakeToolCall(
+                id=tc["id"],
+                function=FakeFunction(
+                    name=tc["name"],
+                    arguments=json.dumps(tc["arguments"]),
+                ),
+            )
+            for tc in tool_calls
+        ]
 
-    choice.message = message
-    response.choices = [choice]
-    return response
+    message = FakeMessage(content=content, tool_calls=fake_tool_calls)
+    return FakeLLMResponse(choices=[FakeChoice(message=message)])
 
 
 def _make_settings() -> MagicMock:
@@ -230,7 +259,7 @@ class TestComposerConvergence:
             tool_calls=[
                 {
                     "id": "call_loop",
-                    "name": "get_current_state",
+                    "name": "get_expression_grammar",
                     "arguments": {},
                 }
             ],
@@ -256,7 +285,7 @@ class TestComposerConvergence:
             tool_calls=[
                 {
                     "id": "call_tool",
-                    "name": "get_current_state",
+                    "name": "get_expression_grammar",
                     "arguments": {},
                 }
             ],
@@ -285,7 +314,7 @@ class TestComposerConvergence:
             tool_calls=[
                 {
                     "id": "call_tool",
-                    "name": "get_current_state",
+                    "name": "get_expression_grammar",
                     "arguments": {},
                 }
             ],

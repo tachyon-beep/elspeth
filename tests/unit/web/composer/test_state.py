@@ -315,11 +315,10 @@ class TestPipelineMetadata:
         )
         assert restored == m
 
-    def test_from_dict_uses_defaults_for_missing_fields(self) -> None:
-        """Missing fields fall back to dataclass defaults."""
-        restored = PipelineMetadata.from_dict({})
-        assert restored.name == "Untitled Pipeline"
-        assert restored.description == ""
+    def test_from_dict_crashes_on_missing_fields(self) -> None:
+        """Missing fields crash — this is Tier 1 data from to_dict()."""
+        with pytest.raises(KeyError):
+            PipelineMetadata.from_dict({})
 
 
 class TestValidationSummary:

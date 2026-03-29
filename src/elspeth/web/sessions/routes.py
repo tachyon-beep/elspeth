@@ -12,11 +12,12 @@ from uuid import UUID
 
 from fastapi import APIRouter, Depends, File, HTTPException, Query, Request, UploadFile
 
+import litellm
+
 from elspeth.contracts.freeze import deep_thaw
 from elspeth.web.auth.middleware import get_current_user
 from elspeth.web.auth.models import UserIdentity
-from elspeth.web.composer.protocol import ComposerConvergenceError
-from elspeth.web.composer.service import ComposerServiceImpl
+from elspeth.web.composer.protocol import ComposerConvergenceError, ComposerService
 from elspeth.web.composer.state import CompositionState, PipelineMetadata
 from elspeth.web.composer.yaml_generator import generate_yaml
 from elspeth.web.sessions.protocol import (
@@ -35,17 +36,6 @@ from elspeth.web.sessions.schemas import (
     SessionResponse,
     UploadResponse,
 )
-
-
-def _is_llm_client_error(exc: Exception) -> bool:
-    """Check if an exception is an LLM client error (network, auth, etc.).
-
-    Matches exceptions from litellm by module path rather than importing
-    litellm's exception classes directly. This keeps litellm out of the
-    import path for routes.py when litellm is not installed.
-    """
-    module = type(exc).__module__ or ""
-    return module.startswith("litellm") or module.startswith("openai")
 
 
 def _session_response(session: SessionRecord) -> SessionResponse:
@@ -87,27 +77,24 @@ def _state_from_record(record: CompositionStateRecord) -> CompositionState:
     Thaws frozen container fields (MappingProxyType, tuple) back to plain
     dicts/lists so CompositionState.from_dict() can re-freeze them.
     """
+    # Tier 1: metadata_ must always be populated. A None here indicates
+    # database corruption or a migration gap — crash immediately.
+    if record.metadata_ is None:
+        msg = f"CompositionStateRecord {record.id} has None metadata_ — database corruption or migration gap"
+        raise ValueError(msg)
+
     state_dict = {
         "version": record.version,
         "source": deep_thaw(record.source) if record.source is not None else None,
+        # nodes/edges/outputs: None is the legitimate initial state when no
+        # nodes have been added yet. Mapping None -> [] is meaning-preserving
+        # (empty collection, not fabricated data).
         "nodes": [deep_thaw(n) for n in record.nodes] if record.nodes is not None else [],
         "edges": [deep_thaw(e) for e in record.edges] if record.edges is not None else [],
         "outputs": [deep_thaw(o) for o in record.outputs] if record.outputs is not None else [],
-        "metadata": deep_thaw(record.metadata_) if record.metadata_ is not None else {"name": "Untitled Pipeline", "description": ""},
+        "metadata": deep_thaw(record.metadata_),
     }
     return CompositionState.from_dict(state_dict)
-
-
-def _get_composer(request: Request) -> ComposerServiceImpl:
-    """Construct a ComposerServiceImpl from app state.
-
-    Uses catalog_service and settings from app.state. When app.py registers
-    composer_service directly on app.state, this helper can be replaced
-    with a direct attribute access.
-    """
-    catalog = request.app.state.catalog_service
-    settings = request.app.state.settings
-    return ComposerServiceImpl(catalog=catalog, settings=settings)
 
 
 async def _verify_session_ownership(
@@ -236,7 +223,7 @@ def create_session_router() -> APIRouter:
         chat_messages = [{"role": r.role, "content": r.content} for r in records]
 
         # 4. Run the LLM composition loop
-        composer = _get_composer(request)
+        composer: ComposerService = request.app.state.composer_service
         try:
             result = await composer.compose(body.content, chat_messages, state)
         except ComposerConvergenceError as exc:
@@ -248,17 +235,16 @@ def create_session_router() -> APIRouter:
                     "turns_used": exc.max_turns,
                 },
             ) from exc
-        except Exception as exc:
-            # LLM client errors (network, auth, rate-limit) -> 502
-            if _is_llm_client_error(exc):
-                raise HTTPException(
-                    status_code=502,
-                    detail={
-                        "error_type": "llm_unavailable",
-                        "detail": str(exc),
-                    },
-                ) from exc
-            raise
+        except litellm.AuthenticationError as exc:
+            raise HTTPException(
+                status_code=502,
+                detail={"error_type": "llm_auth_error", "detail": str(exc)},
+            ) from exc
+        except litellm.APIError as exc:
+            raise HTTPException(
+                status_code=502,
+                detail={"error_type": "llm_unavailable", "detail": str(exc)},
+            ) from exc
 
         # 5. Persist assistant message
         assistant_msg = await service.add_message(

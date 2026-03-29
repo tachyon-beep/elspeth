@@ -39,6 +39,27 @@ class ComposerConvergenceError(ComposerServiceError):
         self.max_turns = max_turns
 
 
+class ComposerSettings(Protocol):
+    """Protocol for the settings the composer service needs.
+
+    Allows ComposerServiceImpl to depend on a structural type rather than
+    the concrete WebSettings class. Properties are read-only to match
+    frozen Pydantic models.
+    """
+
+    @property
+    def composer_model(self) -> str: ...
+
+    @property
+    def composer_max_turns(self) -> int: ...
+
+    @property
+    def composer_timeout_seconds(self) -> float: ...
+
+    @property
+    def data_dir(self) -> Any: ...
+
+
 class ComposerService(Protocol):
     """Protocol for the LLM-driven pipeline composer.
 

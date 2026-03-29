@@ -148,6 +148,8 @@ class TestSetSource:
         assert result.success is False
         assert result.updated_state.source is None  # unchanged
         assert result.updated_state.version == 1
+        assert result.data is not None
+        assert "foobar" in result.data["error"].lower()
 
 
 class TestUpsertNode:
@@ -355,6 +357,13 @@ class TestSetMetadata:
         assert result.updated_state.metadata.name == "My Pipeline"
         assert result.updated_state.metadata.description == ""  # preserved
         assert result.affected_nodes == ()  # metadata doesn't affect nodes
+
+    def test_missing_patch_key_raises(self) -> None:
+        """LLM omits required 'patch' key — KeyError propagates to service handler."""
+        state = _empty_state()
+        catalog = _mock_catalog()
+        with pytest.raises(KeyError):
+            execute_tool("set_metadata", {"name": "Oops"}, state, catalog)
 
 
 class TestSetOutput:
@@ -598,20 +607,12 @@ class TestDiscoveryTools:
         assert "row" in grammar
         assert isinstance(grammar, str)
 
-    def test_get_current_state_returns_state(self) -> None:
-        state = _empty_state()
-        catalog = _mock_catalog()
-        result = execute_tool("get_current_state", {}, state, catalog)
-        assert result.success is True
-        # State is unchanged
-        assert result.updated_state.version == 1
-
 
 class TestToolDefinitions:
-    def test_has_fourteen_tools(self) -> None:
-        """6 discovery + 8 mutation = 14 tools."""
+    def test_has_thirteen_tools(self) -> None:
+        """5 discovery + 8 mutation = 13 tools."""
         defs = get_tool_definitions()
-        assert len(defs) == 14
+        assert len(defs) == 13
 
     def test_all_have_json_schema(self) -> None:
         for defn in get_tool_definitions():

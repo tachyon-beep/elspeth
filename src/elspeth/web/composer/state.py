@@ -11,9 +11,12 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 from dataclasses import dataclass, replace
-from typing import Any, Self
+from typing import Any, Literal, Self
 
-from elspeth.contracts.freeze import freeze_fields
+from elspeth.contracts.freeze import deep_thaw, freeze_fields
+
+NodeType = Literal["transform", "gate", "aggregation", "coalesce"]
+EdgeType = Literal["on_success", "on_error", "route_true", "route_false", "fork"]
 
 
 @dataclass(frozen=True, slots=True)
@@ -30,8 +33,8 @@ class PipelineMetadata:
     def from_dict(cls, d: dict[str, Any]) -> Self:
         """Reconstruct from a plain dict (inverse of to_dict serialisation)."""
         return cls(
-            name=d.get("name", "Untitled Pipeline"),
-            description=d.get("description", ""),
+            name=d["name"],
+            description=d["description"],
         )
 
 
@@ -86,7 +89,7 @@ class NodeSpec:
     """
 
     id: str
-    node_type: str
+    node_type: NodeType
     plugin: str | None
     input: str
     on_success: str | None
@@ -146,7 +149,7 @@ class EdgeSpec:
     id: str
     from_node: str
     to_node: str
-    edge_type: str
+    edge_type: EdgeType
     label: str | None
 
     @classmethod
@@ -225,14 +228,9 @@ class CompositionState:
     outputs: tuple[OutputSpec, ...]
     metadata: PipelineMetadata
     version: int
-
-    def __post_init__(self) -> None:
-        # nodes, edges, outputs are tuples of frozen dataclasses — tuple is
-        # already immutable and contents are individually frozen. No freeze
-        # guard needed. metadata is a frozen dataclass with scalar-only fields.
-        # Source is a frozen dataclass with its own freeze guard.
-        # Nothing to freeze here beyond what frozen=True provides.
-        pass
+    # No __post_init__ needed: nodes/edges/outputs are tuples of frozen
+    # dataclasses (immutable containers of immutable items). metadata is a
+    # frozen dataclass with scalar-only fields. Source has its own freeze guard.
 
     # --- Mutation methods ---
 
@@ -265,7 +263,14 @@ class CompositionState:
 
     def with_edge(self, edge: EdgeSpec) -> CompositionState:
         """Add or replace an edge (matched by id). Version incremented."""
-        edges = (*tuple(e for e in self.edges if e.id != edge.id), edge)
+        existing_ids = [e.id for e in self.edges]
+        if edge.id in existing_ids:
+            idx = existing_ids.index(edge.id)
+            edge_list = list(self.edges)
+            edge_list[idx] = edge
+            edges = tuple(edge_list)
+        else:
+            edges = (*self.edges, edge)
         return replace(self, edges=edges, version=self.version + 1)
 
     def without_edge(self, edge_id: str) -> CompositionState | None:
@@ -277,7 +282,14 @@ class CompositionState:
 
     def with_output(self, output: OutputSpec) -> CompositionState:
         """Add or replace an output (matched by name). Version incremented."""
-        outputs = (*tuple(o for o in self.outputs if o.name != output.name), output)
+        existing_names = [o.name for o in self.outputs]
+        if output.name in existing_names:
+            idx = existing_names.index(output.name)
+            output_list = list(self.outputs)
+            output_list[idx] = output
+            outputs = tuple(output_list)
+        else:
+            outputs = (*self.outputs, output)
         return replace(self, outputs=outputs, version=self.version + 1)
 
     def without_output(self, output_name: str) -> CompositionState | None:
@@ -305,13 +317,6 @@ class CompositionState:
         The result is suitable for yaml.dump() and JSON serialization.
         """
 
-        def _unfreeze(obj: Any) -> Any:
-            if isinstance(obj, Mapping):
-                return {k: _unfreeze(v) for k, v in obj.items()}
-            if isinstance(obj, (tuple, list)):
-                return [_unfreeze(item) for item in obj]
-            return obj
-
         result: dict[str, Any] = {
             "version": self.version,
             "metadata": {
@@ -328,7 +333,7 @@ class CompositionState:
             result["source"] = {
                 "plugin": self.source.plugin,
                 "on_success": self.source.on_success,
-                "options": _unfreeze(self.source.options),
+                "options": deep_thaw(self.source.options),
                 "on_validation_failure": self.source.on_validation_failure,
             }
 
@@ -340,12 +345,12 @@ class CompositionState:
                 "input": node.input,
                 "on_success": node.on_success,
                 "on_error": node.on_error,
-                "options": _unfreeze(node.options),
+                "options": deep_thaw(node.options),
             }
             if node.condition is not None:
                 node_dict["condition"] = node.condition
             if node.routes is not None:
-                node_dict["routes"] = _unfreeze(node.routes)
+                node_dict["routes"] = deep_thaw(node.routes)
             if node.fork_to is not None:
                 node_dict["fork_to"] = list(node.fork_to)
             if node.branches is not None:
@@ -372,7 +377,7 @@ class CompositionState:
                 {
                     "name": output.name,
                     "plugin": output.plugin,
-                    "options": _unfreeze(output.options),
+                    "options": deep_thaw(output.options),
                     "on_write_failure": output.on_write_failure,
                 }
             )

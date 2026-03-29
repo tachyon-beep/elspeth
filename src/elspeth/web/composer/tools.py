@@ -13,7 +13,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from elspeth.contracts.freeze import freeze_fields
+from elspeth.contracts.freeze import deep_thaw, freeze_fields
 from elspeth.web.catalog.protocol import CatalogService
 from elspeth.web.composer.state import (
     CompositionState,
@@ -47,6 +47,8 @@ class ToolResult:
 
     def __post_init__(self) -> None:
         freeze_fields(self, "affected_nodes")
+        if self.data is not None:
+            freeze_fields(self, "data")
 
     def to_dict(self) -> dict[str, Any]:
         """Serialize to a dict suitable for LLM tool response."""
@@ -60,7 +62,7 @@ class ToolResult:
             "version": self.updated_state.version,
         }
         if self.data is not None:
-            result["data"] = self.data
+            result["data"] = deep_thaw(self.data)
         return result
 
 
@@ -107,7 +109,7 @@ def get_expression_grammar() -> str:
 def get_tool_definitions() -> list[dict[str, Any]]:
     """Return JSON Schema tool definitions for the LLM.
 
-    Returns 14 tools: 6 discovery, 8 mutation.
+    Returns 13 tools: 5 discovery, 8 mutation.
     """
     return [
         # Discovery tools
@@ -148,11 +150,6 @@ def get_tool_definitions() -> list[dict[str, Any]]:
         {
             "name": "get_expression_grammar",
             "description": "Get the gate expression syntax reference.",
-            "parameters": {"type": "object", "properties": {}, "required": []},
-        },
-        {
-            "name": "get_current_state",
-            "description": "Get the full current pipeline composition state.",
             "parameters": {"type": "object", "properties": {}, "required": []},
         },
         # Mutation tools
@@ -327,19 +324,12 @@ def execute_tool(
             schema = catalog.get_schema(arguments["plugin_type"], arguments["name"])
             return _discovery_result(state, schema)
         except (ValueError, KeyError) as exc:
+            # ValueError: catalog contract for "unknown plugin/type"
+            # KeyError: LLM omitted required argument (Tier 3)
             return _failure_result(state, str(exc))
 
     if tool_name == "get_expression_grammar":
         return _discovery_result(state, get_expression_grammar())
-
-    if tool_name == "get_current_state":
-        serialized = state.to_dict()
-        validation = state.validate()
-        serialized["validation"] = {
-            "is_valid": validation.is_valid,
-            "errors": list(validation.errors),
-        }
-        return _discovery_result(state, serialized)
 
     # Mutation tools
     if tool_name == "set_source":
@@ -581,10 +571,7 @@ def _execute_set_metadata(
     state: CompositionState,
 ) -> ToolResult:
     """Update pipeline metadata."""
-    patch = args.get("patch", args)
-    # If the LLM passes fields directly instead of under "patch"
-    if "patch" in args and isinstance(args["patch"], dict):
-        patch = args["patch"]
+    patch = args["patch"]
 
     new_state = state.with_metadata(patch)
     return _mutation_result(new_state, ())
