@@ -28,6 +28,7 @@ from elspeth.web.sessions.protocol import (
     ChatMessageRecord,
     CompositionStateData,
     CompositionStateRecord,
+    InvalidForkTargetError,
     SessionRecord,
     SessionServiceProtocol,
 )
@@ -469,21 +470,15 @@ def create_session_router() -> APIRouter:
         settings = request.app.state.settings
 
         try:
-            fork_message_id = UUID(body.from_message_id)
-        except ValueError:
-            raise HTTPException(
-                status_code=400,
-                detail="Invalid message ID format",
-            ) from None
-
-        try:
             new_session, new_messages, copied_state = await service.fork_session(
                 source_session_id=session_id,
-                fork_message_id=fork_message_id,
+                fork_message_id=body.from_message_id,
                 new_message_content=body.new_message_content,
                 user_id=user.user_id,
                 auth_provider_type=settings.auth_provider,
             )
+        except InvalidForkTargetError as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
         except ValueError as exc:
             raise HTTPException(status_code=404, detail=str(exc)) from exc
 

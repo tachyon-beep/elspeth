@@ -158,6 +158,18 @@ class RunRecord:
     pipeline_yaml: str | None
 
 
+class InvalidForkTargetError(Exception):
+    """Raised when attempting to fork from a non-user message.
+
+    Route handlers catching this error should return 422.
+    """
+
+    def __init__(self, message_id: str, role: str) -> None:
+        self.message_id = message_id
+        self.role = role
+        super().__init__(f"Can only fork from user messages, got role '{role}' for message {message_id}")
+
+
 class RunAlreadyActiveError(Exception):
     """Raised when attempting to create a run while one is already active.
 

@@ -18,6 +18,7 @@ from elspeth.web.config import WebSettings
 from elspeth.web.sessions.models import metadata
 from elspeth.web.sessions.protocol import (
     CompositionStateData,
+    InvalidForkTargetError,
 )
 from elspeth.web.sessions.routes import create_session_router
 from elspeth.web.sessions.service import SessionServiceImpl
@@ -166,21 +167,6 @@ class TestForkSession:
         assert original_session.title == "Original"
 
     @pytest.mark.asyncio
-    async def test_fork_from_wrong_user_raises(self, service) -> None:
-        """Fork fails if user doesn't own the source session."""
-        session = await service.create_session("alice", "Alice's Session", "local")
-        msg = await service.add_message(session.id, "user", "Hello")
-
-        with pytest.raises(ValueError, match="not owned"):
-            await service.fork_session(
-                source_session_id=session.id,
-                fork_message_id=msg.id,
-                new_message_content="Hi",
-                user_id="bob",
-                auth_provider_type="local",
-            )
-
-    @pytest.mark.asyncio
     async def test_fork_from_nonexistent_message_raises(self, service) -> None:
         """Fork fails if message doesn't exist in session."""
         session = await service.create_session("alice", "Test", "local")
@@ -202,7 +188,7 @@ class TestForkSession:
         await service.add_message(session.id, "user", "Hello")
         assistant_msg = await service.add_message(session.id, "assistant", "Hi")
 
-        with pytest.raises(ValueError, match="user messages"):
+        with pytest.raises(InvalidForkTargetError):
             await service.fork_session(
                 source_session_id=session.id,
                 fork_message_id=assistant_msg.id,
@@ -437,3 +423,114 @@ class TestForkEndpoint:
         # Verify content matches
         content = await blob_service.read_blob_content(new_blobs[0].id)
         assert content == b"a,b,c\n1,2,3"
+
+    @pytest.mark.asyncio
+    async def test_fork_preserves_original_messages_status_check(self, tmp_path) -> None:
+        """Fork endpoint returns 201 and original session is unchanged."""
+        app, service, _ = _make_fork_app(tmp_path)
+        client = TestClient(app)
+
+        session = await service.create_session("alice", "Original", "local")
+        await service.add_message(session.id, "user", "First")
+        msg2 = await service.add_message(session.id, "user", "Second")
+
+        msgs_before = await service.get_messages(session.id)
+
+        response = client.post(
+            f"/api/sessions/{session.id}/fork",
+            json={
+                "from_message_id": str(msg2.id),
+                "new_message_content": "Second edited",
+            },
+        )
+
+        assert response.status_code == 201
+        msgs_after = await service.get_messages(session.id)
+        assert len(msgs_after) == len(msgs_before)
+
+    @pytest.mark.asyncio
+    async def test_fork_from_assistant_message_returns_422(self, tmp_path) -> None:
+        """Forking from an assistant message returns 422, not 404."""
+        app, service, _ = _make_fork_app(tmp_path)
+        client = TestClient(app)
+
+        session = await service.create_session("alice", "Test", "local")
+        await service.add_message(session.id, "user", "Hello")
+        assistant_msg = await service.add_message(session.id, "assistant", "Hi")
+
+        response = client.post(
+            f"/api/sessions/{session.id}/fork",
+            json={
+                "from_message_id": str(assistant_msg.id),
+                "new_message_content": "Hi",
+            },
+        )
+
+        assert response.status_code == 422
+
+    @pytest.mark.asyncio
+    async def test_fork_blob_quota_exceeded_returns_413(self, tmp_path) -> None:
+        """Fork returns 413 and cleans up when blob quota is exceeded."""
+        # Create blob service with very small quota
+        from sqlalchemy import create_engine
+        from sqlalchemy.pool import StaticPool
+
+        engine = create_engine(
+            "sqlite:///:memory:",
+            connect_args={"check_same_thread": False},
+            poolclass=StaticPool,
+        )
+        metadata.create_all(engine)
+        session_service = SessionServiceImpl(engine)
+        # Source blob service has generous quota; we'll swap to a tight one for the fork
+        blob_service = BlobServiceImpl(engine, tmp_path, max_storage_per_session=500)
+
+        app = FastAPI()
+
+        identity = UserIdentity(user_id="alice", username="alice")
+
+        async def mock_user():
+            return identity
+
+        app.dependency_overrides[get_current_user] = mock_user
+        app.state.session_service = session_service
+        app.state.blob_service = blob_service
+        app.state.settings = WebSettings(data_dir=tmp_path)
+        app.state.composer_service = None
+
+        from elspeth.web.middleware.rate_limit import ComposerRateLimiter
+
+        app.state.rate_limiter = ComposerRateLimiter(limit=100)
+        router = create_session_router()
+        app.include_router(router)
+
+        client = TestClient(app)
+
+        # Create source session with blobs using the generous-quota service
+        session = await session_service.create_session("alice", "Original", "local")
+        await blob_service.create_blob(
+            session.id,
+            "big.csv",
+            b"x" * 200,
+            "text/csv",
+        )
+
+        # Now swap the blob service on the app to one with a tiny quota (50 bytes)
+        # so the fork's copy will exceed the target session quota
+        tight_blob_service = BlobServiceImpl(engine, tmp_path, max_storage_per_session=50)
+        app.state.blob_service = tight_blob_service
+        msg = await session_service.add_message(session.id, "user", "Go")
+
+        response = client.post(
+            f"/api/sessions/{session.id}/fork",
+            json={
+                "from_message_id": str(msg.id),
+                "new_message_content": "Go edited",
+            },
+        )
+
+        assert response.status_code == 413
+
+        # The partially created session should have been cleaned up
+        sessions = await session_service.list_sessions("alice", "local")
+        assert len(sessions) == 1  # Only the original remains

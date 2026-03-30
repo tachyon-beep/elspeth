@@ -449,26 +449,55 @@ class BlobServiceImpl:
     ) -> list[BlobRecord]:
         """Copy all ready blobs from source session to target session.
 
-        Creates new blob records with new IDs and new storage paths.
-        Copies backing files to the new session's blob directory.
-        Respects the per-session quota — raises BlobQuotaExceededError
-        if the target session can't accommodate the copied blobs.
+        Pre-checks total source blob size against the target session's
+        quota before copying any files. This eliminates partial-write
+        scenarios — either all blobs are copied or none are.
+
+        On any failure during the copy loop, cleans up files already
+        written before re-raising.
         """
         source_blobs = await self.list_blobs(source_session_id, limit=1000)
         ready_blobs = [b for b in source_blobs if b.status == "ready"]
 
+        if not ready_blobs:
+            return []
+
+        # Pre-check: will the total source blob size fit in the target quota?
+        total_source_bytes = sum(b.size_bytes for b in ready_blobs)
+        target_session_id_str = str(target_session_id)
+
+        def _check_quota() -> int:
+            with self._engine.connect() as conn:
+                current = conn.execute(
+                    select(func.coalesce(func.sum(blobs_table.c.size_bytes), 0)).where(blobs_table.c.session_id == target_session_id_str)
+                ).scalar()
+                return int(current)  # type: ignore[arg-type]
+
+        current_usage = await self._run_sync(_check_quota)
+        if current_usage + total_source_bytes > self._max_storage_per_session:
+            raise BlobQuotaExceededError(target_session_id_str, current_usage, self._max_storage_per_session)
+
+        # Copy blobs — clean up partial writes on any failure
         copied: list[BlobRecord] = []
-        for blob in ready_blobs:
-            content = await self.read_blob_content(blob.id)
-            new_blob = await self.create_blob(
-                session_id=target_session_id,
-                filename=blob.filename,
-                content=content,
-                mime_type=blob.mime_type,
-                created_by=blob.created_by,
-                source_description=f"copied from session fork (original: {blob.id})",
-            )
-            copied.append(new_blob)
+        try:
+            for blob in ready_blobs:
+                content = await self.read_blob_content(blob.id)
+                new_blob = await self.create_blob(
+                    session_id=target_session_id,
+                    filename=blob.filename,
+                    content=content,
+                    mime_type=blob.mime_type,
+                    created_by=blob.created_by,
+                    source_description=f"copied from session fork (original: {blob.id})",
+                )
+                copied.append(new_blob)
+        except BaseException:
+            # Clean up files for any blobs already written
+            for written_blob in copied:
+                storage = Path(written_blob.storage_path)
+                if storage.exists():
+                    storage.unlink(missing_ok=True)
+            raise
 
         return copied
 

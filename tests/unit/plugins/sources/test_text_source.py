@@ -30,7 +30,7 @@ class TestTextSource:
                 "on_validation_failure": QUARANTINE_SINK,
             }
         )
-        assert hasattr(source, "output_schema")
+        assert source.output_schema is not None
 
     def test_loads_one_row_per_line(self, tmp_path: Path, ctx: PluginContext) -> None:
         from elspeth.plugins.sources.text_source import TextSource
@@ -156,6 +156,5 @@ class TestTextSource:
     def test_has_plugin_version(self) -> None:
         from elspeth.plugins.sources.text_source import TextSource
 
-        assert hasattr(TextSource, "plugin_version")
         assert isinstance(TextSource.plugin_version, str)
         assert TextSource.plugin_version != "0.0.0"

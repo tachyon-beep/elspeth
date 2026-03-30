@@ -801,20 +801,21 @@ class SessionServiceImpl:
     ) -> tuple[SessionRecord, list[ChatMessageRecord], CompositionStateRecord | None]:
         """Fork a session from a specific user message.
 
+        All writes happen in a single transaction — if anything fails,
+        the entire fork is rolled back with no partial state.
+
         Creates a new session containing:
-        1. All messages BEFORE the fork message
-        2. A synthetic system message noting the fork
-        3. The new edited user message
-        4. Composition state copied from the fork message's pre-send state
+        1. Composition state copied from the fork message's pre-send state
+        2. All messages BEFORE the fork message (with NULL state provenance)
+        3. A synthetic system message noting the fork
+        4. The new edited user message (provenance = copied state, not source)
 
         Returns (new_session, new_messages, copied_state_or_none).
         """
-        # Load source session and verify ownership
-        source_session = await self.get_session(source_session_id)
-        if source_session.user_id != user_id:
-            raise ValueError(f"Session {source_session_id} not owned by {user_id}")
+        from elspeth.web.sessions.protocol import InvalidForkTargetError
 
-        # Load all messages from source session
+        # Load source data (read-only, outside the write transaction)
+        source_session = await self.get_session(source_session_id)
         source_messages = await self.get_messages(source_session_id, limit=10000)
 
         # Find the fork message — must be a user message
@@ -829,69 +830,159 @@ class SessionServiceImpl:
         if fork_msg is None:
             raise ValueError(f"Message {fork_message_id} not found in session {source_session_id}")
         if fork_msg.role != "user":
-            raise ValueError(f"Can only fork from user messages, got role '{fork_msg.role}'")
+            raise InvalidForkTargetError(str(fork_message_id), fork_msg.role)
 
-        # Messages to copy: everything BEFORE the fork message
         messages_to_copy = source_messages[:fork_idx]
-
-        # Get the pre-send composition state from the fork message
         pre_send_state_id = fork_msg.composition_state_id
 
-        # Create the forked session
+        # Load source composition state if it exists (read-only)
+        source_state_record: CompositionStateRecord | None = None
+        if pre_send_state_id is not None:
+            source_state_record = await self.get_state(pre_send_state_id)
+
+        # Prepare IDs and timestamps upfront
+        new_session_id = uuid.uuid4()
+        new_session_id_str = str(new_session_id)
+        now = self._now()
         title = f"{source_session.title} (fork)"
-        new_session = await self.create_session(
+
+        # Prepare state copy if needed
+        copied_state_id = uuid.uuid4() if source_state_record is not None else None
+        copied_state_id_str = str(copied_state_id) if copied_state_id else None
+
+        # Prepare all message rows upfront
+        msg_records_data: list[dict[str, Any]] = []
+        for msg in messages_to_copy:
+            msg_records_data.append(
+                {
+                    "id": str(uuid.uuid4()),
+                    "session_id": new_session_id_str,
+                    "role": msg.role,
+                    "content": msg.content,
+                    "tool_calls": deep_thaw(msg.tool_calls) if msg.tool_calls else None,
+                    "created_at": now,
+                    "composition_state_id": None,  # Don't reference source session states
+                }
+            )
+        # System message
+        system_msg_id = str(uuid.uuid4())
+        msg_records_data.append(
+            {
+                "id": system_msg_id,
+                "session_id": new_session_id_str,
+                "role": "system",
+                "content": "Conversation forked from an earlier point.",
+                "tool_calls": None,
+                "created_at": now,
+                "composition_state_id": None,
+            }
+        )
+        # New edited user message — provenance points to COPIED state, not source
+        new_user_msg_id = str(uuid.uuid4())
+        msg_records_data.append(
+            {
+                "id": new_user_msg_id,
+                "session_id": new_session_id_str,
+                "role": "user",
+                "content": new_message_content,
+                "tool_calls": None,
+                "created_at": now,
+                "composition_state_id": copied_state_id_str,
+            }
+        )
+
+        def _enveloped(val: Any) -> Any:
+            raw = deep_thaw(val)
+            if raw is None:
+                return None
+            return {"_version": 1, "data": raw}
+
+        def _sync() -> int | None:
+            """Single atomic transaction for the entire fork."""
+            with self._engine.begin() as conn:
+                # 1. Create session
+                conn.execute(
+                    insert(sessions_table).values(
+                        id=new_session_id_str,
+                        user_id=user_id,
+                        auth_provider_type=auth_provider_type,
+                        title=title,
+                        created_at=now,
+                        updated_at=now,
+                        forked_from_session_id=str(source_session_id),
+                        forked_from_message_id=str(fork_message_id),
+                    )
+                )
+
+                # 2. Copy composition state (before messages, so FK is valid)
+                state_version: int | None = None
+                if source_state_record is not None and copied_state_id_str is not None:
+                    state_version = 1
+                    conn.execute(
+                        insert(composition_states_table).values(
+                            id=copied_state_id_str,
+                            session_id=new_session_id_str,
+                            version=1,
+                            source=_enveloped(source_state_record.source),
+                            nodes=_enveloped(source_state_record.nodes),
+                            edges=_enveloped(source_state_record.edges),
+                            outputs=_enveloped(source_state_record.outputs),
+                            metadata_=_enveloped(source_state_record.metadata_),
+                            is_valid=source_state_record.is_valid,
+                            validation_errors=deep_thaw(source_state_record.validation_errors),
+                            derived_from_state_id=None,
+                            created_at=now,
+                        )
+                    )
+
+                # 3. Insert all messages in batch
+                if msg_records_data:
+                    conn.execute(insert(chat_messages_table), msg_records_data)
+
+                return state_version
+
+        state_version = await self._run_sync(_sync)
+
+        # Build return records from the pre-computed data
+        new_session = SessionRecord(
+            id=new_session_id,
             user_id=user_id,
-            title=title,
             auth_provider_type=auth_provider_type,
+            title=title,
+            created_at=now,
+            updated_at=now,
             forked_from_session_id=source_session_id,
             forked_from_message_id=fork_message_id,
         )
 
-        # Copy messages into the new session (preserving order)
-        new_messages: list[ChatMessageRecord] = []
-        for msg in messages_to_copy:
-            copied = await self.add_message(
-                new_session.id,
-                msg.role,
-                msg.content,
-                tool_calls=msg.tool_calls,
-                composition_state_id=msg.composition_state_id,
+        new_messages = [
+            ChatMessageRecord(
+                id=UUID(d["id"]),
+                session_id=new_session_id,
+                role=d["role"],
+                content=d["content"],
+                tool_calls=d["tool_calls"],
+                created_at=now,
+                composition_state_id=UUID(d["composition_state_id"]) if d["composition_state_id"] else None,
             )
-            new_messages.append(copied)
+            for d in msg_records_data
+        ]
 
-        # Add synthetic system message indicating the fork
-        system_msg = await self.add_message(
-            new_session.id,
-            "system",
-            "Conversation forked from an earlier point.",
-        )
-        new_messages.append(system_msg)
-
-        # Add the new edited user message with pre-send state provenance
-        new_user_msg = await self.add_message(
-            new_session.id,
-            "user",
-            new_message_content,
-            composition_state_id=pre_send_state_id,
-        )
-        new_messages.append(new_user_msg)
-
-        # Copy composition state into the forked session if it exists
         copied_state: CompositionStateRecord | None = None
-        if pre_send_state_id is not None:
-            source_state = await self.get_state(pre_send_state_id)
-            state_data = CompositionStateData(
-                source=source_state.source,
-                nodes=source_state.nodes,
-                edges=source_state.edges,
-                outputs=source_state.outputs,
-                metadata_=source_state.metadata_,
-                is_valid=source_state.is_valid,
-                validation_errors=source_state.validation_errors,
-            )
-            copied_state = await self.save_composition_state(
-                new_session.id,
-                state_data,
+        if source_state_record is not None and copied_state_id is not None and state_version is not None:
+            copied_state = CompositionStateRecord(
+                id=copied_state_id,
+                session_id=new_session_id,
+                version=state_version,
+                source=source_state_record.source,
+                nodes=source_state_record.nodes,
+                edges=source_state_record.edges,
+                outputs=source_state_record.outputs,
+                metadata_=source_state_record.metadata_,
+                is_valid=source_state_record.is_valid,
+                validation_errors=source_state_record.validation_errors,
+                created_at=now,
+                derived_from_state_id=None,
             )
 
         return new_session, new_messages, copied_state

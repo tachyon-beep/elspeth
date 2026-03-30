@@ -78,7 +78,7 @@ class CompositionStateResponse(BaseModel):
 class ForkSessionRequest(BaseModel):
     """Request body for POST /api/sessions/{id}/fork."""
 
-    from_message_id: str
+    from_message_id: UUID
     new_message_content: str
 
 
