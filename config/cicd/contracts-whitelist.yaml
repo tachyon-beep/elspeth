@@ -18,6 +18,8 @@ allowed_external_types:
   - "core/dependency_config:DependencyRunResult"
   - "core/dependency_config:CommencementGateResult"
   - "core/dependency_config:PreflightResult"
+  # Secret loader types - used by web secret stores (user_store, server_store)
+  - "core/security/secret_loader:SecretRef"
 
 # dict[str, Any] patterns that are intentional
 # Format: "file_path:context:param_name"

@@ -118,6 +118,8 @@ instantiation-*.txt
 .env.local
 .env.*.local
 secrets/
+!src/elspeth/**/secrets/
+!tests/**/secrets/
 credentials.json
 *.pem
 *.key

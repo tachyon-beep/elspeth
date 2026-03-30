@@ -19,6 +19,7 @@ from sqlalchemy import (
     ForeignKey,
     Index,
     Integer,
+    LargeBinary,
     MetaData,
     String,
     Table,
@@ -205,3 +206,17 @@ run_events_table = Table(
         name="ck_run_events_type",
     ),
 )
+
+user_secrets_table = Table(
+    "user_secrets",
+    metadata,
+    Column("id", String, primary_key=True),
+    Column("name", String, nullable=False),
+    Column("user_id", String, nullable=False),
+    Column("encrypted_value", LargeBinary, nullable=False),
+    Column("salt", LargeBinary, nullable=False),
+    Column("created_at", DateTime, nullable=False),
+    Column("updated_at", DateTime, nullable=False),
+    UniqueConstraint("name", "user_id", name="uq_user_secret_name_user"),
+)
+Index("ix_user_secrets_user_id", user_secrets_table.c.user_id)

@@ -38,6 +38,12 @@ class WebSettings(BaseModel):
     )
     max_upload_bytes: int = Field(default=100 * 1024 * 1024, ge=1)
     max_blob_storage_per_session_bytes: int = Field(default=500 * 1024 * 1024, ge=1)
+    server_secret_allowlist: tuple[str, ...] = (
+        "OPENROUTER_API_KEY",
+        "OPENAI_API_KEY",
+        "ANTHROPIC_API_KEY",
+        "AZURE_API_KEY",
+    )
     orphan_run_max_age_seconds: int = Field(default=3600, ge=60)
 
     # Execution infrastructure — defaults derive from data_dir when not explicitly set

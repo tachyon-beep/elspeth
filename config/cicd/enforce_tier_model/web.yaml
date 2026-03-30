@@ -527,6 +527,32 @@ allow_hits:
   safety: "Absent keys are treated honestly as 'no path provided' and the check is recorded as skipped/passed"
   expires: null
 
+# ServerSecretStore — os.environ.get() is Tier 3 (env vars are external input)
+- key: web/secrets/server_store.py:R1:ServerSecretStore:get_secret:fp=f952e9c1c17a704e
+  owner: web-secrets
+  reason: "Tier 3 boundary — os.environ.get() reads external env var; unset/empty raises SecretNotFoundError"
+  safety: "Missing env var raises SecretNotFoundError; no default fabrication"
+  expires: null
+
+- key: web/secrets/server_store.py:R1:ServerSecretStore:list_secrets:fp=723efd77972a1e21
+  owner: web-secrets
+  reason: "Tier 3 boundary — os.environ.get() checks env var presence for availability metadata"
+  safety: "Only produces bool available flag; no secret value exposed"
+  expires: null
+
+# WebSecretService — chained resolution catches SecretNotFoundError for fallback
+- key: web/secrets/service.py:R6:WebSecretService:resolve:fp=9c915e3f931310ca
+  owner: web-secrets
+  reason: "Chained resolution — user store miss falls through to server store; SecretNotFoundError is the expected miss signal"
+  safety: "Only SecretNotFoundError is caught; all other exceptions propagate; no data loss"
+  expires: null
+
+- key: web/secrets/service.py:R6:WebSecretService:resolve:fp=e0a95062e1360fdb
+  owner: web-secrets
+  reason: "Chained resolution — server store miss returns None; SecretNotFoundError is the expected miss signal"
+  safety: "Only SecretNotFoundError is caught; caller receives None for genuine absence"
+  expires: null
+
 per_file_rules:
 # Composer tools — mutation executors parse LLM tool call arguments (Tier 3).
 - pattern: web/composer/tools.py
