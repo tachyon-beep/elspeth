@@ -125,6 +125,7 @@ def _setup_transform_with_mock_provider(chunks=None, **config_overrides):
     mock_provider = MagicMock()
     mock_provider.search.return_value = chunks or []
     mock_provider.check_readiness.return_value = _ready_provider_result()
+    mock_provider.last_skipped_count = 0
 
     mock_config_cls = MagicMock(return_value=MagicMock())
     mock_factory = MagicMock(return_value=mock_provider)
@@ -279,6 +280,7 @@ class TestRAGTransformReadinessGuard:
         from elspeth.contracts.probes import CollectionReadinessResult
 
         mock_provider = MagicMock()
+        mock_provider.last_skipped_count = 0
         if count > 0:
             message = f"Collection '{collection}' has {count} documents"
         elif reachable:

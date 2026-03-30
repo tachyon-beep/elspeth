@@ -249,21 +249,7 @@ class DataverseSource(BaseSource):
         self._telemetry_emit = ctx.telemetry_emit
 
         # Construct credential (azure-identity) — validates early
-        from azure.identity import ClientSecretCredential, ManagedIdentityCredential
-
-        credential: ClientSecretCredential | ManagedIdentityCredential
-        if self._auth_config.method == "service_principal":
-            # Pydantic validator guarantees these are non-None for service_principal
-            assert self._auth_config.tenant_id is not None
-            assert self._auth_config.client_id is not None
-            assert self._auth_config.client_secret is not None
-            credential = ClientSecretCredential(
-                tenant_id=self._auth_config.tenant_id,
-                client_id=self._auth_config.client_id,
-                client_secret=self._auth_config.client_secret,
-            )
-        else:
-            credential = ManagedIdentityCredential()
+        credential = self._auth_config.create_credential()
 
         # Obtain rate limiter (with null guard per spec)
         limiter = ctx.rate_limit_registry.get_limiter("dataverse_source") if ctx.rate_limit_registry is not None else None
@@ -517,6 +503,8 @@ class DataverseSource(BaseSource):
                     latency_ms=page.latency_ms,
                     provider="dataverse",
                 )
+            except (FrameworkBugError, AuditIntegrityError):
+                raise
             except Exception as exc:
                 raise AuditIntegrityError(
                     f"Failed to record successful page fetch to audit trail "
@@ -538,14 +526,23 @@ class DataverseSource(BaseSource):
                 "status_code": error.status_code,
                 "reason": error_reason,
             }
-            ctx.record_call(
-                call_type=CallType.HTTP,
-                status=CallStatus.ERROR,
-                request_data=request_data,
-                error=error_data,
-                latency_ms=error.latency_ms,
-                provider="dataverse",
-            )
+            try:
+                ctx.record_call(
+                    call_type=CallType.HTTP,
+                    status=CallStatus.ERROR,
+                    request_data=request_data,
+                    error=error_data,
+                    latency_ms=error.latency_ms,
+                    provider="dataverse",
+                )
+            except (FrameworkBugError, AuditIntegrityError):
+                raise
+            except Exception as exc:
+                raise AuditIntegrityError(
+                    f"Failed to record error page fetch to audit trail "
+                    f"(url={url!r}, error={error!r}). "
+                    f"Error occurred but audit record is missing."
+                ) from exc
             if error.latency_ms is not None:
                 self._emit_telemetry(
                     ctx=ctx,

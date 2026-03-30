@@ -200,20 +200,7 @@ class DataverseSink(BaseSink):
         self._run_id = ctx.run_id
         self._telemetry_emit = ctx.telemetry_emit
 
-        from azure.identity import ClientSecretCredential, ManagedIdentityCredential
-
-        credential: ClientSecretCredential | ManagedIdentityCredential
-        if self._auth_config.method == "service_principal":
-            assert self._auth_config.tenant_id is not None
-            assert self._auth_config.client_id is not None
-            assert self._auth_config.client_secret is not None
-            credential = ClientSecretCredential(
-                tenant_id=self._auth_config.tenant_id,
-                client_id=self._auth_config.client_id,
-                client_secret=self._auth_config.client_secret,
-            )
-        else:
-            credential = ManagedIdentityCredential()
+        credential = self._auth_config.create_credential()
 
         # Obtain rate limiter (with null guard)
         limiter = ctx.rate_limit_registry.get_limiter("dataverse_sink") if ctx.rate_limit_registry is not None else None
@@ -340,11 +327,6 @@ class DataverseSink(BaseSink):
                 )
             )
 
-        # Compute content hash BEFORE writing (proves intent)
-        canonical_payload = canonical_json(rows).encode("utf-8")
-        content_hash = hashlib.sha256(canonical_payload).hexdigest()
-        total_size = len(canonical_payload)
-
         # Client and key field must be set by on_start/__init__
         assert self._client is not None, "on_start() must be called before write()"
         assert self._alternate_key_pipeline_field is not None
@@ -372,6 +354,14 @@ class DataverseSink(BaseSink):
             url = self._build_upsert_url(key_value)
             payload = self._map_row(row)
             prepared.append((url, payload))
+
+        # Compute content hash from the mapped payloads (what we actually send
+        # to Dataverse), not the full pipeline rows. This allows an auditor to
+        # independently verify the hash against the Dataverse-side data.
+        mapped_payloads = [payload for _, payload in prepared]
+        canonical_payload = canonical_json(mapped_payloads).encode("utf-8")
+        content_hash = hashlib.sha256(canonical_payload).hexdigest()
+        total_size = len(canonical_payload)
 
         # All pre-processing succeeded — safe to make HTTP calls
         for url, payload in prepared:

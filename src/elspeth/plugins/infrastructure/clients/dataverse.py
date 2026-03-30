@@ -154,6 +154,32 @@ class DataverseAuthConfig(BaseModel):
                 raise ValueError(f"service_principal auth requires: {', '.join(missing)}")
         return self
 
+    def create_credential(self) -> ClientSecretCredential | ManagedIdentityCredential:
+        """Construct an azure-identity credential from this config.
+
+        Returns the appropriate credential type based on the configured
+        auth method. Fields are guaranteed non-None by model_validator
+        for service_principal mode.
+
+        Returns:
+            ClientSecretCredential or ManagedIdentityCredential
+
+        Raises:
+            ImportError: If azure-identity is not installed.
+        """
+        from azure.identity import ClientSecretCredential, ManagedIdentityCredential
+
+        if self.method == "service_principal":
+            assert self.tenant_id is not None
+            assert self.client_id is not None
+            assert self.client_secret is not None
+            return ClientSecretCredential(
+                tenant_id=self.tenant_id,
+                client_id=self.client_id,
+                client_secret=self.client_secret,
+            )
+        return ManagedIdentityCredential()
+
 
 def _validate_domain_allowlist(hostname: str, additional_domains: tuple[str, ...] = ()) -> bool:
     """Validate hostname against Dataverse domain allowlist.
@@ -783,20 +809,7 @@ class DataverseClient:
         Args:
             auth_config: Auth configuration to rebuild from
         """
-        from azure.identity import ClientSecretCredential, ManagedIdentityCredential
-
-        if auth_config.method == "service_principal":
-            assert auth_config.tenant_id is not None
-            assert auth_config.client_id is not None
-            assert auth_config.client_secret is not None
-            self._credential = ClientSecretCredential(
-                tenant_id=auth_config.tenant_id,
-                client_id=auth_config.client_id,
-                client_secret=auth_config.client_secret,
-            )
-        else:
-            self._credential = ManagedIdentityCredential()
-
+        self._credential = auth_config.create_credential()
         self._auth_retried = True
 
     def close(self) -> None:
