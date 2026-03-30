@@ -107,6 +107,21 @@ class TestAuthenticate:
             await provider.authenticate(expired_token)
 
     @pytest.mark.asyncio
+    async def test_authenticate_deleted_user_rejected(self, provider) -> None:
+        """A deleted user's JWT must be rejected by authenticate()."""
+        import sqlite3
+
+        provider.create_user("alice", "pw", display_name="Alice")
+        token = provider.login("alice", "pw")
+
+        # Delete the user behind the provider's back
+        with sqlite3.connect(str(provider._db_path)) as conn:
+            conn.execute("DELETE FROM users WHERE user_id = ?", ("alice",))
+
+        with pytest.raises(AuthenticationError, match="Invalid token"):
+            await provider.authenticate(token)
+
+    @pytest.mark.asyncio
     async def test_authenticate_wrong_secret_key(self, tmp_path) -> None:
         """Token signed with a different key should fail."""
         import jwt as pyjwt
@@ -169,7 +184,7 @@ class TestGetUserInfo:
         with sqlite3.connect(str(provider._db_path)) as conn:
             conn.execute("DELETE FROM users WHERE user_id = ?", ("alice",))
 
-        with pytest.raises(AuthenticationError, match="User not found"):
+        with pytest.raises(AuthenticationError, match="Invalid token"):
             await provider.get_user_info(token)
 
 

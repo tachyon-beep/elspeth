@@ -9,7 +9,7 @@ import pytest
 from fastapi import Depends
 from starlette.testclient import TestClient
 
-from elspeth.web.app import create_app
+from elspeth.web.app import _settings_from_env, create_app
 from elspeth.web.config import WebSettings
 from elspeth.web.dependencies import get_settings
 
@@ -188,3 +188,48 @@ class TestExecutionWiring:
         assert "/api/runs/{run_id}" in route_paths
         assert "/api/runs/{run_id}/cancel" in route_paths
         assert "/ws/runs/{run_id}" in route_paths
+
+
+class TestSettingsFromEnv:
+    """Tests for _settings_from_env() environment variable parsing."""
+
+    def test_parses_json_tuple_values(self, monkeypatch) -> None:
+        """JSON-encoded lists are converted to tuples for tuple-typed fields."""
+        monkeypatch.setenv("ELSPETH_WEB__CORS_ORIGINS", '["https://app.example.com"]')
+        settings = _settings_from_env()
+        assert settings.cors_origins == ("https://app.example.com",)
+
+    def test_parses_json_list_with_multiple_items(self, monkeypatch) -> None:
+        monkeypatch.setenv(
+            "ELSPETH_WEB__CORS_ORIGINS",
+            '["https://a.example.com", "https://b.example.com"]',
+        )
+        settings = _settings_from_env()
+        assert settings.cors_origins == ("https://a.example.com", "https://b.example.com")
+
+    def test_plain_string_passes_through(self, monkeypatch) -> None:
+        monkeypatch.setenv("ELSPETH_WEB__HOST", "127.0.0.1")
+        settings = _settings_from_env()
+        assert settings.host == "127.0.0.1"
+
+    def test_json_integer_parsed(self, monkeypatch) -> None:
+        monkeypatch.setenv("ELSPETH_WEB__PORT", "9090")
+        settings = _settings_from_env()
+        assert settings.port == 9090
+        assert isinstance(settings.port, int)
+
+    def test_server_secret_allowlist_from_json(self, monkeypatch) -> None:
+        monkeypatch.setenv("ELSPETH_WEB__SERVER_SECRET_ALLOWLIST", '["MY_KEY"]')
+        settings = _settings_from_env()
+        assert settings.server_secret_allowlist == ("MY_KEY",)
+
+
+class TestDataDirCreation:
+    """Bug 4: create_app() must create data_dir before any DB access."""
+
+    def test_create_app_creates_nonexistent_data_dir(self, tmp_path) -> None:
+        fresh_dir = tmp_path / "nonexistent" / "nested"
+        settings = WebSettings(data_dir=fresh_dir)
+        create_app(settings)
+        assert fresh_dir.exists()
+        assert fresh_dir.is_dir()

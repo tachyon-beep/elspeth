@@ -2200,22 +2200,21 @@ def web(
         )
         raise typer.Exit(1) from None
 
-    from elspeth.web.config import WebSettings
-
-    # Validate CLI arguments against WebSettings (catches invalid auth_provider early).
-    settings = WebSettings(port=port, host=host, auth_provider=auth)
-
     # Bridge CLI args to create_app() via environment variables.
     # uvicorn's factory protocol calls create_app() with no arguments,
     # so we set ELSPETH_WEB__* env vars that _settings_from_env() reads.
-    os.environ["ELSPETH_WEB__HOST"] = settings.host
-    os.environ["ELSPETH_WEB__PORT"] = str(settings.port)
-    os.environ["ELSPETH_WEB__AUTH_PROVIDER"] = settings.auth_provider
+    # Validation happens in create_app() where ALL settings (CLI args +
+    # deployment env vars like SECRET_KEY, OIDC_ISSUER) are available.
+    # Early validation here would reject valid deployments that set
+    # required fields via ELSPETH_WEB__* env vars.
+    os.environ["ELSPETH_WEB__HOST"] = host
+    os.environ["ELSPETH_WEB__PORT"] = str(port)
+    os.environ["ELSPETH_WEB__AUTH_PROVIDER"] = auth
 
     uvicorn.run(
         "elspeth.web.app:create_app",
-        host=settings.host,
-        port=settings.port,
+        host=host,
+        port=port,
         reload=reload,
         factory=True,
     )

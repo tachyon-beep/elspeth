@@ -149,17 +149,34 @@ class LocalAuthProvider:
     async def authenticate(self, token: str) -> UserIdentity:
         """Validate a JWT and return the authenticated identity.
 
-        Raises AuthenticationError("Invalid token") on decode failure or expiry.
+        Raises AuthenticationError("Invalid token") on decode failure, expiry,
+        or if the user has been deleted since the token was issued.
         """
         try:
             payload = jwt.decode(token, self._secret_key, algorithms=["HS256"])
         except PyJWTError as exc:
             raise AuthenticationError("Invalid token") from exc
 
+        user_id = payload["sub"]
+
+        # Verify user still exists — deleted users must not retain access
+        exists = await asyncio.to_thread(self._user_exists, user_id)
+        if not exists:
+            raise AuthenticationError("Invalid token")
+
         return UserIdentity(
-            user_id=payload["sub"],
+            user_id=user_id,
             username=payload["username"],
         )
+
+    def _user_exists(self, user_id: str) -> bool:
+        """Check if a user still exists in auth.db (sync, called via to_thread)."""
+        with self._get_conn() as conn:
+            row = conn.execute(
+                "SELECT 1 FROM users WHERE user_id = ?",
+                (user_id,),
+            ).fetchone()
+            return row is not None
 
     def _query_user(self, user_id: str) -> tuple[str, str | None] | None:
         """Synchronous DB lookup — called via asyncio.to_thread."""

@@ -225,27 +225,39 @@ allow_hits:
   expires: null
 
 # App factory — os.environ.get(), @app.get() false positives, and getattr for optional services
-- key: web/app.py:R2:lifespan:fp=87350cfd8047de35
+- key: web/app.py:R2:lifespan:fp=97dea957d9af9a52
   owner: web-app
   reason: "Optional service — secret_service may not be wired in all deployment modes"
   safety: "Returns None; caller checks before use"
   expires: null
 
-- key: web/app.py:R1:create_app:fp=200707c68622816e
+- key: web/app.py:R5:_settings_from_env:fp=bb118a9028ce2eff
   owner: web-app
-  reason: "Tier 3 boundary — os.environ.get() for env var check, not dict.get() on pipeline data"
+  reason: "Tier 3 boundary — JSON-parsed env var may be a list; isinstance check classifies for tuple conversion"
+  safety: "isinstance used only for type dispatch; no contract masking"
+  expires: null
+
+- key: web/app.py:R6:_settings_from_env:fp=4bd0041b827e4b56
+  owner: web-app
+  reason: "Tier 3 boundary — env var value that isn't valid JSON is treated as plain string (the common case)"
+  safety: "JSONDecodeError caught only to fall back to raw string; no silent data loss"
+  expires: null
+
+- key: web/app.py:R1:create_app:fp=43c5fa4048ab59e4
+  owner: web-app
+  reason: "Tier 3 boundary — os.environ.get() for env var check"
   safety: "Guards dev-mode secret_key warning; no data flow impact"
   expires: null
 
-- key: web/app.py:R1:create_app:health:fp=6aa63454fe4ecade
+- key: web/app.py:R1:create_app:health:fp=69857402ca0121fc
   owner: web-app
-  reason: "False positive — @app.get() is FastAPI HTTP route decorator, not dict.get()"
+  reason: "False positive — @app.get() is FastAPI HTTP route decorator"
   safety: No dict access involved
   expires: null
 
-- key: web/app.py:R1:create_app:system_status:fp=de07d8d84692f54a
+- key: web/app.py:R1:create_app:system_status:fp=8599db92cf0b6bcb
   owner: web-app
-  reason: "False positive — @app.get() is FastAPI HTTP route decorator, not dict.get()"
+  reason: "False positive — @app.get() is FastAPI HTTP route decorator"
   safety: No dict access involved
   expires: null
 

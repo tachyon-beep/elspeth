@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import os
 import sys
 from collections.abc import AsyncIterator
@@ -91,12 +92,21 @@ def _settings_from_env() -> WebSettings:
     by uvicorn's factory protocol). The CLI sets these env vars before
     calling uvicorn.run().
     """
-    kwargs: dict[str, str] = {}
+    kwargs: dict[str, object] = {}
     prefix = "ELSPETH_WEB__"
     for key, value in os.environ.items():
         if key.startswith(prefix):
             field_name = key[len(prefix) :].lower()
-            kwargs[field_name] = value
+            # Attempt JSON decode for non-scalar types (tuples, lists).
+            # E.g. ELSPETH_WEB__CORS_ORIGINS='["https://app.example.com"]'
+            try:
+                parsed = json.loads(value)
+                if isinstance(parsed, list):
+                    kwargs[field_name] = tuple(parsed)
+                else:
+                    kwargs[field_name] = parsed
+            except (json.JSONDecodeError, ValueError):
+                kwargs[field_name] = value
     return WebSettings(**kwargs)
 
 
@@ -124,6 +134,9 @@ def create_app(settings: WebSettings | None = None) -> FastAPI:
     )
 
     app.state.settings = settings
+
+    # Ensure data directory exists before any DB access (auth.db, sessions.db)
+    settings.data_dir.mkdir(parents=True, exist_ok=True)
 
     # --- Catalog ---
     app.state.catalog_service = create_catalog_service()
