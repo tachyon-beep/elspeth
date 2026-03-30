@@ -126,6 +126,9 @@ allowed_dict_patterns:
   # as part of T11 (PluginBundle extraction) — dict[str, Any] replaced with frozen dataclass.
   - "src/elspeth/cli.py:_load_raw_yaml:return"
 
+  # Secret refs resolver - walks arbitrary pipeline config trees to replace secret refs
+  - "src/elspeth/core/secrets.py:resolve_secret_refs:config"
+
   # Config - runtime configuration dicts
   - "src/elspeth/core/config.py:resolve_config:return"
   - "src/elspeth/core/config.py:_expand_env_vars:config"

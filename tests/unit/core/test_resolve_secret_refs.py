@@ -1,0 +1,105 @@
+"""Tests for resolve_secret_refs() tree-walk helper."""
+
+from __future__ import annotations
+
+import pytest
+
+from elspeth.contracts.secrets import ResolvedSecret, SecretInventoryItem
+from elspeth.core.secrets import SecretResolutionError, resolve_secret_refs
+
+
+class FakeResolver:
+    def __init__(self, secrets: dict[str, str]):
+        self._secrets = secrets
+
+    def list_refs(self, user_id: str) -> list[SecretInventoryItem]:
+        return [SecretInventoryItem(name=k, scope="test", available=True) for k in self._secrets]
+
+    def has_ref(self, user_id: str, name: str) -> bool:
+        return name in self._secrets
+
+    def resolve(self, user_id: str, name: str) -> ResolvedSecret | None:
+        if name not in self._secrets:
+            return None
+        return ResolvedSecret(name=name, value=self._secrets[name], scope="test", fingerprint="fp")
+
+
+def test_replaces_secret_ref_in_flat_dict() -> None:
+    resolver = FakeResolver({"MY_KEY": "sk-123"})
+    config = {"api_key": {"secret_ref": "MY_KEY"}, "model": "gpt-4"}
+    result, resolutions = resolve_secret_refs(config, resolver, "user1")
+    assert result == {"api_key": "sk-123", "model": "gpt-4"}
+    assert len(resolutions) == 1
+    assert resolutions[0].name == "MY_KEY"
+    assert resolutions[0].value == "sk-123"
+
+
+def test_replaces_nested_secret_ref() -> None:
+    resolver = FakeResolver({"DB_PASS": "hunter2"})
+    config = {"database": {"host": "localhost", "password": {"secret_ref": "DB_PASS"}}}
+    result, resolutions = resolve_secret_refs(config, resolver, "user1")
+    assert result == {"database": {"host": "localhost", "password": "hunter2"}}
+    assert len(resolutions) == 1
+    assert resolutions[0].name == "DB_PASS"
+
+
+def test_replaces_secret_ref_in_list() -> None:
+    resolver = FakeResolver({"TOKEN_A": "abc", "TOKEN_B": "def"})
+    config = {"tokens": [{"secret_ref": "TOKEN_A"}, "literal", {"secret_ref": "TOKEN_B"}]}
+    result, resolutions = resolve_secret_refs(config, resolver, "user1")
+    assert result == {"tokens": ["abc", "literal", "def"]}
+    assert len(resolutions) == 2
+    resolved_names = {r.name for r in resolutions}
+    assert resolved_names == {"TOKEN_A", "TOKEN_B"}
+
+
+def test_raises_on_missing_secret() -> None:
+    resolver = FakeResolver({})
+    config = {"key": {"secret_ref": "MISSING_SECRET"}}
+    with pytest.raises(SecretResolutionError) as exc_info:
+        resolve_secret_refs(config, resolver, "user1")
+    assert "MISSING_SECRET" in exc_info.value.missing
+    assert "MISSING_SECRET" in str(exc_info.value)
+
+
+def test_collects_all_missing_secrets() -> None:
+    resolver = FakeResolver({})
+    config = {
+        "key_x": {"secret_ref": "SECRET_X"},
+        "key_y": {"secret_ref": "SECRET_Y"},
+    }
+    with pytest.raises(SecretResolutionError) as exc_info:
+        resolve_secret_refs(config, resolver, "user1")
+    assert "SECRET_X" in exc_info.value.missing
+    assert "SECRET_Y" in exc_info.value.missing
+    error_str = str(exc_info.value)
+    assert "SECRET_X" in error_str
+    assert "SECRET_Y" in error_str
+
+
+def test_leaves_non_ref_dicts_unchanged() -> None:
+    resolver = FakeResolver({})
+    config = {
+        "options": {"timeout": 30, "retries": 3},
+        "tags": ["a", "b"],
+    }
+    result, resolutions = resolve_secret_refs(config, resolver, "user1")
+    assert result == config
+    assert resolutions == []
+
+
+def test_empty_config() -> None:
+    resolver = FakeResolver({})
+    result, resolutions = resolve_secret_refs({}, resolver, "user1")
+    assert result == {}
+    assert resolutions == []
+
+
+def test_does_not_mutate_original() -> None:
+    resolver = FakeResolver({"API_KEY": "secret-value"})
+    original = {"key": {"secret_ref": "API_KEY"}, "nested": {"inner": {"secret_ref": "API_KEY"}}}
+    import copy
+
+    original_copy = copy.deepcopy(original)
+    resolve_secret_refs(original, resolver, "user1")
+    assert original == original_copy

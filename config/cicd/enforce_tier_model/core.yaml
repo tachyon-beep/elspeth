@@ -1,4 +1,10 @@
 per_file_rules:
+- pattern: core/secrets.py
+  rules:
+  - R5
+  reason: Tree-walk over Tier-3 config dicts requires isinstance() for structural dispatch (dict/list/leaf). The entire point of this module is to inspect an arbitrary config dict whose shape is external/user-provided.
+  expires: null
+  max_hits: 4
 - pattern: core/expression_parser.py
   rules:
   - R5
