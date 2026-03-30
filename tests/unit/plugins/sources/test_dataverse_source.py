@@ -613,6 +613,84 @@ class TestDataverseSourceConstruction:
         source = _make_source(_base_config())
         assert source._additional_domains == ()
 
+    def test_validate_entity_exists_404_raises_descriptive_error(self) -> None:
+        """404 from metadata endpoint raises DataverseClientError with entity-not-found message."""
+        source = _make_source(_base_config())
+        lifecycle_ctx = _mock_lifecycle_context()
+
+        mock_client = MagicMock()
+        mock_client.get_page.side_effect = DataverseClientError(
+            "Not Found",
+            retryable=False,
+            status_code=404,
+        )
+
+        with (
+            patch("azure.identity.ClientSecretCredential", return_value=MagicMock()),
+            patch(
+                "elspeth.plugins.sources.dataverse.DataverseClient",
+                return_value=mock_client,
+            ),
+            pytest.raises(DataverseClientError, match="Entity 'contacts' not found"),
+        ):
+            source.on_start(lifecycle_ctx)
+
+    def test_validate_entity_exists_403_logs_warning_and_continues(self) -> None:
+        """403 from metadata endpoint logs a warning but does not raise."""
+        source = _make_source(_base_config())
+        lifecycle_ctx = _mock_lifecycle_context()
+
+        mock_client = MagicMock()
+        mock_client.get_page.side_effect = DataverseClientError(
+            "Forbidden",
+            retryable=False,
+            status_code=403,
+        )
+
+        with (
+            patch("azure.identity.ClientSecretCredential", return_value=MagicMock()),
+            patch(
+                "elspeth.plugins.sources.dataverse.DataverseClient",
+                return_value=mock_client,
+            ),
+            patch("elspeth.plugins.sources.dataverse.logger") as mock_logger,
+        ):
+            source.on_start(lifecycle_ctx)
+
+        mock_logger.warning.assert_called_once_with(
+            "entity_metadata_check_forbidden",
+            entity="contacts",
+            error="Forbidden",
+            status_code=403,
+        )
+        # Non-fatal: source must still be in a usable state after on_start
+        assert source._client is not None
+
+    def test_validate_entity_exists_5xx_reraises(self) -> None:
+        """5xx from metadata endpoint re-raises the original error."""
+        source = _make_source(_base_config())
+        lifecycle_ctx = _mock_lifecycle_context()
+
+        original_error = DataverseClientError(
+            "Internal Server Error",
+            retryable=True,
+            status_code=500,
+        )
+        mock_client = MagicMock()
+        mock_client.get_page.side_effect = original_error
+
+        with (
+            patch("azure.identity.ClientSecretCredential", return_value=MagicMock()),
+            patch(
+                "elspeth.plugins.sources.dataverse.DataverseClient",
+                return_value=mock_client,
+            ),
+            pytest.raises(DataverseClientError, match="Internal Server Error") as exc_info,
+        ):
+            source.on_start(lifecycle_ctx)
+
+        assert exc_info.value is original_error
+
 
 # ─────────────────────────────────────────────────────────────────────────
 # Build query URL tests
@@ -785,6 +863,9 @@ class TestDataverseSourceLoadStructured:
         assert rows[0].is_quarantined
         assert "collision" in rows[0].quarantine_error.lower()
         ctx.record_validation_error.assert_called_once()
+        call_kwargs = ctx.record_validation_error.call_args.kwargs
+        assert call_kwargs["schema_mode"] == "odata_strip"
+        assert "collision" in call_kwargs["error"].lower()
 
     def test_load_discard_does_not_yield_quarantined(self) -> None:
         """When on_validation_failure='discard', quarantined rows are not yielded."""

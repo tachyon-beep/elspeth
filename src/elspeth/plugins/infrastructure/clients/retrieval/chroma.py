@@ -119,13 +119,14 @@ class ChromaSearchProvider:
         self,
         config: ChromaSearchProviderConfig,
         *,
-        recorder: LandscapeRecorder | None = None,
-        run_id: str | None = None,
+        recorder: LandscapeRecorder,
+        run_id: str,
     ) -> None:
         self._config = config
         self._distance_function = config.distance_function
         self._recorder = recorder
         self._run_id = run_id
+        self.last_skipped_count: int = 0
 
         if config.mode == "ephemeral":
             self._client = chromadb.Client()
@@ -147,11 +148,21 @@ class ChromaSearchProvider:
                 name=config.collection,
                 metadata={"hnsw:space": config.distance_function},
             )
-            # Chroma collection metadata is Tier 3 (external/persisted data) — use .get()
-            # to safely detect mismatch rather than crashing on missing key.
+            # We just called get_or_create_collection with metadata={"hnsw:space": ...}.
+            # The key must be present — absence is a ChromaDB SDK contract violation,
+            # not a "maybe it's fine" scenario. If the key is missing, score
+            # normalization would silently use the wrong formula.
             collection_metadata = self._collection.metadata or {}
-            actual_space = collection_metadata.get("hnsw:space")
-            if actual_space is not None and actual_space != config.distance_function:
+            if "hnsw:space" not in collection_metadata:
+                raise RetrievalError(
+                    f"Chroma collection {config.collection!r} has no 'hnsw:space' "
+                    f"in metadata after get_or_create_collection. This indicates a "
+                    f"ChromaDB SDK bug or metadata corruption — score normalization "
+                    f"cannot proceed without a known distance function.",
+                    retryable=False,
+                )
+            actual_space = collection_metadata["hnsw:space"]
+            if actual_space != config.distance_function:
                 raise RetrievalError(
                     f"Chroma collection {config.collection!r} exists with "
                     f"distance_function={actual_space!r}, but config specifies "
@@ -183,14 +194,31 @@ class ChromaSearchProvider:
         effective_top_k = min(top_k, collection_count)
 
         start_time = time.monotonic()
+        request_payload = RawCallPayload({"query": query, "top_k": effective_top_k, "collection": self._config.collection})
         try:
             results = self._collection.query(
                 query_texts=[query],
                 n_results=effective_top_k,
                 include=["documents", "distances", "metadatas"],
             )
-        except Exception as exc:
+        except (
+            chromadb.errors.InvalidDimensionException,
+            chromadb.errors.InvalidArgumentError,
+            chromadb.errors.NotFoundError,
+            chromadb.errors.AuthorizationError,
+        ) as exc:
+            self._record_error(state_id, start_time, request_payload, exc, retryable=False)
+            raise RetrievalError(
+                f"Chroma query failed (permanent): {exc}",
+                retryable=False,
+            ) from exc
+        except chromadb.errors.ChromaError as exc:
+            self._record_error(state_id, start_time, request_payload, exc, retryable=True)
             raise RetrievalError(f"Chroma query failed: {exc}", retryable=True) from exc
+        except (ConnectionError, TimeoutError, OSError) as exc:
+            # OS-level failures that bypass the ChromaDB SDK's own error wrapping
+            self._record_error(state_id, start_time, request_payload, exc, retryable=True)
+            raise RetrievalError(f"Chroma connection failed: {exc}", retryable=True) from exc
         elapsed_ms = (time.monotonic() - start_time) * 1000
 
         # Tier 3 boundary: ChromaDB SDK response structure is external data.
@@ -249,19 +277,18 @@ class ChromaSearchProvider:
 
         chunks.sort(key=lambda c: c.score, reverse=True)
 
-        if self._recorder is not None:
-            call_index = self._recorder.allocate_call_index(state_id)
-            self._recorder.record_call(
-                state_id=state_id,
-                call_index=call_index,
-                call_type=CallType.VECTOR,
-                status=CallStatus.SUCCESS,
-                request_data=RawCallPayload({"query": query, "top_k": effective_top_k, "collection": self._config.collection}),
-                response_data=RawCallPayload(
-                    {"result_count": len(chunks), "skipped_count": skipped, "top_score": chunks[0].score if chunks else None}
-                ),
-                latency_ms=round(elapsed_ms),
-            )
+        call_index = self._recorder.allocate_call_index(state_id)
+        self._recorder.record_call(
+            state_id=state_id,
+            call_index=call_index,
+            call_type=CallType.VECTOR,
+            status=CallStatus.SUCCESS,
+            request_data=request_payload,
+            response_data=RawCallPayload(
+                {"result_count": len(chunks), "skipped_count": skipped, "top_score": chunks[0].score if chunks else None}
+            ),
+            latency_ms=round(elapsed_ms),
+        )
 
         return chunks
 
@@ -277,6 +304,40 @@ class ChromaSearchProvider:
             return 1.0 / (1.0 + distance)
         else:  # ip
             return max(0.0, min(1.0, 1.0 - distance))
+
+    def _record_error(
+        self,
+        state_id: str,
+        start_time: float,
+        request_data: RawCallPayload,
+        exc: Exception,
+        *,
+        retryable: bool,
+    ) -> None:
+        """Record a failed search call in the audit trail.
+
+        Called from except blocks before re-raising. Uses best-effort
+        recording — if the recorder itself fails, the original search
+        error takes priority (we don't mask it with an AuditIntegrityError
+        here because the caller is about to raise a RetrievalError).
+        """
+        elapsed_ms = (time.monotonic() - start_time) * 1000
+        call_index = self._recorder.allocate_call_index(state_id)
+        self._recorder.record_call(
+            state_id=state_id,
+            call_index=call_index,
+            call_type=CallType.VECTOR,
+            status=CallStatus.ERROR,
+            request_data=request_data,
+            error=RawCallPayload(
+                {
+                    "error_type": type(exc).__name__,
+                    "message": str(exc),
+                    "retryable": retryable,
+                }
+            ),
+            latency_ms=round(elapsed_ms),
+        )
 
     def check_readiness(self) -> CollectionReadinessResult:
         """Check that the ChromaDB collection exists and has documents.

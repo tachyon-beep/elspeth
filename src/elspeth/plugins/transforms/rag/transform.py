@@ -283,10 +283,8 @@ class RAGRetrievalTransform(BaseTransform):
         )
 
         # Include skipped_count in audit metadata — "record what we didn't get".
-        # Providers that track skipped items (e.g., AzureSearchProvider) expose
-        # last_skipped_count; others (e.g., ChromaSearchProvider) do not.
-        skipped_count_raw = getattr(self._provider, "last_skipped_count", None)
-        skipped_count = skipped_count_raw if isinstance(skipped_count_raw, int) else 0
+        # All providers implement last_skipped_count per the RetrievalProvider protocol.
+        skipped_count = self._provider.last_skipped_count
 
         success_metadata: dict[str, Any] = {
             "chunk_count": len(chunks),

@@ -106,7 +106,10 @@ _SCORE_RANGES: dict[str, tuple[float, float]] = {
 class AzureSearchProvider:
     """Azure AI Search implementation of RetrievalProvider.
 
-    Constructs a per-call AuditedHTTPClient scoped to each row's state_id.
+    Uses a single AuditedHTTPClient for connection pooling across searches.
+    The client's state_id and token_id are updated per-call for correct
+    audit scoping. This is safe because row processing is serial within
+    a transform — no concurrent calls to search().
     """
 
     def __init__(
@@ -118,6 +121,8 @@ class AzureSearchProvider:
         telemetry_emit: TelemetryEmitCallback,
         limiter: RateLimiter | NoOpLimiter | None = None,
     ) -> None:
+        from elspeth.plugins.infrastructure.clients.http import AuditedHTTPClient
+
         self._config = config
         self._recorder = recorder
         self._run_id = run_id
@@ -131,6 +136,21 @@ class AzureSearchProvider:
         # skip counts in audit records without changing the protocol.
         self.last_skipped_count: int = 0
         self.last_skipped_reasons: list[dict[str, Any]] = []
+
+        # Shared HTTP client for connection pooling. Created once, reused
+        # across all search() calls. state_id is updated per-call.
+        headers = {"Content-Type": "application/json"}
+        if self._config.api_key:
+            headers["api-key"] = self._config.api_key
+        self._http_client = AuditedHTTPClient(
+            recorder=self._recorder,
+            state_id="__init__",  # Updated per-call in _execute_search
+            run_id=self._run_id,
+            telemetry_emit=self._telemetry_emit,
+            timeout=self._config.request_timeout,
+            limiter=self._limiter,
+            headers=headers,
+        )
 
     def search(
         self,
@@ -166,26 +186,15 @@ class AzureSearchProvider:
         state_id: str,
         token_id: str | None,
     ) -> dict[str, Any]:
-        from elspeth.plugins.infrastructure.clients.http import AuditedHTTPClient
-
-        headers = {"Content-Type": "application/json"}
-        if self._config.api_key:
-            headers["api-key"] = self._config.api_key
-
         body = self._build_request_body(query, top_k)
 
-        http_client = AuditedHTTPClient(
-            recorder=self._recorder,
-            state_id=state_id,
-            run_id=self._run_id,
-            telemetry_emit=self._telemetry_emit,
-            timeout=self._config.request_timeout,
-            limiter=self._limiter,
-            token_id=token_id,
-            headers=headers,
-        )
+        # Update per-call audit scoping on the shared client.
+        # Safe because row processing is serial within a transform.
+        self._http_client._state_id = state_id
+        self._http_client._token_id = token_id
+
         try:
-            response = http_client.post(self._search_url, json=body)
+            response = self._http_client.post(self._search_url, json=body)
 
             status_code = response.status_code
             if status_code in (401, 403):
@@ -213,8 +222,6 @@ class AzureSearchProvider:
             raise RetrievalError(f"HTTP error during search: {exc}", retryable=True) from exc
         except (ConnectionError, TimeoutError, OSError) as exc:
             raise RetrievalError(f"Search request failed: {exc}", retryable=True) from exc
-        finally:
-            http_client.close()
 
     def _build_request_body(self, query: str, top_k: int) -> dict[str, Any]:
         body: dict[str, Any] = {"top": top_k}
@@ -379,4 +386,5 @@ class AzureSearchProvider:
             )
 
     def close(self) -> None:
-        pass
+        """Release the shared HTTP client and its connection pool."""
+        self._http_client.close()

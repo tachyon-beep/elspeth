@@ -34,6 +34,8 @@ class RetrievalProvider(Protocol):
     provider-specific query objects leak into the transform.
     """
 
+    last_skipped_count: int
+
     def search(
         self,
         query: str,

@@ -341,7 +341,13 @@ class TestArtifactDescriptor:
         ]
         descriptor = sink.write(rows, ctx)
 
-        expected_canonical = canonical_json(rows).encode("utf-8")
+        # Hash should cover the mapped payloads (what was actually sent to
+        # Dataverse), not the full pipeline rows.
+        mapped_payloads = [
+            {"emailaddress1": "a@b.com", "fullname": "Alice"},
+            {"emailaddress1": "c@d.com", "fullname": "Bob"},
+        ]
+        expected_canonical = canonical_json(mapped_payloads).encode("utf-8")
         expected_hash = hashlib.sha256(expected_canonical).hexdigest()
 
         assert descriptor.artifact.artifact_type == "webhook"

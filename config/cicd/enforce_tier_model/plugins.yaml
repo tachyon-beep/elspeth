@@ -280,12 +280,12 @@ allow_hits:
   reason: Pydantic field_validator wraps ipaddress.ip_network() on user-provided CIDR strings — Tier 3 config boundary
   safety: ValueError re-raised as Pydantic ValidationError; invalid config crashes at load time, not at runtime
   expires: null
-- key: plugins/transforms/rag/query.py:R5:QueryBuilder:_build_field_only:fp=2292b6dad24076f3
+- key: plugins/transforms/rag/query.py:R5:QueryBuilder:_build_field_only:fp=8f3e1338a50d0c2b
   owner: feature
   reason: Offensive isinstance(str) guard on Tier 2 pipeline data — crashes immediately with TypeError if upstream plugin sends non-string value to query_field
   safety: Raises TypeError (crash), does not suppress or coerce; message identifies the upstream plugin bug
   expires: null
-- key: plugins/transforms/rag/query.py:R5:QueryBuilder:_build_regex:fp=ec4af2b38344f664
+- key: plugins/transforms/rag/query.py:R5:QueryBuilder:_build_regex:fp=188237d4793d02b7
   owner: feature
   reason: Offensive isinstance(str) guard on Tier 2 pipeline data — crashes immediately with TypeError if upstream plugin sends non-string value to query_field
   safety: Raises TypeError (crash), does not suppress or coerce; message identifies the upstream plugin bug
@@ -300,15 +300,20 @@ allow_hits:
   reason: Optional ChromaDB provider registration — ImportError means chromadb is not installed ([rag] extra absent); provider is silently omitted from registry
   safety: Unknown provider raises ValueError at config validation time with list of available providers; no silent data loss
   expires: null
-- key: plugins/infrastructure/clients/retrieval/chroma.py:R1:ChromaSearchProvider:__init__:fp=3b96c13fababf5b4
-  owner: feature
-  reason: ChromaDB collection metadata is persisted external data (Tier 3) — .get() safely detects distance_function mismatch on pre-existing collections without crashing on absent key
-  safety: Missing key yields None (no mismatch detected — safe); present key with wrong value raises RetrievalError immediately
-  expires: null
-- key: plugins/infrastructure/clients/retrieval/chroma.py:R5:ChromaSearchProvider:search:fp=2bdf19e04ce79d90
+- key: plugins/infrastructure/clients/retrieval/chroma.py:R5:ChromaSearchProvider:search:fp=9fbe7bf78a431c5d
   owner: bugfix
   reason: Tier 3 boundary type check — ChromaDB SDK may return non-string documents from corrupt index; isinstance guards pipeline from non-string content
   safety: Non-string documents are skipped (continue); only validated str content enters pipeline as Tier 2
+  expires: null
+- key: plugins/infrastructure/clients/retrieval/chroma.py:R5:ChromaSearchProvider:search:fp=2b4244b3f0db0019
+  owner: bugfix
+  reason: Tier 3 boundary — isinstance(distance, bool) guard before isinstance(distance, (int, float)) because Python's isinstance(True, int) is True
+  safety: Non-numeric distance crashes with RetrievalError (infrastructure corruption); does not suppress or coerce
+  expires: null
+- key: plugins/infrastructure/clients/retrieval/chroma.py:R5:ChromaSearchProvider:search:fp=0edd9a162c2f07b7
+  owner: bugfix
+  reason: Tier 3 boundary — isinstance(distance, (int, float)) validates ChromaDB distance values are numeric before arithmetic
+  safety: Non-numeric distance crashes with RetrievalError (infrastructure corruption); does not suppress or coerce
   expires: null
 - key: plugins/transforms/rag/config.py:R5:RAGRetrievalConfig:coerce_schema_config:fp=4a027df2f322fde0
   owner: feature
@@ -319,16 +324,6 @@ allow_hits:
   owner: feature
   reason: Provider lookup — dict.get() with explicit None check and meaningful ValueError; this IS the guard that catches unknown providers at config load time rather than first-row execution
   safety: None result raises ValueError immediately with list of available providers; no silent pass-through
-  expires: null
-- key: plugins/transforms/rag/transform.py:R2:RAGRetrievalTransform:process:fp=6ad1f82946041a65
-  owner: feature
-  reason: RAG transform reads optional last_skipped_count from provider — getattr with default because not all providers expose this attribute
-  safety: Absent attribute yields None, coerced to 0 by isinstance guard on next line; no silent bug hiding
-  expires: null
-- key: plugins/transforms/rag/transform.py:R5:RAGRetrievalTransform:process:fp=0703d33ef696c676
-  owner: feature
-  reason: RAG transform validates skipped_count is int before arithmetic — provider may return non-int from optional attribute
-  safety: Non-int coerced to 0; prevents TypeError in downstream arithmetic
   expires: null
 - key: plugins/infrastructure/clients/retrieval/azure_search.py:R1:AzureSearchProvider:_parse_response:fp=f17cf7fb0b2ebda5
   owner: feature
@@ -389,16 +384,6 @@ allow_hits:
   owner: feature
   reason: httpx.get() method call for Azure Search $count endpoint — false positive from R1 rule matching .get( syntax
   safety: This is the actual HTTP call, not a defensive dict access
-  expires: null
-- key: plugins/infrastructure/clients/retrieval/chroma.py:R5:ChromaSearchProvider:search:fp=9c8adbd251d61ac3
-  owner: bugfix
-  reason: Offensive type guard — ChromaDB is our infrastructure, not external API; non-numeric distance indicates index corruption or SDK bug
-  safety: Raises RetrievalError immediately (crash) — not silently skipped
-  expires: null
-- key: plugins/infrastructure/clients/retrieval/chroma.py:R5:ChromaSearchProvider:search:fp=a36738ef1d0de1df
-  owner: bugfix
-  reason: Offensive type guard — rejects non-numeric distance types with crash; corrupt ChromaDB index must not produce silent wrong results
-  safety: Raises RetrievalError immediately (crash) — not silently skipped
   expires: null
 - key: plugins/sinks/chroma_sink.py:R6:ChromaSink:write:fp=b4b747bb26344d76
   owner: feature
