@@ -193,25 +193,27 @@ class ExecutionServiceImpl:
         )
         run_id = run_record.id  # Use the DB-generated UUID as canonical
 
-        # Record blob-to-run linkage for input blobs
-        if composition_state.source is not None and self._blob_service is not None:
-            blob_ref = composition_state.source.options.get("blob_ref")
-            if blob_ref is not None:
-                await self._blob_service.link_blob_to_run(
-                    blob_id=UUID(blob_ref),
-                    run_id=run_id,
-                    direction="input",
-                )
-
-        # Create shutdown event for cancellation (B2/cancel support)
+        # Register shutdown event immediately so cancel() always finds it.
+        # Without this, cancel() firing between create_run() and registration
+        # bypasses the event and updates DB to "cancelled" directly — causing
+        # an illegal cancelled→running transition when _run_pipeline starts.
         shutdown_event = threading.Event()
         self._shutdown_events[str(run_id)] = shutdown_event
 
-        # Submit to thread pool — clean up shutdown event if submit fails
-        # (e.g. RuntimeError after executor.shutdown())
         try:
+            # Record blob-to-run linkage for input blobs
+            if composition_state.source is not None and self._blob_service is not None:
+                blob_ref = composition_state.source.options.get("blob_ref")
+                if blob_ref is not None:
+                    await self._blob_service.link_blob_to_run(
+                        blob_id=UUID(blob_ref),
+                        run_id=run_id,
+                        direction="input",
+                    )
+
+            # Submit to thread pool
             future = self._executor.submit(self._run_pipeline, str(run_id), pipeline_yaml, shutdown_event, user_id)
-        except RuntimeError:
+        except BaseException:
             self._shutdown_events.pop(str(run_id), None)
             raise
         # B7 Layer 2: safety net callback
@@ -342,8 +344,27 @@ class ExecutionServiceImpl:
         landscape_db: LandscapeDB | None = None
         run_uuid = UUID(run_id)
         try:
-            # B8/C1: SessionService is async — bridge from background thread
-            self._call_async(self._session_service.update_run_status(run_uuid, status="running"))
+            # B8/C1: SessionService is async — bridge from background thread.
+            # Race defence: if cancel() updated DB to "cancelled" before we
+            # started, this transition raises ValueError. Detect that specific
+            # case and exit gracefully — the run was legitimately cancelled.
+            try:
+                self._call_async(self._session_service.update_run_status(run_uuid, status="running"))
+            except ValueError:
+                current = self._call_async(self._session_service.get_run(run_uuid))
+                if current.status == "cancelled":
+                    self._broadcaster.broadcast(
+                        run_id,
+                        RunEvent(
+                            run_id=run_id,
+                            timestamp=datetime.now(tz=UTC),
+                            event_type="cancelled",
+                            data={},
+                        ),
+                    )
+                    self._finalize_output_blobs(run_id, success=False)
+                    return  # Graceful exit — finally block still runs
+                raise  # Non-cancelled ValueError — crash per offensive programming
 
             # B3 fix: construct from WebSettings, not hardcoded paths
             # NOTE: LandscapeDB is constructed per-run, not shared. This is safe

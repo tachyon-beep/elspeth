@@ -504,10 +504,10 @@ allow_hits:
   reason: Check for live shutdown event before fallback handling
   safety: Pop returns None if absent
   expires: null
-- key: web/execution/service.py:R1:ExecutionServiceImpl:execute:fp=3a56b0cbd3573202
+- key: web/execution/service.py:R1:ExecutionServiceImpl:execute:fp=83e28e4a8651cb77
   owner: web-execution
-  reason: Optional keys in user-authored config — source path is optional
-  safety: Returns None; path check skipped
+  reason: Optional keys in user-authored config — blob_ref is optional in source options
+  safety: Returns None; blob link skipped
   expires: null
 - key: web/execution/service.py:R1:ExecutionServiceImpl:execute:fp=8d28adad23e4744f
   owner: web-execution
@@ -549,10 +549,10 @@ allow_hits:
   reason: Tier 3 — config from YAML deserialization may be non-dict
   safety: Skips secret resolution if not dict
   expires: null
-- key: web/execution/service.py:R9:ExecutionServiceImpl:execute:fp=17152a6b97151f81
+- key: web/execution/service.py:R9:ExecutionServiceImpl:execute:fp=d1717abd38161684
   owner: web-execution
-  reason: Idempotent shutdown-event cleanup
-  safety: Pop is idempotent
+  reason: Idempotent shutdown-event cleanup on blob linkage or submit failure
+  safety: Pop is idempotent; except BaseException handler cleans up before re-raise
   expires: null
 - key: web/execution/service.py:R9:ExecutionServiceImpl:_run_pipeline:fp=0999f2d3fec9e597
   owner: web-execution

@@ -444,6 +444,119 @@ class TestCancelMechanism:
         # Alternative: verify that the status update includes "cancelled".
         # The status calls already verify this above.
 
+    # ── Race condition: cancel() before _run_pipeline starts ──────────
+
+    @patch("elspeth.web.execution.service.LandscapeDB")
+    @patch("elspeth.web.execution.service.FilesystemPayloadStore")
+    def test_run_pipeline_exits_gracefully_when_already_cancelled(
+        self,
+        mock_payload: MagicMock,
+        mock_landscape: MagicMock,
+        service: ExecutionServiceImpl,
+        mock_session_service: MagicMock,
+    ) -> None:
+        """Race fix: if cancel() set DB to 'cancelled' before _run_pipeline
+        starts, the pending→running transition fails. _run_pipeline must
+        detect this and exit cleanly — no Orchestrator, no crash."""
+        run_id = str(uuid4())
+
+        # Simulate: update_run_status("running") raises because status is "cancelled"
+        mock_session_service.update_run_status.side_effect = ValueError("Illegal run transition: 'cancelled' → 'running'. Allowed: []")
+        mock_session_service.get_run.return_value = MagicMock(status="cancelled")
+
+        # Should NOT raise — graceful exit
+        service._run_pipeline(run_id, "yaml", threading.Event())
+
+        # No Orchestrator or LandscapeDB instantiated (early return)
+        mock_landscape.assert_not_called()
+        mock_payload.assert_not_called()
+
+        # Only the one failed "running" attempt — no "failed" status update
+        assert mock_session_service.update_run_status.call_count == 1
+
+    @patch("elspeth.web.execution.service.LandscapeDB")
+    @patch("elspeth.web.execution.service.FilesystemPayloadStore")
+    def test_run_pipeline_reraises_valueerror_when_not_cancelled(
+        self,
+        mock_payload: MagicMock,
+        mock_landscape: MagicMock,
+        service: ExecutionServiceImpl,
+        mock_session_service: MagicMock,
+    ) -> None:
+        """If update_run_status raises ValueError for a reason other than
+        'already cancelled', _run_pipeline must re-raise (offensive programming)."""
+        run_id = str(uuid4())
+
+        mock_session_service.update_run_status.side_effect = ValueError("Illegal run transition: 'completed' → 'running'. Allowed: []")
+        mock_session_service.get_run.return_value = MagicMock(status="completed")
+
+        with pytest.raises(ValueError, match="completed"):
+            service._run_pipeline(run_id, "yaml", threading.Event())
+
+    @pytest.mark.asyncio
+    async def test_shutdown_event_registered_before_blob_linkage(
+        self,
+        service: ExecutionServiceImpl,
+        mock_session_service: MagicMock,
+    ) -> None:
+        """Race fix part 2: _shutdown_events registration must happen before
+        blob linkage, so cancel() finds the event during the blob window."""
+        run_id = uuid4()
+        blob_ref = str(uuid4())
+        mock_session_service.create_run.return_value = MagicMock(id=run_id)
+
+        blob_service = MagicMock()
+
+        async def tracking_link(*args: Any, **kwargs: Any) -> None:
+            # At the time blob linkage runs, the event MUST already exist
+            assert str(run_id) in service._shutdown_events, "RACE: _shutdown_events not registered before blob linkage"
+
+        blob_service.link_blob_to_run = AsyncMock(side_effect=tracking_link)
+        cast(Any, service)._blob_service = blob_service
+
+        # Set up state record with a source containing a blob_ref.
+        # Use a real dict so state_from_record → deep_thaw works correctly.
+        state = mock_session_service.get_current_state.return_value
+        state.source = {
+            "plugin": "csv",
+            "on_success": "continue",
+            "options": {"blob_ref": blob_ref},
+            "on_validation_failure": "quarantine",
+        }
+
+        with patch.object(service, "_run_pipeline"):
+            await service.execute(session_id=uuid4())
+
+    @pytest.mark.asyncio
+    async def test_shutdown_event_cleaned_up_on_blob_linkage_failure(
+        self,
+        service: ExecutionServiceImpl,
+        mock_session_service: MagicMock,
+    ) -> None:
+        """If blob linkage raises after event registration, the event must
+        be cleaned up to avoid leaking into _shutdown_events."""
+        run_id = uuid4()
+        blob_ref = str(uuid4())
+        mock_session_service.create_run.return_value = MagicMock(id=run_id)
+
+        blob_service = MagicMock()
+        blob_service.link_blob_to_run = AsyncMock(side_effect=RuntimeError("blob storage unavailable"))
+        cast(Any, service)._blob_service = blob_service
+
+        # Use a real dict so state_from_record → deep_thaw works correctly.
+        state = mock_session_service.get_current_state.return_value
+        state.source = {
+            "plugin": "csv",
+            "on_success": "continue",
+            "options": {"blob_ref": blob_ref},
+            "on_validation_failure": "quarantine",
+        }
+
+        with pytest.raises(RuntimeError, match="blob storage unavailable"):
+            await service.execute(session_id=uuid4())
+
+        assert str(run_id) not in service._shutdown_events
+
 
 # ── One Active Run (B6) ───────────────────────────────────────────────
 
