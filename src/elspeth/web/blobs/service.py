@@ -438,6 +438,10 @@ class BlobServiceImpl:
                             # Run succeeded but this blob would breach the
                             # session quota — mark as error so the run
                             # finalization isn't aborted entirely.
+                            # Delete the backing file to prevent untracked
+                            # disk growth from repeated over-quota outputs.
+                            if storage.exists():
+                                storage.unlink()
                             record = self._finalize_blob_sync(blob_id, "error")
                     else:
                         record = self._finalize_blob_sync(blob_id, "error")

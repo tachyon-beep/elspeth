@@ -429,11 +429,6 @@ allow_hits:
   reason: Best-effort cleanup on fork failure — delete_blob may fail if DB disconnected
   safety: Falls back to file unlink; original error re-raised
   expires: null
-- key: web/blobs/service.py:R6:BlobServiceImpl:finalize_run_output_blobs:_sync:fp=8d330406ef26cc55
-  owner: web-blobs
-  reason: Quota exceeded during finalization marks blob as error instead of crashing run
-  safety: Run still finalized; blob marked error
-  expires: null
 - key: web/sessions/routes.py:R1:create_session_router:get_current_state:fp=56d5b19749795fdd
   owner: web-sessions
   reason: False positive — @router.get() is FastAPI route decorator
@@ -578,6 +573,11 @@ allow_hits:
   owner: web-auth
   reason: False positive — @router.get() is FastAPI route decorator
   safety: No dict access involved
+  expires: null
+- key: web/blobs/service.py:R6:BlobServiceImpl:finalize_run_output_blobs:_sync:fp=c09366e02831de24
+  owner: web-blobs
+  reason: Quota exceeded during finalization marks blob as error instead of crashing run
+  safety: Over-quota file deleted; blob marked error; run still finalized
   expires: null
 per_file_rules:
 - pattern: web/composer/tools.py

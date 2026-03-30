@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import asyncio
 from pathlib import Path
-from uuid import UUID
+from uuid import UUID, uuid4
 
 import structlog
 from fastapi import APIRouter, Depends, File, HTTPException, Query, Request, UploadFile
@@ -760,10 +760,14 @@ def create_session_router() -> APIRouter:
 
         # Create upload directory and save — include session_id to isolate
         # files per session so uploads with the same filename in different
-        # sessions don't overwrite each other.
+        # sessions don't overwrite each other.  Prefix the stored filename
+        # with a short UUID to prevent overwrites when the same name is
+        # uploaded twice within a session (composition states reference the
+        # path, so overwriting silently breaks reproducibility).
         upload_dir = Path(settings.data_dir) / "uploads" / sanitized_user_id / str(session_id)
         upload_dir.mkdir(parents=True, exist_ok=True)
-        file_path = upload_dir / sanitized_filename
+        unique_filename = f"{uuid4().hex[:8]}_{sanitized_filename}"
+        file_path = upload_dir / unique_filename
         await asyncio.to_thread(file_path.write_bytes, content)
 
         # Return the absolute path so it passes source-path validation.

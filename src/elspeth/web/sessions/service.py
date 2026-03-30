@@ -911,7 +911,10 @@ class SessionServiceImpl:
                 "composition_state_id": None,
             }
         )
-        # New edited user message — provenance points to COPIED state, not source
+        # New edited user message — provenance points to COPIED state, not source.
+        # Offset by 1 microsecond so get_messages() ordering is deterministic
+        # (system note before user turn).  Without this, SQLite/Postgres can
+        # return the two rows in either order since they share created_at.
         new_user_msg_id = str(uuid.uuid4())
         msg_records_data.append(
             {
@@ -920,7 +923,7 @@ class SessionServiceImpl:
                 "role": "user",
                 "content": new_message_content,
                 "tool_calls": None,
-                "created_at": now,
+                "created_at": now + timedelta(microseconds=1),
                 "composition_state_id": copied_state_id_str,
             }
         )

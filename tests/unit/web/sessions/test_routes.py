@@ -545,8 +545,8 @@ class TestUploadRoute:
         # Path should be absolute and under data_dir/uploads
         assert returned_path.startswith("/")
         assert saved_path.is_relative_to(tmp_path / "uploads")
-        # Filename should be just "passwd", not "../../etc/passwd"
-        assert saved_path.name == "passwd"
+        # Filename should end with "passwd" (UUID-prefixed), not "../../etc/passwd"
+        assert saved_path.name.endswith("_passwd")
         assert ".." not in str(saved_path)
 
     def test_upload_file_too_large(self, tmp_path) -> None:
