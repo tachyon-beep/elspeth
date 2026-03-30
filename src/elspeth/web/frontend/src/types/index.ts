@@ -324,3 +324,13 @@ export interface BlobMetadata {
   source_description: string | null;
   status: "ready" | "pending" | "error";
 }
+
+// ── Secret References ───────────────────────────────────────────────────────
+
+/** Secret inventory item — browser-safe metadata, never contains values. */
+export interface SecretInventoryItem {
+  name: string;
+  scope: "user" | "server" | "org";
+  available: boolean;
+  source_kind: string;
+}

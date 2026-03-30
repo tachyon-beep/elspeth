@@ -25,4 +25,5 @@ export type {
   ApiError,
   UploadResult,
   BlobMetadata,
+  SecretInventoryItem,
 } from "./index";

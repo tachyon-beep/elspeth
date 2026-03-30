@@ -96,6 +96,7 @@ class ComposerService(Protocol):
         messages: list[dict[str, Any]],
         state: CompositionState,
         session_id: str | None = None,
+        user_id: str | None = None,
     ) -> ComposerResult:
         """Run the LLM composition loop.
 
@@ -107,6 +108,7 @@ class ComposerService(Protocol):
                 and passes the result here. ComposerService does NOT
                 depend on SessionService (seam contract B).
             state: The current CompositionState.
+            user_id: Current user ID. Passed through to secret tools.
 
         Returns:
             ComposerResult with assistant message and updated state.

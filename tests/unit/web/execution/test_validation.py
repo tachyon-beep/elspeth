@@ -16,12 +16,27 @@ from unittest.mock import MagicMock, patch
 import pytest
 from pydantic import ValidationError as PydanticValidationError
 
+from elspeth.contracts.secrets import ResolvedSecret
 from elspeth.core.dag.models import GraphValidationError
-from elspeth.web.execution.validation import validate_pipeline
+from elspeth.web.execution.validation import _collect_secret_refs, validate_pipeline
 
 
 class FakeSourceSpec:
     """Minimal stand-in for SourceSpec during validation tests."""
+
+    def __init__(self, options: dict[str, Any] | None = None) -> None:
+        self.options = options or {}
+
+
+class FakeNodeSpec:
+    """Minimal stand-in for NodeSpec during validation tests."""
+
+    def __init__(self, options: dict[str, Any] | None = None) -> None:
+        self.options = options or {}
+
+
+class FakeOutputSpec:
+    """Minimal stand-in for OutputSpec during validation tests."""
 
     def __init__(self, options: dict[str, Any] | None = None) -> None:
         self.options = options or {}
@@ -34,9 +49,17 @@ class FakeCompositionState:
     object with an .options attribute, not a raw dict.
     """
 
-    def __init__(self, yaml_content: str = "", source_options: dict[str, Any] | None = None) -> None:
+    def __init__(
+        self,
+        yaml_content: str = "",
+        source_options: dict[str, Any] | None = None,
+        nodes: tuple[FakeNodeSpec, ...] | None = None,
+        outputs: tuple[FakeOutputSpec, ...] | None = None,
+    ) -> None:
         self.yaml_content = yaml_content
         self.source: FakeSourceSpec | None = FakeSourceSpec(source_options) if source_options is not None else None
+        self.nodes = nodes or ()
+        self.outputs = outputs or ()
 
 
 class FakeWebSettings:
@@ -130,11 +153,13 @@ class TestValidatePipelineSuccess:
         result = validate_pipeline(state, settings, mock_yaml_gen)
 
         assert result.is_valid is True
-        assert len(result.checks) == 5
+        assert len(result.checks) == 6
         assert all(c.passed for c in result.checks)
         # B11 fix: source_path_allowlist check is always recorded
         assert result.checks[0].name == "source_path_allowlist"
         assert result.checks[0].passed is True
+        assert result.checks[1].name == "secret_refs"
+        assert result.checks[1].passed is True
         assert result.errors == []
 
         # Verify real engine functions were called
@@ -172,14 +197,16 @@ class TestValidatePipelineSettingsFailure:
         result = validate_pipeline(state, settings, mock_yaml_gen)
 
         assert result.is_valid is False
-        # B11: index 0 is source_path_allowlist (passed), index 1 is settings_load
+        # B11: index 0=path_allowlist, 1=secret_refs, 2=settings_load
         assert result.checks[0].name == "source_path_allowlist"
         assert result.checks[0].passed is True
-        assert result.checks[1].name == "settings_load"
-        assert result.checks[1].passed is False
+        assert result.checks[1].name == "secret_refs"
+        assert result.checks[1].passed is True
+        assert result.checks[2].name == "settings_load"
+        assert result.checks[2].passed is False
         # Downstream checks are skipped but recorded
-        assert all(not c.passed for c in result.checks[2:])
-        assert any("Skipped" in c.detail for c in result.checks[2:])
+        assert all(not c.passed for c in result.checks[3:])
+        assert any("Skipped" in c.detail for c in result.checks[3:])
         assert len(result.errors) >= 1
 
     @patch("elspeth.web.execution.validation.load_settings")
@@ -196,8 +223,8 @@ class TestValidatePipelineSettingsFailure:
         result = validate_pipeline(state, settings, mock_yaml_gen)
 
         assert result.is_valid is False
-        # B11: index 1 is settings_load (index 0 is source_path_allowlist)
-        assert result.checks[1].passed is False
+        # B11: index 2 is settings_load (0=path_allowlist, 1=secret_refs)
+        assert result.checks[2].passed is False
 
 
 class TestValidatePipelinePluginFailure:
@@ -218,9 +245,9 @@ class TestValidatePipelinePluginFailure:
         result = validate_pipeline(state, settings, mock_yaml_gen)
 
         assert result.is_valid is False
-        # B11: index 0=path_allowlist, 1=settings_load, 2=plugin_instantiation
-        assert result.checks[1].passed is True  # settings_load passed
-        assert result.checks[2].passed is False  # plugin_instantiation failed
+        # B11: index 0=path_allowlist, 1=secret_refs, 2=settings_load, 3=plugin_instantiation
+        assert result.checks[2].passed is True  # settings_load passed
+        assert result.checks[3].passed is False  # plugin_instantiation failed
         assert any("unknown" in e.message.lower() for e in result.errors)
 
 
@@ -254,8 +281,8 @@ class TestValidatePipelineGraphFailure:
         result = validate_pipeline(state, settings, mock_yaml_gen)
 
         assert result.is_valid is False
-        # B11: index 0=path_allowlist, 1=settings_load, 2=plugins, 3=graph_structure
-        assert result.checks[3].passed is False  # graph_structure failed
+        # B11: index 0=path_allowlist, 1=secret_refs, 2=settings_load, 3=plugins, 4=graph_structure
+        assert result.checks[4].passed is False  # graph_structure failed
         assert len(result.errors) >= 1
 
     @patch("elspeth.web.execution.validation.load_settings")
@@ -288,9 +315,9 @@ class TestValidatePipelineGraphFailure:
         result = validate_pipeline(state, settings, mock_yaml_gen)
 
         assert result.is_valid is False
-        # B11: index 0=path_allowlist, 1=settings, 2=plugins, 3=graph, 4=schema
-        assert result.checks[3].passed is True  # graph_structure passed
-        assert result.checks[4].passed is False  # schema_compatibility failed
+        # B11: index 0=path_allowlist, 1=secret_refs, 2=settings, 3=plugins, 4=graph, 5=schema
+        assert result.checks[4].passed is True  # graph_structure passed
+        assert result.checks[5].passed is False  # schema_compatibility failed
 
 
 class TestValidatePipelineNoBareCatch:
@@ -350,3 +377,198 @@ class TestValidatePipelineTempFileCleanup:
 
         # The temp file should have been cleaned up
         assert not arg.exists()
+
+
+# ── Secret Ref Helpers ────────────────────────────────────────────────
+
+
+class FakeSecretService:
+    """Minimal WebSecretResolver stand-in for validation tests."""
+
+    def __init__(self, available_refs: set[str]) -> None:
+        self._available = available_refs
+
+    def list_refs(self, user_id: str) -> list[Any]:
+        return []
+
+    def has_ref(self, user_id: str, name: str) -> bool:
+        return name in self._available
+
+    def resolve(self, user_id: str, name: str) -> ResolvedSecret | None:
+        if name in self._available:
+            return ResolvedSecret(name=name, value="fake", scope="user", fingerprint="abc123")
+        return None
+
+
+class TestCollectSecretRefs:
+    """Unit tests for _collect_secret_refs helper."""
+
+    def test_empty_dict(self) -> None:
+        assert _collect_secret_refs({}) == []
+
+    def test_single_secret_ref(self) -> None:
+        assert _collect_secret_refs({"secret_ref": "API_KEY"}) == ["API_KEY"]
+
+    def test_nested_secret_ref(self) -> None:
+        data = {"source": {"options": {"api_key": {"secret_ref": "MY_KEY"}}}}
+        assert _collect_secret_refs(data) == ["MY_KEY"]
+
+    def test_multiple_refs(self) -> None:
+        data = {
+            "auth": {"secret_ref": "TOKEN"},
+            "db": {"password": {"secret_ref": "DB_PASS"}},
+        }
+        refs = _collect_secret_refs(data)
+        assert sorted(refs) == ["DB_PASS", "TOKEN"]
+
+    def test_list_with_refs(self) -> None:
+        data = [{"secret_ref": "A"}, {"secret_ref": "B"}]
+        assert _collect_secret_refs(data) == ["A", "B"]
+
+    def test_non_secret_dict(self) -> None:
+        data = {"secret_ref": "KEY", "extra": "field"}  # len > 1, not a secret ref
+        assert _collect_secret_refs(data) == []
+
+    def test_mapping_proxy_type(self) -> None:
+        """Frozen dataclass fields use MappingProxyType — must be walkable."""
+        from types import MappingProxyType
+
+        data = MappingProxyType({"api_key": MappingProxyType({"secret_ref": "KEY"})})
+        assert _collect_secret_refs(data) == ["KEY"]
+
+
+class TestValidatePipelineSecretRefs:
+    """Secret ref validation check in validate_pipeline()."""
+
+    def test_missing_refs_fail_validation(self) -> None:
+        """Validation fails when secret refs can't be resolved."""
+        state = FakeCompositionState(
+            source_options={"api_key": {"secret_ref": "MISSING_KEY"}},
+        )
+        settings = FakeWebSettings()
+        mock_yaml_gen = MagicMock()
+        secret_svc = FakeSecretService(available_refs=set())
+
+        result = validate_pipeline(
+            state,
+            settings,
+            mock_yaml_gen,
+            secret_service=secret_svc,
+            user_id="user-1",
+        )
+
+        assert result.is_valid is False
+        secret_check = next(c for c in result.checks if c.name == "secret_refs")
+        assert secret_check.passed is False
+        assert "MISSING_KEY" in secret_check.detail
+        assert any("MISSING_KEY" in e.message for e in result.errors)
+        # Downstream checks should be skipped
+        assert any("Skipped" in c.detail for c in result.checks if c.name == "settings_load")
+
+    def test_all_refs_present_passes(self) -> None:
+        """Validation passes when all secret refs are resolvable."""
+        state = FakeCompositionState(
+            source_options={"api_key": {"secret_ref": "MY_KEY"}},
+        )
+        settings = FakeWebSettings()
+        mock_yaml_gen = MagicMock()
+        mock_yaml_gen.generate_yaml.return_value = "source:\n  plugin: csv_source"
+        secret_svc = FakeSecretService(available_refs={"MY_KEY"})
+
+        with patch("elspeth.web.execution.validation.load_settings") as mock_load:
+            mock_load.side_effect = FileNotFoundError("no temp file")
+            result = validate_pipeline(
+                state,
+                settings,
+                mock_yaml_gen,
+                secret_service=secret_svc,
+                user_id="user-1",
+            )
+
+        secret_check = next(c for c in result.checks if c.name == "secret_refs")
+        assert secret_check.passed is True
+        assert "1 secret reference(s) resolved" in secret_check.detail
+
+    def test_no_secret_service_skips_check(self) -> None:
+        """Without secret_service, the check is skipped (passed=True)."""
+        state = FakeCompositionState(
+            source_options={"api_key": {"secret_ref": "KEY"}},
+        )
+        settings = FakeWebSettings()
+        mock_yaml_gen = MagicMock()
+        mock_yaml_gen.generate_yaml.return_value = "source:\n  plugin: csv_source"
+
+        with patch("elspeth.web.execution.validation.load_settings") as mock_load:
+            mock_load.side_effect = FileNotFoundError("no temp file")
+            result = validate_pipeline(state, settings, mock_yaml_gen)
+
+        secret_check = next(c for c in result.checks if c.name == "secret_refs")
+        assert secret_check.passed is True
+        assert "skipped" in secret_check.detail.lower()
+
+    def test_refs_in_node_options_detected(self) -> None:
+        """Secret refs in node options are found and validated."""
+        state = FakeCompositionState(
+            source_options={},
+            nodes=(FakeNodeSpec(options={"token": {"secret_ref": "NODE_TOKEN"}}),),
+        )
+        settings = FakeWebSettings()
+        mock_yaml_gen = MagicMock()
+        secret_svc = FakeSecretService(available_refs=set())
+
+        result = validate_pipeline(
+            state,
+            settings,
+            mock_yaml_gen,
+            secret_service=secret_svc,
+            user_id="user-1",
+        )
+
+        assert result.is_valid is False
+        assert any("NODE_TOKEN" in e.message for e in result.errors)
+
+    def test_refs_in_output_options_detected(self) -> None:
+        """Secret refs in output options are found and validated."""
+        state = FakeCompositionState(
+            source_options={},
+            outputs=(FakeOutputSpec(options={"password": {"secret_ref": "DB_PASS"}}),),
+        )
+        settings = FakeWebSettings()
+        mock_yaml_gen = MagicMock()
+        secret_svc = FakeSecretService(available_refs=set())
+
+        result = validate_pipeline(
+            state,
+            settings,
+            mock_yaml_gen,
+            secret_service=secret_svc,
+            user_id="user-1",
+        )
+
+        assert result.is_valid is False
+        assert any("DB_PASS" in e.message for e in result.errors)
+
+    def test_multiple_missing_refs_listed(self) -> None:
+        """All missing refs are collected and reported at once."""
+        state = FakeCompositionState(
+            source_options={
+                "key1": {"secret_ref": "REF_A"},
+                "key2": {"secret_ref": "REF_B"},
+            },
+        )
+        settings = FakeWebSettings()
+        mock_yaml_gen = MagicMock()
+        secret_svc = FakeSecretService(available_refs={"REF_A"})  # REF_B missing
+
+        result = validate_pipeline(
+            state,
+            settings,
+            mock_yaml_gen,
+            secret_service=secret_svc,
+            user_id="user-1",
+        )
+
+        assert result.is_valid is False
+        secret_check = next(c for c in result.checks if c.name == "secret_refs")
+        assert "REF_B" in secret_check.detail
+        assert "REF_A" not in secret_check.detail  # REF_A resolved fine

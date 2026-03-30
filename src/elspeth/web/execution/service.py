@@ -84,6 +84,7 @@ class ExecutionServiceImpl:
         session_service: SessionServiceProtocol,
         yaml_generator: Any,  # YamlGenerator — injected, not module-level
         blob_service: Any = None,  # BlobServiceImpl — optional for blob linkage
+        secret_service: Any = None,  # WebSecretService — optional for secret resolution
     ) -> None:
         self._loop = loop
         self._broadcaster = broadcaster
@@ -91,6 +92,7 @@ class ExecutionServiceImpl:
         self._session_service = session_service
         self._yaml_generator = yaml_generator
         self._blob_service = blob_service
+        self._secret_service = secret_service
         # AC #17: No run_repository — all Run CRUD delegates to SessionService
         # via create_run(), update_run_status(), get_active_run(), get_run().
         # R6 expanded params: landscape_run_id, pipeline_yaml, rows_processed,
@@ -122,13 +124,18 @@ class ExecutionServiceImpl:
             event.set()
         self._executor.shutdown(wait=True)
 
-    async def execute(self, session_id: UUID, state_id: UUID | None = None) -> UUID:
+    async def execute(self, session_id: UUID, state_id: UUID | None = None, *, user_id: str | None = None) -> UUID:
         """Start a background pipeline run.
 
         B6 enforcement: raises RunAlreadyActiveError if a pending or running
         run already exists for this session.
 
         Returns the run_id immediately.
+
+        Args:
+            session_id: Session to execute.
+            state_id: Specific state to execute (latest if None).
+            user_id: Authenticated user's ID for scoped secret resolution.
 
         Note: async because SessionService methods are async. The pipeline
         itself runs in a background thread — only setup is async.
@@ -201,7 +208,7 @@ class ExecutionServiceImpl:
         # Submit to thread pool — clean up shutdown event if submit fails
         # (e.g. RuntimeError after executor.shutdown())
         try:
-            future = self._executor.submit(self._run_pipeline, str(run_id), pipeline_yaml, shutdown_event)
+            future = self._executor.submit(self._run_pipeline, str(run_id), pipeline_yaml, shutdown_event, user_id)
         except RuntimeError:
             self._shutdown_events.pop(str(run_id), None)
             raise
@@ -224,12 +231,18 @@ class ExecutionServiceImpl:
             landscape_run_id=run.landscape_run_id,
         )
 
-    async def validate(self, session_id: UUID) -> ValidationResult:
+    async def validate(self, session_id: UUID, *, user_id: str | None = None) -> ValidationResult:
         """Dry-run validation using real engine code paths.
 
         Wraps the sync validate_pipeline() call via run_in_executor
         to avoid blocking the event loop (AC #16).
+
+        Args:
+            session_id: Session whose current state to validate.
+            user_id: Authenticated user's ID for scoped secret ref validation.
         """
+        from functools import partial
+
         from elspeth.web.execution.validation import validate_pipeline
 
         state_record = await self._session_service.get_current_state(session_id)
@@ -259,10 +272,14 @@ class ExecutionServiceImpl:
             ValidationResult,
             await loop.run_in_executor(
                 None,
-                validate_pipeline,
-                composition_state,
-                self._settings,
-                self._yaml_generator,
+                partial(
+                    validate_pipeline,
+                    composition_state,
+                    self._settings,
+                    self._yaml_generator,
+                    secret_service=self._secret_service,
+                    user_id=user_id,
+                ),
             ),
         )
 
@@ -304,6 +321,7 @@ class ExecutionServiceImpl:
         run_id: str,
         pipeline_yaml: str,
         shutdown_event: threading.Event,
+        user_id: str | None = None,
     ) -> None:
         """Execute a pipeline in the background thread.
 
@@ -313,6 +331,11 @@ class ExecutionServiceImpl:
 
         B2 fix: shutdown_event is ALWAYS passed to orchestrator.run().
         B3 fix: LandscapeDB and PayloadStore from WebSettings resolvers.
+
+        Secret resolution: If secret_service and user_id are available,
+        resolves {"secret_ref": "NAME"} patterns in the YAML config before
+        loading settings. Resolved values exist only in the worker thread's
+        local memory — never persisted.
         """
         tmp_path: Path | None = None
         landscape_db: LandscapeDB | None = None
@@ -329,10 +352,24 @@ class ExecutionServiceImpl:
             landscape_db = LandscapeDB(connection_string=self._settings.get_landscape_url())
             payload_store = FilesystemPayloadStore(base_path=self._settings.get_payload_store_path())
 
+            # Resolve secret refs before writing YAML to temp file.
+            # Resolved values exist only in this thread's local memory — the
+            # original pipeline_yaml (persisted in the Run record) is untouched.
+            resolved_yaml = pipeline_yaml
+            if self._secret_service is not None and user_id is not None:
+                import yaml as _yaml
+
+                from elspeth.core.secrets import resolve_secret_refs
+
+                config_dict = _yaml.safe_load(pipeline_yaml)
+                if isinstance(config_dict, dict):
+                    resolved_dict, _resolutions = resolve_secret_refs(config_dict, self._secret_service, user_id)
+                    resolved_yaml = _yaml.dump(resolved_dict, default_flow_style=False)
+
             # Write YAML to temp file — load_settings takes a path, NOT content
             tmp_file = tempfile.NamedTemporaryFile(mode="w", suffix=".yaml", delete=False)  # noqa: SIM115
             tmp_path = Path(tmp_file.name)
-            tmp_file.write(pipeline_yaml)
+            tmp_file.write(resolved_yaml)
             tmp_file.close()
 
             settings = load_settings(tmp_path)

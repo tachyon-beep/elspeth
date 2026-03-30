@@ -104,7 +104,7 @@ def create_execution_router() -> APIRouter:
     ) -> ValidationResult:
         """Dry-run validation using real engine code paths."""
         await _verify_session_ownership(session_id, user, request)
-        result = await service.validate(session_id)
+        result = await service.validate(session_id, user_id=user.user_id)
         return result
 
     @router.post(
@@ -125,7 +125,7 @@ def create_execution_router() -> APIRouter:
         {"detail": str(exc), "error_type": "run_already_active"}.
         """
         await _verify_session_ownership(session_id, user, request)
-        run_id = await service.execute(session_id, state_id)
+        run_id = await service.execute(session_id, state_id, user_id=user.user_id)
         return {"run_id": str(run_id)}
 
     # ── Run-scoped endpoints (status, cancel, results) ────────────────

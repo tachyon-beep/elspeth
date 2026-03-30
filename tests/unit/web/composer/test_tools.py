@@ -609,10 +609,10 @@ class TestDiscoveryTools:
 
 
 class TestToolDefinitions:
-    def test_has_sixteen_tools(self) -> None:
-        """5 discovery + 8 mutation + 3 blob tools = 16 tools."""
+    def test_has_nineteen_tools(self) -> None:
+        """5 discovery + 8 mutation + 3 blob tools + 3 secret tools = 19 tools."""
         defs = get_tool_definitions()
-        assert len(defs) == 16
+        assert len(defs) == 19
 
     def test_all_have_json_schema(self) -> None:
         for defn in get_tool_definitions():
@@ -934,3 +934,170 @@ class TestBlobTools:
         assert result.success is True
         assert result.updated_state.source is not None
         assert result.updated_state.source.plugin == "csv"
+
+
+# ---------------------------------------------------------------------------
+# Secret tool tests — composer-level secret reference wiring
+# ---------------------------------------------------------------------------
+
+
+class TestSecretTools:
+    """Secret reference composition tools: discovery, validation, and wiring.
+
+    Security contracts tested:
+    - Secret tools fail without secret_service (no ambient access)
+    - list_secret_refs never returns plaintext values
+    - validate_secret_ref returns availability status
+    - wire_secret_ref sets a secret_ref marker in source options
+    """
+
+    def _mock_secret_service(self) -> MagicMock:
+        from elspeth.contracts.secrets import SecretInventoryItem
+
+        svc = MagicMock()
+        svc.list_refs.return_value = [
+            SecretInventoryItem(name="OPENROUTER_API_KEY", scope="user", available=True),
+            SecretInventoryItem(name="DB_PASSWORD", scope="server", available=True),
+        ]
+        svc.has_ref.return_value = True
+        return svc
+
+    def test_list_secret_refs_without_service_returns_failure(self) -> None:
+        """Secret tools with no secret_service must fail — no ambient access."""
+        state = _empty_state()
+        catalog = _mock_catalog()
+        result = execute_tool("list_secret_refs", {}, state, catalog)
+        assert result.success is False
+
+    def test_list_secret_refs_returns_inventory(self) -> None:
+        """list_secret_refs returns inventory items without values."""
+        state = _empty_state()
+        catalog = _mock_catalog()
+        svc = self._mock_secret_service()
+        result = execute_tool(
+            "list_secret_refs",
+            {},
+            state,
+            catalog,
+            secret_service=svc,
+            user_id="test-user",
+        )
+        assert result.success is True
+        assert len(result.data) == 2
+        # Ensure no value field leaked
+        for item in result.data:
+            assert "value" not in item
+
+    def test_validate_secret_ref_returns_availability(self) -> None:
+        """validate_secret_ref returns name and availability status."""
+        state = _empty_state()
+        catalog = _mock_catalog()
+        svc = self._mock_secret_service()
+        result = execute_tool(
+            "validate_secret_ref",
+            {"name": "OPENROUTER_API_KEY"},
+            state,
+            catalog,
+            secret_service=svc,
+            user_id="test-user",
+        )
+        assert result.success is True
+        assert result.data["name"] == "OPENROUTER_API_KEY"
+        assert result.data["available"] is True
+
+    def test_validate_secret_ref_without_service_returns_failure(self) -> None:
+        state = _empty_state()
+        catalog = _mock_catalog()
+        result = execute_tool(
+            "validate_secret_ref",
+            {"name": "OPENROUTER_API_KEY"},
+            state,
+            catalog,
+        )
+        assert result.success is False
+
+    def test_wire_secret_ref_sets_marker_in_source_options(self) -> None:
+        """wire_secret_ref patches source options with a secret_ref marker."""
+        catalog = _mock_catalog()
+        svc = self._mock_secret_service()
+        # First set a source
+        state = _empty_state()
+        r1 = execute_tool(
+            "set_source",
+            {
+                "plugin": "csv",
+                "on_success": "t1",
+                "options": {"path": "/data/in.csv"},
+                "on_validation_failure": "quarantine",
+            },
+            state,
+            catalog,
+        )
+        assert r1.success is True
+        # Now wire a secret into the source
+        r2 = execute_tool(
+            "wire_secret_ref",
+            {
+                "name": "OPENROUTER_API_KEY",
+                "target": "source",
+                "option_key": "api_key",
+            },
+            r1.updated_state,
+            catalog,
+            secret_service=svc,
+            user_id="test-user",
+        )
+        assert r2.success is True
+        assert r2.updated_state.source is not None
+        from elspeth.contracts.freeze import deep_thaw
+
+        opts = deep_thaw(r2.updated_state.source.options)
+        assert opts["api_key"] == {"secret_ref": "OPENROUTER_API_KEY"}
+        # Original options preserved
+        assert opts["path"] == "/data/in.csv"
+
+    def test_wire_secret_ref_without_service_returns_failure(self) -> None:
+        state = _empty_state()
+        catalog = _mock_catalog()
+        result = execute_tool(
+            "wire_secret_ref",
+            {
+                "name": "OPENROUTER_API_KEY",
+                "target": "source",
+                "option_key": "api_key",
+            },
+            state,
+            catalog,
+        )
+        assert result.success is False
+
+    def test_wire_secret_ref_nonexistent_ref_fails(self) -> None:
+        """wire_secret_ref fails if the secret ref doesn't exist."""
+        catalog = _mock_catalog()
+        svc = self._mock_secret_service()
+        svc.has_ref.return_value = False
+        state = _empty_state()
+        r1 = execute_tool(
+            "set_source",
+            {
+                "plugin": "csv",
+                "on_success": "t1",
+                "options": {},
+                "on_validation_failure": "quarantine",
+            },
+            state,
+            catalog,
+        )
+        r2 = execute_tool(
+            "wire_secret_ref",
+            {
+                "name": "NONEXISTENT",
+                "target": "source",
+                "option_key": "api_key",
+            },
+            r1.updated_state,
+            catalog,
+            secret_service=svc,
+            user_id="test-user",
+        )
+        assert r2.success is False

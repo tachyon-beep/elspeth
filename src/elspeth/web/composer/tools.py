@@ -113,7 +113,7 @@ def get_expression_grammar() -> str:
 def get_tool_definitions() -> list[dict[str, Any]]:
     """Return JSON Schema tool definitions for the LLM.
 
-    Returns 16 tools: 5 discovery + 8 mutation + 3 blob tools.
+    Returns 19 tools: 5 discovery + 8 mutation + 3 blob tools + 3 secret tools.
     """
     return [
         # Discovery tools
@@ -323,6 +323,41 @@ def get_tool_definitions() -> list[dict[str, Any]]:
                     },
                 },
                 "required": ["blob_id", "on_success"],
+            },
+        },
+        # Secret tools
+        {
+            "name": "list_secret_refs",
+            "description": "List available secret references (API keys, credentials). Shows names and scopes, never values.",
+            "parameters": {"type": "object", "properties": {}, "required": []},
+        },
+        {
+            "name": "validate_secret_ref",
+            "description": "Check if a secret reference exists and is accessible to the current user.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "name": {"type": "string", "description": "Secret reference name (e.g. 'OPENROUTER_API_KEY')."},
+                },
+                "required": ["name"],
+            },
+        },
+        {
+            "name": "wire_secret_ref",
+            "description": "Place a secret reference marker in the pipeline config. The secret will be resolved at execution time.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "name": {"type": "string", "description": "Secret reference name."},
+                    "target": {
+                        "type": "string",
+                        "enum": ["source", "node", "output"],
+                        "description": "Which component to wire the secret into.",
+                    },
+                    "target_id": {"type": "string", "description": "Node ID or output name (required for node/output targets)."},
+                    "option_key": {"type": "string", "description": "Config option key to set (e.g. 'api_key')."},
+                },
+                "required": ["name", "target", "option_key"],
             },
         },
     ]
@@ -857,6 +892,129 @@ def _execute_set_source_from_blob(
 # Blob tool handler type — extended signature with session context
 BlobToolHandler = Callable[..., ToolResult]
 
+# --- Secret tool handlers ---
+
+# Secret tool handler type — extended signature with secret_service + user_id
+SecretToolHandler = Callable[..., ToolResult]
+
+
+def _handle_list_secret_refs(
+    arguments: dict[str, Any],
+    state: CompositionState,
+    catalog: CatalogServiceProtocol,
+    data_dir: str | None = None,
+    *,
+    secret_service: Any | None = None,
+    user_id: str | None = None,
+) -> ToolResult:
+    if secret_service is None or user_id is None:
+        return _failure_result(state, "Secret tools require secret service context.")
+    items = secret_service.list_refs(user_id)
+    # Return inventory dicts — NEVER include values
+    data = [{"name": item.name, "scope": item.scope, "available": item.available} for item in items]
+    return _discovery_result(state, data)
+
+
+def _handle_validate_secret_ref(
+    arguments: dict[str, Any],
+    state: CompositionState,
+    catalog: CatalogServiceProtocol,
+    data_dir: str | None = None,
+    *,
+    secret_service: Any | None = None,
+    user_id: str | None = None,
+) -> ToolResult:
+    if secret_service is None or user_id is None:
+        return _failure_result(state, "Secret tools require secret service context.")
+    name = arguments["name"]
+    available = secret_service.has_ref(user_id, name)
+    return _discovery_result(state, {"name": name, "available": available})
+
+
+def _execute_wire_secret_ref(
+    arguments: dict[str, Any],
+    state: CompositionState,
+    catalog: CatalogServiceProtocol,
+    data_dir: str | None = None,
+    *,
+    secret_service: Any | None = None,
+    user_id: str | None = None,
+) -> ToolResult:
+    if secret_service is None or user_id is None:
+        return _failure_result(state, "Secret tools require secret service context.")
+
+    name = arguments["name"]
+    target = arguments["target"]
+    option_key = arguments["option_key"]
+    target_id = arguments.get("target_id")
+
+    # Validate the secret ref exists
+    if not secret_service.has_ref(user_id, name):
+        return _failure_result(state, f"Secret reference '{name}' not found or not accessible.")
+
+    marker = {"secret_ref": name}
+
+    if target == "source":
+        if state.source is None:
+            return _failure_result(state, "No source configured — set a source first.")
+        patched_options = dict(deep_thaw(state.source.options))
+        patched_options[option_key] = marker
+        new_source = SourceSpec(
+            plugin=state.source.plugin,
+            on_success=state.source.on_success,
+            options=patched_options,
+            on_validation_failure=state.source.on_validation_failure,
+        )
+        new_state = state.with_source(new_source)
+        return _mutation_result(new_state, ("source",))
+
+    elif target == "node":
+        if target_id is None:
+            return _failure_result(state, "target_id is required for node targets.")
+        node = next((n for n in state.nodes if n.id == target_id), None)
+        if node is None:
+            return _failure_result(state, f"Node '{target_id}' not found.")
+        patched_options = dict(deep_thaw(node.options))
+        patched_options[option_key] = marker
+        new_node = NodeSpec(
+            id=node.id,
+            node_type=node.node_type,
+            plugin=node.plugin,
+            input=node.input,
+            on_success=node.on_success,
+            on_error=node.on_error,
+            options=patched_options,
+            condition=node.condition,
+            routes=deep_thaw(node.routes) if node.routes is not None else None,
+            fork_to=node.fork_to,
+            branches=node.branches,
+            policy=node.policy,
+            merge=node.merge,
+        )
+        new_state = state.with_node(new_node)
+        return _mutation_result(new_state, (target_id,))
+
+    elif target == "output":
+        if target_id is None:
+            return _failure_result(state, "target_id is required for output targets.")
+        output = next((o for o in state.outputs if o.name == target_id), None)
+        if output is None:
+            return _failure_result(state, f"Output '{target_id}' not found.")
+        patched_options = dict(deep_thaw(output.options))
+        patched_options[option_key] = marker
+        new_output = OutputSpec(
+            name=output.name,
+            plugin=output.plugin,
+            options=patched_options,
+            on_write_failure=output.on_write_failure,
+        )
+        new_state = state.with_output(new_output)
+        return _mutation_result(new_state, (target_id,))
+
+    else:
+        return _failure_result(state, f"Unknown target type: '{target}'.")
+
+
 # --- Registries ---
 # Must be after all handler definitions to avoid NameError.
 
@@ -894,11 +1052,33 @@ _BLOB_MUTATION_TOOLS: dict[str, BlobToolHandler] = {
     "set_source_from_blob": _execute_set_source_from_blob,
 }
 
+# Secret tools use an extended handler signature with secret_service + user_id kwargs
+_SECRET_DISCOVERY_TOOLS: dict[str, SecretToolHandler] = {
+    "list_secret_refs": _handle_list_secret_refs,
+    "validate_secret_ref": _handle_validate_secret_ref,
+}
+
+_SECRET_MUTATION_TOOLS: dict[str, SecretToolHandler] = {
+    "wire_secret_ref": _execute_wire_secret_ref,
+}
+
 # Module-level assertions: registries must not overlap.
-_all_tools = set(_DISCOVERY_TOOLS) | set(_MUTATION_TOOLS) | set(_BLOB_DISCOVERY_TOOLS) | set(_BLOB_MUTATION_TOOLS)
-assert len(_all_tools) == len(_DISCOVERY_TOOLS) + len(_MUTATION_TOOLS) + len(_BLOB_DISCOVERY_TOOLS) + len(_BLOB_MUTATION_TOOLS), (
-    "Tool registry overlap detected"
+_all_tools = (
+    set(_DISCOVERY_TOOLS)
+    | set(_MUTATION_TOOLS)
+    | set(_BLOB_DISCOVERY_TOOLS)
+    | set(_BLOB_MUTATION_TOOLS)
+    | set(_SECRET_DISCOVERY_TOOLS)
+    | set(_SECRET_MUTATION_TOOLS)
 )
+assert len(_all_tools) == (
+    len(_DISCOVERY_TOOLS)
+    + len(_MUTATION_TOOLS)
+    + len(_BLOB_DISCOVERY_TOOLS)
+    + len(_BLOB_MUTATION_TOOLS)
+    + len(_SECRET_DISCOVERY_TOOLS)
+    + len(_SECRET_MUTATION_TOOLS)
+), "Tool registry overlap detected"
 
 assert set(_DISCOVERY_TOOLS) >= _CACHEABLE_DISCOVERY_TOOLS, (
     f"Cacheable tools not in discovery registry: {_CACHEABLE_DISCOVERY_TOOLS - set(_DISCOVERY_TOOLS)}"
@@ -907,7 +1087,7 @@ assert set(_DISCOVERY_TOOLS) >= _CACHEABLE_DISCOVERY_TOOLS, (
 
 def is_discovery_tool(name: str) -> bool:
     """Return True if the tool is a discovery (read-only) tool."""
-    return name in _DISCOVERY_TOOLS or name in _BLOB_DISCOVERY_TOOLS
+    return name in _DISCOVERY_TOOLS or name in _BLOB_DISCOVERY_TOOLS or name in _SECRET_DISCOVERY_TOOLS
 
 
 def is_cacheable_discovery_tool(name: str) -> bool:
@@ -926,6 +1106,8 @@ def execute_tool(
     data_dir: str | None = None,
     session_engine: Engine | None = None,
     session_id: str | None = None,
+    secret_service: Any | None = None,
+    user_id: str | None = None,
 ) -> ToolResult:
     """Execute a composition tool by name.
 
@@ -940,6 +1122,8 @@ def execute_tool(
         session_engine: SQLAlchemy engine for the session database.
             Required for blob tools to perform synchronous blob lookups.
         session_id: Current session ID. Required for blob tools.
+        secret_service: WebSecretService instance. Required for secret tools.
+        user_id: Current user ID. Required for secret tools.
     """
     # Check standard tools first
     handler = _DISCOVERY_TOOLS.get(tool_name) or _MUTATION_TOOLS.get(tool_name)
@@ -956,6 +1140,18 @@ def execute_tool(
             data_dir,
             session_engine=session_engine,
             session_id=session_id,
+        )
+
+    # Check secret tools (extended signature with secret_service + user_id)
+    secret_handler = _SECRET_DISCOVERY_TOOLS.get(tool_name) or _SECRET_MUTATION_TOOLS.get(tool_name)
+    if secret_handler is not None:
+        return secret_handler(
+            arguments,
+            state,
+            catalog,
+            data_dir,
+            secret_service=secret_service,
+            user_id=user_id,
         )
 
     return _failure_result(state, f"Unknown tool: {tool_name}")

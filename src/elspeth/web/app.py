@@ -27,6 +27,10 @@ from elspeth.web.execution.progress import ProgressBroadcaster
 from elspeth.web.execution.routes import create_execution_router
 from elspeth.web.execution.service import ExecutionServiceImpl
 from elspeth.web.middleware.rate_limit import ComposerRateLimiter
+from elspeth.web.secrets.routes import create_secrets_router
+from elspeth.web.secrets.server_store import ServerSecretStore
+from elspeth.web.secrets.service import WebSecretService
+from elspeth.web.secrets.user_store import UserSecretStore
 from elspeth.web.sessions.migrations import run_migrations
 from elspeth.web.sessions.protocol import RunAlreadyActiveError
 from elspeth.web.sessions.routes import create_session_router
@@ -70,6 +74,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         session_service=session_service,
         yaml_generator=yaml_generator_module,
         blob_service=app.state.blob_service,
+        secret_service=getattr(app.state, "secret_service", None),
     )
     app.state.execution_service = execution_service
 
@@ -175,11 +180,17 @@ def create_app(settings: WebSettings | None = None) -> FastAPI:
         settings.max_blob_storage_per_session_bytes,
     )
 
+    # --- Secret service ---
+    user_secret_store = UserSecretStore(session_engine, settings.secret_key)
+    server_secret_store = ServerSecretStore(settings.server_secret_allowlist)
+    app.state.secret_service = WebSecretService(user_secret_store, server_secret_store)
+
     # --- Composer service (singleton, not per-request) ---
     app.state.composer_service = ComposerServiceImpl(
         catalog=app.state.catalog_service,
         settings=settings,
         session_engine=session_engine,
+        secret_service=app.state.secret_service,
     )
     app.state.composer_availability = app.state.composer_service.get_availability()
 
@@ -206,6 +217,7 @@ def create_app(settings: WebSettings | None = None) -> FastAPI:
     app.include_router(create_auth_router())
     app.include_router(create_session_router())
     app.include_router(create_blobs_router())
+    app.include_router(create_secrets_router())
     app.include_router(create_execution_router())
 
     # --- Seam contract D: RunAlreadyActiveError -> 409 with error_type ---

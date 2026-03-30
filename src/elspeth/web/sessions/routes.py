@@ -209,7 +209,7 @@ def create_session_router() -> APIRouter:
         # 4. Run the LLM composition loop
         composer: ComposerService = request.app.state.composer_service
         try:
-            result = await composer.compose(body.content, chat_messages, state, session_id=str(session_id))
+            result = await composer.compose(body.content, chat_messages, state, session_id=str(session_id), user_id=str(user.user_id))
         except ComposerConvergenceError as exc:
             response_body: dict[str, object] = {
                 "error_type": "convergence",

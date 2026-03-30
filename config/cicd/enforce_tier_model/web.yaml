@@ -224,20 +224,26 @@ allow_hits:
   safety: "Crashes on unknown version or missing envelope; no silent coercion"
   expires: null
 
-# App factory — os.environ.get() and @app.get() false positives
-- key: web/app.py:R1:create_app:fp=ac4f59aacf5905a5
+# App factory — os.environ.get(), @app.get() false positives, and getattr for optional services
+- key: web/app.py:R2:lifespan:fp=87350cfd8047de35
+  owner: web-app
+  reason: "Optional service — secret_service may not be wired in all deployment modes"
+  safety: "Returns None; caller checks before use"
+  expires: null
+
+- key: web/app.py:R1:create_app:fp=200707c68622816e
   owner: web-app
   reason: "Tier 3 boundary — os.environ.get() for env var check, not dict.get() on pipeline data"
   safety: "Guards dev-mode secret_key warning; no data flow impact"
   expires: null
 
-- key: web/app.py:R1:create_app:health:fp=fca1756e908148d5
+- key: web/app.py:R1:create_app:health:fp=6aa63454fe4ecade
   owner: web-app
   reason: "False positive — @app.get() is FastAPI HTTP route decorator, not dict.get()"
   safety: No dict access involved
   expires: null
 
-- key: web/app.py:R1:create_app:system_status:fp=d42859fbc377cbb2
+- key: web/app.py:R1:create_app:system_status:fp=de07d8d84692f54a
   owner: web-app
   reason: "False positive — @app.get() is FastAPI HTTP route decorator, not dict.get()"
   safety: No dict access involved
@@ -356,7 +362,7 @@ allow_hits:
   safety: "Missing event routes to an explicit database-backed status update path"
   expires: null
 
-- key: web/execution/service.py:R4:ExecutionServiceImpl:_run_pipeline:_safe_broadcast:fp=1f95d33248434c3d
+- key: web/execution/service.py:R4:ExecutionServiceImpl:_run_pipeline:_safe_broadcast:fp=77a57758687e510b
   owner: web-execution
   reason: "Progress broadcasting is operational visibility and may fail with transport/runtime exceptions outside pipeline correctness"
   safety: "Broadcast failure is logged while run status and audit updates continue on the authoritative path"
@@ -521,7 +527,7 @@ allow_hits:
   expires: null
 
 # Execution validation — optional path/file keys in user-authored source config (fingerprint updated)
-- key: web/execution/validation.py:R1:validate_pipeline:fp=5ef4bf2201e8e7aa
+- key: web/execution/validation.py:R1:validate_pipeline:fp=7f46a13f5a001bac
   owner: web-execution
   reason: "Validation checks optional source path/file keys supplied by composition state"
   safety: "Absent keys are treated honestly as 'no path provided' and the check is recorded as skipped/passed"
@@ -551,6 +557,45 @@ allow_hits:
   owner: web-secrets
   reason: "Chained resolution — server store miss returns None; SecretNotFoundError is the expected miss signal"
   safety: "Only SecretNotFoundError is caught; caller receives None for genuine absence"
+  expires: null
+
+# Secrets routes — @router.get() false positive (FastAPI route decorator)
+- key: web/secrets/routes.py:R1:create_secrets_router:list_secrets:fp=68f742b3de4df7ce
+  owner: web-secrets
+  reason: "False positive — @router.get() is FastAPI HTTP route decorator, not dict.get()"
+  safety: No dict access involved
+  expires: null
+
+# Execution service — isinstance check on config dict and getattr on node options
+- key: web/execution/service.py:R5:ExecutionServiceImpl:_run_pipeline:fp=bdb5ffe0a7580fb3
+  owner: web-execution
+  reason: "Tier 3 boundary — config_dict from YAML deserialization may be non-dict (e.g. None or string)"
+  safety: "Non-dict triggers error path; no silent coercion"
+  expires: null
+
+# Execution validation — isinstance checks in tree-walk for secret ref collection
+- key: web/execution/validation.py:R5:_collect_secret_refs:fp=7955508cb148c972
+  owner: web-execution
+  reason: "Tree-walk — isinstance() dispatches dict/list/scalar branches in recursive config traversal"
+  safety: "No contract masking; structural dispatch on deserialized YAML (Tier 3 data)"
+  expires: null
+
+- key: web/execution/validation.py:R5:_collect_secret_refs:fp=c7f127a19ae9acd8
+  owner: web-execution
+  reason: "Tree-walk — isinstance(ref, str) validates secret_ref marker value type"
+  safety: "Non-string ref is silently skipped (malformed marker); no crash masking"
+  expires: null
+
+- key: web/execution/validation.py:R5:_collect_secret_refs:fp=9d372da2d9050ede
+  owner: web-execution
+  reason: "Tree-walk — isinstance() dispatches list/tuple branch in recursive config traversal"
+  safety: "No contract masking; structural dispatch on deserialized YAML (Tier 3 data)"
+  expires: null
+
+- key: web/execution/validation.py:R2:validate_pipeline:fp=1b4a447f623a5367
+  owner: web-execution
+  reason: "Composition node may lack 'options' attribute depending on node type"
+  safety: "Default empty dict means no secret refs collected for that node; no data loss"
   expires: null
 
 per_file_rules:

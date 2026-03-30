@@ -16,23 +16,31 @@ class ExecutionService(Protocol):
     execute() returns immediately; the pipeline runs in a background thread.
     """
 
-    async def validate(self, session_id: UUID) -> ValidationResult:
+    async def validate(self, session_id: UUID, *, user_id: str | None = None) -> ValidationResult:
         """Async dry-run validation using real engine code paths.
 
         Loads the current CompositionState for the session, generates YAML,
         and runs it through load_settings -> instantiate_plugins_from_config
         -> ExecutionGraph.from_plugin_instances -> graph.validate().
 
+        When user_id and a secret_service are provided, also validates
+        that all {"secret_ref": "NAME"} patterns are resolvable.
+
         Async because the implementation wraps the sync validate_pipeline()
         call via run_in_executor to avoid blocking the event loop.
         """
         ...
 
-    async def execute(self, session_id: UUID, state_id: UUID | None = None) -> UUID:
+    async def execute(self, session_id: UUID, state_id: UUID | None = None, *, user_id: str | None = None) -> UUID:
         """Start a background pipeline run.
 
         Returns the run_id immediately. Raises RunAlreadyActiveError if
         a pending or running Run already exists for this session.
+
+        Args:
+            session_id: Session to execute.
+            state_id: Specific state to execute (latest if None).
+            user_id: Authenticated user's ID for scoped secret resolution.
 
         Note: async because it calls SessionService (async) for active-run
         check and run creation. The actual pipeline runs in a background

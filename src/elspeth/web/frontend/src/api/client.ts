@@ -17,6 +17,7 @@ import type {
   PluginSchemaInfo,
   PluginSummary,
   Run,
+  SecretInventoryItem,
   Session,
   UploadResult,
   UserProfile,
@@ -512,6 +513,38 @@ export async function deleteBlob(
     `/api/sessions/${sessionId}/blobs/${blobId}`,
     { method: "DELETE", headers: authHeaders() },
   );
+  if (!response.ok) {
+    await parseResponse<never>(response);
+  }
+}
+
+// ── Secrets ────────────────────────────────────────────────────────────────
+
+/** List all available secret references (no values). */
+export async function listSecrets(): Promise<SecretInventoryItem[]> {
+  const response = await fetch("/api/secrets", { headers: authHeaders() });
+  return parseResponse<SecretInventoryItem[]>(response);
+}
+
+/** Create or update a user-scoped secret. Response never contains the value. */
+export async function createSecret(
+  name: string,
+  value: string,
+): Promise<{ name: string; scope: string; available: boolean }> {
+  const response = await fetch("/api/secrets", {
+    method: "POST",
+    headers: authHeaders("application/json"),
+    body: JSON.stringify({ name, value }),
+  });
+  return parseResponse<{ name: string; scope: string; available: boolean }>(response);
+}
+
+/** Delete a user-scoped secret. */
+export async function deleteSecret(name: string): Promise<void> {
+  const response = await fetch(`/api/secrets/${encodeURIComponent(name)}`, {
+    method: "DELETE",
+    headers: authHeaders(),
+  });
   if (!response.ok) {
     await parseResponse<never>(response);
   }

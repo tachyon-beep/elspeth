@@ -17,12 +17,14 @@ from __future__ import annotations
 
 import re
 import tempfile
+from collections.abc import Mapping
 from pathlib import Path
 from typing import Any
 
 from pydantic import ValidationError as PydanticValidationError
 
 from elspeth.cli_helpers import instantiate_plugins_from_config
+from elspeth.contracts.secrets import WebSecretResolver
 from elspeth.core.config import load_settings
 from elspeth.core.dag.graph import ExecutionGraph
 from elspeth.core.dag.models import GraphValidationError
@@ -34,12 +36,13 @@ from elspeth.web.execution.schemas import (
 
 # ── Check names (ordered) ─────────────────────────────────────────────
 _CHECK_PATH_ALLOWLIST = "source_path_allowlist"
+_CHECK_SECRET_REFS = "secret_refs"
 _CHECK_SETTINGS = "settings_load"
 _CHECK_PLUGINS = "plugin_instantiation"
 _CHECK_GRAPH = "graph_structure"
 _CHECK_SCHEMA = "schema_compatibility"
 
-_ALL_CHECKS = [_CHECK_PATH_ALLOWLIST, _CHECK_SETTINGS, _CHECK_PLUGINS, _CHECK_GRAPH, _CHECK_SCHEMA]
+_ALL_CHECKS = [_CHECK_PATH_ALLOWLIST, _CHECK_SECRET_REFS, _CHECK_SETTINGS, _CHECK_PLUGINS, _CHECK_GRAPH, _CHECK_SCHEMA]
 
 
 def _skipped_checks(from_check: str) -> list[ValidationCheck]:
@@ -88,11 +91,36 @@ def _extract_component_id(message: str) -> tuple[str | None, str | None]:
     return None, None
 
 
-def validate_pipeline(state: Any, settings: Any, yaml_generator: Any) -> ValidationResult:
+def _collect_secret_refs(obj: Any) -> list[str]:
+    """Walk a nested dict/list/Mapping structure and collect all secret_ref names."""
+    refs: list[str] = []
+    if isinstance(obj, (dict, Mapping)):
+        if len(obj) == 1 and "secret_ref" in obj:
+            ref = obj["secret_ref"]
+            if isinstance(ref, str):
+                refs.append(ref)
+                return refs
+        for v in obj.values():
+            refs.extend(_collect_secret_refs(v))
+    elif isinstance(obj, (list, tuple)):
+        for item in obj:
+            refs.extend(_collect_secret_refs(item))
+    return refs
+
+
+def validate_pipeline(
+    state: Any,
+    settings: Any,
+    yaml_generator: Any,
+    *,
+    secret_service: WebSecretResolver | None = None,
+    user_id: str | None = None,
+) -> ValidationResult:
     """Dry-run validation through the real engine code path.
 
     Steps:
     1. Source path allowlist check (C3/S2 defense-in-depth)
+    1b. Secret ref validation (all referenced secrets exist)
     2. Generate YAML from CompositionState
     3. Write to temp file, load_settings(path) — NOT yaml content
     4. instantiate_plugins_from_config(settings)
@@ -106,6 +134,8 @@ def validate_pipeline(state: Any, settings: Any, yaml_generator: Any) -> Validat
         state: CompositionState from the session.
         settings: WebSettings — used for path allowlist check.
         yaml_generator: YamlGenerator module/object with generate_yaml() method.
+        secret_service: Optional secret resolver for validating secret refs.
+        user_id: User ID for scoped secret resolution (required if secret_service is set).
     """
     checks: list[ValidationCheck] = []
     errors: list[ValidationError] = []
@@ -161,6 +191,53 @@ def validate_pipeline(state: Any, settings: Any, yaml_generator: Any) -> Validat
                 name=_CHECK_PATH_ALLOWLIST,
                 passed=True,
                 detail="No path option — check skipped",
+            )
+        )
+
+    # Step 1b: Secret ref validation — check all refs are resolvable
+    if secret_service is not None and user_id is not None:
+        # Walk source options, node configs, and output options for secret refs
+        all_refs: list[str] = []
+        if state.source is not None:
+            all_refs.extend(_collect_secret_refs(state.source.options))
+        for node in state.nodes or ():
+            all_refs.extend(_collect_secret_refs(getattr(node, "options", {})))
+        for output in state.outputs or ():
+            all_refs.extend(_collect_secret_refs(output.options))
+
+        missing_refs = [ref for ref in all_refs if not secret_service.has_ref(user_id, ref)]
+        if missing_refs:
+            names = ", ".join(missing_refs)
+            checks.append(
+                ValidationCheck(
+                    name=_CHECK_SECRET_REFS,
+                    passed=False,
+                    detail=f"Missing secret references: {names}",
+                )
+            )
+            errors.append(
+                ValidationError(
+                    component_id=None,
+                    component_type=None,
+                    message=f"Cannot resolve secret references: {names}",
+                    suggestion="Add the missing secrets via the Secrets panel before executing.",
+                )
+            )
+            checks.extend(_skipped_checks(_CHECK_SECRET_REFS))
+            return ValidationResult(is_valid=False, checks=checks, errors=errors)
+        checks.append(
+            ValidationCheck(
+                name=_CHECK_SECRET_REFS,
+                passed=True,
+                detail=f"All {len(all_refs)} secret reference(s) resolved" if all_refs else "No secret references found",
+            )
+        )
+    else:
+        checks.append(
+            ValidationCheck(
+                name=_CHECK_SECRET_REFS,
+                passed=True,
+                detail="No secret service — check skipped",
             )
         )
 
