@@ -38,6 +38,7 @@ from elspeth.contracts import (
     RowOutcome,
     Run,
     RunStatus,
+    SecretResolution,
     SecretResolutionInput,
     Token,
     TokenOutcome,
@@ -2494,6 +2495,88 @@ class TestSecretResolutionInputValidation:
         assert len(fingerprint) == 64
         sri = SecretResolutionInput(**self._valid_kwargs(fingerprint=fingerprint))  # type: ignore[arg-type]
         assert sri.fingerprint == fingerprint
+
+    # --- Extended sources: "env" and "user" ---
+
+    def test_env_source_accepted(self) -> None:
+        """SecretResolutionInput accepts source='env' with no vault fields."""
+        sri = SecretResolutionInput(**self._valid_kwargs(source="env", vault_url=None, secret_name=None))  # type: ignore[arg-type]
+        assert sri.source == "env"
+        assert sri.vault_url is None
+        assert sri.secret_name is None
+
+    def test_user_source_accepted(self) -> None:
+        """SecretResolutionInput accepts source='user' with no vault fields."""
+        sri = SecretResolutionInput(**self._valid_kwargs(source="user", vault_url=None, secret_name=None))  # type: ignore[arg-type]
+        assert sri.source == "user"
+        assert sri.vault_url is None
+        assert sri.secret_name is None
+
+
+class TestSecretResolutionReadSideValidation:
+    """Tests for SecretResolution (read-side) __post_init__ validation.
+
+    SecretResolution is the read-side contract for secret provenance records.
+    Tier 1 audit data: crash immediately on any anomaly.
+    """
+
+    @staticmethod
+    def _valid_kwargs(**overrides: object) -> dict[str, object]:
+        """Build valid SecretResolution kwargs with optional overrides."""
+        defaults: dict[str, object] = {
+            "resolution_id": "res-001",
+            "run_id": "run-001",
+            "timestamp": 1709100000.0,
+            "env_var_name": "API_KEY",
+            "source": "keyvault",
+            "fingerprint": "a" * 64,
+            "vault_url": "https://vault.example.com",
+            "secret_name": "api-key",
+            "resolution_latency_ms": 42.5,
+        }
+        defaults.update(overrides)
+        return defaults
+
+    def test_keyvault_source_valid(self) -> None:
+        """Keyvault source with vault_url and secret_name succeeds."""
+        sr = SecretResolution(**self._valid_kwargs())  # type: ignore[arg-type]
+        assert sr.source == "keyvault"
+        assert sr.vault_url == "https://vault.example.com"
+        assert sr.secret_name == "api-key"
+
+    def test_keyvault_requires_vault_url(self) -> None:
+        """Keyvault source without vault_url crashes (Tier 1)."""
+        with pytest.raises(ValueError, match="vault_url is required"):
+            SecretResolution(**self._valid_kwargs(vault_url=None))  # type: ignore[arg-type]
+
+    def test_keyvault_requires_secret_name(self) -> None:
+        """Keyvault source without secret_name crashes (Tier 1)."""
+        with pytest.raises(ValueError, match="secret_name is required"):
+            SecretResolution(**self._valid_kwargs(secret_name=None))  # type: ignore[arg-type]
+
+    def test_env_source_accepted(self) -> None:
+        """SecretResolution accepts source='env' with no vault fields."""
+        sr = SecretResolution(**self._valid_kwargs(source="env", vault_url=None, secret_name=None))  # type: ignore[arg-type]
+        assert sr.source == "env"
+        assert sr.vault_url is None
+        assert sr.secret_name is None
+
+    def test_user_source_accepted(self) -> None:
+        """SecretResolution accepts source='user' with no vault fields."""
+        sr = SecretResolution(**self._valid_kwargs(source="user", vault_url=None, secret_name=None))  # type: ignore[arg-type]
+        assert sr.source == "user"
+        assert sr.vault_url is None
+        assert sr.secret_name is None
+
+    def test_invalid_source_rejected(self) -> None:
+        """Unknown source value crashes (Tier 1)."""
+        with pytest.raises(ValueError, match="source must be one of"):
+            SecretResolution(**self._valid_kwargs(source="s3"))  # type: ignore[arg-type]
+
+    def test_empty_source_rejected(self) -> None:
+        """Empty source crashes (Tier 1)."""
+        with pytest.raises(ValueError, match="source is required"):
+            SecretResolution(**self._valid_kwargs(source=""))  # type: ignore[arg-type]
 
 
 class TestRequireIntValidation:

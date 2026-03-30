@@ -776,20 +776,20 @@ class SecretResolution:
         run_id: Run that used this secret
         timestamp: When the secret was loaded (epoch seconds, may be before run start)
         env_var_name: Environment variable the secret was injected into
-        source: Source type ('keyvault' - env source doesn't record)
+        source: Source type ('keyvault', 'env', or 'user')
         vault_url: Key Vault URL (None if source != keyvault)
         secret_name: Secret name in the vault
         fingerprint: HMAC-SHA256 fingerprint of the secret value (not the value itself)
         resolution_latency_ms: Time to fetch from vault (None if not measured)
     """
 
-    _ALLOWED_SOURCES: ClassVar[frozenset[str]] = frozenset({"keyvault"})
+    _ALLOWED_SOURCES: ClassVar[frozenset[str]] = frozenset({"keyvault", "env", "user"})
 
     resolution_id: str
     run_id: str
     timestamp: float  # Epoch seconds - may be before run start
     env_var_name: str
-    source: str  # 'keyvault'
+    source: str  # 'keyvault', 'env', or 'user'
     fingerprint: str  # HMAC fingerprint, NOT the secret value
     vault_url: str | None = None
     secret_name: str | None = None
@@ -851,7 +851,7 @@ class SecretResolutionInput:
     Follows the TokenUsage precedent (commit dffe74a6) for typed audit inputs.
     """
 
-    _ALLOWED_SOURCES: ClassVar[frozenset[str]] = frozenset({"keyvault"})
+    _ALLOWED_SOURCES: ClassVar[frozenset[str]] = frozenset({"keyvault", "env", "user"})
 
     env_var_name: str
     source: str
