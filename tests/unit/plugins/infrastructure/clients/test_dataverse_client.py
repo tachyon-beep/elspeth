@@ -25,6 +25,7 @@ from unittest.mock import patch
 import httpx
 import pytest
 
+from elspeth.core.security.web import SSRFSafeRequest
 from elspeth.plugins.infrastructure.clients.dataverse import (
     DataverseAuthConfig,
     DataverseClient,
@@ -113,6 +114,30 @@ class MockTransport(httpx.BaseTransport):
 
 
 ENV_URL = "https://myorg.crm.dynamics.com"
+
+
+def _make_ssrf_safe(url: str) -> SSRFSafeRequest:
+    """Build a fake SSRFSafeRequest that connects to the original URL.
+
+    In tests using MockTransport, we don't need actual IP pinning.
+    The SSRFSafeRequest just needs to produce a valid URL that the
+    transport can handle. We use 127.0.0.1 as the resolved IP since
+    MockTransport ignores the actual connection target.
+    """
+    parsed = urllib.parse.urlparse(url)
+    hostname = parsed.hostname or "localhost"
+    port = parsed.port or (443 if parsed.scheme == "https" else 80)
+    path = parsed.path or "/"
+    if parsed.query:
+        path = f"{path}?{parsed.query}"
+    return SSRFSafeRequest(
+        original_url=url,
+        resolved_ip="127.0.0.1",
+        host_header=hostname,
+        port=port,
+        path=path,
+        scheme=parsed.scheme,
+    )
 
 
 @pytest.fixture()
@@ -528,19 +553,19 @@ class TestSuccessfulResponses:
         transport.add_response(_make_json_response({"value": [{"id": 1}, {"id": 2}]}))
         page = client.get_page(f"{ENV_URL}/api/data/v9.2/accounts")
         assert len(page.rows) == 2
-        assert page.rows[0] == {"id": 1}
+        assert dict(page.rows[0]) == {"id": 1}
         assert page.status_code == 200
 
     def test_single_record_response(self, client: DataverseClient, transport: MockTransport) -> None:
         """Response without 'value' key is treated as single-record."""
         transport.add_response(_make_json_response({"id": 42, "name": "test"}))
         page = client.get_page(f"{ENV_URL}/api/data/v9.2/accounts(42)")
-        assert page.rows == [{"id": 42, "name": "test"}]
+        assert [dict(r) for r in page.rows] == [{"id": 42, "name": "test"}]
 
     def test_204_no_content(self, client: DataverseClient, transport: MockTransport) -> None:
         transport.add_response(_make_empty_response(204))
         page = client.get_page(f"{ENV_URL}/api/data/v9.2/accounts")
-        assert page.rows == []
+        assert len(page.rows) == 0
         assert page.more_records is None  # No body → no morerecords field
 
     def test_non_dict_json_rejected(self, client: DataverseClient, transport: MockTransport) -> None:
@@ -587,12 +612,15 @@ class TestPaginateOdata:
         )
         transport.add_response(_make_json_response({"value": [{"id": 2}]}))
 
-        with patch("elspeth.plugins.infrastructure.clients.dataverse.validate_url_for_ssrf"):
+        with patch(
+            "elspeth.plugins.infrastructure.clients.dataverse.validate_url_for_ssrf",
+            return_value=_make_ssrf_safe(next_url),
+        ):
             pages = list(client.paginate_odata(f"{ENV_URL}/api/data/v9.2/accounts"))
 
         assert len(pages) == 2
-        assert pages[0].rows == [{"id": 1}]
-        assert pages[1].rows == [{"id": 2}]
+        assert [dict(r) for r in pages[0].rows] == [{"id": 1}]
+        assert [dict(r) for r in pages[1].rows] == [{"id": 2}]
 
     def test_ssrf_rejection_on_cross_host_next_link(self, client: DataverseClient, transport: MockTransport) -> None:
         """nextLink pointing to a different host is rejected by domain allowlist."""
@@ -652,7 +680,10 @@ class TestEmptyPageGuard:
         transport.add_response(_make_json_response({"value": [], "@odata.nextLink": next3}))
 
         with (
-            patch("elspeth.plugins.infrastructure.clients.dataverse.validate_url_for_ssrf"),
+            patch(
+                "elspeth.plugins.infrastructure.clients.dataverse.validate_url_for_ssrf",
+                side_effect=lambda url, **kw: _make_ssrf_safe(url),
+            ),
             pytest.raises(DataverseClientError, match="3 consecutive empty pages"),
         ):
             list(client.paginate_odata(f"{ENV_URL}/api/data/v9.2/accounts"))
@@ -668,7 +699,10 @@ class TestEmptyPageGuard:
         # Page 3: empty but only 1 consecutive, and no next link -> done
         transport.add_response(_make_json_response({"value": []}))
 
-        with patch("elspeth.plugins.infrastructure.clients.dataverse.validate_url_for_ssrf"):
+        with patch(
+            "elspeth.plugins.infrastructure.clients.dataverse.validate_url_for_ssrf",
+            side_effect=lambda url, **kw: _make_ssrf_safe(url),
+        ):
             pages = list(client.paginate_odata(f"{ENV_URL}/api/data/v9.2/accounts"))
 
         assert len(pages) == 3
@@ -900,7 +934,7 @@ class TestUpsert:
             f"{ENV_URL}/api/data/v9.2/accounts(key=val)",
             {"name": "test"},
         )
-        assert page.rows == []
+        assert len(page.rows) == 0
         assert page.status_code == 204
 
         # Verify it was a PATCH request
@@ -912,7 +946,7 @@ class TestUpsert:
             f"{ENV_URL}/api/data/v9.2/accounts(key=val)",
             {"name": "test"},
         )
-        assert page.rows == [{"id": 42, "name": "test"}]
+        assert [dict(r) for r in page.rows] == [{"id": 42, "name": "test"}]
 
 
 # ---------------------------------------------------------------------------
@@ -1115,7 +1149,11 @@ class TestRequestUrlTracking:
         )
 
         # Patch SSRF validation since nextLink domain check requires DNS
-        with patch.object(client, "_validate_url_ssrf"):
+        with patch.object(
+            client,
+            "_validate_url_ssrf",
+            side_effect=lambda url: _make_ssrf_safe(url),
+        ):
             pages = list(client.paginate_odata(initial_url))
 
         assert len(pages) == 2

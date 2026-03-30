@@ -127,24 +127,23 @@ class BlobServiceImpl:
         storage = self._storage_path(session_id_str, blob_id, safe_filename)
 
         def _sync() -> BlobRecord:
-            # Quota check — reject if adding this blob would exceed session limit
-            with self._engine.connect() as conn:
-                current_total = conn.execute(
-                    select(func.coalesce(func.sum(blobs_table.c.size_bytes), 0)).where(blobs_table.c.session_id == session_id_str)
-                ).scalar()
-            # COALESCE guarantees an int; non-int = Tier 1 anomaly
-            current_total = int(current_total)  # type: ignore[arg-type]
-            if current_total + len(content) > self._max_storage_per_session:
-                raise BlobQuotaExceededError(session_id_str, current_total, self._max_storage_per_session)
-
-            # Write file
+            # Write file first (before DB transaction)
             storage.parent.mkdir(parents=True, exist_ok=True)
             storage.write_bytes(content)
 
-            # Insert metadata — clean up file if DB insert fails
+            # Single transaction: quota check + insert (atomic, no TOCTOU)
             now = self._now()
             try:
                 with self._engine.begin() as conn:
+                    # Quota check inside the write transaction
+                    current_total = conn.execute(
+                        select(func.coalesce(func.sum(blobs_table.c.size_bytes), 0)).where(blobs_table.c.session_id == session_id_str)
+                    ).scalar()
+                    # COALESCE guarantees an int; non-int = Tier 1 anomaly
+                    current_total = int(current_total)  # type: ignore[arg-type]
+                    if current_total + len(content) > self._max_storage_per_session:
+                        raise BlobQuotaExceededError(session_id_str, current_total, self._max_storage_per_session)
+
                     conn.execute(
                         blobs_table.insert().values(
                             id=blob_id,
@@ -161,7 +160,7 @@ class BlobServiceImpl:
                         )
                     )
             except BaseException:
-                # Orphaned file with no DB record is irrecoverable — clean up
+                # Clean up file on quota exceeded or any DB failure
                 if storage.exists():
                     storage.unlink()
                 raise

@@ -263,7 +263,7 @@ class RAGRetrievalTransform(BaseTransform):
                 {
                     "source_id": chunk.source_id,
                     "score": chunk.score,
-                    "metadata": chunk.metadata,
+                    "metadata": dict(chunk.metadata),
                 }
                 for chunk in chunks
             ],
@@ -282,15 +282,25 @@ class RAGRetrievalTransform(BaseTransform):
             transform_adds_fields=True,
         )
 
+        # Include skipped_count in audit metadata — "record what we didn't get".
+        # Providers that track skipped items (e.g., AzureSearchProvider) expose
+        # last_skipped_count; others (e.g., ChromaSearchProvider) do not.
+        skipped_count_raw = getattr(self._provider, "last_skipped_count", None)
+        skipped_count = skipped_count_raw if isinstance(skipped_count_raw, int) else 0
+
+        success_metadata: dict[str, Any] = {
+            "chunk_count": len(chunks),
+            "best_score": best_score,
+            "truncated": formatted.truncated,
+        }
+        if skipped_count > 0:
+            success_metadata["skipped_count"] = skipped_count
+
         return TransformResult.success(
             PipelineRow(output, output_contract),
             success_reason={
                 "action": "rag_retrieval",
-                "metadata": {
-                    "chunk_count": len(chunks),
-                    "best_score": best_score,
-                    "truncated": formatted.truncated,
-                },
+                "metadata": success_metadata,
             },
         )
 

@@ -403,12 +403,27 @@ class ExecutionServiceImpl:
             )
             graph.validate()
 
+            # Include aggregation transforms alongside regular transforms,
+            # following the CLI pattern (cli.py:868-878)
+            from elspeth.contracts.types import AggregationName
+
+            all_transforms = [t.plugin for t in bundle.transforms]
+
+            agg_id_map = graph.get_aggregation_id_map()
+            aggregation_settings: dict[str, Any] = {}
+
+            for agg_name, (transform, agg_config) in bundle.aggregations.items():
+                node_id = agg_id_map[AggregationName(agg_name)]
+                aggregation_settings[node_id] = agg_config
+                transform.node_id = node_id
+                all_transforms.append(transform)
+
             pipeline_config = PipelineConfig(
                 source=bundle.source,
-                transforms=[t.plugin for t in bundle.transforms],
+                transforms=all_transforms,
                 sinks=bundle.sinks,
                 gates=list(settings.gates),
-                aggregation_settings={k: v[1] for k, v in bundle.aggregations.items()},
+                aggregation_settings=aggregation_settings,
                 coalesce_settings=(list(settings.coalesce) if settings.coalesce else []),
             )
 

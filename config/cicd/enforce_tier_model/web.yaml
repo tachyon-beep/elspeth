@@ -374,7 +374,7 @@ allow_hits:
   safety: "Missing event routes to an explicit database-backed status update path"
   expires: null
 
-- key: web/execution/service.py:R4:ExecutionServiceImpl:_run_pipeline:_safe_broadcast:fp=3dec5c4cf8f9b280
+- key: web/execution/service.py:R4:ExecutionServiceImpl:_run_pipeline:_safe_broadcast:fp=951191ef3e6c3c31
   owner: web-execution
   reason: "Progress broadcasting is operational visibility and may fail with transport/runtime exceptions outside pipeline correctness"
   safety: "Broadcast failure is logged while run status and audit updates continue on the authoritative path"

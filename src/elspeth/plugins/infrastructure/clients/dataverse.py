@@ -20,9 +20,10 @@ from typing import TYPE_CHECKING, Any, Literal
 
 import httpx
 import structlog
-from pydantic import BaseModel, model_validator
+from pydantic import BaseModel, Field, model_validator
 
-from elspeth.core.security.web import validate_url_for_ssrf
+from elspeth.contracts.freeze import freeze_fields
+from elspeth.core.security.web import SSRFSafeRequest, validate_url_for_ssrf
 from elspeth.plugins.infrastructure.clients.fingerprinting import (
     filter_response_headers,
     fingerprint_headers,
@@ -123,6 +124,7 @@ class DataversePageResponse:
             raise ValueError(
                 "next_link and paging_cookie are mutually exclusive — OData queries use next_link, FetchXML queries use paging_cookie"
             )
+        freeze_fields(self, "rows", "headers", "request_headers")
 
 
 class DataverseAuthConfig(BaseModel):
@@ -133,9 +135,10 @@ class DataverseAuthConfig(BaseModel):
     method: Literal["service_principal", "managed_identity"]
 
     # Service principal fields (required when method=service_principal)
+    # repr=False on client_secret prevents credential exposure in stack traces
     tenant_id: str | None = None
     client_id: str | None = None
-    client_secret: str | None = None
+    client_secret: str | None = Field(default=None, repr=False)
 
     @model_validator(mode="after")
     def validate_auth_fields(self) -> Self:
@@ -274,11 +277,19 @@ class DataverseClient:
             "OData-Version": "4.0",
         }
 
-    def _validate_url_ssrf(self, url: str) -> None:
+    def _validate_url_ssrf(self, url: str) -> SSRFSafeRequest:
         """Two-layer SSRF validation: domain allowlist + IP-pinning.
+
+        Returns an SSRFSafeRequest with the resolved IP pinned. Callers
+        MUST use safe_request.connection_url for the actual HTTP call
+        and pass safe_request.host_header as the Host header. This
+        prevents DNS rebinding between validation and connection.
 
         Args:
             url: URL to validate
+
+        Returns:
+            SSRFSafeRequest with pinned IP for direct connection
 
         Raises:
             DataverseClientError: If URL fails either validation layer
@@ -302,7 +313,7 @@ class DataverseClient:
 
         # Layer 2: IP-pinning validation (prevents DNS rebinding)
         try:
-            validate_url_for_ssrf(url)
+            return validate_url_for_ssrf(url)
         except Exception as exc:
             raise DataverseClientError(
                 f"URL {url!r} failed IP-pinning SSRF validation: {exc}",
@@ -393,17 +404,25 @@ class DataverseClient:
         *,
         json_body: dict[str, Any] | None = None,
         extra_headers: dict[str, str] | None = None,
+        ssrf_safe: SSRFSafeRequest | None = None,
     ) -> DataversePageResponse:
         """Execute an HTTP request against Dataverse.
 
         Handles auth header injection, rate limiting, response parsing,
         and error classification. Returns a validated DataversePageResponse.
 
+        When ssrf_safe is provided, the request connects to the pre-validated
+        IP address (preventing DNS rebinding) while preserving the original
+        hostname via the Host header for virtual hosting and TLS SNI.
+
         Args:
             method: HTTP method (GET or PATCH)
-            url: Full URL to request
+            url: Full URL to request (used for audit recording)
             json_body: JSON body for PATCH requests
             extra_headers: Additional headers to merge
+            ssrf_safe: Pre-validated SSRFSafeRequest with pinned IP.
+                When provided, the actual HTTP call uses connection_url
+                (IP-based) instead of url (hostname-based).
 
         Returns:
             DataversePageResponse with validated response data
@@ -416,12 +435,20 @@ class DataverseClient:
         auth_headers = self.get_auth_headers()
         headers = {**auth_headers, **(extra_headers or {})}
 
+        # When SSRF-safe request is provided, connect to the pinned IP
+        # and set the Host header for virtual hosting/TLS SNI.
+        if ssrf_safe is not None:
+            connection_url = ssrf_safe.connection_url
+            headers["Host"] = ssrf_safe.host_header
+        else:
+            connection_url = url
+
         start = time.perf_counter()
         try:
             if method == "PATCH":
-                response = self._client.patch(url, json=json_body, headers=headers)
+                response = self._client.patch(connection_url, json=json_body, headers=headers)
             else:
-                response = self._client.get(url, headers=headers)
+                response = self._client.get(connection_url, headers=headers)
         except httpx.TimeoutException as exc:
             latency_ms = (time.perf_counter() - start) * 1000
             raise DataverseClientError(
@@ -627,9 +654,9 @@ class DataverseClient:
     def paginate_odata(self, initial_url: str) -> Iterator[DataversePageResponse]:
         """Paginate through structured OData query results.
 
-        Follows @odata.nextLink URLs with SSRF validation at each hop.
-        Terminates when no nextLink is present or after consecutive empty
-        pages (empty-page guard).
+        Follows @odata.nextLink URLs with SSRF validation and IP-pinning
+        at each hop. Terminates when no nextLink is present or after
+        consecutive empty pages (empty-page guard).
 
         Args:
             initial_url: First page URL
@@ -642,10 +669,14 @@ class DataverseClient:
                 or protocol errors
         """
         url = initial_url
+        # No SSRF pinning on initial URL — it comes from config (operator trust),
+        # and was already domain-validated in __init__. The environment_url is
+        # built from config, not from external data.
+        ssrf_safe: SSRFSafeRequest | None = None
         consecutive_empty = 0
 
         while True:
-            page = self.get_page(url)
+            page = self._execute_request("GET", url, ssrf_safe=ssrf_safe)
             yield page
 
             # Empty-page guard
@@ -666,8 +697,11 @@ class DataverseClient:
             if page.next_link is None:
                 break
 
-            # SSRF validate the nextLink before following
-            self._validate_url_ssrf(page.next_link)
+            # SSRF validate the nextLink and pin the resolved IP.
+            # The returned SSRFSafeRequest is passed to _execute_request
+            # so the HTTP call connects to the validated IP, preventing
+            # DNS rebinding between validation and connection.
+            ssrf_safe = self._validate_url_ssrf(page.next_link)
             url = page.next_link
 
     def paginate_fetchxml(self, entity: str, fetch_xml: str) -> Iterator[DataversePageResponse]:

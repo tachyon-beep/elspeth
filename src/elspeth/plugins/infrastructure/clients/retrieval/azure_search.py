@@ -22,6 +22,8 @@ if TYPE_CHECKING:
     from elspeth.core.rate_limit.registry import NoOpLimiter
     from elspeth.plugins.infrastructure.clients.base import TelemetryEmitCallback
 
+logger = structlog.get_logger(__name__)
+
 
 class AzureSearchProviderConfig(BaseModel):
     """Configuration for Azure AI Search provider."""
@@ -125,6 +127,11 @@ class AzureSearchProvider:
         self._search_url = f"{config.endpoint.rstrip('/')}/indexes/{config.index}/docs/search?api-version={config.api_version}"
         self._score_range = _SCORE_RANGES[config.search_mode]
 
+        # Per-search skipped item tracking — allows callers to include
+        # skip counts in audit records without changing the protocol.
+        self.last_skipped_count: int = 0
+        self.last_skipped_reasons: list[dict[str, Any]] = []
+
     def search(
         self,
         query: str,
@@ -136,9 +143,14 @@ class AzureSearchProvider:
     ) -> list[RetrievalChunk]:
         response_data = self._execute_search(query, top_k, state_id=state_id, token_id=token_id)
         chunks, skipped_items = self._parse_response(response_data, min_score)
-        # "Record what we didn't get" — skipped items are audit evidence
+        # "Record what we didn't get" — skipped items are audit evidence.
+        # Store on instance so callers (RAGRetrievalTransform) can include
+        # skip counts in their audit success_reason metadata, which flows
+        # into the Landscape audit trail.
+        self.last_skipped_count = len(skipped_items)
+        self.last_skipped_reasons = skipped_items
         if skipped_items:
-            structlog.get_logger(__name__).debug(
+            logger.debug(
                 "azure_search_skipped_items",
                 state_id=state_id,
                 skipped=skipped_items,
@@ -195,6 +207,10 @@ class AzureSearchProvider:
                 raise RetrievalError(f"Malformed JSON response from Azure AI Search: {exc}", retryable=False) from exc
         except RetrievalError:
             raise
+        except (httpx.TimeoutException, httpx.ConnectError, httpx.NetworkError) as exc:
+            raise RetrievalError(f"Search request failed: {exc}", retryable=True) from exc
+        except httpx.HTTPError as exc:
+            raise RetrievalError(f"HTTP error during search: {exc}", retryable=True) from exc
         except (ConnectionError, TimeoutError, OSError) as exc:
             raise RetrievalError(f"Search request failed: {exc}", retryable=True) from exc
         finally:

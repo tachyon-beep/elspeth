@@ -96,10 +96,11 @@ export function LoginPage() {
     const url =
       `${authConfig.oidc_issuer}/authorize` +
       `?client_id=${encodeURIComponent(authConfig.oidc_client_id)}` +
-      `&response_type=code` +
+      `&response_type=token` +
       `&redirect_uri=${encodeURIComponent(window.location.origin)}` +
       `&scope=openid profile email` +
-      `&state=${encodeURIComponent(state)}`;
+      `&state=${encodeURIComponent(state)}` +
+      `&nonce=${crypto.randomUUID()}`;
     window.location.href = url;
   }
 
