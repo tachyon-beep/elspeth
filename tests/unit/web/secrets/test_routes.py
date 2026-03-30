@@ -258,14 +258,14 @@ class TestCrossUserIsolation:
         # App for User A
         app_a = FastAPI()
         identity_a = UserIdentity(user_id="alice", username="alice")
-        app_a.dependency_overrides[get_current_user] = lambda: identity_a  # noqa: E731
+        app_a.dependency_overrides[get_current_user] = lambda: identity_a
         app_a.state.secret_service = secret_service
         app_a.include_router(create_secrets_router())
 
         # App for User B — same service, different identity
         app_b = FastAPI()
         identity_b = UserIdentity(user_id="bob", username="bob")
-        app_b.dependency_overrides[get_current_user] = lambda: identity_b  # noqa: E731
+        app_b.dependency_overrides[get_current_user] = lambda: identity_b
         app_b.state.secret_service = secret_service
         app_b.include_router(create_secrets_router())
 
