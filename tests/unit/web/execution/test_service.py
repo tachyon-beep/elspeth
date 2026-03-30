@@ -159,7 +159,7 @@ class TestB2ShutdownEvent:
     """
 
     @patch("elspeth.web.execution.service.Orchestrator")
-    @patch("elspeth.web.execution.service.load_settings")
+    @patch("elspeth.web.execution.service.load_settings_from_yaml_string")
     @patch("elspeth.web.execution.service.instantiate_plugins_from_config")
     @patch("elspeth.web.execution.service.ExecutionGraph")
     @patch("elspeth.web.execution.service.LandscapeDB")
@@ -213,7 +213,7 @@ class TestB3Construction:
     """
 
     @patch("elspeth.web.execution.service.Orchestrator")
-    @patch("elspeth.web.execution.service.load_settings")
+    @patch("elspeth.web.execution.service.load_settings_from_yaml_string")
     @patch("elspeth.web.execution.service.instantiate_plugins_from_config")
     @patch("elspeth.web.execution.service.ExecutionGraph")
     @patch("elspeth.web.execution.service.LandscapeDB")
@@ -391,7 +391,7 @@ class TestCancelMechanism:
         assert event.is_set()
 
     @patch("elspeth.web.execution.service.Orchestrator")
-    @patch("elspeth.web.execution.service.load_settings")
+    @patch("elspeth.web.execution.service.load_settings_from_yaml_string")
     @patch("elspeth.web.execution.service.instantiate_plugins_from_config")
     @patch("elspeth.web.execution.service.ExecutionGraph")
     @patch("elspeth.web.execution.service.LandscapeDB")

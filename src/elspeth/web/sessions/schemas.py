@@ -96,6 +96,19 @@ class RevertStateRequest(BaseModel):
     state_id: UUID
 
 
+class RunResponse(BaseModel):
+    """Response for GET /api/sessions/{id}/runs."""
+
+    id: str
+    session_id: str
+    status: str
+    rows_processed: int
+    rows_failed: int
+    started_at: datetime
+    finished_at: datetime | None = None
+    composition_version: int
+
+
 class UploadResponse(BaseModel):
     """Response for POST /api/sessions/{id}/upload."""
 

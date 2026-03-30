@@ -15,7 +15,6 @@ schedule coroutines on the main event loop from the background thread.
 from __future__ import annotations
 
 import asyncio
-import tempfile
 import threading
 import time
 from collections.abc import Coroutine
@@ -30,7 +29,7 @@ import structlog
 from elspeth.cli_helpers import instantiate_plugins_from_config
 from elspeth.contracts.audit import SecretResolutionInput
 from elspeth.contracts.cli import ProgressEvent
-from elspeth.core.config import load_settings
+from elspeth.core.config import load_settings_from_yaml_string
 from elspeth.core.dag.graph import ExecutionGraph
 from elspeth.core.events import EventBus
 from elspeth.core.landscape.database import LandscapeDB
@@ -340,7 +339,6 @@ class ExecutionServiceImpl:
         loading settings. Resolved values exist only in the worker thread's
         local memory — never persisted.
         """
-        tmp_path: Path | None = None
         landscape_db: LandscapeDB | None = None
         run_uuid = UUID(run_id)
         try:
@@ -383,13 +381,10 @@ class ExecutionServiceImpl:
                             )
                         )
 
-            # Write YAML to temp file — load_settings takes a path, NOT content
-            tmp_file = tempfile.NamedTemporaryFile(mode="w", suffix=".yaml", delete=False)  # noqa: SIM115
-            tmp_path = Path(tmp_file.name)
-            tmp_file.write(resolved_yaml)
-            tmp_file.close()
-
-            settings = load_settings(tmp_path)
+            # Load settings from YAML string — never write resolved secrets
+            # to disk.  load_settings_from_yaml_string() parses in-process,
+            # bypassing Dynaconf file I/O.
+            settings = load_settings_from_yaml_string(resolved_yaml)
             bundle = instantiate_plugins_from_config(settings)
 
             graph = ExecutionGraph.from_plugin_instances(
@@ -566,8 +561,6 @@ class ExecutionServiceImpl:
             self._shutdown_events.pop(run_id, None)
             if landscape_db is not None:
                 landscape_db.close()
-            if tmp_path is not None and tmp_path.exists():
-                tmp_path.unlink()
             self._broadcaster.cleanup_run(run_id)
 
     def _finalize_output_blobs(self, run_id: str, *, success: bool) -> None:

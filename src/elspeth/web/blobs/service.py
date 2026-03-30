@@ -286,7 +286,7 @@ class BlobServiceImpl:
     async def list_blobs(
         self,
         session_id: UUID,
-        limit: int = 50,
+        limit: int | None = 50,
         offset: int = 0,
     ) -> list[BlobRecord]:
         """List blobs for a session, newest first."""
@@ -427,12 +427,18 @@ class BlobServiceImpl:
                     storage = Path(row.storage_path)
                     if storage.exists():
                         file_bytes = storage.read_bytes()
-                        record = self._finalize_blob_sync(
-                            blob_id,
-                            "ready",
-                            size_bytes=len(file_bytes),
-                            content_hash_val=content_hash(file_bytes),
-                        )
+                        try:
+                            record = self._finalize_blob_sync(
+                                blob_id,
+                                "ready",
+                                size_bytes=len(file_bytes),
+                                content_hash_val=content_hash(file_bytes),
+                            )
+                        except BlobQuotaExceededError:
+                            # Run succeeded but this blob would breach the
+                            # session quota — mark as error so the run
+                            # finalization isn't aborted entirely.
+                            record = self._finalize_blob_sync(blob_id, "error")
                     else:
                         record = self._finalize_blob_sync(blob_id, "error")
                 else:
@@ -446,7 +452,7 @@ class BlobServiceImpl:
         self,
         source_session_id: UUID,
         target_session_id: UUID,
-    ) -> list[BlobRecord]:
+    ) -> dict[UUID, BlobRecord]:
         """Copy all ready blobs from source session to target session.
 
         Pre-checks total source blob size against the target session's
@@ -456,11 +462,11 @@ class BlobServiceImpl:
         On any failure during the copy loop, cleans up files already
         written before re-raising.
         """
-        source_blobs = await self.list_blobs(source_session_id, limit=1000)
+        source_blobs = await self.list_blobs(source_session_id, limit=None)
         ready_blobs = [b for b in source_blobs if b.status == "ready"]
 
         if not ready_blobs:
-            return []
+            return {}
 
         # Pre-check: will the total source blob size fit in the target quota?
         total_source_bytes = sum(b.size_bytes for b in ready_blobs)
@@ -477,7 +483,9 @@ class BlobServiceImpl:
         if current_usage + total_source_bytes > self._max_storage_per_session:
             raise BlobQuotaExceededError(target_session_id_str, current_usage, self._max_storage_per_session)
 
-        # Copy blobs — clean up partial writes on any failure
+        # Copy blobs — clean up partial writes on any failure.
+        # Build old_id → new_blob mapping for source reference rewriting.
+        blob_map: dict[UUID, BlobRecord] = {}
         copied: list[BlobRecord] = []
         try:
             for blob in ready_blobs:
@@ -491,15 +499,24 @@ class BlobServiceImpl:
                     source_description=f"copied from session fork (original: {blob.id})",
                 )
                 copied.append(new_blob)
+                blob_map[blob.id] = new_blob
         except BaseException:
-            # Clean up files for any blobs already written
+            # Clean up both files AND database rows for any blobs already
+            # committed. create_blob() commits each blob atomically, so
+            # without this cleanup the forked session would have "ready"
+            # blob metadata pointing at files we're about to delete.
             for written_blob in copied:
-                storage = Path(written_blob.storage_path)
-                if storage.exists():
-                    storage.unlink(missing_ok=True)
+                try:
+                    await self.delete_blob(written_blob.id)
+                except Exception:
+                    # Best-effort cleanup — if delete_blob fails (e.g.
+                    # DB already disconnected), at least unlink the file
+                    storage = Path(written_blob.storage_path)
+                    if storage.exists():
+                        storage.unlink(missing_ok=True)
             raise
 
-        return copied
+        return blob_map
 
     def _finalize_blob_sync(
         self,
@@ -518,6 +535,22 @@ class BlobServiceImpl:
                 raise RuntimeError(f"Cannot finalize blob {blob_id_str} — status is '{row.status}', expected 'pending'")
             if status not in ("ready", "error"):
                 raise RuntimeError(f"Invalid finalize status '{status}' — must be 'ready' or 'error'")
+
+            # Enforce quota when finalizing with a real size — pending blobs
+            # were reserved at size_bytes=0, so this is the first time the
+            # actual size is known.  Without this check, pipeline-generated
+            # output could bypass the per-session storage cap entirely.
+            if status == "ready" and size_bytes is not None and size_bytes > 0:
+                session_id_str = row.session_id
+                current_total = conn.execute(
+                    select(func.coalesce(func.sum(blobs_table.c.size_bytes), 0)).where(
+                        blobs_table.c.session_id == session_id_str,
+                        blobs_table.c.id != blob_id_str,
+                    )
+                ).scalar()
+                current_total = int(current_total)  # type: ignore[arg-type]
+                if current_total + size_bytes > self._max_storage_per_session:
+                    raise BlobQuotaExceededError(session_id_str, current_total, self._max_storage_per_session)
 
             updates: dict[str, Any] = {"status": status}
             if size_bytes is not None:

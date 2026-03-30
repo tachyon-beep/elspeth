@@ -17,6 +17,7 @@ export interface AuthConfig {
   provider: "local" | "oidc" | "entra";
   oidc_issuer: string | null;
   oidc_client_id: string | null;
+  authorization_endpoint: string | null;
 }
 
 /**
@@ -230,16 +231,13 @@ export interface Run {
  *   the progress view or close the WebSocket.
  * - "completed" -- terminal. Pipeline finished successfully.
  * - "cancelled" -- terminal. Pipeline was cancelled.
- *
- * Note: "failed" is a Run status (set when the pipeline aborts), not a
- * RunEvent type. If the pipeline aborts, the WebSocket closes and the
- * frontend fetches the final Run status via REST.
+ * - "failed" -- terminal. Pipeline aborted due to an unrecoverable error.
  */
 export interface RunEvent {
   run_id: string;
   timestamp: string;
-  event_type: "progress" | "error" | "completed" | "cancelled";
-  data: RunEventProgress | RunEventError | RunEventCompleted | RunEventCancelled;
+  event_type: "progress" | "error" | "completed" | "cancelled" | "failed";
+  data: RunEventProgress | RunEventError | RunEventCompleted | RunEventCancelled | RunEventFailed;
 }
 
 export interface RunEventProgress {
@@ -266,12 +264,17 @@ export interface RunEventCancelled {
   rows_failed: number;
 }
 
+export interface RunEventFailed {
+  detail: string;
+  node_id: string | null;
+}
+
 /** Live progress state derived from RunEvents. */
 export interface RunProgress {
   rows_processed: number;
   rows_failed: number;
   recent_errors: RunEventError[];
-  status: "running" | "completed" | "cancelled";
+  status: "running" | "completed" | "cancelled" | "failed";
 }
 
 // ── API Error Envelope ──────────────────────────────────────────────────────

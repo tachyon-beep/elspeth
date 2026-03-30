@@ -19,6 +19,7 @@ import type {
   RunEventError,
   RunEventCompleted,
   RunEventCancelled,
+  RunEventFailed,
   ValidationResult,
   ApiError,
 } from "@/types/index";
@@ -87,13 +88,15 @@ function applyRunEvent(
         ? "completed"
         : event.event_type === "cancelled"
           ? "cancelled"
-          : "running",
+          : event.event_type === "failed"
+            ? "failed"
+            : "running",
   };
 
   // Update the run in the list when terminal.
-  // "error" is non-terminal -- only "completed" and "cancelled" are terminal.
+  // "error" is non-terminal -- "completed", "cancelled", and "failed" are terminal.
   let updatedRuns = state.runs;
-  if (event.event_type === "completed" || event.event_type === "cancelled") {
+  if (event.event_type === "completed" || event.event_type === "cancelled" || event.event_type === "failed") {
     updatedRuns = state.runs.map((r) =>
       r.id === event.run_id
         ? {
@@ -197,6 +200,9 @@ export const useExecutionStore = create<ExecutionState>((set, get) => ({
         set((state) => applyRunEvent(state, event));
       },
       onCancelled(event: RunEvent, _data: RunEventCancelled) {
+        set((state) => applyRunEvent(state, event));
+      },
+      onFailed(event: RunEvent, _data: RunEventFailed) {
         set((state) => applyRunEvent(state, event));
       },
       onAuthFailure() {

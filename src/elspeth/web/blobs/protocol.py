@@ -155,7 +155,7 @@ class BlobServiceProtocol(Protocol):
     async def list_blobs(
         self,
         session_id: UUID,
-        limit: int = 50,
+        limit: int | None = 50,
         offset: int = 0,
     ) -> list[BlobRecord]:
         """List blobs for a session, newest first."""
@@ -196,11 +196,14 @@ class BlobServiceProtocol(Protocol):
         self,
         source_session_id: UUID,
         target_session_id: UUID,
-    ) -> list[BlobRecord]:
+    ) -> dict[UUID, BlobRecord]:
         """Copy all ready blobs from source to target session.
 
         Creates new blob records with new IDs and new storage paths.
         Copies backing files. Respects the per-session quota.
+
+        Returns a mapping of old blob ID → new BlobRecord, enabling
+        callers to remap source references in the forked state.
         """
         ...
 

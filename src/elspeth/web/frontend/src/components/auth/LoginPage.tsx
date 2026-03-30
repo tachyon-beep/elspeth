@@ -9,8 +9,8 @@ import type { AuthConfig } from "../../types/index";
  * Fetches GET /api/auth/config on mount to determine provider type:
  * - "local": renders a username/password form
  * - "oidc" or "entra": renders a "Sign in with SSO" button that
- *   constructs the OIDC redirect URL from config.oidc_issuer and
- *   config.oidc_client_id
+ *   redirects to config.authorization_endpoint (resolved from OIDC
+ *   discovery by the backend)
  *
  * On return from an OIDC redirect, extracts the token from the URL
  * fragment or query parameter and calls loginWithToken().
@@ -37,6 +37,7 @@ export function LoginPage() {
           provider: "local",
           oidc_issuer: null,
           oidc_client_id: null,
+          authorization_endpoint: null,
         });
         setConfigLoading(false);
       });
@@ -87,14 +88,14 @@ export function LoginPage() {
   }
 
   function handleSsoRedirect() {
-    if (!authConfig?.oidc_issuer || !authConfig?.oidc_client_id) return;
+    if (!authConfig?.authorization_endpoint || !authConfig?.oidc_client_id) return;
 
     // Generate OIDC state nonce for CSRF protection (H2)
     const state = crypto.randomUUID();
     sessionStorage.setItem("oidc_state", state);
 
     const url =
-      `${authConfig.oidc_issuer}/authorize` +
+      `${authConfig.authorization_endpoint}` +
       `?client_id=${encodeURIComponent(authConfig.oidc_client_id)}` +
       `&response_type=token` +
       `&redirect_uri=${encodeURIComponent(window.location.origin)}` +

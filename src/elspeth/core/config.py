@@ -2065,6 +2065,35 @@ def load_settings(config_path: Path) -> ElspethSettings:
     return ElspethSettings(**raw_config)
 
 
+def load_settings_from_yaml_string(yaml_content: str) -> ElspethSettings:
+    """Load settings from a YAML string without touching disk.
+
+    This is used by the web execution service to load pipeline configs
+    that may contain resolved secrets. Unlike load_settings(), this
+    skips Dynaconf (no env var merging) and file I/O, ensuring secret
+    values never leave process memory.
+
+    Args:
+        yaml_content: YAML configuration as a string.
+
+    Returns:
+        Validated ElspethSettings instance.
+    """
+    config_dict = yaml.safe_load(yaml_content)
+    if not isinstance(config_dict, dict):
+        raise ValueError(f"Configuration must be a YAML mapping (key: value), not {type(config_dict).__name__}")
+    raw_config = _lowercase_schema_keys(config_dict)
+    known_fields = set(ElspethSettings.model_fields.keys())
+
+    unknown_keys = sorted(k for k in raw_config if k not in known_fields)
+    if unknown_keys:
+        raise ValueError(f"Unknown configuration keys: {unknown_keys}. Valid top-level keys: {sorted(known_fields)}")
+
+    raw_config = {k: v for k, v in raw_config.items() if k in known_fields}
+    raw_config = _expand_env_vars(raw_config)
+    return ElspethSettings(**raw_config)
+
+
 def resolve_config(settings: ElspethSettings) -> dict[str, Any]:
     """Convert validated settings to a dict for audit storage.
 

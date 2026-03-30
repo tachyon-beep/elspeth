@@ -244,6 +244,22 @@ export async function sendMessage(
   );
 }
 
+/** Re-run the composer without inserting a new user message.
+ *  Used by the retry flow when the user message is already persisted. */
+export async function recompose(
+  sessionId: string,
+  signal?: AbortSignal,
+): Promise<{ message: ChatMessage; state: CompositionState | null }> {
+  const response = await fetch(`/api/sessions/${sessionId}/recompose`, {
+    method: "POST",
+    headers: authHeaders("application/json"),
+    signal,
+  });
+  return parseResponse<{ message: ChatMessage; state: CompositionState | null }>(
+    response,
+  );
+}
+
 /** Fork a session from a specific user message. */
 export async function forkFromMessage(
   sessionId: string,
@@ -426,7 +442,6 @@ export async function getRunResults(
 }
 
 /** List runs for a session. */
-// TODO: Verify backend endpoint exists — no /runs sub-route found in sessions/routes.py
 export async function fetchRuns(sessionId: string): Promise<Run[]> {
   const response = await fetch(`/api/sessions/${sessionId}/runs`, {
     headers: authHeaders(),

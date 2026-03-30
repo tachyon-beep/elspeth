@@ -62,6 +62,29 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     if cancelled:
         slog.info("cancelled_orphaned_runs", count=cancelled)
 
+    # Resolve OIDC authorization_endpoint from discovery or explicit config
+    if settings.auth_provider in ("oidc", "entra"):
+        if settings.oidc_authorization_endpoint:
+            app.state.oidc_authorization_endpoint = settings.oidc_authorization_endpoint
+        else:
+            import httpx
+
+            issuer = (settings.oidc_issuer or "").rstrip("/")
+            discovery_url = f"{issuer}/.well-known/openid-configuration"
+            try:
+                async with httpx.AsyncClient(timeout=httpx.Timeout(10.0, connect=5.0)) as client:
+                    resp = await client.get(discovery_url)
+                    resp.raise_for_status()
+                    doc = resp.json()
+                    app.state.oidc_authorization_endpoint = doc["authorization_endpoint"]
+            except (httpx.HTTPError, KeyError, ValueError) as exc:
+                slog.warning(
+                    "oidc_discovery_failed_for_authorization_endpoint",
+                    issuer=issuer,
+                    error=str(exc),
+                )
+                app.state.oidc_authorization_endpoint = None
+
     # Sub-5: Construct ProgressBroadcaster and ExecutionServiceImpl
     # These require a running event loop, which is only available here.
     loop = asyncio.get_running_loop()
@@ -183,7 +206,7 @@ def create_app(settings: WebSettings | None = None) -> FastAPI:
     session_engine = create_engine(session_db_url)
     run_migrations(session_engine)
 
-    session_service = SessionServiceImpl(session_engine)
+    session_service = SessionServiceImpl(session_engine, data_dir=settings.data_dir)
     app.state.session_service = session_service
 
     # --- Blob service ---
@@ -213,16 +236,47 @@ def create_app(settings: WebSettings | None = None) -> FastAPI:
     )
 
     # --- Multi-worker enforcement (W10 -> R6) ---
-    if "WEB_CONCURRENCY" in os.environ:
-        web_concurrency = int(os.environ["WEB_CONCURRENCY"])
-    else:
-        web_concurrency = 1
-    if web_concurrency > 1:
+    # ProgressBroadcaster and the rate limiter are process-local, so
+    # multi-worker mode is unsupported.  Check multiple signals because
+    # different deployment tools advertise workers in different ways.
+    multi_worker_reason: str | None = None
+
+    # 1. WEB_CONCURRENCY env var (Heroku, Railway, render.com)
+    web_concurrency_str = os.environ.get("WEB_CONCURRENCY", "1")
+    try:
+        if int(web_concurrency_str) > 1:
+            multi_worker_reason = f"WEB_CONCURRENCY={web_concurrency_str}"
+    except ValueError:
+        pass
+
+    # 2. sys.argv: uvicorn --workers N, gunicorn -w N / --workers N
+    if multi_worker_reason is None:
+        argv = sys.argv
+        for i, arg in enumerate(argv):
+            if arg == "--workers" and i + 1 < len(argv):
+                try:
+                    if int(argv[i + 1]) > 1:
+                        multi_worker_reason = f"--workers {argv[i + 1]}"
+                except ValueError:
+                    pass
+            elif arg.startswith("--workers="):
+                try:
+                    if int(arg.split("=", 1)[1]) > 1:
+                        multi_worker_reason = f"{arg}"
+                except ValueError:
+                    pass
+            elif arg == "-w" and i + 1 < len(argv):
+                try:
+                    if int(argv[i + 1]) > 1:
+                        multi_worker_reason = f"-w {argv[i + 1]}"
+                except ValueError:
+                    pass
+
+    if multi_worker_reason is not None:
         raise RuntimeError(
-            f"WEB_CONCURRENCY={web_concurrency} is not supported. "
+            f"Multi-worker mode detected ({multi_worker_reason}) but is not supported. "
             "ProgressBroadcaster holds subscriber queues in process memory — "
             "WebSocket progress streaming requires a single worker. "
-            "Set WEB_CONCURRENCY=1 or remove the variable. "
             "For multi-worker deployment, replace ProgressBroadcaster with Redis Streams."
         )
 

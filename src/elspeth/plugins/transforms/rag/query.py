@@ -151,6 +151,13 @@ class QueryBuilder:
             matched, group0, group1 = future.result(timeout=self._regex_timeout)
         except FuturesTimeoutError:
             future.cancel()
+            # future.cancel() only prevents queued tasks from starting — it
+            # cannot kill a worker already executing C extension code (re module).
+            # With max_workers=1 the stuck worker blocks all future submissions,
+            # so we must destroy the pool (killing the worker process) and create
+            # a fresh one to restore ReDoS containment.
+            self._regex_pool.shutdown(wait=False, cancel_futures=True)
+            self._regex_pool = ProcessPoolExecutor(max_workers=1)
             return QueryResult(
                 error={
                     "reason": "no_regex_match",

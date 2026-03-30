@@ -21,6 +21,7 @@ import type {
   RunEventError,
   RunEventCompleted,
   RunEventCancelled,
+  RunEventFailed,
 } from "@/types/index";
 
 /**
@@ -31,6 +32,7 @@ import type {
  *   the frontend appends the error to the exceptions list.
  * - onComplete: Terminal. Pipeline finished successfully.
  * - onCancelled: Terminal. Pipeline was cancelled.
+ * - onFailed: Terminal. Pipeline aborted due to unrecoverable error.
  * - onAuthFailure: Close code 4001. Token invalid/expired.
  *   Caller should trigger authStore.logout(). No reconnect attempt.
  */
@@ -39,6 +41,7 @@ export interface WebSocketCallbacks {
   onError: (event: RunEvent, data: RunEventError) => void;
   onComplete: (event: RunEvent, data: RunEventCompleted) => void;
   onCancelled: (event: RunEvent, data: RunEventCancelled) => void;
+  onFailed: (event: RunEvent, data: RunEventFailed) => void;
   onAuthFailure: () => void;
 }
 
@@ -97,6 +100,9 @@ export function connectToRun(
       case "cancelled":
         callbacks.onCancelled(event, event.data as RunEventCancelled);
         break;
+      case "failed":
+        callbacks.onFailed(event, event.data as RunEventFailed);
+        break;
     }
   }
 
@@ -116,7 +122,7 @@ export function connectToRun(
 
       // Terminal events: stop reconnecting. The server will close
       // the connection with code 1000 after sending a terminal event.
-      if (event.event_type === "completed" || event.event_type === "cancelled") {
+      if (event.event_type === "completed" || event.event_type === "cancelled" || event.event_type === "failed") {
         closed = true;
       }
     };

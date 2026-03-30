@@ -125,7 +125,11 @@ def create_execution_router() -> APIRouter:
         {"detail": str(exc), "error_type": "run_already_active"}.
         """
         await _verify_session_ownership(session_id, user, request)
-        run_id = await service.execute(session_id, state_id, user_id=user.user_id)
+        try:
+            run_id = await service.execute(session_id, state_id, user_id=user.user_id)
+        except ValueError as exc:
+            # get_state() raises ValueError for unknown/stale state IDs
+            raise HTTPException(status_code=404, detail=str(exc)) from None
         return {"run_id": str(run_id)}
 
     # ── Run-scoped endpoints (status, cancel, results) ────────────────

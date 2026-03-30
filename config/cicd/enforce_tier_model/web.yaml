@@ -1,645 +1,594 @@
 allow_hits:
-# Catalog routes — @router.get() false positives (FastAPI route decorators, not dict.get)
 - key: web/catalog/routes.py:R1:list_sources:fp=ccdc6bb55bdef578
   owner: web-catalog
-  reason: "False positive — @catalog_router.get() is FastAPI route decorator, not dict.get()"
+  reason: False positive — @catalog_router.get() is FastAPI route decorator, not dict.get()
   safety: No dict access involved
   expires: null
-
 - key: web/catalog/routes.py:R1:list_transforms:fp=2c4051cabdd7abc4
   owner: web-catalog
-  reason: "False positive — @catalog_router.get() is FastAPI route decorator, not dict.get()"
+  reason: False positive — @catalog_router.get() is FastAPI route decorator, not dict.get()
   safety: No dict access involved
   expires: null
-
 - key: web/catalog/routes.py:R1:list_sinks:fp=2f3c4211eedd8864
   owner: web-catalog
-  reason: "False positive — @catalog_router.get() is FastAPI route decorator, not dict.get()"
+  reason: False positive — @catalog_router.get() is FastAPI route decorator, not dict.get()
   safety: No dict access involved
   expires: null
-
 - key: web/catalog/routes.py:R1:get_schema:fp=bfaf3a79a383cb6f
   owner: web-catalog
-  reason: "False positive — @catalog_router.get() is FastAPI route decorator, not dict.get()"
+  reason: False positive — @catalog_router.get() is FastAPI route decorator, not dict.get()
   safety: No dict access involved
   expires: null
-
-# Catalog service — Tier 3 JSON schema introspection (.get() on Pydantic-generated JSON schema dicts)
 - key: web/catalog/routes.py:R1:get_schema:fp=bc80b0854f0cb34e
   owner: web-catalog
-  reason: "Tier 3 boundary — plugin_type from URL path parameter, lookup in constant dict"
-  safety: "Returns None on miss, handled by 404 response"
+  reason: Tier 3 boundary — plugin_type from URL path parameter, lookup in constant dict
+  safety: Returns None on miss, handled by 404 response
   expires: null
-
-# CatalogServiceImpl — silent-except for unknown plugin type fallback (pre-existing)
 - key: web/catalog/service.py:R6:CatalogServiceImpl:_resolve_config_model:fp=5e0056175f439976
   owner: web-catalog
-  reason: "Expected error path — UnknownPluginTypeError caught and returns None to caller"
-  safety: "Caller checks None return and skips config extraction; no silent data loss"
+  reason: Expected error path — UnknownPluginTypeError caught and returns None to caller
+  safety: Caller checks None return and skips config extraction; no silent data loss
   expires: null
-
 - key: web/catalog/service.py:R1:CatalogServiceImpl:_extract_config_fields:fp=4ff2ba785b505451
   owner: web-catalog
-  reason: "Tier 3 boundary — Pydantic-generated JSON schema 'properties' key may be absent"
-  safety: "Default empty dict; no properties means no config fields"
+  reason: Tier 3 boundary — Pydantic-generated JSON schema 'properties' key may be absent
+  safety: Default empty dict; no properties means no config fields
   expires: null
-
 - key: web/catalog/service.py:R1:CatalogServiceImpl:_extract_config_fields:fp=1f5f1cda6e9c0466
   owner: web-catalog
-  reason: "Tier 3 boundary — Pydantic JSON schema 'required' key may be absent"
-  safety: "Default empty list; no required fields"
+  reason: Tier 3 boundary — Pydantic JSON schema 'required' key may be absent
+  safety: Default empty list; no required fields
   expires: null
-
 - key: web/catalog/service.py:R1:CatalogServiceImpl:_extract_config_fields:fp=1de9302972b26a3a
   owner: web-catalog
-  reason: "Tier 3 boundary — JSON schema field 'type' may be absent (e.g. anyOf unions)"
-  safety: "Default 'object'; conservative fallback"
+  reason: Tier 3 boundary — JSON schema field 'type' may be absent (e.g. anyOf unions)
+  safety: Default 'object'; conservative fallback
   expires: null
-
 - key: web/catalog/service.py:R1:CatalogServiceImpl:_extract_config_fields:fp=ff5c2a0e7c73ce66
   owner: web-catalog
-  reason: "Tier 3 boundary — JSON schema anyOf branch may lack 'type'"
-  safety: "Checked before use; null branch skipped"
+  reason: Tier 3 boundary — JSON schema anyOf branch may lack 'type'
+  safety: Checked before use; null branch skipped
   expires: null
-
 - key: web/catalog/service.py:R1:CatalogServiceImpl:_extract_config_fields:fp=e3cf8be3854ff16b
   owner: web-catalog
-  reason: "Tier 3 boundary — JSON schema branch 'type' checked for null filtering"
-  safety: "Skips null branches; extracts real type from remaining"
+  reason: Tier 3 boundary — JSON schema branch 'type' checked for null filtering
+  safety: Skips null branches; extracts real type from remaining
   expires: null
-
 - key: web/catalog/service.py:R1:CatalogServiceImpl:_extract_config_fields:fp=eddfe72d549a8215
   owner: web-catalog
-  reason: "Tier 3 boundary — fallback type extraction from anyOf branch"
-  safety: "Default 'object'; conservative"
+  reason: Tier 3 boundary — fallback type extraction from anyOf branch
+  safety: Default 'object'; conservative
   expires: null
-
 - key: web/catalog/service.py:R1:CatalogServiceImpl:_extract_config_fields:fp=4fcdbac964375893
   owner: web-catalog
-  reason: "Tier 3 boundary — JSON schema field 'description' is optional"
-  safety: "Returns None; ConfigFieldInfo.description accepts None"
+  reason: Tier 3 boundary — JSON schema field 'description' is optional
+  safety: Returns None; ConfigFieldInfo.description accepts None
   expires: null
-
 - key: web/catalog/service.py:R1:CatalogServiceImpl:_extract_config_fields:fp=a288b28b42de381b
   owner: web-catalog
-  reason: "Tier 3 boundary — JSON schema field 'default' is optional"
-  safety: "Returns None; ConfigFieldInfo.default accepts None"
+  reason: Tier 3 boundary — JSON schema field 'default' is optional
+  safety: Returns None; ConfigFieldInfo.default accepts None
   expires: null
-
-# JWKSTokenValidator — httpx client.get() false positives (HTTP method, not dict.get)
 - key: web/auth/oidc.py:R1:JWKSTokenValidator:ensure_jwks:fp=5d9ec6c99446cd42
   owner: web-auth
-  reason: "False positive — httpx.AsyncClient.get() is an HTTP GET request, not dict.get()"
+  reason: False positive — httpx.AsyncClient.get() is an HTTP GET request, not dict.get()
   safety: HTTP errors caught by raise_for_status() and except block
   expires: null
-
 - key: web/auth/oidc.py:R1:JWKSTokenValidator:ensure_jwks:fp=0212bb5677a2406e
   owner: web-auth
-  reason: "False positive — httpx.AsyncClient.get() is an HTTP GET request, not dict.get()"
+  reason: False positive — httpx.AsyncClient.get() is an HTTP GET request, not dict.get()
   safety: HTTP errors caught by raise_for_status() and except block
   expires: null
-
-# JWKSTokenValidator — Tier 3 JWT header .get() for kid extraction
 - key: web/auth/oidc.py:R1:JWKSTokenValidator:decode_token:fp=43b5f14ace609f1d
   owner: web-auth
-  reason: "Tier 3 boundary — JWT header kid field is optional per RFC 7515"
-  safety: "Missing kid falls through to first key in JWKS; AuthenticationError on decode failure"
+  reason: Tier 3 boundary — JWT header kid field is optional per RFC 7515
+  safety: Missing kid falls through to first key in JWKS; AuthenticationError on decode failure
   expires: null
-
-# OIDC provider — Tier 3 JWT payload .get() calls (external IdP token claims)
 - key: web/auth/oidc.py:R1:OIDCAuthProvider:authenticate:fp=a8c6a2b695a3d754
   owner: web-auth
-  reason: "Tier 3 boundary — preferred_username is optional in OIDC tokens, falls back to sub"
-  safety: "Default is payload['sub'] which is required; absence of optional claim is expected"
+  reason: Tier 3 boundary — preferred_username is optional in OIDC tokens, falls back to sub
+  safety: Default is payload['sub'] which is required; absence of optional claim is expected
   expires: null
-
 - key: web/auth/oidc.py:R1:OIDCAuthProvider:get_user_info:fp=a3787dad45249f67
   owner: web-auth
-  reason: "Tier 3 boundary — groups claim is optional in OIDC tokens; None = no groups"
-  safety: "None returns empty groups; non-list raises AuthenticationError; no silent discard"
+  reason: Tier 3 boundary — groups claim is optional in OIDC tokens; None = no groups
+  safety: None returns empty groups; non-list raises AuthenticationError; no silent discard
   expires: null
-
 - key: web/auth/oidc.py:R5:OIDCAuthProvider:get_user_info:fp=8ca64d6c43cc262d
   owner: web-auth
-  reason: "Tier 3 boundary — groups claim type is not guaranteed by external IdP"
-  safety: "Non-list raises AuthenticationError with type info for debugging"
+  reason: Tier 3 boundary — groups claim type is not guaranteed by external IdP
+  safety: Non-list raises AuthenticationError with type info for debugging
   expires: null
-
 - key: web/auth/oidc.py:R1:OIDCAuthProvider:get_user_info:fp=e9a89464d499fed3
   owner: web-auth
-  reason: "Tier 3 boundary — preferred_username is optional in OIDC tokens, falls back to sub"
-  safety: "Default is payload['sub'] which is required"
+  reason: Tier 3 boundary — preferred_username is optional in OIDC tokens, falls back to sub
+  safety: Default is payload['sub'] which is required
   expires: null
-
 - key: web/auth/oidc.py:R1:OIDCAuthProvider:get_user_info:fp=50e2c5aea8128cfe
   owner: web-auth
-  reason: "Tier 3 boundary — name claim is optional, falls back to preferred_username"
-  safety: "Falls back to preferred_username or 'Unknown'; never to opaque sub UUID"
+  reason: Tier 3 boundary — name claim is optional, falls back to preferred_username
+  safety: Falls back to preferred_username or 'Unknown'; never to opaque sub UUID
   expires: null
-
 - key: web/auth/oidc.py:R1:OIDCAuthProvider:get_user_info:fp=64985ed62a0e03ec
   owner: web-auth
-  reason: "Tier 3 boundary — preferred_username fallback in display_name chain"
-  safety: "Part of name -> preferred_username -> 'Unknown' chain"
+  reason: Tier 3 boundary — preferred_username fallback in display_name chain
+  safety: Part of name -> preferred_username -> 'Unknown' chain
   expires: null
-
 - key: web/auth/oidc.py:R1:OIDCAuthProvider:get_user_info:fp=f2a1b1758a966c9d
   owner: web-auth
-  reason: "Tier 3 boundary — email claim is optional in OIDC tokens"
-  safety: "Default None; UserProfile.email accepts None; absence is honest representation"
+  reason: Tier 3 boundary — email claim is optional in OIDC tokens
+  safety: Default None; UserProfile.email accepts None; absence is honest representation
   expires: null
-
-# Entra provider — Tier 3 JWT payload .get() and isinstance() calls
 - key: web/auth/entra.py:R1:EntraAuthProvider:_extract_groups:fp=268368c0e155cc41
   owner: web-auth
-  reason: "Tier 3 boundary — groups claim is optional in Entra tokens; None = no groups"
-  safety: "None returns empty; non-list raises AuthenticationError; no silent discard"
+  reason: Tier 3 boundary — groups claim is optional in Entra tokens; None = no groups
+  safety: None returns empty; non-list raises AuthenticationError; no silent discard
   expires: null
-
 - key: web/auth/entra.py:R5:EntraAuthProvider:_extract_groups:fp=6dcc1eafd56c6429
   owner: web-auth
-  reason: "Tier 3 boundary — groups claim type is not guaranteed by external IdP"
-  safety: "Non-list raises AuthenticationError with type info"
+  reason: Tier 3 boundary — groups claim type is not guaranteed by external IdP
+  safety: Non-list raises AuthenticationError with type info
   expires: null
-
 - key: web/auth/entra.py:R1:EntraAuthProvider:_extract_groups:fp=cc258a6069465936
   owner: web-auth
-  reason: "Tier 3 boundary — roles claim is optional in Entra tokens; None = no roles"
-  safety: "None returns empty; non-list raises AuthenticationError; no silent discard"
+  reason: Tier 3 boundary — roles claim is optional in Entra tokens; None = no roles
+  safety: None returns empty; non-list raises AuthenticationError; no silent discard
   expires: null
-
 - key: web/auth/entra.py:R5:EntraAuthProvider:_extract_groups:fp=8a85154b5c04b93d
   owner: web-auth
-  reason: "Tier 3 boundary — roles claim type is not guaranteed by external IdP"
-  safety: "Non-list raises AuthenticationError with type info"
+  reason: Tier 3 boundary — roles claim type is not guaranteed by external IdP
+  safety: Non-list raises AuthenticationError with type info
   expires: null
-
 - key: web/auth/entra.py:R1:EntraAuthProvider:authenticate:fp=fd48174d76f75c9d
   owner: web-auth
-  reason: "Tier 3 boundary — preferred_username is optional in Entra tokens, falls back to sub"
-  safety: "Default is payload['sub'] which is required; absence of optional claim is expected"
+  reason: Tier 3 boundary — preferred_username is optional in Entra tokens, falls back to sub
+  safety: Default is payload['sub'] which is required; absence of optional claim is expected
   expires: null
-
 - key: web/auth/entra.py:R1:EntraAuthProvider:get_user_info:fp=011fa8f44233c8e6
   owner: web-auth
-  reason: "Tier 3 boundary — preferred_username is optional in Entra tokens, falls back to sub"
-  safety: "Default is payload['sub'] which is required"
+  reason: Tier 3 boundary — preferred_username is optional in Entra tokens, falls back to sub
+  safety: Default is payload['sub'] which is required
   expires: null
-
 - key: web/auth/entra.py:R1:EntraAuthProvider:get_user_info:fp=cf8febe0ecd5d91c
   owner: web-auth
-  reason: "Tier 3 boundary — email claim is optional in Entra tokens"
-  safety: "Default None; UserProfile.email accepts None"
+  reason: Tier 3 boundary — email claim is optional in Entra tokens
+  safety: Default None; UserProfile.email accepts None
   expires: null
-
 - key: web/auth/entra.py:R1:EntraAuthProvider:get_user_info:fp=b006a5696f76b645
   owner: web-auth
-  reason: "Tier 3 boundary — name claim is optional, falls back to preferred_username"
-  safety: "Falls back to preferred_username or 'Unknown'; never to opaque sub UUID"
+  reason: Tier 3 boundary — name claim is optional, falls back to preferred_username
+  safety: Falls back to preferred_username or 'Unknown'; never to opaque sub UUID
   expires: null
-
 - key: web/auth/entra.py:R1:EntraAuthProvider:get_user_info:fp=a3dbe8d2b3f309d5
   owner: web-auth
-  reason: "Tier 3 boundary — preferred_username fallback in display_name chain"
-  safety: "Part of name -> preferred_username -> 'Unknown' chain"
+  reason: Tier 3 boundary — preferred_username fallback in display_name chain
+  safety: Part of name -> preferred_username -> 'Unknown' chain
   expires: null
-
-# Auth routes — @router.get() false positives (FastAPI route decorators, not dict.get)
-- key: web/auth/routes.py:R1:create_auth_router:auth_config:fp=3f8fc32990ce6112
-  owner: web-auth
-  reason: "False positive — @router.get() is FastAPI HTTP route decorator, not dict.get()"
-  safety: No dict access involved; decorator syntax triggers text-based pattern match
-  expires: null
-
 - key: web/auth/routes.py:R1:create_auth_router:me:fp=4db7c70c9126b330
   owner: web-auth
-  reason: "False positive — @router.get() is FastAPI HTTP route decorator, not dict.get()"
+  reason: False positive — @router.get() is FastAPI HTTP route decorator, not dict.get()
   safety: No dict access involved; decorator syntax triggers text-based pattern match
   expires: null
-
-# SessionServiceImpl — _unwrap_envelope checks envelope structure (Tier 1 read boundary)
-- key: web/sessions/service.py:R5:SessionServiceImpl:_unwrap_envelope:fp=1f13048cd351a07f
-  owner: web-sessions
-  reason: "Tier 1 read boundary — validates JSON envelope structure before accessing _version key"
-  safety: "Crashes on unknown version or missing envelope; no silent coercion"
-  expires: null
-
-# App factory — os.environ.get(), @app.get() false positives, and getattr for optional services
-- key: web/app.py:R2:lifespan:fp=97dea957d9af9a52
-  owner: web-app
-  reason: "Optional service — secret_service may not be wired in all deployment modes"
-  safety: "Returns None; caller checks before use"
-  expires: null
-
 - key: web/app.py:R5:_settings_from_env:fp=bb118a9028ce2eff
   owner: web-app
-  reason: "Tier 3 boundary — JSON-parsed env var may be a list; isinstance check classifies for tuple conversion"
-  safety: "isinstance used only for type dispatch; no contract masking"
+  reason: Tier 3 boundary — JSON-parsed env var may be a list; isinstance check classifies for tuple conversion
+  safety: isinstance used only for type dispatch; no contract masking
   expires: null
-
 - key: web/app.py:R6:_settings_from_env:fp=4bd0041b827e4b56
   owner: web-app
-  reason: "Tier 3 boundary — env var value that isn't valid JSON is treated as plain string (the common case)"
-  safety: "JSONDecodeError caught only to fall back to raw string; no silent data loss"
+  reason: Tier 3 boundary — env var value that isn't valid JSON is treated as plain string (the common case)
+  safety: JSONDecodeError caught only to fall back to raw string; no silent data loss
   expires: null
-
-- key: web/app.py:R1:create_app:fp=43c5fa4048ab59e4
-  owner: web-app
-  reason: "Tier 3 boundary — os.environ.get() for env var check"
-  safety: "Guards dev-mode secret_key warning; no data flow impact"
-  expires: null
-
-- key: web/app.py:R1:create_app:health:fp=69857402ca0121fc
-  owner: web-app
-  reason: "False positive — @app.get() is FastAPI HTTP route decorator"
-  safety: No dict access involved
-  expires: null
-
-- key: web/app.py:R1:create_app:system_status:fp=8599db92cf0b6bcb
-  owner: web-app
-  reason: "False positive — @app.get() is FastAPI HTTP route decorator"
-  safety: No dict access involved
-  expires: null
-
-# Blob routes — @router.get() false positives (FastAPI route decorators)
 - key: web/blobs/routes.py:R1:create_blobs_router:list_blobs:fp=be5f3aed9b28c617
   owner: web-blobs
-  reason: "False positive — @router.get() is FastAPI HTTP route decorator, not dict.get()"
+  reason: False positive — @router.get() is FastAPI HTTP route decorator, not dict.get()
   safety: No dict access involved
   expires: null
-
 - key: web/blobs/routes.py:R1:create_blobs_router:get_blob_metadata:fp=3aec9f34241a470a
   owner: web-blobs
-  reason: "False positive — @router.get() is FastAPI HTTP route decorator, not dict.get()"
+  reason: False positive — @router.get() is FastAPI HTTP route decorator, not dict.get()
   safety: No dict access involved
   expires: null
-
 - key: web/blobs/routes.py:R1:create_blobs_router:download_blob_content:fp=abed53a4daf5b523
   owner: web-blobs
-  reason: "False positive — @router.get() is FastAPI HTTP route decorator, not dict.get()"
+  reason: False positive — @router.get() is FastAPI HTTP route decorator, not dict.get()
   safety: No dict access involved
   expires: null
-
-# Session routes — @router.get() false positives (FastAPI route decorators)
 - key: web/sessions/routes.py:R1:create_session_router:list_sessions:fp=ba37411100a107f1
   owner: web-sessions
-  reason: "False positive — @router.get() is FastAPI HTTP route decorator, not dict.get()"
+  reason: False positive — @router.get() is FastAPI HTTP route decorator, not dict.get()
   safety: No dict access involved
   expires: null
-
 - key: web/sessions/routes.py:R1:create_session_router:get_session:fp=43361cc3e4c7a1e9
   owner: web-sessions
-  reason: "False positive — @router.get() is FastAPI HTTP route decorator, not dict.get()"
+  reason: False positive — @router.get() is FastAPI HTTP route decorator, not dict.get()
   safety: No dict access involved
   expires: null
-
-- key: web/sessions/routes.py:R1:create_session_router:get_messages:fp=12f6d578ad877231
-  owner: web-sessions
-  reason: "False positive — @router.get() is FastAPI HTTP route decorator, not dict.get()"
-  safety: No dict access involved
-  expires: null
-
-- key: web/sessions/routes.py:R1:create_session_router:get_current_state:fp=18e735f65888fb1e
-  owner: web-sessions
-  reason: "False positive — @router.get() is FastAPI HTTP route decorator, not dict.get()"
-  safety: No dict access involved
-  expires: null
-
-# Execution routes — FastAPI decorators and WebSocket transport/auth handling
 - key: web/execution/routes.py:R1:create_execution_router:get_run_status:fp=d08d1e4253439ed0
   owner: web-execution
-  reason: "False positive — @router.get() is FastAPI HTTP route decorator, not dict.get()"
+  reason: False positive — @router.get() is FastAPI HTTP route decorator, not dict.get()
   safety: No dict access involved
   expires: null
-
 - key: web/execution/routes.py:R1:create_execution_router:get_run_results:fp=f7d5bcef727d0b7d
   owner: web-execution
-  reason: "False positive — @router.get() is FastAPI HTTP route decorator, not dict.get()"
+  reason: False positive — @router.get() is FastAPI HTTP route decorator, not dict.get()
   safety: No dict access involved
   expires: null
-
 - key: web/execution/routes.py:R4:create_execution_router:websocket_run_progress:fp=39b0b5f635b0c602
   owner: web-execution
-  reason: "WebSocket auth boundary — auth providers may fail with provider-specific exceptions beyond AuthenticationError"
-  safety: "Any failure is handled by denying the connection with close code 4001 before websocket.accept()"
+  reason: WebSocket auth boundary — auth providers may fail with provider-specific exceptions beyond AuthenticationError
+  safety: Any failure is handled by denying the connection with close code 4001 before websocket.accept()
   expires: null
-
 - key: web/execution/routes.py:R4:create_execution_router:websocket_run_progress:fp=f39f2a57045dcacd
   owner: web-execution
-  reason: "Run-ownership gate on WebSocket setup treats backend lookup failures as not-found to avoid leaking run existence"
-  safety: "Failure closes the socket with 4004 and does not expose run metadata"
+  reason: Run-ownership gate on WebSocket setup treats backend lookup failures as not-found to avoid leaking run existence
+  safety: Failure closes the socket with 4004 and does not expose run metadata
   expires: null
-
 - key: web/execution/routes.py:R1:create_execution_router:websocket_run_progress:fp=edcad716854e9464
   owner: web-execution
-  reason: "False positive — asyncio.Queue.get() is an async queue method, not dict.get()"
-  safety: "Queue timeout is handled explicitly by heartbeat logic"
+  reason: False positive — asyncio.Queue.get() is an async queue method, not dict.get()
+  safety: Queue timeout is handled explicitly by heartbeat logic
   expires: null
-
 - key: web/execution/routes.py:R6:create_execution_router:websocket_run_progress:fp=ca6a807e18a9c081
   owner: web-execution
-  reason: "Heartbeat timeout is an expected idle path, not an error swallow"
-  safety: "The handler emits an explicit heartbeat frame and continues waiting, so clients get a visible keepalive signal"
+  reason: Heartbeat timeout is an expected idle path, not an error swallow
+  safety: The handler emits an explicit heartbeat frame and continues waiting, so clients get a visible keepalive signal
   expires: null
-
 - key: web/execution/routes.py:R4:create_execution_router:websocket_run_progress:fp=c4039cf10d17cb30
   owner: web-execution
-  reason: "WebSocket transport writes can fail with varied connection-state exceptions across ASGI servers"
-  safety: "Failure breaks the loop and cleanup runs in finally; no run data is lost or fabricated"
+  reason: WebSocket transport writes can fail with varied connection-state exceptions across ASGI servers
+  safety: Failure breaks the loop and cleanup runs in finally; no run data is lost or fabricated
   expires: null
-
 - key: web/execution/routes.py:R6:create_execution_router:websocket_run_progress:fp=f70460a861072998
   owner: web-execution
-  reason: "WebSocketDisconnect is the expected disconnect control-flow path"
-  safety: "Disconnect falls through to finally for unsubscribe cleanup; no error is hidden from callers"
+  reason: WebSocketDisconnect is the expected disconnect control-flow path
+  safety: Disconnect falls through to finally for unsubscribe cleanup; no error is hidden from callers
   expires: null
-
 - key: web/execution/routes.py:R4:create_execution_router:websocket_run_progress:fp=8051d9a2c963899b
   owner: web-execution
-  reason: "Top-level WebSocket handler guard converts unexpected transport/runtime failures into a clean 1011 close"
-  safety: "The error is logged and the client receives an explicit internal-error close code"
+  reason: Top-level WebSocket handler guard converts unexpected transport/runtime failures into a clean 1011 close
+  safety: The error is logged and the client receives an explicit internal-error close code
   expires: null
-
 - key: web/execution/routes.py:R4:create_execution_router:websocket_run_progress:fp=3e188822ed707289
   owner: web-execution
-  reason: "Best-effort websocket.close() can raise transport-specific exceptions after a primary handler failure"
-  safety: "Secondary close failure is logged only after the original failure path is already established"
+  reason: Best-effort websocket.close() can raise transport-specific exceptions after a primary handler failure
+  safety: Secondary close failure is logged only after the original failure path is already established
   expires: null
-
-# Execution service — optional config keys and concurrent shutdown-event lifecycle
-
-- key: web/execution/service.py:R1:ExecutionServiceImpl:cancel:fp=6f3326731b6efc5b
-  owner: web-execution
-  reason: "Cancellation checks whether a live shutdown event exists before falling back to pending/terminal-run handling"
-  safety: "Missing event routes to an explicit database-backed status update path"
-  expires: null
-
-- key: web/execution/service.py:R4:ExecutionServiceImpl:_run_pipeline:_safe_broadcast:fp=951191ef3e6c3c31
-  owner: web-execution
-  reason: "Progress broadcasting is operational visibility and may fail with transport/runtime exceptions outside pipeline correctness"
-  safety: "Broadcast failure is logged while run status and audit updates continue on the authoritative path"
-  expires: null
-
-- key: web/execution/service.py:R5:ExecutionServiceImpl:_run_pipeline:fp=378b41518f8fb4c9
-  owner: web-execution
-  reason: "Error classification for sanitized client messaging — SecretResolutionError triggers safe error message instead of leaking secret names"
-  safety: "isinstance used only for error-message selection; exception still propagates"
-  expires: null
-
-- key: web/execution/service.py:R5:ExecutionServiceImpl:_run_pipeline:fp=b163bed1df70dc90
-  owner: web-execution
-  reason: "BaseException split distinguishes process-termination control flow from ordinary failures"
-  safety: "KeyboardInterrupt/SystemExit are re-raised and skip the best-effort failed-status write to preserve shutdown semantics"
-  expires: null
-
-- key: web/execution/service.py:R4:ExecutionServiceImpl:_run_pipeline:fp=b5dbca9b5b132a37
-  owner: web-execution
-  reason: "Failure while marking a crashed run as failed is a secondary cleanup error on an already-failing path"
-  safety: "Secondary failure is logged and the original exception continues to propagate"
-  expires: null
-
-- key: web/execution/service.py:R9:ExecutionServiceImpl:_run_pipeline:fp=738021e4eed18a07
-  owner: web-execution
-  reason: "Final shutdown-event cleanup is intentionally idempotent because completion and cancellation can race"
-  safety: "Removing a missing key is harmless and avoids masking the primary pipeline outcome"
-  expires: null
-
-# Execution progress — subscriber map lifecycle helpers
 - key: web/execution/progress.py:R8:ProgressBroadcaster:subscribe:fp=4e52b3400d28695a
   owner: web-execution
-  reason: "Subscriber map creates the per-run queue set lazily on first subscription"
-  safety: "Mutation is guarded by the broadcaster lock and only initializes empty internal state"
+  reason: Subscriber map creates the per-run queue set lazily on first subscription
+  safety: Mutation is guarded by the broadcaster lock and only initializes empty internal state
   expires: null
-
 - key: web/execution/progress.py:R1:ProgressBroadcaster:broadcast:fp=9e876f45c424ae5e
   owner: web-execution
-  reason: "Broadcast treats an absent run entry as 'no subscribers' for that run"
-  safety: "A missing subscriber set results in a no-op broadcast, which is the correct behavior"
+  reason: Broadcast treats an absent run entry as 'no subscribers' for that run
+  safety: A missing subscriber set results in a no-op broadcast, which is the correct behavior
   expires: null
-
 - key: web/execution/progress.py:R9:ProgressBroadcaster:cleanup_run:fp=743167bc43d078f7
   owner: web-execution
-  reason: "Run cleanup is idempotent because unsubscribe and explicit cleanup can both remove the same run entry"
-  safety: "Missing key simply means there are no remaining subscribers to clean up"
+  reason: Run cleanup is idempotent because unsubscribe and explicit cleanup can both remove the same run entry
+  safety: Missing key simply means there are no remaining subscribers to clean up
   expires: null
-
-- key: web/sessions/routes.py:R1:create_session_router:get_state_versions:fp=a6afd2cb2f599d92
-  owner: web-sessions
-  reason: "False positive — @router.get() is FastAPI HTTP route decorator, not dict.get()"
-  safety: No dict access involved
-  expires: null
-
-- key: web/sessions/routes.py:R1:create_session_router:get_state_yaml:fp=9b02cdcf65559323
-  owner: web-sessions
-  reason: "False positive — @router.get() is FastAPI HTTP route decorator, not dict.get()"
-  safety: No dict access involved
-  expires: null
-
-# Session routes — broad except in convergence partial state guards (F2 hardening)
-- key: web/sessions/routes.py:R4:create_session_router:send_message:fp=55109e5b7d658e7d
-  owner: web-composer
-  reason: "Convergence validation guard — if validate() raises, degrade to is_valid=False rather than lose partial state"
-  safety: "Caught exception produces ValidationSummary(is_valid=False); state still persisted"
-  expires: null
-
-- key: web/sessions/routes.py:R4:create_session_router:send_message:fp=9982c5a6a9518270
-  owner: web-composer
-  reason: "Convergence persistence guard — if save_composition_state() fails, log and return 422 without partial_state"
-  safety: "Caught exception logged via structlog; 422 response omits partial_state; no crash to 500"
-  expires: null
-
-# Auth middleware — Tier 3 HTTP header access (Authorization header from client)
 - key: web/auth/middleware.py:R1:get_current_user:fp=27850ac518f1116d
   owner: web-auth
-  reason: "Tier 3 boundary — request.headers.get('Authorization') reads untrusted HTTP header"
-  safety: "Missing header returns 401; malformed header returns 401; no default fabrication"
+  reason: Tier 3 boundary — request.headers.get('Authorization') reads untrusted HTTP header
+  safety: Missing header returns 401; malformed header returns 401; no default fabrication
   expires: null
-
-# Composer state — NodeSpec.from_dict() uses .get() for optional fields absent from to_dict()
 - key: web/composer/state.py:R1:NodeSpec:from_dict:fp=cfc303e4ee462b63
   owner: web-composer
-  reason: "Optional fields — to_dict() conditionally omits None fields; from_dict() defaults to None"
-  safety: "Missing = None; matches dataclass field default; round-trip invariant tested"
+  reason: Optional fields — to_dict() conditionally omits None fields; from_dict() defaults to None
+  safety: Missing = None; matches dataclass field default; round-trip invariant tested
   expires: null
-
 - key: web/composer/state.py:R1:NodeSpec:from_dict:fp=8c8f945cb356cd6b
   owner: web-composer
-  reason: "Optional fields — to_dict() conditionally omits None fields; from_dict() defaults to None"
-  safety: "Missing = None; matches dataclass field default; round-trip invariant tested"
+  reason: Optional fields — to_dict() conditionally omits None fields; from_dict() defaults to None
+  safety: Missing = None; matches dataclass field default; round-trip invariant tested
   expires: null
-
 - key: web/composer/state.py:R1:NodeSpec:from_dict:fp=54276a836e71e2ad
   owner: web-composer
-  reason: "Optional fields — to_dict() conditionally omits None fields; from_dict() defaults to None"
-  safety: "Missing = None; matches dataclass field default; round-trip invariant tested"
+  reason: Optional fields — to_dict() conditionally omits None fields; from_dict() defaults to None
+  safety: Missing = None; matches dataclass field default; round-trip invariant tested
   expires: null
-
 - key: web/composer/state.py:R1:NodeSpec:from_dict:fp=1a3dc41d13b14500
   owner: web-composer
-  reason: "Optional fields — to_dict() conditionally omits None fields; from_dict() defaults to None"
-  safety: "Missing = None; matches dataclass field default; round-trip invariant tested"
+  reason: Optional fields — to_dict() conditionally omits None fields; from_dict() defaults to None
+  safety: Missing = None; matches dataclass field default; round-trip invariant tested
   expires: null
-
 - key: web/composer/state.py:R1:NodeSpec:from_dict:fp=0fc6469ca0fca4c3
   owner: web-composer
-  reason: "Optional fields — to_dict() conditionally omits None fields; from_dict() defaults to None"
-  safety: "Missing = None; matches dataclass field default; round-trip invariant tested"
+  reason: Optional fields — to_dict() conditionally omits None fields; from_dict() defaults to None
+  safety: Missing = None; matches dataclass field default; round-trip invariant tested
   expires: null
-
 - key: web/composer/state.py:R1:NodeSpec:from_dict:fp=d9e79308f2030bf0
   owner: web-composer
-  reason: "Optional fields — to_dict() conditionally omits None fields; from_dict() defaults to None"
-  safety: "Missing = None; matches dataclass field default; round-trip invariant tested"
+  reason: Optional fields — to_dict() conditionally omits None fields; from_dict() defaults to None
+  safety: Missing = None; matches dataclass field default; round-trip invariant tested
   expires: null
-
-# Composer state — with_metadata() uses .get() for partial dict patch
 - key: web/composer/state.py:R1:CompositionState:with_metadata:fp=a72cd948565706e7
   owner: web-composer
-  reason: "Partial patch API — only provided fields are updated, others preserved"
-  safety: "Defaults are the current field values; no fabrication, no loss"
+  reason: Partial patch API — only provided fields are updated, others preserved
+  safety: Defaults are the current field values; no fabrication, no loss
   expires: null
-
 - key: web/composer/state.py:R1:CompositionState:with_metadata:fp=fc470cb12ec23522
   owner: web-composer
-  reason: "Partial patch API — only provided fields are updated, others preserved"
-  safety: "Defaults are the current field values; no fabrication, no loss"
+  reason: Partial patch API — only provided fields are updated, others preserved
+  safety: Defaults are the current field values; no fabrication, no loss
   expires: null
-
-# Session service — IntegrityError handling for upsert-or-skip patterns
-- key: web/sessions/service.py:R6:SessionServiceImpl:save_composition_state:_sync:fp=c07f71670e637c5c
-  owner: web-sessions
-  reason: "Upsert-or-skip — IntegrityError on duplicate version is expected race condition, not a bug"
-  safety: "Returns None to caller; caller retries or skips; no data loss"
-  expires: null
-
-- key: web/sessions/service.py:R6:SessionServiceImpl:set_active_state:_sync:fp=7881a6e600190df3
-  owner: web-sessions
-  reason: "Upsert-or-skip — IntegrityError on duplicate active state is expected race condition"
-  safety: "Returns None to caller; caller retries or skips; no data loss"
-  expires: null
-
-# Execution service — blob finalization is best-effort on an already-terminal path
-- key: web/execution/service.py:R5:ExecutionServiceImpl:_on_pipeline_done:fp=422cba6afcb263ec
-  owner: web-execution
-  reason: "Error classification for sanitized client messaging — SecretResolutionError triggers safe error message in completion callback"
-  safety: "isinstance used only for error-message selection; no exception suppression"
-  expires: null
-
-- key: web/execution/service.py:R4:ExecutionServiceImpl:_finalize_output_blobs:fp=d5c2eb3b2452fc93
-  owner: web-execution
-  reason: "Blob finalization runs after the run has already reached terminal status. Failure must not mask the run outcome."
-  safety: "Error is logged via structlog; the run status and audit trail are already committed. Blob stays pending for orphan cleanup."
-  expires: null
-
-# Execution service — blob-ref is an optional source options key
-- key: web/execution/service.py:R1:ExecutionServiceImpl:execute:fp=137de28b6b1deb23
-  owner: web-execution
-  reason: "Optional keys in user-authored config — composition state may legitimately omit optional source path/file keys"
-  safety: "Only present keys are checked against the allowlist; missing keys skip the check"
-  expires: null
-
-- key: web/execution/service.py:R1:ExecutionServiceImpl:execute:fp=0d3c8face999da71
-  owner: web-execution
-  reason: "blob_ref is an optional key in source options set by set_source_from_blob tool"
-  safety: "Missing blob_ref means source is not blob-backed; no linkage recorded"
-  expires: null
-
-- key: web/execution/service.py:R9:ExecutionServiceImpl:execute:fp=77bb06caa7dc7c5d
-  owner: web-execution
-  reason: "Idempotent cleanup — shutdown-event cleanup is idempotent because submit failure can race with cancellation/lifecycle cleanup"
-  safety: "Missing key means there is no active event to clean; run creation aborts immediately"
-  expires: null
-
-# Execution validation — optional path/file keys in user-authored source config (fingerprint updated)
 - key: web/execution/validation.py:R1:validate_pipeline:fp=7f46a13f5a001bac
   owner: web-execution
-  reason: "Validation checks optional source path/file keys supplied by composition state"
-  safety: "Absent keys are treated honestly as 'no path provided' and the check is recorded as skipped/passed"
+  reason: Validation checks optional source path/file keys supplied by composition state
+  safety: Absent keys are treated honestly as 'no path provided' and the check is recorded as skipped/passed
   expires: null
-
-# ServerSecretStore — os.environ.get() is Tier 3 (env vars are external input)
 - key: web/secrets/server_store.py:R1:ServerSecretStore:has_secret:fp=4c611b234b52a51a
   owner: web-secrets
-  reason: "Tier 3 boundary — os.environ.get() checks env var presence for has_secret fast path"
-  safety: "Returns bool only; no secret value exposed; no default fabrication"
+  reason: Tier 3 boundary — os.environ.get() checks env var presence for has_secret fast path
+  safety: Returns bool only; no secret value exposed; no default fabrication
   expires: null
-
 - key: web/secrets/server_store.py:R1:ServerSecretStore:get_secret:fp=baad87e6c2e61bb4
   owner: web-secrets
-  reason: "Tier 3 boundary — os.environ.get() reads external env var; unset/empty raises SecretNotFoundError"
-  safety: "Missing env var raises SecretNotFoundError; no default fabrication"
+  reason: Tier 3 boundary — os.environ.get() reads external env var; unset/empty raises SecretNotFoundError
+  safety: Missing env var raises SecretNotFoundError; no default fabrication
   expires: null
-
 - key: web/secrets/server_store.py:R1:ServerSecretStore:list_secrets:fp=a12f8cf908d2c98d
   owner: web-secrets
-  reason: "Tier 3 boundary — os.environ.get() checks env var presence for availability metadata"
-  safety: "Only produces bool available flag; no secret value exposed"
+  reason: Tier 3 boundary — os.environ.get() checks env var presence for availability metadata
+  safety: Only produces bool available flag; no secret value exposed
   expires: null
-
-# UserSecretStore — os.environ.get() for fingerprint key is Tier 3 (deployment env)
 - key: web/secrets/user_store.py:R1:_compute_fingerprint:fp=1c5082907e8fb795
   owner: web-secrets
-  reason: "Tier 3 — fingerprint key from deployment environment"
-  safety: "Missing env var falls back to machine-local key derivation; no secret leakage"
+  reason: Tier 3 — fingerprint key from deployment environment
+  safety: Missing env var falls back to machine-local key derivation; no secret leakage
   expires: null
-
-# WebSecretService — chained resolution catches SecretNotFoundError for fallback
 - key: web/secrets/service.py:R6:WebSecretService:resolve:fp=9c915e3f931310ca
   owner: web-secrets
-  reason: "Chained resolution — user store miss falls through to server store; SecretNotFoundError is the expected miss signal"
-  safety: "Only SecretNotFoundError is caught; all other exceptions propagate; no data loss"
+  reason: Chained resolution — user store miss falls through to server store; SecretNotFoundError is the expected miss signal
+  safety: Only SecretNotFoundError is caught; all other exceptions propagate; no data loss
   expires: null
-
 - key: web/secrets/service.py:R6:WebSecretService:resolve:fp=e0a95062e1360fdb
   owner: web-secrets
-  reason: "Chained resolution — server store miss returns None; SecretNotFoundError is the expected miss signal"
-  safety: "Only SecretNotFoundError is caught; caller receives None for genuine absence"
+  reason: Chained resolution — server store miss returns None; SecretNotFoundError is the expected miss signal
+  safety: Only SecretNotFoundError is caught; caller receives None for genuine absence
   expires: null
-
-# Secrets routes — @router.get() false positive (FastAPI route decorator)
 - key: web/secrets/routes.py:R1:create_secrets_router:list_secrets:fp=68f742b3de4df7ce
   owner: web-secrets
-  reason: "False positive — @router.get() is FastAPI HTTP route decorator, not dict.get()"
+  reason: False positive — @router.get() is FastAPI HTTP route decorator, not dict.get()
   safety: No dict access involved
   expires: null
-
-# Execution service — isinstance check on config dict and getattr on node options
-- key: web/execution/service.py:R5:ExecutionServiceImpl:_run_pipeline:fp=3c25e0e58be32d6f
-  owner: web-execution
-  reason: "Tier 3 — config from YAML deserialization may be non-dict (e.g. None or string)"
-  safety: "Non-dict triggers error path; no silent coercion"
-  expires: null
-
-# Execution validation — isinstance checks in tree-walk for secret ref collection
 - key: web/execution/validation.py:R5:_collect_secret_refs:fp=7955508cb148c972
   owner: web-execution
-  reason: "Tree-walk — isinstance() dispatches dict/list/scalar branches in recursive config traversal"
-  safety: "No contract masking; structural dispatch on deserialized YAML (Tier 3 data)"
+  reason: Tree-walk — isinstance() dispatches dict/list/scalar branches in recursive config traversal
+  safety: No contract masking; structural dispatch on deserialized YAML (Tier 3 data)
   expires: null
-
 - key: web/execution/validation.py:R5:_collect_secret_refs:fp=c7f127a19ae9acd8
   owner: web-execution
-  reason: "Tree-walk — isinstance(ref, str) validates secret_ref marker value type"
-  safety: "Non-string ref is silently skipped (malformed marker); no crash masking"
+  reason: Tree-walk — isinstance(ref, str) validates secret_ref marker value type
+  safety: Non-string ref is silently skipped (malformed marker); no crash masking
   expires: null
-
 - key: web/execution/validation.py:R5:_collect_secret_refs:fp=9d372da2d9050ede
   owner: web-execution
-  reason: "Tree-walk — isinstance() dispatches list/tuple branch in recursive config traversal"
-  safety: "No contract masking; structural dispatch on deserialized YAML (Tier 3 data)"
+  reason: Tree-walk — isinstance() dispatches list/tuple branch in recursive config traversal
+  safety: No contract masking; structural dispatch on deserialized YAML (Tier 3 data)
   expires: null
-
+- key: web/app.py:R1:create_app:fp=007417015be5e7ce
+  owner: web-app
+  reason: Tier 3 — os.environ.get() for optional WEB_CONCURRENCY env var
+  safety: Defaults to "1" when absent
+  expires: null
+- key: web/app.py:R1:create_app:health:fp=4d24adfc6077ad6c
+  owner: web-app
+  reason: False positive — @router.get() is FastAPI route decorator
+  safety: No dict access involved
+  expires: null
+- key: web/app.py:R1:create_app:system_status:fp=2f305b949366fe45
+  owner: web-app
+  reason: False positive — @router.get() is FastAPI route decorator
+  safety: No dict access involved
+  expires: null
+- key: web/app.py:R1:lifespan:fp=f74df10b8a73da45
+  owner: web-app
+  reason: Tier 3 — httpx.get() for OIDC discovery endpoint
+  safety: Discovery failure logged; authorization_endpoint set to None
+  expires: null
+- key: web/app.py:R2:lifespan:fp=8bcf747439291264
+  owner: web-app
+  reason: Optional secret_service — not all deployments configure it
+  safety: Falls back to None
+  expires: null
+- key: web/app.py:R6:lifespan:fp=a8b969a2c85d4a5a
+  owner: web-app
+  reason: OIDC discovery is best-effort at startup
+  safety: Logs warning; SSO disabled when endpoint is None
+  expires: null
+- key: web/app.py:R6:create_app:fp=4a6b6695db50d62e
+  owner: web-app
+  reason: ValueError from int() on non-numeric WEB_CONCURRENCY
+  safety: Defaults to single worker
+  expires: null
+- key: web/app.py:R6:create_app:fp=b07b0b17bf1094a4
+  owner: web-app
+  reason: ValueError from int() on non-numeric --workers arg
+  safety: Skips this argv entry
+  expires: null
+- key: web/app.py:R6:create_app:fp=fdd8142948730f7e
+  owner: web-app
+  reason: ValueError from int() on non-numeric --workers=N
+  safety: Skips this argv entry
+  expires: null
+- key: web/app.py:R6:create_app:fp=13261c18fe0563f2
+  owner: web-app
+  reason: ValueError from int() on non-numeric -w arg
+  safety: Skips this argv entry
+  expires: null
+- key: web/auth/routes.py:R2:create_auth_router:auth_config:fp=506f9bf37a1a5661
+  owner: web-auth
+  reason: Optional oidc_authorization_endpoint — only set for OIDC/Entra
+  safety: Returns None in response
+  expires: null
+- key: web/blobs/service.py:R4:BlobServiceImpl:copy_blobs_for_fork:fp=d8b44ad06e9e270b
+  owner: web-blobs
+  reason: Best-effort cleanup on fork failure — delete_blob may fail if DB disconnected
+  safety: Falls back to file unlink; original error re-raised
+  expires: null
+- key: web/blobs/service.py:R6:BlobServiceImpl:finalize_run_output_blobs:_sync:fp=8d330406ef26cc55
+  owner: web-blobs
+  reason: Quota exceeded during finalization marks blob as error instead of crashing run
+  safety: Run still finalized; blob marked error
+  expires: null
+- key: web/sessions/routes.py:R1:create_session_router:get_current_state:fp=56d5b19749795fdd
+  owner: web-sessions
+  reason: False positive — @router.get() is FastAPI route decorator
+  safety: No dict access involved
+  expires: null
+- key: web/sessions/routes.py:R1:create_session_router:get_messages:fp=2bbddfdc28c07e0f
+  owner: web-sessions
+  reason: False positive — @router.get() is FastAPI route decorator
+  safety: No dict access involved
+  expires: null
+- key: web/sessions/routes.py:R1:create_session_router:get_state_versions:fp=d0a742e019087e1f
+  owner: web-sessions
+  reason: False positive — @router.get() is FastAPI route decorator
+  safety: No dict access involved
+  expires: null
+- key: web/sessions/routes.py:R1:create_session_router:get_state_yaml:fp=3fa3f8a3d2335219
+  owner: web-sessions
+  reason: False positive — @router.get() is FastAPI route decorator
+  safety: No dict access involved
+  expires: null
+- key: web/sessions/routes.py:R1:create_session_router:list_session_runs:fp=e892e2880a3213dd
+  owner: web-sessions
+  reason: False positive — @router.get() is FastAPI route decorator
+  safety: No dict access involved
+  expires: null
+- key: web/sessions/routes.py:R1:create_session_router:fork_from_message:fp=4960b1a1191dba5e
+  owner: web-sessions
+  reason: source_dict.get() on Tier 3 composition state — optional source options
+  safety: Returns empty dict default
+  expires: null
+- key: web/sessions/routes.py:R1:create_session_router:fork_from_message:fp=60e0f6ffb1cee7e8
+  owner: web-sessions
+  reason: options.get() on Tier 3 state source — blob_ref is optional
+  safety: Returns None; no rewrite if absent
+  expires: null
+- key: web/sessions/routes.py:R5:create_session_router:fork_from_message:fp=d9b346b472c8a32b
+  owner: web-sessions
+  reason: isinstance check on deserialized composition state source
+  safety: Skips rewrite if not dict
+  expires: null
+- key: web/sessions/routes.py:R5:create_session_router:fork_from_message:fp=f75885b86e7e79f2
+  owner: web-sessions
+  reason: isinstance check on blob_ref — may be str or UUID
+  safety: UUID conversion handles both types
+  expires: null
+- key: web/sessions/routes.py:R6:create_session_router:list_session_runs:fp=ba8410a6889c0901
+  owner: web-sessions
+  reason: ValueError from get_state() for deleted composition state on old runs
+  safety: Falls back to version=0
+  expires: null
+- key: web/sessions/service.py:R5:SessionServiceImpl:_unwrap_envelope:fp=92be5b7dd57e1352
+  owner: web-sessions
+  reason: Type check for envelope format in composition state deserialization
+  safety: Handles both raw and enveloped formats
+  expires: null
+- key: web/sessions/service.py:R6:SessionServiceImpl:save_composition_state:_sync:fp=37078bb0de6f4e8c
+  owner: web-sessions
+  reason: IntegrityError on duplicate version is expected race condition
+  safety: Upsert-or-skip
+  expires: null
+- key: web/sessions/service.py:R6:SessionServiceImpl:set_active_state:_sync:fp=4363acb177f59bfe
+  owner: web-sessions
+  reason: IntegrityError on duplicate active state is expected race condition
+  safety: Upsert-or-skip
+  expires: null
+- key: web/execution/service.py:R1:ExecutionServiceImpl:cancel:fp=a4ff7daf73a4ecb7
+  owner: web-execution
+  reason: Check for live shutdown event before fallback handling
+  safety: Pop returns None if absent
+  expires: null
+- key: web/execution/service.py:R1:ExecutionServiceImpl:execute:fp=3a56b0cbd3573202
+  owner: web-execution
+  reason: Optional keys in user-authored config — source path is optional
+  safety: Returns None; path check skipped
+  expires: null
+- key: web/execution/service.py:R1:ExecutionServiceImpl:execute:fp=8d28adad23e4744f
+  owner: web-execution
+  reason: blob_ref is optional key in source options
+  safety: Returns None; blob link skipped
+  expires: null
+- key: web/execution/service.py:R4:ExecutionServiceImpl:_finalize_output_blobs:fp=c7830bf943ef6f0f
+  owner: web-execution
+  reason: Blob finalization after terminal status — failure must not mask run outcome
+  safety: Logged; run status preserved
+  expires: null
+- key: web/execution/service.py:R4:ExecutionServiceImpl:_run_pipeline:fp=4322d7b835e7a2f4
+  owner: web-execution
+  reason: Progress broadcasting is operational visibility
+  safety: Logged; pipeline continues
+  expires: null
+- key: web/execution/service.py:R4:ExecutionServiceImpl:_run_pipeline:_safe_broadcast:fp=9bda594d34906064
+  owner: web-execution
+  reason: Progress broadcasting may fail with transport exceptions
+  safety: Logged; pipeline continues
+  expires: null
+- key: web/execution/service.py:R5:ExecutionServiceImpl:_on_pipeline_done:fp=1569fd8ea7732124
+  owner: web-execution
+  reason: Error classification for sanitized client messaging
+  safety: SecretResolutionError triggers safe message
+  expires: null
+- key: web/execution/service.py:R5:ExecutionServiceImpl:_run_pipeline:fp=8ddfb3204b084fe9
+  owner: web-execution
+  reason: Error classification — SecretResolutionError triggers safe message
+  safety: Secret names not leaked to client
+  expires: null
+- key: web/execution/service.py:R5:ExecutionServiceImpl:_run_pipeline:fp=ebbc87b1b6fbe3a8
+  owner: web-execution
+  reason: BaseException split for process-termination vs ordinary failures
+  safety: Control flow distinction, not type masking
+  expires: null
+- key: web/execution/service.py:R5:ExecutionServiceImpl:_run_pipeline:fp=ec66859ca8fbccba
+  owner: web-execution
+  reason: Tier 3 — config from YAML deserialization may be non-dict
+  safety: Skips secret resolution if not dict
+  expires: null
+- key: web/execution/service.py:R9:ExecutionServiceImpl:execute:fp=17152a6b97151f81
+  owner: web-execution
+  reason: Idempotent shutdown-event cleanup
+  safety: Pop is idempotent
+  expires: null
+- key: web/execution/service.py:R9:ExecutionServiceImpl:_run_pipeline:fp=0999f2d3fec9e597
+  owner: web-execution
+  reason: Final shutdown-event cleanup is intentionally idempotent
+  safety: Pop is idempotent
+  expires: null
+- key: web/app.py:R1:create_app:fp=43c5fa4048ab59e4
+  owner: web-app
+  reason: Tier 3 — os.environ.get() for optional ELSPETH_ENV
+  safety: Returns None when absent; only used for test guard
+  expires: null
+- key: web/sessions/routes.py:R4:create_session_router:send_message:fp=55109e5b7d658e7d
+  owner: web-sessions
+  reason: Convergence partial-state validation may fail — persist with is_valid=False rather than losing state
+  safety: Partial state saved with error flag; not swallowed
+  expires: null
+- key: web/sessions/routes.py:R4:create_session_router:send_message:fp=9982c5a6a9518270
+  owner: web-sessions
+  reason: Convergence partial-state save may fail — return 422 without partial_state
+  safety: Error logged; 422 still returned to client
+  expires: null
+- key: web/auth/routes.py:R1:create_auth_router:auth_config:fp=3f8fc32990ce6112
+  owner: web-auth
+  reason: False positive — @router.get() is FastAPI route decorator
+  safety: No dict access involved
+  expires: null
 per_file_rules:
-# Composer tools — mutation executors parse LLM tool call arguments (Tier 3).
 - pattern: web/composer/tools.py
   rules:
   - R1
   - R5
-  reason: "Tier 3 boundary — LLM tool call arguments are external data with optional fields per JSON schema"
+  reason: Tier 3 boundary — LLM tool call arguments are external data with optional fields per JSON schema
   expires: null
-
 - pattern: web/composer/service.py
   rules:
   - R6
-  reason: "Tier 3 boundary — LLM tool call arguments may contain malformed JSON (JSONDecodeError) or missing required keys (KeyError/TypeError). Errors returned to LLM for self-correction, not swallowed."
+  reason: Tier 3 boundary — LLM tool call arguments may contain malformed JSON (JSONDecodeError) or missing required keys
+    (KeyError/TypeError). Errors returned to LLM for self-correction, not swallowed.
   expires: null

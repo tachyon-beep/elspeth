@@ -220,7 +220,7 @@ class SessionServiceProtocol(Protocol):
     async def get_messages(
         self,
         session_id: UUID,
-        limit: int = 100,
+        limit: int | None = 100,
         offset: int = 0,
     ) -> list[ChatMessageRecord]: ...
 
@@ -264,6 +264,8 @@ class SessionServiceProtocol(Protocol):
     ) -> RunRecord: ...
 
     async def get_run(self, run_id: UUID) -> RunRecord: ...
+
+    async def list_runs_for_session(self, session_id: UUID) -> list[RunRecord]: ...
 
     async def update_run_status(
         self,

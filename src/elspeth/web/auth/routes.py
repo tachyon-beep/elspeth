@@ -49,6 +49,7 @@ class AuthConfigResponse(BaseModel):
     provider: str
     oidc_issuer: str | None = None
     oidc_client_id: str | None = None
+    authorization_endpoint: str | None = None
 
 
 def create_auth_router() -> APIRouter:
@@ -112,6 +113,7 @@ def create_auth_router() -> APIRouter:
             provider=settings.auth_provider,
             oidc_issuer=settings.oidc_issuer,
             oidc_client_id=settings.oidc_client_id,
+            authorization_endpoint=getattr(request.app.state, "oidc_authorization_endpoint", None),
         )
 
     @router.get("/me", response_model=UserProfileResponse)

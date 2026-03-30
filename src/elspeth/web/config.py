@@ -54,6 +54,7 @@ class WebSettings(BaseModel):
     oidc_issuer: str | None = None
     oidc_audience: str | None = None
     oidc_client_id: str | None = None
+    oidc_authorization_endpoint: str | None = None
     entra_tenant_id: str | None = None
 
     # Session database (sessions, messages, composition states, runs)

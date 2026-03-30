@@ -8,9 +8,11 @@ from __future__ import annotations
 
 import asyncio
 import functools
+import shutil
 import uuid
 from collections.abc import Mapping
 from datetime import UTC, datetime, timedelta
+from pathlib import Path
 from typing import Any, cast
 from uuid import UUID
 
@@ -43,8 +45,9 @@ class SessionServiceImpl:
     pool executor via _run_sync() so the async event loop is never blocked.
     """
 
-    def __init__(self, engine: Engine) -> None:
+    def __init__(self, engine: Engine, data_dir: Path | None = None) -> None:
         self._engine = engine
+        self._data_dir = data_dir
 
     async def _run_sync(self, func: Any, *args: Any, **kwargs: Any) -> Any:
         """Run a synchronous callable in the thread pool executor."""
@@ -159,7 +162,7 @@ class SessionServiceImpl:
         ]
 
     async def archive_session(self, session_id: UUID) -> None:
-        """Delete a session and cascade to all related records."""
+        """Delete a session and cascade to all related records and files."""
         sid = str(session_id)
 
         def _sync() -> None:
@@ -173,6 +176,21 @@ class SessionServiceImpl:
                 conn.execute(delete(composition_states_table).where(composition_states_table.c.session_id == sid))
                 conn.execute(delete(chat_messages_table).where(chat_messages_table.c.session_id == sid))
                 conn.execute(delete(sessions_table).where(sessions_table.c.id == sid))
+
+            # Clean up filesystem artifacts after DB rows are committed.
+            # Blob files: data/blobs/{session_id}/
+            # Upload files: data/uploads/*/{session_id}/ (user-scoped subdirs)
+            if self._data_dir is not None:
+                blob_dir = self._data_dir / "blobs" / sid
+                if blob_dir.is_dir():
+                    shutil.rmtree(blob_dir)
+
+                uploads_dir = self._data_dir / "uploads"
+                if uploads_dir.is_dir():
+                    for user_dir in uploads_dir.iterdir():
+                        session_upload_dir = user_dir / sid
+                        if session_upload_dir.is_dir():
+                            shutil.rmtree(session_upload_dir)
 
         await self._run_sync(_sync)
 
@@ -219,7 +237,7 @@ class SessionServiceImpl:
     async def get_messages(
         self,
         session_id: UUID,
-        limit: int = 100,
+        limit: int | None = 100,
         offset: int = 0,
     ) -> list[ChatMessageRecord]:
         """Get messages for a session, ordered by created_at ascending."""
@@ -488,6 +506,19 @@ class SessionServiceImpl:
             raise ValueError(f"Run not found: {run_id}")
 
         return self._row_to_run_record(row)
+
+    async def list_runs_for_session(self, session_id: UUID) -> list[RunRecord]:
+        """List all runs for a session, newest first."""
+        sid = str(session_id)
+
+        def _sync() -> Any:
+            with self._engine.connect() as conn:
+                return conn.execute(
+                    select(runs_table).where(runs_table.c.session_id == sid).order_by(runs_table.c.started_at.desc())
+                ).fetchall()
+
+        rows = await self._run_sync(_sync)
+        return [self._row_to_run_record(row) for row in rows]
 
     async def update_run_status(
         self,
@@ -816,7 +847,7 @@ class SessionServiceImpl:
 
         # Load source data (read-only, outside the write transaction)
         source_session = await self.get_session(source_session_id)
-        source_messages = await self.get_messages(source_session_id, limit=10000)
+        source_messages = await self.get_messages(source_session_id, limit=None)
 
         # Find the fork message — must be a user message
         fork_msg = None
@@ -850,7 +881,10 @@ class SessionServiceImpl:
         copied_state_id = uuid.uuid4() if source_state_record is not None else None
         copied_state_id_str = str(copied_state_id) if copied_state_id else None
 
-        # Prepare all message rows upfront
+        # Prepare all message rows upfront — preserve original created_at
+        # so get_messages() ordering is deterministic.  Stamping all rows
+        # with `now` would make them indistinguishable by timestamp and
+        # produce non-deterministic ordering on subsequent reads.
         msg_records_data: list[dict[str, Any]] = []
         for msg in messages_to_copy:
             msg_records_data.append(
@@ -860,7 +894,7 @@ class SessionServiceImpl:
                     "role": msg.role,
                     "content": msg.content,
                     "tool_calls": deep_thaw(msg.tool_calls) if msg.tool_calls else None,
-                    "created_at": now,
+                    "created_at": msg.created_at,
                     "composition_state_id": None,  # Don't reference source session states
                 }
             )

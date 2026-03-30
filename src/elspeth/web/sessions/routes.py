@@ -40,6 +40,7 @@ from elspeth.web.sessions.schemas import (
     ForkSessionResponse,
     MessageWithStateResponse,
     RevertStateRequest,
+    RunResponse,
     SendMessageRequest,
     SessionResponse,
     UploadResponse,
@@ -226,7 +227,13 @@ def create_session_router() -> APIRouter:
             # another tab mutated state.
             if body.state_id is not None:
                 client_state_id = UUID(body.state_id)
-                client_state = await service.get_state(client_state_id)
+                try:
+                    client_state = await service.get_state(client_state_id)
+                except ValueError:
+                    raise HTTPException(
+                        status_code=404,
+                        detail="State not found",
+                    ) from None
                 if client_state.session_id != session.id:
                     raise HTTPException(
                         status_code=404,
@@ -245,8 +252,13 @@ def create_session_router() -> APIRouter:
         )
 
         # 3. Pre-fetch chat history as plain dicts (seam contract B)
-        records = await service.get_messages(session.id)
-        chat_messages = [{"role": r.role, "content": r.content} for r in records]
+        # Pass limit=None to fetch the full conversation — the default
+        # limit=100 would silently drop recent context once a session
+        # exceeds 100 turns, causing the LLM to lose conversation state.
+        # Exclude the just-persisted user message — the composer receives
+        # it separately via body.content and appends it in _build_messages.
+        records = await service.get_messages(session.id, limit=None)
+        chat_messages = [{"role": r.role, "content": r.content} for r in records[:-1]]
 
         # 4. Run the LLM composition loop
         composer: ComposerService = request.app.state.composer_service
@@ -341,6 +353,120 @@ def create_session_router() -> APIRouter:
             state=state_response,
         )
 
+    @router.post(
+        "/{session_id}/recompose",
+        response_model=MessageWithStateResponse,
+    )
+    async def recompose(
+        session_id: UUID,
+        request: Request,
+        user: UserIdentity = Depends(get_current_user),  # noqa: B008
+        rate_limiter: ComposerRateLimiter = Depends(get_rate_limiter),  # noqa: B008
+    ) -> MessageWithStateResponse:
+        """Re-run the composer without inserting a new user message.
+
+        Used by the frontend retry flow when the original send_message
+        persisted the user message but the composer failed. Skips step 2
+        of send_message (user message insertion) and uses the existing
+        conversation history.
+        """
+        await rate_limiter.check(user.user_id)
+        session = await _verify_session_ownership(session_id, user, request)
+        service: SessionServiceProtocol = request.app.state.session_service
+
+        # Load current state
+        state_record = await service.get_current_state(session.id)
+        if state_record is None:
+            state = CompositionState(
+                source=None,
+                nodes=(),
+                edges=(),
+                outputs=(),
+                metadata=PipelineMetadata(),
+                version=1,
+            )
+            pre_send_state_id: UUID | None = None
+        else:
+            state = _state_from_record(state_record)
+            pre_send_state_id = state_record.id
+
+        # Fetch full chat history — the last message must be the user turn
+        # that failed.  Reject if it's not, since blindly dropping
+        # records[-1] would corrupt the conversation transcript.
+        records = await service.get_messages(session.id, limit=None)
+        if not records:
+            raise HTTPException(status_code=400, detail="No messages to recompose from")
+        if records[-1].role != "user":
+            raise HTTPException(
+                status_code=409,
+                detail="Cannot recompose: the last message is not a user message. "
+                "Recompose is only valid when the most recent message is the "
+                "user turn whose composition failed.",
+            )
+
+        last_user_content = records[-1].content
+        # Exclude the last user message — the composer receives it
+        # separately via the message arg and appends it in _build_messages.
+        chat_messages = [{"role": r.role, "content": r.content} for r in records[:-1]]
+
+        # Run the LLM composition loop
+        composer: ComposerService = request.app.state.composer_service
+        try:
+            result = await composer.compose(last_user_content, chat_messages, state, session_id=str(session_id), user_id=str(user.user_id))
+        except ComposerConvergenceError as exc:
+            response_body: dict[str, object] = {
+                "error_type": "convergence",
+                "detail": str(exc),
+                "turns_used": exc.max_turns,
+                "budget_exhausted": exc.budget_exhausted,
+            }
+            raise HTTPException(status_code=422, detail=response_body) from exc
+        except LiteLLMAuthError as exc:
+            raise HTTPException(
+                status_code=502,
+                detail={"error_type": "llm_auth_error", "detail": str(exc)},
+            ) from exc
+        except LiteLLMAPIError as exc:
+            raise HTTPException(
+                status_code=502,
+                detail={"error_type": "llm_unavailable", "detail": str(exc)},
+            ) from exc
+
+        # Save state if version changed
+        state_response: CompositionStateResponse | None = None
+        post_compose_state_id: UUID | None = pre_send_state_id
+        if result.state.version != state.version:
+            state_d = result.state.to_dict()
+            validation = result.state.validate()
+            state_data = CompositionStateData(
+                source=state_d["source"],
+                nodes=state_d["nodes"],
+                edges=state_d["edges"],
+                outputs=state_d["outputs"],
+                metadata_=state_d["metadata"],
+                is_valid=validation.is_valid,
+                validation_errors=list(validation.errors) if validation.errors else None,
+            )
+            new_state_record = await service.save_composition_state(
+                session.id,
+                state_data,
+            )
+            state_response = _state_response(new_state_record)
+            post_compose_state_id = new_state_record.id
+
+        # Persist assistant message
+        assistant_msg = await service.add_message(
+            session.id,
+            "assistant",
+            result.message,
+            composition_state_id=post_compose_state_id,
+        )
+
+        return MessageWithStateResponse(
+            message=_message_response(assistant_msg),
+            state=state_response,
+        )
+
     @router.get(
         "/{session_id}/messages",
         response_model=list[ChatMessageResponse],
@@ -357,6 +483,42 @@ def create_session_router() -> APIRouter:
         service = request.app.state.session_service
         messages = await service.get_messages(session.id, limit=limit, offset=offset)
         return [_message_response(m) for m in messages]
+
+    @router.get(
+        "/{session_id}/runs",
+        response_model=list[RunResponse],
+    )
+    async def list_session_runs(
+        session_id: UUID,
+        request: Request,
+        user: UserIdentity = Depends(get_current_user),  # noqa: B008
+    ) -> list[RunResponse]:
+        """List all runs for a session, newest first."""
+        session = await _verify_session_ownership(session_id, user, request)
+        service: SessionServiceProtocol = request.app.state.session_service
+        runs = await service.list_runs_for_session(session.id)
+
+        # Resolve composition_version from each run's state_id
+        responses: list[RunResponse] = []
+        for run in runs:
+            try:
+                state = await service.get_state(run.state_id)
+                version = state.version
+            except ValueError:
+                version = 0
+            responses.append(
+                RunResponse(
+                    id=str(run.id),
+                    session_id=str(run.session_id),
+                    status=run.status,
+                    rows_processed=run.rows_processed,
+                    rows_failed=run.rows_failed,
+                    started_at=run.started_at,
+                    finished_at=run.finished_at,
+                    composition_version=version,
+                )
+            )
+        return responses
 
     @router.get("/{session_id}/state")
     async def get_current_state(
@@ -482,10 +644,11 @@ def create_session_router() -> APIRouter:
         except ValueError as exc:
             raise HTTPException(status_code=404, detail=str(exc)) from exc
 
-        # Copy blobs from source session into the forked session
+        # Copy blobs from source session into the forked session.
+        # Returns old_id → new_blob mapping for source reference rewriting.
         blob_service: BlobServiceProtocol = request.app.state.blob_service
         try:
-            await blob_service.copy_blobs_for_fork(session_id, new_session.id)
+            blob_map = await blob_service.copy_blobs_for_fork(session_id, new_session.id)
         except BlobQuotaExceededError:
             # Fork partially created — clean up by archiving the new session
             await service.archive_session(new_session.id)
@@ -493,6 +656,56 @@ def create_session_router() -> APIRouter:
                 status_code=413,
                 detail="Blob quota exceeded during fork — unable to copy files",
             ) from None
+
+        # Rewrite source references in the forked state so the fork is
+        # self-contained.  Without this, blob_ref and path in the source
+        # options still point at the original session's assets.
+        if copied_state is not None and copied_state.source is not None and blob_map:
+            source_dict = deep_thaw(copied_state.source) if copied_state.source else None
+            if isinstance(source_dict, dict):
+                options = source_dict.get("options", {})
+                rewritten = False
+                # Remap blob_ref to the new blob's ID
+                old_ref = options.get("blob_ref")
+                if old_ref is not None:
+                    old_uuid = UUID(old_ref) if isinstance(old_ref, str) else old_ref
+                    if old_uuid in blob_map:
+                        options["blob_ref"] = str(blob_map[old_uuid].id)
+                        options["path"] = blob_map[old_uuid].storage_path
+                        rewritten = True
+                # Remap path for uploaded-file sources (path under old session dir)
+                if not rewritten and "path" in options:
+                    old_path = str(options["path"])
+                    old_session_str = str(session_id)
+                    new_session_str = str(new_session.id)
+                    if old_session_str in old_path:
+                        options["path"] = old_path.replace(old_session_str, new_session_str)
+                        rewritten = True
+                        # Copy the uploaded file to the new session directory
+                        old_file = Path(old_path)
+                        new_file = Path(options["path"])
+                        if old_file.exists() and not new_file.exists():
+                            new_file.parent.mkdir(parents=True, exist_ok=True)
+                            import shutil
+
+                            shutil.copy2(str(old_file), str(new_file))
+
+                if rewritten:
+                    source_dict["options"] = options
+                    # Save updated state with remapped source
+                    state_data = CompositionStateData(
+                        source=source_dict,
+                        nodes=deep_thaw(copied_state.nodes),
+                        edges=deep_thaw(copied_state.edges),
+                        outputs=deep_thaw(copied_state.outputs),
+                        metadata_=deep_thaw(copied_state.metadata_),
+                        is_valid=copied_state.is_valid,
+                        validation_errors=list(copied_state.validation_errors) if copied_state.validation_errors else None,
+                    )
+                    copied_state = await service.save_composition_state(
+                        new_session.id,
+                        state_data,
+                    )
 
         return ForkSessionResponse(
             session=_session_response(new_session),
@@ -545,17 +758,20 @@ def create_session_router() -> APIRouter:
             chunks.append(chunk)
         content = b"".join(chunks)
 
-        # Create upload directory and save
-        upload_dir = Path(settings.data_dir) / "uploads" / sanitized_user_id
+        # Create upload directory and save — include session_id to isolate
+        # files per session so uploads with the same filename in different
+        # sessions don't overwrite each other.
+        upload_dir = Path(settings.data_dir) / "uploads" / sanitized_user_id / str(session_id)
         upload_dir.mkdir(parents=True, exist_ok=True)
         file_path = upload_dir / sanitized_filename
         await asyncio.to_thread(file_path.write_bytes, content)
 
-        # Return relative path (not absolute) for portability
-        relative_path = file_path.relative_to(settings.data_dir)
-
+        # Return the absolute path so it passes source-path validation.
+        # The validators in composer/tools.py and execution/service.py
+        # resolve paths and check they're under data_dir/uploads/ — a
+        # relative path would resolve against CWD and fail.
         return UploadResponse(
-            path=str(relative_path),
+            path=str(file_path),
             filename=original_filename,
             size_bytes=len(content),
         )

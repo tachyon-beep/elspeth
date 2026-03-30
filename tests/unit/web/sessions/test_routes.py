@@ -486,11 +486,12 @@ class TestUploadRoute:
         assert body["size_bytes"] == len(file_content)
         assert "path" in body
 
-        # Path should be relative (not start with /)
-        assert not body["path"].startswith("/")
+        # Path should be absolute (starts with /) so it passes source-path
+        # validation in composer/tools.py and execution/service.py
+        assert body["path"].startswith("/")
 
-        # Verify the file exists on disk via data_dir / relative path
-        saved_path = tmp_path / body["path"]
+        # Verify the file exists on disk at the absolute path
+        saved_path = Path(body["path"])
         assert saved_path.exists()
         assert saved_path.read_bytes() == file_content
 
@@ -508,16 +509,16 @@ class TestUploadRoute:
             files={"file": ("payload.txt", io.BytesIO(file_content), "text/plain")},
         )
         assert upload_resp.status_code == 200
-        relative_path = upload_resp.json()["path"]
-        saved_path = Path(relative_path)
+        returned_path = upload_resp.json()["path"]
+        saved_path = Path(returned_path)
 
-        # Path should be relative (not start with /)
-        assert not relative_path.startswith("/")
+        # Path should be absolute and under data_dir/uploads
+        assert returned_path.startswith("/")
+        assert saved_path.is_relative_to(tmp_path / "uploads")
         # The path should NOT contain ".." components
         assert ".." not in str(saved_path)
         # Should be under uploads/etc/ (sanitized)
         assert "etc" in saved_path.parts
-        assert (tmp_path / relative_path).is_relative_to(tmp_path / "uploads")
 
     def test_upload_path_traversal_filename_sanitized(self, tmp_path) -> None:
         """Filename containing path traversal is sanitized."""
@@ -539,10 +540,11 @@ class TestUploadRoute:
             },
         )
         assert upload_resp.status_code == 200
-        relative_path = upload_resp.json()["path"]
-        saved_path = Path(relative_path)
-        # Path should be relative (not start with /)
-        assert not relative_path.startswith("/")
+        returned_path = upload_resp.json()["path"]
+        saved_path = Path(returned_path)
+        # Path should be absolute and under data_dir/uploads
+        assert returned_path.startswith("/")
+        assert saved_path.is_relative_to(tmp_path / "uploads")
         # Filename should be just "passwd", not "../../etc/passwd"
         assert saved_path.name == "passwd"
         assert ".." not in str(saved_path)

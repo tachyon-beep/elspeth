@@ -91,17 +91,21 @@ class JWKSTokenValidator:
             jwk_set = jwt.PyJWKSet.from_dict(jwks)
             header = jwt.get_unverified_header(token)
             kid = header.get("kid")
-            signing_key = None
+            matched_jwk = None
             for key in jwk_set.keys:
                 if key.key_id == kid:
-                    signing_key = key.key
+                    matched_jwk = key
                     break
-            if signing_key is None:
+            if matched_jwk is None:
                 raise AuthenticationError(f"No matching key found in JWKS for kid={kid!r}")
+            # Derive algorithm from the JWK rather than hardcoding RS256.
+            # PyJWT's PyJWK.algorithm_name reads the JWK's "alg" field, or
+            # infers from "kty" when absent (e.g., kty=RSA → RS256,
+            # kty=EC → ES256). This supports providers using ES256, PS256, etc.
             payload: dict[str, Any] = jwt.decode(
                 token,
-                signing_key,
-                algorithms=["RS256"],
+                matched_jwk.key,
+                algorithms=[matched_jwk.algorithm_name],
                 audience=self._audience,
                 issuer=self._issuer,
             )
