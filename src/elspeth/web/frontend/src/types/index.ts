@@ -48,6 +48,8 @@ export interface Session {
   title: string;
   created_at: string;
   updated_at: string;
+  forked_from_session_id?: string;
+  forked_from_message_id?: string;
 }
 
 // ── Messages ────────────────────────────────────────────────────────────────
@@ -75,6 +77,7 @@ export interface ChatMessage {
   tool_calls: ToolCall[] | null;
   created_at: string;
   local_status?: "pending" | "failed";
+  composition_state_id?: string;
 }
 
 // ── Composition State ───────────────────────────────────────────────────────

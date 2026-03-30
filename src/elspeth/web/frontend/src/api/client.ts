@@ -244,6 +244,31 @@ export async function sendMessage(
   );
 }
 
+/** Fork a session from a specific user message. */
+export async function forkFromMessage(
+  sessionId: string,
+  fromMessageId: string,
+  newMessageContent: string,
+): Promise<{
+  session: Session;
+  messages: ChatMessage[];
+  composition_state: CompositionState | null;
+}> {
+  const response = await fetch(`/api/sessions/${sessionId}/fork`, {
+    method: "POST",
+    headers: authHeaders("application/json"),
+    body: JSON.stringify({
+      from_message_id: fromMessageId,
+      new_message_content: newMessageContent,
+    }),
+  });
+  return parseResponse<{
+    session: Session;
+    messages: ChatMessage[];
+    composition_state: CompositionState | null;
+  }>(response);
+}
+
 // ── Composition State ───────────────────────────────────────────────────────
 
 /** Get the current composition state for a session. Returns null if none exists. */

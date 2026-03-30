@@ -29,6 +29,7 @@ interface SessionState {
   archiveSession: (id: string) => Promise<void>;
   sendMessage: (content: string, signal?: AbortSignal) => Promise<void>;
   retryMessage: (messageId: string, signal?: AbortSignal) => Promise<void>;
+  forkFromMessage: (messageId: string, newContent: string) => Promise<void>;
   loadStateVersions: () => Promise<void>;
   isLoadingVersions: boolean;
   revertToVersion: (stateId: string) => Promise<void>;
@@ -265,6 +266,36 @@ export const useSessionStore = create<SessionState>((set, get) => ({
             : existing,
         ),
       }));
+    }
+  },
+
+  async forkFromMessage(messageId: string, newContent: string) {
+    const { activeSessionId } = get();
+    if (!activeSessionId) return;
+
+    set({ isComposing: true, error: null });
+    try {
+      const result = await api.forkFromMessage(
+        activeSessionId,
+        messageId,
+        newContent,
+      );
+      // Clear validation for the new session
+      getExecutionStore().clearValidation();
+
+      set((state) => ({
+        sessions: [result.session, ...state.sessions],
+        activeSessionId: result.session.id,
+        messages: result.messages,
+        compositionState: result.composition_state,
+        stateVersions: [],
+        isComposing: false,
+      }));
+    } catch {
+      set({
+        isComposing: false,
+        error: "Failed to fork conversation. Please try again.",
+      });
     }
   },
 

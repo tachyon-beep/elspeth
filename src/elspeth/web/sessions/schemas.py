@@ -23,12 +23,15 @@ class SessionResponse(BaseModel):
     title: str
     created_at: datetime
     updated_at: datetime
+    forked_from_session_id: str | None = None
+    forked_from_message_id: str | None = None
 
 
 class SendMessageRequest(BaseModel):
     """Request body for POST /api/sessions/{id}/messages."""
 
     content: str
+    state_id: str | None = None
 
 
 class ChatMessageResponse(BaseModel):
@@ -40,6 +43,7 @@ class ChatMessageResponse(BaseModel):
     content: str
     tool_calls: Any | None = None
     created_at: datetime
+    composition_state_id: str | None = None
 
 
 class MessageWithStateResponse(BaseModel):
@@ -71,6 +75,21 @@ class CompositionStateResponse(BaseModel):
     created_at: datetime
 
 
+class ForkSessionRequest(BaseModel):
+    """Request body for POST /api/sessions/{id}/fork."""
+
+    from_message_id: str
+    new_message_content: str
+
+
+class ForkSessionResponse(BaseModel):
+    """Response for POST /api/sessions/{id}/fork."""
+
+    session: SessionResponse
+    messages: list[ChatMessageResponse]
+    composition_state: CompositionStateResponse | None = None
+
+
 class RevertStateRequest(BaseModel):
     """Request body for POST /api/sessions/{id}/state/revert."""
 
@@ -87,3 +106,4 @@ class UploadResponse(BaseModel):
 
 # Forward reference resolution
 MessageWithStateResponse.model_rebuild()
+ForkSessionResponse.model_rebuild()

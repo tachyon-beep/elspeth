@@ -542,7 +542,7 @@ _MIME_TO_SOURCE_PLUGIN: dict[str, str] = {
     "application/x-jsonlines": "jsonl",
     "application/jsonl": "jsonl",
     "text/jsonl": "jsonl",
-    "text/plain": "csv",
+    "text/plain": "text",
 }
 
 

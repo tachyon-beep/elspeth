@@ -1,18 +1,22 @@
 // src/components/chat/MessageBubble.tsx
-import { useState, useCallback } from "react";
+import { useState, useCallback, useRef, useEffect } from "react";
 import type { ChatMessage } from "@/types/api";
 
 interface MessageBubbleProps {
   message: ChatMessage;
   isComposing?: boolean;
   onRetry?: (messageId: string) => void;
+  onFork?: (messageId: string, newContent: string) => void;
 }
 
-export function MessageBubble({ message, isComposing, onRetry }: MessageBubbleProps) {
+export function MessageBubble({ message, isComposing, onRetry, onFork }: MessageBubbleProps) {
   const isUser = message.role === "user";
   const isSystem = message.role === "system";
   const [toolsExpanded, setToolsExpanded] = useState(false);
   const [copied, setCopied] = useState(false);
+  const [isEditing, setIsEditing] = useState(false);
+  const [editContent, setEditContent] = useState(message.content);
+  const editRef = useRef<HTMLTextAreaElement>(null);
 
   const handleCopy = useCallback(async () => {
     try {
@@ -23,6 +27,33 @@ export function MessageBubble({ message, isComposing, onRetry }: MessageBubblePr
       // Clipboard API may fail in insecure contexts
     }
   }, [message.content]);
+
+  const handleEditStart = useCallback(() => {
+    setEditContent(message.content);
+    setIsEditing(true);
+  }, [message.content]);
+
+  const handleEditCancel = useCallback(() => {
+    setIsEditing(false);
+    setEditContent(message.content);
+  }, [message.content]);
+
+  const handleForkSubmit = useCallback(() => {
+    if (onFork && editContent.trim()) {
+      onFork(message.id, editContent.trim());
+      setIsEditing(false);
+    }
+  }, [onFork, message.id, editContent]);
+
+  useEffect(() => {
+    if (isEditing && editRef.current) {
+      editRef.current.focus();
+      editRef.current.setSelectionRange(
+        editRef.current.value.length,
+        editRef.current.value.length,
+      );
+    }
+  }, [isEditing]);
 
   // System messages: centre-aligned full-width banner, muted colour,
   // italic text, no sender label. Used for audit markers like
@@ -91,7 +122,93 @@ export function MessageBubble({ message, isComposing, onRetry }: MessageBubblePr
           </button>
         )}
 
-        {message.content}
+        {isUser && isEditing ? (
+          <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+            <textarea
+              ref={editRef}
+              value={editContent}
+              onChange={(e) => setEditContent(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) {
+                  handleForkSubmit();
+                } else if (e.key === "Escape") {
+                  handleEditCancel();
+                }
+              }}
+              aria-label="Edit message"
+              style={{
+                width: "100%",
+                minHeight: 60,
+                padding: 8,
+                border: "1px solid var(--color-border-strong)",
+                borderRadius: 4,
+                fontSize: 14,
+                lineHeight: 1.5,
+                fontFamily: "inherit",
+                resize: "vertical",
+                backgroundColor: "var(--color-surface)",
+                color: "var(--color-text)",
+              }}
+            />
+            <div style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}>
+              <button
+                onClick={handleEditCancel}
+                style={{
+                  border: "1px solid var(--color-border-strong)",
+                  backgroundColor: "transparent",
+                  color: "var(--color-text)",
+                  borderRadius: 4,
+                  cursor: "pointer",
+                  fontSize: 12,
+                  padding: "4px 12px",
+                }}
+              >
+                Cancel
+              </button>
+              <button
+                onClick={handleForkSubmit}
+                disabled={!editContent.trim()}
+                style={{
+                  border: "none",
+                  backgroundColor: "var(--color-primary)",
+                  color: "var(--color-on-primary, #fff)",
+                  borderRadius: 4,
+                  cursor: editContent.trim() ? "pointer" : "not-allowed",
+                  fontSize: 12,
+                  padding: "4px 12px",
+                  opacity: editContent.trim() ? 1 : 0.5,
+                }}
+              >
+                Fork
+              </button>
+            </div>
+          </div>
+        ) : (
+          message.content
+        )}
+
+        {/* Edit/fork button — user messages only, not pending/failed */}
+        {isUser && !isEditing && !message.local_status && onFork && (
+          <button
+            onClick={handleEditStart}
+            aria-label="Edit and fork from this message"
+            className="bubble-edit-btn"
+            style={{
+              position: "absolute",
+              top: 4,
+              right: 28,
+              background: "none",
+              border: "none",
+              cursor: "pointer",
+              fontSize: 12,
+              color: "var(--color-text-muted)",
+              padding: "2px 6px",
+              borderRadius: 4,
+            }}
+          >
+            &#9998;
+          </button>
+        )}
 
         {isUser && message.local_status === "failed" && onRetry && (
           <div

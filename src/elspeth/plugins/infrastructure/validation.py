@@ -104,6 +104,10 @@ class PluginConfigValidator:
             from elspeth.plugins.sources.csv_source import CSVSourceConfig
 
             return CSVSourceConfig
+        elif source_type == "text":
+            from elspeth.plugins.sources.text_source import TextSourceConfig
+
+            return TextSourceConfig
         elif source_type == "json":
             from elspeth.plugins.sources.json_source import JSONSourceConfig
 

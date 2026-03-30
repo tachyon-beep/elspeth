@@ -42,6 +42,11 @@ class TestListSources:
         names = [s.name for s in sources]
         assert "csv" in names
 
+    def test_text_source_present(self, catalog: CatalogServiceImpl) -> None:
+        sources = catalog.list_sources()
+        names = [s.name for s in sources]
+        assert "text" in names
+
     def test_all_entries_are_plugin_summaries(self, catalog: CatalogServiceImpl) -> None:
         sources = catalog.list_sources()
         for s in sources:
@@ -140,6 +145,12 @@ class TestGetSchema:
 
         info = catalog.get_schema("source", "csv")
         assert info.json_schema == CSVSourceConfig.model_json_schema()
+
+    def test_text_source_schema_matches_model_json_schema(self, catalog: CatalogServiceImpl) -> None:
+        from elspeth.plugins.sources.text_source import TextSourceConfig
+
+        info = catalog.get_schema("source", "text")
+        assert info.json_schema == TextSourceConfig.model_json_schema()
 
     def test_passthrough_transform_schema(self, catalog: CatalogServiceImpl) -> None:
         info = catalog.get_schema("transform", "passthrough")

@@ -442,6 +442,36 @@ class BlobServiceImpl:
 
         return await self._run_sync(_sync)
 
+    async def copy_blobs_for_fork(
+        self,
+        source_session_id: UUID,
+        target_session_id: UUID,
+    ) -> list[BlobRecord]:
+        """Copy all ready blobs from source session to target session.
+
+        Creates new blob records with new IDs and new storage paths.
+        Copies backing files to the new session's blob directory.
+        Respects the per-session quota — raises BlobQuotaExceededError
+        if the target session can't accommodate the copied blobs.
+        """
+        source_blobs = await self.list_blobs(source_session_id, limit=1000)
+        ready_blobs = [b for b in source_blobs if b.status == "ready"]
+
+        copied: list[BlobRecord] = []
+        for blob in ready_blobs:
+            content = await self.read_blob_content(blob.id)
+            new_blob = await self.create_blob(
+                session_id=target_session_id,
+                filename=blob.filename,
+                content=content,
+                mime_type=blob.mime_type,
+                created_by=blob.created_by,
+                source_description=f"copied from session fork (original: {blob.id})",
+            )
+            copied.append(new_blob)
+
+        return copied
+
     def _finalize_blob_sync(
         self,
         blob_id: UUID,

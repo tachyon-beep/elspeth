@@ -62,6 +62,8 @@ class SessionServiceImpl:
         user_id: str,
         title: str,
         auth_provider_type: str,
+        forked_from_session_id: UUID | None = None,
+        forked_from_message_id: UUID | None = None,
     ) -> SessionRecord:
         """Create a new session and return its record."""
         session_id = uuid.uuid4()
@@ -77,6 +79,8 @@ class SessionServiceImpl:
                         title=title,
                         created_at=now,
                         updated_at=now,
+                        forked_from_session_id=str(forked_from_session_id) if forked_from_session_id else None,
+                        forked_from_message_id=str(forked_from_message_id) if forked_from_message_id else None,
                     )
                 )
 
@@ -89,6 +93,8 @@ class SessionServiceImpl:
             title=title,
             created_at=now,
             updated_at=now,
+            forked_from_session_id=forked_from_session_id,
+            forked_from_message_id=forked_from_message_id,
         )
 
     async def get_session(self, session_id: UUID) -> SessionRecord:
@@ -110,6 +116,8 @@ class SessionServiceImpl:
             title=row.title,
             created_at=row.created_at,
             updated_at=row.updated_at,
+            forked_from_session_id=UUID(row.forked_from_session_id) if row.forked_from_session_id else None,
+            forked_from_message_id=UUID(row.forked_from_message_id) if row.forked_from_message_id else None,
         )
 
     async def list_sessions(
@@ -144,6 +152,8 @@ class SessionServiceImpl:
                 title=row.title,
                 created_at=row.created_at,
                 updated_at=row.updated_at,
+                forked_from_session_id=UUID(row.forked_from_session_id) if row.forked_from_session_id else None,
+                forked_from_message_id=UUID(row.forked_from_message_id) if row.forked_from_message_id else None,
             )
             for row in rows
         ]
@@ -172,6 +182,7 @@ class SessionServiceImpl:
         role: str,
         content: str,
         tool_calls: Mapping[str, Any] | None = None,
+        composition_state_id: UUID | None = None,
     ) -> ChatMessageRecord:
         """Add a chat message and update the session's updated_at."""
         msg_id = uuid.uuid4()
@@ -188,6 +199,7 @@ class SessionServiceImpl:
                         content=content,
                         tool_calls=tool_calls,
                         created_at=now,
+                        composition_state_id=str(composition_state_id) if composition_state_id else None,
                     )
                 )
                 conn.execute(update(sessions_table).where(sessions_table.c.id == sid).values(updated_at=now))
@@ -201,6 +213,7 @@ class SessionServiceImpl:
             content=content,
             tool_calls=tool_calls,
             created_at=now,
+            composition_state_id=composition_state_id,
         )
 
     async def get_messages(
@@ -231,6 +244,7 @@ class SessionServiceImpl:
                 content=row.content,
                 tool_calls=row.tool_calls,
                 created_at=row.created_at,
+                composition_state_id=UUID(row.composition_state_id) if row.composition_state_id else None,
             )
             for row in rows
         ]
@@ -776,6 +790,111 @@ class SessionServiceImpl:
                 return result.rowcount
 
         return cast(int, await self._run_sync(_sync))
+
+    async def fork_session(
+        self,
+        source_session_id: UUID,
+        fork_message_id: UUID,
+        new_message_content: str,
+        user_id: str,
+        auth_provider_type: str,
+    ) -> tuple[SessionRecord, list[ChatMessageRecord], CompositionStateRecord | None]:
+        """Fork a session from a specific user message.
+
+        Creates a new session containing:
+        1. All messages BEFORE the fork message
+        2. A synthetic system message noting the fork
+        3. The new edited user message
+        4. Composition state copied from the fork message's pre-send state
+
+        Returns (new_session, new_messages, copied_state_or_none).
+        """
+        # Load source session and verify ownership
+        source_session = await self.get_session(source_session_id)
+        if source_session.user_id != user_id:
+            raise ValueError(f"Session {source_session_id} not owned by {user_id}")
+
+        # Load all messages from source session
+        source_messages = await self.get_messages(source_session_id, limit=10000)
+
+        # Find the fork message — must be a user message
+        fork_msg = None
+        fork_idx = -1
+        for i, msg in enumerate(source_messages):
+            if msg.id == fork_message_id:
+                fork_msg = msg
+                fork_idx = i
+                break
+
+        if fork_msg is None:
+            raise ValueError(f"Message {fork_message_id} not found in session {source_session_id}")
+        if fork_msg.role != "user":
+            raise ValueError(f"Can only fork from user messages, got role '{fork_msg.role}'")
+
+        # Messages to copy: everything BEFORE the fork message
+        messages_to_copy = source_messages[:fork_idx]
+
+        # Get the pre-send composition state from the fork message
+        pre_send_state_id = fork_msg.composition_state_id
+
+        # Create the forked session
+        title = f"{source_session.title} (fork)"
+        new_session = await self.create_session(
+            user_id=user_id,
+            title=title,
+            auth_provider_type=auth_provider_type,
+            forked_from_session_id=source_session_id,
+            forked_from_message_id=fork_message_id,
+        )
+
+        # Copy messages into the new session (preserving order)
+        new_messages: list[ChatMessageRecord] = []
+        for msg in messages_to_copy:
+            copied = await self.add_message(
+                new_session.id,
+                msg.role,
+                msg.content,
+                tool_calls=msg.tool_calls,
+                composition_state_id=msg.composition_state_id,
+            )
+            new_messages.append(copied)
+
+        # Add synthetic system message indicating the fork
+        system_msg = await self.add_message(
+            new_session.id,
+            "system",
+            "Conversation forked from an earlier point.",
+        )
+        new_messages.append(system_msg)
+
+        # Add the new edited user message with pre-send state provenance
+        new_user_msg = await self.add_message(
+            new_session.id,
+            "user",
+            new_message_content,
+            composition_state_id=pre_send_state_id,
+        )
+        new_messages.append(new_user_msg)
+
+        # Copy composition state into the forked session if it exists
+        copied_state: CompositionStateRecord | None = None
+        if pre_send_state_id is not None:
+            source_state = await self.get_state(pre_send_state_id)
+            state_data = CompositionStateData(
+                source=source_state.source,
+                nodes=source_state.nodes,
+                edges=source_state.edges,
+                outputs=source_state.outputs,
+                metadata_=source_state.metadata_,
+                is_valid=source_state.is_valid,
+                validation_errors=source_state.validation_errors,
+            )
+            copied_state = await self.save_composition_state(
+                new_session.id,
+                state_data,
+            )
+
+        return new_session, new_messages, copied_state
 
     def _row_to_run_record(self, row: Any) -> RunRecord:
         """Convert a SQLAlchemy row to a RunRecord."""

@@ -51,6 +51,12 @@ def _mock_catalog() -> MagicMock:
             ],
         ),
         PluginSummary(
+            name="text",
+            description="Text line source",
+            plugin_type="source",
+            config_fields=[],
+        ),
+        PluginSummary(
             name="json",
             description="JSON file source",
             plugin_type="source",
@@ -934,6 +940,29 @@ class TestBlobTools:
         assert result.success is True
         assert result.updated_state.source is not None
         assert result.updated_state.source.plugin == "csv"
+
+    def test_set_source_from_plain_text_blob_uses_text_source(self) -> None:
+        """text/plain blob should auto-resolve to the 'text' source plugin."""
+        from elspeth.web.sessions.models import blobs_table
+
+        state = _empty_state()
+        catalog = _mock_catalog()
+
+        with self.engine.begin() as conn:
+            conn.execute(blobs_table.update().where(blobs_table.c.id == self.blob_id).values(mime_type="text/plain"))
+
+        result = execute_tool(
+            "set_source_from_blob",
+            {"blob_id": self.blob_id, "on_success": "out"},
+            state,
+            catalog,
+            session_engine=self.engine,
+            session_id=self.session_id,
+        )
+
+        assert result.success is True
+        assert result.updated_state.source is not None
+        assert result.updated_state.source.plugin == "text"
 
 
 # ---------------------------------------------------------------------------

@@ -18,12 +18,14 @@ from litellm.exceptions import AuthenticationError as LiteLLMAuthError
 from elspeth.contracts.freeze import deep_thaw
 from elspeth.web.auth.middleware import get_current_user
 from elspeth.web.auth.models import UserIdentity
+from elspeth.web.blobs.protocol import BlobQuotaExceededError, BlobServiceProtocol
 from elspeth.web.composer.protocol import ComposerConvergenceError, ComposerService
 from elspeth.web.composer.state import CompositionState, PipelineMetadata
 from elspeth.web.composer.yaml_generator import generate_yaml
 from elspeth.web.middleware.rate_limit import ComposerRateLimiter, get_rate_limiter
 from elspeth.web.sessions.converters import state_from_record as _state_from_record
 from elspeth.web.sessions.protocol import (
+    ChatMessageRecord,
     CompositionStateData,
     CompositionStateRecord,
     SessionRecord,
@@ -33,6 +35,8 @@ from elspeth.web.sessions.schemas import (
     ChatMessageResponse,
     CompositionStateResponse,
     CreateSessionRequest,
+    ForkSessionRequest,
+    ForkSessionResponse,
     MessageWithStateResponse,
     RevertStateRequest,
     SendMessageRequest,
@@ -51,6 +55,21 @@ def _session_response(session: SessionRecord) -> SessionResponse:
         title=session.title,
         created_at=session.created_at,
         updated_at=session.updated_at,
+        forked_from_session_id=str(session.forked_from_session_id) if session.forked_from_session_id else None,
+        forked_from_message_id=str(session.forked_from_message_id) if session.forked_from_message_id else None,
+    )
+
+
+def _message_response(msg: ChatMessageRecord) -> ChatMessageResponse:
+    """Convert a ChatMessageRecord to a ChatMessageResponse."""
+    return ChatMessageResponse(
+        id=str(msg.id),
+        session_id=str(msg.session_id),
+        role=msg.role,
+        content=msg.content,
+        tool_calls=msg.tool_calls,
+        created_at=msg.created_at,
+        composition_state_id=str(msg.composition_state_id) if msg.composition_state_id else None,
     )
 
 
@@ -171,12 +190,12 @@ def create_session_router() -> APIRouter:
         """Send a user message, run the LLM composer, persist results.
 
         1. Rate limit check (per-user).
-        2. Persist the user message.
-        3. Load or create the current CompositionState.
+        2. Load or create the current CompositionState (pre-send provenance).
+        3. Persist the user message with pre-send state_id.
         4. Pre-fetch chat history for the composer.
         5. Run the LLM composition loop.
-        6. Persist the assistant response message.
-        7. If state changed, save the new composition state version.
+        6. Save state if version changed (post-compose provenance).
+        7. Persist the assistant response message with post-compose state_id.
         8. Return the assistant message and (optionally) the new state.
         """
         # 0. Rate limit check — before any work
@@ -185,10 +204,8 @@ def create_session_router() -> APIRouter:
         session = await _verify_session_ownership(session_id, user, request)
         service: SessionServiceProtocol = request.app.state.session_service
 
-        # 1. Persist user message
-        await service.add_message(session.id, "user", body.content)
-
-        # 2. Load or create CompositionState
+        # 1. Load or create CompositionState — needed before user message
+        #    for pre-send provenance (AD-7: user msg records what user saw).
         state_record = await service.get_current_state(session.id)
         if state_record is None:
             state = CompositionState(
@@ -199,8 +216,32 @@ def create_session_router() -> APIRouter:
                 metadata=PipelineMetadata(),
                 version=1,
             )
+            pre_send_state_id: UUID | None = None
         else:
             state = _state_from_record(state_record)
+            # If client provided a state_id, verify it belongs to this session.
+            # Use client-asserted state for provenance (AD-2) — it reflects
+            # what the user was looking at, which may differ from current if
+            # another tab mutated state.
+            if body.state_id is not None:
+                client_state_id = UUID(body.state_id)
+                client_state = await service.get_state(client_state_id)
+                if client_state.session_id != session.id:
+                    raise HTTPException(
+                        status_code=404,
+                        detail="State not found for this session",
+                    )
+                pre_send_state_id = client_state_id
+            else:
+                pre_send_state_id = state_record.id
+
+        # 2. Persist user message with pre-send provenance
+        await service.add_message(
+            session.id,
+            "user",
+            body.content,
+            composition_state_id=pre_send_state_id,
+        )
 
         # 3. Pre-fetch chat history as plain dicts (seam contract B)
         records = await service.get_messages(session.id)
@@ -263,15 +304,9 @@ def create_session_router() -> APIRouter:
                 detail={"error_type": "llm_unavailable", "detail": str(exc)},
             ) from exc
 
-        # 5. Persist assistant message
-        assistant_msg = await service.add_message(
-            session.id,
-            "assistant",
-            result.message,
-        )
-
-        # 6. Save state if version changed
+        # 5. Save state if version changed — post-compose provenance
         state_response: CompositionStateResponse | None = None
+        post_compose_state_id: UUID | None = pre_send_state_id
         if result.state.version != state.version:
             state_d = result.state.to_dict()
             validation = result.state.validate()
@@ -289,17 +324,19 @@ def create_session_router() -> APIRouter:
                 state_data,
             )
             state_response = _state_response(new_state_record)
+            post_compose_state_id = new_state_record.id
+
+        # 6. Persist assistant message with post-compose provenance
+        assistant_msg = await service.add_message(
+            session.id,
+            "assistant",
+            result.message,
+            composition_state_id=post_compose_state_id,
+        )
 
         # 7. Return response
         return MessageWithStateResponse(
-            message=ChatMessageResponse(
-                id=str(assistant_msg.id),
-                session_id=str(assistant_msg.session_id),
-                role=assistant_msg.role,
-                content=assistant_msg.content,
-                tool_calls=assistant_msg.tool_calls,
-                created_at=assistant_msg.created_at,
-            ),
+            message=_message_response(assistant_msg),
             state=state_response,
         )
 
@@ -318,17 +355,7 @@ def create_session_router() -> APIRouter:
         session = await _verify_session_ownership(session_id, user, request)
         service = request.app.state.session_service
         messages = await service.get_messages(session.id, limit=limit, offset=offset)
-        return [
-            ChatMessageResponse(
-                id=str(m.id),
-                session_id=str(m.session_id),
-                role=m.role,
-                content=m.content,
-                tool_calls=m.tool_calls,
-                created_at=m.created_at,
-            )
-            for m in messages
-        ]
+        return [_message_response(m) for m in messages]
 
     @router.get("/{session_id}/state")
     async def get_current_state(
@@ -419,6 +446,64 @@ def create_session_router() -> APIRouter:
         state = _state_from_record(state_record)
         yaml_str = generate_yaml(state)
         return {"yaml": yaml_str}
+
+    @router.post(
+        "/{session_id}/fork",
+        status_code=201,
+        response_model=ForkSessionResponse,
+    )
+    async def fork_from_message(
+        session_id: UUID,
+        body: ForkSessionRequest,
+        request: Request,
+        user: UserIdentity = Depends(get_current_user),  # noqa: B008
+    ) -> ForkSessionResponse:
+        """Fork a session from a specific user message.
+
+        Creates a new session inheriting history and composition state up to
+        the fork point, with the edited message replacing the original.
+        The original session is never mutated.
+        """
+        await _verify_session_ownership(session_id, user, request)
+        service: SessionServiceProtocol = request.app.state.session_service
+        settings = request.app.state.settings
+
+        try:
+            fork_message_id = UUID(body.from_message_id)
+        except ValueError:
+            raise HTTPException(
+                status_code=400,
+                detail="Invalid message ID format",
+            ) from None
+
+        try:
+            new_session, new_messages, copied_state = await service.fork_session(
+                source_session_id=session_id,
+                fork_message_id=fork_message_id,
+                new_message_content=body.new_message_content,
+                user_id=user.user_id,
+                auth_provider_type=settings.auth_provider,
+            )
+        except ValueError as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+        # Copy blobs from source session into the forked session
+        blob_service: BlobServiceProtocol = request.app.state.blob_service
+        try:
+            await blob_service.copy_blobs_for_fork(session_id, new_session.id)
+        except BlobQuotaExceededError:
+            # Fork partially created — clean up by archiving the new session
+            await service.archive_session(new_session.id)
+            raise HTTPException(
+                status_code=413,
+                detail="Blob quota exceeded during fork — unable to copy files",
+            ) from None
+
+        return ForkSessionResponse(
+            session=_session_response(new_session),
+            messages=[_message_response(m) for m in new_messages],
+            composition_state=_state_response(copied_state) if copied_state else None,
+        )
 
     @router.post("/{session_id}/upload", response_model=UploadResponse)
     async def upload_file(

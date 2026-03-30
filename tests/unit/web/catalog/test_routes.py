@@ -59,6 +59,11 @@ class TestListSources:
         names = [e["name"] for e in resp.json()]
         assert "csv" in names
 
+    def test_text_source_present(self, client: TestClient) -> None:
+        resp = client.get("/api/catalog/sources")
+        names = [e["name"] for e in resp.json()]
+        assert "text" in names
+
 
 class TestListTransforms:
     """GET /api/catalog/transforms"""
@@ -119,6 +124,13 @@ class TestGetSchema:
     def test_csv_sink_schema_200(self, client: TestClient) -> None:
         resp = client.get("/api/catalog/sinks/csv/schema")
         assert resp.status_code == 200
+
+    def test_text_source_schema_200(self, client: TestClient) -> None:
+        resp = client.get("/api/catalog/sources/text/schema")
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["name"] == "text"
+        assert data["plugin_type"] == "source"
 
     def test_null_source_returns_empty_schema(self, client: TestClient) -> None:
         resp = client.get("/api/catalog/sources/null/schema")

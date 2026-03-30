@@ -127,9 +127,27 @@ export function SessionSidebar() {
                         textOverflow: "ellipsis",
                         whiteSpace: "nowrap",
                         fontWeight: isActive ? 600 : 400,
+                        display: "flex",
+                        alignItems: "center",
+                        gap: 4,
                       }}
                     >
-                      {session.title}
+                      {session.forked_from_session_id && (
+                        <span
+                          title="Forked session"
+                          aria-label="Forked session"
+                          style={{
+                            fontSize: 10,
+                            color: "var(--color-text-muted)",
+                            flexShrink: 0,
+                          }}
+                        >
+                          &#x2442;
+                        </span>
+                      )}
+                      <span style={{ overflow: "hidden", textOverflow: "ellipsis" }}>
+                        {session.title}
+                      </span>
                     </div>
                     <div
                       style={{

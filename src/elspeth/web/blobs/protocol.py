@@ -192,6 +192,18 @@ class BlobServiceProtocol(Protocol):
         """Get all run links for a blob."""
         ...
 
+    async def copy_blobs_for_fork(
+        self,
+        source_session_id: UUID,
+        target_session_id: UUID,
+    ) -> list[BlobRecord]:
+        """Copy all ready blobs from source to target session.
+
+        Creates new blob records with new IDs and new storage paths.
+        Copies backing files. Respects the per-session quota.
+        """
+        ...
+
     async def finalize_run_output_blobs(
         self,
         run_id: UUID,

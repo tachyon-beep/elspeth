@@ -18,6 +18,7 @@ export function ChatPanel() {
   const messages = useSessionStore((s) => s.messages);
   const activeSessionId = useSessionStore((s) => s.activeSessionId);
   const clearError = useSessionStore((s) => s.clearError);
+  const forkFromMessage = useSessionStore((s) => s.forkFromMessage);
   const { sendMessage, retryMessage, isComposing, error } = useComposer();
 
   const messagesEndRef = useRef<HTMLDivElement>(null);
@@ -65,6 +66,13 @@ export function ChatPanel() {
       messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
     },
     [sendMessage],
+  );
+
+  const handleFork = useCallback(
+    (messageId: string, newContent: string) => {
+      forkFromMessage(messageId, newContent);
+    },
+    [forkFromMessage],
   );
 
   const handleUseAsInput = useCallback(
@@ -182,6 +190,7 @@ export function ChatPanel() {
               message={msg}
               isComposing={isComposing}
               onRetry={msg.role === "user" ? retryMessage : undefined}
+              onFork={msg.role === "user" ? handleFork : undefined}
             />
           ))
         )}

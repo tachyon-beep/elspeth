@@ -281,25 +281,25 @@ allow_hits:
   expires: null
 
 # Session routes — @router.get() false positives (FastAPI route decorators)
-- key: web/sessions/routes.py:R1:create_session_router:list_sessions:fp=decbc54c94c75e3c
+- key: web/sessions/routes.py:R1:create_session_router:list_sessions:fp=ba37411100a107f1
   owner: web-sessions
   reason: "False positive — @router.get() is FastAPI HTTP route decorator, not dict.get()"
   safety: No dict access involved
   expires: null
 
-- key: web/sessions/routes.py:R1:create_session_router:get_session:fp=9cf17bef7e30db48
+- key: web/sessions/routes.py:R1:create_session_router:get_session:fp=43361cc3e4c7a1e9
   owner: web-sessions
   reason: "False positive — @router.get() is FastAPI HTTP route decorator, not dict.get()"
   safety: No dict access involved
   expires: null
 
-- key: web/sessions/routes.py:R1:create_session_router:get_messages:fp=7ceeee2a5e642481
+- key: web/sessions/routes.py:R1:create_session_router:get_messages:fp=12f6d578ad877231
   owner: web-sessions
   reason: "False positive — @router.get() is FastAPI HTTP route decorator, not dict.get()"
   safety: No dict access involved
   expires: null
 
-- key: web/sessions/routes.py:R1:create_session_router:get_current_state:fp=fb7810da03bd8b01
+- key: web/sessions/routes.py:R1:create_session_router:get_current_state:fp=18e735f65888fb1e
   owner: web-sessions
   reason: "False positive — @router.get() is FastAPI HTTP route decorator, not dict.get()"
   safety: No dict access involved
@@ -423,26 +423,26 @@ allow_hits:
   safety: "Missing key simply means there are no remaining subscribers to clean up"
   expires: null
 
-- key: web/sessions/routes.py:R1:create_session_router:get_state_versions:fp=6e1f4f1fc01319f9
+- key: web/sessions/routes.py:R1:create_session_router:get_state_versions:fp=a6afd2cb2f599d92
   owner: web-sessions
   reason: "False positive — @router.get() is FastAPI HTTP route decorator, not dict.get()"
   safety: No dict access involved
   expires: null
 
-- key: web/sessions/routes.py:R1:create_session_router:get_state_yaml:fp=a709e6420dc9571e
+- key: web/sessions/routes.py:R1:create_session_router:get_state_yaml:fp=9b02cdcf65559323
   owner: web-sessions
   reason: "False positive — @router.get() is FastAPI HTTP route decorator, not dict.get()"
   safety: No dict access involved
   expires: null
 
 # Session routes — broad except in convergence partial state guards (F2 hardening)
-- key: web/sessions/routes.py:R4:create_session_router:send_message:fp=f6fed8b0740f3d3d
+- key: web/sessions/routes.py:R4:create_session_router:send_message:fp=55109e5b7d658e7d
   owner: web-composer
   reason: "Convergence validation guard — if validate() raises, degrade to is_valid=False rather than lose partial state"
   safety: "Caught exception produces ValidationSummary(is_valid=False); state still persisted"
   expires: null
 
-- key: web/sessions/routes.py:R4:create_session_router:send_message:fp=f8cc5e458c655b2c
+- key: web/sessions/routes.py:R4:create_session_router:send_message:fp=9982c5a6a9518270
   owner: web-composer
   reason: "Convergence persistence guard — if save_composition_state() fails, log and return 422 without partial_state"
   safety: "Caught exception logged via structlog; 422 response omits partial_state; no crash to 500"

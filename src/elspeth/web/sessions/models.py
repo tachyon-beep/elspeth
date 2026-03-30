@@ -39,6 +39,13 @@ sessions_table = Table(
     Column("title", String, nullable=False),
     Column("created_at", DateTime, nullable=False),
     Column("updated_at", DateTime, nullable=False),
+    Column(
+        "forked_from_session_id",
+        String,
+        ForeignKey("sessions.id"),
+        nullable=True,
+    ),
+    Column("forked_from_message_id", String, nullable=True),
 )
 
 chat_messages_table = Table(
@@ -56,6 +63,12 @@ chat_messages_table = Table(
     Column("content", Text, nullable=False),
     Column("tool_calls", JSON, nullable=True),
     Column("created_at", DateTime, nullable=False),
+    Column(
+        "composition_state_id",
+        String,
+        ForeignKey("composition_states.id"),
+        nullable=True,
+    ),
     CheckConstraint(
         "role IN ('user', 'assistant', 'system', 'tool')",
         name="ck_chat_messages_role",

@@ -69,6 +69,7 @@ allowed_dict_patterns:
 
   # Source plugins - row validation
   - "src/elspeth/plugins/sources/json_source.py:JSONSource._validate_and_yield:row"
+  - "src/elspeth/plugins/sources/text_source.py:TextSource._validate_and_yield:row"
 
   # Pooling executor - row processing
   - "src/elspeth/plugins/infrastructure/pooling/executor.py:PooledExecutor.get_stats:return"
@@ -110,6 +111,7 @@ allowed_dict_patterns:
   - "src/elspeth/plugins/sources/json_source.py:JSONSource.__init__:config"
   - "src/elspeth/plugins/sources/csv_source.py:CSVSource.__init__:config"
   - "src/elspeth/plugins/sources/null_source.py:NullSource.__init__:config"
+  - "src/elspeth/plugins/sources/text_source.py:TextSource.__init__:config"
 
   # Plugin manager - factory methods for creating plugins from config
   - "src/elspeth/plugins/infrastructure/manager.py:PluginManager.create_source:config"

@@ -43,6 +43,8 @@ class SessionRecord:
     title: str
     created_at: datetime
     updated_at: datetime
+    forked_from_session_id: UUID | None = None
+    forked_from_message_id: UUID | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -58,6 +60,7 @@ class ChatMessageRecord:
     content: str
     tool_calls: Mapping[str, Any] | None
     created_at: datetime
+    composition_state_id: UUID | None = None
 
     def __post_init__(self) -> None:
         if self.tool_calls is not None:
@@ -177,6 +180,8 @@ class SessionServiceProtocol(Protocol):
         user_id: str,
         title: str,
         auth_provider_type: str,
+        forked_from_session_id: UUID | None = None,
+        forked_from_message_id: UUID | None = None,
     ) -> SessionRecord: ...
 
     async def get_session(self, session_id: UUID) -> SessionRecord: ...
@@ -197,6 +202,7 @@ class SessionServiceProtocol(Protocol):
         role: str,
         content: str,
         tool_calls: Mapping[str, Any] | None = None,
+        composition_state_id: UUID | None = None,
     ) -> ChatMessageRecord: ...
 
     async def get_messages(
@@ -282,6 +288,21 @@ class SessionServiceProtocol(Protocol):
         Preserves the most recent `keep_latest` versions and any versions
         referenced by a run (via runs.state_id). Returns the count of
         deleted versions.
+        """
+        ...
+
+    async def fork_session(
+        self,
+        source_session_id: UUID,
+        fork_message_id: UUID,
+        new_message_content: str,
+        user_id: str,
+        auth_provider_type: str,
+    ) -> tuple[SessionRecord, list[ChatMessageRecord], CompositionStateRecord | None]:
+        """Fork a session from a specific user message.
+
+        Creates a new session with inherited history and state up to the
+        fork point. The original session is never mutated.
         """
         ...
 
