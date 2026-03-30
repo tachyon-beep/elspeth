@@ -224,36 +224,6 @@ allow_hits:
   reason: Run-ownership gate on WebSocket setup treats backend lookup failures as not-found to avoid leaking run existence
   safety: Failure closes the socket with 4004 and does not expose run metadata
   expires: null
-- key: web/execution/routes.py:R1:create_execution_router:websocket_run_progress:fp=edcad716854e9464
-  owner: web-execution
-  reason: False positive — asyncio.Queue.get() is an async queue method, not dict.get()
-  safety: Queue timeout is handled explicitly by heartbeat logic
-  expires: null
-- key: web/execution/routes.py:R6:create_execution_router:websocket_run_progress:fp=ca6a807e18a9c081
-  owner: web-execution
-  reason: Heartbeat timeout is an expected idle path, not an error swallow
-  safety: The handler emits an explicit heartbeat frame and continues waiting, so clients get a visible keepalive signal
-  expires: null
-- key: web/execution/routes.py:R4:create_execution_router:websocket_run_progress:fp=c4039cf10d17cb30
-  owner: web-execution
-  reason: WebSocket transport writes can fail with varied connection-state exceptions across ASGI servers
-  safety: Failure breaks the loop and cleanup runs in finally; no run data is lost or fabricated
-  expires: null
-- key: web/execution/routes.py:R6:create_execution_router:websocket_run_progress:fp=f70460a861072998
-  owner: web-execution
-  reason: WebSocketDisconnect is the expected disconnect control-flow path
-  safety: Disconnect falls through to finally for unsubscribe cleanup; no error is hidden from callers
-  expires: null
-- key: web/execution/routes.py:R4:create_execution_router:websocket_run_progress:fp=8051d9a2c963899b
-  owner: web-execution
-  reason: Top-level WebSocket handler guard converts unexpected transport/runtime failures into a clean 1011 close
-  safety: The error is logged and the client receives an explicit internal-error close code
-  expires: null
-- key: web/execution/routes.py:R4:create_execution_router:websocket_run_progress:fp=3e188822ed707289
-  owner: web-execution
-  reason: Best-effort websocket.close() can raise transport-specific exceptions after a primary handler failure
-  safety: Secondary close failure is logged only after the original failure path is already established
-  expires: null
 - key: web/execution/progress.py:R8:ProgressBroadcaster:subscribe:fp=4e52b3400d28695a
   owner: web-execution
   reason: Subscriber map creates the per-run queue set lazily on first subscription
@@ -578,6 +548,41 @@ allow_hits:
   owner: web-blobs
   reason: Quota exceeded during finalization marks blob as error instead of crashing run
   safety: Over-quota file deleted; blob marked error; run still finalized
+  expires: null
+- key: web/execution/routes.py:R4:create_execution_router:websocket_run_progress:fp=3562534a531b81f8
+  owner: web-execution
+  reason: Seed check — run status lookup may fail for transient reasons; proceed to live stream
+  safety: Falls through to subscriber queue
+  expires: null
+- key: web/execution/routes.py:R1:create_execution_router:websocket_run_progress:fp=d97651977849dfad
+  owner: web-execution
+  reason: False positive — asyncio.Queue.get() is an async queue method, not dict.get()
+  safety: No dict access involved
+  expires: null
+- key: web/execution/routes.py:R6:create_execution_router:websocket_run_progress:fp=d47a3e2197f8b916
+  owner: web-execution
+  reason: Heartbeat timeout is an expected idle path, not an error swallow
+  safety: Sends heartbeat to keep connection alive
+  expires: null
+- key: web/execution/routes.py:R4:create_execution_router:websocket_run_progress:fp=95d14bc78c8bd116
+  owner: web-execution
+  reason: WebSocket transport writes can fail with varied connection-state exceptions across ASGI servers
+  safety: Breaks out of loop; falls through to unsubscribe
+  expires: null
+- key: web/execution/routes.py:R6:create_execution_router:websocket_run_progress:fp=dc5e597613a41199
+  owner: web-execution
+  reason: WebSocketDisconnect is the expected disconnect control-flow path
+  safety: Falls through to unsubscribe cleanup
+  expires: null
+- key: web/execution/routes.py:R4:create_execution_router:websocket_run_progress:fp=14e3507701b45db1
+  owner: web-execution
+  reason: Top-level WebSocket handler guard converts unexpected failures into clean 1011 close
+  safety: Logged; clean close sent to client
+  expires: null
+- key: web/execution/routes.py:R4:create_execution_router:websocket_run_progress:fp=a4fa103cbe028fdb
+  owner: web-execution
+  reason: Best-effort websocket.close() can raise transport-specific exceptions after primary failure
+  safety: Logged; already in error path
   expires: null
 per_file_rules:
 - pattern: web/composer/tools.py
