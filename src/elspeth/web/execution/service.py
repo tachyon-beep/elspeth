@@ -17,6 +17,7 @@ from __future__ import annotations
 import asyncio
 import tempfile
 import threading
+import time
 from collections.abc import Coroutine
 from concurrent.futures import Future, ThreadPoolExecutor
 from datetime import UTC, datetime
@@ -27,12 +28,14 @@ from uuid import UUID
 import structlog
 
 from elspeth.cli_helpers import instantiate_plugins_from_config
+from elspeth.contracts.audit import SecretResolutionInput
 from elspeth.contracts.cli import ProgressEvent
 from elspeth.core.config import load_settings
 from elspeth.core.dag.graph import ExecutionGraph
 from elspeth.core.events import EventBus
 from elspeth.core.landscape.database import LandscapeDB
 from elspeth.core.payload_store import FilesystemPayloadStore
+from elspeth.core.secrets import SecretResolutionError
 from elspeth.engine.orchestrator.core import Orchestrator
 from elspeth.engine.orchestrator.types import PipelineConfig
 from elspeth.web.execution.progress import ProgressBroadcaster
@@ -356,6 +359,7 @@ class ExecutionServiceImpl:
             # Resolved values exist only in this thread's local memory — the
             # original pipeline_yaml (persisted in the Run record) is untouched.
             resolved_yaml = pipeline_yaml
+            secret_resolution_inputs: list[SecretResolutionInput] = []
             if self._secret_service is not None and user_id is not None:
                 import yaml as _yaml
 
@@ -363,8 +367,21 @@ class ExecutionServiceImpl:
 
                 config_dict = _yaml.safe_load(pipeline_yaml)
                 if isinstance(config_dict, dict):
-                    resolved_dict, _resolutions = resolve_secret_refs(config_dict, self._secret_service, user_id)
+                    resolved_dict, resolutions = resolve_secret_refs(config_dict, self._secret_service, user_id)
                     resolved_yaml = _yaml.dump(resolved_dict, default_flow_style=False)
+
+                    for rs in resolutions:
+                        secret_resolution_inputs.append(
+                            SecretResolutionInput(
+                                env_var_name=rs.name,
+                                source=rs.scope,
+                                vault_url=None,
+                                secret_name=None,
+                                timestamp=time.time(),
+                                resolution_latency_ms=0.0,
+                                fingerprint=rs.fingerprint,
+                            )
+                        )
 
             # Write YAML to temp file — load_settings takes a path, NOT content
             tmp_file = tempfile.NamedTemporaryFile(mode="w", suffix=".yaml", delete=False)  # noqa: SIM115
@@ -419,6 +436,7 @@ class ExecutionServiceImpl:
                 graph=graph,
                 settings=settings,
                 payload_store=payload_store,
+                secret_resolutions=secret_resolution_inputs or None,
                 shutdown_event=shutdown_event,  # B2: NEVER omit this
             )
 
@@ -485,6 +503,15 @@ class ExecutionServiceImpl:
             # Broadcast "failed" (terminal) not "error" (non-terminal).
             # "error" is for per-row exceptions during processing;
             # "failed" means the pipeline itself crashed.
+
+            # Sanitize error messages — SecretResolutionError may contain
+            # secret names that should not leak to WebSocket clients or
+            # be persisted in run records.
+            if isinstance(exc, SecretResolutionError):
+                client_msg = "One or more secret references could not be resolved. Check the Secrets panel."
+            else:
+                client_msg = str(exc)
+
             self._broadcaster.broadcast(
                 run_id,
                 RunEvent(
@@ -492,7 +519,7 @@ class ExecutionServiceImpl:
                     timestamp=datetime.now(tz=UTC),
                     event_type="failed",
                     data={
-                        "detail": str(exc),
+                        "detail": client_msg,
                         "node_id": None,
                         "row_id": None,
                     },
@@ -502,12 +529,12 @@ class ExecutionServiceImpl:
             # loop is likely shutting down. Let orphan cleanup handle the status.
             if not isinstance(exc, (KeyboardInterrupt, SystemExit)):
                 try:
-                    self._call_async(self._session_service.update_run_status(run_uuid, status="failed", error=str(exc)))
+                    self._call_async(self._session_service.update_run_status(run_uuid, status="failed", error=client_msg))
                 except Exception as status_err:
                     slog.error(
                         "run_status_update_failed_in_except",
                         run_id=run_id,
-                        original_error=str(exc),
+                        original_error=client_msg,
                         status_update_error=str(status_err),
                     )
             else:
@@ -558,13 +585,23 @@ class ExecutionServiceImpl:
         Fires when the Future completes, regardless of how. Logs any
         exception that _run_pipeline() raised. Does NOT update the Run
         record — that's Layer 1's job. This is purely diagnostic.
+
+        Sanitizes SecretResolutionError to avoid leaking secret names
+        into logs.
         """
         exc = future.exception()
         if exc is not None:
-            slog.error(
-                "Pipeline thread raised exception (safety net)",
-                exc_info=exc,
-            )
+            if isinstance(exc, SecretResolutionError):
+                slog.error(
+                    "pipeline_secret_resolution_failed",
+                    missing_count=len(exc.missing),
+                )
+            else:
+                slog.error(
+                    "pipeline_thread_failed",
+                    exc_type=type(exc).__name__,
+                    exc_message=str(exc),
+                )
 
     def _to_run_event(self, run_id: str, progress: ProgressEvent) -> RunEvent:
         """Translate engine ProgressEvent to web RunEvent.

@@ -356,31 +356,37 @@ allow_hits:
 
 # Execution service — optional config keys and concurrent shutdown-event lifecycle
 
-- key: web/execution/service.py:R1:ExecutionServiceImpl:cancel:fp=efc0a289072bef70
+- key: web/execution/service.py:R1:ExecutionServiceImpl:cancel:fp=6f3326731b6efc5b
   owner: web-execution
   reason: "Cancellation checks whether a live shutdown event exists before falling back to pending/terminal-run handling"
   safety: "Missing event routes to an explicit database-backed status update path"
   expires: null
 
-- key: web/execution/service.py:R4:ExecutionServiceImpl:_run_pipeline:_safe_broadcast:fp=77a57758687e510b
+- key: web/execution/service.py:R4:ExecutionServiceImpl:_run_pipeline:_safe_broadcast:fp=3dec5c4cf8f9b280
   owner: web-execution
   reason: "Progress broadcasting is operational visibility and may fail with transport/runtime exceptions outside pipeline correctness"
   safety: "Broadcast failure is logged while run status and audit updates continue on the authoritative path"
   expires: null
 
-- key: web/execution/service.py:R5:ExecutionServiceImpl:_run_pipeline:fp=33fc2673c9f0be24
+- key: web/execution/service.py:R5:ExecutionServiceImpl:_run_pipeline:fp=378b41518f8fb4c9
+  owner: web-execution
+  reason: "Error classification for sanitized client messaging — SecretResolutionError triggers safe error message instead of leaking secret names"
+  safety: "isinstance used only for error-message selection; exception still propagates"
+  expires: null
+
+- key: web/execution/service.py:R5:ExecutionServiceImpl:_run_pipeline:fp=b163bed1df70dc90
   owner: web-execution
   reason: "BaseException split distinguishes process-termination control flow from ordinary failures"
   safety: "KeyboardInterrupt/SystemExit are re-raised and skip the best-effort failed-status write to preserve shutdown semantics"
   expires: null
 
-- key: web/execution/service.py:R4:ExecutionServiceImpl:_run_pipeline:fp=75a503441a2f61b8
+- key: web/execution/service.py:R4:ExecutionServiceImpl:_run_pipeline:fp=b5dbca9b5b132a37
   owner: web-execution
   reason: "Failure while marking a crashed run as failed is a secondary cleanup error on an already-failing path"
   safety: "Secondary failure is logged and the original exception continues to propagate"
   expires: null
 
-- key: web/execution/service.py:R9:ExecutionServiceImpl:_run_pipeline:fp=e25340ab9894eff7
+- key: web/execution/service.py:R9:ExecutionServiceImpl:_run_pipeline:fp=738021e4eed18a07
   owner: web-execution
   reason: "Final shutdown-event cleanup is intentionally idempotent because completion and cancellation can race"
   safety: "Removing a missing key is harmless and avoids masking the primary pipeline outcome"
@@ -501,28 +507,34 @@ allow_hits:
   expires: null
 
 # Execution service — blob finalization is best-effort on an already-terminal path
-- key: web/execution/service.py:R4:ExecutionServiceImpl:_finalize_output_blobs:fp=24528457d89d66b9
+- key: web/execution/service.py:R5:ExecutionServiceImpl:_on_pipeline_done:fp=422cba6afcb263ec
+  owner: web-execution
+  reason: "Error classification for sanitized client messaging — SecretResolutionError triggers safe error message in completion callback"
+  safety: "isinstance used only for error-message selection; no exception suppression"
+  expires: null
+
+- key: web/execution/service.py:R4:ExecutionServiceImpl:_finalize_output_blobs:fp=d5c2eb3b2452fc93
   owner: web-execution
   reason: "Blob finalization runs after the run has already reached terminal status. Failure must not mask the run outcome."
   safety: "Error is logged via structlog; the run status and audit trail are already committed. Blob stays pending for orphan cleanup."
   expires: null
 
 # Execution service — blob-ref is an optional source options key
-- key: web/execution/service.py:R1:ExecutionServiceImpl:execute:fp=d63e80b2ffd96382
+- key: web/execution/service.py:R1:ExecutionServiceImpl:execute:fp=137de28b6b1deb23
   owner: web-execution
-  reason: "Session composition state may legitimately omit optional source path/file keys"
+  reason: "Optional keys in user-authored config — composition state may legitimately omit optional source path/file keys"
   safety: "Only present keys are checked against the allowlist; missing keys skip the check"
   expires: null
 
-- key: web/execution/service.py:R1:ExecutionServiceImpl:execute:fp=08f557b13bcaf895
+- key: web/execution/service.py:R1:ExecutionServiceImpl:execute:fp=0d3c8face999da71
   owner: web-execution
   reason: "blob_ref is an optional key in source options set by set_source_from_blob tool"
   safety: "Missing blob_ref means source is not blob-backed; no linkage recorded"
   expires: null
 
-- key: web/execution/service.py:R9:ExecutionServiceImpl:execute:fp=74559ffa8bbfc394
+- key: web/execution/service.py:R9:ExecutionServiceImpl:execute:fp=77bb06caa7dc7c5d
   owner: web-execution
-  reason: "Shutdown-event cleanup is idempotent because submit failure can race with cancellation/lifecycle cleanup"
+  reason: "Idempotent cleanup — shutdown-event cleanup is idempotent because submit failure can race with cancellation/lifecycle cleanup"
   safety: "Missing key means there is no active event to clean; run creation aborts immediately"
   expires: null
 
@@ -534,16 +546,29 @@ allow_hits:
   expires: null
 
 # ServerSecretStore — os.environ.get() is Tier 3 (env vars are external input)
-- key: web/secrets/server_store.py:R1:ServerSecretStore:get_secret:fp=f952e9c1c17a704e
+- key: web/secrets/server_store.py:R1:ServerSecretStore:has_secret:fp=4c611b234b52a51a
+  owner: web-secrets
+  reason: "Tier 3 boundary — os.environ.get() checks env var presence for has_secret fast path"
+  safety: "Returns bool only; no secret value exposed; no default fabrication"
+  expires: null
+
+- key: web/secrets/server_store.py:R1:ServerSecretStore:get_secret:fp=baad87e6c2e61bb4
   owner: web-secrets
   reason: "Tier 3 boundary — os.environ.get() reads external env var; unset/empty raises SecretNotFoundError"
   safety: "Missing env var raises SecretNotFoundError; no default fabrication"
   expires: null
 
-- key: web/secrets/server_store.py:R1:ServerSecretStore:list_secrets:fp=723efd77972a1e21
+- key: web/secrets/server_store.py:R1:ServerSecretStore:list_secrets:fp=a12f8cf908d2c98d
   owner: web-secrets
   reason: "Tier 3 boundary — os.environ.get() checks env var presence for availability metadata"
   safety: "Only produces bool available flag; no secret value exposed"
+  expires: null
+
+# UserSecretStore — os.environ.get() for fingerprint key is Tier 3 (deployment env)
+- key: web/secrets/user_store.py:R1:_compute_fingerprint:fp=1c5082907e8fb795
+  owner: web-secrets
+  reason: "Tier 3 — fingerprint key from deployment environment"
+  safety: "Missing env var falls back to machine-local key derivation; no secret leakage"
   expires: null
 
 # WebSecretService — chained resolution catches SecretNotFoundError for fallback
@@ -567,9 +592,9 @@ allow_hits:
   expires: null
 
 # Execution service — isinstance check on config dict and getattr on node options
-- key: web/execution/service.py:R5:ExecutionServiceImpl:_run_pipeline:fp=bdb5ffe0a7580fb3
+- key: web/execution/service.py:R5:ExecutionServiceImpl:_run_pipeline:fp=3c25e0e58be32d6f
   owner: web-execution
-  reason: "Tier 3 boundary — config_dict from YAML deserialization may be non-dict (e.g. None or string)"
+  reason: "Tier 3 — config from YAML deserialization may be non-dict (e.g. None or string)"
   safety: "Non-dict triggers error path; no silent coercion"
   expires: null
 
@@ -590,12 +615,6 @@ allow_hits:
   owner: web-execution
   reason: "Tree-walk — isinstance() dispatches list/tuple branch in recursive config traversal"
   safety: "No contract masking; structural dispatch on deserialized YAML (Tier 3 data)"
-  expires: null
-
-- key: web/execution/validation.py:R2:validate_pipeline:fp=1b4a447f623a5367
-  owner: web-execution
-  reason: "Composition node may lack 'options' attribute depending on node type"
-  safety: "Default empty dict means no secret refs collected for that node; no data loss"
   expires: null
 
 per_file_rules:

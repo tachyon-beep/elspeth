@@ -232,3 +232,76 @@ class TestValidateSecret:
         resp = client.post("/api/secrets/CHECK/validate")
         body = resp.json()
         assert "value" not in body, "SECURITY: value must never appear in validate response"
+
+
+# ---------------------------------------------------------------------------
+# Cross-user isolation
+# ---------------------------------------------------------------------------
+
+
+class TestCrossUserIsolation:
+    """SECURITY: secrets are scoped per-user. User B must not see User A's secrets."""
+
+    def _make_two_user_clients(self) -> tuple[TestClient, TestClient]:
+        """Create two test clients authenticated as different users sharing the same DB."""
+        engine = create_engine(
+            "sqlite:///:memory:",
+            poolclass=StaticPool,
+            connect_args={"check_same_thread": False},
+        )
+        metadata.create_all(engine)
+
+        user_store = UserSecretStore(engine, _TEST_MASTER_KEY)
+        server_store = ServerSecretStore(())
+        secret_service = WebSecretService(user_store, server_store)
+
+        # App for User A
+        app_a = FastAPI()
+        identity_a = UserIdentity(user_id="alice", username="alice")
+        app_a.dependency_overrides[get_current_user] = lambda: identity_a  # noqa: E731
+        app_a.state.secret_service = secret_service
+        app_a.include_router(create_secrets_router())
+
+        # App for User B — same service, different identity
+        app_b = FastAPI()
+        identity_b = UserIdentity(user_id="bob", username="bob")
+        app_b.dependency_overrides[get_current_user] = lambda: identity_b  # noqa: E731
+        app_b.state.secret_service = secret_service
+        app_b.include_router(create_secrets_router())
+
+        return TestClient(app_a), TestClient(app_b)
+
+    def test_user_b_cannot_see_user_a_secrets(self) -> None:
+        """User B's list must not contain User A's secrets."""
+        client_a, client_b = self._make_two_user_clients()
+
+        client_a.post("/api/secrets", json={"name": "ALICE_SECRET", "value": "alice-val"})
+
+        resp_b = client_b.get("/api/secrets")
+        assert resp_b.status_code == 200
+        names_b = [item["name"] for item in resp_b.json()]
+        assert "ALICE_SECRET" not in names_b
+
+    def test_user_b_cannot_delete_user_a_secrets(self) -> None:
+        """User B cannot delete User A's secrets."""
+        client_a, client_b = self._make_two_user_clients()
+
+        client_a.post("/api/secrets", json={"name": "ALICE_KEY", "value": "val"})
+
+        resp = client_b.delete("/api/secrets/ALICE_KEY")
+        assert resp.status_code == 404
+
+        # Verify secret still exists for User A
+        resp_a = client_a.get("/api/secrets")
+        names_a = [item["name"] for item in resp_a.json()]
+        assert "ALICE_KEY" in names_a
+
+    def test_user_b_cannot_validate_user_a_secrets(self) -> None:
+        """User B's validate check should not find User A's user-scoped secrets."""
+        client_a, client_b = self._make_two_user_clients()
+
+        client_a.post("/api/secrets", json={"name": "ALICE_ONLY", "value": "val"})
+
+        resp = client_b.post("/api/secrets/ALICE_ONLY/validate")
+        assert resp.status_code == 200
+        assert resp.json()["available"] is False

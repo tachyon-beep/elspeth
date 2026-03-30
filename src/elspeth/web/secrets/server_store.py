@@ -10,6 +10,7 @@ import os
 
 from elspeth.contracts.secrets import SecretInventoryItem
 from elspeth.core.security.secret_loader import SecretNotFoundError, SecretRef
+from elspeth.web.secrets.user_store import _compute_fingerprint
 
 
 class ServerSecretStore:
@@ -21,6 +22,10 @@ class ServerSecretStore:
 
     def __init__(self, allowlist: tuple[str, ...]) -> None:
         self._allowlist = allowlist
+
+    def has_secret(self, name: str) -> bool:
+        """Check if an allowlisted env var secret exists without reading the value."""
+        return name in self._allowlist and bool(os.environ.get(name))
 
     def get_secret(self, name: str) -> tuple[str, SecretRef]:
         """Resolve an allowlisted env var.
@@ -34,7 +39,8 @@ class ServerSecretStore:
         value = os.environ.get(name)  # Tier 3: env vars are external input
         if not value:
             raise SecretNotFoundError(name)
-        return value, SecretRef(name=name, fingerprint="", source="env")
+        fp = _compute_fingerprint(name, value)
+        return value, SecretRef(name=name, fingerprint=fp, source="env")
 
     def list_secrets(self) -> list[SecretInventoryItem]:
         """Return metadata for every allowlisted name (never exposes values)."""

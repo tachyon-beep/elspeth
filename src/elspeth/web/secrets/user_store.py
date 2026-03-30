@@ -17,15 +17,38 @@ import uuid
 from datetime import UTC, datetime
 
 import sqlalchemy as sa
+import structlog
 from cryptography.fernet import Fernet
 from sqlalchemy.engine import Engine
 
 from elspeth.contracts.secrets import SecretInventoryItem
+from elspeth.contracts.security import secret_fingerprint
 from elspeth.core.security.secret_loader import SecretNotFoundError, SecretRef
 from elspeth.web.sessions.models import user_secrets_table
 
+slog = structlog.get_logger()
+
 _PBKDF2_ITERATIONS = 480_000
 _SALT_BYTES = 16
+
+
+def _compute_fingerprint(name: str, value: str) -> str:
+    """Compute HMAC fingerprint of a secret value.
+
+    Returns a 64-char hex digest if ELSPETH_FINGERPRINT_KEY is available,
+    or empty string with a warning if not. Missing fingerprint key is a
+    deployment config issue, not a runtime error — the web path should
+    not crash on missing fingerprint key.
+    """
+    fp_key = os.environ.get("ELSPETH_FINGERPRINT_KEY")
+    if not fp_key:
+        slog.warning(
+            "secret_fingerprint_key_missing",
+            secret_name=name,
+            detail="ELSPETH_FINGERPRINT_KEY not set; fingerprint will be empty",
+        )
+        return ""
+    return secret_fingerprint(value, key=fp_key.encode("utf-8"))
 
 
 def _derive_fernet_key(master_key: str, salt: bytes) -> bytes:
@@ -60,6 +83,13 @@ class UserSecretStore:
     # Public API
     # ------------------------------------------------------------------
 
+    def has_secret(self, name: str, *, user_id: str) -> bool:
+        """Check if a user secret exists without decrypting."""
+        t = user_secrets_table
+        with self._engine.connect() as conn:
+            row = conn.execute(sa.select(t.c.id).where(sa.and_(t.c.name == name, t.c.user_id == user_id))).first()
+            return row is not None
+
     def get_secret(self, name: str, *, user_id: str) -> tuple[str, SecretRef]:
         """Retrieve and decrypt a user secret.
 
@@ -84,7 +114,8 @@ class UserSecretStore:
 
         key = _derive_fernet_key(self._master_key, row.salt)
         plaintext = Fernet(key).decrypt(row.encrypted_value).decode("utf-8")
-        ref = SecretRef(name=name, fingerprint="", source="user")
+        fp = _compute_fingerprint(name, plaintext)
+        ref = SecretRef(name=name, fingerprint=fp, source="user")
         return plaintext, ref
 
     def set_secret(self, name: str, *, value: str, user_id: str) -> None:

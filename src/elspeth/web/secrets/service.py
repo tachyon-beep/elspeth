@@ -30,8 +30,12 @@ class WebSecretService:
         return sorted(merged.values(), key=lambda x: x.name)
 
     def has_ref(self, user_id: str, name: str) -> bool:
-        """Check whether *name* is resolvable in either scope."""
-        return self.resolve(user_id, name) is not None
+        """Check whether *name* is resolvable in either scope.
+
+        Uses existence checks (no decrypt) for efficiency — avoids
+        unnecessary Fernet decrypt + HMAC computation.
+        """
+        return self._user_store.has_secret(name, user_id=user_id) or self._server_store.has_secret(name)
 
     def resolve(self, user_id: str, name: str) -> ResolvedSecret | None:
         """Resolve a secret, trying user scope first then server."""

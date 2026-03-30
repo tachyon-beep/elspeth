@@ -11,13 +11,16 @@ Verifies:
 
 from __future__ import annotations
 
+import os
+
 import pytest
+from cryptography.fernet import Fernet, InvalidToken
 from sqlalchemy import create_engine
 from sqlalchemy.pool import StaticPool
 
 from elspeth.contracts.secrets import SecretInventoryItem
 from elspeth.core.security.secret_loader import SecretNotFoundError
-from elspeth.web.secrets.user_store import UserSecretStore
+from elspeth.web.secrets.user_store import UserSecretStore, _derive_fernet_key
 from elspeth.web.sessions.models import metadata
 
 TEST_MASTER_KEY = "test-master-key-for-encryption"
@@ -106,3 +109,69 @@ class TestUserSecretStore:
         """Getting a secret that doesn't exist must raise SecretNotFoundError."""
         with pytest.raises(SecretNotFoundError):
             store.get_secret("MISSING", user_id="user-1")
+
+    def test_has_secret_true(self, store: UserSecretStore) -> None:
+        """has_secret returns True for existing secrets without decrypting."""
+        store.set_secret("EXISTS", value="val", user_id="user-1")
+        assert store.has_secret("EXISTS", user_id="user-1") is True
+
+    def test_has_secret_false(self, store: UserSecretStore) -> None:
+        """has_secret returns False for non-existent secrets."""
+        assert store.has_secret("NOPE", user_id="user-1") is False
+
+    def test_has_secret_user_scoped(self, store: UserSecretStore) -> None:
+        """has_secret is user-scoped — user B cannot see user A's secret."""
+        store.set_secret("SCOPED", value="val", user_id="alice")
+        assert store.has_secret("SCOPED", user_id="alice") is True
+        assert store.has_secret("SCOPED", user_id="bob") is False
+
+    def test_fingerprint_populated_when_key_set(self, store: UserSecretStore, monkeypatch: pytest.MonkeyPatch) -> None:
+        """get_secret returns a non-empty fingerprint when ELSPETH_FINGERPRINT_KEY is set."""
+        monkeypatch.setenv("ELSPETH_FINGERPRINT_KEY", "test-fp-key")
+        store.set_secret("FP_TEST", value="my-secret", user_id="user-1")
+        _, ref = store.get_secret("FP_TEST", user_id="user-1")
+        assert len(ref.fingerprint) == 64
+        assert all(c in "0123456789abcdef" for c in ref.fingerprint)
+
+    def test_fingerprint_empty_when_key_missing(self, store: UserSecretStore, monkeypatch: pytest.MonkeyPatch) -> None:
+        """get_secret returns empty fingerprint when ELSPETH_FINGERPRINT_KEY is not set."""
+        monkeypatch.delenv("ELSPETH_FINGERPRINT_KEY", raising=False)
+        store.set_secret("FP_EMPTY", value="val", user_id="user-1")
+        _, ref = store.get_secret("FP_EMPTY", user_id="user-1")
+        assert ref.fingerprint == ""
+
+
+class TestDeriveFernetKey:
+    """Direct tests for _derive_fernet_key — key derivation function."""
+
+    def test_different_salts_produce_different_keys(self) -> None:
+        """Same master key + different salts must produce different Fernet keys."""
+        salt_a = b"\x00" * 16
+        salt_b = b"\x01" * 16
+        key_a = _derive_fernet_key("master", salt_a)
+        key_b = _derive_fernet_key("master", salt_b)
+        assert key_a != key_b
+
+    def test_different_master_keys_produce_different_keys(self) -> None:
+        """Different master keys + same salt must produce different Fernet keys."""
+        salt = b"\x00" * 16
+        key_a = _derive_fernet_key("master-a", salt)
+        key_b = _derive_fernet_key("master-b", salt)
+        assert key_a != key_b
+
+    def test_wrong_key_cannot_decrypt(self) -> None:
+        """Data encrypted with one derived key cannot be decrypted with another."""
+        salt = os.urandom(16)
+        key_correct = _derive_fernet_key("correct-master", salt)
+        key_wrong = _derive_fernet_key("wrong-master", salt)
+
+        ciphertext = Fernet(key_correct).encrypt(b"sensitive data")
+        with pytest.raises(InvalidToken):
+            Fernet(key_wrong).decrypt(ciphertext)
+
+    def test_deterministic_for_same_inputs(self) -> None:
+        """Same master key + same salt must produce the same Fernet key."""
+        salt = b"\xab\xcd" * 8
+        key_a = _derive_fernet_key("my-master", salt)
+        key_b = _derive_fernet_key("my-master", salt)
+        assert key_a == key_b

@@ -7,7 +7,7 @@ in a response model.  ``CreateSecretRequest`` accepts a value on the way *in*;
 
 from __future__ import annotations
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 
 class SecretInventoryResponse(BaseModel):
@@ -22,8 +22,8 @@ class SecretInventoryResponse(BaseModel):
 class CreateSecretRequest(BaseModel):
     """Write-only request body for creating/updating a user-scoped secret."""
 
-    name: str
-    value: str
+    name: str = Field(min_length=1, max_length=256, pattern=r"^[A-Za-z][A-Za-z0-9_]*$")
+    value: str = Field(min_length=1, max_length=65536)
 
 
 class CreateSecretResponse(BaseModel):

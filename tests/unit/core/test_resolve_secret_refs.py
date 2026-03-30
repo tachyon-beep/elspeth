@@ -103,3 +103,47 @@ def test_does_not_mutate_original() -> None:
     original_copy = copy.deepcopy(original)
     resolve_secret_refs(original, resolver, "user1")
     assert original == original_copy
+
+
+def test_deeply_nested_list_in_dict_in_list() -> None:
+    """Secret refs nested inside list > dict > dict structures are resolved."""
+    resolver = FakeResolver({"X": "resolved-x"})
+    config = {"items": [{"nested": {"secret_ref": "X"}}]}
+    result, resolutions = resolve_secret_refs(config, resolver, "user1")
+    assert result == {"items": [{"nested": "resolved-x"}]}
+    assert len(resolutions) == 1
+    assert resolutions[0].name == "X"
+
+
+def test_secret_ref_with_non_string_value() -> None:
+    """A dict with secret_ref=42 (non-string) is NOT treated as a secret ref."""
+    resolver = FakeResolver({})
+    config = {"key": {"secret_ref": 42}}
+    result, resolutions = resolve_secret_refs(config, resolver, "user1")
+    assert result == {"key": {"secret_ref": 42}}
+    assert resolutions == []
+
+
+def test_secret_ref_with_extra_keys() -> None:
+    """A dict with secret_ref + extra keys is NOT treated as a secret ref."""
+    resolver = FakeResolver({"X": "val"})
+    config = {"key": {"secret_ref": "X", "extra": "y"}}
+    result, resolutions = resolve_secret_refs(config, resolver, "user1")
+    assert result == {"key": {"secret_ref": "X", "extra": "y"}}
+    assert resolutions == []
+
+
+def test_mapping_is_secret_ref_detection() -> None:
+    """_is_secret_ref detects Mapping types (not just dict) as potential secret refs.
+
+    MappingProxyType can't be deepcopied, so it won't appear inside
+    resolve_secret_refs input in practice. But _is_secret_ref uses
+    Mapping check to handle OrderedDict and other Mapping subtypes.
+    """
+    from collections import OrderedDict
+
+    resolver = FakeResolver({"KEY": "resolved"})
+    config = {"items": [OrderedDict({"secret_ref": "KEY"})]}
+    result, resolutions = resolve_secret_refs(config, resolver, "user1")
+    assert result == {"items": ["resolved"]}
+    assert len(resolutions) == 1

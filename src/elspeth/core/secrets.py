@@ -5,6 +5,7 @@ Layer: L1 (core). Imports from L0 (contracts) only.
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from copy import deepcopy
 from typing import Any
 
@@ -42,7 +43,7 @@ def resolve_secret_refs(
 
 def _is_secret_ref(value: Any) -> str | None:
     """If value is {"secret_ref": "NAME"}, return NAME. Else None."""
-    if isinstance(value, dict) and len(value) == 1 and "secret_ref" in value:
+    if isinstance(value, Mapping) and len(value) == 1 and "secret_ref" in value:
         ref = value["secret_ref"]
         if isinstance(ref, str):
             return ref
@@ -56,8 +57,13 @@ def _walk(
     resolutions: list[ResolvedSecret],
     missing: list[str],
 ) -> None:
-    """Recursively walk and replace secret refs in-place."""
-    if isinstance(obj, dict):
+    """Recursively walk and replace secret refs in-place.
+
+    Uses Mapping for isinstance checks to cover dict, MappingProxyType,
+    OrderedDict, etc. After deepcopy(), MappingProxyType becomes dict,
+    so in-place mutation via obj[key] is safe at runtime.
+    """
+    if isinstance(obj, Mapping):
         for key in list(obj.keys()):
             ref_name = _is_secret_ref(obj[key])
             if ref_name is not None:
@@ -65,7 +71,7 @@ def _walk(
                 if resolved is None:
                     missing.append(ref_name)
                 else:
-                    obj[key] = resolved.value
+                    obj[key] = resolved.value  # type: ignore[index]  # safe: deepcopy produces dict
                     resolutions.append(resolved)
             else:
                 _walk(obj[key], resolver, user_id, resolutions, missing)

@@ -201,7 +201,7 @@ def validate_pipeline(
         if state.source is not None:
             all_refs.extend(_collect_secret_refs(state.source.options))
         for node in state.nodes or ():
-            all_refs.extend(_collect_secret_refs(getattr(node, "options", {})))
+            all_refs.extend(_collect_secret_refs(node.options))
         for output in state.outputs or ():
             all_refs.extend(_collect_secret_refs(output.options))
 
