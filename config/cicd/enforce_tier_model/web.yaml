@@ -225,21 +225,40 @@ allow_hits:
   expires: null
 
 # App factory — os.environ.get() and @app.get() false positives
-- key: web/app.py:R1:create_app:fp=fffa82ecffb3c21f
+- key: web/app.py:R1:create_app:fp=ac4f59aacf5905a5
   owner: web-app
   reason: "Tier 3 boundary — os.environ.get() for env var check, not dict.get() on pipeline data"
   safety: "Guards dev-mode secret_key warning; no data flow impact"
   expires: null
 
-- key: web/app.py:R1:create_app:health:fp=9f0230766ffa4cd3
+- key: web/app.py:R1:create_app:health:fp=fca1756e908148d5
   owner: web-app
   reason: "False positive — @app.get() is FastAPI HTTP route decorator, not dict.get()"
   safety: No dict access involved
   expires: null
 
-- key: web/app.py:R1:create_app:system_status:fp=5b72498a2aa7b56d
+- key: web/app.py:R1:create_app:system_status:fp=d42859fbc377cbb2
   owner: web-app
   reason: "False positive — @app.get() is FastAPI HTTP route decorator, not dict.get()"
+  safety: No dict access involved
+  expires: null
+
+# Blob routes — @router.get() false positives (FastAPI route decorators)
+- key: web/blobs/routes.py:R1:create_blobs_router:list_blobs:fp=ab64acae0029cd0f
+  owner: web-blobs
+  reason: "False positive — @router.get() is FastAPI HTTP route decorator, not dict.get()"
+  safety: No dict access involved
+  expires: null
+
+- key: web/blobs/routes.py:R1:create_blobs_router:get_blob_metadata:fp=48098766946c84cc
+  owner: web-blobs
+  reason: "False positive — @router.get() is FastAPI HTTP route decorator, not dict.get()"
+  safety: No dict access involved
+  expires: null
+
+- key: web/blobs/routes.py:R1:create_blobs_router:download_blob_content:fp=759828a06d6127a0
+  owner: web-blobs
+  reason: "False positive — @router.get() is FastAPI HTTP route decorator, not dict.get()"
   safety: No dict access involved
   expires: null
 

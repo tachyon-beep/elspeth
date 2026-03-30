@@ -16,6 +16,8 @@ from sqlalchemy import create_engine
 from elspeth.web.auth.local import LocalAuthProvider
 from elspeth.web.auth.protocol import AuthProvider
 from elspeth.web.auth.routes import create_auth_router
+from elspeth.web.blobs.routes import create_blobs_router
+from elspeth.web.blobs.service import BlobServiceImpl
 from elspeth.web.catalog.routes import catalog_router
 from elspeth.web.composer import yaml_generator as yaml_generator_module
 from elspeth.web.composer.service import ComposerServiceImpl
@@ -165,6 +167,9 @@ def create_app(settings: WebSettings | None = None) -> FastAPI:
     session_service = SessionServiceImpl(session_engine)
     app.state.session_service = session_service
 
+    # --- Blob service ---
+    app.state.blob_service = BlobServiceImpl(session_engine, settings.data_dir)
+
     # --- Composer service (singleton, not per-request) ---
     app.state.composer_service = ComposerServiceImpl(
         catalog=app.state.catalog_service,
@@ -194,6 +199,7 @@ def create_app(settings: WebSettings | None = None) -> FastAPI:
     # --- Register routers ---
     app.include_router(create_auth_router())
     app.include_router(create_session_router())
+    app.include_router(create_blobs_router())
     app.include_router(create_execution_router())
 
     # --- Seam contract D: RunAlreadyActiveError -> 409 with error_type ---
