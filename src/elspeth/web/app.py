@@ -69,6 +69,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         settings=settings,
         session_service=session_service,
         yaml_generator=yaml_generator_module,
+        blob_service=app.state.blob_service,
     )
     app.state.execution_service = execution_service
 
@@ -168,12 +169,17 @@ def create_app(settings: WebSettings | None = None) -> FastAPI:
     app.state.session_service = session_service
 
     # --- Blob service ---
-    app.state.blob_service = BlobServiceImpl(session_engine, settings.data_dir)
+    app.state.blob_service = BlobServiceImpl(
+        session_engine,
+        settings.data_dir,
+        settings.max_blob_storage_per_session_bytes,
+    )
 
     # --- Composer service (singleton, not per-request) ---
     app.state.composer_service = ComposerServiceImpl(
         catalog=app.state.catalog_service,
         settings=settings,
+        session_engine=session_engine,
     )
     app.state.composer_availability = app.state.composer_service.get_availability()
 

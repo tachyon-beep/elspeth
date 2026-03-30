@@ -244,19 +244,19 @@ allow_hits:
   expires: null
 
 # Blob routes — @router.get() false positives (FastAPI route decorators)
-- key: web/blobs/routes.py:R1:create_blobs_router:list_blobs:fp=ab64acae0029cd0f
+- key: web/blobs/routes.py:R1:create_blobs_router:list_blobs:fp=be5f3aed9b28c617
   owner: web-blobs
   reason: "False positive — @router.get() is FastAPI HTTP route decorator, not dict.get()"
   safety: No dict access involved
   expires: null
 
-- key: web/blobs/routes.py:R1:create_blobs_router:get_blob_metadata:fp=48098766946c84cc
+- key: web/blobs/routes.py:R1:create_blobs_router:get_blob_metadata:fp=3aec9f34241a470a
   owner: web-blobs
   reason: "False positive — @router.get() is FastAPI HTTP route decorator, not dict.get()"
   safety: No dict access involved
   expires: null
 
-- key: web/blobs/routes.py:R1:create_blobs_router:download_blob_content:fp=759828a06d6127a0
+- key: web/blobs/routes.py:R1:create_blobs_router:download_blob_content:fp=abed53a4daf5b523
   owner: web-blobs
   reason: "False positive — @router.get() is FastAPI HTTP route decorator, not dict.get()"
   safety: No dict access involved
@@ -349,17 +349,6 @@ allow_hits:
   expires: null
 
 # Execution service — optional config keys and concurrent shutdown-event lifecycle
-- key: web/execution/service.py:R1:ExecutionServiceImpl:execute:fp=05f6bf7c01106310
-  owner: web-execution
-  reason: "Session composition state may legitimately omit optional source path/file keys"
-  safety: "Only present keys are checked against the uploads allowlist; missing keys skip the check without fabricating values"
-  expires: null
-
-- key: web/execution/service.py:R9:ExecutionServiceImpl:execute:fp=52f2e397f8f0ae3f
-  owner: web-execution
-  reason: "Shutdown-event cleanup is idempotent because submit failure can race with cancellation/lifecycle cleanup"
-  safety: "Missing key means there is no active event to clean; run creation aborts immediately"
-  expires: null
 
 - key: web/execution/service.py:R1:ExecutionServiceImpl:cancel:fp=efc0a289072bef70
   owner: web-execution
@@ -408,13 +397,6 @@ allow_hits:
   owner: web-execution
   reason: "Run cleanup is idempotent because unsubscribe and explicit cleanup can both remove the same run entry"
   safety: "Missing key simply means there are no remaining subscribers to clean up"
-  expires: null
-
-# Execution validation — optional path/file keys in user-authored source config
-- key: web/execution/validation.py:R1:validate_pipeline:fp=f4448c9a506ce863
-  owner: web-execution
-  reason: "Validation checks optional source path/file keys supplied by composition state"
-  safety: "Absent keys are treated honestly as 'no path provided' and the check is recorded as skipped/passed"
   expires: null
 
 - key: web/sessions/routes.py:R1:create_session_router:get_state_versions:fp=6e1f4f1fc01319f9
@@ -510,6 +492,39 @@ allow_hits:
   owner: web-sessions
   reason: "Upsert-or-skip — IntegrityError on duplicate active state is expected race condition"
   safety: "Returns None to caller; caller retries or skips; no data loss"
+  expires: null
+
+# Execution service — blob finalization is best-effort on an already-terminal path
+- key: web/execution/service.py:R4:ExecutionServiceImpl:_finalize_output_blobs:fp=24528457d89d66b9
+  owner: web-execution
+  reason: "Blob finalization runs after the run has already reached terminal status. Failure must not mask the run outcome."
+  safety: "Error is logged via structlog; the run status and audit trail are already committed. Blob stays pending for orphan cleanup."
+  expires: null
+
+# Execution service — blob-ref is an optional source options key
+- key: web/execution/service.py:R1:ExecutionServiceImpl:execute:fp=d63e80b2ffd96382
+  owner: web-execution
+  reason: "Session composition state may legitimately omit optional source path/file keys"
+  safety: "Only present keys are checked against the allowlist; missing keys skip the check"
+  expires: null
+
+- key: web/execution/service.py:R1:ExecutionServiceImpl:execute:fp=08f557b13bcaf895
+  owner: web-execution
+  reason: "blob_ref is an optional key in source options set by set_source_from_blob tool"
+  safety: "Missing blob_ref means source is not blob-backed; no linkage recorded"
+  expires: null
+
+- key: web/execution/service.py:R9:ExecutionServiceImpl:execute:fp=74559ffa8bbfc394
+  owner: web-execution
+  reason: "Shutdown-event cleanup is idempotent because submit failure can race with cancellation/lifecycle cleanup"
+  safety: "Missing key means there is no active event to clean; run creation aborts immediately"
+  expires: null
+
+# Execution validation — optional path/file keys in user-authored source config (fingerprint updated)
+- key: web/execution/validation.py:R1:validate_pipeline:fp=5ef4bf2201e8e7aa
+  owner: web-execution
+  reason: "Validation checks optional source path/file keys supplied by composition state"
+  safety: "Absent keys are treated honestly as 'no path provided' and the check is recorded as skipped/passed"
   expires: null
 
 per_file_rules:

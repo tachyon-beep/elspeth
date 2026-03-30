@@ -24,4 +24,5 @@ export type {
   RunProgress,
   ApiError,
   UploadResult,
+  BlobMetadata,
 } from "./index";

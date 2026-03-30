@@ -37,6 +37,7 @@ class WebSettings(BaseModel):
         "change-me-in-production"  # Security rule S3 (seam-contracts.md): Sub-2 startup guard enforces non-default in production
     )
     max_upload_bytes: int = Field(default=100 * 1024 * 1024, ge=1)
+    max_blob_storage_per_session_bytes: int = Field(default=500 * 1024 * 1024, ge=1)
     orphan_run_max_age_seconds: int = Field(default=3600, ge=60)
 
     # Execution infrastructure — defaults derive from data_dir when not explicitly set

@@ -113,9 +113,10 @@ def validate_pipeline(state: Any, settings: Any, yaml_generator: Any) -> Validat
 
     # Step 1: Source path allowlist check (C3/S2 defense-in-depth)
     # Any `path` or `file` key in source options must resolve under
-    # {settings.data_dir}/uploads/. This duplicates the composer tool
-    # check as defense-in-depth.
-    uploads_dir = Path(settings.data_dir) / "uploads"
+    # an allowed source directory. Uses the shared helper from AD-4.
+    from elspeth.web.composer.tools import _allowed_source_directories
+
+    allowed_dirs = _allowed_source_directories(str(settings.data_dir))
     # state is a CompositionState (typed domain object). state.source is a
     # SourceSpec with typed .options attribute (Mapping[str, Any]).
     source_options = dict(state.source.options) if state.source is not None else {}
@@ -125,14 +126,14 @@ def validate_pipeline(state: Any, settings: Any, yaml_generator: Any) -> Validat
         if value is not None:
             path_checked = True
             resolved = Path(value).resolve()
-            if not resolved.is_relative_to(uploads_dir.resolve()):
+            if not any(resolved.is_relative_to(d) for d in allowed_dirs):
                 return ValidationResult(
                     is_valid=False,
                     checks=[
                         ValidationCheck(
                             name="source_path_allowlist",
                             passed=False,
-                            detail=f"Source {key} '{value}' is outside allowed upload directory: {uploads_dir}",
+                            detail=f"Source {key} '{value}' is outside allowed source directories",
                         ),
                         *_skipped_checks("source_path_allowlist"),
                     ],
@@ -140,8 +141,8 @@ def validate_pipeline(state: Any, settings: Any, yaml_generator: Any) -> Validat
                         ValidationError(
                             component_id="source",
                             component_type="source",
-                            message=f"Path traversal blocked: {key}='{value}' resolves outside {uploads_dir}",
-                            suggestion="Use a file within the uploads directory.",
+                            message=f"Path traversal blocked: {key}='{value}' resolves outside allowed directories",
+                            suggestion="Use a file within the uploads or blobs directory.",
                         ),
                     ],
                 )

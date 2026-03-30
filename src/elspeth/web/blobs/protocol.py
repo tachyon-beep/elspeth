@@ -6,13 +6,10 @@ BlobCreateData is the input DTO for creating new blobs.
 
 from __future__ import annotations
 
-from collections.abc import Mapping
 from dataclasses import dataclass
 from datetime import datetime
-from typing import Any, Protocol, runtime_checkable
+from typing import Protocol, runtime_checkable
 from uuid import UUID
-
-from elspeth.contracts.freeze import freeze_fields
 
 # Valid blob statuses and their meanings:
 #   ready   — content is available for download/use
@@ -43,7 +40,7 @@ ALLOWED_MIME_TYPES = frozenset(
 class BlobRecord:
     """Represents a row from the blobs table.
 
-    schema_info is a JSON dict — requires freeze guard when not None.
+    All fields are scalars or None — no freeze guard needed.
     """
 
     id: UUID
@@ -51,17 +48,12 @@ class BlobRecord:
     filename: str
     mime_type: str
     size_bytes: int
-    content_hash: str
+    content_hash: str | None
     storage_path: str
     created_at: datetime
     created_by: str
     source_description: str | None
-    schema_info: Mapping[str, Any] | None
     status: str
-
-    def __post_init__(self) -> None:
-        if self.schema_info is not None:
-            freeze_fields(self, "schema_info")
 
 
 @dataclass(frozen=True, slots=True)
@@ -97,6 +89,19 @@ class BlobActiveRunError(Exception):
         self.blob_id = blob_id
         self.run_id = run_id
         super().__init__(f"Blob {blob_id} is linked to active run {run_id} and cannot be deleted")
+
+
+class BlobQuotaExceededError(Exception):
+    """Raised when a blob creation would exceed the session storage quota.
+
+    Route handlers catching this error should return 413.
+    """
+
+    def __init__(self, session_id: str, current_bytes: int, limit_bytes: int) -> None:
+        self.session_id = session_id
+        self.current_bytes = current_bytes
+        self.limit_bytes = limit_bytes
+        super().__init__(f"Session {session_id} blob storage ({current_bytes} bytes) would exceed quota ({limit_bytes} bytes)")
 
 
 @runtime_checkable
@@ -185,4 +190,12 @@ class BlobServiceProtocol(Protocol):
         blob_id: UUID,
     ) -> list[BlobRunLinkRecord]:
         """Get all run links for a blob."""
+        ...
+
+    async def finalize_run_output_blobs(
+        self,
+        run_id: UUID,
+        success: bool,
+    ) -> list[BlobRecord]:
+        """Finalize all pending output blobs for a completed/failed run."""
         ...

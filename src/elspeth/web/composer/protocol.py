@@ -95,6 +95,7 @@ class ComposerService(Protocol):
         message: str,
         messages: list[dict[str, Any]],
         state: CompositionState,
+        session_id: str | None = None,
     ) -> ComposerResult:
         """Run the LLM composition loop.
 

@@ -10,6 +10,7 @@
 import type {
   ApiError,
   AuthConfig,
+  BlobMetadata,
   ChatMessage,
   CompositionState,
   CompositionStateVersion,
@@ -436,4 +437,82 @@ export async function uploadFile(
     body: formData,
   });
   return parseResponse<UploadResult>(response);
+}
+
+// ── Blobs ──────────────────────────────────────────────────────────────────
+
+/** Upload a file as a session-scoped blob. */
+export async function uploadBlob(
+  sessionId: string,
+  file: File,
+): Promise<BlobMetadata> {
+  const formData = new FormData();
+  formData.append("file", file);
+
+  const token = getToken();
+  const headers: Record<string, string> = {};
+  if (token) {
+    headers["Authorization"] = `Bearer ${token}`;
+  }
+
+  const response = await fetch(`/api/sessions/${sessionId}/blobs`, {
+    method: "POST",
+    headers,
+    body: formData,
+  });
+  return parseResponse<BlobMetadata>(response);
+}
+
+/** List all blobs for a session. */
+export async function listBlobs(sessionId: string): Promise<BlobMetadata[]> {
+  const response = await fetch(`/api/sessions/${sessionId}/blobs`, {
+    headers: authHeaders(),
+  });
+  return parseResponse<BlobMetadata[]>(response);
+}
+
+/** Get metadata for a single blob. */
+export async function getBlobMetadata(
+  sessionId: string,
+  blobId: string,
+): Promise<BlobMetadata> {
+  const response = await fetch(
+    `/api/sessions/${sessionId}/blobs/${blobId}`,
+    { headers: authHeaders() },
+  );
+  return parseResponse<BlobMetadata>(response);
+}
+
+/** Download blob content as a Blob (browser Blob, not ELSPETH Blob). */
+export async function downloadBlobContent(
+  sessionId: string,
+  blobId: string,
+): Promise<{ data: Blob; filename: string }> {
+  const response = await fetch(
+    `/api/sessions/${sessionId}/blobs/${blobId}/content`,
+    { headers: authHeaders() },
+  );
+  if (!response.ok) {
+    await parseResponse<never>(response);
+  }
+
+  const disposition = response.headers.get("Content-Disposition");
+  const filenameMatch = disposition?.match(/filename="(.+)"/);
+  const filename = filenameMatch?.[1] ?? "download";
+  const data = await response.blob();
+  return { data, filename };
+}
+
+/** Delete a blob and its backing file. */
+export async function deleteBlob(
+  sessionId: string,
+  blobId: string,
+): Promise<void> {
+  const response = await fetch(
+    `/api/sessions/${sessionId}/blobs/${blobId}`,
+    { method: "DELETE", headers: authHeaders() },
+  );
+  if (!response.ok) {
+    await parseResponse<never>(response);
+  }
 }

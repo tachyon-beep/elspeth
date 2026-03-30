@@ -145,12 +145,11 @@ blobs_table = Table(
     Column("filename", String, nullable=False),
     Column("mime_type", String, nullable=False),
     Column("size_bytes", Integer, nullable=False),
-    Column("content_hash", String, nullable=False),
+    Column("content_hash", String, nullable=True),
     Column("storage_path", String, nullable=False),
     Column("created_at", DateTime, nullable=False),
     Column("created_by", String, nullable=False),
     Column("source_description", String, nullable=True),
-    Column("schema_info", JSON, nullable=True),
     Column("status", String, nullable=False, server_default="ready"),
     CheckConstraint(
         "created_by IN ('user', 'assistant', 'pipeline')",

@@ -609,10 +609,10 @@ class TestDiscoveryTools:
 
 
 class TestToolDefinitions:
-    def test_has_thirteen_tools(self) -> None:
-        """5 discovery + 8 mutation = 13 tools."""
+    def test_has_sixteen_tools(self) -> None:
+        """5 discovery + 8 mutation + 3 blob tools = 16 tools."""
         defs = get_tool_definitions()
-        assert len(defs) == 13
+        assert len(defs) == 16
 
     def test_all_have_json_schema(self) -> None:
         for defn in get_tool_definitions():
@@ -770,3 +770,167 @@ class TestToolRegistry:
         import elspeth.web.composer.tools as mod
 
         importlib.reload(mod)  # Force re-evaluation of module-level assertion
+
+
+# ---------------------------------------------------------------------------
+# Blob tool tests — composer-level security boundaries
+# ---------------------------------------------------------------------------
+
+
+class TestBlobTools:
+    """Blob composition tools: session context enforcement, storage_path exclusion,
+    status guards, and source plugin wiring.
+
+    Security contracts tested:
+    - Blob tools fail without session context (no ambient access)
+    - get_blob_metadata never exposes storage_path to the LLM
+    - Wrong session_id returns failure (IDOR at the tool layer)
+    - set_source_from_blob rejects non-ready blobs
+    - set_source_from_blob wires the correct source plugin from MIME type
+    """
+
+    @pytest.fixture(autouse=True)
+    def _setup(self):
+        """Create an in-memory SQLite engine with tables and seed data."""
+        from datetime import UTC, datetime
+        from uuid import uuid4
+
+        from sqlalchemy import create_engine
+        from sqlalchemy.pool import StaticPool
+
+        from elspeth.web.sessions.models import blobs_table, metadata, sessions_table
+
+        self.engine = create_engine(
+            "sqlite:///:memory:",
+            poolclass=StaticPool,
+            connect_args={"check_same_thread": False},
+        )
+        metadata.create_all(self.engine)
+
+        self.session_id = str(uuid4())
+        self.other_session_id = str(uuid4())
+        self.blob_id = str(uuid4())
+        self.pending_blob_id = str(uuid4())
+
+        now = datetime.now(UTC)
+
+        with self.engine.begin() as conn:
+            # Two sessions
+            conn.execute(
+                sessions_table.insert().values(
+                    id=self.session_id,
+                    user_id="test-user",
+                    auth_provider_type="local",
+                    title="Test Session",
+                    created_at=now,
+                    updated_at=now,
+                )
+            )
+            conn.execute(
+                sessions_table.insert().values(
+                    id=self.other_session_id,
+                    user_id="other-user",
+                    auth_provider_type="local",
+                    title="Other Session",
+                    created_at=now,
+                    updated_at=now,
+                )
+            )
+            # Ready blob in session
+            conn.execute(
+                blobs_table.insert().values(
+                    id=self.blob_id,
+                    session_id=self.session_id,
+                    filename="data.csv",
+                    mime_type="text/csv",
+                    size_bytes=100,
+                    content_hash="abc123",
+                    storage_path="/tmp/fake/data.csv",
+                    created_at=now,
+                    created_by="user",
+                    source_description=None,
+                    status="ready",
+                )
+            )
+            # Pending blob in session
+            conn.execute(
+                blobs_table.insert().values(
+                    id=self.pending_blob_id,
+                    session_id=self.session_id,
+                    filename="output.csv",
+                    mime_type="text/csv",
+                    size_bytes=0,
+                    content_hash=None,
+                    storage_path="/tmp/fake/output.csv",
+                    created_at=now,
+                    created_by="pipeline",
+                    source_description=None,
+                    status="pending",
+                )
+            )
+
+    def test_list_blobs_without_session_context_returns_failure(self) -> None:
+        """Blob tools with no session context must fail — no ambient data access."""
+        state = _empty_state()
+        catalog = _mock_catalog()
+        result = execute_tool("list_blobs", {}, state, catalog)
+        assert result.success is False
+
+    def test_get_blob_metadata_excludes_storage_path(self) -> None:
+        """storage_path must never be exposed to the LLM — it leaks filesystem layout."""
+        state = _empty_state()
+        catalog = _mock_catalog()
+        result = execute_tool(
+            "get_blob_metadata",
+            {"blob_id": self.blob_id},
+            state,
+            catalog,
+            session_engine=self.engine,
+            session_id=self.session_id,
+        )
+        assert result.success is True
+        assert "storage_path" not in result.data
+
+    def test_get_blob_metadata_wrong_session_returns_failure(self) -> None:
+        """IDOR at tool layer: blob belongs to session A, caller is session B."""
+        state = _empty_state()
+        catalog = _mock_catalog()
+        result = execute_tool(
+            "get_blob_metadata",
+            {"blob_id": self.blob_id},
+            state,
+            catalog,
+            session_engine=self.engine,
+            session_id=self.other_session_id,
+        )
+        assert result.success is False
+
+    def test_set_source_from_blob_rejects_non_ready(self) -> None:
+        """Cannot wire a pending blob as source — content doesn't exist yet."""
+        state = _empty_state()
+        catalog = _mock_catalog()
+        result = execute_tool(
+            "set_source_from_blob",
+            {"blob_id": self.pending_blob_id, "on_success": "out"},
+            state,
+            catalog,
+            session_engine=self.engine,
+            session_id=self.session_id,
+        )
+        assert result.success is False
+
+    def test_set_source_from_blob_wires_correct_plugin(self) -> None:
+        """text/csv blob should auto-resolve to the 'csv' source plugin."""
+        state = _empty_state()
+        catalog = _mock_catalog()
+        result = execute_tool(
+            "set_source_from_blob",
+            {"blob_id": self.blob_id, "on_success": "out"},
+            state,
+            catalog,
+            session_engine=self.engine,
+            session_id=self.session_id,
+        )
+        assert result.success is True
+        assert result.updated_state.source is not None
+        assert result.updated_state.source.plugin == "csv"

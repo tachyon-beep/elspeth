@@ -7,6 +7,7 @@ belong to the authenticated user's session.
 
 from __future__ import annotations
 
+from urllib.parse import quote
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, File, HTTPException, Request, UploadFile
@@ -15,12 +16,15 @@ from fastapi.responses import Response
 from elspeth.web.auth.middleware import get_current_user
 from elspeth.web.auth.models import UserIdentity
 from elspeth.web.blobs.protocol import (
+    ALLOWED_MIME_TYPES,
     BlobActiveRunError,
     BlobNotFoundError,
+    BlobQuotaExceededError,
     BlobRecord,
 )
 from elspeth.web.blobs.schemas import BlobMetadataResponse, CreateInlineBlobRequest
 from elspeth.web.blobs.service import BlobServiceImpl
+from elspeth.web.blobs.sniff import detect_mime_type
 
 
 def _blob_response(record: BlobRecord) -> BlobMetadataResponse:
@@ -35,7 +39,6 @@ def _blob_response(record: BlobRecord) -> BlobMetadataResponse:
         created_at=record.created_at,
         created_by=record.created_by,
         source_description=record.source_description,
-        schema_info=dict(record.schema_info) if record.schema_info else None,
         status=record.status,
     )
 
@@ -104,7 +107,7 @@ def create_blobs_router() -> APIRouter:
 
         # Validate MIME type
         mime_type = file.content_type or "application/octet-stream"
-        if not BlobServiceImpl.validate_mime_type(mime_type):
+        if mime_type not in ALLOWED_MIME_TYPES:
             raise HTTPException(
                 status_code=415,
                 detail=f"Unsupported content type: {mime_type}. Allowed types: CSV, JSON, JSONL, plain text.",
@@ -124,14 +127,33 @@ def create_blobs_router() -> APIRouter:
             chunks.append(chunk)
         content = b"".join(chunks)
 
-        record = await blob_service.create_blob(
-            session_id=session_id,
-            filename=original_filename,
-            content=content,
-            mime_type=mime_type,
-            created_by="user",
-            source_description="uploaded",
-        )
+        # Server-side MIME detection — reject if declared type doesn't
+        # match detected content (defense-in-depth, client MIME is untrusted)
+        detected = detect_mime_type(content)
+        if detected is not None and detected != mime_type and detected not in ALLOWED_MIME_TYPES:
+            raise HTTPException(
+                status_code=415,
+                detail=f"Detected content type '{detected}' does not match declared '{mime_type}' and is not in the allowed set.",
+            )
+        # Use detected type if available — record the truth, not the claim
+        effective_mime = detected if detected is not None else mime_type
+        if effective_mime not in ALLOWED_MIME_TYPES:
+            raise HTTPException(
+                status_code=415,
+                detail=f"Detected content type '{effective_mime}' is not in the allowed set.",
+            )
+
+        try:
+            record = await blob_service.create_blob(
+                session_id=session_id,
+                filename=original_filename,
+                content=content,
+                mime_type=effective_mime,
+                created_by="user",
+                source_description="uploaded",
+            )
+        except BlobQuotaExceededError as exc:
+            raise HTTPException(status_code=413, detail=str(exc)) from None
         return _blob_response(record)
 
     @router.post("/inline", status_code=201, response_model=BlobMetadataResponse)
@@ -144,7 +166,7 @@ def create_blobs_router() -> APIRouter:
         """Create a blob from inline text/JSON content."""
         blob_service = await _verify_session_and_get_blob_service(session_id, user, request)
 
-        if not BlobServiceImpl.validate_mime_type(body.content_type):
+        if body.content_type not in ALLOWED_MIME_TYPES:
             raise HTTPException(
                 status_code=415,
                 detail=f"Unsupported content type: {body.content_type}.",
@@ -158,14 +180,17 @@ def create_blobs_router() -> APIRouter:
                 detail=f"Content exceeds maximum size of {settings.max_upload_bytes} bytes",
             )
 
-        record = await blob_service.create_blob(
-            session_id=session_id,
-            filename=body.filename,
-            content=content_bytes,
-            mime_type=body.content_type,
-            created_by="assistant",
-            source_description="created inline",
-        )
+        try:
+            record = await blob_service.create_blob(
+                session_id=session_id,
+                filename=body.filename,
+                content=content_bytes,
+                mime_type=body.content_type,
+                created_by="assistant",
+                source_description="created inline",
+            )
+        except BlobQuotaExceededError as exc:
+            raise HTTPException(status_code=413, detail=str(exc)) from None
         return _blob_response(record)
 
     @router.get("", response_model=list[BlobMetadataResponse])
@@ -210,7 +235,7 @@ def create_blobs_router() -> APIRouter:
         return Response(
             content=content,
             media_type=blob.mime_type,
-            headers={"Content-Disposition": f'attachment; filename="{blob.filename}"'},
+            headers={"Content-Disposition": f"attachment; filename*=UTF-8''{quote(blob.filename, safe='')}"},
         )
 
     @router.delete("/{blob_id}", status_code=204)

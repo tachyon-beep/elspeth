@@ -21,6 +21,7 @@ from typing import Any
 
 import litellm
 from litellm.exceptions import BadRequestError as LiteLLMBadRequestError
+from sqlalchemy import Engine
 
 from elspeth.web.composer.prompts import build_messages
 from elspeth.web.composer.protocol import (
@@ -73,6 +74,7 @@ class ComposerServiceImpl:
         self,
         catalog: CatalogServiceProtocol,
         settings: ComposerSettings,
+        session_engine: Engine | None = None,
     ) -> None:
         self._catalog = catalog
         self._model = settings.composer_model
@@ -80,6 +82,7 @@ class ComposerServiceImpl:
         self._max_discovery_turns = settings.composer_max_discovery_turns
         self._timeout_seconds = settings.composer_timeout_seconds
         self._data_dir = str(settings.data_dir)
+        self._session_engine = session_engine
         self._availability = self._compute_availability()
 
     def get_availability(self) -> ComposerAvailability:
@@ -91,6 +94,7 @@ class ComposerServiceImpl:
         message: str,
         messages: list[dict[str, Any]],
         state: CompositionState,
+        session_id: str | None = None,
     ) -> ComposerResult:
         """Run the LLM composition loop with dual-counter budget.
 
@@ -115,7 +119,7 @@ class ComposerServiceImpl:
         initial_version = state.version
         try:
             return await asyncio.wait_for(
-                self._compose_loop(message, messages, state, state_ref),
+                self._compose_loop(message, messages, state, state_ref, session_id),
                 timeout=self._timeout_seconds,
             )
         except TimeoutError:
@@ -133,6 +137,7 @@ class ComposerServiceImpl:
         messages: list[dict[str, Any]],
         state: CompositionState,
         state_ref: list[CompositionState],
+        session_id: str | None = None,
     ) -> ComposerResult:
         """Inner composition loop with dual-counter budget tracking.
 
@@ -236,6 +241,8 @@ class ComposerServiceImpl:
                         state,
                         self._catalog,
                         data_dir=self._data_dir,
+                        session_engine=self._session_engine,
+                        session_id=session_id,
                     )
                 except (KeyError, TypeError) as exc:
                     llm_messages.append(

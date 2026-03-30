@@ -83,12 +83,14 @@ class ExecutionServiceImpl:
         settings: Any,  # WebSettings
         session_service: SessionServiceProtocol,
         yaml_generator: Any,  # YamlGenerator — injected, not module-level
+        blob_service: Any = None,  # BlobServiceImpl — optional for blob linkage
     ) -> None:
         self._loop = loop
         self._broadcaster = broadcaster
         self._settings = settings
         self._session_service = session_service
         self._yaml_generator = yaml_generator
+        self._blob_service = blob_service
         # AC #17: No run_repository — all Run CRUD delegates to SessionService
         # via create_run(), update_run_status(), get_active_run(), get_run().
         # R6 expanded params: landscape_run_id, pipeline_yaml, rows_processed,
@@ -158,15 +160,17 @@ class ExecutionServiceImpl:
         # Path allowlist check — defense-in-depth. The validate endpoint also
         # checks this, but /execute does not require /validate first. An
         # authenticated user could skip validation and execute a state that
-        # reads files outside the uploads directory.
+        # reads files outside the allowed directories.
         if composition_state.source is not None:
-            uploads_dir = Path(self._settings.data_dir) / "uploads"
+            from elspeth.web.composer.tools import _allowed_source_directories
+
+            allowed_dirs = _allowed_source_directories(str(self._settings.data_dir))
             for key in ("path", "file"):
                 value = composition_state.source.options.get(key)
                 if value is not None:
                     resolved = Path(value).resolve()
-                    if not resolved.is_relative_to(uploads_dir.resolve()):
-                        raise ValueError(f"Source {key}='{value}' resolves outside allowed upload directory: {uploads_dir}")
+                    if not any(resolved.is_relative_to(d) for d in allowed_dirs):
+                        raise ValueError(f"Source {key}='{value}' resolves outside allowed directories")
 
         pipeline_yaml = self._yaml_generator.generate_yaml(composition_state)
 
@@ -179,6 +183,16 @@ class ExecutionServiceImpl:
             pipeline_yaml=pipeline_yaml,
         )
         run_id = run_record.id  # Use the DB-generated UUID as canonical
+
+        # Record blob-to-run linkage for input blobs
+        if composition_state.source is not None and self._blob_service is not None:
+            blob_ref = composition_state.source.options.get("blob_ref")
+            if blob_ref is not None:
+                await self._blob_service.link_blob_to_run(
+                    blob_id=UUID(blob_ref),
+                    run_id=run_id,
+                    direction="input",
+                )
 
         # Create shutdown event for cancellation (B2/cancel support)
         shutdown_event = threading.Event()
@@ -396,6 +410,8 @@ class ExecutionServiceImpl:
                         rows_failed=result.rows_failed,
                     )
                 )
+                # Finalize output blobs as error (run was cancelled)
+                self._finalize_output_blobs(run_id, success=False)
             else:
                 # Broadcast terminal completed event
                 self._broadcaster.broadcast(
@@ -422,6 +438,8 @@ class ExecutionServiceImpl:
                         rows_failed=result.rows_failed,
                     )
                 )
+                # Finalize output blobs as ready (run completed successfully)
+                self._finalize_output_blobs(run_id, success=True)
 
         except BaseException as exc:
             # B7 fix: Catch BaseException (not Exception) to handle
@@ -461,6 +479,8 @@ class ExecutionServiceImpl:
                     run_id=run_id,
                     exc_type=type(exc).__name__,
                 )
+            # Finalize output blobs as error (run failed)
+            self._finalize_output_blobs(run_id, success=False)
             raise  # Re-raise so future.add_done_callback sees it
         finally:
             # Always clean up, regardless of success or failure
@@ -470,6 +490,30 @@ class ExecutionServiceImpl:
             if tmp_path is not None and tmp_path.exists():
                 tmp_path.unlink()
             self._broadcaster.cleanup_run(run_id)
+
+    def _finalize_output_blobs(self, run_id: str, *, success: bool) -> None:
+        """Finalize pending output blobs after a run completes/fails/cancels.
+
+        Uses _call_async to bridge from the background thread to the async
+        blob service. Failure here must not mask the original run outcome —
+        errors are logged, not raised.
+        """
+        if self._blob_service is None:
+            return
+        try:
+            self._call_async(
+                self._blob_service.finalize_run_output_blobs(
+                    UUID(run_id),
+                    success=success,
+                )
+            )
+        except Exception as blob_err:
+            slog.error(
+                "blob_finalization_failed",
+                run_id=run_id,
+                success=success,
+                error=str(blob_err),
+            )
 
     def _on_pipeline_done(self, future: Future[None]) -> None:
         """B7 Layer 2: Safety net callback.

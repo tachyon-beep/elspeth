@@ -5,6 +5,8 @@ import { useComposer } from "@/hooks/useComposer";
 import { MessageBubble } from "./MessageBubble";
 import { ComposingIndicator } from "./ComposingIndicator";
 import { ChatInput } from "./ChatInput";
+import { BlobManager } from "@/components/blobs/BlobManager";
+import type { BlobMetadata } from "@/types/api";
 
 /**
  * Main chat panel combining the message list, composing indicator, and input.
@@ -22,6 +24,7 @@ export function ChatPanel() {
   const scrollContainerRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const [showScrollButton, setShowScrollButton] = useState(false);
+  const [showBlobManager, setShowBlobManager] = useState(false);
 
   function scrollToBottom() {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -60,6 +63,17 @@ export function ChatPanel() {
       // force-scroll to bottom and resume auto-scroll.
       setShowScrollButton(false);
       messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
+    },
+    [sendMessage],
+  );
+
+  const handleUseAsInput = useCallback(
+    (blob: BlobMetadata) => {
+      // Insert a helper message referencing the blob by filename.
+      // The assistant/composer will use blob tools to wire it as source.
+      const prompt = `Please use the file "${blob.filename}" as the pipeline input.`;
+      sendMessage(prompt);
+      setShowBlobManager(false);
     },
     [sendMessage],
   );
@@ -198,11 +212,16 @@ export function ChatPanel() {
         </button>
       )}
 
+      {/* Blob manager drawer */}
+      {showBlobManager && <BlobManager onUseAsInput={handleUseAsInput} />}
+
       {/* Input */}
       <ChatInput
         onSend={handleSend}
         disabled={isComposing}
         inputRef={inputRef}
+        onToggleBlobManager={() => setShowBlobManager((v) => !v)}
+        showBlobManager={showBlobManager}
       />
     </div>
   );

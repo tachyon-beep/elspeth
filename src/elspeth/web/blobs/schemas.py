@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 from datetime import datetime
-from typing import Any
 
 from pydantic import BaseModel
 
@@ -19,11 +18,10 @@ class BlobMetadataResponse(BaseModel):
     filename: str
     mime_type: str
     size_bytes: int
-    content_hash: str
+    content_hash: str | None
     created_at: datetime
     created_by: str
     source_description: str | None = None
-    schema_info: dict[str, Any] | None = None
     status: str
 
 

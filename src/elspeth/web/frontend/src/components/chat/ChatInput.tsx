@@ -1,27 +1,26 @@
 // src/components/chat/ChatInput.tsx
 import {
   useState,
-  useRef,
   useCallback,
   type KeyboardEvent,
   type ChangeEvent,
 } from "react";
-import * as api from "@/api/client";
-import type { ApiError } from "@/types/api";
 import { useSessionStore } from "@/stores/sessionStore";
+import { useBlobStore } from "@/stores/blobStore";
 
 interface ChatInputProps {
   onSend: (content: string) => void;
   disabled: boolean;
   inputRef: React.RefObject<HTMLTextAreaElement>;
+  onToggleBlobManager?: () => void;
+  showBlobManager?: boolean;
 }
 
-export function ChatInput({ onSend, disabled, inputRef }: ChatInputProps) {
+export function ChatInput({ onSend, disabled, inputRef, onToggleBlobManager, showBlobManager }: ChatInputProps) {
   const [text, setText] = useState("");
-  const [uploadError, setUploadError] = useState<string | null>(null);
-  const [isUploading, setIsUploading] = useState(false);
-  const fileInputRef = useRef<HTMLInputElement>(null);
+  const [uploadStatus, setUploadStatus] = useState<string | null>(null);
   const activeSessionId = useSessionStore((s) => s.activeSessionId);
+  const uploadBlob = useBlobStore((s) => s.uploadBlob);
 
   const handleSend = useCallback(() => {
     const trimmed = text.trim();
@@ -41,34 +40,23 @@ export function ChatInput({ onSend, disabled, inputRef }: ChatInputProps) {
     const file = e.target.files?.[0];
     if (!file || !activeSessionId) return;
 
-    setIsUploading(true);
-    setUploadError(null);
-
+    setUploadStatus(null);
     try {
-      const result = await api.uploadFile(activeSessionId, file);
+      const blob = await uploadBlob(activeSessionId, file);
+      // Reference blob by filename, not by filesystem path
       setText(
         (prev) =>
           prev +
           (prev ? "\n" : "") +
-          `I've uploaded a file at ${result.path}`,
+          `I've uploaded "${blob.filename}"; please use it as the pipeline input.`,
       );
-    } catch (err) {
-      const apiErr = err as ApiError;
-      if (apiErr.status === 413) {
-        setUploadError(
-          "The file exceeds the maximum upload size. Please use a smaller file.",
-        );
-      } else {
-        setUploadError(
-          "Upload failed due to a network error. Please check your connection and try again.",
-        );
-      }
+    } catch {
+      // Error is shown in the blob store / blob manager
+      setUploadStatus("Upload failed. Check the file manager for details.");
     } finally {
-      setIsUploading(false);
       // Reset the file input so the same file can be re-selected
-      if (fileInputRef.current) {
-        fileInputRef.current.value = "";
-      }
+      const input = e.target;
+      input.value = "";
     }
   }
 
@@ -82,7 +70,7 @@ export function ChatInput({ onSend, disabled, inputRef }: ChatInputProps) {
         borderTop: "1px solid var(--color-border)",
       }}
     >
-      {uploadError && (
+      {uploadStatus && (
         <div
           role="alert"
           style={{
@@ -95,7 +83,7 @@ export function ChatInput({ onSend, disabled, inputRef }: ChatInputProps) {
             border: "1px solid var(--color-error-border)",
           }}
         >
-          {uploadError}
+          {uploadStatus}
         </div>
       )}
       <div style={{ display: "flex", gap: 8, alignItems: "flex-end" }} role="group" aria-label="Message composition">
@@ -122,37 +110,54 @@ export function ChatInput({ onSend, disabled, inputRef }: ChatInputProps) {
           }}
         />
 
+        {/* File manager toggle */}
+        {onToggleBlobManager && (
+          <button
+            onClick={onToggleBlobManager}
+            title={showBlobManager ? "Hide file manager" : "Show file manager"}
+            aria-label={showBlobManager ? "Hide file manager" : "Show file manager"}
+            style={{
+              padding: "8px 10px",
+              backgroundColor: showBlobManager
+                ? "var(--color-surface-hover)"
+                : "transparent",
+              border: "1px solid var(--color-border-strong)",
+              borderRadius: 6,
+              cursor: "pointer",
+              fontSize: 16,
+              color: "var(--color-text)",
+            }}
+          >
+            <span aria-hidden="true">{"\uD83D\uDCC1"}</span>
+          </button>
+        )}
+
         {/* File upload button */}
-        <button
-          onClick={() => fileInputRef.current?.click()}
-          disabled={isUploading || !activeSessionId}
-          title="Upload file"
-          aria-label="Upload file"
+        <label
           style={{
             padding: "8px 10px",
             backgroundColor: "transparent",
             border: "1px solid var(--color-border-strong)",
             borderRadius: 6,
-            cursor:
-              isUploading || !activeSessionId ? "not-allowed" : "pointer",
+            cursor: !activeSessionId ? "not-allowed" : "pointer",
             fontSize: 16,
             color: "var(--color-text)",
+            display: "flex",
+            alignItems: "center",
           }}
+          title="Upload file"
+          aria-label="Upload file"
         >
-          {isUploading ? (
-            <span aria-hidden="true">&#9203;</span>
-          ) : (
-            <><span aria-hidden="true">&#128206;</span><span className="sr-only">Attach file</span></>
-          )}
-        </button>
-        <input
-          ref={fileInputRef}
-          type="file"
-          onChange={handleFileSelect}
-          style={{ display: "none" }}
-          aria-hidden="true"
-          tabIndex={-1}
-        />
+          <span aria-hidden="true">{"\uD83D\uDCCE"}</span>
+          <input
+            type="file"
+            onChange={handleFileSelect}
+            disabled={!activeSessionId}
+            style={{ display: "none" }}
+            aria-hidden="true"
+            tabIndex={-1}
+          />
+        </label>
 
         {/* Send button */}
         <button

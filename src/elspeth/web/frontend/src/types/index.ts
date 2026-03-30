@@ -308,3 +308,19 @@ export interface UploadResult {
   filename: string;
   size_bytes: number;
 }
+
+// ── Blob Manager ────────────────────────────────────────────────────────────
+
+/** Blob metadata returned by all blob endpoints. */
+export interface BlobMetadata {
+  id: string;
+  session_id: string;
+  filename: string;
+  mime_type: string;
+  size_bytes: number;
+  content_hash: string | null;
+  created_at: string;
+  created_by: "user" | "assistant" | "pipeline";
+  source_description: string | null;
+  status: "ready" | "pending" | "error";
+}

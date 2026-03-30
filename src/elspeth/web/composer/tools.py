@@ -14,6 +14,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+from sqlalchemy import Engine, select
+
 from elspeth.contracts.freeze import deep_thaw, freeze_fields
 from elspeth.web.catalog.protocol import CatalogService
 from elspeth.web.composer.state import (
@@ -24,6 +26,7 @@ from elspeth.web.composer.state import (
     SourceSpec,
     ValidationSummary,
 )
+from elspeth.web.sessions.models import blobs_table
 
 CatalogServiceProtocol = CatalogService  # Re-export for local use
 
@@ -110,7 +113,7 @@ def get_expression_grammar() -> str:
 def get_tool_definitions() -> list[dict[str, Any]]:
     """Return JSON Schema tool definitions for the LLM.
 
-    Returns 13 tools: 5 discovery, 8 mutation.
+    Returns 16 tools: 5 discovery + 8 mutation + 3 blob tools.
     """
     return [
         # Discovery tools
@@ -284,6 +287,42 @@ def get_tool_definitions() -> list[dict[str, Any]]:
                     "sink_name": {"type": "string", "description": "Sink name to remove."},
                 },
                 "required": ["sink_name"],
+            },
+        },
+        # Blob tools
+        {
+            "name": "list_blobs",
+            "description": "List uploaded/created files (blobs) in this session with metadata.",
+            "parameters": {"type": "object", "properties": {}, "required": []},
+        },
+        {
+            "name": "get_blob_metadata",
+            "description": "Get metadata for a specific blob (file) by ID.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "blob_id": {"type": "string", "description": "Blob ID."},
+                },
+                "required": ["blob_id"],
+            },
+        },
+        {
+            "name": "set_source_from_blob",
+            "description": "Wire a blob as the pipeline source. Resolves the blob's storage path internally and infers the source plugin from its MIME type.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "blob_id": {"type": "string", "description": "Blob ID to use as source."},
+                    "plugin": {"type": "string", "description": "Source plugin override (e.g. 'csv'). Inferred from MIME type if omitted."},
+                    "on_success": {"type": "string", "description": "Node ID to route rows to after source."},
+                    "on_validation_failure": {
+                        "type": "string",
+                        "enum": ["quarantine", "discard"],
+                        "description": "How to handle validation failures.",
+                        "default": "quarantine",
+                    },
+                },
+                "required": ["blob_id", "on_success"],
             },
         },
     ]
@@ -460,11 +499,75 @@ def _mutation_result(
     )
 
 
+# --- Blob helpers (sync — called from worker thread via compose()) ---
+
+_MIME_TO_SOURCE_PLUGIN: dict[str, str] = {
+    "text/csv": "csv",
+    "application/json": "json",
+    "application/x-jsonlines": "jsonl",
+    "application/jsonl": "jsonl",
+    "text/jsonl": "jsonl",
+    "text/plain": "csv",
+}
+
+
+def _sync_get_blob(engine: Engine, blob_id: str, session_id: str | None = None) -> dict[str, Any] | None:
+    """Synchronous blob lookup for use in the tool executor thread."""
+    with engine.connect() as conn:
+        query = select(blobs_table).where(blobs_table.c.id == blob_id)
+        if session_id is not None:
+            query = query.where(blobs_table.c.session_id == session_id)
+        row = conn.execute(query).first()
+        if row is None:
+            return None
+        return {
+            "id": row.id,
+            "session_id": row.session_id,
+            "filename": row.filename,
+            "mime_type": row.mime_type,
+            "size_bytes": row.size_bytes,
+            "content_hash": row.content_hash,
+            "storage_path": row.storage_path,
+            "created_by": row.created_by,
+            "source_description": row.source_description,
+            "status": row.status,
+        }
+
+
+def _sync_list_blobs(engine: Engine, session_id: str) -> list[dict[str, Any]]:
+    """Synchronous blob listing for use in the tool executor thread."""
+    with engine.connect() as conn:
+        rows = conn.execute(
+            select(blobs_table).where(blobs_table.c.session_id == session_id).order_by(blobs_table.c.created_at.desc()).limit(50)
+        ).fetchall()
+        return [
+            {
+                "id": row.id,
+                "filename": row.filename,
+                "mime_type": row.mime_type,
+                "size_bytes": row.size_bytes,
+                "created_by": row.created_by,
+                "status": row.status,
+            }
+            for row in rows
+        ]
+
+
+def _allowed_source_directories(data_dir: str) -> tuple[Path, ...]:
+    """Return the set of directories from which source paths are allowed.
+
+    AD-4: Single shared helper used by composer tool validation,
+    execution validation, and execution runtime guard.
+    """
+    base = Path(data_dir).resolve()
+    return (base / "uploads", base / "blobs")
+
+
 def _validate_source_path(
     options: dict[str, Any],
     data_dir: str | None,
 ) -> str | None:
-    """S2: Validate that path/file options are under {data_dir}/uploads/.
+    """S2: Validate that path/file options are under allowed source directories.
 
     Returns an error message if validation fails, None if OK.
     Uses Path.resolve() + is_relative_to() to defeat ../ traversal.
@@ -472,16 +575,16 @@ def _validate_source_path(
     if data_dir is None:
         return None
 
-    uploads_dir = Path(data_dir).resolve() / "uploads"
+    allowed = _allowed_source_directories(data_dir)
 
     for key in ("path", "file"):
         if key in options:
             resolved = Path(options[key]).resolve()
-            if not resolved.is_relative_to(uploads_dir):
+            if not any(resolved.is_relative_to(d) for d in allowed):
                 return (
                     f"Path violation (S2): '{options[key]}' is outside the "
-                    f"allowed directory '{uploads_dir}'. Source file paths "
-                    f"must be under {{data_dir}}/uploads/."
+                    f"allowed directories. Source file paths "
+                    f"must be under {data_dir}/uploads/ or {data_dir}/blobs/."
                 )
     return None
 
@@ -672,6 +775,88 @@ def _execute_remove_output(
     return _mutation_result(new_state, (sink_name,))
 
 
+# --- Blob tool handlers ---
+
+
+def _handle_list_blobs(
+    arguments: dict[str, Any],
+    state: CompositionState,
+    catalog: CatalogServiceProtocol,
+    data_dir: str | None = None,
+    *,
+    session_engine: Engine | None = None,
+    session_id: str | None = None,
+) -> ToolResult:
+    if session_engine is None or session_id is None:
+        return _failure_result(state, "Blob tools require session context.")
+    blobs = _sync_list_blobs(session_engine, session_id)
+    return _discovery_result(state, blobs)
+
+
+def _handle_get_blob_metadata(
+    arguments: dict[str, Any],
+    state: CompositionState,
+    catalog: CatalogServiceProtocol,
+    data_dir: str | None = None,
+    *,
+    session_engine: Engine | None = None,
+    session_id: str | None = None,
+) -> ToolResult:
+    if session_engine is None or session_id is None:
+        return _failure_result(state, "Blob tools require session context.")
+    blob = _sync_get_blob(session_engine, arguments["blob_id"], session_id)
+    if blob is None:
+        return _failure_result(state, f"Blob '{arguments['blob_id']}' not found.")
+    # Exclude storage_path from response
+    safe_blob = {k: v for k, v in blob.items() if k != "storage_path"}
+    return _discovery_result(state, safe_blob)
+
+
+def _execute_set_source_from_blob(
+    arguments: dict[str, Any],
+    state: CompositionState,
+    catalog: CatalogServiceProtocol,
+    data_dir: str | None = None,
+    *,
+    session_engine: Engine | None = None,
+    session_id: str | None = None,
+) -> ToolResult:
+    if session_engine is None or session_id is None:
+        return _failure_result(state, "Blob tools require session context.")
+    blob = _sync_get_blob(session_engine, arguments["blob_id"], session_id)
+    if blob is None:
+        return _failure_result(state, f"Blob '{arguments['blob_id']}' not found.")
+
+    if blob["status"] != "ready":
+        return _failure_result(state, f"Blob is not ready (status: {blob['status']}).")
+
+    # Determine source plugin
+    plugin = arguments.get("plugin") or _MIME_TO_SOURCE_PLUGIN.get(blob["mime_type"])
+    if plugin is None:
+        return _failure_result(
+            state,
+            f"Cannot infer source plugin for MIME type '{blob['mime_type']}'. Please specify the 'plugin' parameter explicitly.",
+        )
+
+    # Validate plugin exists
+    try:
+        catalog.get_schema("source", plugin)
+    except (ValueError, KeyError) as exc:
+        return _failure_result(state, f"Unknown source plugin '{plugin}': {exc}")
+
+    source = SourceSpec(
+        plugin=plugin,
+        on_success=arguments["on_success"],
+        options={"path": blob["storage_path"], "blob_ref": blob["id"]},
+        on_validation_failure=arguments.get("on_validation_failure", "quarantine"),
+    )
+    new_state = state.with_source(source)
+    return _mutation_result(new_state, ("source",))
+
+
+# Blob tool handler type — extended signature with session context
+BlobToolHandler = Callable[..., ToolResult]
+
 # --- Registries ---
 # Must be after all handler definitions to avoid NameError.
 
@@ -699,8 +884,21 @@ _MUTATION_TOOLS: dict[str, ToolHandler] = {
     "remove_output": _handle_remove_output,
 }
 
+# Blob tools use an extended handler signature with session context kwargs
+_BLOB_DISCOVERY_TOOLS: dict[str, BlobToolHandler] = {
+    "list_blobs": _handle_list_blobs,
+    "get_blob_metadata": _handle_get_blob_metadata,
+}
+
+_BLOB_MUTATION_TOOLS: dict[str, BlobToolHandler] = {
+    "set_source_from_blob": _execute_set_source_from_blob,
+}
+
 # Module-level assertions: registries must not overlap.
-assert not (set(_DISCOVERY_TOOLS) & set(_MUTATION_TOOLS)), f"Tool registry overlap: {set(_DISCOVERY_TOOLS) & set(_MUTATION_TOOLS)}"
+_all_tools = set(_DISCOVERY_TOOLS) | set(_MUTATION_TOOLS) | set(_BLOB_DISCOVERY_TOOLS) | set(_BLOB_MUTATION_TOOLS)
+assert len(_all_tools) == len(_DISCOVERY_TOOLS) + len(_MUTATION_TOOLS) + len(_BLOB_DISCOVERY_TOOLS) + len(_BLOB_MUTATION_TOOLS), (
+    "Tool registry overlap detected"
+)
 
 assert set(_DISCOVERY_TOOLS) >= _CACHEABLE_DISCOVERY_TOOLS, (
     f"Cacheable tools not in discovery registry: {_CACHEABLE_DISCOVERY_TOOLS - set(_DISCOVERY_TOOLS)}"
@@ -709,7 +907,7 @@ assert set(_DISCOVERY_TOOLS) >= _CACHEABLE_DISCOVERY_TOOLS, (
 
 def is_discovery_tool(name: str) -> bool:
     """Return True if the tool is a discovery (read-only) tool."""
-    return name in _DISCOVERY_TOOLS
+    return name in _DISCOVERY_TOOLS or name in _BLOB_DISCOVERY_TOOLS
 
 
 def is_cacheable_discovery_tool(name: str) -> bool:
@@ -726,6 +924,8 @@ def execute_tool(
     state: CompositionState,
     catalog: CatalogServiceProtocol,
     data_dir: str | None = None,
+    session_engine: Engine | None = None,
+    session_id: str | None = None,
 ) -> ToolResult:
     """Execute a composition tool by name.
 
@@ -736,9 +936,26 @@ def execute_tool(
     Args:
         data_dir: Base data directory for S2 path allowlist enforcement.
             When provided, source options containing ``path`` or ``file``
-            keys are restricted to ``{data_dir}/uploads/``.
+            keys are restricted to ``{data_dir}/uploads/`` or ``{data_dir}/blobs/``.
+        session_engine: SQLAlchemy engine for the session database.
+            Required for blob tools to perform synchronous blob lookups.
+        session_id: Current session ID. Required for blob tools.
     """
+    # Check standard tools first
     handler = _DISCOVERY_TOOLS.get(tool_name) or _MUTATION_TOOLS.get(tool_name)
-    if handler is None:
-        return _failure_result(state, f"Unknown tool: {tool_name}")
-    return handler(arguments, state, catalog, data_dir)
+    if handler is not None:
+        return handler(arguments, state, catalog, data_dir)
+
+    # Check blob tools (extended signature with session context)
+    blob_handler = _BLOB_DISCOVERY_TOOLS.get(tool_name) or _BLOB_MUTATION_TOOLS.get(tool_name)
+    if blob_handler is not None:
+        return blob_handler(
+            arguments,
+            state,
+            catalog,
+            data_dir,
+            session_engine=session_engine,
+            session_id=session_id,
+        )
+
+    return _failure_result(state, f"Unknown tool: {tool_name}")
