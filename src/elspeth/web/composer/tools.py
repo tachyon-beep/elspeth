@@ -1231,12 +1231,12 @@ def _execute_set_pipeline(
                 )
             )
 
-        meta = args.get("metadata", {})
+        meta = args.get("metadata") or {}
         metadata_spec = PipelineMetadata(
             name=meta.get("name", "Untitled Pipeline"),
             description=meta.get("description", ""),
         )
-    except (KeyError, TypeError) as exc:
+    except (KeyError, TypeError, AttributeError) as exc:
         return _failure_result(state, f"Invalid pipeline spec: {exc}")
 
     # 5. Build new state
@@ -1274,6 +1274,8 @@ def _execute_patch_source_options(
     if state.source is None:
         return _failure_result(state, "No source configured to patch.")
     patch = args["patch"]
+    if not isinstance(patch, dict):
+        return _failure_result(state, "patch must be an object.")
     new_options = _apply_merge_patch(state.source.options, patch)
 
     # S2: Validate patched source paths against allowlist
@@ -1306,6 +1308,8 @@ def _execute_patch_node_options(
 ) -> ToolResult:
     node_id = args["node_id"]
     patch = args["patch"]
+    if not isinstance(patch, dict):
+        return _failure_result(state, "patch must be an object.")
     current = next((n for n in state.nodes if n.id == node_id), None)
     if current is None:
         return _failure_result(state, f"Node '{node_id}' not found.")
@@ -1344,6 +1348,8 @@ def _execute_patch_output_options(
 ) -> ToolResult:
     sink_name = args["sink_name"]
     patch = args["patch"]
+    if not isinstance(patch, dict):
+        return _failure_result(state, "patch must be an object.")
     current = next((o for o in state.outputs if o.name == sink_name), None)
     if current is None:
         return _failure_result(state, f"Output '{sink_name}' not found.")

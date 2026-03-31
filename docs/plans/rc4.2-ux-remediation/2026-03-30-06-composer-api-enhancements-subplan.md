@@ -1,7 +1,7 @@
 # RC4.2 UX Remediation — Composer API Enhancements Subplan
 
-Date: 2026-03-30 (expanded 2026-03-31)
-Status: Ready
+Date: 2026-03-30 (expanded 2026-03-31, corrected 2026-03-31, implemented 2026-03-31)
+Status: Implemented
 Parent: `docs/plans/rc4.2-ux-remediation/2026-03-30-rc4.2-ux-implementation-plan.md`
 
 ---
@@ -51,9 +51,9 @@ Non-goals:
 
 ## 3. Architecture Decisions
 
-### AD-1: JSON merge-patch (RFC 7396) for all patch operations
+### AD-1: Shallow merge-patch for all patch operations
 
-Patch tools apply RFC 7396 semantics at the `options` dict level:
+Patch tools apply shallow merge-patch semantics at the `options` dict level:
 
 - Keys present in the patch overwrite the corresponding keys in the target.
 - Keys set to `null` in the patch delete the corresponding key from the target.
@@ -63,8 +63,13 @@ This is a **shallow merge** on `options` only. To change a nested key inside
 options, the caller must supply the full nested structure for that key. This
 matches the requirement spec and is simple to implement and explain.
 
-Implementation: `{**current_options, **patch}` with explicit `None`-key
-deletion. No library dependency needed.
+Implementation: `dict(target)` + iterate patch items with explicit `None`-key
+deletion via `result.pop(key, None)`. No library dependency needed.
+
+**Implementation note:** The helper docstring uses "Shallow merge-patch"
+rather than citing RFC 7396 directly, because RFC 7396 specifies recursive
+merge and our implementation is deliberately shallow (one level only). The
+tool descriptions accurately describe the behaviour to the LLM.
 
 ### AD-2: Patch tools reuse existing state mutation methods
 
@@ -101,9 +106,10 @@ applied atomically.
 ### AD-4: `set_pipeline` validates plugin names via catalog
 
 Each source/node/sink plugin name in the `set_pipeline` payload is validated
-against the catalog, using the same logic as `set_source`, `upsert_node`, and
-`set_output`. This prevents the LLM from inventing plugin names in an atomic
-call that would bypass the per-tool validation.
+against the catalog, using the same shared `_validate_plugin_name` helper as
+`set_source`, `upsert_node`, and `set_output`. This prevents the LLM from
+inventing plugin names in an atomic call that would bypass the per-tool
+validation.
 
 ### AD-5: `set_pipeline` counts as a single composition budget charge
 
@@ -111,90 +117,65 @@ Even though it replaces the entire state, `set_pipeline` is a single mutation
 tool call and charges one composition turn. This is the primary benefit: the
 LLM can build a full pipeline in one turn instead of N sequential mutations.
 
+### AD-6: Source path allowlist enforced on all source-mutating tools
+
+Any tool that can set or modify source `options` must call
+`_validate_source_path(options, data_dir)` to enforce the S2 composer-time
+path allowlist. This applies to: `set_source`, `set_pipeline`,
+`patch_source_options`, and `set_source_from_blob`.
+
+**Discovered during implementation:** The initial `set_pipeline` and
+`patch_source_options` implementations omitted this check, creating a
+security control bypass. Both were fixed during code review. The root cause
+is that the allowlist check lives in the handler layer, not in
+`CompositionState.with_source()`. A future refactor could move it into the
+state model to make bypasses impossible, but that requires threading
+`data_dir` into the state model — a larger change deferred for now.
+
+### AD-7: LLM tool arguments are Tier 3 (untrusted) input
+
+Tool arguments arrive from the LLM and may contain `null` or wrong types
+where the JSON Schema declares `"type": "object"`. Patch handlers validate
+that `patch` is a `dict` before calling `_apply_merge_patch`. The
+`set_pipeline` handler uses `args.get("metadata") or {}` to handle both
+absent and `null` metadata, and catches `AttributeError` alongside
+`KeyError`/`TypeError` in spec construction.
+
 ---
 
 ## 4. Detailed Changes
 
 ### Phase 6A: Patch Operations (3 new tools)
 
-#### 6A.1: `patch_source_options` tool
+#### Handler signature convention
 
-**Tool definition** (add to `get_tool_definitions()` in `tools.py`):
-
-```python
-{
-    "name": "patch_source_options",
-    "description": "Apply a JSON merge-patch to the current source options. "
-        "Keys in the patch overwrite existing keys. "
-        "Keys set to null are deleted. Missing keys are unchanged.",
-    "parameters": {
-        "type": "object",
-        "properties": {
-            "patch": {
-                "type": "object",
-                "description": "Merge-patch to apply to source options.",
-            },
-        },
-        "required": ["patch"],
-    },
-}
-```
-
-**Handler** (`_execute_patch_source_options`):
+All handlers registered in `_MUTATION_TOOLS` conform to the `ToolHandler`
+type alias:
 
 ```python
-def _execute_patch_source_options(
-    state: CompositionState,
-    args: dict[str, Any],
-    catalog: CatalogServiceProtocol,
-) -> ToolResult:
-    if state.source is None:
-        return _failure_result(state, "No source configured to patch.")
-    patch = args.get("patch", {})
-    new_options = _apply_merge_patch(state.source.options, patch)
-    new_source = SourceSpec(
-        plugin=state.source.plugin,
-        options=new_options,
-        on_success=state.source.on_success,
-        on_validation_failure=state.source.on_validation_failure,
-    )
-    new_state = state.with_source(new_source)
-    return ToolResult(
-        success=True,
-        updated_state=new_state,
-        validation=new_state.validate(),
-        affected_nodes=("source",),
-    )
+ToolHandler = Callable[
+    [dict[str, Any], CompositionState, CatalogServiceProtocol, str | None],
+    ToolResult,
+]
 ```
 
-#### 6A.2: `patch_node_options` tool
+Parameter order: `(arguments, state, catalog, data_dir=None)`.
 
-Same pattern. Looks up node by `node_id`, applies merge-patch to `node.options`,
-constructs new `NodeSpec` preserving all other fields, calls `state.with_node()`.
-
-**Extra parameter:** `node_id: str` (required).
-
-Fail if node not found: `"Node '{node_id}' not found."`
-
-#### 6A.3: `patch_output_options` tool
-
-Same pattern. Looks up output by `sink_name`, applies merge-patch to
-`output.options`, constructs new `OutputSpec`, calls `state.with_output()`.
-
-**Extra parameter:** `sink_name: str` (required).
-
-Fail if output not found: `"Output '{sink_name}' not found."`
+The codebase uses a two-layer pattern: a thin wrapper (e.g.
+`_handle_patch_source_options`) satisfies the `ToolHandler` signature and
+delegates to an inner function (e.g. `_execute_patch_source_options`) with a
+tighter signature. The `patch_source_options` wrapper passes `data_dir`
+through for path validation (AD-6); the node and output wrappers do not need
+it.
 
 #### 6A.4: Shared merge-patch helper
-
-Add a module-level helper:
 
 ```python
 def _apply_merge_patch(
     target: Mapping[str, Any],
     patch: dict[str, Any],
 ) -> dict[str, Any]:
-    """RFC 7396 JSON merge-patch at one level."""
+    """Shallow merge-patch: overwrite or delete top-level keys in target."""
     result = dict(target)
     for key, value in patch.items():
         if value is None:
@@ -204,225 +185,111 @@ def _apply_merge_patch(
     return result
 ```
 
-This is deliberately one-level-deep, matching AD-1.
+- `target` typed `Mapping[str, Any]` for frozen `MappingProxyType` compat
+- `dict(target)` produces a mutable copy; returned dict is re-frozen by spec
+  constructor's `freeze_fields()`
+- `result.pop(key, None)` is not a tier model violation — operates on a local
+  mutable dict, not a dataclass field
+
+#### 6A.1: `patch_source_options`
+
+Inner handler receives `data_dir` and calls `_validate_source_path` on the
+patched options (AD-6). Validates `patch` is a `dict` before use (AD-7).
+Uses `args["patch"]` (required parameter — direct access, not `.get()`).
+
+#### 6A.2: `patch_node_options`
+
+Looks up node by `node_id`. Validates `patch` is a `dict`. Constructs new
+`NodeSpec` with all 13 fields preserved from `current`, only `options`
+replaced. Uses `state.with_node()`.
+
+#### 6A.3: `patch_output_options`
+
+Looks up output by `sink_name`. Validates `patch` is a `dict`. Constructs
+new `OutputSpec` with `options` replaced. Uses `state.with_output()`.
 
 #### 6A.5: Register in dispatch
 
-Add all three to `_MUTATION_TOOLS` registry dict (around line 1040):
-
-```python
-_MUTATION_TOOLS: dict[str, MutationHandler] = {
-    # ... existing entries ...
-    "patch_source_options": _execute_patch_source_options,
-    "patch_node_options": _execute_patch_node_options,
-    "patch_output_options": _execute_patch_output_options,
-}
-```
-
-The overlap assertions at line 1074 will catch any name collision
-automatically.
+All three wrappers added to `_MUTATION_TOOLS`.
 
 ---
 
 ### Phase 6B: `set_pipeline` Tool
 
-#### 6B.1: Tool definition
-
-```python
-{
-    "name": "set_pipeline",
-    "description": "Atomically replace the entire pipeline. Provide the "
-        "complete source, nodes, edges, outputs, and metadata in one call. "
-        "This is more efficient than calling set_source + upsert_node + "
-        "upsert_edge + set_output sequentially.",
-    "parameters": {
-        "type": "object",
-        "properties": {
-            "source": {
-                "type": "object",
-                "description": "Source configuration: {plugin, options, on_success, on_validation_failure?}",
-            },
-            "nodes": {
-                "type": "array",
-                "items": {"type": "object"},
-                "description": "Array of node specs: [{id, input, plugin?, node_type, options?, condition?, routes?, branches?, policy?}]",
-            },
-            "edges": {
-                "type": "array",
-                "items": {"type": "object"},
-                "description": "Array of edge specs: [{id, from_node, to_node, edge_type}]",
-            },
-            "outputs": {
-                "type": "array",
-                "items": {"type": "object"},
-                "description": "Array of output specs: [{name, plugin, options, on_write_failure?}]",
-            },
-            "metadata": {
-                "type": "object",
-                "description": "Pipeline metadata: {name?, description?}",
-            },
-        },
-        "required": ["source", "nodes", "edges", "outputs"],
-    },
-}
-```
-
-#### 6B.2: Handler (`_execute_set_pipeline`)
-
-Flow:
-
-1. **Validate source plugin** against catalog (same check as `set_source`).
-2. **Validate each node's plugin** against catalog where `plugin` is present
-   (same check as `upsert_node`).
-3. **Validate each output's plugin** against catalog (same check as
-   `set_output`).
-4. **Construct specs** from raw dicts using `SourceSpec(...)`,
-   `NodeSpec(...)`, `EdgeSpec(...)`, `OutputSpec(...)`,
-   `PipelineMetadata(...)`. Use the same field extraction and defaults as the
-   individual tool handlers.
-5. **Build new state:**
-   ```python
-   new_state = CompositionState(
-       source=source_spec,
-       nodes=tuple(node_specs),
-       edges=tuple(edge_specs),
-       outputs=tuple(output_specs),
-       metadata=metadata_spec,
-       version=state.version + 1,
-   )
-   ```
-6. **Validate** and return `ToolResult`.
-
-Error handling:
-
-- If any plugin name is not in the catalog, fail with a clear message
-  identifying which component has the unknown plugin.
-- If spec construction raises (e.g. missing required field), catch
-  `KeyError`/`TypeError` and return `_failure_result` with the field name.
-
-#### 6B.3: Register in dispatch
-
-Add to `_MUTATION_TOOLS`:
-
-```python
-"set_pipeline": _execute_set_pipeline,
-```
-
 #### 6B.4: Extract shared plugin validation
 
-The catalog validation logic is currently inline in `_execute_set_source`
-(line ~635), `_execute_upsert_node` (line ~665), and `_execute_set_output`
-(line ~785). `set_pipeline` needs the same checks for all three plugin types.
+Extracted `_validate_plugin_name(catalog, plugin_type, name) -> str | None`
+from the inline try/except blocks in `_execute_set_source`,
+`_execute_upsert_node`, and `_execute_set_output`. Refactored all three
+handlers to use it. The `plugin_type` parameter is typed with `PluginKind`
+(`Literal["source", "transform", "sink"]`).
 
-Extract a shared helper:
+#### 6B.1–6B.3: Tool definition, handler, and registration
 
-```python
-def _validate_plugin_name(
-    catalog: CatalogServiceProtocol,
-    plugin_type: str,
-    name: str,
-) -> str | None:
-    """Return an error message if the plugin name is not in the catalog,
-    or None if valid."""
-    # ... lookup logic from existing handlers ...
-```
+`_execute_set_pipeline(args, state, catalog, data_dir)`:
 
-Refactor the three existing handlers to use this helper, then use it in
-`set_pipeline`. This is a refactor, not a behaviour change.
+1. Validates source plugin via `_validate_plugin_name`
+2. Validates source path via `_validate_source_path` (AD-6)
+3. Validates each node's plugin (only `transform`/`aggregation` with non-None
+   plugin)
+4. Validates each output's plugin
+5. Constructs all specs with correct defaults matching individual handlers:
+   - `SourceSpec.on_validation_failure` → `"quarantine"`
+   - `NodeSpec.on_success`/`on_error` → `None`; `options` → `{}`
+   - `OutputSpec.on_write_failure` → `"discard"`; `options` → `{}`
+   - `PipelineMetadata.name` → `"Untitled Pipeline"` (matches class default)
+   - `fork_to`/`branches` converted to `tuple` when present
+6. Catches `(KeyError, TypeError, AttributeError)` from spec construction
+   (AD-7)
+7. Builds `CompositionState` with `version = state.version + 1`
+8. Returns `_mutation_result` with all nodes + source + outputs as affected
+
+Wrapper `_handle_set_pipeline` passes `data_dir` through.
 
 ---
 
 ### Phase 6C: Tests
 
-#### 6C.1: Patch tool unit tests
+22 new tests in `tests/unit/web/composer/test_tools.py`:
 
-File: `tests/unit/web/composer/test_tools.py` (create or extend)
+- **TestMergePatch** (6): overwrites, adds, deletes-null,
+  preserves-unmentioned, empty-patch, MappingProxyType immutability
+- **TestPatchSourceOptions** (4): updates-key, adds-key, deletes-key-null,
+  no-source-fails
+- **TestPatchNodeOptions** (2): updates-key (other fields preserved),
+  unknown-node-fails
+- **TestPatchOutputOptions** (2): updates-key, unknown-sink-fails
+- **TestSetPipeline** (8): creates-valid-state, unknown-source-fails,
+  unknown-node-fails (selective side_effect), unknown-sink-fails (selective
+  side_effect), missing-required-field-fails, replaces-entire-state,
+  version-increments, validation-runs
 
-| Test | Setup | Expected |
-|------|-------|----------|
-| `test_patch_source_options_updates_key` | Source with `{path: "/a"}`, patch `{path: "/b"}` | Source options now `{path: "/b"}` |
-| `test_patch_source_options_adds_key` | Source with `{path: "/a"}`, patch `{encoding: "utf-8"}` | Options now `{path: "/a", encoding: "utf-8"}` |
-| `test_patch_source_options_deletes_key` | Source with `{path: "/a", encoding: "utf-8"}`, patch `{encoding: null}` | Options now `{path: "/a"}` |
-| `test_patch_source_options_no_source_fails` | No source configured | `success=False`, error message |
-| `test_patch_node_options_updates_key` | Node with options, patch one key | Options updated, other fields preserved |
-| `test_patch_node_options_unknown_node_fails` | Nonexistent node_id | `success=False`, error message |
-| `test_patch_output_options_updates_key` | Output with options, patch one key | Options updated |
-| `test_patch_output_options_unknown_sink_fails` | Nonexistent sink_name | `success=False`, error message |
+2 existing tests updated: tool count 19→23, mutation tool count 8→12.
 
-#### 6C.2: Merge-patch helper unit tests
-
-| Test | Setup | Expected |
-|------|-------|----------|
-| `test_merge_patch_overwrites` | `{a: 1}` + `{a: 2}` | `{a: 2}` |
-| `test_merge_patch_adds` | `{a: 1}` + `{b: 2}` | `{a: 1, b: 2}` |
-| `test_merge_patch_deletes_null` | `{a: 1, b: 2}` + `{b: null}` | `{a: 1}` |
-| `test_merge_patch_preserves_unmentioned` | `{a: 1, b: 2}` + `{a: 3}` | `{a: 3, b: 2}` |
-| `test_merge_patch_empty_patch` | `{a: 1}` + `{}` | `{a: 1}` |
-| `test_merge_patch_does_not_mutate_target` | MappingProxyType input | Original unchanged |
-
-#### 6C.3: `set_pipeline` unit tests
-
-| Test | Setup | Expected |
-|------|-------|----------|
-| `test_set_pipeline_creates_valid_state` | Full valid pipeline spec | `success=True`, `is_valid=True`, version incremented |
-| `test_set_pipeline_unknown_source_plugin_fails` | Source with `plugin: "nonexistent"` | `success=False`, error names the source plugin |
-| `test_set_pipeline_unknown_node_plugin_fails` | Node with unknown plugin | `success=False`, error names the node |
-| `test_set_pipeline_unknown_sink_plugin_fails` | Output with unknown plugin | `success=False`, error names the output |
-| `test_set_pipeline_missing_required_field_fails` | Source missing `on_success` | `success=False`, error indicates the field |
-| `test_set_pipeline_replaces_entire_state` | Existing state with 3 nodes, set_pipeline with 1 node | New state has exactly 1 node |
-| `test_set_pipeline_version_increments` | Current version N | New version is N+1 |
-| `test_set_pipeline_validation_runs` | Pipeline with disconnected node | Validation errors in result |
-
-#### 6C.4: Integration tests
-
-File: `tests/integration/web/test_composer_tools.py` (create or extend)
-
-| Test | Setup | Expected |
-|------|-------|----------|
-| `test_patch_source_via_message` | Send message that triggers `patch_source_options` | Response state reflects patched options |
-| `test_set_pipeline_via_message` | Send message that triggers `set_pipeline` | Response state matches the full pipeline |
-
-These can be difficult to trigger deterministically via the LLM. If the
-composer test harness supports direct tool execution, test via that path
-instead.
+All error-path tests verify `result.data["error"]` content. Test fixture
+`_valid_pipeline_args()` uses proper channel names (`source_out`) for node
+inputs.
 
 ---
 
-## 5. Implementation Order
+## 5. Implementation Order (as executed)
 
 ```
-Phase 6A (patch tools) ─────────────────────────────────┐
+Phase 6A (patch tools) ─── sequential ──────────────────┐
   6A.4  Shared merge-patch helper                        │
-  6A.1  patch_source_options tool + handler              │
-  6A.2  patch_node_options tool + handler                │
-  6A.3  patch_output_options tool + handler              │
+  6A.1–3  3 patch tools + handlers + wrappers            │
   6A.5  Register in dispatch                             │
                                                          │
-Phase 6B (set_pipeline) ── can parallel with 6A ────────┤
-  6B.4  Extract shared plugin validation helper          │
-  6B.1  Tool definition                                  │
-  6B.2  Handler                                          │
-  6B.3  Register in dispatch                             │
+Phase 6B (set_pipeline) ── after 6A (same file) ───────┤
+  6B.4  Extract _validate_plugin_name, refactor 3 handlers│
+  6B.1–3  set_pipeline tool + handler + registration     │
                                                          │
 Phase 6C (tests) ── after 6A + 6B ──────────────────────┘
-  6C.1  Patch tool unit tests
-  6C.2  Merge-patch helper tests
-  6C.3  set_pipeline unit tests
-  6C.4  Integration tests (if feasible)
+  22 unit tests across 5 test classes
 ```
 
-**Parallelism:** Phases 6A and 6B are independent of each other (different
-tools, different handlers). Both must complete before 6C.
-
-**Dependencies:** Sub-plan 05 (validation enhancements) should land first so
-the new tools return `warnings` and `suggestions` in their validation results
-automatically. However, this is not a hard blocker — the tools will work
-correctly without it, they'll just return the pre-enhancement
-`ValidationSummary` shape.
-
-**Estimated scope:** ~200 lines new tool handlers, ~50 lines shared helpers,
-~200 lines tests. No database changes. No frontend changes. No new files
-except test files.
+6A and 6B were executed sequentially (not in parallel) because both modify
+`tools.py`. Sub-plan 05 landed first.
 
 ---
 
@@ -432,44 +299,49 @@ except test files.
 
 | File | Changes |
 |------|---------|
-| `src/elspeth/web/composer/tools.py` | 4 new tool definitions, 4 new handlers, 1 merge-patch helper, 1 plugin validation helper, registry additions |
-
-### Possibly modified
-
-| File | Condition |
-|------|-----------|
-| `src/elspeth/web/composer/state.py` | Only if `without_source()` is added here (moved to Wave 4) |
-
-### New (tests only)
-
-| File | Purpose |
-|------|---------|
-| `tests/unit/web/composer/test_tools.py` | Patch + set_pipeline unit tests |
+| `src/elspeth/web/composer/tools.py` | 4 new tool definitions, 4 wrapper handlers, 4 inner handlers, `_apply_merge_patch` helper, `_validate_plugin_name` helper, refactor of 3 existing handlers, registry additions (tool count 19→23, mutation 8→12) |
+| `tests/unit/web/composer/test_tools.py` | 22 new tests in 5 classes, 2 updated count assertions, `deep_thaw` moved to module-level import |
 
 ---
 
-## 7. Risks
+## 7. Risks and Mitigations
 
 | Risk | Severity | Mitigation |
 |------|----------|------------|
-| LLM uses patch tools incorrectly (wrong key names, wrong nesting level) | Low | Tool descriptions are explicit about shallow merge. Validation runs after every mutation — the LLM sees errors immediately. |
-| `set_pipeline` with invalid plugin names produces confusing multi-error output | Low | Validate each component type separately and report the first failure with a clear component identifier. |
-| Plugin validation extraction changes existing tool behaviour | Low | The refactor is mechanical — extract existing inline checks to a shared function. Existing tests cover the behaviour. |
-| Merge-patch on frozen `MappingProxyType` options | None | `_apply_merge_patch` accepts `Mapping` and returns a plain `dict`. The spec constructor + `freeze_fields` handles re-freezing. |
+| LLM uses patch tools incorrectly (wrong key names, wrong nesting level) | Low | Tool descriptions are explicit about shallow merge. Validation runs after every mutation. |
+| `set_pipeline` with invalid plugin names | Low | Validate each component type separately and return on the first failure. |
+| Plugin validation extraction changes existing behaviour | Low | Mechanical refactor. Existing tests all pass. |
+| Merge-patch on frozen `MappingProxyType` options | None | `_apply_merge_patch` accepts `Mapping`, returns `dict`. Spec constructor re-freezes. |
+| **Source path allowlist bypass via new tools** | **Caught** | `set_pipeline` and `patch_source_options` initially omitted `_validate_source_path`. Both fixed during code review (AD-6). |
+| **`null` or non-object LLM arguments** | **Caught** | Patch handlers validate `isinstance(patch, dict)`. `set_pipeline` uses `or {}` for metadata and catches `AttributeError` (AD-7). |
+| Tier model enforcer new violations | Low | `isinstance` checks in patch handlers are Tier 3 boundary validation (allowlisted). |
 
 ---
 
 ## 8. Acceptance Criteria
 
-- [ ] `patch_source_options`, `patch_node_options`, `patch_output_options`
+- [x] `patch_source_options`, `patch_node_options`, `patch_output_options`
       tools exist and appear in LLM tool definitions.
-- [ ] Patch tools apply RFC 7396 merge-patch: overwrite, add, delete-on-null,
+- [x] Patch tools apply shallow merge-patch: overwrite, add, delete-on-null,
       preserve-absent.
-- [ ] Patch tools fail gracefully when target doesn't exist (no source, unknown
-      node, unknown output).
-- [ ] `set_pipeline` tool exists and creates a complete state in one call.
-- [ ] `set_pipeline` validates all plugin names against the catalog.
-- [ ] `set_pipeline` increments version by 1.
-- [ ] `set_pipeline` charges one composition budget turn.
-- [ ] All new tools return `ToolResult` with `ValidationSummary`.
-- [ ] All unit tests pass.
+- [x] Patch tools fail gracefully when target doesn't exist (no source,
+      unknown node, unknown output).
+- [x] Patch tools validate `patch` argument is a dict (AD-7).
+- [x] `patch_source_options` enforces source path allowlist (AD-6).
+- [x] `set_pipeline` tool exists and creates a complete state in one call.
+- [x] `set_pipeline` validates all plugin names against the catalog.
+- [x] `set_pipeline` enforces source path allowlist (AD-6).
+- [x] `set_pipeline` handles `null` metadata gracefully (AD-7).
+- [x] `set_pipeline` increments version by 1.
+- [x] `set_pipeline` charges one composition budget turn.
+- [x] `PipelineMetadata.name` defaults to `"Untitled Pipeline"` (matches
+      class default).
+- [x] All new tools return `ToolResult` with `ValidationSummary` including
+      warnings and suggestions (from sub-plan 05).
+- [x] All handler wrappers conform to `ToolHandler` signature.
+- [x] Shared `_validate_plugin_name` helper used by `set_source`,
+      `upsert_node`, `set_output`, and `set_pipeline`.
+- [x] All 80 tool tests pass (22 new + 58 existing).
+- [x] All error-path tests verify error message content.
+- [x] Tier model enforcer passes.
+- [x] mypy + ruff clean.
