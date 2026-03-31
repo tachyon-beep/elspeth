@@ -276,6 +276,7 @@ class ChromaSearchProvider:
             )
 
         chunks.sort(key=lambda c: c.score, reverse=True)
+        self.last_skipped_count = skipped
 
         call_index = self._recorder.allocate_call_index(state_id)
         self._recorder.record_call(

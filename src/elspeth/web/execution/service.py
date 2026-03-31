@@ -15,6 +15,7 @@ schedule coroutines on the main event loop from the background thread.
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import threading
 import time
 from collections.abc import Coroutine
@@ -123,7 +124,7 @@ class ExecutionServiceImpl:
         Sets all active shutdown events first so running pipelines can
         terminate gracefully before blocking on executor.shutdown(wait=True).
         """
-        for event in self._shutdown_events.values():
+        for event in list(self._shutdown_events.values()):
             event.set()
         self._executor.shutdown(wait=True)
 
@@ -222,8 +223,12 @@ class ExecutionServiceImpl:
 
             # Submit to thread pool
             future = self._executor.submit(self._run_pipeline, str(run_id), pipeline_yaml, shutdown_event, user_id)
-        except BaseException:
+        except BaseException as exc:
             self._shutdown_events.pop(str(run_id), None)
+            # Transition run out of pending so the one-active-run constraint
+            # doesn't permanently block this session.
+            with contextlib.suppress(Exception):
+                await self._session_service.update_run_status(run_id, status="failed", error=f"Setup failed: {exc}")
             raise
         # B7 Layer 2: safety net callback
         future.add_done_callback(self._on_pipeline_done)

@@ -228,36 +228,37 @@ def create_execution_router() -> APIRouter:
             await websocket.close(code=4004, reason="Run not found")
             return
 
-        # Seed: if the run already reached a terminal state before the
-        # client connected (short runs, page refresh), send the terminal
-        # status immediately and close.  Without this, the client gets
-        # stuck on heartbeats because the terminal event was already
-        # emitted before this queue existed.
-        try:
-            current = await service.get_status(UUID(run_id))
-            if current.status in ("completed", "failed", "cancelled"):
-                await websocket.send_json(
-                    {
-                        "run_id": run_id,
-                        "timestamp": current.finished_at.isoformat()
-                        if current.finished_at
-                        else current.started_at.isoformat()
-                        if current.started_at
-                        else "",
-                        "event_type": current.status,
-                        "data": {
-                            "rows_processed": current.rows_processed,
-                            "rows_failed": current.rows_failed,
-                        },
-                    }
-                )
-                await websocket.close(code=1000)
-                return
-        except ValueError:
-            pass  # Run not found — proceed to live stream
-
+        # Subscribe BEFORE checking terminal status to close the race
+        # window where a run finishes between get_status() and subscribe().
+        # If subscribed first, any terminal event broadcast during the check
+        # lands in the queue and won't be lost.
         queue = broadcaster.subscribe(run_id)
         try:
+            # Seed: if the run already reached a terminal state before the
+            # client connected (short runs, page refresh), send the terminal
+            # status immediately and close.
+            try:
+                current = await service.get_status(UUID(run_id))
+                if current.status in ("completed", "failed", "cancelled"):
+                    await websocket.send_json(
+                        {
+                            "run_id": run_id,
+                            "timestamp": current.finished_at.isoformat()
+                            if current.finished_at
+                            else current.started_at.isoformat()
+                            if current.started_at
+                            else "",
+                            "event_type": current.status,
+                            "data": {
+                                "rows_processed": current.rows_processed,
+                                "rows_failed": current.rows_failed,
+                            },
+                        }
+                    )
+                    await websocket.close(code=1000)
+                    return
+            except ValueError:
+                pass  # Run not found — proceed to live stream
             while True:
                 try:
                     event = await asyncio.wait_for(queue.get(), timeout=60.0)
