@@ -980,3 +980,147 @@ class TestStage1Validation:
         restored = CompositionState.from_dict(state.to_dict())
         result = restored.validate()
         assert result.is_valid, result.errors
+
+    # --- Warning rules (W1-W4) ---
+
+    def test_validate_output_no_incoming_edge_warns(self) -> None:
+        """W1: Output with no edge targeting it produces a warning."""
+        state = self._empty_state()
+        state = state.with_source(self._make_source(on_success="t1"))
+        state = state.with_node(self._make_transform("t1", "t1", "main"))
+        state = state.with_output(self._make_output("main"))
+        state = state.with_output(self._make_output("orphan"))
+        state = state.with_edge(self._make_edge("e1", "source", "t1"))
+        state = state.with_edge(self._make_edge("e2", "t1", "main"))
+        result = state.validate()
+        assert result.is_valid
+        assert any("orphan" in w and "no incoming edge" in w for w in result.warnings)
+
+    def test_validate_source_on_success_mismatch_warns(self) -> None:
+        """W2: Source on_success doesn't match any node input."""
+        state = self._empty_state()
+        state = state.with_source(self._make_source(on_success="nonexistent"))
+        state = state.with_node(self._make_transform("t1", "other_input", "main"))
+        state = state.with_output(self._make_output("main"))
+        state = state.with_edge(self._make_edge("e1", "source", "t1"))
+        state = state.with_edge(self._make_edge("e2", "t1", "main"))
+        result = state.validate()
+        assert any("nonexistent" in w and "does not match" in w for w in result.warnings)
+
+    def test_validate_format_extension_mismatch_warns(self) -> None:
+        """W4: Sink plugin/filename extension mismatch."""
+        state = self._empty_state()
+        state = state.with_source(self._make_source(on_success="t1"))
+        state = state.with_node(self._make_transform("t1", "t1", "results"))
+        output = OutputSpec(
+            name="results",
+            plugin="csv",
+            options={"path": "/output/data.json"},
+            on_write_failure="discard",
+        )
+        state = state.with_output(output)
+        state = state.with_edge(self._make_edge("e1", "source", "t1"))
+        state = state.with_edge(self._make_edge("e2", "t1", "results"))
+        result = state.validate()
+        assert result.is_valid
+        assert any("extension suggests a different format" in w for w in result.warnings)
+
+    # --- Suggestion rules (S1-S3) ---
+
+    def test_validate_no_error_routing_suggests(self) -> None:
+        """S1: Pipeline with no gates and no on_error edges gets a suggestion."""
+        state = self._empty_state()
+        state = state.with_source(self._make_source(on_success="t1"))
+        state = state.with_node(self._make_transform("t1", "t1", "main"))
+        state = state.with_output(self._make_output("main"))
+        state = state.with_edge(self._make_edge("e1", "source", "t1"))
+        state = state.with_edge(self._make_edge("e2", "t1", "main"))
+        result = state.validate()
+        assert result.is_valid
+        assert any("error routing" in s for s in result.suggestions)
+
+    def test_validate_single_output_suggests(self) -> None:
+        """S2: Pipeline with only one output gets a suggestion."""
+        state = self._empty_state()
+        state = state.with_source(self._make_source(on_success="t1"))
+        state = state.with_node(self._make_transform("t1", "t1", "main"))
+        state = state.with_output(self._make_output("main"))
+        state = state.with_edge(self._make_edge("e1", "source", "t1"))
+        state = state.with_edge(self._make_edge("e2", "t1", "main"))
+        result = state.validate()
+        assert any("second output" in s for s in result.suggestions)
+
+    def test_validate_no_schema_config_suggests(self) -> None:
+        """S3: Source without schema_config in options gets a suggestion."""
+        state = self._empty_state()
+        state = state.with_source(self._make_source(on_success="t1"))
+        state = state.with_node(self._make_transform("t1", "t1", "main"))
+        state = state.with_output(self._make_output("main"))
+        state = state.with_edge(self._make_edge("e1", "source", "t1"))
+        state = state.with_edge(self._make_edge("e2", "t1", "main"))
+        result = state.validate()
+        assert any("no explicit schema" in s for s in result.suggestions)
+
+    # --- Interaction tests ---
+
+    def test_validate_warnings_dont_block(self) -> None:
+        """Warnings don't affect is_valid."""
+        state = self._empty_state()
+        state = state.with_source(self._make_source(on_success="t1"))
+        state = state.with_node(self._make_transform("t1", "t1", "main"))
+        state = state.with_output(self._make_output("main"))
+        state = state.with_output(self._make_output("orphan"))
+        state = state.with_edge(self._make_edge("e1", "source", "t1"))
+        state = state.with_edge(self._make_edge("e2", "t1", "main"))
+        result = state.validate()
+        assert result.is_valid is True
+        assert len(result.warnings) > 0
+
+    def test_validate_errors_and_warnings_coexist(self) -> None:
+        """A state with both errors and warnings populates both."""
+        state = self._empty_state()
+        # No source = error, orphan output = warning
+        state = state.with_output(self._make_output("orphan"))
+        result = state.validate()
+        assert result.is_valid is False
+        assert len(result.errors) > 0
+        assert any("no incoming edge" in w for w in result.warnings)
+
+    def test_validate_clean_pipeline_no_warnings(self) -> None:
+        """Well-formed pipeline with gates, error routing, schema, and
+        multiple outputs has empty warnings and suggestions."""
+        state = self._empty_state()
+        source = SourceSpec(
+            plugin="csv",
+            on_success="t1",
+            options={"path": "/in.csv", "schema_config": {"fields": []}},
+            on_validation_failure="quarantine",
+        )
+        state = state.with_source(source)
+        state = state.with_node(self._make_transform("t1", "t1", "gate_1"))
+        gate = NodeSpec(
+            id="gate_1",
+            node_type="gate",
+            plugin=None,
+            input="gate_in",
+            on_success=None,
+            on_error=None,
+            options={},
+            condition="row['score'] >= 0.5",
+            routes={"high": "main", "low": "errors"},
+            fork_to=None,
+            branches=None,
+            policy=None,
+            merge=None,
+        )
+        state = state.with_node(gate)
+        state = state.with_output(self._make_output("main"))
+        state = state.with_output(self._make_output("errors"))
+        state = state.with_edge(self._make_edge("e1", "source", "t1"))
+        state = state.with_edge(self._make_edge("e2", "t1", "gate_1"))
+        state = state.with_edge(self._make_edge("e3", "gate_1", "main"))
+        state = state.with_edge(self._make_edge("e4", "gate_1", "errors"))
+        result = state.validate()
+        assert result.is_valid, result.errors
+        assert result.warnings == ()
+        assert result.suggestions == ()

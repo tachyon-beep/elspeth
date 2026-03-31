@@ -21,7 +21,7 @@ from elspeth.web.auth.middleware import get_current_user
 from elspeth.web.auth.models import UserIdentity
 from elspeth.web.blobs.protocol import BlobQuotaExceededError, BlobServiceProtocol
 from elspeth.web.composer.protocol import ComposerConvergenceError, ComposerService
-from elspeth.web.composer.state import CompositionState, PipelineMetadata
+from elspeth.web.composer.state import CompositionState, PipelineMetadata, ValidationSummary
 from elspeth.web.composer.yaml_generator import generate_yaml
 from elspeth.web.middleware.rate_limit import ComposerRateLimiter, get_rate_limiter
 from elspeth.web.sessions.converters import state_from_record as _state_from_record
@@ -76,11 +76,18 @@ def _message_response(msg: ChatMessageRecord) -> ChatMessageResponse:
     )
 
 
-def _state_response(state: CompositionStateRecord) -> CompositionStateResponse:
+def _state_response(
+    state: CompositionStateRecord,
+    live_validation: ValidationSummary | None = None,
+) -> CompositionStateResponse:
     """Convert a CompositionStateRecord to a CompositionStateResponse.
 
     Unfreezes container fields (MappingProxyType, tuple) so Pydantic
     can serialize them to JSON.
+
+    When live_validation is provided (from a just-computed validate() call),
+    transient warnings and suggestions are included in the response.
+    Historical loads pass None, producing null for these fields.
     """
     return CompositionStateResponse(
         id=str(state.id),
@@ -93,6 +100,8 @@ def _state_response(state: CompositionStateRecord) -> CompositionStateResponse:
         metadata=deep_thaw(state.metadata_),
         is_valid=state.is_valid,
         validation_errors=deep_thaw(state.validation_errors),
+        validation_warnings=list(live_validation.warnings) if live_validation and live_validation.warnings else None,
+        validation_suggestions=list(live_validation.suggestions) if live_validation and live_validation.suggestions else None,
         derived_from_state_id=str(state.derived_from_state_id) if state.derived_from_state_id is not None else None,
         created_at=state.created_at,
     )
@@ -340,7 +349,7 @@ def create_session_router() -> APIRouter:
                 session.id,
                 state_data,
             )
-            state_response = _state_response(new_state_record)
+            state_response = _state_response(new_state_record, live_validation=validation)
             post_compose_state_id = new_state_record.id
 
         # 6. Persist assistant message with post-compose provenance
@@ -455,7 +464,7 @@ def create_session_router() -> APIRouter:
                 session.id,
                 state_data,
             )
-            state_response = _state_response(new_state_record)
+            state_response = _state_response(new_state_record, live_validation=validation)
             post_compose_state_id = new_state_record.id
 
         # Persist assistant message

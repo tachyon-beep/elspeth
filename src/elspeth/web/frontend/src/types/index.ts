@@ -141,6 +141,8 @@ export interface CompositionState {
   outputs: OutputSpec[];
   metadata: PipelineMetadata;
   validation_errors?: string[];
+  validation_warnings?: string[];
+  validation_suggestions?: string[];
 }
 
 /** A version history entry for CompositionState. */

@@ -114,6 +114,39 @@ class TestToolResult:
         )
         assert isinstance(result.affected_nodes, tuple)
 
+    def test_to_dict_includes_warnings_and_suggestions(self) -> None:
+        state = _empty_state()
+        from elspeth.web.composer.state import ValidationSummary
+
+        result = ToolResult(
+            success=True,
+            updated_state=state,
+            validation=ValidationSummary(
+                is_valid=True,
+                errors=(),
+                warnings=("warn1", "warn2"),
+                suggestions=("sug1",),
+            ),
+            affected_nodes=(),
+        )
+        d = result.to_dict()
+        assert d["validation"]["warnings"] == ["warn1", "warn2"]
+        assert d["validation"]["suggestions"] == ["sug1"]
+
+    def test_to_dict_empty_warnings_and_suggestions(self) -> None:
+        state = _empty_state()
+        from elspeth.web.composer.state import ValidationSummary
+
+        result = ToolResult(
+            success=True,
+            updated_state=state,
+            validation=ValidationSummary(is_valid=True, errors=()),
+            affected_nodes=(),
+        )
+        d = result.to_dict()
+        assert d["validation"]["warnings"] == []
+        assert d["validation"]["suggestions"] == []
+
 
 class TestSetSource:
     def test_sets_source(self) -> None:

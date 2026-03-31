@@ -155,6 +155,59 @@ function ConnectionIndicator({
   );
 }
 
+// ── SuggestionBanner — collapsible info banner ──────────────────────────────
+
+function SuggestionBanner({ suggestions }: { suggestions: string[] }) {
+  const [expanded, setExpanded] = useState(suggestions.length <= 2);
+
+  return (
+    <div
+      role="note"
+      style={{
+        padding: "8px 12px",
+        backgroundColor: "var(--color-info-bg)",
+        borderRadius: 6,
+        fontSize: 13,
+        color: "var(--color-info)",
+        border: "1px solid var(--color-info-border)",
+      }}
+    >
+      <div
+        style={{
+          fontWeight: 600,
+          marginBottom: expanded ? 4 : 0,
+          cursor: "pointer",
+          display: "flex",
+          justifyContent: "space-between",
+          alignItems: "center",
+        }}
+        onClick={() => setExpanded(!expanded)}
+        onKeyDown={(e) => {
+          if (e.key === "Enter" || e.key === " ") {
+            e.preventDefault();
+            setExpanded(!expanded);
+          }
+        }}
+        tabIndex={0}
+        role="button"
+        aria-expanded={expanded}
+      >
+        <span>Suggestions ({suggestions.length})</span>
+        <span style={{ fontSize: 11 }}>{expanded ? "▲" : "▼"}</span>
+      </div>
+      {expanded && (
+        <ul style={{ margin: 0, paddingLeft: 16 }}>
+          {suggestions.map((msg, i) => (
+            <li key={i} style={{ marginBottom: 2 }}>
+              {msg}
+            </li>
+          ))}
+        </ul>
+      )}
+    </div>
+  );
+}
+
 // ── SpecView component ───────────────────────────────────────────────────────
 
 export function SpecView() {
@@ -229,11 +282,36 @@ export function SpecView() {
         gap: 8,
       }}
     >
-      {/* Stage 1 validation errors: simple string[] from composer */}
+      {/* Stage 1 validation errors */}
       {compositionState.validation_errors &&
         compositionState.validation_errors.length > 0 && (
           <div
             role="alert"
+            style={{
+              padding: "8px 12px",
+              backgroundColor: "var(--color-error-bg)",
+              borderRadius: 6,
+              fontSize: 13,
+              color: "var(--color-error)",
+              border: "1px solid var(--color-error-border)",
+            }}
+          >
+            <div style={{ fontWeight: 600, marginBottom: 4 }}>Errors</div>
+            <ul style={{ margin: 0, paddingLeft: 16 }}>
+              {compositionState.validation_errors.map((msg, i) => (
+                <li key={i} style={{ marginBottom: 2 }}>
+                  {msg}
+                </li>
+              ))}
+            </ul>
+          </div>
+        )}
+
+      {/* Stage 1 validation warnings */}
+      {compositionState.validation_warnings &&
+        compositionState.validation_warnings.length > 0 && (
+          <div
+            role="status"
             style={{
               padding: "8px 12px",
               backgroundColor: "var(--color-warning-bg)",
@@ -243,17 +321,23 @@ export function SpecView() {
               border: "1px solid var(--color-warning-border)",
             }}
           >
-            <div style={{ fontWeight: 600, marginBottom: 4 }}>
-              Composition warnings
-            </div>
+            <div style={{ fontWeight: 600, marginBottom: 4 }}>Warnings</div>
             <ul style={{ margin: 0, paddingLeft: 16 }}>
-              {compositionState.validation_errors.map((msg, i) => (
+              {compositionState.validation_warnings.map((msg, i) => (
                 <li key={i} style={{ marginBottom: 2 }}>
                   {msg}
                 </li>
               ))}
             </ul>
           </div>
+        )}
+
+      {/* Stage 1 validation suggestions */}
+      {compositionState.validation_suggestions &&
+        compositionState.validation_suggestions.length > 0 && (
+          <SuggestionBanner
+            suggestions={compositionState.validation_suggestions}
+          />
         )}
 
       {/* Component cards */}

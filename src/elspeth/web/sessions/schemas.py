@@ -72,6 +72,8 @@ class CompositionStateResponse(BaseModel):
     metadata: Any | None = None
     is_valid: bool
     validation_errors: list[str] | None = None
+    validation_warnings: list[str] | None = None
+    validation_suggestions: list[str] | None = None
     derived_from_state_id: str | None = None
     created_at: datetime
 

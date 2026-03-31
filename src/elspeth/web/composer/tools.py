@@ -61,6 +61,8 @@ class ToolResult:
             "validation": {
                 "is_valid": self.validation.is_valid,
                 "errors": list(self.validation.errors),
+                "warnings": list(self.validation.warnings),
+                "suggestions": list(self.validation.suggestions),
             },
             "affected_nodes": list(self.affected_nodes),
             "version": self.updated_state.version,

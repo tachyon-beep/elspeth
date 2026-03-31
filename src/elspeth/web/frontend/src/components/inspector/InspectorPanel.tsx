@@ -225,6 +225,39 @@ export function InspectorPanel() {
               </>
             )}
 
+            {/* Validation status dot: amber (not validated), green (passed), red (failed) */}
+            {compositionState && compositionState.nodes.length > 0 && (
+              <span
+                aria-label={
+                  validationResult === null
+                    ? "Not validated"
+                    : validationResult.is_valid
+                      ? "Validation passed"
+                      : "Validation failed"
+                }
+                title={
+                  validationResult === null
+                    ? "Not validated"
+                    : validationResult.is_valid
+                      ? "Validation passed"
+                      : "Validation failed"
+                }
+                style={{
+                  display: "inline-block",
+                  width: 8,
+                  height: 8,
+                  borderRadius: "50%",
+                  backgroundColor:
+                    validationResult === null
+                      ? "var(--color-warning)"
+                      : validationResult.is_valid
+                        ? "var(--color-success)"
+                        : "var(--color-error)",
+                  flexShrink: 0,
+                }}
+              />
+            )}
+
             {/* Validate button with spinner */}
             <button
               onClick={handleValidate}

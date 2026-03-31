@@ -11,6 +11,7 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 from dataclasses import dataclass, replace
+from pathlib import PurePosixPath
 from typing import Any, Literal, Self
 
 from elspeth.contracts.freeze import deep_thaw, freeze_fields
@@ -198,12 +199,16 @@ class OutputSpec:
 class ValidationSummary:
     """Stage 1 validation result.
 
-    errors is a tuple of human-readable strings. frozen=True is sufficient
-    since tuples of strings are immutable.
+    errors block execution. warnings are advisory but actionable.
+    suggestions are optional improvements. All are tuples of
+    human-readable strings. frozen=True is sufficient since tuples
+    of strings are immutable.
     """
 
     is_valid: bool
     errors: tuple[str, ...]
+    warnings: tuple[str, ...] = ()
+    suggestions: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True, slots=True)
@@ -483,7 +488,78 @@ class CompositionState:
             if not reachable:
                 errors.append(f"Node '{node.id}' input '{node.input}' is not reachable from any edge or the source on_success.")
 
+        # --- Warnings (advisory, non-blocking) ---
+        warnings: list[str] = []
+
+        # Build connection-field targets (wiring that doesn't require edges)
+        connection_targets: set[str] = set()
+        if source_on_success is not None:
+            connection_targets.add(source_on_success)
+        for node in self.nodes:
+            if node.on_success is not None:
+                connection_targets.add(node.on_success)
+            if node.on_error is not None:
+                connection_targets.add(node.on_error)
+            if node.routes is not None:
+                connection_targets.update(node.routes.values())
+
+        # W1: Output has no incoming edge or connection-field reference
+        for output in self.outputs:
+            if output.name not in edge_destinations and output.name not in connection_targets:
+                warnings.append(f"Output '{output.name}' has no incoming edge — it will never receive data.")
+
+        # W2: Source on_success target doesn't match any node input or output name
+        if source_on_success is not None:
+            node_inputs = {n.input for n in self.nodes if n.input is not None}
+            if source_on_success not in node_inputs and source_on_success not in output_names:
+                warnings.append(f"Source on_success '{source_on_success}' does not match any node input or output — data may not flow.")
+
+        # W3: Node has no outgoing edges and no connection-field targets
+        edge_sources = {e.from_node for e in self.edges}
+        for node in self.nodes:
+            has_edge_out = node.id in edge_sources
+            has_connection_out = (
+                node.on_success is not None or node.on_error is not None or (node.routes is not None and len(node.routes) > 0)
+            )
+            if not has_edge_out and not has_connection_out:
+                warnings.append(f"Node '{node.id}' has no outgoing edges — its output is not connected to any downstream node or sink.")
+
+        # W4: Sink plugin/filename extension mismatch
+        _plugin_exts: dict[str, set[str]] = {
+            "csv": {".csv"},
+            "json": {".json", ".jsonl"},
+            "jsonl": {".jsonl"},
+        }
+        for output in self.outputs:
+            path_val = output.options.get("path") if output.options else None
+            if isinstance(path_val, str):
+                ext = PurePosixPath(path_val).suffix.lower()
+                accepted = _plugin_exts.get(output.plugin)
+                if ext and accepted is not None and ext not in accepted:
+                    warnings.append(
+                        f"Output '{output.name}' uses plugin '{output.plugin}' but filename extension suggests a different format."
+                    )
+
+        # --- Suggestions (optional improvements) ---
+        suggestions: list[str] = []
+
+        # S1: No error routing
+        has_gate = any(n.node_type == "gate" for n in self.nodes)
+        has_error_routing = any(e.edge_type == "on_error" for e in self.edges) or any(n.on_error is not None for n in self.nodes)
+        if not has_gate and not has_error_routing and self.nodes:
+            suggestions.append("Consider adding error routing — rows that fail transforms currently have no explicit destination.")
+
+        # S2: Single output
+        if len(self.outputs) == 1:
+            suggestions.append("Single output pipeline. Consider adding a second output for rejected/quarantined rows.")
+
+        # S3: Source has no schema_config
+        if self.source is not None and "schema_config" not in self.source.options:
+            suggestions.append("Source has no explicit schema. Downstream field references depend on runtime column names.")
+
         return ValidationSummary(
             is_valid=len(errors) == 0,
             errors=tuple(errors),
+            warnings=tuple(warnings),
+            suggestions=tuple(suggestions),
         )
