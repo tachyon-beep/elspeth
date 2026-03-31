@@ -370,7 +370,7 @@ export async function listSinks(): Promise<PluginSummary[]> {
  * matching the CatalogService protocol.
  */
 export async function getPluginSchema(
-  pluginType: "source" | "transform" | "gate" | "sink",
+  pluginType: "source" | "transform" | "sink",
   pluginName: string,
 ): Promise<PluginSchemaInfo> {
   // REST URL uses plural path segments; the route handler translates

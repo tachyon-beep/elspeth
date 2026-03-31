@@ -100,8 +100,8 @@ def _state_response(
         metadata=deep_thaw(state.metadata_),
         is_valid=state.is_valid,
         validation_errors=deep_thaw(state.validation_errors),
-        validation_warnings=list(live_validation.warnings) if live_validation and live_validation.warnings else None,
-        validation_suggestions=list(live_validation.suggestions) if live_validation and live_validation.suggestions else None,
+        validation_warnings=list(live_validation.warnings) if live_validation is not None else None,
+        validation_suggestions=list(live_validation.suggestions) if live_validation is not None else None,
         derived_from_state_id=str(state.derived_from_state_id) if state.derived_from_state_id is not None else None,
         created_at=state.created_at,
     )

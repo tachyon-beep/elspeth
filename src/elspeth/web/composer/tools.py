@@ -294,7 +294,7 @@ def get_tool_definitions() -> list[dict[str, Any]]:
         },
         {
             "name": "patch_source_options",
-            "description": "Apply a JSON merge-patch to the current source options. "
+            "description": "Apply a shallow merge-patch to the current source options. "
             "Keys in the patch overwrite existing keys. "
             "Keys set to null are deleted. Missing keys are unchanged.",
             "parameters": {
@@ -310,7 +310,7 @@ def get_tool_definitions() -> list[dict[str, Any]]:
         },
         {
             "name": "patch_node_options",
-            "description": "Apply a JSON merge-patch to a node's options. "
+            "description": "Apply a shallow merge-patch to a node's options. "
             "Keys in the patch overwrite existing keys. "
             "Keys set to null are deleted. Missing keys are unchanged.",
             "parameters": {
@@ -330,7 +330,7 @@ def get_tool_definitions() -> list[dict[str, Any]]:
         },
         {
             "name": "patch_output_options",
-            "description": "Apply a JSON merge-patch to an output's options. "
+            "description": "Apply a shallow merge-patch to an output's options. "
             "Keys in the patch overwrite existing keys. "
             "Keys set to null are deleted. Missing keys are unchanged.",
             "parameters": {
@@ -1231,12 +1231,18 @@ def _execute_set_pipeline(
                 )
             )
 
-        meta = args.get("metadata") or {}
+        meta_raw = args.get("metadata")
+        if meta_raw is None:
+            meta = {}
+        elif isinstance(meta_raw, dict):
+            meta = meta_raw
+        else:
+            return _failure_result(state, "metadata must be an object.")
         metadata_spec = PipelineMetadata(
             name=meta.get("name", "Untitled Pipeline"),
             description=meta.get("description", ""),
         )
-    except (KeyError, TypeError, AttributeError) as exc:
+    except (KeyError, TypeError) as exc:
         return _failure_result(state, f"Invalid pipeline spec: {exc}")
 
     # 5. Build new state

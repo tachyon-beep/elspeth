@@ -32,7 +32,7 @@ function resolveComponentName(
 ): string {
   if (!nodes) return componentId;
   const node = nodes.find((n) => n.id === componentId);
-  return node ? node.name : componentId;
+  return node ? node.id : componentId;
 }
 
 export function ValidationResultBanner({

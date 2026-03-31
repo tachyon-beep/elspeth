@@ -39,6 +39,8 @@
   --color-badge-transform:   #e8a030;
   --color-badge-gate:        #c390f9;
   --color-badge-sink:        #e07040;
+  --color-badge-aggregation: #61daff;
+  --color-badge-coalesce:    #14b0ae;
 
   /* ── Semantic colours — DTA/GOLD dark theme ──────────────────────────────── */
   --color-success:           #14b0ae;
@@ -424,6 +426,18 @@ summary:focus-visible {
   background-color: rgba(224, 112, 64, 0.15);
   color: var(--color-badge-sink);
   border: 1px solid rgba(224, 112, 64, 0.3);
+}
+
+.type-badge-aggregation {
+  background-color: rgba(97, 218, 255, 0.15);
+  color: var(--color-badge-aggregation);
+  border: 1px solid rgba(97, 218, 255, 0.3);
+}
+
+.type-badge-coalesce {
+  background-color: rgba(20, 176, 174, 0.15);
+  color: var(--color-badge-coalesce);
+  border: 1px solid rgba(20, 176, 174, 0.3);
 }
 
 /* ---------------------------------------------------------------------------

@@ -34,18 +34,18 @@ import type { NodeSpec, EdgeSpec, CompositionState } from "@/types/index";
 // ── Type badge CSS class mapping ─────────────────────────────────────────────
 // Uses .type-badge + .type-badge-{type} classes from App.css
 
-const TYPE_BADGE_CLASSES: Record<NodeSpec["type"], string> = {
-  source: "type-badge type-badge-source",
+const TYPE_BADGE_CLASSES: Record<NodeSpec["node_type"], string> = {
   transform: "type-badge type-badge-transform",
   gate: "type-badge type-badge-gate",
-  sink: "type-badge type-badge-sink",
+  aggregation: "type-badge type-badge-aggregation",
+  coalesce: "type-badge type-badge-coalesce",
 };
 
-const TYPE_LABELS: Record<NodeSpec["type"], string> = {
-  source: "SOURCE",
+const TYPE_LABELS: Record<NodeSpec["node_type"], string> = {
   transform: "TRANSFORM",
   gate: "GATE",
-  sink: "SINK",
+  aggregation: "AGGREGATION",
+  coalesce: "COALESCE",
 };
 
 // ── Relationship computation ─────────────────────────────────────────────────
@@ -63,11 +63,16 @@ function computeRelationships(
   const downstream = new Map<string, string | null>();
 
   for (const edge of edges) {
-    if (edge.target === nodeId) {
-      upstream.add(edge.source);
+    if (edge.to_node === nodeId) {
+      upstream.add(edge.from_node);
     }
-    if (edge.source === nodeId) {
-      downstream.set(edge.target, edge.label);
+    if (edge.from_node === nodeId) {
+      // Derive route label from edge_type when edge.label is absent
+      const label = edge.label
+        ?? (edge.edge_type === "route_true" ? "true"
+          : edge.edge_type === "route_false" ? "false"
+          : null);
+      downstream.set(edge.to_node, label);
     }
   }
 
@@ -111,10 +116,10 @@ function ConnectionIndicator({
   edge,
   compositionState,
 }: ConnectionIndicatorProps) {
-  const targetNode = compositionState.nodes.find((n) => n.id === edge.target);
-  const targetName = targetNode?.name ?? edge.target;
+  const targetNode = compositionState.nodes.find((n) => n.id === edge.to_node);
+  const targetName = targetNode?.id ?? edge.to_node;
 
-  if (edge.edge_type === "error") {
+  if (edge.edge_type === "on_error") {
     return (
       <div>
         <span aria-hidden="true">{"\u26A0"}</span> <span className="sr-only">error route to</span>on_error <span aria-hidden="true">{"\u2192"}</span> {targetName}
@@ -122,14 +127,15 @@ function ConnectionIndicator({
     );
   }
 
-  if (edge.edge_type === "route" && edge.label) {
-    // Gate route indicators with check/cross marks
+  if (edge.edge_type.startsWith("route")) {
+    // Gate route indicators — derive label from edge_type when edge.label is absent
+    const routeLabel = edge.label ?? (edge.edge_type === "route_true" ? "true" : edge.edge_type === "route_false" ? "false" : edge.edge_type);
     const isTrue =
-      edge.label.toLowerCase() === "true" ||
-      edge.label.toLowerCase() === "yes";
+      routeLabel.toLowerCase() === "true" ||
+      routeLabel.toLowerCase() === "yes";
     const isFalse =
-      edge.label.toLowerCase() === "false" ||
-      edge.label.toLowerCase() === "no";
+      routeLabel.toLowerCase() === "false" ||
+      routeLabel.toLowerCase() === "no";
 
     let prefix: string;
     if (isTrue) {
@@ -142,7 +148,7 @@ function ConnectionIndicator({
 
     return (
       <div>
-        <span aria-hidden="true">{prefix}</span> {edge.label} <span aria-hidden="true">{"\u2192"}</span><span className="sr-only"> routes to</span> {targetName}
+        <span aria-hidden="true">{prefix}</span> {routeLabel} <span aria-hidden="true">{"\u2192"}</span><span className="sr-only"> routes to</span> {targetName}
       </div>
     );
   }
@@ -250,7 +256,12 @@ export function SpecView() {
   }
 
   // Empty state
-  if (!compositionState || compositionState.nodes.length === 0) {
+  const hasContent =
+    compositionState &&
+    (compositionState.source !== null ||
+      compositionState.nodes.length > 0 ||
+      compositionState.outputs.length > 0);
+  if (!hasContent) {
     return (
       <div
         className="empty-state"
@@ -267,9 +278,9 @@ export function SpecView() {
   // Build a map of node -> outgoing edges for connection indicators
   const nodeDownstream = new Map<string, EdgeSpec[]>();
   for (const edge of compositionState.edges) {
-    const existing = nodeDownstream.get(edge.source) ?? [];
+    const existing = nodeDownstream.get(edge.from_node) ?? [];
     existing.push(edge);
-    nodeDownstream.set(edge.source, existing);
+    nodeDownstream.set(edge.from_node, existing);
   }
 
   return (
@@ -358,7 +369,7 @@ export function SpecView() {
             tabIndex={0}
             role="button"
             aria-pressed={isSelected}
-            aria-label={`${TYPE_LABELS[node.type]} ${node.name}${isSelected ? ", selected" : ""}`}
+            aria-label={`${TYPE_LABELS[node.node_type]} ${node.id}${isSelected ? ", selected" : ""}`}
             onClick={(e) => {
               e.stopPropagation();
               handleCardClick(node.id);
@@ -382,8 +393,8 @@ export function SpecView() {
               }}
             >
               {/* Type badge: uses CSS class from App.css */}
-              <span className={TYPE_BADGE_CLASSES[node.type]}>
-                {TYPE_LABELS[node.type]}
+              <span className={TYPE_BADGE_CLASSES[node.node_type]}>
+                {TYPE_LABELS[node.node_type]}
               </span>
 
               {/* Relationship badge (INPUT, OUTPUT, SELECTED, route label) */}
@@ -406,19 +417,20 @@ export function SpecView() {
             </div>
 
             {/* Plugin name */}
-            <div style={{ fontWeight: 600, fontSize: 13 }}>{node.name}</div>
+            <div style={{ fontWeight: 600, fontSize: 13 }}>{node.id}</div>
 
-            {/* Config summary */}
-            <div
-              style={{
-                fontSize: 12,
-                color: "var(--color-text-muted)",
-                marginTop: 2,
-              }}
-            >
-              {node.plugin}
-              {node.config_summary && ` \u2014 ${node.config_summary}`}
-            </div>
+            {/* Plugin name */}
+            {node.plugin && (
+              <div
+                style={{
+                  fontSize: 12,
+                  color: "var(--color-text-muted)",
+                  marginTop: 2,
+                }}
+              >
+                {node.plugin}
+              </div>
+            )}
 
             {/* Connection indicators */}
             {edges.length > 0 && (
@@ -431,7 +443,7 @@ export function SpecView() {
               >
                 {edges.map((edge, i) => (
                   <ConnectionIndicator
-                    key={`${edge.source}-${edge.target}-${i}`}
+                    key={`${edge.from_node}-${edge.to_node}-${i}`}
                     edge={edge}
                     compositionState={compositionState}
                   />

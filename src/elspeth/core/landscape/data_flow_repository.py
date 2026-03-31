@@ -917,14 +917,14 @@ class DataFlowRepository:
         input_contract: SchemaContract | None = None,
         output_contract: SchemaContract | None = None,
     ) -> Node:
-        """Register a plugin instance (node) in the execution graph.
+        """Register a node in the execution graph.
 
         Args:
             run_id: Run this node belongs to
-            plugin_name: Name of the plugin
+            plugin_name: Name of the plugin (None for gates and coalesces, which are config-driven)
             node_type: NodeType enum (SOURCE, TRANSFORM, GATE, AGGREGATION, COALESCE, SINK)
-            plugin_version: Version of the plugin
-            config: Plugin configuration
+            plugin_version: Version of the plugin (None for non-plugin nodes)
+            config: Node configuration
             node_id: Optional node ID (generated if not provided)
             sequence: Position in pipeline
             schema_hash: Optional input/output schema hash

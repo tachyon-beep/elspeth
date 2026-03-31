@@ -91,23 +91,31 @@ export interface SourceSpec {
 
 /**
  * A node in the pipeline composition DAG.
- * Represents a source, transform, gate, or sink.
+ * Matches backend CompositionState.to_dict() node serialization.
  */
 export interface NodeSpec {
   id: string;
-  name: string;
-  type: "source" | "transform" | "gate" | "sink";
-  plugin: string;
-  config: Record<string, unknown>;
-  config_summary: string;
+  node_type: "transform" | "gate" | "aggregation" | "coalesce";
+  plugin: string | null;
+  input: string;
+  on_success: string | null;
+  on_error: string | null;
+  options: Record<string, unknown>;
+  condition?: string | null;
+  routes?: Record<string, string> | null;
+  fork_to?: string[] | null;
+  branches?: string[] | null;
+  policy?: string | null;
+  merge?: string | null;
 }
 
 /** An edge connecting two nodes in the DAG. */
 export interface EdgeSpec {
-  source: string;
-  target: string;
+  id: string;
+  from_node: string;
+  to_node: string;
+  edge_type: "on_success" | "on_error" | "route_true" | "route_false" | "fork";
   label: string | null;
-  edge_type: "continue" | "route" | "error";
 }
 
 /** Output/sink specification within a pipeline composition. */
@@ -158,16 +166,17 @@ export interface CompositionStateVersion {
 /** Plugin summary from the catalog listing endpoints. */
 export interface PluginSummary {
   name: string;
-  type: "source" | "transform" | "gate" | "sink";
+  plugin_type: "source" | "transform" | "sink";
   description: string;
+  config_fields: { name: string; type: string; required: boolean; description: string; default: unknown }[];
 }
 
 /** Detailed plugin schema info including configuration JSON Schema. */
 export interface PluginSchemaInfo {
   name: string;
-  type: "source" | "transform" | "gate" | "sink";
+  plugin_type: "source" | "transform" | "sink";
   description: string;
-  config_schema: Record<string, unknown>;
+  json_schema: Record<string, unknown>;
 }
 
 // ── Validation ──────────────────────────────────────────────────────────────

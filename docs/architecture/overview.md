@@ -887,12 +887,12 @@ sinks:
         - webhook: https://emergency.gov/broadcast
         - database: emergency_log
 
-row_plugins:
-  - plugin: threshold_gate
+# Gates are config-driven operations, not plugins.
+# They are defined inline with a condition expression and route map.
+gates:
+  - id: confidence_check
     type: gate
-    options:
-      field: sensor_confidence
-      min: 0.8
+    condition: "row['sensor_confidence'] >= 0.8"
     routes:
       pass: continue
       fail: routine_log

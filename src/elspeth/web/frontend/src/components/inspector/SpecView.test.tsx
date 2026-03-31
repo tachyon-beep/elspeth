@@ -6,11 +6,12 @@ import type { CompositionState } from "@/types/index";
 
 const DUMMY_NODE = {
   id: "t1",
-  name: "Uppercase",
-  type: "transform" as const,
+  node_type: "transform" as const,
   plugin: "uppercase",
-  config: {},
-  config_summary: "field: name",
+  input: "source_out",
+  on_success: "main",
+  on_error: null,
+  options: {},
 };
 
 function makeState(

@@ -9,17 +9,17 @@
 // ── Component type badge colours ─────────────────────────────────────────────
 
 export const BADGE_COLORS = {
-  source: "#4db89a",
   transform: "#e8a030",
   gate: "#c390f9",
-  sink: "#e07040",
+  aggregation: "#61daff",
+  coalesce: "#14b0ae",
 } as const;
 
 export const BADGE_BACKGROUNDS = {
-  source: "rgba(77, 184, 154, 0.15)",
   transform: "rgba(232, 160, 48, 0.15)",
   gate: "rgba(195, 144, 249, 0.15)",
-  sink: "rgba(224, 112, 64, 0.15)",
+  aggregation: "rgba(97, 218, 255, 0.15)",
+  coalesce: "rgba(20, 176, 174, 0.15)",
 } as const;
 
 // ── Edge colours ─────────────────────────────────────────────────────────────
