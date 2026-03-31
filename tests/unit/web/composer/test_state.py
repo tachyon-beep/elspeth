@@ -994,7 +994,7 @@ class TestStage1Validation:
         state = state.with_edge(self._make_edge("e2", "t1", "main"))
         result = state.validate()
         assert result.is_valid
-        assert any("orphan" in w and "no incoming edge" in w for w in result.warnings)
+        assert any("orphan" in w and "never receive data" in w for w in result.warnings)
 
     def test_validate_source_on_success_mismatch_warns(self) -> None:
         """W2: Source on_success doesn't match any node input."""
@@ -1084,7 +1084,7 @@ class TestStage1Validation:
         result = state.validate()
         assert result.is_valid is False
         assert len(result.errors) > 0
-        assert any("no incoming edge" in w for w in result.warnings)
+        assert any("never receive data" in w for w in result.warnings)
 
     def test_validate_clean_pipeline_no_warnings(self) -> None:
         """Well-formed pipeline with gates, error routing, schema, and

@@ -2,10 +2,12 @@
 
 from __future__ import annotations
 
+from types import MappingProxyType
 from unittest.mock import MagicMock
 
 import pytest
 
+from elspeth.contracts.freeze import deep_thaw
 from elspeth.web.catalog.schemas import (
     ConfigFieldSummary,
     PluginSchemaInfo,
@@ -17,6 +19,7 @@ from elspeth.web.composer.state import (
 )
 from elspeth.web.composer.tools import (
     ToolResult,
+    _apply_merge_patch,
     execute_tool,
     get_expression_grammar,
     get_tool_definitions,
@@ -648,10 +651,10 @@ class TestDiscoveryTools:
 
 
 class TestToolDefinitions:
-    def test_has_nineteen_tools(self) -> None:
-        """5 discovery + 8 mutation + 3 blob tools + 3 secret tools = 19 tools."""
+    def test_has_twenty_three_tools(self) -> None:
+        """5 discovery + 12 mutation + 3 blob tools + 3 secret tools = 23 tools."""
         defs = get_tool_definitions()
-        assert len(defs) == 19
+        assert len(defs) == 23
 
     def test_all_have_json_schema(self) -> None:
         for defn in get_tool_definitions():
@@ -698,10 +701,10 @@ class TestToolRegistry:
         }
         assert set(_DISCOVERY_TOOLS.keys()) == expected
 
-    def test_mutation_tools_has_eight_entries(self) -> None:
+    def test_mutation_tools_has_twelve_entries(self) -> None:
         from elspeth.web.composer.tools import _MUTATION_TOOLS
 
-        assert len(_MUTATION_TOOLS) == 8
+        assert len(_MUTATION_TOOLS) == 12
         expected = {
             "set_source",
             "upsert_node",
@@ -711,6 +714,10 @@ class TestToolRegistry:
             "set_metadata",
             "set_output",
             "remove_output",
+            "patch_source_options",
+            "patch_node_options",
+            "patch_output_options",
+            "set_pipeline",
         }
         assert set(_MUTATION_TOOLS.keys()) == expected
 
@@ -1111,7 +1118,6 @@ class TestSecretTools:
         )
         assert r2.success is True
         assert r2.updated_state.source is not None
-        from elspeth.contracts.freeze import deep_thaw
 
         opts = deep_thaw(r2.updated_state.source.options)
         assert opts["api_key"] == {"secret_ref": "OPENROUTER_API_KEY"}
@@ -1163,3 +1169,408 @@ class TestSecretTools:
             user_id="test-user",
         )
         assert r2.success is False
+
+
+# ---------------------------------------------------------------------------
+# Merge-patch helper tests
+# ---------------------------------------------------------------------------
+
+
+class TestMergePatch:
+    def test_merge_patch_overwrites(self) -> None:
+        result = _apply_merge_patch({"a": 1}, {"a": 2})
+        assert result == {"a": 2}
+
+    def test_merge_patch_adds(self) -> None:
+        result = _apply_merge_patch({"a": 1}, {"b": 2})
+        assert result == {"a": 1, "b": 2}
+
+    def test_merge_patch_deletes_null(self) -> None:
+        result = _apply_merge_patch({"a": 1, "b": 2}, {"b": None})
+        assert result == {"a": 1}
+        assert "b" not in result
+
+    def test_merge_patch_preserves_unmentioned(self) -> None:
+        result = _apply_merge_patch({"a": 1, "b": 2}, {"a": 3})
+        assert result == {"a": 3, "b": 2}
+
+    def test_merge_patch_empty_patch(self) -> None:
+        result = _apply_merge_patch({"a": 1}, {})
+        assert result == {"a": 1}
+
+    def test_merge_patch_does_not_mutate_target(self) -> None:
+        proxy = MappingProxyType({"a": 1})
+        result = _apply_merge_patch(proxy, {"a": 2})
+        # Original proxy is unchanged
+        assert proxy["a"] == 1
+        assert result == {"a": 2}
+
+
+# ---------------------------------------------------------------------------
+# patch_source_options tool tests
+# ---------------------------------------------------------------------------
+
+
+class TestPatchSourceOptions:
+    def _state_with_source(self, options: dict) -> CompositionState:
+        state = _empty_state()
+        catalog = _mock_catalog()
+        r = execute_tool(
+            "set_source",
+            {
+                "plugin": "csv",
+                "on_success": "t1",
+                "options": options,
+                "on_validation_failure": "quarantine",
+            },
+            state,
+            catalog,
+        )
+        assert r.success is True
+        return r.updated_state
+
+    def test_patch_source_options_updates_key(self) -> None:
+        state = self._state_with_source({"path": "/a"})
+        catalog = _mock_catalog()
+        result = execute_tool(
+            "patch_source_options",
+            {"patch": {"path": "/b"}},
+            state,
+            catalog,
+        )
+        assert result.success is True
+        assert result.updated_state.source is not None
+
+        opts = deep_thaw(result.updated_state.source.options)
+        assert opts["path"] == "/b"
+
+    def test_patch_source_options_adds_key(self) -> None:
+        state = self._state_with_source({"path": "/a"})
+        catalog = _mock_catalog()
+        result = execute_tool(
+            "patch_source_options",
+            {"patch": {"encoding": "utf-8"}},
+            state,
+            catalog,
+        )
+        assert result.success is True
+
+        opts = deep_thaw(result.updated_state.source.options)
+        assert opts["path"] == "/a"
+        assert opts["encoding"] == "utf-8"
+
+    def test_patch_source_options_deletes_key(self) -> None:
+        state = self._state_with_source({"path": "/a", "encoding": "utf-8"})
+        catalog = _mock_catalog()
+        result = execute_tool(
+            "patch_source_options",
+            {"patch": {"encoding": None}},
+            state,
+            catalog,
+        )
+        assert result.success is True
+
+        opts = deep_thaw(result.updated_state.source.options)
+        assert opts["path"] == "/a"
+        assert "encoding" not in opts
+
+    def test_patch_source_options_no_source_fails(self) -> None:
+        state = _empty_state()
+        catalog = _mock_catalog()
+        result = execute_tool(
+            "patch_source_options",
+            {"patch": {"path": "/b"}},
+            state,
+            catalog,
+        )
+        assert result.success is False
+        assert "No source" in result.data["error"]
+        assert result.updated_state.version == 1
+
+
+# ---------------------------------------------------------------------------
+# patch_node_options tool tests
+# ---------------------------------------------------------------------------
+
+
+class TestPatchNodeOptions:
+    def _state_with_node(self, options: dict) -> CompositionState:
+        state = _empty_state()
+        catalog = _mock_catalog()
+        r = execute_tool(
+            "upsert_node",
+            {
+                "id": "t1",
+                "node_type": "transform",
+                "plugin": "uppercase",
+                "input": "source_out",
+                "on_success": "main",
+                "options": options,
+            },
+            state,
+            catalog,
+        )
+        assert r.success is True
+        return r.updated_state
+
+    def test_patch_node_options_updates_key(self) -> None:
+        state = self._state_with_node({"field": "old"})
+        catalog = _mock_catalog()
+        result = execute_tool(
+            "patch_node_options",
+            {"node_id": "t1", "patch": {"field": "new"}},
+            state,
+            catalog,
+        )
+        assert result.success is True
+        node = result.updated_state.nodes[0]
+        assert node.id == "t1"
+
+        opts = deep_thaw(node.options)
+        assert opts["field"] == "new"
+        # Other node fields preserved
+        assert node.node_type == "transform"
+        assert node.plugin == "uppercase"
+
+    def test_patch_node_options_unknown_node_fails(self) -> None:
+        state = _empty_state()
+        catalog = _mock_catalog()
+        result = execute_tool(
+            "patch_node_options",
+            {"node_id": "nonexistent", "patch": {"field": "value"}},
+            state,
+            catalog,
+        )
+        assert result.success is False
+        assert "nonexistent" in result.data["error"]
+
+
+# ---------------------------------------------------------------------------
+# patch_output_options tool tests
+# ---------------------------------------------------------------------------
+
+
+class TestPatchOutputOptions:
+    def _state_with_output(self, options: dict) -> CompositionState:
+        state = _empty_state()
+        catalog = _mock_catalog()
+        r = execute_tool(
+            "set_output",
+            {
+                "sink_name": "main",
+                "plugin": "csv",
+                "options": options,
+                "on_write_failure": "discard",
+            },
+            state,
+            catalog,
+        )
+        assert r.success is True
+        return r.updated_state
+
+    def test_patch_output_options_updates_key(self) -> None:
+        state = self._state_with_output({"path": "/old.csv"})
+        catalog = _mock_catalog()
+        result = execute_tool(
+            "patch_output_options",
+            {"sink_name": "main", "patch": {"path": "/new.csv"}},
+            state,
+            catalog,
+        )
+        assert result.success is True
+        output = result.updated_state.outputs[0]
+
+        opts = deep_thaw(output.options)
+        assert opts["path"] == "/new.csv"
+
+    def test_patch_output_options_unknown_sink_fails(self) -> None:
+        state = _empty_state()
+        catalog = _mock_catalog()
+        result = execute_tool(
+            "patch_output_options",
+            {"sink_name": "nonexistent", "patch": {"path": "/x.csv"}},
+            state,
+            catalog,
+        )
+        assert result.success is False
+        assert "nonexistent" in result.data["error"]
+
+
+# ---------------------------------------------------------------------------
+# set_pipeline tool tests
+# ---------------------------------------------------------------------------
+
+
+def _valid_pipeline_args() -> dict:
+    """Return a minimal valid set_pipeline args dict."""
+    return {
+        "source": {
+            "plugin": "csv",
+            "on_success": "source_out",
+            "options": {"path": "/data/in.csv"},
+            "on_validation_failure": "quarantine",
+        },
+        "nodes": [
+            {
+                "id": "t1",
+                "node_type": "transform",
+                "plugin": "uppercase",
+                "input": "source_out",
+                "on_success": "main",
+                "on_error": None,
+                "options": {},
+            }
+        ],
+        "edges": [
+            {
+                "id": "e1",
+                "from_node": "source",
+                "to_node": "t1",
+                "edge_type": "on_success",
+                "label": None,
+            }
+        ],
+        "outputs": [
+            {
+                "name": "main",
+                "plugin": "csv",
+                "options": {"path": "/data/out.csv"},
+                "on_write_failure": "discard",
+            }
+        ],
+    }
+
+
+class TestSetPipeline:
+    def test_set_pipeline_creates_valid_state(self) -> None:
+        state = _empty_state()
+        catalog = _mock_catalog()
+        result = execute_tool("set_pipeline", _valid_pipeline_args(), state, catalog)
+        assert result.success is True
+        assert result.validation is not None
+        assert result.validation.is_valid is True
+        assert result.updated_state.version == 2  # incremented from 1
+
+    def test_set_pipeline_unknown_source_plugin_fails(self) -> None:
+        state = _empty_state()
+        catalog = _mock_catalog()
+        catalog.get_schema.side_effect = ValueError("Unknown plugin: nonexistent")
+        args = _valid_pipeline_args()
+        args["source"]["plugin"] = "nonexistent"
+        result = execute_tool("set_pipeline", args, state, catalog)
+        assert result.success is False
+        assert "source" in result.data["error"].lower()
+
+    def test_set_pipeline_unknown_node_plugin_fails(self) -> None:
+        state = _empty_state()
+        catalog = _mock_catalog()
+
+        from elspeth.web.catalog.schemas import PluginSchemaInfo
+
+        def selective_schema(plugin_type: str, name: str) -> PluginSchemaInfo:
+            if plugin_type == "transform" and name == "badplugin":
+                raise ValueError(f"Unknown plugin: {name}")
+            return PluginSchemaInfo(name=name, plugin_type=plugin_type, description="", json_schema={})
+
+        catalog.get_schema.side_effect = selective_schema
+        args = _valid_pipeline_args()
+        args["nodes"][0]["plugin"] = "badplugin"
+        result = execute_tool("set_pipeline", args, state, catalog)
+        assert result.success is False
+        assert "transform" in result.data["error"].lower()
+
+    def test_set_pipeline_unknown_sink_plugin_fails(self) -> None:
+        state = _empty_state()
+        catalog = _mock_catalog()
+
+        from elspeth.web.catalog.schemas import PluginSchemaInfo
+
+        def selective_schema(plugin_type: str, name: str) -> PluginSchemaInfo:
+            if plugin_type == "sink" and name == "badsink":
+                raise ValueError(f"Unknown plugin: {name}")
+            return PluginSchemaInfo(name=name, plugin_type=plugin_type, description="", json_schema={})
+
+        catalog.get_schema.side_effect = selective_schema
+        args = _valid_pipeline_args()
+        args["outputs"][0]["plugin"] = "badsink"
+        result = execute_tool("set_pipeline", args, state, catalog)
+        assert result.success is False
+        assert "sink" in result.data["error"].lower()
+
+    def test_set_pipeline_missing_required_field_fails(self) -> None:
+        state = _empty_state()
+        catalog = _mock_catalog()
+        args = _valid_pipeline_args()
+        # Remove on_success from source — required field
+        del args["source"]["on_success"]
+        result = execute_tool("set_pipeline", args, state, catalog)
+        assert result.success is False
+        assert "Invalid pipeline spec" in result.data["error"]
+
+    def test_set_pipeline_replaces_entire_state(self) -> None:
+        # Build a state with 3 nodes first
+        state = _empty_state()
+        catalog = _mock_catalog()
+        for i in range(3):
+            r = execute_tool(
+                "upsert_node",
+                {
+                    "id": f"t{i}",
+                    "node_type": "transform",
+                    "plugin": "uppercase",
+                    "input": "in",
+                    "on_success": "out",
+                    "options": {},
+                },
+                state,
+                catalog,
+            )
+            state = r.updated_state
+        assert len(state.nodes) == 3
+
+        # set_pipeline with 1 node replaces all
+        result = execute_tool("set_pipeline", _valid_pipeline_args(), state, catalog)
+        assert result.success is True
+        assert len(result.updated_state.nodes) == 1
+        assert result.updated_state.nodes[0].id == "t1"
+
+    def test_set_pipeline_version_increments(self) -> None:
+        from elspeth.web.composer.state import PipelineMetadata
+
+        state = CompositionState(
+            source=None,
+            nodes=(),
+            edges=(),
+            outputs=(),
+            metadata=PipelineMetadata(),
+            version=5,
+        )
+        catalog = _mock_catalog()
+        result = execute_tool("set_pipeline", _valid_pipeline_args(), state, catalog)
+        assert result.success is True
+        assert result.updated_state.version == 6
+
+    def test_set_pipeline_validation_runs(self) -> None:
+        """A pipeline with a disconnected node (unreachable input) should produce
+        validation errors or is_valid=False."""
+        state = _empty_state()
+        catalog = _mock_catalog()
+        args = _valid_pipeline_args()
+        # Add a second node that has an input not connected to anything
+        args["nodes"].append(
+            {
+                "id": "t2",
+                "node_type": "transform",
+                "plugin": "uppercase",
+                "input": "orphan_channel",
+                "on_success": "main",
+                "on_error": None,
+                "options": {},
+            }
+        )
+        result = execute_tool("set_pipeline", args, state, catalog)
+        assert result.success is True
+        assert result.validation is not None
+        # The orphan node has no reachable input — validation should flag it
+        assert result.validation.is_valid is False
+        assert len(result.validation.errors) > 0

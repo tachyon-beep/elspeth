@@ -503,10 +503,15 @@ class CompositionState:
             if node.routes is not None:
                 connection_targets.update(node.routes.values())
 
-        # W1: Output has no incoming edge or connection-field reference
+        # W1: Output has no runtime routing reference (on_success / on_error / routes)
+        # Edges are UI-only — generate_yaml() uses only connection fields,
+        # so an edge to a sink without a matching connection field is a
+        # false positive for reachability.
         for output in self.outputs:
-            if output.name not in edge_destinations and output.name not in connection_targets:
-                warnings.append(f"Output '{output.name}' has no incoming edge — it will never receive data.")
+            if output.name not in connection_targets:
+                warnings.append(
+                    f"Output '{output.name}' is not referenced by any on_success, on_error, or route — it will never receive data."
+                )
 
         # W2: Source on_success target doesn't match any node input or output name
         if source_on_success is not None:

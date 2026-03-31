@@ -505,6 +505,18 @@ allowed_dict_patterns:
   - "src/elspeth/web/composer/tools.py:_handle_list_secret_refs:arguments"
   - "src/elspeth/web/composer/tools.py:_handle_validate_secret_ref:arguments"
   - "src/elspeth/web/composer/tools.py:_execute_wire_secret_ref:arguments"
+  # RFC 7386 merge-patch helper — patch dict is Tier 3 (LLM-provided)
+  - "src/elspeth/web/composer/tools.py:_apply_merge_patch:patch"
+  - "src/elspeth/web/composer/tools.py:_apply_merge_patch:return"
+  # Pipeline-level set/patch tool handlers — same pattern as above
+  - "src/elspeth/web/composer/tools.py:_execute_set_pipeline:args"
+  - "src/elspeth/web/composer/tools.py:_handle_set_pipeline:arguments"
+  - "src/elspeth/web/composer/tools.py:_execute_patch_source_options:args"
+  - "src/elspeth/web/composer/tools.py:_handle_patch_source_options:arguments"
+  - "src/elspeth/web/composer/tools.py:_execute_patch_node_options:args"
+  - "src/elspeth/web/composer/tools.py:_handle_patch_node_options:arguments"
+  - "src/elspeth/web/composer/tools.py:_execute_patch_output_options:args"
+  - "src/elspeth/web/composer/tools.py:_handle_patch_output_options:arguments"
 
   # WEB COMPOSER — Service, protocol, prompts (LLM message lists)
   # LiteLLM message format is list[dict[str, Any]] by API contract.

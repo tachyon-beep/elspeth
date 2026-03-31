@@ -9,7 +9,7 @@ L3 (web/composer/state, web/catalog/protocol).
 
 from __future__ import annotations
 
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -17,12 +17,13 @@ from typing import Any
 from sqlalchemy import Engine, select
 
 from elspeth.contracts.freeze import deep_thaw, freeze_fields
-from elspeth.web.catalog.protocol import CatalogService
+from elspeth.web.catalog.protocol import CatalogService, PluginKind
 from elspeth.web.composer.state import (
     CompositionState,
     EdgeSpec,
     NodeSpec,
     OutputSpec,
+    PipelineMetadata,
     SourceSpec,
     ValidationSummary,
 )
@@ -115,7 +116,7 @@ def get_expression_grammar() -> str:
 def get_tool_definitions() -> list[dict[str, Any]]:
     """Return JSON Schema tool definitions for the LLM.
 
-    Returns 19 tools: 5 discovery + 8 mutation + 3 blob tools + 3 secret tools.
+    Returns 23 tools: 5 discovery + 12 mutation + 3 blob tools + 3 secret tools.
     """
     return [
         # Discovery tools
@@ -289,6 +290,98 @@ def get_tool_definitions() -> list[dict[str, Any]]:
                     "sink_name": {"type": "string", "description": "Sink name to remove."},
                 },
                 "required": ["sink_name"],
+            },
+        },
+        {
+            "name": "patch_source_options",
+            "description": "Apply a JSON merge-patch to the current source options. "
+            "Keys in the patch overwrite existing keys. "
+            "Keys set to null are deleted. Missing keys are unchanged.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "patch": {
+                        "type": "object",
+                        "description": "Merge-patch to apply to source options.",
+                    },
+                },
+                "required": ["patch"],
+            },
+        },
+        {
+            "name": "patch_node_options",
+            "description": "Apply a JSON merge-patch to a node's options. "
+            "Keys in the patch overwrite existing keys. "
+            "Keys set to null are deleted. Missing keys are unchanged.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "node_id": {
+                        "type": "string",
+                        "description": "ID of the node to patch.",
+                    },
+                    "patch": {
+                        "type": "object",
+                        "description": "Merge-patch to apply to node options.",
+                    },
+                },
+                "required": ["node_id", "patch"],
+            },
+        },
+        {
+            "name": "patch_output_options",
+            "description": "Apply a JSON merge-patch to an output's options. "
+            "Keys in the patch overwrite existing keys. "
+            "Keys set to null are deleted. Missing keys are unchanged.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "sink_name": {
+                        "type": "string",
+                        "description": "Name of the output (sink) to patch.",
+                    },
+                    "patch": {
+                        "type": "object",
+                        "description": "Merge-patch to apply to output options.",
+                    },
+                },
+                "required": ["sink_name", "patch"],
+            },
+        },
+        {
+            "name": "set_pipeline",
+            "description": "Atomically replace the entire pipeline. Provide the "
+            "complete source, nodes, edges, outputs, and metadata in one call. "
+            "This is more efficient than calling set_source + upsert_node + "
+            "upsert_edge + set_output sequentially.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "source": {
+                        "type": "object",
+                        "description": "Source configuration: {plugin, options, on_success, on_validation_failure?}",
+                    },
+                    "nodes": {
+                        "type": "array",
+                        "items": {"type": "object"},
+                        "description": "Array of node specs: [{id, input, plugin?, node_type, options?, on_success?, on_error?, condition?, routes?, fork_to?, branches?, policy?, merge?}]",
+                    },
+                    "edges": {
+                        "type": "array",
+                        "items": {"type": "object"},
+                        "description": "Array of edge specs: [{id, from_node, to_node, edge_type}]",
+                    },
+                    "outputs": {
+                        "type": "array",
+                        "items": {"type": "object"},
+                        "description": "Array of output specs: [{name, plugin, options, on_write_failure?}]",
+                    },
+                    "metadata": {
+                        "type": "object",
+                        "description": "Pipeline metadata: {name?, description?}",
+                    },
+                },
+                "required": ["source", "nodes", "edges", "outputs"],
             },
         },
         # Blob tools
@@ -536,6 +629,33 @@ def _mutation_result(
     )
 
 
+def _apply_merge_patch(
+    target: Mapping[str, Any],
+    patch: dict[str, Any],
+) -> dict[str, Any]:
+    """Shallow merge-patch: overwrite or delete top-level keys in target."""
+    result = dict(target)
+    for key, value in patch.items():
+        if value is None:
+            result.pop(key, None)
+        else:
+            result[key] = value
+    return result
+
+
+def _validate_plugin_name(
+    catalog: CatalogServiceProtocol,
+    plugin_type: PluginKind,
+    name: str,
+) -> str | None:
+    """Return an error message if the plugin name is not in the catalog, or None if valid."""
+    try:
+        catalog.get_schema(plugin_type, name)
+    except (ValueError, KeyError) as exc:
+        return f"Unknown {plugin_type} plugin '{name}': {exc}"
+    return None
+
+
 # --- Blob helpers (sync — called from worker thread via compose()) ---
 
 _MIME_TO_SOURCE_PLUGIN: dict[str, str] = {
@@ -635,10 +755,9 @@ def _execute_set_source(
     """Set or replace the pipeline source."""
     plugin = args["plugin"]
     # Validate plugin exists in catalog
-    try:
-        catalog.get_schema("source", plugin)
-    except (ValueError, KeyError) as exc:
-        return _failure_result(state, f"Unknown source plugin '{plugin}': {exc}")
+    plugin_error = _validate_plugin_name(catalog, "source", plugin)
+    if plugin_error is not None:
+        return _failure_result(state, plugin_error)
 
     # S2: Validate source path allowlist
     options = args.get("options", {})
@@ -667,10 +786,9 @@ def _execute_upsert_node(
 
     # Validate plugin for types that require one
     if node_type in ("transform", "aggregation") and plugin is not None:
-        try:
-            catalog.get_schema("transform", plugin)
-        except (ValueError, KeyError) as exc:
-            return _failure_result(state, f"Unknown {node_type} plugin '{plugin}': {exc}")
+        plugin_error = _validate_plugin_name(catalog, "transform", plugin)
+        if plugin_error is not None:
+            return _failure_result(state, plugin_error)
 
     fork_to = args.get("fork_to")
     if fork_to is not None:
@@ -785,10 +903,9 @@ def _execute_set_output(
     """Add or replace a pipeline output (sink)."""
     plugin = args["plugin"]
     # Validate plugin exists in catalog
-    try:
-        catalog.get_schema("sink", plugin)
-    except (ValueError, KeyError) as exc:
-        return _failure_result(state, f"Unknown sink plugin '{plugin}': {exc}")
+    plugin_error = _validate_plugin_name(catalog, "sink", plugin)
+    if plugin_error is not None:
+        return _failure_result(state, plugin_error)
 
     output = OutputSpec(
         name=args["sink_name"],
@@ -1017,6 +1134,239 @@ def _execute_wire_secret_ref(
         return _failure_result(state, f"Unknown target type: '{target}'.")
 
 
+# --- Atomic set_pipeline handler ---
+
+
+def _execute_set_pipeline(
+    args: dict[str, Any],
+    state: CompositionState,
+    catalog: CatalogServiceProtocol,
+    data_dir: str | None = None,
+) -> ToolResult:
+    """Atomically replace the entire pipeline composition state."""
+    # 1. Validate source plugin
+    src_args = args["source"]
+    src_plugin = src_args["plugin"]
+    plugin_error = _validate_plugin_name(catalog, "source", src_plugin)
+    if plugin_error is not None:
+        return _failure_result(state, plugin_error)
+
+    # S2: Validate source path allowlist (same check as _execute_set_source)
+    src_options = src_args.get("options", {})
+    path_error = _validate_source_path(src_options, data_dir)
+    if path_error is not None:
+        return _failure_result(state, path_error)
+
+    # 2. Validate node plugins
+    for node_args in args["nodes"]:
+        node_type = node_args["node_type"]
+        node_plugin = node_args.get("plugin")
+        if node_type in ("transform", "aggregation") and node_plugin is not None:
+            plugin_error = _validate_plugin_name(catalog, "transform", node_plugin)
+            if plugin_error is not None:
+                return _failure_result(state, plugin_error)
+
+    # 3. Validate output plugins
+    for out_args in args["outputs"]:
+        out_plugin = out_args["plugin"]
+        plugin_error = _validate_plugin_name(catalog, "sink", out_plugin)
+        if plugin_error is not None:
+            return _failure_result(state, plugin_error)
+
+    # 4. Construct specs (same field extraction as individual handlers)
+    try:
+        source_spec = SourceSpec(
+            plugin=src_plugin,
+            on_success=src_args["on_success"],
+            options=src_args.get("options", {}),
+            on_validation_failure=src_args.get("on_validation_failure", "quarantine"),
+        )
+
+        node_specs = []
+        for n in args["nodes"]:
+            fork_to = n.get("fork_to")
+            if fork_to is not None:
+                fork_to = tuple(fork_to)
+            branches = n.get("branches")
+            if branches is not None:
+                branches = tuple(branches)
+            node_specs.append(
+                NodeSpec(
+                    id=n["id"],
+                    node_type=n["node_type"],
+                    plugin=n.get("plugin"),
+                    input=n["input"],
+                    on_success=n.get("on_success"),
+                    on_error=n.get("on_error"),
+                    options=n.get("options", {}),
+                    condition=n.get("condition"),
+                    routes=n.get("routes"),
+                    fork_to=fork_to,
+                    branches=branches,
+                    policy=n.get("policy"),
+                    merge=n.get("merge"),
+                )
+            )
+
+        edge_specs = []
+        for e in args["edges"]:
+            edge_specs.append(
+                EdgeSpec(
+                    id=e["id"],
+                    from_node=e["from_node"],
+                    to_node=e["to_node"],
+                    edge_type=e["edge_type"],
+                    label=e.get("label"),
+                )
+            )
+
+        output_specs = []
+        for o in args["outputs"]:
+            output_specs.append(
+                OutputSpec(
+                    name=o["name"],
+                    plugin=o["plugin"],
+                    options=o.get("options", {}),
+                    on_write_failure=o.get("on_write_failure", "discard"),
+                )
+            )
+
+        meta = args.get("metadata", {})
+        metadata_spec = PipelineMetadata(
+            name=meta.get("name", "Untitled Pipeline"),
+            description=meta.get("description", ""),
+        )
+    except (KeyError, TypeError) as exc:
+        return _failure_result(state, f"Invalid pipeline spec: {exc}")
+
+    # 5. Build new state
+    new_state = CompositionState(
+        source=source_spec,
+        nodes=tuple(node_specs),
+        edges=tuple(edge_specs),
+        outputs=tuple(output_specs),
+        metadata=metadata_spec,
+        version=state.version + 1,
+    )
+
+    # 6. Report all nodes + source + outputs as affected
+    affected = ("source", *(n.id for n in node_specs), *(o.name for o in output_specs))
+    return _mutation_result(new_state, affected)
+
+
+def _handle_set_pipeline(
+    arguments: dict[str, Any],
+    state: CompositionState,
+    catalog: CatalogServiceProtocol,
+    data_dir: str | None = None,
+) -> ToolResult:
+    return _execute_set_pipeline(arguments, state, catalog, data_dir)
+
+
+# --- Merge-patch mutation handlers ---
+
+
+def _execute_patch_source_options(
+    args: dict[str, Any],
+    state: CompositionState,
+    data_dir: str | None = None,
+) -> ToolResult:
+    if state.source is None:
+        return _failure_result(state, "No source configured to patch.")
+    patch = args["patch"]
+    new_options = _apply_merge_patch(state.source.options, patch)
+
+    # S2: Validate patched source paths against allowlist
+    path_error = _validate_source_path(new_options, data_dir)
+    if path_error is not None:
+        return _failure_result(state, path_error)
+
+    new_source = SourceSpec(
+        plugin=state.source.plugin,
+        options=new_options,
+        on_success=state.source.on_success,
+        on_validation_failure=state.source.on_validation_failure,
+    )
+    new_state = state.with_source(new_source)
+    return _mutation_result(new_state, ("source",))
+
+
+def _handle_patch_source_options(
+    arguments: dict[str, Any],
+    state: CompositionState,
+    catalog: CatalogServiceProtocol,
+    data_dir: str | None = None,
+) -> ToolResult:
+    return _execute_patch_source_options(arguments, state, data_dir)
+
+
+def _execute_patch_node_options(
+    args: dict[str, Any],
+    state: CompositionState,
+) -> ToolResult:
+    node_id = args["node_id"]
+    patch = args["patch"]
+    current = next((n for n in state.nodes if n.id == node_id), None)
+    if current is None:
+        return _failure_result(state, f"Node '{node_id}' not found.")
+    new_options = _apply_merge_patch(current.options, patch)
+    new_node = NodeSpec(
+        id=current.id,
+        node_type=current.node_type,
+        plugin=current.plugin,
+        input=current.input,
+        on_success=current.on_success,
+        on_error=current.on_error,
+        options=new_options,
+        condition=current.condition,
+        routes=current.routes,
+        fork_to=current.fork_to,
+        branches=current.branches,
+        policy=current.policy,
+        merge=current.merge,
+    )
+    new_state = state.with_node(new_node)
+    return _mutation_result(new_state, (node_id,))
+
+
+def _handle_patch_node_options(
+    arguments: dict[str, Any],
+    state: CompositionState,
+    catalog: CatalogServiceProtocol,
+    data_dir: str | None = None,
+) -> ToolResult:
+    return _execute_patch_node_options(arguments, state)
+
+
+def _execute_patch_output_options(
+    args: dict[str, Any],
+    state: CompositionState,
+) -> ToolResult:
+    sink_name = args["sink_name"]
+    patch = args["patch"]
+    current = next((o for o in state.outputs if o.name == sink_name), None)
+    if current is None:
+        return _failure_result(state, f"Output '{sink_name}' not found.")
+    new_options = _apply_merge_patch(current.options, patch)
+    new_output = OutputSpec(
+        name=current.name,
+        plugin=current.plugin,
+        options=new_options,
+        on_write_failure=current.on_write_failure,
+    )
+    new_state = state.with_output(new_output)
+    return _mutation_result(new_state, (sink_name,))
+
+
+def _handle_patch_output_options(
+    arguments: dict[str, Any],
+    state: CompositionState,
+    catalog: CatalogServiceProtocol,
+    data_dir: str | None = None,
+) -> ToolResult:
+    return _execute_patch_output_options(arguments, state)
+
+
 # --- Registries ---
 # Must be after all handler definitions to avoid NameError.
 
@@ -1042,6 +1392,10 @@ _MUTATION_TOOLS: dict[str, ToolHandler] = {
     "set_metadata": _handle_set_metadata,
     "set_output": _handle_set_output,
     "remove_output": _handle_remove_output,
+    "patch_source_options": _handle_patch_source_options,
+    "patch_node_options": _handle_patch_node_options,
+    "patch_output_options": _handle_patch_output_options,
+    "set_pipeline": _handle_set_pipeline,
 }
 
 # Blob tools use an extended handler signature with session context kwargs

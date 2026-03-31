@@ -651,8 +651,9 @@ per_file_rules:
   rules:
   - R1
   - R5
+  - R9
   reason: Tier 3 boundary — LLM tool call arguments are external data with optional
-    fields per JSON schema
+    fields per JSON schema; pop-with-default implements RFC 7386 merge patch null semantics
   expires: null
 - pattern: web/composer/service.py
   rules:
