@@ -534,3 +534,55 @@ class TestForkEndpoint:
         # The partially created session should have been cleaned up
         sessions = await session_service.list_sessions("alice", "local")
         assert len(sessions) == 1  # Only the original remains
+
+    @pytest.mark.asyncio
+    async def test_fork_with_non_uuid_blob_ref_succeeds_gracefully(self, tmp_path) -> None:
+        """A non-UUID blob_ref in the source state should not crash the fork.
+
+        The rewrite is best-effort — if the blob_ref isn't a valid UUID,
+        it can't match any entry in blob_map, so we skip the remap rather
+        than raising ValueError after irreversible side effects.
+        """
+        app, service, blob_service = _make_fork_app(tmp_path)
+        client = TestClient(app)
+
+        session = await service.create_session("alice", "Original", "local")
+
+        # Save state with a non-UUID blob_ref (simulates manual edit or
+        # corrupt persisted data)
+        await service.save_composition_state(
+            session.id,
+            CompositionStateData(
+                source={
+                    "plugin": "csv",
+                    "options": {"blob_ref": "not-a-valid-uuid", "path": "/data/x.csv"},
+                },
+                is_valid=True,
+            ),
+        )
+
+        msg = await service.add_message(
+            session.id,
+            "user",
+            "Hello",
+            composition_state_id=(await service.get_current_state(session.id)).id,
+        )
+
+        # Create a blob so blob_map is non-empty (triggers the rewrite path)
+        await blob_service.create_blob(
+            session.id,
+            "data.csv",
+            b"a,b\n1,2",
+            "text/csv",
+        )
+
+        response = client.post(
+            f"/api/sessions/{session.id}/fork",
+            json={
+                "from_message_id": str(msg.id),
+                "new_message_content": "Hello edited",
+            },
+        )
+
+        # Fork should succeed (201), not crash with 500
+        assert response.status_code == 201

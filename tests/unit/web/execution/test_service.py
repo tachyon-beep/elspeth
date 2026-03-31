@@ -603,6 +603,72 @@ class TestCancelMechanism:
         assert str(run_id) not in service._shutdown_events
 
 
+# ── Blob Ref Pre-Validation ───────────────────────────────────────────
+
+
+class TestBlobRefPreValidation:
+    """Malformed blob_ref must raise BEFORE create_run() to avoid
+    orphaning a pending run that blocks future executions."""
+
+    @pytest.mark.asyncio
+    async def test_malformed_blob_ref_raises_before_run_creation(
+        self,
+        service: ExecutionServiceImpl,
+        mock_session_service: MagicMock,
+    ) -> None:
+        """A non-UUID blob_ref raises ValueError before create_run()
+        is called, so no pending run is orphaned."""
+        state = mock_session_service.get_current_state.return_value
+        state.source = {
+            "plugin": "csv",
+            "on_success": "continue",
+            "options": {"blob_ref": "not-a-uuid"},
+            "on_validation_failure": "quarantine",
+        }
+
+        blob_service = MagicMock()
+        cast(Any, service)._blob_service = blob_service
+
+        with pytest.raises(ValueError):
+            await service.execute(session_id=uuid4())
+
+        # The critical invariant: create_run() was never called,
+        # so no stale pending run exists.
+        mock_session_service.create_run.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_valid_blob_ref_still_links_correctly(
+        self,
+        service: ExecutionServiceImpl,
+        mock_session_service: MagicMock,
+    ) -> None:
+        """Valid UUID blob_ref is parsed early and passed to link_blob_to_run."""
+        run_id = uuid4()
+        blob_ref = str(uuid4())
+        mock_session_service.create_run.return_value = MagicMock(id=run_id)
+
+        blob_service = MagicMock()
+        blob_service.link_blob_to_run = AsyncMock()
+        cast(Any, service)._blob_service = blob_service
+
+        state = mock_session_service.get_current_state.return_value
+        state.source = {
+            "plugin": "csv",
+            "on_success": "continue",
+            "options": {"blob_ref": blob_ref},
+            "on_validation_failure": "quarantine",
+        }
+
+        with patch.object(service, "_run_pipeline"):
+            await service.execute(session_id=uuid4())
+
+        blob_service.link_blob_to_run.assert_called_once_with(
+            blob_id=UUID(blob_ref),
+            run_id=run_id,
+            direction="input",
+        )
+
+
 # ── One Active Run (B6) ───────────────────────────────────────────────
 
 

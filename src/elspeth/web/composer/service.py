@@ -202,6 +202,9 @@ class ComposerServiceImpl:
                 try:
                     arguments = json.loads(tool_call.function.arguments)
                 except (json.JSONDecodeError, TypeError) as exc:
+                    # Track mutation intent even when args are unparseable
+                    if not is_discovery_tool(tool_name):
+                        turn_has_mutation = True
                     llm_messages.append(
                         {
                             "role": "tool",
@@ -251,6 +254,11 @@ class ComposerServiceImpl:
                         user_id=user_id,
                     )
                 except (KeyError, TypeError) as exc:
+                    # Track mutation intent even on failure — the LLM
+                    # attempted a mutation, so charge composition budget,
+                    # not discovery.
+                    if not is_discovery_tool(tool_name):
+                        turn_has_mutation = True
                     llm_messages.append(
                         {
                             "role": "tool",

@@ -184,6 +184,16 @@ class ExecutionServiceImpl:
 
         pipeline_yaml = self._yaml_generator.generate_yaml(composition_state)
 
+        # Pre-validate blob_ref UUID before creating the run record.
+        # UUID() can raise ValueError on malformed strings; if that happens
+        # after create_run(), the pending run blocks the session permanently
+        # because the except block below only cleans up _shutdown_events.
+        parsed_blob_id: UUID | None = None
+        if composition_state.source is not None and self._blob_service is not None:
+            blob_ref = composition_state.source.options.get("blob_ref")
+            if blob_ref is not None:
+                parsed_blob_id = UUID(blob_ref)
+
         # B9 fix: create_run() generates its own UUID internally and returns
         # a RunRecord. Read the run_id back from the returned record so our
         # _shutdown_events key matches the DB record.
@@ -203,14 +213,12 @@ class ExecutionServiceImpl:
 
         try:
             # Record blob-to-run linkage for input blobs
-            if composition_state.source is not None and self._blob_service is not None:
-                blob_ref = composition_state.source.options.get("blob_ref")
-                if blob_ref is not None:
-                    await self._blob_service.link_blob_to_run(
-                        blob_id=UUID(blob_ref),
-                        run_id=run_id,
-                        direction="input",
-                    )
+            if parsed_blob_id is not None:
+                await self._blob_service.link_blob_to_run(
+                    blob_id=parsed_blob_id,
+                    run_id=run_id,
+                    direction="input",
+                )
 
             # Submit to thread pool
             future = self._executor.submit(self._run_pipeline, str(run_id), pipeline_yaml, shutdown_event, user_id)

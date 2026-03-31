@@ -373,6 +373,126 @@ class TestComposerConvergence:
         assert result.state.metadata.name == "Works"
 
 
+class TestFailedMutationBudgetClassification:
+    """Failed mutation tool calls must charge composition budget, not discovery."""
+
+    @pytest.mark.asyncio
+    async def test_failed_mutation_charges_composition_budget(self) -> None:
+        """A mutation tool that fails with KeyError/TypeError should exhaust
+        composition budget, not discovery budget."""
+        catalog = _mock_catalog()
+        settings = _make_settings(
+            composer_max_composition_turns=1,
+            composer_max_discovery_turns=10,
+        )
+        service = ComposerServiceImpl(catalog=catalog, settings=settings)
+        state = _empty_state()
+
+        # Turn 1: set_source with missing required key → KeyError
+        # This is a mutation tool, so even though it fails, it should
+        # charge composition budget (1/1 → exhausted).
+        bad_mutation = _make_llm_response(
+            tool_calls=[
+                {
+                    "id": "c1",
+                    "name": "set_source",
+                    "arguments": {"plugin": "csv"},  # missing on_success
+                }
+            ],
+        )
+        # Bonus call (composition exhausted gives one last chance) also
+        # returns a tool call → convergence error
+        bad_mutation2 = _make_llm_response(
+            tool_calls=[
+                {
+                    "id": "c2",
+                    "name": "set_source",
+                    "arguments": {"plugin": "csv"},
+                }
+            ],
+        )
+
+        with patch.object(service, "_call_llm", new_callable=AsyncMock) as mock_llm:
+            mock_llm.side_effect = [bad_mutation, bad_mutation2]
+            with pytest.raises(ComposerConvergenceError) as exc_info:
+                await service.compose("Setup source", [], state)
+            assert exc_info.value.budget_exhausted == "composition"
+
+    @pytest.mark.asyncio
+    async def test_failed_mutation_json_parse_charges_composition_budget(self) -> None:
+        """Mutation tool with unparseable JSON arguments should still
+        charge composition budget."""
+        catalog = _mock_catalog()
+        settings = _make_settings(
+            composer_max_composition_turns=1,
+            composer_max_discovery_turns=10,
+        )
+        service = ComposerServiceImpl(catalog=catalog, settings=settings)
+        state = _empty_state()
+
+        # Build a tool call with invalid JSON manually
+        call = FakeToolCall(
+            id="c1",
+            function=FakeFunction(
+                name="set_source",
+                arguments="{invalid json",
+            ),
+        )
+        msg = FakeMessage(content=None, tool_calls=[call])
+        response = FakeLLMResponse(choices=[FakeChoice(message=msg)])
+
+        # Bonus call also fails
+        call2 = FakeToolCall(
+            id="c2",
+            function=FakeFunction(
+                name="set_source",
+                arguments="{still invalid",
+            ),
+        )
+        msg2 = FakeMessage(content=None, tool_calls=[call2])
+        response2 = FakeLLMResponse(choices=[FakeChoice(message=msg2)])
+
+        with patch.object(service, "_call_llm", new_callable=AsyncMock) as mock_llm:
+            mock_llm.side_effect = [response, response2]
+            with pytest.raises(ComposerConvergenceError) as exc_info:
+                await service.compose("Setup source", [], state)
+            assert exc_info.value.budget_exhausted == "composition"
+
+    @pytest.mark.asyncio
+    async def test_failed_discovery_does_not_charge_composition_budget(self) -> None:
+        """A failed discovery tool should still charge discovery budget,
+        not composition budget."""
+        catalog = _mock_catalog()
+        settings = _make_settings(
+            composer_max_composition_turns=10,
+            composer_max_discovery_turns=1,
+        )
+        service = ComposerServiceImpl(catalog=catalog, settings=settings)
+        state = _empty_state()
+
+        # list_sources with invalid JSON → still a discovery turn
+        call = FakeToolCall(
+            id="c1",
+            function=FakeFunction(
+                name="list_sources",
+                arguments="{bad json",
+            ),
+        )
+        msg = FakeMessage(content=None, tool_calls=[call])
+        response = FakeLLMResponse(choices=[FakeChoice(message=msg)])
+
+        # Turn 2: another discovery call
+        disc2 = _make_llm_response(
+            tool_calls=[{"id": "c2", "name": "list_transforms", "arguments": {}}],
+        )
+
+        with patch.object(service, "_call_llm", new_callable=AsyncMock) as mock_llm:
+            mock_llm.side_effect = [response, disc2]
+            with pytest.raises(ComposerConvergenceError) as exc_info:
+                await service.compose("Explore", [], state)
+            assert exc_info.value.budget_exhausted == "discovery"
+
+
 class TestComposerErrorHandling:
     @pytest.mark.asyncio
     async def test_unknown_tool_returns_error_to_llm(self) -> None:

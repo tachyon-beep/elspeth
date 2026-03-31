@@ -437,10 +437,15 @@ allow_hits:
   reason: isinstance check on deserialized composition state source
   safety: Skips rewrite if not dict
   expires: null
-- key: web/sessions/routes.py:R5:create_session_router:fork_from_message:fp=b75fb6d443fe8da5
+- key: web/sessions/routes.py:R5:create_session_router:fork_from_message:fp=9a052b8fb6efade5
   owner: web-sessions
-  reason: isinstance check on blob_ref — may be str or UUID
-  safety: UUID conversion handles both types
+  reason: isinstance check on blob_ref — may be str or UUID from persisted state
+  safety: UUID conversion handles both types; ValueError guard handles non-UUID strings
+  expires: null
+- key: web/sessions/routes.py:R6:create_session_router:fork_from_message:fp=87c12b2a54b96f4e
+  owner: web-sessions
+  reason: Tier 3 boundary — persisted blob_ref may be non-UUID string; skip rewrite gracefully
+  safety: ValueError caught only for UUID parse; fork proceeds without blob_ref remap
   expires: null
 - key: web/sessions/service.py:R5:SessionServiceImpl:_unwrap_envelope:fp=92be5b7dd57e1352
   owner: web-sessions
@@ -467,9 +472,9 @@ allow_hits:
   reason: Optional keys in user-authored config — blob_ref is optional in source options
   safety: Returns None; blob link skipped
   expires: null
-- key: web/execution/service.py:R1:ExecutionServiceImpl:execute:fp=bb4332df9d5ab9d5
+- key: web/execution/service.py:R1:ExecutionServiceImpl:execute:fp=5589953bbc93b236
   owner: web-execution
-  reason: blob_ref is optional key in source options
+  reason: blob_ref is optional key in source options — pre-validated before create_run
   safety: Returns None; blob link skipped
   expires: null
 - key: web/execution/service.py:R4:ExecutionServiceImpl:_finalize_output_blobs:fp=d5c2eb3b2452fc93
@@ -507,7 +512,7 @@ allow_hits:
   reason: Tier 3 — config from YAML deserialization may be non-dict
   safety: Raises TypeError if not dict; no silent default
   expires: null
-- key: web/execution/service.py:R9:ExecutionServiceImpl:execute:fp=a04c9b04d2e7dabc
+- key: web/execution/service.py:R9:ExecutionServiceImpl:execute:fp=74a7c5783a530e7f
   owner: web-execution
   reason: Idempotent shutdown-event cleanup on blob linkage or submit failure
   safety: Pop is idempotent; except BaseException handler cleans up before re-raise

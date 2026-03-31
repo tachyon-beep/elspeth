@@ -667,11 +667,17 @@ def create_session_router() -> APIRouter:
             if isinstance(source_dict, dict):
                 options = source_dict.get("options", {})
                 rewritten = False
-                # Remap blob_ref to the new blob's ID
+                # Remap blob_ref to the new blob's ID.
+                # Guard against non-UUID blob_ref values — if the persisted
+                # source has a malformed ref, skip the remap rather than
+                # crashing after fork artifacts are already committed.
                 old_ref = options.get("blob_ref")
                 if old_ref is not None:
-                    old_uuid = UUID(old_ref) if isinstance(old_ref, str) else old_ref
-                    if old_uuid in blob_map:
+                    try:
+                        old_uuid = UUID(old_ref) if isinstance(old_ref, str) else old_ref
+                    except ValueError:
+                        old_uuid = None
+                    if old_uuid is not None and old_uuid in blob_map:
                         options["blob_ref"] = str(blob_map[old_uuid].id)
                         options["path"] = blob_map[old_uuid].storage_path
                         rewritten = True
