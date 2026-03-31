@@ -1,136 +1,80 @@
 # RC4.2 UX Remediation — Wave 4 Nice-to-Have Subplan
 
-Date: 2026-03-31
-Status: Seed
+Date: 2026-03-31 (expanded and implemented 2026-03-31)
+Status: Implemented
 Parent: `docs/plans/rc4.2-ux-remediation/2026-03-30-rc4.2-ux-implementation-plan.md`
 
 ---
 
 ## Scope
 
-This subplan groups the P3 requirements that enhance the composer tooling and
-introduce preview execution. None of these items block other work; they can be
-implemented in any order once Wave 3 is complete.
+Four P3 tools that enhance the composer's editing and introspection
+capabilities. All backend-only, no frontend changes, no DB changes.
 
-Included requirements:
-
-- `REQ-API-05` — clear source
-- `REQ-API-06` — preview execution
-- `REQ-API-08` — explain validation errors
-- `REQ-API-09` — list available models
-
-Primary surfaces:
-
-- `CompositionState` mutation API
-- composer tool definitions
-- execution service (preview path)
-- catalog/model discovery
+- `REQ-API-05` — clear_source (remove source from composition)
+- `REQ-API-06` — preview_pipeline (dry-run configuration summary)
+- `REQ-API-08` — explain_validation_error (error pattern catalogue)
+- `REQ-API-09` — list_models (available LLM model identifiers)
 
 ---
 
-## Goals
+## Implementation
 
-- Remove friction from common iterative editing patterns.
-- Let users preview pipeline behaviour before committing to a full run.
-- Improve the assistant's self-repair loop through richer error context and
-  model discovery.
+### REQ-API-05: clear_source
 
----
+- `CompositionState.without_source()` — returns new state with source=None
+- `clear_source` mutation tool — fails if no source configured
+- 2 tests: removes source, no-source-fails
 
-## Requirement Sketches
+### REQ-API-06: preview_pipeline (v1 — dry-run only)
 
-### REQ-API-05: Clear Source (TINY)
+- Discovery tool returning validation result + source/node/output summary
+- Does NOT instantiate or execute the source plugin
+- Rationale: sources may be live APIs with rate limits, costs, or side
+  effects (e.g. weather station monitoring points). Reading data "just to
+  see if it works" is potentially destructive. The dry-run preview confirms
+  pipeline structure is valid without touching external systems.
+- Returns: is_valid, errors, warnings, suggestions, source summary,
+  node/output counts and IDs
+- 2 tests: empty pipeline, valid pipeline
 
-Add `CompositionState.without_source()` returning a new state with the source
-removed. Expose as `clear_source` composer tool. Straightforward — mirrors
-the existing `without_output()` pattern.
+### REQ-API-08: explain_validation_error
 
-Files: `state.py` (new method), `tools.py` (new tool).
+- Discovery tool with 14-pattern error catalogue covering all
+  `CompositionState.validate()` error classes plus Stage 2 common errors
+- Returns: error_text, explanation, suggested_fix
+- Falls back to generic response for unknown errors
+- 6 tests: no-source, unknown-node, duplicate, path-violation,
+  unreachable-node, unknown-error-generic
 
-### REQ-API-06: Preview Execution (MEDIUM)
+### REQ-API-09: list_models
 
-Two new tools: `preview_pipeline(max_rows?)` and
-`preview_node_output(node_id, sample_rows)`.
-
-Key constraints:
-
-- Preview is explicitly non-destructive — no Landscape recording, no sink
-  writes, no run record creation.
-- Row limiting at source level (default 5 rows).
-- Per-node output capture for full pipeline preview.
-- The implementation plan recommends starting with source-only preview for v1:
-  validate + run first N rows through source, return sample data. Full
-  per-node preview deferred.
-
-Risk: engine changes for preview mode. The v1 source-only approach avoids
-engine coupling — it only needs to instantiate and run the source plugin,
-which is already possible outside the orchestrator.
-
-Files: `tools.py` (2 new tools), `execution/service.py` (preview path),
-possibly engine changes for full preview.
-
-### REQ-API-08: Explain Validation Errors (SMALL)
-
-New discovery tool `explain_validation_error(error_text)` that maps common
-error patterns to human-readable diagnoses with suggested fixes. Pattern
-catalogue covers the ~8 error classes from `CompositionState.validate()` plus
-common Stage 2 errors.
-
-Implementation: a pattern-matching function over known error strings. No
-external calls, no LLM involvement — this is a lookup table with regex
-matching.
-
-Files: `tools.py` (new tool + error pattern catalogue).
-
-### REQ-API-09: List Models (SMALL)
-
-New discovery tool `list_models(provider?)`. Returns available model IDs,
-optionally filtered by provider. Implementation depends on configured
-providers — may query LiteLLM's model list or return a curated static list
-from config.
-
-Open question: dynamic (query LiteLLM at runtime) vs static (curated list in
-settings). Dynamic is more accurate but adds latency and a failure mode.
-Recommend static list with an optional dynamic refresh.
-
-Files: `tools.py` (new tool), possibly config additions for model list.
+- Discovery tool querying `litellm.model_list` at runtime
+- Optional `provider` prefix filter (e.g. "openrouter/")
+- Graceful fallback to empty list if litellm not installed
+- 2 tests: returns data, provider filter
 
 ---
 
-## Likely Decisions
+## Files Modified
 
-- Start preview with source-only (no engine changes for v1).
-- Use a static error pattern catalogue for explain, not LLM-generated
-  explanations.
-- Model listing from config with optional LiteLLM query.
-
----
-
-## Dependencies
-
-- Enhanced validation model (sub-plan 05) for richer error context in
-  `explain_validation_error`.
-- No hard blockers — all items are independently implementable.
+| File | Changes |
+|------|---------|
+| `src/elspeth/web/composer/state.py` | `without_source()` method |
+| `src/elspeth/web/composer/tools.py` | 4 tool definitions, 4 handlers, error pattern catalogue, tool count 23→27 |
+| `tests/unit/web/composer/test_tools.py` | 12 new tests, registry count assertions updated |
 
 ---
 
-## Open Questions
+## Acceptance Criteria
 
-- Whether `preview_pipeline` should create a transient run record for
-  observability, even if it's not persisted to Landscape.
-- Whether `list_models` should validate that listed models are actually
-  reachable (adds latency) or just return the configured list.
-- Whether `clear_source` should also clear edges that reference the source's
-  `on_success` target (cascading cleanup) or leave orphaned edges for the
-  user/assistant to fix.
-
----
-
-## Expansion Notes
-
-When expanded into a full plan, include:
-
-- preview execution architecture (source-only vs full per-node)
-- error pattern catalogue content and matching strategy
-- model list data source and refresh policy
-- tool definitions with exact parameter and return shapes
+- [x] `clear_source` removes source and increments version
+- [x] `clear_source` fails gracefully when no source exists
+- [x] `preview_pipeline` returns validation + structure summary
+- [x] `preview_pipeline` does NOT execute or read from the source
+- [x] `explain_validation_error` maps known error patterns to explanations
+- [x] `explain_validation_error` returns generic response for unknown errors
+- [x] `list_models` returns sorted model identifiers from litellm
+- [x] `list_models` supports optional provider prefix filter
+- [x] All 92 tool tests pass
+- [x] mypy + ruff clean

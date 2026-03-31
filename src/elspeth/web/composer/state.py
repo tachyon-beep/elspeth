@@ -244,6 +244,10 @@ class CompositionState:
         """Return new state with the given source, version incremented."""
         return replace(self, source=source, version=self.version + 1)
 
+    def without_source(self) -> CompositionState:
+        """Return new state with the source removed, version incremented."""
+        return replace(self, source=None, version=self.version + 1)
+
     def with_node(self, node: NodeSpec) -> CompositionState:
         """Add or replace a node (matched by id). Version incremented."""
         existing_ids = [n.id for n in self.nodes]

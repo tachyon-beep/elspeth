@@ -651,10 +651,10 @@ class TestDiscoveryTools:
 
 
 class TestToolDefinitions:
-    def test_has_twenty_three_tools(self) -> None:
-        """5 discovery + 12 mutation + 3 blob tools + 3 secret tools = 23 tools."""
+    def test_has_twenty_seven_tools(self) -> None:
+        """8 discovery + 13 mutation + 3 blob tools + 3 secret tools = 27 tools."""
         defs = get_tool_definitions()
-        assert len(defs) == 23
+        assert len(defs) == 27
 
     def test_all_have_json_schema(self) -> None:
         for defn in get_tool_definitions():
@@ -688,23 +688,26 @@ class TestToolResultValidation:
 class TestToolRegistry:
     """Tests for the tool registry pattern — two dicts + cacheable frozenset."""
 
-    def test_discovery_tools_has_five_entries(self) -> None:
+    def test_discovery_tools_has_eight_entries(self) -> None:
         from elspeth.web.composer.tools import _DISCOVERY_TOOLS
 
-        assert len(_DISCOVERY_TOOLS) == 5
+        assert len(_DISCOVERY_TOOLS) == 8
         expected = {
             "list_sources",
             "list_transforms",
             "list_sinks",
             "get_plugin_schema",
             "get_expression_grammar",
+            "explain_validation_error",
+            "list_models",
+            "preview_pipeline",
         }
         assert set(_DISCOVERY_TOOLS.keys()) == expected
 
-    def test_mutation_tools_has_twelve_entries(self) -> None:
+    def test_mutation_tools_has_thirteen_entries(self) -> None:
         from elspeth.web.composer.tools import _MUTATION_TOOLS
 
-        assert len(_MUTATION_TOOLS) == 12
+        assert len(_MUTATION_TOOLS) == 13
         expected = {
             "set_source",
             "upsert_node",
@@ -718,6 +721,7 @@ class TestToolRegistry:
             "patch_node_options",
             "patch_output_options",
             "set_pipeline",
+            "clear_source",
         }
         assert set(_MUTATION_TOOLS.keys()) == expected
 
@@ -1574,3 +1578,193 @@ class TestSetPipeline:
         # The orphan node has no reachable input — validation should flag it
         assert result.validation.is_valid is False
         assert len(result.validation.errors) > 0
+
+
+# ---------------------------------------------------------------------------
+# clear_source tool tests
+# ---------------------------------------------------------------------------
+
+
+class TestClearSource:
+    def test_clear_source_removes_source(self) -> None:
+        state = _empty_state()
+        catalog = _mock_catalog()
+        # First set a source
+        r1 = execute_tool(
+            "set_source",
+            {"plugin": "csv", "on_success": "t1", "options": {}, "on_validation_failure": "quarantine"},
+            state,
+            catalog,
+        )
+        assert r1.updated_state.source is not None
+        # Now clear it
+        r2 = execute_tool("clear_source", {}, r1.updated_state, catalog)
+        assert r2.success is True
+        assert r2.updated_state.source is None
+        assert r2.updated_state.version == 3
+
+    def test_clear_source_no_source_fails(self) -> None:
+        state = _empty_state()
+        catalog = _mock_catalog()
+        result = execute_tool("clear_source", {}, state, catalog)
+        assert result.success is False
+        assert "No source" in result.data["error"]
+
+
+# ---------------------------------------------------------------------------
+# explain_validation_error tool tests
+# ---------------------------------------------------------------------------
+
+
+class TestExplainValidationError:
+    def test_explains_no_source(self) -> None:
+        state = _empty_state()
+        catalog = _mock_catalog()
+        result = execute_tool(
+            "explain_validation_error",
+            {"error_text": "No source configured."},
+            state,
+            catalog,
+        )
+        assert result.success is True
+        assert "source" in result.data["explanation"].lower()
+        assert "set_source" in result.data["suggested_fix"]
+
+    def test_explains_unknown_node_reference(self) -> None:
+        state = _empty_state()
+        catalog = _mock_catalog()
+        result = execute_tool(
+            "explain_validation_error",
+            {"error_text": "Edge 'e1' references unknown node 'foo' as from_node."},
+            state,
+            catalog,
+        )
+        assert result.success is True
+        assert "from_node" in result.data["suggested_fix"]
+
+    def test_explains_duplicate_node(self) -> None:
+        state = _empty_state()
+        catalog = _mock_catalog()
+        result = execute_tool(
+            "explain_validation_error",
+            {"error_text": "Duplicate node ID: 'transform_1'."},
+            state,
+            catalog,
+        )
+        assert result.success is True
+        assert "unique" in result.data["explanation"].lower()
+
+    def test_unknown_error_returns_generic(self) -> None:
+        state = _empty_state()
+        catalog = _mock_catalog()
+        result = execute_tool(
+            "explain_validation_error",
+            {"error_text": "Some completely unknown error."},
+            state,
+            catalog,
+        )
+        assert result.success is True
+        assert "not in the known pattern" in result.data["explanation"]
+
+    def test_explains_path_violation(self) -> None:
+        state = _empty_state()
+        catalog = _mock_catalog()
+        result = execute_tool(
+            "explain_validation_error",
+            {"error_text": "Path violation (S2): '/etc/passwd' is outside the allowed directories."},
+            state,
+            catalog,
+        )
+        assert result.success is True
+        assert "allowed directories" in result.data["explanation"]
+
+    def test_explains_unreachable_node(self) -> None:
+        state = _empty_state()
+        catalog = _mock_catalog()
+        result = execute_tool(
+            "explain_validation_error",
+            {"error_text": "Node 't1' input 'foo' is not reachable from any edge or the source on_success."},
+            state,
+            catalog,
+        )
+        assert result.success is True
+        assert "edge" in result.data["suggested_fix"].lower()
+
+
+# ---------------------------------------------------------------------------
+# list_models tool tests
+# ---------------------------------------------------------------------------
+
+
+class TestListModels:
+    def test_list_models_returns_data(self) -> None:
+        state = _empty_state()
+        catalog = _mock_catalog()
+        result = execute_tool("list_models", {}, state, catalog)
+        assert result.success is True
+        assert "models" in result.data
+        assert "count" in result.data
+        assert isinstance(result.data["models"], (list, tuple))
+
+    def test_list_models_with_provider_filter(self) -> None:
+        state = _empty_state()
+        catalog = _mock_catalog()
+        # Even if litellm returns an empty list, the filter shouldn't crash
+        result = execute_tool(
+            "list_models",
+            {"provider": "openrouter/"},
+            state,
+            catalog,
+        )
+        assert result.success is True
+        assert isinstance(result.data["models"], (list, tuple))
+
+
+# ---------------------------------------------------------------------------
+# preview_pipeline tool tests
+# ---------------------------------------------------------------------------
+
+
+class TestPreviewPipeline:
+    def test_preview_empty_pipeline(self) -> None:
+        state = _empty_state()
+        catalog = _mock_catalog()
+        result = execute_tool("preview_pipeline", {}, state, catalog)
+        assert result.success is True
+        assert result.data["is_valid"] is False
+        assert result.data["source"] is None
+        assert result.data["node_count"] == 0
+
+    def test_preview_valid_pipeline(self) -> None:
+        state = _empty_state()
+        catalog = _mock_catalog()
+        # Build a minimal valid pipeline
+        r1 = execute_tool(
+            "set_source",
+            {
+                "plugin": "csv",
+                "on_success": "t1",
+                "options": {"path": "/data/in.csv", "schema_config": {"fields": []}},
+                "on_validation_failure": "quarantine",
+            },
+            state,
+            catalog,
+        )
+        r2 = execute_tool(
+            "upsert_node",
+            {"id": "t1", "node_type": "transform", "plugin": "uppercase", "input": "t1", "on_success": "main", "options": {}},
+            r1.updated_state,
+            catalog,
+        )
+        r3 = execute_tool(
+            "set_output",
+            {"sink_name": "main", "plugin": "csv", "options": {}},
+            r2.updated_state,
+            catalog,
+        )
+        result = execute_tool("preview_pipeline", {}, r3.updated_state, catalog)
+        assert result.success is True
+        assert result.data["source"]["plugin"] == "csv"
+        assert result.data["source"]["has_schema_config"] is True
+        assert result.data["node_count"] == 1
+        assert result.data["output_count"] == 1

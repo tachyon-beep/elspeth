@@ -116,7 +116,7 @@ def get_expression_grammar() -> str:
 def get_tool_definitions() -> list[dict[str, Any]]:
     """Return JSON Schema tool definitions for the LLM.
 
-    Returns 23 tools: 5 discovery + 12 mutation + 3 blob tools + 3 secret tools.
+    Returns 27 tools: 8 discovery + 13 mutation + 3 blob tools + 3 secret tools.
     """
     return [
         # Discovery tools
@@ -383,6 +383,50 @@ def get_tool_definitions() -> list[dict[str, Any]]:
                 },
                 "required": ["source", "nodes", "edges", "outputs"],
             },
+        },
+        # Wave 4 tools
+        {
+            "name": "clear_source",
+            "description": "Remove the source from the pipeline composition state.",
+            "parameters": {"type": "object", "properties": {}, "required": []},
+        },
+        {
+            "name": "explain_validation_error",
+            "description": "Get a human-readable explanation of a validation error "
+            "with suggested fixes. Pass the exact error text from a validation result.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "error_text": {
+                        "type": "string",
+                        "description": "The validation error message to explain.",
+                    },
+                },
+                "required": ["error_text"],
+            },
+        },
+        {
+            "name": "list_models",
+            "description": "List available LLM model identifiers that can be used "
+            "in LLM transform nodes. Optionally filter by provider prefix.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "provider": {
+                        "type": "string",
+                        "description": "Optional provider prefix to filter by (e.g. 'openrouter/', 'azure/').",
+                    },
+                },
+                "required": [],
+            },
+        },
+        {
+            "name": "preview_pipeline",
+            "description": "Preview the current pipeline configuration — returns "
+            "validation status, source summary, and node/output overview "
+            "without executing. Use this to confirm the pipeline is set up "
+            "correctly before running.",
+            "parameters": {"type": "object", "properties": {}, "required": []},
         },
         # Blob tools
         {
@@ -1379,6 +1423,213 @@ def _handle_patch_output_options(
     return _execute_patch_output_options(arguments, state)
 
 
+# --- Wave 4 handlers ---
+
+
+def _execute_clear_source(
+    args: dict[str, Any],
+    state: CompositionState,
+) -> ToolResult:
+    """Remove the pipeline source."""
+    if state.source is None:
+        return _failure_result(state, "No source configured to clear.")
+    new_state = state.without_source()
+    return _mutation_result(new_state, ("source",))
+
+
+def _handle_clear_source(
+    arguments: dict[str, Any],
+    state: CompositionState,
+    catalog: CatalogServiceProtocol,
+    data_dir: str | None = None,
+) -> ToolResult:
+    return _execute_clear_source(arguments, state)
+
+
+# Validation error pattern catalogue for explain_validation_error.
+# Each entry: (regex pattern, explanation, suggested fix).
+_VALIDATION_ERROR_PATTERNS: list[tuple[str, str, str]] = [
+    (
+        r"No source configured",
+        "The pipeline has no data source. Every pipeline needs exactly one source to read input data from.",
+        "Use set_source to configure a source plugin (e.g. csv, json, dataverse).",
+    ),
+    (
+        r"No sinks configured",
+        "The pipeline has no outputs. At least one sink is needed to write results.",
+        "Use set_output to add an output (e.g. csv, json).",
+    ),
+    (
+        r"references unknown node '(.+)' as from_node",
+        "An edge references a node that doesn't exist in the pipeline as its source.",
+        "Check the edge's from_node value. Either add the missing node with upsert_node or fix the edge with upsert_edge.",
+    ),
+    (
+        r"references unknown node '(.+)' as to_node",
+        "An edge references a node or output that doesn't exist in the pipeline as its target.",
+        "Check the edge's to_node value. Either add the missing node/output or fix the edge.",
+    ),
+    (
+        r"Duplicate node ID: '(.+)'",
+        "Two nodes have the same ID. Each node must have a unique identifier.",
+        "Rename one of the duplicate nodes using upsert_node with a different id.",
+    ),
+    (
+        r"Duplicate output name: '(.+)'",
+        "Two outputs have the same name. Each output must have a unique name.",
+        "Rename one of the duplicate outputs using set_output with a different sink_name.",
+    ),
+    (
+        r"Duplicate edge ID: '(.+)'",
+        "Two edges have the same ID. Each edge must have a unique identifier.",
+        "Remove the duplicate edge with remove_edge and re-add with a unique id.",
+    ),
+    (
+        r"Gate '(.+)' is missing required field '(.+)'",
+        "A gate node is missing a required configuration field (condition or routes).",
+        "Update the gate with upsert_node, providing the missing field.",
+    ),
+    (
+        r"Transform '(.+)' must not have '(.+)' field",
+        "A transform node has a field that only gates should have (condition or routes).",
+        "Update the node with upsert_node. Set node_type to 'gate' if routing is needed, or remove the field.",
+    ),
+    (
+        r"Coalesce '(.+)' is missing required field '(.+)'",
+        "A coalesce node is missing a required field (branches or policy).",
+        "Update the coalesce node with upsert_node, providing the missing field.",
+    ),
+    (
+        r"Aggregation '(.+)' is missing required field 'plugin'",
+        "An aggregation node needs a plugin to define its aggregation behaviour.",
+        "Update the aggregation with upsert_node, specifying the plugin name.",
+    ),
+    (
+        r"input '(.+)' is not reachable",
+        "A node's input connection point is not connected to any edge or the source's on_success target.",
+        "Either add an edge targeting this node, or set the source's on_success to match the node's input.",
+    ),
+    (
+        r"Unknown .+ plugin '(.+)'",
+        "The specified plugin name is not available in the catalog.",
+        "Use list_sources, list_transforms, or list_sinks to see available plugins.",
+    ),
+    (
+        r"Path violation \(S2\)",
+        "The source file path is outside the allowed directories.",
+        "Source paths must be under the uploads/ or blobs/ directory. Upload a file first or use set_source_from_blob.",
+    ),
+]
+
+
+def _execute_explain_validation_error(
+    args: dict[str, Any],
+    state: CompositionState,
+    catalog: CatalogServiceProtocol,
+    data_dir: str | None = None,
+) -> ToolResult:
+    """Explain a validation error with human-readable diagnosis and fix."""
+    import re
+
+    error_text = args["error_text"]
+    for pattern, explanation, fix in _VALIDATION_ERROR_PATTERNS:
+        if re.search(pattern, error_text):
+            return ToolResult(
+                success=True,
+                updated_state=state,
+                validation=state.validate(),
+                affected_nodes=(),
+                data={
+                    "error_text": error_text,
+                    "explanation": explanation,
+                    "suggested_fix": fix,
+                },
+            )
+    # No match — return a generic response
+    return ToolResult(
+        success=True,
+        updated_state=state,
+        validation=state.validate(),
+        affected_nodes=(),
+        data={
+            "error_text": error_text,
+            "explanation": "This error is not in the known pattern catalogue.",
+            "suggested_fix": "Review the error message and the pipeline structure. Use get_pipeline_state to inspect the current composition.",
+        },
+    )
+
+
+def _execute_list_models(
+    args: dict[str, Any],
+    state: CompositionState,
+    catalog: CatalogServiceProtocol,
+    data_dir: str | None = None,
+) -> ToolResult:
+    """List available LLM model identifiers."""
+    try:
+        import litellm
+
+        all_models: list[str] = sorted(litellm.model_list)
+    except (ImportError, AttributeError):
+        all_models = []
+
+    provider = args.get("provider")
+    if provider and isinstance(provider, str):
+        filtered = [m for m in all_models if m.startswith(provider)]
+    else:
+        filtered = all_models
+
+    return ToolResult(
+        success=True,
+        updated_state=state,
+        validation=state.validate(),
+        affected_nodes=(),
+        data={"models": filtered, "count": len(filtered)},
+    )
+
+
+def _execute_preview_pipeline(
+    args: dict[str, Any],
+    state: CompositionState,
+    catalog: CatalogServiceProtocol,
+    data_dir: str | None = None,
+) -> ToolResult:
+    """Preview pipeline configuration — dry-run validation with source summary.
+
+    V1: Returns validation result + source/node/output summary without
+    executing. Full data-flow preview (actually running the source and
+    returning sample rows) is a future enhancement.
+    """
+    validation = state.validate()
+
+    summary: dict[str, Any] = {
+        "is_valid": validation.is_valid,
+        "errors": list(validation.errors),
+        "warnings": list(validation.warnings),
+        "suggestions": list(validation.suggestions),
+        "source": None,
+        "node_count": len(state.nodes),
+        "output_count": len(state.outputs),
+        "nodes": [{"id": n.id, "node_type": n.node_type, "plugin": n.plugin} for n in state.nodes],
+        "outputs": [{"name": o.name, "plugin": o.plugin} for o in state.outputs],
+    }
+
+    if state.source is not None:
+        summary["source"] = {
+            "plugin": state.source.plugin,
+            "on_success": state.source.on_success,
+            "has_schema_config": "schema_config" in state.source.options,
+        }
+
+    return ToolResult(
+        success=True,
+        updated_state=state,
+        validation=validation,
+        affected_nodes=(),
+        data=summary,
+    )
+
+
 # --- Registries ---
 # Must be after all handler definitions to avoid NameError.
 
@@ -1388,6 +1639,9 @@ _DISCOVERY_TOOLS: dict[str, ToolHandler] = {
     "list_sinks": _handle_list_sinks,
     "get_plugin_schema": _handle_get_plugin_schema,
     "get_expression_grammar": _handle_get_expression_grammar,
+    "explain_validation_error": _execute_explain_validation_error,
+    "list_models": _execute_list_models,
+    "preview_pipeline": _execute_preview_pipeline,
 }
 
 # All discovery tools are cacheable. If a non-cacheable discovery tool is
@@ -1408,6 +1662,7 @@ _MUTATION_TOOLS: dict[str, ToolHandler] = {
     "patch_node_options": _handle_patch_node_options,
     "patch_output_options": _handle_patch_output_options,
     "set_pipeline": _handle_set_pipeline,
+    "clear_source": _handle_clear_source,
 }
 
 # Blob tools use an extended handler signature with session context kwargs

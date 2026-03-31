@@ -287,33 +287,38 @@ allow_hits:
     defaults to None
   safety: Missing = None; matches dataclass field default; round-trip invariant tested
   expires: null
-- key: web/composer/state.py:R1:CompositionState:with_metadata:fp=a9c809addf004c26
+- key: web/composer/state.py:R1:CompositionState:with_metadata:fp=e4ed52bc9bfb29d5
   owner: web-composer
   reason: Partial patch API — only provided fields are updated, others preserved
   safety: Defaults are the current field values; no fabrication, no loss
   expires: null
-- key: web/composer/state.py:R1:CompositionState:with_metadata:fp=f92267be975713f8
+- key: web/composer/state.py:R1:CompositionState:with_metadata:fp=cd32f53dcc6598ac
   owner: web-composer
   reason: Partial patch API — only provided fields are updated, others preserved
   safety: Defaults are the current field values; no fabrication, no loss
   expires: null
-- key: web/composer/state.py:R1:CompositionState:validate:fp=5fe1af5f42233589
+- key: web/composer/state.py:R1:CompositionState:validate:fp=d8f82ae3c0a7445b
   owner: web-composer
   reason: W4 extension check — output.options is a Mapping of user-authored config;
     path key is optional and may not exist
   safety: Missing path key returns None; no warning emitted; no fabrication
   expires: null
-- key: web/composer/state.py:R5:CompositionState:validate:fp=92bebb48a5bb819d
+- key: web/composer/state.py:R5:CompositionState:validate:fp=22b391db6486c675
   owner: web-composer
   reason: W4 extension check — path_val from options Mapping may be any type;
     isinstance guards against non-string values before PurePosixPath parsing
   safety: Non-string path_val is skipped; no warning emitted; no type coercion
   expires: null
-- key: web/composer/state.py:R1:CompositionState:validate:fp=df7892680a4e2ec7
+- key: web/composer/state.py:R1:CompositionState:validate:fp=45756dff83441453
   owner: web-composer
   reason: W4 extension check — _plugin_exts lookup for plugins not in the map;
     unknown plugins are silently skipped (no warning emitted)
   safety: Unknown plugin returns None; no warning emitted; no false positive
+  expires: null
+- key: web/composer/tools.py:R6:_execute_list_models:fp=983defe66bfa0916
+  owner: web-composer
+  reason: list_models gracefully handles missing litellm — returns empty model list
+  safety: ImportError/AttributeError returns empty list; no data fabrication
   expires: null
 - key: web/execution/validation.py:R1:validate_pipeline:fp=7f46a13f5a001bac
   owner: web-execution
