@@ -145,7 +145,7 @@ class ExecutionServiceImpl:
         # B6: One active run per session (AC #17: via SessionService)
         active = await self._session_service.get_active_run(session_id)
         if active is not None:
-            raise RunAlreadyActiveError(f"Session {session_id} already has an active run: {active.id}")
+            raise RunAlreadyActiveError(str(session_id))
 
         # B4 fix: get_composition_state() doesn't exist on SessionService.
         # Use get_state() for explicit state_id, get_current_state() for latest.
@@ -385,22 +385,25 @@ class ExecutionServiceImpl:
                 from elspeth.core.secrets import resolve_secret_refs
 
                 config_dict = _yaml.safe_load(pipeline_yaml)
-                if isinstance(config_dict, dict):
-                    resolved_dict, resolutions = resolve_secret_refs(config_dict, self._secret_service, user_id)
-                    resolved_yaml = _yaml.dump(resolved_dict, default_flow_style=False)
+                if not isinstance(config_dict, dict):
+                    raise TypeError(
+                        f"generate_yaml() produced non-dict YAML (got {type(config_dict).__name__}) — this is a bug in the YAML generator"
+                    )
+                resolved_dict, resolutions = resolve_secret_refs(config_dict, self._secret_service, user_id)
+                resolved_yaml = _yaml.dump(resolved_dict, default_flow_style=False)
 
-                    for rs in resolutions:
-                        secret_resolution_inputs.append(
-                            SecretResolutionInput(
-                                env_var_name=rs.name,
-                                source=rs.scope,
-                                vault_url=None,
-                                secret_name=None,
-                                timestamp=time.time(),
-                                resolution_latency_ms=0.0,
-                                fingerprint=rs.fingerprint,
-                            )
+                for rs in resolutions:
+                    secret_resolution_inputs.append(
+                        SecretResolutionInput(
+                            env_var_name=rs.name,
+                            source=rs.scope,
+                            vault_url=None,
+                            secret_name=None,
+                            timestamp=time.time(),
+                            resolution_latency_ms=0.0,
+                            fingerprint=rs.fingerprint,
                         )
+                    )
 
             # Load settings from YAML string — never write resolved secrets
             # to disk.  load_settings_from_yaml_string() parses in-process,
@@ -443,10 +446,13 @@ class ExecutionServiceImpl:
                 coalesce_settings=(list(settings.coalesce) if settings.coalesce else []),
             )
 
-            # Set up EventBus to bridge ProgressEvent -> RunEvent -> broadcaster
+            # Set up EventBus to bridge ProgressEvent -> RunEvent -> broadcaster.
+            # _to_run_event is a pure mapping (system code) — let it crash.
+            # broadcast() pushes to async queues — catch network/client errors.
             def _safe_broadcast(evt: ProgressEvent) -> None:
+                run_event = self._to_run_event(run_id, evt)
                 try:
-                    self._broadcaster.broadcast(run_id, self._to_run_event(run_id, evt))
+                    self._broadcaster.broadcast(run_id, run_event)
                 except Exception as broadcast_err:
                     slog.error(
                         "progress_broadcast_failed",

@@ -13,7 +13,7 @@ import uuid
 from collections.abc import Mapping
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
-from typing import Any, cast
+from typing import Any, Literal, cast
 from uuid import UUID
 
 from sqlalchemy import Engine, delete, desc, func, insert, select, update
@@ -173,8 +173,8 @@ class SessionServiceImpl:
                 if run_ids:
                     conn.execute(delete(run_events_table).where(run_events_table.c.run_id.in_(run_ids)))
                 conn.execute(delete(runs_table).where(runs_table.c.session_id == sid))
-                conn.execute(delete(composition_states_table).where(composition_states_table.c.session_id == sid))
                 conn.execute(delete(chat_messages_table).where(chat_messages_table.c.session_id == sid))
+                conn.execute(delete(composition_states_table).where(composition_states_table.c.session_id == sid))
                 conn.execute(delete(sessions_table).where(sessions_table.c.id == sid))
 
             # Clean up filesystem artifacts after DB rows are committed.
@@ -197,7 +197,7 @@ class SessionServiceImpl:
     async def add_message(
         self,
         session_id: UUID,
-        role: str,
+        role: Literal["user", "assistant", "system", "tool"],
         content: str,
         tool_calls: Mapping[str, Any] | None = None,
         composition_state_id: UUID | None = None,
@@ -811,8 +811,20 @@ class SessionServiceImpl:
                     ).fetchall()
                 }
 
-                # Candidates for deletion: everything not kept and not referenced
-                delete_ids = [row.id for row in all_rows if row.id not in keep_ids and row.id not in run_referenced]
+                # IDs referenced by chat messages (provenance tracking)
+                message_referenced = {
+                    row.composition_state_id
+                    for row in conn.execute(
+                        select(chat_messages_table.c.composition_state_id).where(
+                            chat_messages_table.c.session_id == sid,
+                            chat_messages_table.c.composition_state_id.isnot(None),
+                        )
+                    ).fetchall()
+                }
+
+                # Candidates for deletion: not kept, not run-referenced, not message-referenced
+                protected = keep_ids | run_referenced | message_referenced
+                delete_ids = [row.id for row in all_rows if row.id not in protected]
 
                 if not delete_ids:
                     return 0
@@ -1023,6 +1035,23 @@ class SessionServiceImpl:
             )
 
         return new_session, new_messages, copied_state
+
+    async def update_message_composition_state(
+        self,
+        message_id: UUID,
+        composition_state_id: UUID,
+    ) -> None:
+        """Re-point a message's composition_state_id to a different state."""
+        mid = str(message_id)
+        sid = str(composition_state_id)
+
+        def _sync() -> None:
+            with self._engine.begin() as conn:
+                result = conn.execute(update(chat_messages_table).where(chat_messages_table.c.id == mid).values(composition_state_id=sid))
+                if result.rowcount == 0:
+                    raise ValueError(f"Message {message_id} not found")
+
+        await self._run_sync(_sync)
 
     def _row_to_run_record(self, row: Any) -> RunRecord:
         """Convert a SQLAlchemy row to a RunRecord."""

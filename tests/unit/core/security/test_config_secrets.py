@@ -329,9 +329,13 @@ class TestErrorHandling:
         This tests the case where the fingerprint key itself is loaded from Key Vault.
         The key must be in the mapping, which means it will be loaded first.
         """
-        # Ensure fingerprint key is NOT in environment initially
-        monkeypatch.delenv("ELSPETH_FINGERPRINT_KEY", raising=False)
-        monkeypatch.delenv("MY_API_KEY", raising=False)
+        # Force-register for cleanup: monkeypatch.delenv() is a no-op for
+        # non-existent keys, so load_secrets_from_config()'s os.environ writes
+        # would leak into subsequent tests.  setenv+delenv forces monkeypatch
+        # to record the original state (absent) so teardown removes the key.
+        for key in ("ELSPETH_FINGERPRINT_KEY", "MY_API_KEY"):
+            monkeypatch.setenv(key, "")
+            monkeypatch.delenv(key)
 
         def mock_get_secret(name: str) -> MagicMock:
             secret = MagicMock()
@@ -373,9 +377,10 @@ class TestErrorHandling:
         the Key Vault secret hadn't been injected into os.environ yet. The fix
         ensures ELSPETH_FINGERPRINT_KEY is always loaded first.
         """
-        # Ensure fingerprint key is NOT in environment initially
-        monkeypatch.delenv("ELSPETH_FINGERPRINT_KEY", raising=False)
-        monkeypatch.delenv("MY_API_KEY", raising=False)
+        # Force-register for cleanup (see test above for rationale).
+        for key in ("ELSPETH_FINGERPRINT_KEY", "MY_API_KEY"):
+            monkeypatch.setenv(key, "")
+            monkeypatch.delenv(key)
 
         call_order: list[str] = []
 

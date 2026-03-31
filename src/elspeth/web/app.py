@@ -78,12 +78,10 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
                     doc = resp.json()
                     app.state.oidc_authorization_endpoint = doc["authorization_endpoint"]
             except (httpx.HTTPError, KeyError, ValueError) as exc:
-                slog.warning(
-                    "oidc_discovery_failed_for_authorization_endpoint",
-                    issuer=issuer,
-                    error=str(exc),
-                )
-                app.state.oidc_authorization_endpoint = None
+                raise SystemExit(
+                    f"FATAL: OIDC discovery failed for issuer {issuer!r}: {exc}. "
+                    f"Either fix the issuer URL or set oidc_authorization_endpoint explicitly."
+                ) from exc
 
     # Sub-5: Construct ProgressBroadcaster and ExecutionServiceImpl
     # These require a running event loop, which is only available here.
@@ -98,7 +96,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         session_service=session_service,
         yaml_generator=yaml_generator_module,
         blob_service=app.state.blob_service,
-        secret_service=getattr(app.state, "secret_service", None),
+        secret_service=app.state.secret_service,
     )
     app.state.execution_service = execution_service
 
@@ -192,6 +190,7 @@ def create_app(settings: WebSettings | None = None) -> FastAPI:
             audience=settings.oidc_audience,
         )
     app.state.auth_provider = auth_provider
+    app.state.oidc_authorization_endpoint = None  # Set by lifespan for OIDC/Entra
 
     # W16/S3: Secret key production guard -- hard crash
     if settings.secret_key == "change-me-in-production" and "pytest" not in sys.modules and os.environ.get("ELSPETH_ENV") != "test":

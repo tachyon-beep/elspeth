@@ -212,7 +212,7 @@ def create_execution_router() -> APIRouter:
             return
         try:
             user = await auth_provider.authenticate(token)
-        except (AuthenticationError, Exception):
+        except AuthenticationError:
             await websocket.close(code=4001, reason="Invalid authentication token")
             return
 
@@ -224,7 +224,7 @@ def create_execution_router() -> APIRouter:
             if not run_ownership:
                 await websocket.close(code=4004, reason="Run not found")
                 return
-        except Exception:
+        except ValueError:
             await websocket.close(code=4004, reason="Run not found")
             return
 
@@ -253,8 +253,8 @@ def create_execution_router() -> APIRouter:
                 )
                 await websocket.close(code=1000)
                 return
-        except (ValueError, Exception):
-            pass  # Run not found or status check failed — proceed to live stream
+        except ValueError:
+            pass  # Run not found — proceed to live stream
 
         queue = broadcaster.subscribe(run_id)
         try:

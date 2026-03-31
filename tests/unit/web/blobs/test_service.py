@@ -491,3 +491,122 @@ class TestBlobQuota:
             created_by="user",
         )
         assert record.status == "ready"
+
+
+# ---------------------------------------------------------------------------
+# copy_blobs_for_fork — rollback on partial failure
+# ---------------------------------------------------------------------------
+
+
+class TestCopyBlobsForForkRollback:
+    """Rollback path: partial blob copies are cleaned up on failure.
+
+    copy_blobs_for_fork creates blobs atomically (one at a time). If the
+    second create_blob fails, the first already-committed blob must be
+    deleted — both its DB row and its file on disk.
+    """
+
+    @pytest.fixture()
+    def target_session_id(self, db_engine) -> UUID:
+        """Second session for the fork target."""
+        sid = str(uuid4())
+        now = datetime.now(UTC)
+        with db_engine.begin() as conn:
+            conn.execute(
+                sessions_table.insert().values(
+                    id=sid,
+                    user_id="test-user",
+                    auth_provider_type="local",
+                    title="Forked Session",
+                    created_at=now,
+                    updated_at=now,
+                )
+            )
+        return UUID(sid)
+
+    @pytest.mark.asyncio
+    async def test_rollback_cleans_up_partial_copies(
+        self,
+        blob_service: BlobServiceImpl,
+        session_id: UUID,
+        target_session_id: UUID,
+        tmp_path,
+    ) -> None:
+        """When create_blob fails mid-copy, already-created blobs are removed."""
+        # Create two blobs in the source session
+        await blob_service.create_blob(
+            session_id=session_id,
+            filename="first.csv",
+            content=b"first file content",
+            mime_type="text/csv",
+            created_by="user",
+        )
+        await blob_service.create_blob(
+            session_id=session_id,
+            filename="second.csv",
+            content=b"second file content",
+            mime_type="text/csv",
+            created_by="user",
+        )
+
+        # Patch create_blob to fail on the second call
+        original_create = blob_service.create_blob
+        call_count = 0
+
+        async def _failing_create(*args, **kwargs):
+            nonlocal call_count
+            call_count += 1
+            if call_count >= 2:
+                raise RuntimeError("Simulated disk failure on second blob")
+            return await original_create(*args, **kwargs)
+
+        blob_service.create_blob = _failing_create  # type: ignore[assignment]
+
+        with pytest.raises(RuntimeError, match="Simulated disk failure"):
+            await blob_service.copy_blobs_for_fork(session_id, target_session_id)
+
+        # Verify rollback: no blobs should remain in the target session
+        target_blobs = await blob_service.list_blobs(target_session_id)
+        assert target_blobs == [], f"Expected 0 blobs after rollback, found {len(target_blobs)}: {[b.filename for b in target_blobs]}"
+
+    @pytest.mark.asyncio
+    async def test_empty_source_returns_empty_map(
+        self,
+        blob_service: BlobServiceImpl,
+        session_id: UUID,
+        target_session_id: UUID,
+    ) -> None:
+        """No blobs in source session → empty mapping, no errors."""
+        result = await blob_service.copy_blobs_for_fork(session_id, target_session_id)
+        assert result == {}
+
+    @pytest.mark.asyncio
+    async def test_quota_exceeded_before_any_copy(
+        self,
+        blob_service: BlobServiceImpl,
+        db_engine,
+        session_id: UUID,
+        target_session_id: UUID,
+        tmp_path,
+    ) -> None:
+        """Quota check happens before copying — no partial writes."""
+        from elspeth.web.blobs.protocol import BlobQuotaExceededError
+
+        # Create a blob using the default (large-quota) service
+        await blob_service.create_blob(
+            session_id=session_id,
+            filename="big.csv",
+            content=b"x" * 100,
+            mime_type="text/csv",
+            created_by="user",
+        )
+
+        # Fork with a small-quota service — quota pre-check should reject
+        small_quota = BlobServiceImpl(db_engine, tmp_path, max_storage_per_session=10)
+
+        with pytest.raises(BlobQuotaExceededError):
+            await small_quota.copy_blobs_for_fork(session_id, target_session_id)
+
+        # Verify: no blobs in target (pre-check prevented any copies)
+        target_blobs = await blob_service.list_blobs(target_session_id)
+        assert target_blobs == []

@@ -7,7 +7,7 @@ import hashlib
 from collections.abc import Callable
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any, TypeVar
+from typing import Any, Literal, TypeVar
 from uuid import UUID, uuid4
 
 from sqlalchemy import Engine, func, select
@@ -114,7 +114,7 @@ class BlobServiceImpl:
         filename: str,
         content: bytes,
         mime_type: str,
-        created_by: str = "user",
+        created_by: Literal["user", "assistant", "pipeline"] = "user",
         source_description: str | None = None,
     ) -> BlobRecord:
         """Create a blob from content bytes."""
@@ -186,7 +186,7 @@ class BlobServiceImpl:
         session_id: UUID,
         filename: str,
         mime_type: str,
-        created_by: str = "pipeline",
+        created_by: Literal["user", "assistant", "pipeline"] = "pipeline",
         source_description: str | None = None,
     ) -> BlobRecord:
         """Reserve a pending output blob."""

@@ -741,3 +741,89 @@ class TestRunningStatusFailure:
 
         # The except block tried to set "failed" via the second _call_async call
         assert call_count >= 2
+
+
+# ── IDOR Protection: verify_run_ownership ─────────────────────────────
+
+
+class TestVerifyRunOwnership:
+    """IDOR protection — verify_run_ownership checks user_id + auth_provider.
+
+    Criticality 9/10: This is the gate between "attacker can watch other
+    users' pipeline progress via WebSocket" and "access denied."
+    """
+
+    @pytest.fixture
+    def idor_service(
+        self,
+        mock_loop: MagicMock,
+        broadcaster: ProgressBroadcaster,
+    ) -> tuple[ExecutionServiceImpl, MagicMock]:
+        """ExecutionServiceImpl with controllable session service."""
+        session_svc = MagicMock()
+        settings = MagicMock()
+        settings.auth_provider = "local"
+        settings.get_landscape_url.return_value = "sqlite:///test.db"
+        settings.get_payload_store_path.return_value = Path("/tmp/test")
+
+        svc = ExecutionServiceImpl(
+            loop=mock_loop,
+            broadcaster=broadcaster,
+            settings=settings,
+            session_service=session_svc,
+            yaml_generator=MagicMock(),
+        )
+        return svc, session_svc
+
+    @pytest.mark.asyncio
+    async def test_owner_match_returns_true(self, idor_service) -> None:
+        """Correct user + correct provider → access granted."""
+        svc, session_svc = idor_service
+        session_id = uuid4()
+        run = MagicMock(session_id=session_id)
+        session = MagicMock(user_id="alice", auth_provider_type="local")
+        session_svc.get_run = AsyncMock(return_value=run)
+        session_svc.get_session = AsyncMock(return_value=session)
+
+        user = MagicMock(user_id="alice")
+        assert await svc.verify_run_ownership(user, str(uuid4())) is True
+
+    @pytest.mark.asyncio
+    async def test_wrong_user_returns_false(self, idor_service) -> None:
+        """Wrong user_id → access denied."""
+        svc, session_svc = idor_service
+        run = MagicMock(session_id=uuid4())
+        session = MagicMock(user_id="alice", auth_provider_type="local")
+        session_svc.get_run = AsyncMock(return_value=run)
+        session_svc.get_session = AsyncMock(return_value=session)
+
+        user = MagicMock(user_id="eve")
+        assert await svc.verify_run_ownership(user, str(uuid4())) is False
+
+    @pytest.mark.asyncio
+    async def test_cross_provider_returns_false(self, idor_service) -> None:
+        """Same user_id but different auth provider → access denied.
+
+        This prevents "alice" in local auth from accessing runs belonging
+        to "alice" in OIDC. Cross-provider user_id collision is the
+        non-obvious IDOR vector.
+        """
+        svc, session_svc = idor_service
+        run = MagicMock(session_id=uuid4())
+        # Session was created under OIDC, but server is now configured for "local"
+        session = MagicMock(user_id="alice", auth_provider_type="oidc")
+        session_svc.get_run = AsyncMock(return_value=run)
+        session_svc.get_session = AsyncMock(return_value=session)
+
+        user = MagicMock(user_id="alice")
+        assert await svc.verify_run_ownership(user, str(uuid4())) is False
+
+    @pytest.mark.asyncio
+    async def test_nonexistent_run_raises(self, idor_service) -> None:
+        """Run not found → ValueError propagates (caller handles)."""
+        svc, session_svc = idor_service
+        session_svc.get_run = AsyncMock(side_effect=ValueError("Run not found"))
+
+        user = MagicMock(user_id="alice")
+        with pytest.raises(ValueError, match="Run not found"):
+            await svc.verify_run_ownership(user, str(uuid4()))

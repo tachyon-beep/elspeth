@@ -43,6 +43,17 @@ def store(db_engine) -> UserSecretStore:
     return UserSecretStore(engine=db_engine, master_key=TEST_MASTER_KEY)
 
 
+@pytest.fixture(autouse=True)
+def _ensure_fingerprint_key(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Provide ELSPETH_FINGERPRINT_KEY for all tests.
+
+    _compute_fingerprint() now crashes if the key is unset (it's a
+    deployment requirement). Tests that verify the missing-key path
+    override this via their own monkeypatch.delenv().
+    """
+    monkeypatch.setenv("ELSPETH_FINGERPRINT_KEY", "test-default-fp-key")
+
+
 class TestUserSecretStore:
     def test_store_and_retrieve_roundtrip(self, store: UserSecretStore) -> None:
         """Set a secret then get it back — value must match."""
@@ -52,7 +63,7 @@ class TestUserSecretStore:
         assert value == "sk-secret-123"
         assert ref.name == "API_KEY"
         assert ref.source == "user"
-        assert ref.fingerprint == ""
+        assert len(ref.fingerprint) == 64
 
     def test_different_users_isolated(self, store: UserSecretStore) -> None:
         """User A's secret must not be visible to user B."""
@@ -133,12 +144,13 @@ class TestUserSecretStore:
         assert len(ref.fingerprint) == 64
         assert all(c in "0123456789abcdef" for c in ref.fingerprint)
 
-    def test_fingerprint_empty_when_key_missing(self, store: UserSecretStore, monkeypatch: pytest.MonkeyPatch) -> None:
-        """get_secret returns empty fingerprint when ELSPETH_FINGERPRINT_KEY is not set."""
-        monkeypatch.delenv("ELSPETH_FINGERPRINT_KEY", raising=False)
+    def test_fingerprint_missing_key_raises(self, store: UserSecretStore, monkeypatch: pytest.MonkeyPatch) -> None:
+        """get_secret raises RuntimeError when ELSPETH_FINGERPRINT_KEY is not set."""
+        monkeypatch.setenv("ELSPETH_FINGERPRINT_KEY", "temp-for-set")
         store.set_secret("FP_EMPTY", value="val", user_id="user-1")
-        _, ref = store.get_secret("FP_EMPTY", user_id="user-1")
-        assert ref.fingerprint == ""
+        monkeypatch.delenv("ELSPETH_FINGERPRINT_KEY")
+        with pytest.raises(RuntimeError, match="ELSPETH_FINGERPRINT_KEY is not set"):
+            store.get_secret("FP_EMPTY", user_id="user-1")
 
 
 class TestDeriveFernetKey:

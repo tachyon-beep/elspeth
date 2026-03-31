@@ -14,6 +14,7 @@ import structlog
 from fastapi import APIRouter, Depends, File, HTTPException, Query, Request, UploadFile
 from litellm.exceptions import APIError as LiteLLMAPIError
 from litellm.exceptions import AuthenticationError as LiteLLMAuthError
+from sqlalchemy.exc import IntegrityError
 
 from elspeth.contracts.freeze import deep_thaw
 from elspeth.web.auth.middleware import get_current_user
@@ -272,17 +273,19 @@ def create_session_router() -> APIRouter:
                 "budget_exhausted": exc.budget_exhausted,
             }
             if exc.partial_state is not None:
-                # Validate guard: if validation itself fails, persist with
-                # is_valid=False rather than losing the state entirely.
+                # Validate guard: partial_state from the LLM loop may be
+                # structurally damaged.  Catch data-shape errors so we can
+                # still persist with is_valid=False rather than losing it.
                 try:
                     validation = exc.partial_state.validate()
-                except Exception:
+                except (ValueError, TypeError, KeyError, AttributeError) as val_err:
                     from elspeth.web.composer.state import ValidationSummary
 
+                    slog.warning("convergence_validation_failed", error=str(val_err))
                     validation = ValidationSummary(is_valid=False, errors=("validation_failed",))
 
-                # Persistence guard: if save fails, log the error and return
-                # 422 without partial_state rather than crashing to 500.
+                # Persistence guard: DB write failure should not upgrade the
+                # response from 422 (convergence error) to 500 (internal).
                 try:
                     state_d = exc.partial_state.to_dict()
                     state_data = CompositionStateData(
@@ -296,10 +299,11 @@ def create_session_router() -> APIRouter:
                     )
                     await service.save_composition_state(session.id, state_data)
                     response_body["partial_state"] = state_d
-                except Exception:
+                except (ValueError, TypeError, KeyError, IntegrityError) as save_err:
                     slog.error(
                         "convergence_partial_state_save_failed",
                         session_id=str(session_id),
+                        error=str(save_err),
                         exc_info=True,
                     )
                     # Do NOT include partial_state in response — it was not
@@ -498,14 +502,12 @@ def create_session_router() -> APIRouter:
         service: SessionServiceProtocol = request.app.state.session_service
         runs = await service.list_runs_for_session(session.id)
 
-        # Resolve composition_version from each run's state_id
+        # Resolve composition_version from each run's state_id.
+        # A missing state is Tier 1 data corruption — crash, don't hide.
         responses: list[RunResponse] = []
         for run in runs:
-            try:
-                state = await service.get_state(run.state_id)
-                version = state.version
-            except ValueError:
-                version = 0
+            state = await service.get_state(run.state_id)
+            version = state.version
             responses.append(
                 RunResponse(
                     id=str(run.id),
@@ -705,6 +707,24 @@ def create_session_router() -> APIRouter:
                     copied_state = await service.save_composition_state(
                         new_session.id,
                         state_data,
+                    )
+
+                    # The edited user message (last in list) still references
+                    # the pre-rewrite state.  Re-point it at the replacement
+                    # state so message-state lineage is self-contained.
+                    user_msg = new_messages[-1]
+                    await service.update_message_composition_state(
+                        user_msg.id,
+                        copied_state.id,
+                    )
+                    new_messages[-1] = ChatMessageRecord(
+                        id=user_msg.id,
+                        session_id=user_msg.session_id,
+                        role=user_msg.role,
+                        content=user_msg.content,
+                        tool_calls=user_msg.tool_calls,
+                        created_at=user_msg.created_at,
+                        composition_state_id=copied_state.id,
                     )
 
         return ForkSessionResponse(

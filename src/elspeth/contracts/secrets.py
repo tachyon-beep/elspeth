@@ -6,7 +6,7 @@ Layer: L0 (contracts). No upward imports.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Protocol, runtime_checkable
+from typing import Literal, Protocol, runtime_checkable
 
 
 @dataclass(frozen=True, slots=True)
@@ -19,7 +19,7 @@ class ResolvedSecret:
 
     name: str
     value: str
-    scope: str  # "user", "server", "org"
+    scope: Literal["user", "server", "org"]
     fingerprint: str
 
     def __repr__(self) -> str:

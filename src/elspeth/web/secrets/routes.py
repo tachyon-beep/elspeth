@@ -13,6 +13,8 @@ POST   /api/secrets/{name}/validate -- check whether a secret ref is resolvable
 
 from __future__ import annotations
 
+import asyncio
+
 from fastapi import APIRouter, Depends, HTTPException, Request
 
 from elspeth.web.auth.middleware import get_current_user
@@ -70,7 +72,7 @@ def create_secrets_router() -> APIRouter:
         the value.
         """
         service = _get_service(request)
-        service.set_user_secret(user.user_id, body.name, body.value)
+        await asyncio.to_thread(service.set_user_secret, user.user_id, body.name, body.value)
         return CreateSecretResponse(
             name=body.name,
             scope="user",
@@ -88,7 +90,7 @@ def create_secrets_router() -> APIRouter:
         Returns 204 on success, 404 if the secret does not exist for this user.
         """
         service = _get_service(request)
-        deleted = service.delete_user_secret(user.user_id, name)
+        deleted = await asyncio.to_thread(service.delete_user_secret, user.user_id, name)
         if not deleted:
             raise HTTPException(status_code=404, detail=f"Secret {name!r} not found")
 

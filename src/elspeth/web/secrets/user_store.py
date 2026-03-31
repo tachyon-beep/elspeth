@@ -35,19 +35,17 @@ _SALT_BYTES = 16
 def _compute_fingerprint(name: str, value: str) -> str:
     """Compute HMAC fingerprint of a secret value.
 
-    Returns a 64-char hex digest if ELSPETH_FINGERPRINT_KEY is available,
-    or empty string with a warning if not. Missing fingerprint key is a
-    deployment config issue, not a runtime error — the web path should
-    not crash on missing fingerprint key.
+    Returns a 64-char hex digest.  Raises if ELSPETH_FINGERPRINT_KEY is
+    not set — the fingerprint is required for audit trail integrity, and
+    an empty value would crash downstream at SecretResolutionInput
+    validation with a confusing generic error.
     """
     fp_key = os.environ.get("ELSPETH_FINGERPRINT_KEY")
     if not fp_key:
-        slog.warning(
-            "secret_fingerprint_key_missing",
-            secret_name=name,
-            detail="ELSPETH_FINGERPRINT_KEY not set; fingerprint will be empty",
+        raise RuntimeError(
+            f"ELSPETH_FINGERPRINT_KEY is not set — cannot compute fingerprint for secret {name!r}. "
+            "Set the environment variable before starting the web server."
         )
-        return ""
     return secret_fingerprint(value, key=fp_key.encode("utf-8"))
 
 

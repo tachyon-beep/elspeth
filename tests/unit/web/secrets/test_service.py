@@ -12,6 +12,12 @@ from elspeth.web.secrets.user_store import UserSecretStore
 from elspeth.web.sessions.models import metadata as session_metadata
 
 
+@pytest.fixture(autouse=True)
+def _ensure_fingerprint_key(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Provide ELSPETH_FINGERPRINT_KEY — required by _compute_fingerprint()."""
+    monkeypatch.setenv("ELSPETH_FINGERPRINT_KEY", "test-service-fp-key")
+
+
 @pytest.fixture()
 def engine() -> sa.engine.Engine:
     """In-memory SQLite engine with session tables created."""

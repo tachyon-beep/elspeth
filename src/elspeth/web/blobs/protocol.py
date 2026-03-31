@@ -8,7 +8,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import datetime
-from typing import Protocol, runtime_checkable
+from typing import Literal, Protocol, runtime_checkable
 from uuid import UUID
 
 # Valid blob statuses and their meanings:
@@ -51,9 +51,9 @@ class BlobRecord:
     content_hash: str | None
     storage_path: str
     created_at: datetime
-    created_by: str
+    created_by: Literal["user", "assistant", "pipeline"]
     source_description: str | None
-    status: str
+    status: Literal["ready", "pending", "error"]
 
 
 @dataclass(frozen=True, slots=True)
@@ -65,7 +65,7 @@ class BlobRunLinkRecord:
 
     blob_id: UUID
     run_id: UUID
-    direction: str
+    direction: Literal["input", "output"]
 
 
 class BlobNotFoundError(Exception):
@@ -114,7 +114,7 @@ class BlobServiceProtocol(Protocol):
         filename: str,
         content: bytes,
         mime_type: str,
-        created_by: str = "user",
+        created_by: Literal["user", "assistant", "pipeline"] = "user",
         source_description: str | None = None,
     ) -> BlobRecord:
         """Create a blob from content bytes.
@@ -128,7 +128,7 @@ class BlobServiceProtocol(Protocol):
         session_id: UUID,
         filename: str,
         mime_type: str,
-        created_by: str = "pipeline",
+        created_by: Literal["user", "assistant", "pipeline"] = "pipeline",
         source_description: str | None = None,
     ) -> BlobRecord:
         """Reserve a pending output blob (status='pending').

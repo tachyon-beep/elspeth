@@ -25,6 +25,7 @@ def _create_test_app(provider, auth_provider_type: str = "local", **settings_ove
     app = FastAPI()
     app.state.auth_provider = provider
     app.state.settings = WebSettings(auth_provider=auth_provider_type, **settings_overrides)
+    app.state.oidc_authorization_endpoint = None
     router = create_auth_router()
     app.include_router(router)
     return app

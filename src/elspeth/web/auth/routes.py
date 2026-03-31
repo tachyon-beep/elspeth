@@ -113,7 +113,7 @@ def create_auth_router() -> APIRouter:
             provider=settings.auth_provider,
             oidc_issuer=settings.oidc_issuer,
             oidc_client_id=settings.oidc_client_id,
-            authorization_endpoint=getattr(request.app.state, "oidc_authorization_endpoint", None),
+            authorization_endpoint=request.app.state.oidc_authorization_endpoint,
         )
 
     @router.get("/me", response_model=UserProfileResponse)

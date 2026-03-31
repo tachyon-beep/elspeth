@@ -7,7 +7,7 @@ pipeline composition.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any, Protocol
+from typing import Any, Literal, Protocol
 
 from elspeth.web.composer.state import CompositionState
 
@@ -44,7 +44,7 @@ class ComposerConvergenceError(ComposerServiceError):
         self,
         max_turns: int,
         *,
-        budget_exhausted: str = "composition",
+        budget_exhausted: Literal["composition", "discovery", "timeout"] = "composition",
         partial_state: CompositionState | None = None,
     ) -> None:
         super().__init__(

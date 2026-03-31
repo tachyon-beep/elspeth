@@ -77,10 +77,11 @@ class WebSettings(BaseModel):
             if missing:
                 raise ValueError(f"OIDC auth requires: {', '.join(missing)}")
         elif self.auth_provider == "entra":
+            # oidc_issuer is NOT required — EntraAuthProvider derives it
+            # from entra_tenant_id (login.microsoftonline.com/{tid}/v2.0).
             missing = [
                 name
                 for name, val in (
-                    ("oidc_issuer", self.oidc_issuer),
                     ("oidc_audience", self.oidc_audience),
                     ("oidc_client_id", self.oidc_client_id),
                     ("entra_tenant_id", self.entra_tenant_id),

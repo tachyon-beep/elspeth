@@ -14,7 +14,7 @@ from __future__ import annotations
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from datetime import datetime
-from typing import Any, Protocol, runtime_checkable
+from typing import Any, Literal, Protocol, runtime_checkable
 from uuid import UUID
 
 from elspeth.contracts.freeze import freeze_fields
@@ -56,7 +56,7 @@ class ChatMessageRecord:
 
     id: UUID
     session_id: UUID
-    role: str
+    role: Literal["user", "assistant", "system", "tool"]
     content: str
     tool_calls: Mapping[str, Any] | None
     created_at: datetime
@@ -148,7 +148,7 @@ class RunRecord:
     id: UUID
     session_id: UUID
     state_id: UUID
-    status: str
+    status: Literal["pending", "running", "completed", "failed", "cancelled"]
     started_at: datetime
     finished_at: datetime | None
     rows_processed: int
@@ -211,7 +211,7 @@ class SessionServiceProtocol(Protocol):
     async def add_message(
         self,
         session_id: UUID,
-        role: str,
+        role: Literal["user", "assistant", "system", "tool"],
         content: str,
         tool_calls: Mapping[str, Any] | None = None,
         composition_state_id: UUID | None = None,
@@ -320,6 +320,19 @@ class SessionServiceProtocol(Protocol):
         """
         ...
 
+    async def update_message_composition_state(
+        self,
+        message_id: UUID,
+        composition_state_id: UUID,
+    ) -> None:
+        """Re-point a message's composition_state_id to a different state.
+
+        Used after fork blob-remapping creates a replacement state so
+        the user message's provenance tracks the rewritten (self-contained)
+        state rather than the original copy.
+        """
+        ...
+
     async def cancel_orphaned_runs(
         self,
         session_id: UUID,
@@ -330,5 +343,16 @@ class SessionServiceProtocol(Protocol):
         Returns the list of cancelled RunRecords. Called by the execution
         service on startup and periodically to prevent orphaned runs from
         permanently blocking sessions.
+        """
+        ...
+
+    async def cancel_all_orphaned_runs(
+        self,
+        max_age_seconds: int = 3600,
+    ) -> int:
+        """Force-cancel stale runs across all sessions.
+
+        Called on startup to recover sessions blocked by runs orphaned
+        during a previous server crash. Returns the count of cancelled runs.
         """
         ...
