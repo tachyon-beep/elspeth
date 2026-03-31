@@ -69,7 +69,12 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         else:
             import httpx
 
-            issuer = (settings.oidc_issuer or "").rstrip("/")
+            if settings.oidc_issuer:
+                issuer = settings.oidc_issuer.rstrip("/")
+            elif settings.auth_provider == "entra" and settings.entra_tenant_id:
+                issuer = f"https://login.microsoftonline.com/{settings.entra_tenant_id}/v2.0"
+            else:
+                raise SystemExit("FATAL: OIDC discovery requires either oidc_issuer or entra_tenant_id to derive the issuer URL.")
             discovery_url = f"{issuer}/.well-known/openid-configuration"
             try:
                 async with httpx.AsyncClient(timeout=httpx.Timeout(10.0, connect=5.0)) as client:

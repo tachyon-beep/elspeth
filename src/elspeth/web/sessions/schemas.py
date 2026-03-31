@@ -3,9 +3,10 @@
 from __future__ import annotations
 
 from datetime import datetime
-from typing import Any
+from typing import Any, Literal
 from uuid import UUID
 
+import pydantic
 from pydantic import BaseModel
 
 
@@ -30,7 +31,7 @@ class SessionResponse(BaseModel):
 class SendMessageRequest(BaseModel):
     """Request body for POST /api/sessions/{id}/messages."""
 
-    content: str
+    content: str = pydantic.Field(min_length=1)
     state_id: str | None = None
 
 
@@ -101,7 +102,7 @@ class RunResponse(BaseModel):
 
     id: str
     session_id: str
-    status: str
+    status: Literal["pending", "running", "completed", "failed", "cancelled"]
     rows_processed: int
     rows_failed: int
     started_at: datetime

@@ -407,8 +407,59 @@ class TestCancelMechanism:
         service: ExecutionServiceImpl,
         mock_session_service: MagicMock,
     ) -> None:
-        """AC #19: When shutdown_event is set, _run_pipeline broadcasts
-        a 'cancelled' terminal event instead of 'completed'."""
+        """When orchestrator raises GracefulShutdownError, _run_pipeline
+        broadcasts 'cancelled' and updates status accordingly."""
+        from elspeth.contracts.errors import GracefulShutdownError
+
+        mock_load.return_value = MagicMock()
+        mock_bundle = MagicMock()
+        mock_bundle.source = MagicMock()
+        mock_bundle.source_settings = MagicMock()
+        mock_bundle.transforms = ()
+        mock_bundle.sinks = {"primary": MagicMock()}
+        mock_bundle.aggregations = {}
+        mock_instantiate.return_value = mock_bundle
+        mock_graph_cls.from_plugin_instances.return_value = MagicMock()
+        mock_orch = MagicMock()
+        mock_orch_cls.return_value = mock_orch
+        # Orchestrator raises GracefulShutdownError on actual cancellation
+        mock_orch.run.side_effect = GracefulShutdownError(
+            rows_processed=50,
+            run_id="test-run-001",
+            rows_failed=2,
+        )
+
+        shutdown_event = threading.Event()
+        shutdown_event.set()
+        run_id = str(uuid4())
+
+        service._run_pipeline(run_id, "source:\n  plugin: csv", shutdown_event)
+
+        # Verify status updated to "cancelled" (not "completed" or "failed")
+        status_calls = mock_session_service.update_run_status.call_args_list
+        final_status_call = status_calls[-1]
+        assert "cancelled" in str(final_status_call), f"Expected 'cancelled' status update, got: {final_status_call}"
+
+    @patch("elspeth.web.execution.service.Orchestrator")
+    @patch("elspeth.web.execution.service.load_settings_from_yaml_string")
+    @patch("elspeth.web.execution.service.instantiate_plugins_from_config")
+    @patch("elspeth.web.execution.service.ExecutionGraph")
+    @patch("elspeth.web.execution.service.LandscapeDB")
+    @patch("elspeth.web.execution.service.FilesystemPayloadStore")
+    def test_completed_run_not_misclassified_when_event_set_late(
+        self,
+        mock_payload: MagicMock,
+        mock_landscape: MagicMock,
+        mock_graph_cls: MagicMock,
+        mock_instantiate: MagicMock,
+        mock_load: MagicMock,
+        mock_orch_cls: MagicMock,
+        service: ExecutionServiceImpl,
+        mock_session_service: MagicMock,
+    ) -> None:
+        """Race guard: if shutdown_event is set AFTER orchestrator completes
+        (returns normally), the run must still be classified as 'completed',
+        not 'cancelled'."""
         mock_load.return_value = MagicMock()
         mock_bundle = MagicMock()
         mock_bundle.source = MagicMock()
@@ -425,24 +476,18 @@ class TestCancelMechanism:
         mock_result.rows_failed = 2
         mock_orch.run.return_value = mock_result
 
+        # Event is set (simulating late cancel() call) but orchestrator
+        # returned normally — run completed before cancel was processed.
         shutdown_event = threading.Event()
-        shutdown_event.set()  # Simulate cancellation
+        shutdown_event.set()
         run_id = str(uuid4())
 
         service._run_pipeline(run_id, "source:\n  plugin: csv", shutdown_event)
 
-        # Verify status updated to "cancelled" (not "completed")
+        # Must be "completed", NOT "cancelled"
         status_calls = mock_session_service.update_run_status.call_args_list
         final_status_call = status_calls[-1]
-        assert "cancelled" in str(final_status_call), f"Expected 'cancelled' status update, got: {final_status_call}"
-
-        # Verify the broadcaster received a "cancelled" event via
-        # loop.call_soon_threadsafe. The broadcaster copies the subscriber
-        # set under lock, then calls loop.call_soon_threadsafe for each.
-        # With no subscribers, call_soon_threadsafe isn't called — so check
-        # the broadcaster directly by subscribing first.
-        # Alternative: verify that the status update includes "cancelled".
-        # The status calls already verify this above.
+        assert "completed" in str(final_status_call), f"Expected 'completed' status update, got: {final_status_call}"
 
     # ── Race condition: cancel() before _run_pipeline starts ──────────
 

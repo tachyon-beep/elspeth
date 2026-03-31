@@ -153,10 +153,16 @@ class QueryBuilder:
             future.cancel()
             # future.cancel() only prevents queued tasks from starting — it
             # cannot kill a worker already executing C extension code (re module).
-            # With max_workers=1 the stuck worker blocks all future submissions,
-            # so we must destroy the pool (killing the worker process) and create
-            # a fresh one to restore ReDoS containment.
+            # shutdown(wait=False) does NOT terminate running workers; the stuck
+            # process stays alive as an orphan. We must explicitly kill it.
+            #
+            # _processes is a private dict[int, Process] — there is no public
+            # API to force-kill pool workers in CPython's ProcessPoolExecutor.
+            stuck_processes = list(self._regex_pool._processes.values())
             self._regex_pool.shutdown(wait=False, cancel_futures=True)
+            for proc in stuck_processes:
+                if proc.is_alive():
+                    proc.kill()
             self._regex_pool = ProcessPoolExecutor(max_workers=1)
             return QueryResult(
                 error={

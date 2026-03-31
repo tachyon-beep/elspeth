@@ -462,19 +462,29 @@ class DataverseClient:
         headers = {**auth_headers, **(extra_headers or {})}
 
         # When SSRF-safe request is provided, connect to the pinned IP
-        # and set the Host header for virtual hosting/TLS SNI.
+        # and set the Host header for virtual hosting. The sni_hostname
+        # extension tells httpx/httpcore to use the original domain for
+        # TLS SNI and certificate verification instead of the IP literal.
+        extensions: dict[str, bytes] | None = None
         if ssrf_safe is not None:
             connection_url = ssrf_safe.connection_url
             headers["Host"] = ssrf_safe.host_header
+            if ssrf_safe.scheme == "https":
+                extensions = {"sni_hostname": ssrf_safe.sni_hostname.encode("ascii")}
         else:
             connection_url = url
 
         start = time.perf_counter()
         try:
             if method == "PATCH":
-                response = self._client.patch(connection_url, json=json_body, headers=headers)
+                response = self._client.patch(
+                    connection_url,
+                    json=json_body,
+                    headers=headers,
+                    extensions=extensions,
+                )
             else:
-                response = self._client.get(connection_url, headers=headers)
+                response = self._client.get(connection_url, headers=headers, extensions=extensions)
         except httpx.TimeoutException as exc:
             latency_ms = (time.perf_counter() - start) * 1000
             raise DataverseClientError(

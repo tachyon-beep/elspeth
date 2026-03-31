@@ -409,11 +409,7 @@ class SessionServiceImpl:
 
         Seam contract A: metadata_ maps DB column metadata_ back to the
         dataclass field. JSON columns are unwrapped from their _version envelope.
-        When Sub-4 provides CompositionState.from_dict(), this method becomes
-        the swap point for domain object reconstruction.
         """
-        # TODO(sub-4): Replace raw dict fields with CompositionState.from_dict()
-        # call once Sub-4 defines it. The swap should be a single-line change.
         return CompositionStateRecord(
             id=UUID(row.id),
             session_id=UUID(row.session_id),
@@ -1011,7 +1007,7 @@ class SessionServiceImpl:
                 role=d["role"],
                 content=d["content"],
                 tool_calls=d["tool_calls"],
-                created_at=now,
+                created_at=d["created_at"],
                 composition_state_id=UUID(d["composition_state_id"]) if d["composition_state_id"] else None,
             )
             for d in msg_records_data

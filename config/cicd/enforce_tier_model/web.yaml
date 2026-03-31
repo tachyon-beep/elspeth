@@ -175,7 +175,7 @@ allow_hits:
   reason: Tier 3 boundary — preferred_username fallback in display_name chain
   safety: Part of name -> preferred_username -> 'Unknown' chain
   expires: null
-- key: web/auth/routes.py:R1:create_auth_router:me:fp=4db7c70c9126b330
+- key: web/auth/routes.py:R1:create_auth_router:me:fp=ea5994543e267f35
   owner: web-auth
   reason: False positive — @router.get() is FastAPI HTTP route decorator, not dict.get()
   safety: No dict access involved; decorator syntax triggers text-based pattern match
@@ -287,12 +287,12 @@ allow_hits:
     defaults to None
   safety: Missing = None; matches dataclass field default; round-trip invariant tested
   expires: null
-- key: web/composer/state.py:R1:CompositionState:with_metadata:fp=a72cd948565706e7
+- key: web/composer/state.py:R1:CompositionState:with_metadata:fp=313de5f8db45db42
   owner: web-composer
   reason: Partial patch API — only provided fields are updated, others preserved
   safety: Defaults are the current field values; no fabrication, no loss
   expires: null
-- key: web/composer/state.py:R1:CompositionState:with_metadata:fp=fc470cb12ec23522
+- key: web/composer/state.py:R1:CompositionState:with_metadata:fp=f636f98adc7f3c1f
   owner: web-composer
   reason: Partial patch API — only provided fields are updated, others preserved
   safety: Defaults are the current field values; no fabrication, no loss
@@ -457,72 +457,83 @@ allow_hits:
   reason: IntegrityError on duplicate active state is expected race condition
   safety: Upsert-or-skip
   expires: null
-- key: web/execution/service.py:R1:ExecutionServiceImpl:cancel:fp=a4ff7daf73a4ecb7
+- key: web/execution/service.py:R1:ExecutionServiceImpl:cancel:fp=6f3326731b6efc5b
   owner: web-execution
   reason: Check for live shutdown event before fallback handling
   safety: Pop returns None if absent
   expires: null
-- key: web/execution/service.py:R1:ExecutionServiceImpl:execute:fp=83e28e4a8651cb77
+- key: web/execution/service.py:R1:ExecutionServiceImpl:execute:fp=137de28b6b1deb23
   owner: web-execution
   reason: Optional keys in user-authored config — blob_ref is optional in source options
   safety: Returns None; blob link skipped
   expires: null
-- key: web/execution/service.py:R1:ExecutionServiceImpl:execute:fp=8d28adad23e4744f
+- key: web/execution/service.py:R1:ExecutionServiceImpl:execute:fp=bb4332df9d5ab9d5
   owner: web-execution
   reason: blob_ref is optional key in source options
   safety: Returns None; blob link skipped
   expires: null
-- key: web/execution/service.py:R4:ExecutionServiceImpl:_finalize_output_blobs:fp=c7830bf943ef6f0f
+- key: web/execution/service.py:R4:ExecutionServiceImpl:_finalize_output_blobs:fp=d5c2eb3b2452fc93
   owner: web-execution
   reason: Blob finalization after terminal status — failure must not mask run outcome
   safety: Logged; run status preserved
   expires: null
-- key: web/execution/service.py:R4:ExecutionServiceImpl:_run_pipeline:fp=4322d7b835e7a2f4
+- key: web/execution/service.py:R4:ExecutionServiceImpl:_run_pipeline:fp=1073d396dde92f68
   owner: web-execution
   reason: Progress broadcasting is operational visibility
   safety: Logged; pipeline continues
   expires: null
-- key: web/execution/service.py:R4:ExecutionServiceImpl:_run_pipeline:_safe_broadcast:fp=7a59b8ecf8cab776
+- key: web/execution/service.py:R4:ExecutionServiceImpl:_run_pipeline:_safe_broadcast:fp=07b670e75eb4c888
   owner: web-execution
   reason: Progress broadcasting may fail with transport exceptions
   safety: Logged; pipeline continues
   expires: null
-- key: web/execution/service.py:R5:ExecutionServiceImpl:_on_pipeline_done:fp=1569fd8ea7732124
+- key: web/execution/service.py:R5:ExecutionServiceImpl:_on_pipeline_done:fp=422cba6afcb263ec
   owner: web-execution
   reason: Error classification for sanitized client messaging
   safety: SecretResolutionError triggers safe message
   expires: null
-- key: web/execution/service.py:R5:ExecutionServiceImpl:_run_pipeline:fp=8ddfb3204b084fe9
+- key: web/execution/service.py:R5:ExecutionServiceImpl:_run_pipeline:fp=3788692d268408fd
   owner: web-execution
   reason: Error classification — SecretResolutionError triggers safe message
   safety: Secret names not leaked to client
   expires: null
-- key: web/execution/service.py:R5:ExecutionServiceImpl:_run_pipeline:fp=ebbc87b1b6fbe3a8
+- key: web/execution/service.py:R5:ExecutionServiceImpl:_run_pipeline:fp=a10cade51d462dac
   owner: web-execution
   reason: BaseException split for process-termination vs ordinary failures
   safety: Control flow distinction, not type masking
   expires: null
-- key: web/execution/service.py:R5:ExecutionServiceImpl:_run_pipeline:fp=5f5fdb7d0859b4cb
+- key: web/execution/service.py:R5:ExecutionServiceImpl:_run_pipeline:fp=4fbb14ebed5795a9
   owner: web-execution
   reason: Tier 3 — config from YAML deserialization may be non-dict
-  safety: Skips secret resolution if not dict
+  safety: Raises TypeError if not dict; no silent default
   expires: null
-- key: web/execution/service.py:R9:ExecutionServiceImpl:execute:fp=d1717abd38161684
+- key: web/execution/service.py:R9:ExecutionServiceImpl:execute:fp=a04c9b04d2e7dabc
   owner: web-execution
   reason: Idempotent shutdown-event cleanup on blob linkage or submit failure
   safety: Pop is idempotent; except BaseException handler cleans up before re-raise
   expires: null
-- key: web/execution/service.py:R9:ExecutionServiceImpl:_run_pipeline:fp=0999f2d3fec9e597
+- key: web/execution/service.py:R9:ExecutionServiceImpl:_run_pipeline:fp=cee9f6262f6174c0
   owner: web-execution
   reason: Final shutdown-event cleanup is intentionally idempotent
   safety: Pop is idempotent
+  expires: null
+- key: web/execution/service.py:R1:ExecutionServiceImpl:_run_pipeline:fp=8d3adc1c476d3c39
+  owner: web-execution
+  reason: Scope-to-audit-source mapping — .get() on explicit mapping dict with crash-on-unknown
+    guard
+  safety: Unknown scope raises ValueError immediately; no silent default
+  expires: null
+- key: web/execution/service.py:R6:ExecutionServiceImpl:_run_pipeline:fp=b9ea07a60c1e0abc
+  owner: web-execution
+  reason: GracefulShutdownError is an expected control-flow signal from orchestrator cancellation
+  safety: Classified as cancelled; separated from BaseException failure path
   expires: null
 - key: web/app.py:R1:create_app:fp=3d404095f1feb5d3
   owner: web-app
   reason: Tier 3 — os.environ.get() for optional ELSPETH_ENV
   safety: Returns None when absent; only used for test guard
   expires: null
-- key: web/auth/routes.py:R1:create_auth_router:auth_config:fp=3f8fc32990ce6112
+- key: web/auth/routes.py:R1:create_auth_router:auth_config:fp=5c165cddd0de5613
   owner: web-auth
   reason: False positive — @router.get() is FastAPI route decorator
   safety: No dict access involved

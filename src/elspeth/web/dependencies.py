@@ -1,8 +1,5 @@
 """FastAPI dependency injection providers.
 
-Sub-1 provides only get_settings().  Service dependencies are added
-as Sub-2 through Sub-5 land.
-
 Service construction order follows
 docs/superpowers/specs/2026-03-28-web-ux-seam-contracts.md.
 ProgressBroadcaster and event-loop reference are created in the lifespan()

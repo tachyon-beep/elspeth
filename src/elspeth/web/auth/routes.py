@@ -8,8 +8,6 @@ GET /me returns the full UserProfile for any auth provider.
 
 from __future__ import annotations
 
-import asyncio
-
 from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel
 
@@ -73,11 +71,7 @@ def create_auth_router() -> APIRouter:
 
         provider: CredentialAuthProvider = request.app.state.auth_provider
         try:
-            token = await asyncio.to_thread(
-                provider.login,
-                body.username,
-                body.password,
-            )
+            token = await provider.login(body.username, body.password)
         except AuthenticationError as exc:
             raise HTTPException(status_code=401, detail=exc.detail) from exc
 
@@ -98,7 +92,7 @@ def create_auth_router() -> APIRouter:
             raise HTTPException(status_code=404, detail="Not found")
 
         provider: CredentialAuthProvider = request.app.state.auth_provider
-        new_token = await asyncio.to_thread(provider.refresh, user.user_id, user.username)
+        new_token = await provider.refresh(user.user_id, user.username)
         return TokenResponse(access_token=new_token)
 
     @router.get("/config", response_model=AuthConfigResponse)

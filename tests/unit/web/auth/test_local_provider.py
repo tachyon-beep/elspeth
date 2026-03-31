@@ -48,22 +48,25 @@ class TestCreateUser:
 class TestLogin:
     """Tests for username/password login."""
 
-    def test_login_returns_jwt_string(self, provider) -> None:
+    @pytest.mark.asyncio
+    async def test_login_returns_jwt_string(self, provider) -> None:
         provider.create_user("alice", "password123", display_name="Alice")
-        token = provider.login("alice", "password123")
+        token = await provider.login("alice", "password123")
         assert isinstance(token, str)
         assert len(token) > 0
         # JWT has three dot-separated segments
         assert len(token.split(".")) == 3
 
-    def test_login_wrong_password_raises(self, provider) -> None:
+    @pytest.mark.asyncio
+    async def test_login_wrong_password_raises(self, provider) -> None:
         provider.create_user("alice", "password123", display_name="Alice")
         with pytest.raises(AuthenticationError, match="Invalid credentials"):
-            provider.login("alice", "wrong-password")
+            await provider.login("alice", "wrong-password")
 
-    def test_login_unknown_user_raises(self, provider) -> None:
+    @pytest.mark.asyncio
+    async def test_login_unknown_user_raises(self, provider) -> None:
         with pytest.raises(AuthenticationError, match="Invalid credentials"):
-            provider.login("nonexistent", "password")
+            await provider.login("nonexistent", "password")
 
 
 class TestAuthenticate:
@@ -72,7 +75,7 @@ class TestAuthenticate:
     @pytest.mark.asyncio
     async def test_authenticate_valid_token(self, provider) -> None:
         provider.create_user("alice", "pw", display_name="Alice")
-        token = provider.login("alice", "pw")
+        token = await provider.login("alice", "pw")
         identity = await provider.authenticate(token)
         assert isinstance(identity, UserIdentity)
         assert identity.user_id == "alice"
@@ -112,7 +115,7 @@ class TestAuthenticate:
         import sqlite3
 
         provider.create_user("alice", "pw", display_name="Alice")
-        token = provider.login("alice", "pw")
+        token = await provider.login("alice", "pw")
 
         # Delete the user behind the provider's back
         with sqlite3.connect(str(provider._db_path)) as conn:
@@ -151,7 +154,7 @@ class TestGetUserInfo:
             display_name="Alice Smith",
             email="alice@example.com",
         )
-        token = provider.login("alice", "pw")
+        token = await provider.login("alice", "pw")
         profile = await provider.get_user_info(token)
         assert isinstance(profile, UserProfile)
         assert profile.user_id == "alice"
@@ -163,7 +166,7 @@ class TestGetUserInfo:
     @pytest.mark.asyncio
     async def test_get_user_info_no_email(self, provider) -> None:
         provider.create_user("bob", "pw", display_name="Bob")
-        token = provider.login("bob", "pw")
+        token = await provider.login("bob", "pw")
         profile = await provider.get_user_info(token)
         assert profile.email is None
 
@@ -176,7 +179,7 @@ class TestGetUserInfo:
     async def test_get_user_info_deleted_user(self, provider) -> None:
         """User deleted between login (token issued) and get_user_info call."""
         provider.create_user("alice", "pw", display_name="Alice")
-        token = provider.login("alice", "pw")
+        token = await provider.login("alice", "pw")
 
         # Access _db_path directly — no public API to delete users by design
         import sqlite3
@@ -191,14 +194,16 @@ class TestGetUserInfo:
 class TestLoginEdgeCases:
     """Edge-case tests for login input validation."""
 
-    def test_login_empty_username_raises(self, provider) -> None:
+    @pytest.mark.asyncio
+    async def test_login_empty_username_raises(self, provider) -> None:
         with pytest.raises(AuthenticationError, match="Invalid credentials"):
-            provider.login("", "some-password")
+            await provider.login("", "some-password")
 
-    def test_login_empty_password_raises(self, provider) -> None:
+    @pytest.mark.asyncio
+    async def test_login_empty_password_raises(self, provider) -> None:
         provider.create_user("alice", "pw", display_name="Alice")
         with pytest.raises(AuthenticationError, match="Invalid credentials"):
-            provider.login("alice", "")
+            await provider.login("alice", "")
 
 
 class TestProtocolConformance:
@@ -213,13 +218,14 @@ class TestProtocolConformance:
 class TestTimingDefense:
     """Verify constant-time behavior for unknown users."""
 
-    def test_login_unknown_user_still_hashes(self, provider) -> None:
+    @pytest.mark.asyncio
+    async def test_login_unknown_user_still_hashes(self, provider) -> None:
         """Verify constant-time behavior: bcrypt.checkpw is called even for unknown users."""
         import unittest.mock as mock
 
         with mock.patch("elspeth.web.auth.local.bcrypt.checkpw", return_value=False) as mock_checkpw:
             with pytest.raises(AuthenticationError, match="Invalid credentials"):
-                provider.login("nonexistent", "password")
+                await provider.login("nonexistent", "password")
             # bcrypt.checkpw must be called even for nonexistent users (timing defense)
             mock_checkpw.assert_called_once()
 
@@ -227,7 +233,8 @@ class TestTimingDefense:
 class TestRefresh:
     """Tests for the token refresh method."""
 
-    def test_refresh_deleted_user_raises(self, provider) -> None:
+    @pytest.mark.asyncio
+    async def test_refresh_deleted_user_raises(self, provider) -> None:
         """A deleted user cannot obtain fresh tokens via refresh."""
         import sqlite3
 
@@ -236,10 +243,11 @@ class TestRefresh:
         with sqlite3.connect(str(provider._db_path)) as conn:
             conn.execute("DELETE FROM users WHERE user_id = ?", ("alice",))
         with pytest.raises(AuthenticationError, match="User not found"):
-            provider.refresh("alice", "alice")
+            await provider.refresh("alice", "alice")
 
-    def test_refresh_valid_user_returns_jwt(self, provider) -> None:
+    @pytest.mark.asyncio
+    async def test_refresh_valid_user_returns_jwt(self, provider) -> None:
         provider.create_user("alice", "pw", display_name="Alice")
-        token = provider.refresh("alice", "alice")
+        token = await provider.refresh("alice", "alice")
         assert isinstance(token, str)
         assert len(token.split(".")) == 3

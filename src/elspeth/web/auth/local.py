@@ -83,13 +83,19 @@ class LocalAuthProvider:
             except sqlite3.IntegrityError as exc:
                 raise ValueError(f"User already exists: {user_id}") from exc
 
-    def login(self, username: str, password: str) -> str:
+    async def login(self, username: str, password: str) -> str:
         """Authenticate with username/password and return a JWT.
 
         Raises AuthenticationError("Invalid credentials") on failure.
         Uses constant-time comparison to prevent username enumeration
         via timing side-channel.
+
+        Blocking bcrypt/sqlite work is offloaded via asyncio.to_thread().
         """
+        return await asyncio.to_thread(self._login_sync, username, password)
+
+    def _login_sync(self, username: str, password: str) -> str:
+        """Synchronous login — called via asyncio.to_thread."""
         # Early rejection for empty credentials. This exits before the
         # bcrypt path, so it is faster than a real login attempt. This is
         # acceptable: empty credentials are syntactically invalid (not a
@@ -120,16 +126,22 @@ class LocalAuthProvider:
         token: str = jwt.encode(payload, self._secret_key, algorithm="HS256")
         return token
 
-    def refresh(self, user_id: str, username: str) -> str:
+    async def refresh(self, user_id: str, username: str) -> str:
         """Issue a new JWT for an already-authenticated user.
 
-        Verifies the user still exists in the database -- a deleted
+        Verifies the user still exists in the database — a deleted
         user must not be able to obtain fresh tokens via refresh.
 
         Called by the token refresh route. Does NOT re-verify
-        credentials -- the caller (get_current_user middleware)
+        credentials — the caller (get_current_user middleware)
         has already validated the existing token.
+
+        Blocking sqlite work is offloaded via asyncio.to_thread().
         """
+        return await asyncio.to_thread(self._refresh_sync, user_id, username)
+
+    def _refresh_sync(self, user_id: str, username: str) -> str:
+        """Synchronous refresh — called via asyncio.to_thread."""
         with self._get_conn() as conn:
             row = conn.execute(
                 "SELECT 1 FROM users WHERE user_id = ?",

@@ -43,14 +43,14 @@ class CredentialAuthProvider(AuthProvider, Protocol):
     then narrow the type to CredentialAuthProvider for method access.
     """
 
-    def login(self, username: str, password: str) -> str:
+    async def login(self, username: str, password: str) -> str:
         """Authenticate with credentials and return a JWT.
 
         Raises AuthenticationError on invalid credentials.
         """
         ...
 
-    def refresh(self, user_id: str, username: str) -> str:
+    async def refresh(self, user_id: str, username: str) -> str:
         """Issue a new JWT for an already-authenticated user.
 
         Raises AuthenticationError if the user no longer exists.

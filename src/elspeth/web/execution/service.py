@@ -29,6 +29,7 @@ import structlog
 from elspeth.cli_helpers import instantiate_plugins_from_config
 from elspeth.contracts.audit import SecretResolutionInput
 from elspeth.contracts.cli import ProgressEvent
+from elspeth.contracts.errors import GracefulShutdownError
 from elspeth.core.config import load_settings_from_yaml_string
 from elspeth.core.dag.graph import ExecutionGraph
 from elspeth.core.events import EventBus
@@ -225,7 +226,7 @@ class ExecutionServiceImpl:
         """Return current run status. AC #17: delegates to SessionService."""
         run = await self._session_service.get_run(run_id)
         return RunStatusResponse(
-            run_id=str(run.id),  # B7: RunRecord uses `id`, not `run_id`
+            run_id=str(run.id),
             status=run.status,
             started_at=run.started_at,
             finished_at=run.finished_at,
@@ -302,12 +303,12 @@ class ExecutionServiceImpl:
         """Cancel a run via the shutdown Event.
 
         Active runs: sets the Event, Orchestrator detects during row processing.
-        Pending runs: sets the Event so _run_pipeline terminates immediately.
+        Pending runs (no Event registered yet): marks the run as cancelled
+        directly via SessionService so _run_pipeline terminates immediately.
         Terminal runs: no-op (idempotent).
 
-        Note: async because pending-run cancellation calls SessionService
-        directly (we're in the event loop thread, not the background thread,
-        so await is correct here — NOT _call_async).
+        Async because the pending-run path awaits SessionService (we're in
+        the event loop thread, not the background thread).
         """
         event = self._shutdown_events.get(str(run_id))
         if event is not None:
@@ -392,11 +393,24 @@ class ExecutionServiceImpl:
                 resolved_dict, resolutions = resolve_secret_refs(config_dict, self._secret_service, user_id)
                 resolved_yaml = _yaml.dump(resolved_dict, default_flow_style=False)
 
+                # Map ResolvedSecret.scope (web domain) to
+                # SecretResolutionInput.source (audit domain).
+                # "server" secrets are env vars on the host → audit source "env".
+                _SCOPE_TO_AUDIT_SOURCE: dict[str, str] = {
+                    "user": "user",
+                    "server": "env",
+                }
                 for rs in resolutions:
+                    audit_source = _SCOPE_TO_AUDIT_SOURCE.get(rs.scope)
+                    if audit_source is None:
+                        raise ValueError(
+                            f"No audit source mapping for secret scope {rs.scope!r} "
+                            f"(secret: {rs.name!r}) — add mapping to _SCOPE_TO_AUDIT_SOURCE"
+                        )
                     secret_resolution_inputs.append(
                         SecretResolutionInput(
                             env_var_name=rs.name,
-                            source=rs.scope,
+                            source=audit_source,
                             vault_url=None,
                             secret_name=None,
                             timestamp=time.time(),
@@ -477,61 +491,58 @@ class ExecutionServiceImpl:
                 shutdown_event=shutdown_event,  # B2: NEVER omit this
             )
 
-            # AC #19: Check if shutdown was requested — if so, broadcast
-            # "cancelled" instead of "completed". The orchestrator returns
-            # normally after detecting the shutdown event, but the run was
-            # not completed by the user's intent.
-            if shutdown_event.is_set():
-                self._broadcaster.broadcast(
-                    run_id,
-                    RunEvent(
-                        run_id=run_id,
-                        timestamp=datetime.now(tz=UTC),
-                        event_type="cancelled",
-                        data={
-                            "rows_processed": result.rows_processed,
-                            "rows_failed": result.rows_failed,
-                        },
-                    ),
+            # Orchestrator.run() returns normally ONLY on completion.
+            # If shutdown was requested, it raises GracefulShutdownError
+            # (caught below). Do NOT check shutdown_event.is_set() here —
+            # cancel() can set the event after processing finishes but
+            # before we persist status, causing a completed run to be
+            # misclassified as cancelled.
+            self._broadcaster.broadcast(
+                run_id,
+                RunEvent(
+                    run_id=run_id,
+                    timestamp=datetime.now(tz=UTC),
+                    event_type="completed",
+                    data={
+                        "rows_processed": result.rows_processed,
+                        "rows_succeeded": result.rows_succeeded,
+                        "rows_failed": result.rows_failed,
+                        "rows_quarantined": result.rows_quarantined,
+                        "landscape_run_id": result.run_id,
+                    },
+                ),
+            )
+            self._call_async(
+                self._session_service.update_run_status(
+                    run_uuid,
+                    status="completed",
+                    landscape_run_id=result.run_id,
+                    rows_processed=result.rows_processed,
+                    rows_failed=result.rows_failed,
                 )
-                self._call_async(
-                    self._session_service.update_run_status(
-                        run_uuid,
-                        status="cancelled",
-                        rows_processed=result.rows_processed,
-                        rows_failed=result.rows_failed,
-                    )
+            )
+            self._finalize_output_blobs(run_id, success=True)
+
+        except GracefulShutdownError:
+            # Orchestrator detected shutdown during processing and raised
+            # after flushing in-progress work. This is the ONLY path that
+            # should classify a run as cancelled.
+            self._broadcaster.broadcast(
+                run_id,
+                RunEvent(
+                    run_id=run_id,
+                    timestamp=datetime.now(tz=UTC),
+                    event_type="cancelled",
+                    data={},
+                ),
+            )
+            self._call_async(
+                self._session_service.update_run_status(
+                    run_uuid,
+                    status="cancelled",
                 )
-                # Finalize output blobs as error (run was cancelled)
-                self._finalize_output_blobs(run_id, success=False)
-            else:
-                # Broadcast terminal completed event
-                self._broadcaster.broadcast(
-                    run_id,
-                    RunEvent(
-                        run_id=run_id,
-                        timestamp=datetime.now(tz=UTC),
-                        event_type="completed",
-                        data={
-                            "rows_processed": result.rows_processed,
-                            "rows_succeeded": result.rows_succeeded,
-                            "rows_failed": result.rows_failed,
-                            "rows_quarantined": result.rows_quarantined,
-                            "landscape_run_id": result.run_id,
-                        },
-                    ),
-                )
-                self._call_async(
-                    self._session_service.update_run_status(
-                        run_uuid,
-                        status="completed",
-                        landscape_run_id=result.run_id,
-                        rows_processed=result.rows_processed,
-                        rows_failed=result.rows_failed,
-                    )
-                )
-                # Finalize output blobs as ready (run completed successfully)
-                self._finalize_output_blobs(run_id, success=True)
+            )
+            self._finalize_output_blobs(run_id, success=False)
 
         except BaseException as exc:
             # B7 fix: Catch BaseException (not Exception) to handle

@@ -64,9 +64,16 @@ class CoalesceMetadata:
             raise ValueError("CoalesceMetadata.policy must not be empty")
         # Freeze all container fields — catches direct construction with raw lists/dicts
         fields_to_freeze = []
-        for name in ("expected_branches", "branches_arrived", "arrival_order", "branches_lost", "union_field_collisions"):
-            if getattr(self, name) is not None:
-                fields_to_freeze.append(name)
+        if self.expected_branches is not None:
+            fields_to_freeze.append("expected_branches")
+        if self.branches_arrived is not None:
+            fields_to_freeze.append("branches_arrived")
+        if self.arrival_order is not None:
+            fields_to_freeze.append("arrival_order")
+        if self.branches_lost is not None:
+            fields_to_freeze.append("branches_lost")
+        if self.union_field_collisions is not None:
+            fields_to_freeze.append("union_field_collisions")
         if fields_to_freeze:
             freeze_fields(self, *fields_to_freeze)
 

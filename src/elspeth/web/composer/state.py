@@ -228,9 +228,10 @@ class CompositionState:
     outputs: tuple[OutputSpec, ...]
     metadata: PipelineMetadata
     version: int
-    # No __post_init__ needed: nodes/edges/outputs are tuples of frozen
-    # dataclasses (immutable containers of immutable items). metadata is a
-    # frozen dataclass with scalar-only fields. Source has its own freeze guard.
+
+    def __post_init__(self) -> None:
+        if self.version < 1:
+            raise ValueError(f"CompositionState.version must be >= 1, got {self.version}")
 
     # --- Mutation methods ---
 
