@@ -227,7 +227,7 @@ class TestBatchStatsFloatOverflow:
         assert result.row["sum"] == 40.0
         assert result.row["mean"] == 20.0
         assert result.row["skipped_non_finite"] == 1
-        assert result.row["skipped_non_finite_indices"] == [1]
+        assert result.row["skipped_non_finite_indices"] == (1,)
 
     def test_inf_input_skipped_from_computation(self, ctx: PluginContext) -> None:
         """Infinity values are skipped from sum/mean, tracked in skipped_non_finite with indices."""
@@ -248,7 +248,7 @@ class TestBatchStatsFloatOverflow:
         assert result.row["count"] == 1
         assert result.row["sum"] == 10.0
         assert result.row["skipped_non_finite"] == 2
-        assert result.row["skipped_non_finite_indices"] == [1, 2]
+        assert result.row["skipped_non_finite_indices"] == (1, 2)
 
     def test_all_non_finite_returns_error(self, ctx: PluginContext) -> None:
         """Batch with only NaN/Inf values returns error — not fabricated sum=0."""

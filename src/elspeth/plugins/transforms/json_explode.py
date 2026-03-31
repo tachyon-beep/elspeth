@@ -153,9 +153,10 @@ class JSONExplode(BaseTransform):
         # KeyError here = upstream bug (source didn't validate field exists)
         array_value = row[self._array_field]
 
-        # Contract enforcement: array_field must be list
-        # Strings/dicts are iterable but would produce garbage - fail explicitly
-        if not isinstance(array_value, list):
+        # Contract enforcement: array_field must be list or tuple.
+        # PipelineRow deep-freezes data (list→tuple), so both are valid.
+        # Strings/dicts are iterable but would produce garbage - fail explicitly.
+        if not isinstance(array_value, (list, tuple)):
             raise TypeError(
                 f"Field '{self._array_field}' must be a list, got {type(array_value).__name__}. "
                 f"This indicates an upstream validation bug - check source schema or prior transforms."

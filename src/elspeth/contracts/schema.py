@@ -26,6 +26,7 @@ are accepted, but quoted strings are recommended for clarity.
 from __future__ import annotations
 
 import re
+from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import Any, Literal
 
@@ -144,7 +145,7 @@ def _parse_field_names_list(value: Any, field_name: str) -> tuple[str, ...] | No
     if value is None:
         return None
 
-    if not isinstance(value, list):
+    if not isinstance(value, (list, tuple)):
         raise ValueError(f"'{field_name}' must be a list of field names, got {type(value).__name__}")
 
     if len(value) == 0:
@@ -224,7 +225,7 @@ def _normalize_field_spec(spec: Any, *, index: int) -> str:
     if isinstance(spec, str):
         return spec
 
-    if isinstance(spec, dict):
+    if isinstance(spec, Mapping):
         # Handle to_dict() round-trip format: {"name": "x", "type": "str", "required": true}
         # This enables SchemaConfig.from_dict(schema_config.to_dict()) to work.
         if "name" in spec and "type" in spec:
@@ -322,7 +323,7 @@ class SchemaConfig:
         return self.mode == "observed"
 
     @classmethod
-    def from_dict(cls, config: dict[str, Any]) -> SchemaConfig:
+    def from_dict(cls, config: Mapping[str, Any]) -> SchemaConfig:
         """Parse schema configuration from dict.
 
         Args:
@@ -336,8 +337,8 @@ class SchemaConfig:
         Raises:
             ValueError: If config is invalid (including non-dict input)
         """
-        if not isinstance(config, dict):
-            raise ValueError(f"Schema config must be a dict, got {type(config).__name__}")
+        if not isinstance(config, Mapping):
+            raise ValueError(f"Schema config must be a Mapping, got {type(config).__name__}")
 
         # Parse contract fields (valid for all schema modes)
         guaranteed_fields = _parse_field_names_list(config.get("guaranteed_fields"), "guaranteed_fields")
@@ -356,7 +357,7 @@ class SchemaConfig:
             fields_value = config.get("fields")
             # Allow only None or [] for backwards compatibility; any other value
             # is an explicit schema declaration and must be rejected.
-            if fields_value is not None and fields_value != []:
+            if fields_value is not None and fields_value != [] and fields_value != ():
                 raise ValueError(
                     "Observed schemas (mode: observed) cannot have explicit field definitions. "
                     "Use guaranteed_fields/required_fields for contracts instead."
@@ -391,7 +392,7 @@ class SchemaConfig:
         fields_value = config["fields"]
 
         # Parse field list
-        if not isinstance(fields_value, list):
+        if not isinstance(fields_value, (list, tuple)):
             raise ValueError(f"Schema fields must be a list, got {type(fields_value).__name__}")
 
         if len(fields_value) == 0:

@@ -624,8 +624,9 @@ class TestPassThroughNodesInheritComputedSchema:
 
         gate_schema_dict = gate_nodes[0].config["schema"]
 
-        # Should inherit raw schema with config_field
-        assert gate_schema_dict["guaranteed_fields"] == ["config_field"]
+        # Should inherit raw schema with config_field.
+        # After graph build, config is deep-frozen: lists become tuples.
+        assert gate_schema_dict["guaranteed_fields"] == ("config_field",)
 
     def test_coalesce_config_schema_includes_computed_fields(self) -> None:
         """Coalesce node's config["schema"] should reflect computed

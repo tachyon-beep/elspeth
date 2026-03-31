@@ -100,9 +100,6 @@ class NodeInfo:
     node_type: NodeType
     plugin_name: str
     config: NodeConfig = field(default_factory=dict)
-    # NOTE: config is typed as dict for construction compatibility, but is
-    # frozen to MappingProxyType by build_execution_graph() in builder.py
-    # after graph build.
     input_schema: type[PluginSchema] | None = None
     output_schema: type[PluginSchema] | None = None
     input_schema_config: SchemaConfig | None = None
@@ -112,6 +109,10 @@ class NodeInfo:
         if len(self.node_id) > _NODE_ID_MAX_LENGTH:
             msg = f"node_id exceeds {_NODE_ID_MAX_LENGTH} characters: '{self.node_id}' (length={len(self.node_id)})"
             raise GraphValidationError(msg)
+        # NOTE: config is NOT frozen here because the builder mutates it
+        # during multi-step schema resolution (e.g., gate/coalesce schema
+        # propagation). Deep freeze is applied by build_execution_graph()
+        # after all mutations are complete.
 
 
 @dataclass(frozen=True, slots=True)

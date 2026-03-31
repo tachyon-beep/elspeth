@@ -1403,10 +1403,10 @@ class ExecutionGraph:
             return None
 
         # Parse the schema dict into SchemaConfig
-        if not isinstance(schema_dict, dict):
+        if not isinstance(schema_dict, Mapping):
             raise GraphValidationError(
                 f"Node '{node_id}' has malformed schema config: "
-                f"expected dict, got {type(schema_dict).__name__}. "
+                f"expected Mapping, got {type(schema_dict).__name__}. "
                 f"This is a configuration or graph construction bug."
             )
 

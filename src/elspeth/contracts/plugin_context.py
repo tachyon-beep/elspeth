@@ -16,6 +16,7 @@ from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any
 
 from elspeth.contracts.call_data import RawCallPayload
+from elspeth.contracts.freeze import deep_freeze
 
 if TYPE_CHECKING:
     from elspeth.contracts import Call, CallStatus, CallType, TransformErrorReason
@@ -135,6 +136,13 @@ class PluginContext:
     # Batch checkpoints restored from previous BatchPendingError
     # Maps node_id -> typed checkpoint state for each batch transform
     _batch_checkpoints: dict[str, BatchCheckpointState] = field(default_factory=dict)
+
+    def __post_init__(self) -> None:
+        # Deep-freeze config so plugins cannot mutate the run configuration
+        # after the audit snapshot (settings_json, config_hash) is recorded.
+        # PluginContext is not frozen (checkpoint/token need mutation), but
+        # config must be immutable for audit integrity.
+        self.config = deep_freeze(self.config)
 
     def get_checkpoint(self) -> BatchCheckpointState | None:
         """Get checkpoint state for batch transforms.

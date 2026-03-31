@@ -188,11 +188,11 @@ allow_hits:
   owner: bugfix
   reason: Type annotation objects (e.g. list[str]) may not have __name__ attribute - getattr is needed for safe error messages
   safety: Falls back to str(a) for display purposes only; used in error message, not logic
-- key: contracts/plugin_context.py:R1:PluginContext:record_call:fp=4149689a27621dfc
+- key: contracts/plugin_context.py:R1:PluginContext:record_call:fp=794c860e09016912
   owner: architecture
   reason: Tier 3 boundary — .get() on serialized LLM response dict to extract optional usage data
   safety: Missing key returns None; no fabrication
-- key: contracts/plugin_context.py:R6:PluginContext:record_validation_error:fp=c88f374a39d117c6
+- key: contracts/plugin_context.py:R6:PluginContext:record_validation_error:fp=77aec82106b1d3da
   owner: architecture
   reason: Tier 3 boundary — ValueError/TypeError from stable_hash on non-canonical data falls back to repr_hash
   safety: Warning logged; row_id still generated via repr_hash for audit trail continuity
@@ -217,6 +217,14 @@ allow_hits:
   reason: TypeError from normalize_type_for_contract for ALL unsupported types during narrowing — maps to object
   safety: Preserves field in narrowed contract as 'any' type; no data loss
   expires: '2026-05-14'
+- key: contracts/schema_contract.py:R5:PipelineRow:to_dict:fp=19c383f767c4ed8c
+  owner: architecture
+  reason: Tier 1 offensive guard — deep_thaw must return dict; isinstance check crashes on corruption
+  safety: Raises TypeError immediately if invariant violated
+- key: contracts/schema_contract.py:R5:PipelineRow:to_checkpoint_format:fp=13c2f8a3bfbe5f2a
+  owner: architecture
+  reason: Tier 1 offensive guard — deep_thaw must return dict; isinstance check crashes on corruption
+  safety: Raises TypeError immediately if invariant violated
 - key: contracts/contract_propagation.py:R1:merge_contract_with_output:fp=368e4bbac0c4fcec
   owner: architecture
   reason: Optional lookup for original name - new fields from transforms may not have input mapping

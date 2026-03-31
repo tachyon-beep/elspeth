@@ -22,6 +22,7 @@ from elspeth.contracts.errors import (
     MissingFieldViolation,
     TypeMismatchViolation,
 )
+from elspeth.contracts.freeze import deep_freeze, deep_thaw
 from elspeth.contracts.type_normalization import (
     ALLOWED_CONTRACT_TYPES,
     CONTRACT_TYPE_MAP,
@@ -543,9 +544,9 @@ class PipelineRow:
                 f"PipelineRow requires exactly dict, got {type(data).__name__}. "
                 f"Non-dict input suggests data corruption on a Tier 1 restore path."
             )
-        # Store as immutable view to prevent mutation after audit recording
-        # Per CLAUDE.md Tier 1: audit data must not be modified
-        self._data = types.MappingProxyType(data.copy())
+        # Deep-freeze to prevent mutation of nested containers after audit recording.
+        # Per CLAUDE.md Tier 1: audit data must not be modified.
+        self._data = deep_freeze(data)
         self._contract = contract
 
     def __setitem__(self, key: str, value: Any) -> None:
@@ -635,9 +636,12 @@ class PipelineRow:
         """Export raw data (normalized keys) for serialization.
 
         Returns:
-            Copy of internal data dict
+            Mutable deep copy of internal data dict
         """
-        return dict(self._data)
+        thawed = deep_thaw(self._data)
+        if not isinstance(thawed, dict):
+            raise TypeError(f"deep_thaw(PipelineRow._data) must return dict, got {type(thawed).__name__}")
+        return thawed
 
     def get(self, key: str, default: Any = None) -> Any:
         """Get field value with optional default (Jinja2 compatibility).
@@ -682,15 +686,15 @@ class PipelineRow:
         return self._contract
 
     def __copy__(self) -> PipelineRow:
-        """Support shallow copy - creates new PipelineRow with same data dict.
+        """Support shallow copy - creates new PipelineRow with same data.
 
         SchemaContract is immutable (frozen=True), so sharing reference is safe.
-        MappingProxyType doesn't support direct copy/pickle, so we create new one.
+        Data is deep-frozen, so thaw→re-freeze produces an independent copy.
 
         Returns:
-            New PipelineRow with same contract and data copy
+            New PipelineRow with same contract and independent data copy
         """
-        return PipelineRow(dict(self._data), self._contract)
+        return PipelineRow(self.to_dict(), self._contract)
 
     def __deepcopy__(self, memo: dict[int, Any]) -> PipelineRow:
         """Support deep copy - creates new PipelineRow with deep copied data.
@@ -699,7 +703,7 @@ class PipelineRow:
         without hitting MappingProxyType pickle issues.
 
         SchemaContract is immutable (frozen=True), so sharing reference is safe.
-        Only the data dict needs deep copying.
+        to_dict() deep-thaws, then PipelineRow.__init__ deep-freezes again.
 
         Args:
             memo: Memoization dict for deepcopy
@@ -707,12 +711,7 @@ class PipelineRow:
         Returns:
             New PipelineRow with same contract and deep copied data
         """
-        import copy
-
-        # Deep copy the data dict (contains nested structures)
-        copied_data = copy.deepcopy(dict(self._data), memo)
-        # Contract is immutable - share reference (safe for frozen dataclass)
-        return PipelineRow(copied_data, self._contract)
+        return PipelineRow(self.to_dict(), self._contract)
 
     def to_checkpoint_format(self) -> dict[str, Any]:
         """Serialize for checkpoint storage.
@@ -723,8 +722,11 @@ class PipelineRow:
         Returns:
             Checkpoint-serializable dict
         """
+        thawed = deep_thaw(self._data)
+        if not isinstance(thawed, dict):
+            raise TypeError(f"deep_thaw(PipelineRow._data) must return dict, got {type(thawed).__name__}")
         return {
-            "data": dict(self._data),  # Convert MappingProxyType to dict for serialization
+            "data": thawed,
             "contract_version": self._contract.version_hash(),
         }
 

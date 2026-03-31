@@ -22,7 +22,7 @@ from typing import TYPE_CHECKING, Any
 
 from elspeth.contracts import CallStatus, CallType
 from elspeth.contracts.errors import AuditIntegrityError
-from elspeth.contracts.freeze import deep_freeze
+from elspeth.contracts.freeze import deep_freeze, deep_thaw
 from elspeth.core.canonical import stable_hash
 from elspeth.core.landscape.row_data import CallDataState
 
@@ -235,9 +235,17 @@ class CallReplayer:
         # Determine if this was an error call
         was_error = call.status == CallStatus.ERROR
 
-        # Extract response data based on explicit state
+        # Extract response data based on explicit state.
+        # deep_thaw converts MappingProxyType→dict and tuple→list recursively,
+        # matching the original live-mode payload types that callers expect.
         if call_data.state == CallDataState.AVAILABLE:
-            response_data: dict[str, Any] = dict(call_data.data)  # type: ignore[arg-type]
+            thawed = deep_thaw(call_data.data)
+            if not isinstance(thawed, dict):
+                raise AuditIntegrityError(
+                    f"deep_thaw(call_data.data) must return dict, got {type(thawed).__name__} "
+                    f"for call in run {self._source_run_id} (Tier 1 violation)"
+                )
+            response_data: dict[str, Any] = thawed
         elif call_data.state == CallDataState.HASH_ONLY:
             raise ReplayPayloadMissingError(call.call_id, request_hash)
         elif call_data.state == CallDataState.NEVER_STORED:

@@ -84,9 +84,9 @@ per_file_rules:
 - pattern: plugins/infrastructure/clients/replayer.py
   rules:
   - R5
-  reason: Deep-freeze guards for recorded call data
+  reason: Deep-freeze guards and Tier 1 deep_thaw type validation for recorded call data
   expires: null
-  max_hits: 2
+  max_hits: 3
 - pattern: plugins/infrastructure/schema_factory.py
   rules:
   - R5

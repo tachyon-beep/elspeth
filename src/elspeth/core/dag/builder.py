@@ -21,6 +21,7 @@ import networkx as nx
 from elspeth.contracts import RouteDestination, RoutingMode, error_edge_label
 from elspeth.contracts.enums import NodeType
 from elspeth.contracts.errors import FrameworkBugError
+from elspeth.contracts.freeze import deep_freeze
 from elspeth.contracts.types import (
     AggregationName,
     BranchName,
@@ -960,19 +961,14 @@ def build_execution_graph(
     if coalesce_id_to_config:
         graph.warn_divert_coalesce_interactions(coalesce_id_to_config)
 
-    # Freeze all NodeInfo configs now that schema resolution is complete.
-    # NodeInfo is frozen=True so we use object.__setattr__ to replace the
-    # mutable dict with an immutable MappingProxyType.  This prevents
-    # accidental mutation of node configs after graph construction.
-    #
-    # Note: This is a shallow freeze (top-level only). Deep immutability is
-    # not enforced because downstream code (SchemaConfig.from_dict, etc.)
-    # expects dict/list types, not MappingProxyType/tuple. The aliasing bug
-    # The aliasing bug is fixed by deep-copying in _best_schema_dict() instead.
+    # Deep-freeze all NodeInfo configs now that schema resolution is complete.
+    # NodeInfo.__post_init__ cannot freeze config because the builder mutates
+    # it during multi-step schema propagation (gate/coalesce schema assignment).
+    # deep_freeze converts nested dicts/lists to MappingProxyType/tuple recursively.
     for _, attrs in graph._graph.nodes(data=True):
         info = attrs["info"]
         if isinstance(info.config, dict):
-            object.__setattr__(info, "config", MappingProxyType(info.config))
+            object.__setattr__(info, "config", deep_freeze(info.config))
 
     # Step maps and node sequence support node_id-based processor traversal.
     graph.set_pipeline_nodes(pipeline_nodes)

@@ -170,8 +170,19 @@ def test_resume_point_rejects_negative_sequence_number() -> None:
 
 
 def test_resume_point_accepts_zero_sequence_number() -> None:
+    cp = Checkpoint(
+        checkpoint_id="cp-001",
+        run_id="run-001",
+        token_id="tok-001",
+        node_id="node-001",
+        sequence_number=0,
+        created_at=datetime.now(UTC),
+        upstream_topology_hash="a" * 64,
+        checkpoint_node_config_hash="b" * 64,
+        format_version=Checkpoint.CURRENT_FORMAT_VERSION,
+    )
     resume_point = ResumePoint(
-        checkpoint=_checkpoint(),
+        checkpoint=cp,
         token_id="tok-001",
         node_id="node-001",
         sequence_number=0,

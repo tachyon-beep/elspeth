@@ -297,12 +297,11 @@ class TestJSONExplodeTypeViolations:
         with pytest.raises(TypeError, match=r"Field 'items' must be a list"):
             transform.process(make_pipeline_row(row), ctx)
 
-    def test_tuple_value_crashes_with_type_error(self, ctx: PluginContext) -> None:
-        """Tuple value is upstream bug - should crash with TypeError.
+    def test_tuple_value_accepted_after_deep_freeze(self, ctx: PluginContext) -> None:
+        """Tuple value is valid — PipelineRow deep-freezes lists to tuples.
 
-        Tuples are iterable in Python, but JSONExplode requires lists.
-        JSON has no tuple type - if data came from JSON it would be a list.
-        A tuple indicates the data came from Python code that should be fixed.
+        After deep_freeze, all lists in PipelineRow become tuples. Transforms
+        must accept both list and tuple for array fields.
         """
         from elspeth.plugins.transforms.json_explode import JSONExplode
 
@@ -313,10 +312,12 @@ class TestJSONExplodeTypeViolations:
             }
         )
 
-        row = {"id": 1, "items": ("a", "b", "c")}  # Tuple, not list!
+        row = {"id": 1, "items": ("a", "b", "c")}  # Tuple (frozen list)
 
-        with pytest.raises(TypeError, match=r"Field 'items' must be a list"):
-            transform.process(make_pipeline_row(row), ctx)
+        result = transform.process(make_pipeline_row(row), ctx)
+        assert result.status == "success"
+        assert result.rows is not None
+        assert len(result.rows) == 3
 
     def test_non_iterable_value_crashes(self, ctx: PluginContext) -> None:
         """Non-iterable value is upstream bug - should crash (TypeError)."""
