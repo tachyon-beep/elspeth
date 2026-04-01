@@ -13,7 +13,7 @@ from elspeth.contracts.freeze import freeze_fields
 slog = structlog.get_logger(__name__)
 
 if TYPE_CHECKING:
-    from collections.abc import Mapping, Sequence
+    from collections.abc import Callable, Mapping, Sequence
 
     from elspeth.contracts import SinkProtocol, SourceProtocol, TransformProtocol
     from elspeth.contracts.run_result import RunResult
@@ -115,6 +115,28 @@ def instantiate_plugins_from_config(config: "ElspethSettings") -> PluginBundle:
         sinks=sinks,
         aggregations=aggregations,
     )
+
+
+def _make_sink_factory(config: "ElspethSettings") -> "Callable[[str], SinkProtocol]":
+    """Create a factory that produces fresh sink instances from config.
+
+    Used by the export phase, which runs after the pipeline's sinks have
+    already been closed. The factory creates a new, unstarted instance
+    each time it is called.
+    """
+    from elspeth.plugins.infrastructure.manager import get_shared_plugin_manager
+
+    def factory(sink_name: str) -> "SinkProtocol":
+        if sink_name not in config.sinks:
+            raise ValueError(f"Export sink '{sink_name}' not found in sink configuration")
+        sink_config = config.sinks[sink_name]
+        manager = get_shared_plugin_manager()
+        sink_cls = manager.get_sink_by_name(sink_config.plugin)
+        sink = sink_cls(dict(sink_config.options))
+        sink._on_write_failure = sink_config.on_write_failure
+        return sink
+
+    return factory
 
 
 def resolve_database_url(
@@ -302,6 +324,7 @@ def bootstrap_and_run(settings_path: Path) -> "RunResult":
                 payload_store=payload_store,
                 preflight_results=preflight,
                 secret_resolutions=secret_resolutions,
+                sink_factory=_make_sink_factory(config),
             )
     finally:
         try:

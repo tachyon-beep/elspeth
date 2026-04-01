@@ -1116,7 +1116,7 @@ class TestInterruptAndResume:
             sequence_number=1,
             graph=graph,
             aggregation_state=AggregationCheckpointState(
-                version="3.0",
+                version="4.0",
                 nodes={
                     agg_node_id: AggregationNodeCheckpoint(
                         tokens=(
@@ -1129,6 +1129,7 @@ class TestInterruptAndResume:
                                 expand_group_id=None,
                                 row_data=rows[0],
                                 contract_version=contract.version_hash(),
+                                contract=contract.to_checkpoint_format(),
                             ),
                             AggregationTokenCheckpoint(
                                 token_id="t1",
@@ -1139,13 +1140,13 @@ class TestInterruptAndResume:
                                 expand_group_id=None,
                                 row_data=rows[1],
                                 contract_version=contract.version_hash(),
+                                contract=contract.to_checkpoint_format(),
                             ),
                         ),
                         batch_id="batch-001",
                         elapsed_age_seconds=0.0,
                         count_fire_offset=None,
                         condition_fire_offset=None,
-                        contract=contract.to_checkpoint_format(),
                     )
                 },
             ),

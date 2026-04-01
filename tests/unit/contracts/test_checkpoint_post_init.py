@@ -26,6 +26,7 @@ class TestAggregationTokenCheckpointPostInit:
                 expand_group_id=None,
                 row_data={},
                 contract_version="v1",
+                contract={},
             )
 
     def test_rejects_empty_row_id(self) -> None:
@@ -39,6 +40,7 @@ class TestAggregationTokenCheckpointPostInit:
                 expand_group_id=None,
                 row_data={},
                 contract_version="v1",
+                contract={},
             )
 
     def test_rejects_empty_contract_version(self) -> None:
@@ -52,6 +54,7 @@ class TestAggregationTokenCheckpointPostInit:
                 expand_group_id=None,
                 row_data={},
                 contract_version="",
+                contract={},
             )
 
     def test_accepts_valid(self) -> None:
@@ -64,6 +67,7 @@ class TestAggregationTokenCheckpointPostInit:
             expand_group_id=None,
             row_data={"x": 1},
             contract_version="v1",
+            contract={},
         )
         assert t.token_id == "t1"
 
@@ -77,7 +81,6 @@ class TestAggregationNodeCheckpointPostInit:
                 elapsed_age_seconds=0.0,
                 count_fire_offset=None,
                 condition_fire_offset=None,
-                contract={},
             )
 
     def test_rejects_negative_elapsed_age(self) -> None:
@@ -88,7 +91,6 @@ class TestAggregationNodeCheckpointPostInit:
                 elapsed_age_seconds=-1.0,
                 count_fire_offset=None,
                 condition_fire_offset=None,
-                contract={},
             )
 
     def test_rejects_nan_elapsed_age(self) -> None:
@@ -99,7 +101,6 @@ class TestAggregationNodeCheckpointPostInit:
                 elapsed_age_seconds=float("nan"),
                 count_fire_offset=None,
                 condition_fire_offset=None,
-                contract={},
             )
 
     def test_rejects_inf_elapsed_age(self) -> None:
@@ -110,7 +111,6 @@ class TestAggregationNodeCheckpointPostInit:
                 elapsed_age_seconds=float("inf"),
                 count_fire_offset=None,
                 condition_fire_offset=None,
-                contract={},
             )
 
     def test_rejects_negative_count_fire_offset(self) -> None:
@@ -121,7 +121,6 @@ class TestAggregationNodeCheckpointPostInit:
                 elapsed_age_seconds=0.0,
                 count_fire_offset=-1.0,
                 condition_fire_offset=None,
-                contract={},
             )
 
     def test_rejects_nan_count_fire_offset(self) -> None:
@@ -132,7 +131,6 @@ class TestAggregationNodeCheckpointPostInit:
                 elapsed_age_seconds=0.0,
                 count_fire_offset=float("nan"),
                 condition_fire_offset=None,
-                contract={},
             )
 
     def test_rejects_negative_condition_fire_offset(self) -> None:
@@ -143,7 +141,6 @@ class TestAggregationNodeCheckpointPostInit:
                 elapsed_age_seconds=0.0,
                 count_fire_offset=None,
                 condition_fire_offset=-2.5,
-                contract={},
             )
 
     def test_rejects_nan_condition_fire_offset(self) -> None:
@@ -154,7 +151,6 @@ class TestAggregationNodeCheckpointPostInit:
                 elapsed_age_seconds=0.0,
                 count_fire_offset=None,
                 condition_fire_offset=float("nan"),
-                contract={},
             )
 
     def test_accepts_valid(self) -> None:
@@ -164,7 +160,6 @@ class TestAggregationNodeCheckpointPostInit:
             elapsed_age_seconds=5.0,
             count_fire_offset=None,
             condition_fire_offset=None,
-            contract={},
         )
         assert n.batch_id == "b1"
 
@@ -175,7 +170,6 @@ class TestAggregationNodeCheckpointPostInit:
             elapsed_age_seconds=0.0,
             count_fire_offset=1.5,
             condition_fire_offset=3.0,
-            contract={},
         )
         assert n.count_fire_offset == 1.5
         assert n.condition_fire_offset == 3.0
@@ -191,21 +185,21 @@ class TestAggregationCheckpointStatePostInit:
     def test_rejects_list_as_nodes(self) -> None:
         """Regression: non-mapping type must raise TypeError, not unhelpful MappingProxyType error."""
         with pytest.raises(TypeError, match="nodes must be dict or MappingProxyType"):
-            AggregationCheckpointState(version="3.0", nodes=[])  # type: ignore[arg-type]
+            AggregationCheckpointState(version="4.0", nodes=[])  # type: ignore[arg-type]
 
     def test_rejects_string_as_nodes(self) -> None:
         with pytest.raises(TypeError, match="nodes must be dict or MappingProxyType"):
-            AggregationCheckpointState(version="3.0", nodes="not-a-dict")  # type: ignore[arg-type]
+            AggregationCheckpointState(version="4.0", nodes="not-a-dict")  # type: ignore[arg-type]
 
     def test_rejects_none_as_nodes(self) -> None:
         with pytest.raises(TypeError, match="nodes must be dict or MappingProxyType"):
-            AggregationCheckpointState(version="3.0", nodes=None)  # type: ignore[arg-type]
+            AggregationCheckpointState(version="4.0", nodes=None)  # type: ignore[arg-type]
 
     def test_accepts_dict_and_wraps_to_mapping_proxy(self) -> None:
         """Valid dict is accepted and wrapped to MappingProxyType."""
         from types import MappingProxyType
 
-        state = AggregationCheckpointState(version="3.0", nodes={})
+        state = AggregationCheckpointState(version="4.0", nodes={})
         assert isinstance(state.nodes, MappingProxyType)
 
 
@@ -303,6 +297,7 @@ class TestAggregationNodeCheckpointTokensFreeze:
             expand_group_id=None,
             row_data={"value": 42},
             contract_version="v1",
+            contract={"mode": "observed"},
         )
         tokens_list = [token]
         node = AggregationNodeCheckpoint(
@@ -311,7 +306,6 @@ class TestAggregationNodeCheckpointTokensFreeze:
             elapsed_age_seconds=1.0,
             count_fire_offset=None,
             condition_fire_offset=None,
-            contract={"mode": "observed"},
         )
         tokens_list.append(token)
         assert isinstance(node.tokens, tuple)

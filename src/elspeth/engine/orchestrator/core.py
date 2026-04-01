@@ -1044,7 +1044,7 @@ class Orchestrator:
         recorder: LandscapeRecorder,
         run_id: str,
         settings: ElspethSettings,
-        config: PipelineConfig,
+        sink_factory: Callable[[str], SinkProtocol],
     ) -> None:
         """Execute the EXPORT phase: export Landscape data to configured sink.
 
@@ -1052,7 +1052,7 @@ class Orchestrator:
             recorder: LandscapeRecorder for status tracking.
             run_id: Run identifier.
             settings: Full settings (export config accessed from settings.landscape.export).
-            config: Pipeline configuration (sinks needed for export).
+            sink_factory: Creates a fresh sink instance by name for export.
 
         Raises:
             Exception: Re-raises any export failure (run is still "completed" in Landscape).
@@ -1081,8 +1081,7 @@ class Orchestrator:
                 )
             )
 
-            # Call module function directly (no wrapper method)
-            export_landscape(self._db, run_id, settings, config.sinks)
+            export_landscape(self._db, run_id, settings, sink_factory)
 
             recorder.set_export_status(run_id, status=ExportStatus.COMPLETED)
             self._events.emit(PhaseCompleted(phase=PipelinePhase.EXPORT, duration_seconds=time.perf_counter() - phase_start))
@@ -1108,6 +1107,7 @@ class Orchestrator:
         secret_resolutions: list[SecretResolutionInput] | None = None,
         preflight_results: PreflightResult | None = None,
         shutdown_event: threading.Event | None = None,
+        sink_factory: Callable[[str], SinkProtocol] | None = None,
     ) -> RunResult:
         """Execute a pipeline run.
 
@@ -1127,6 +1127,9 @@ class Orchestrator:
                 trail after run creation.
             shutdown_event: Optional pre-created shutdown event for testing.
                 Skips signal handler installation when provided.
+            sink_factory: Creates a fresh sink instance by name. Required when
+                landscape export is enabled (the pipeline's sinks are already
+                closed by the time export runs).
 
         Raises:
             OrchestrationInvariantError: If graph or payload_store is not provided
@@ -1196,7 +1199,13 @@ class Orchestrator:
 
             # EXPORT phase - post-run landscape export (if enabled)
             if settings is not None and settings.landscape.export.enabled:
-                self._execute_export_phase(recorder, run.run_id, settings, config)
+                if sink_factory is None:
+                    raise ValueError(
+                        "Export is enabled but no sink_factory was provided to orchestrator.run(). "
+                        "The caller must supply a sink_factory so the export phase can create "
+                        "a fresh sink instance (the pipeline's sinks are already closed)."
+                    )
+                self._execute_export_phase(recorder, run.run_id, settings, sink_factory)
 
             # Emit RunSummary event with final metrics
             total_duration = time.perf_counter() - run_start_time
@@ -1556,22 +1565,14 @@ class Orchestrator:
         # (e.g., malformed CSV rows) can be attributed to the source node
         ctx.node_id = source_id
 
-        # Call on_start for all plugins BEFORE processing.
-        # Order: source -> transforms (pipeline order) -> sinks.
-        # Base classes provide no-op implementations, so no hasattr needed.
-        # NOTE: on_start is called OUTSIDE the try/finally that calls
-        # _cleanup_plugins. If on_start raises, on_complete/close are NOT called.
-        if include_source_on_start:
-            config.source.on_start(ctx)
-        for transform in config.transforms:
-            transform.on_start(ctx)
-        for sink in config.sinks.values():
-            sink.on_start(ctx)
-
-        # Wrap _build_processor so that if it fails after successful on_start,
-        # plugin cleanup still runs (prevents resource leaks: DB connections,
-        # file handles, thread pools).
         try:
+            if include_source_on_start:
+                config.source.on_start(ctx)
+            for transform in config.transforms:
+                transform.on_start(ctx)
+            for sink in config.sinks.values():
+                sink.on_start(ctx)
+
             processor, coalesce_node_map, coalesce_executor = self._build_processor(
                 graph=graph,
                 config=config,

@@ -311,7 +311,7 @@ def test_get_resume_point_restores_aggregation_state(
         checkpoint_manager,
         run_id,
         aggregation_state=AggregationCheckpointState(
-            version="3.0",
+            version="4.0",
             nodes={
                 "agg-node": AggregationNodeCheckpoint(
                     tokens=(
@@ -324,13 +324,13 @@ def test_get_resume_point_restores_aggregation_state(
                             expand_group_id=None,
                             row_data={"id": 5},
                             contract_version="test",
+                            contract={"mode": "FLEXIBLE", "locked": False, "version_hash": "test", "fields": []},
                         ),
                     ),
                     batch_id="batch-001",
                     elapsed_age_seconds=0.0,
                     count_fire_offset=None,
                     condition_fire_offset=None,
-                    contract={"mode": "FLEXIBLE", "locked": False, "version_hash": "test", "fields": []},
                 ),
             },
         ),
@@ -395,7 +395,7 @@ def test_get_unprocessed_rows_handles_fork_and_excludes_buffered_rows(
         sequence_number=10,
         graph=graph,
         aggregation_state=AggregationCheckpointState(
-            version="3.0",
+            version="4.0",
             nodes={
                 "agg-node": AggregationNodeCheckpoint(
                     tokens=(
@@ -408,6 +408,7 @@ def test_get_unprocessed_rows_handles_fork_and_excludes_buffered_rows(
                             expand_group_id=None,
                             row_data={},
                             contract_version="test",
+                            contract={"mode": "FLEXIBLE", "locked": False, "version_hash": "test", "fields": []},
                         ),
                         AggregationTokenCheckpoint(
                             token_id="tok-mixed-buffered",
@@ -418,13 +419,13 @@ def test_get_unprocessed_rows_handles_fork_and_excludes_buffered_rows(
                             expand_group_id=None,
                             row_data={},
                             contract_version="test",
+                            contract={"mode": "FLEXIBLE", "locked": False, "version_hash": "test", "fields": []},
                         ),
                     ),
                     batch_id="batch-001",
                     elapsed_age_seconds=0.0,
                     count_fire_offset=None,
                     condition_fire_offset=None,
-                    contract={"mode": "FLEXIBLE", "locked": False, "version_hash": "test", "fields": []},
                 ),
             },
         ),
@@ -474,7 +475,7 @@ def test_get_unprocessed_rows_chunks_buffered_token_query(
         sequence_number=1,
         graph=graph,
         aggregation_state=AggregationCheckpointState(
-            version="3.0",
+            version="4.0",
             nodes={
                 "agg-node": AggregationNodeCheckpoint(
                     tokens=(
@@ -487,6 +488,7 @@ def test_get_unprocessed_rows_chunks_buffered_token_query(
                             expand_group_id=None,
                             row_data={},
                             contract_version="test",
+                            contract={"mode": "FLEXIBLE", "locked": False, "version_hash": "test", "fields": []},
                         ),
                         AggregationTokenCheckpoint(
                             token_id="tok-c",
@@ -497,13 +499,13 @@ def test_get_unprocessed_rows_chunks_buffered_token_query(
                             expand_group_id=None,
                             row_data={},
                             contract_version="test",
+                            contract={"mode": "FLEXIBLE", "locked": False, "version_hash": "test", "fields": []},
                         ),
                     ),
                     batch_id="batch-001",
                     elapsed_age_seconds=0.0,
                     count_fire_offset=None,
                     condition_fire_offset=None,
-                    contract={"mode": "FLEXIBLE", "locked": False, "version_hash": "test", "fields": []},
                 ),
             },
         ),
@@ -613,7 +615,7 @@ def test_get_unprocessed_rows_combines_aggregation_and_coalesce_buffered(
         sequence_number=1,
         graph=graph,
         aggregation_state=AggregationCheckpointState(
-            version="3.0",
+            version="4.0",
             nodes={
                 "agg-node": AggregationNodeCheckpoint(
                     tokens=(
@@ -626,13 +628,13 @@ def test_get_unprocessed_rows_combines_aggregation_and_coalesce_buffered(
                             expand_group_id=None,
                             row_data={},
                             contract_version="test",
+                            contract={"mode": "FLEXIBLE", "locked": False, "version_hash": "test", "fields": []},
                         ),
                     ),
                     batch_id="batch-001",
                     elapsed_age_seconds=0.0,
                     count_fire_offset=None,
                     condition_fire_offset=None,
-                    contract={"mode": "FLEXIBLE", "locked": False, "version_hash": "test", "fields": []},
                 ),
             },
         ),

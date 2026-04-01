@@ -115,6 +115,7 @@ class TestExportFailurePartialRunSemantics:
                 graph=graph,
                 settings=settings,
                 payload_store=payload_store,
+                sink_factory=lambda name: sink,
             )
 
         assert [status for _, status in export_status_calls] == [
@@ -202,6 +203,7 @@ class TestExportFailurePartialRunSemantics:
                 graph=graph,
                 settings=settings,
                 payload_store=payload_store,
+                sink_factory=lambda name: sink,
             )
 
         mock_export.assert_not_called()

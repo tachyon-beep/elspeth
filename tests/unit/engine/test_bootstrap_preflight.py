@@ -351,11 +351,11 @@ class TestResolvePreflightDirect:
         with pytest.raises(FrameworkBugError, match="probes is required"):
             resolve_preflight(mock_config, Path("/fake/pipeline.yaml"), probes=None)
 
-    def test_duplicate_dependency_names_rejected(self) -> None:
-        """Duplicate dependency names must raise before building gate context.
+    def test_duplicate_dependency_names_rejected_before_execution(self) -> None:
+        """Duplicate dependency names must raise before resolve_dependencies runs.
 
-        Without this check, the dict comprehension silently overwrites earlier
-        entries, so gates would evaluate against incomplete dependency data.
+        This prevents dependency pipelines from executing and mutating external
+        state when the config is invalid.
         """
         from elspeth.core.dependency_config import DependencyConfig
         from elspeth.engine.bootstrap import resolve_preflight
@@ -365,18 +365,16 @@ class TestResolvePreflightDirect:
             DependencyConfig(name="indexer", settings="./a.yaml"),
             DependencyConfig(name="indexer", settings="./b.yaml"),
         ]
-        mock_config.commencement_gates = [CommencementGateConfig(name="test_gate", condition="True")]
-
-        dep_results = [
-            DependencyRunResult(name="indexer", run_id="r1", settings_hash="h1", duration_ms=100, indexed_at="2026-01-01T00:00:00Z"),
-            DependencyRunResult(name="indexer", run_id="r2", settings_hash="h2", duration_ms=200, indexed_at="2026-01-01T00:00:00Z"),
-        ]
+        mock_config.commencement_gates = None
 
         mock_runner = MagicMock()
 
         with (
-            patch("elspeth.engine.dependency_resolver.detect_cycles"),
-            patch("elspeth.engine.dependency_resolver.resolve_dependencies", return_value=dep_results),
+            patch("elspeth.engine.dependency_resolver.detect_cycles") as mock_detect,
+            patch("elspeth.engine.dependency_resolver.resolve_dependencies") as mock_resolve,
             pytest.raises(ValueError, match=r"Duplicate dependency names.*indexer"),
         ):
-            resolve_preflight(mock_config, Path("/fake/pipeline.yaml"), runner=mock_runner, probes=[])
+            resolve_preflight(mock_config, Path("/fake/pipeline.yaml"), runner=mock_runner)
+
+        mock_detect.assert_not_called()
+        mock_resolve.assert_not_called()

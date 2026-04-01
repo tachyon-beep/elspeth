@@ -164,7 +164,7 @@ class TestCheckpointRecoveryIntegration:
         # Create checkpoint with aggregation state — typed DTO
         # Use token ID that was created by _setup_partial_run (tok-001-003)
         agg_state = AggregationCheckpointState(
-            version="3.0",
+            version="4.0",
             nodes={
                 "test_agg": AggregationNodeCheckpoint(
                     tokens=(
@@ -177,6 +177,7 @@ class TestCheckpointRecoveryIntegration:
                             expand_group_id=None,
                             row_data={"id": 1, "value": 100},
                             contract_version="test",
+                            contract={"mode": "FIXED", "locked": True, "version_hash": "test", "fields": []},
                         ),
                         AggregationTokenCheckpoint(
                             token_id="tok-001-002",
@@ -187,13 +188,13 @@ class TestCheckpointRecoveryIntegration:
                             expand_group_id=None,
                             row_data={"id": 2, "value": 200},
                             contract_version="test",
+                            contract={"mode": "FIXED", "locked": True, "version_hash": "test", "fields": []},
                         ),
                     ),
                     batch_id="batch-001",
                     elapsed_age_seconds=0.0,
                     count_fire_offset=None,
                     condition_fire_offset=None,
-                    contract={"mode": "FIXED", "locked": True, "version_hash": "test", "fields": []},
                 ),
             },
         )

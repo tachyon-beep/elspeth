@@ -50,7 +50,7 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 slog = structlog.get_logger(__name__)
 
-AGGREGATION_CHECKPOINT_VERSION = "3.0"
+AGGREGATION_CHECKPOINT_VERSION = "4.0"
 
 
 @dataclass(slots=True)
@@ -631,17 +631,6 @@ class AggregationExecutor:
 
             batch_id = node.batch_id
 
-            # Store full TokenInfo as typed checkpoints (not just IDs)
-            # Include all lineage fields to preserve fork/join/expand metadata
-            #
-            # PipelineRow Migration (v2.0), hash-width bump (v2.1):
-            # - row_data is stored as dict via to_dict() for JSON serialization
-            # - contract is stored once per node (not per token) for efficiency
-            # - contract_version links tokens to their contract for restoration
-            #
-            # Get contract from first token (all tokens in buffer share same contract)
-            # Per CLAUDE.md Tier 1: tokens exist, so first token MUST exist
-            first_token_contract = node.tokens[0].row_data.contract
             token_checkpoints = tuple(
                 AggregationTokenCheckpoint(
                     token_id=t.token_id,
@@ -652,6 +641,7 @@ class AggregationExecutor:
                     expand_group_id=t.expand_group_id,
                     row_data=t.row_data.to_dict(),
                     contract_version=t.row_data.contract.version_hash(),
+                    contract=t.row_data.contract.to_checkpoint_format(),
                 )
                 for t in node.tokens
             )
@@ -662,7 +652,6 @@ class AggregationExecutor:
                 elapsed_age_seconds=elapsed_age_seconds,
                 count_fire_offset=count_fire_offset,
                 condition_fire_offset=condition_fire_offset,
-                contract=first_token_contract.to_checkpoint_format(),
             )
 
         checkpoint = AggregationCheckpointState(
@@ -725,14 +714,11 @@ class AggregationExecutor:
             node_id = NodeID(node_id_str)
             node = self._get_node(node_id, "restore_from_checkpoint")
 
-            # Restore contract from checkpoint (stored once per node)
-            # Per CLAUDE.md Tier 1: contract MUST exist if tokens exist
-            restored_contract = SchemaContract.from_checkpoint(dict(node_checkpoint.contract))
-
             # Reconstruct TokenInfo objects directly from typed checkpoint
             reconstructed_tokens = []
             for t in node_checkpoint.tokens:
-                # Validate contract_version matches restored contract
+                restored_contract = SchemaContract.from_checkpoint(dict(t.contract))
+
                 # Per CLAUDE.md Tier 1: integrity check on our data
                 if t.contract_version != restored_contract.version_hash():
                     raise AuditIntegrityError(
@@ -741,8 +727,7 @@ class AggregationExecutor:
                         f"Checkpoint may be corrupted."
                     )
 
-                # Reconstruct PipelineRow from checkpoint data
-                # deep_thaw() recursively converts MappingProxyType→dict and tuple→list,
+                # deep_thaw() recursively converts MappingProxyType->dict and tuple->list,
                 # preventing frozen nested containers from surviving into restored rows.
                 row_data = PipelineRow(deep_thaw(t.row_data), restored_contract)
 

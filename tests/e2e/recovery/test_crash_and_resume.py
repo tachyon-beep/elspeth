@@ -833,7 +833,7 @@ class TestCheckpointRecovery:
             conn.commit()
 
         _agg_state = AggregationCheckpointState(
-            version="3.0",
+            version="4.0",
             nodes={
                 "test_agg": AggregationNodeCheckpoint(
                     tokens=(
@@ -846,13 +846,13 @@ class TestCheckpointRecovery:
                             expand_group_id=None,
                             row_data={"value": 6},
                             contract_version="test",
+                            contract={"mode": "FLEXIBLE", "locked": False, "version_hash": "test", "fields": []},
                         ),
                     ),
                     batch_id="batch-001",
                     elapsed_age_seconds=0.0,
                     count_fire_offset=None,
                     condition_fire_offset=None,
-                    contract={"mode": "FLEXIBLE", "locked": False, "version_hash": "test", "fields": []},
                 ),
             },
         )
@@ -1026,7 +1026,7 @@ class TestAggregationRecovery:
 
         # Create aggregation state (buffer of 3 rows) — typed DTO
         agg_state = AggregationCheckpointState(
-            version="3.0",
+            version="4.0",
             nodes={
                 "aggregator": AggregationNodeCheckpoint(
                     tokens=tuple(
@@ -1039,6 +1039,7 @@ class TestAggregationRecovery:
                             expand_group_id=None,
                             row_data={"id": i, "value": (i + 1) * 100},
                             contract_version="test",
+                            contract={"mode": "FIXED", "locked": True, "version_hash": "test", "fields": []},
                         )
                         for i, t in enumerate(tokens)
                     ),
@@ -1046,7 +1047,6 @@ class TestAggregationRecovery:
                     elapsed_age_seconds=0.0,
                     count_fire_offset=None,
                     condition_fire_offset=None,
-                    contract={"mode": "FIXED", "locked": True, "version_hash": "test", "fields": []},
                 ),
             },
         )

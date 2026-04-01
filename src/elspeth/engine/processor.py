@@ -801,6 +801,18 @@ class RowProcessor:
                     )
                 )
 
+            if quarantined_index_set:
+                triggering_index_val = len(fctx.buffered_tokens) - 1 if fctx.triggering_token is not None else -1
+                for i, token in enumerate(fctx.buffered_tokens):
+                    if i in quarantined_index_set and i != triggering_index_val:
+                        results.append(
+                            RowResult(
+                                token=token,
+                                final_data=token.row_data,
+                                outcome=RowOutcome.QUARANTINED,
+                            )
+                        )
+
             # Route expanded tokens downstream
             has_downstream = self._nav.resolve_next_node(fctx.node_id) is not None
             first_expanded_branch = expanded_tokens[0].branch_name if expanded_tokens else None
