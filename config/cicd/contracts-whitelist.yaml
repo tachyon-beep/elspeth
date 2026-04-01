@@ -20,6 +20,9 @@ allowed_external_types:
   - "core/dependency_config:PreflightResult"
   # Secret loader types - used by web secret stores (user_store, server_store)
   - "core/security/secret_loader:SecretRef"
+  # Composition state types - shared between web composer and composer MCP server
+  - "web/composer/state:CompositionState"
+  - "web/composer/state:PipelineMetadata"
 
 # dict[str, Any] patterns that are intentional
 # Format: "file_path:context:param_name"
@@ -378,6 +381,14 @@ allowed_dict_patterns:
   # Input is dict[str, Any] by protocol; return is validated but dynamic per-tool.
   - "src/elspeth/mcp/server.py:_validate_tool_args:arguments"
   - "src/elspeth/mcp/server.py:_validate_tool_args:return"
+  # Composer MCP server — same pattern as Landscape MCP, tool args are Tier 3
+  - "src/elspeth/composer_mcp/server.py:_build_tool_defs:return (list)"
+  - "src/elspeth/composer_mcp/server.py:_dispatch_tool:arguments"
+  - "src/elspeth/composer_mcp/server.py:_dispatch_tool:return"
+  - "src/elspeth/composer_mcp/server.py:_dispatch_session_tool:arguments"
+  - "src/elspeth/composer_mcp/server.py:_dispatch_session_tool:return"
+  - "src/elspeth/composer_mcp/server.py:call_tool:arguments"
+  - "src/elspeth/composer_mcp/session.py:SessionManager.list_sessions:return (list)"
 
   # ═══════════════════════════════════════════════════════════════════════════
   # TESTING UTILITIES - Test infrastructure (not production code)

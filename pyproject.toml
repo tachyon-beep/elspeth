@@ -208,6 +208,7 @@ all = [
 [project.scripts]
 elspeth = "elspeth.cli:app"
 elspeth-mcp = "elspeth.mcp:main"
+elspeth-composer = "elspeth.composer_mcp:main"
 check-contracts = "scripts.check_contracts:main"
 
 [project.urls]
