@@ -385,37 +385,37 @@ allow_hits:
     traversal
   safety: No contract masking; structural dispatch on deserialized YAML (Tier 3 data)
   expires: null
-- key: web/app.py:R1:create_app:fp=7530da5bf583569c
+- key: web/app.py:R1:create_app:fp=c6b4a1556ba16eff
   owner: web-app
   reason: Tier 3 — os.environ.get() for optional WEB_CONCURRENCY env var
   safety: Defaults to "1" when absent
   expires: null
-- key: web/app.py:R1:create_app:health:fp=ac42e38bd674f33b
+- key: web/app.py:R1:create_app:health:fp=5ff5ede43a797786
   owner: web-app
   reason: False positive — @router.get() is FastAPI route decorator
   safety: No dict access involved
   expires: null
-- key: web/app.py:R1:create_app:system_status:fp=766853430048a72b
+- key: web/app.py:R1:create_app:system_status:fp=7ef81fc3dc583870
   owner: web-app
   reason: False positive — @router.get() is FastAPI route decorator
   safety: No dict access involved
   expires: null
-- key: web/app.py:R6:create_app:fp=8d8b079b32e1b7ce
+- key: web/app.py:R6:create_app:fp=73efbecfe9b8c578
   owner: web-app
   reason: ValueError from int() on non-numeric WEB_CONCURRENCY
   safety: Defaults to single worker
   expires: null
-- key: web/app.py:R6:create_app:fp=9c35cd2ec6212b1d
+- key: web/app.py:R6:create_app:fp=8e7047a09f6ffd00
   owner: web-app
   reason: ValueError from int() on non-numeric --workers arg
   safety: Skips this argv entry
   expires: null
-- key: web/app.py:R6:create_app:fp=8913c6c659431f71
+- key: web/app.py:R6:create_app:fp=aac7f37fb11ae116
   owner: web-app
   reason: ValueError from int() on non-numeric --workers=N
   safety: Skips this argv entry
   expires: null
-- key: web/app.py:R6:create_app:fp=296a01abbbde9a21
+- key: web/app.py:R6:create_app:fp=04f9ccd82cb8c338
   owner: web-app
   reason: ValueError from int() on non-numeric -w arg
   safety: Skips this argv entry
@@ -571,7 +571,7 @@ allow_hits:
   reason: Best-effort run status cleanup on setup failure — must not mask original exception
   safety: Status update is best-effort; original exception always re-raised
   expires: null
-- key: web/app.py:R1:create_app:fp=3d404095f1feb5d3
+- key: web/app.py:R1:create_app:fp=9a4e11f687906168
   owner: web-app
   reason: Tier 3 — os.environ.get() for optional ELSPETH_ENV
   safety: Returns None when absent; only used for test guard

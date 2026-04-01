@@ -201,7 +201,7 @@ elspeth run --settings pipeline.yaml --execute        # Execute pipeline
 elspeth resume <run_id>                               # Resume interrupted run
 elspeth validate --settings pipeline.yaml             # Validate config
 elspeth plugins list                                  # List available plugins
-elspeth purge --run <run_id>                          # Purge payload data
+elspeth purge --retention-days 90                      # Purge old payload data
 elspeth explain --run <run_id> --row <row_id>         # Lineage explorer (TUI)
 ```
 

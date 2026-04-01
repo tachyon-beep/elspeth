@@ -49,6 +49,7 @@ class WebSettings(BaseModel):
 
     # Execution infrastructure — defaults derive from data_dir when not explicitly set
     landscape_url: str | None = None
+    landscape_passphrase: str | None = None
     payload_store_path: Path | None = None
 
     # OIDC / Entra-specific (optional)

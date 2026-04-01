@@ -147,6 +147,12 @@ class TransformResult:
                 "Use TransformResult.success(row, ...) or TransformResult.success_multi(rows, ...) "
                 "to create success results. Missing output data is a plugin bug."
             )
+        if self.status == "success" and self.row is not None and self.rows is not None:
+            raise ValueError(
+                "TransformResult with status='success' MUST provide exactly one of row or rows, not both. "
+                "Use TransformResult.success(row, ...) for single-row or "
+                "TransformResult.success_multi(rows, ...) for multi-row output."
+            )
         if self.status == "error" and self.reason is None:
             raise ValueError(
                 "TransformResult with status='error' MUST provide reason. "

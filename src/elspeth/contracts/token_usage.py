@@ -33,10 +33,15 @@ class TokenUsage:
             if the provider did not report this.
         completion_tokens: Tokens generated in the response, or ``None``
             if the provider did not report this.
+        reported_total: Provider-reported aggregate total, or ``None``
+            if not reported. Preserved when the provider reports only an
+            aggregate without a prompt/completion breakdown. Use the
+            ``total_tokens`` property for the best available total.
     """
 
     prompt_tokens: int | None = None
     completion_tokens: int | None = None
+    reported_total: int | None = None
 
     def __post_init__(self) -> None:
         """Validate token counts are non-negative when known.
@@ -47,6 +52,7 @@ class TokenUsage:
         """
         require_int(self.prompt_tokens, "prompt_tokens", optional=True, min_value=0)
         require_int(self.completion_tokens, "completion_tokens", optional=True, min_value=0)
+        require_int(self.reported_total, "reported_total", optional=True, min_value=0)
 
     # ------------------------------------------------------------------
     # Derived properties
@@ -54,10 +60,15 @@ class TokenUsage:
 
     @property
     def total_tokens(self) -> int | None:
-        """Sum of prompt + completion, or ``None`` if either is unknown."""
-        if self.prompt_tokens is None or self.completion_tokens is None:
-            return None
-        return self.prompt_tokens + self.completion_tokens
+        """Best available total: computed sum if both components are known,
+        otherwise the provider-reported aggregate, otherwise ``None``.
+
+        Prefers the computed sum because providers occasionally report
+        inconsistent totals.
+        """
+        if self.prompt_tokens is not None and self.completion_tokens is not None:
+            return self.prompt_tokens + self.completion_tokens
+        return self.reported_total
 
     @property
     def is_known(self) -> bool:
@@ -69,11 +80,11 @@ class TokenUsage:
         """``True`` when at least one token count was reported.
 
         Unlike ``is_known`` (which requires *both* counters), this returns
-        ``True`` for partial provider responses that include only one counter.
-        Use this when deciding whether to emit usage to telemetry — partial
-        data is still valuable operational signal.
+        ``True`` for partial provider responses that include only one counter
+        or an aggregate total. Use this when deciding whether to emit usage
+        to telemetry — partial data is still valuable operational signal.
         """
-        return self.prompt_tokens is not None or self.completion_tokens is not None
+        return self.prompt_tokens is not None or self.completion_tokens is not None or self.reported_total is not None
 
     # ------------------------------------------------------------------
     # Serialization
@@ -90,6 +101,8 @@ class TokenUsage:
             result["prompt_tokens"] = self.prompt_tokens
         if self.completion_tokens is not None:
             result["completion_tokens"] = self.completion_tokens
+        if self.reported_total is not None:
+            result["total_tokens"] = self.reported_total
         return result
 
     # ------------------------------------------------------------------
@@ -132,10 +145,12 @@ class TokenUsage:
 
         raw_prompt = data.get("prompt_tokens")
         raw_completion = data.get("completion_tokens")
+        raw_total = data.get("total_tokens")
 
         # bool is a subclass of int in Python, so isinstance(True, int) is True.
         # But True/False are not valid token counts — reject them as non-int.
         prompt = raw_prompt if isinstance(raw_prompt, int) and not isinstance(raw_prompt, bool) else None
         completion = raw_completion if isinstance(raw_completion, int) and not isinstance(raw_completion, bool) else None
+        total = raw_total if isinstance(raw_total, int) and not isinstance(raw_total, bool) else None
 
-        return cls(prompt_tokens=prompt, completion_tokens=completion)
+        return cls(prompt_tokens=prompt, completion_tokens=completion, reported_total=total)

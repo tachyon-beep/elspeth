@@ -22,7 +22,7 @@ from elspeth.contracts.freeze import freeze_fields
 # Legal run status transitions. Implementations MUST reject any
 # transition not in this table.
 LEGAL_RUN_TRANSITIONS: dict[str, frozenset[str]] = {
-    "pending": frozenset({"running", "cancelled"}),
+    "pending": frozenset({"running", "failed", "cancelled"}),
     "running": frozenset({"completed", "failed", "cancelled"}),
     "completed": frozenset(),  # terminal
     "failed": frozenset(),  # terminal

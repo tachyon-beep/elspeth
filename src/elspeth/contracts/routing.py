@@ -45,6 +45,8 @@ class RoutingAction:
 
     def __post_init__(self) -> None:
         """Validate invariants between kind, mode, and destinations."""
+        if not isinstance(self.kind, RoutingKind):
+            raise TypeError(f"kind must be RoutingKind, got {type(self.kind).__name__}: {self.kind!r}")
         if not isinstance(self.mode, RoutingMode):
             raise TypeError(f"mode must be RoutingMode, got {type(self.mode).__name__}: {self.mode!r}")
 
@@ -153,6 +155,8 @@ class RouteDestination:
 
     def __post_init__(self) -> None:
         """Validate destination payload by kind."""
+        if not isinstance(self.kind, RouteDestinationKind):
+            raise TypeError(f"kind must be RouteDestinationKind, got {type(self.kind).__name__}: {self.kind!r}")
         if self.kind == RouteDestinationKind.SINK:
             if self.sink_name is None or not self.sink_name:
                 raise ValueError("SINK destination requires non-empty sink_name")
@@ -200,6 +204,8 @@ class RoutingSpec:
 
     def __post_init__(self) -> None:
         """Validate routing spec invariants."""
+        if not isinstance(self.mode, RoutingMode):
+            raise TypeError(f"mode must be RoutingMode, got {type(self.mode).__name__}: {self.mode!r}")
         if not self.edge_id:
             raise ValueError("RoutingSpec.edge_id must not be empty")
 
@@ -219,6 +225,8 @@ class EdgeInfo:
 
     def __post_init__(self) -> None:
         """Validate edge info invariants."""
+        if not isinstance(self.mode, RoutingMode):
+            raise TypeError(f"mode must be RoutingMode, got {type(self.mode).__name__}: {self.mode!r}")
         if not self.from_node:
             raise ValueError("EdgeInfo.from_node must not be empty")
         if not self.to_node:

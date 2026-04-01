@@ -47,6 +47,7 @@ def mock_settings() -> MagicMock:
     settings = MagicMock()
     settings.get_landscape_url.return_value = "sqlite:///test_audit.db"
     settings.get_payload_store_path.return_value = Path("/tmp/test_payloads")
+    settings.landscape_passphrase = None
     return settings
 
 
@@ -245,7 +246,7 @@ class TestB3Construction:
         service._run_pipeline(str(uuid4()), "yaml", threading.Event())
 
         # B3: LandscapeDB constructed from settings URL
-        mock_landscape_cls.assert_called_once_with(connection_string="sqlite:///test_audit.db")
+        mock_landscape_cls.assert_called_once_with(connection_string="sqlite:///test_audit.db", passphrase=None)
         # B3: PayloadStore constructed from settings path
         mock_payload_cls.assert_called_once_with(base_path=Path("/tmp/test_payloads"))
 

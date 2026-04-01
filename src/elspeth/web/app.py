@@ -161,8 +161,11 @@ def create_app(settings: WebSettings | None = None) -> FastAPI:
 
     app.state.settings = settings
 
-    # Ensure data directory exists before any DB access (auth.db, sessions.db)
+    # Ensure data directory and subdirectories exist before any DB access.
+    # get_landscape_url() defaults to data_dir/runs/audit.db — SQLite does
+    # not create parent directories, so we must ensure runs/ exists too.
     settings.data_dir.mkdir(parents=True, exist_ok=True)
+    (settings.data_dir / "runs").mkdir(exist_ok=True)
 
     # --- Catalog ---
     app.state.catalog_service = create_catalog_service()

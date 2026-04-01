@@ -23,8 +23,8 @@ This manual covers day-to-day usage of the ELSPETH CLI for running auditable pip
 
 ```bash
 # Clone and install
-git clone https://github.com/tachyon-beep/elspeth-rapid.git
-cd elspeth-rapid
+git clone https://github.com/johnm-dta/elspeth.git
+cd elspeth
 uv venv && source .venv/bin/activate
 uv pip install -e ".[all]"  # Full installation with LLM support
 ```
@@ -73,6 +73,7 @@ Options:
 | `purge` | Delete old payloads to free storage |
 | `resume` | Resume a failed run from checkpoint |
 | `health` | Check system health for deployment verification |
+| `web` | Start the web application server |
 
 ---
 
@@ -103,6 +104,9 @@ elspeth run --settings settings.yaml --execute
 
 # With verbose output
 elspeth run --settings settings.yaml --execute --verbose
+
+# JSON output (for machine processing)
+elspeth run --settings settings.yaml --execute --format json
 ```
 
 ### Run Output
@@ -130,18 +134,24 @@ Output:
 SOURCES:
   csv                  - Load rows from a CSV file.
   json                 - Load rows from a JSON file.
+  text                 - Load rows from a text file.
   null                 - A source that yields no rows.
   azure_blob           - Load rows from Azure Blob Storage.
+  dataverse            - Load rows from Dataverse.
 
 TRANSFORMS:
   passthrough          - Pass rows through unchanged.
   field_mapper         - Map, rename, and select row fields.
   json_explode         - Explode a JSON array field into multiple rows.
+  truncate             - Truncate field values to a maximum length.
   keyword_filter       - Filter rows containing blocked content patterns.
+  web_scrape           - Scrape web content from URLs.
   azure_content_safety - Analyze content using Azure Content Safety API.
   azure_prompt_shield  - Detect jailbreak attempts and prompt injection.
   llm                  - LLM transform (provider: azure, openrouter).
   azure_batch_llm      - Batch LLM transform using Azure OpenAI Batch API.
+  openrouter_batch_llm - Batch LLM transform using OpenRouter Batch API.
+  rag_retrieval        - RAG retrieval transform for vector search.
   batch_stats          - Compute aggregate statistics over a batch.
   batch_replicate      - Replicate rows based on a copies field.
 
@@ -150,6 +160,8 @@ SINKS:
   json                 - Write rows to a JSON file.
   database             - Write rows to a database table.
   azure_blob           - Write rows to Azure Blob Storage.
+  dataverse            - Write rows to Dataverse.
+  chroma_sink          - Write rows to a Chroma vector database.
 ```
 
 ### Filter by Type
@@ -190,11 +202,14 @@ elspeth explain --run latest --token abc123 --database <path/to/audit.db>
 # Interactive TUI (default)
 elspeth explain --run latest --database <path/to/audit.db>
 
-# Plain text
+# Plain text (for non-interactive terminals or CI/CD)
 elspeth explain --run latest --no-tui --database <path/to/audit.db>
 
 # JSON output
 elspeth explain --run latest --json --database <path/to/audit.db>
+
+# Disambiguate when a row has multiple terminal tokens (e.g., forked rows)
+elspeth explain --run latest --row 42 --sink high_values --database <path/to/audit.db>
 ```
 
 ---
@@ -215,8 +230,8 @@ elspeth purge --retention-days 90
 # Skip confirmation prompt
 elspeth purge --retention-days 90 --yes
 
-# Specify database path explicitly
-elspeth purge --database ./runs/audit.db --retention-days 30
+# Specify database and payload directory explicitly
+elspeth purge --database ./runs/audit.db --payload-dir ./runs/payloads --retention-days 30
 ```
 
 **Note:** Purging deletes payload blobs but preserves hashes in the audit trail. You can still verify what data existed, you just can't retrieve the content.
@@ -230,8 +245,8 @@ If a run fails (e.g., API timeout, network error), you can resume from the last 
 ### Check Resume Status
 
 ```bash
-# Dry run - show resume information
-elspeth resume run-abc123
+# Dry run - show resume information (positional run_id argument)
+elspeth resume run-abc123 --settings settings.yaml --database ./runs/audit.db
 
 Output:
   Run run-abc123 can be resumed.
@@ -245,7 +260,10 @@ Output:
 ### Execute Resume
 
 ```bash
-elspeth resume run-abc123 --execute
+elspeth resume run-abc123 --execute --settings settings.yaml --database ./runs/audit.db
+
+# JSON output
+elspeth resume run-abc123 --execute --format json
 ```
 
 Resume mode:

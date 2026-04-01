@@ -109,15 +109,15 @@ per_file_rules:
 - pattern: contracts/routing.py
   rules:
   - R5
-  reason: RoutingMode enum validation at construction
+  reason: Enum validation (RoutingKind, RoutingMode, RouteDestinationKind) at construction
   expires: null
-  max_hits: 1
+  max_hits: 5
 - pattern: contracts/token_usage.py
   rules:
   - R5
-  reason: Tier 3 LLM API response dict validation in from_dict
+  reason: Tier 3 LLM API response dict validation in from_dict and __post_init__ validation
   expires: null
-  max_hits: 5
+  max_hits: 7
 - pattern: contracts/transform_contract.py
   rules:
   - R5
@@ -201,13 +201,17 @@ allow_hits:
   owner: architecture
   reason: Tier 3 boundary — ValueError/TypeError from stable_hash on non-canonical data falls back to repr_hash
   safety: Warning logged; row_id still generated via repr_hash for audit trail continuity
-- key: contracts/token_usage.py:R1:TokenUsage:from_dict:fp=22da73e68c808d7f
+- key: contracts/token_usage.py:R1:TokenUsage:from_dict:fp=3ce15b6cf9c7f9ea
   owner: architecture
   reason: Tier 3 boundary — from_dict() uses .get() on external LLM API response dicts where keys may be absent
   safety: Missing keys produce None (unknown); no fabrication
-- key: contracts/token_usage.py:R1:TokenUsage:from_dict:fp=f302312f3d30b520
+- key: contracts/token_usage.py:R1:TokenUsage:from_dict:fp=d1323563ca91841e
   owner: architecture
   reason: Tier 3 boundary — from_dict() uses .get() on external LLM API response dicts where keys may be absent
+  safety: Missing keys produce None (unknown); no fabrication
+- key: contracts/token_usage.py:R1:TokenUsage:from_dict:fp=576af1367368f2fe
+  owner: architecture
+  reason: Tier 3 boundary — from_dict() uses .get() on external LLM API response dicts for total_tokens
   safety: Missing keys produce None (unknown); no fabrication
 - key: contracts/schema_contract_factory.py:R1:create_contract_from_config:fp=caa0070eb7edad8e
   owner: feature

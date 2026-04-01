@@ -173,13 +173,20 @@ class TestTokenUsageFromDict:
         usage = TokenUsage.from_dict({"prompt_tokens": None, "completion_tokens": None})
         assert usage == TokenUsage.unknown()
 
-    def test_from_dict_missing_keys(self) -> None:
+    def test_from_dict_total_only_preserved(self) -> None:
+        """Provider-reported total_tokens without breakdown is preserved, not dropped."""
         usage = TokenUsage.from_dict({"total_tokens": 30})
-        assert usage == TokenUsage.unknown()
+        assert usage.prompt_tokens is None
+        assert usage.completion_tokens is None
+        assert usage.reported_total == 30
+        assert usage.total_tokens == 30  # property falls back to reported_total
 
     def test_from_dict_extra_keys_ignored(self) -> None:
         usage = TokenUsage.from_dict({"prompt_tokens": 10, "completion_tokens": 20, "total_tokens": 30, "extra": "ignored"})
-        assert usage == TokenUsage.known(10, 20)
+        assert usage.prompt_tokens == 10
+        assert usage.completion_tokens == 20
+        assert usage.reported_total == 30
+        assert usage.total_tokens == 30  # computed sum matches reported
 
     def test_from_dict_bool_coerced_to_none(self) -> None:
         """bool is subclass of int in Python, but True/False are not valid token counts."""
