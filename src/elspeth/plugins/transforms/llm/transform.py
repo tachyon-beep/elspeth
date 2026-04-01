@@ -36,8 +36,10 @@ from elspeth.plugins.infrastructure.pooling import PooledExecutor, RowContext
 from elspeth.plugins.infrastructure.schema_factory import create_schema_from_config
 from elspeth.plugins.infrastructure.templates import TemplateError
 from elspeth.plugins.transforms.llm import (
+    _OUTPUT_FIELD_TYPE_TO_SCHEMA,
     _build_augmented_output_schema,
     _build_multi_query_output_schema,
+    _FieldType,
     build_llm_audit_metadata,
     get_llm_guaranteed_fields,
     populate_llm_operational_fields,
@@ -1077,11 +1079,13 @@ class LLMTransform(BaseTransform, BatchTransformMixin):
             )
 
             # Pydantic output schema with prefixed LLM fields
-            # Build extracted_fields mapping: query_name → prefixed output field names
-            extracted: dict[str, tuple[str, ...]] = {}
+            # Build extracted_fields mapping: query_name → (field_name, schema_type) tuples
+            extracted: dict[str, tuple[tuple[str, _FieldType], ...]] = {}
             for spec in query_specs:
                 if spec.output_fields:
-                    extracted[spec.name] = tuple(f"{spec.name}_{f.suffix}" for f in spec.output_fields)
+                    extracted[spec.name] = tuple(
+                        (f"{spec.name}_{f.suffix}", _OUTPUT_FIELD_TYPE_TO_SCHEMA[f.type.value]) for f in spec.output_fields
+                    )
             self.output_schema = _build_multi_query_output_schema(
                 base_schema_config=schema_config,
                 response_field=self._response_field,

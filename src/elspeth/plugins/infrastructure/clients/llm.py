@@ -493,6 +493,29 @@ class AuditedLLMClient(AuditedClientBase):
 
                 raise ContentPolicyError(error_msg)
 
+        # Tier 3 boundary: validate content is actually str.
+        # Provider bugs or SDK schema drift could return non-str content
+        # (e.g., list for multi-part, int, dict). Recording non-str as SUCCESS
+        # would violate the response contract and crash downstream .strip() calls.
+        if not isinstance(content, str):
+            error_msg = (
+                f"LLM response content is {type(content).__name__}, expected str. Provider returned malformed data at Tier 3 boundary."
+            )
+            self._recorder.record_call(
+                state_id=self._state_id,
+                call_index=call_index,
+                call_type=CallType.LLM,
+                status=CallStatus.ERROR,
+                request_data=request_dto,
+                error=LLMCallError(
+                    type="MalformedResponseError",
+                    message=error_msg,
+                    retryable=False,
+                ),
+                latency_ms=latency_ms,
+            )
+            raise LLMClientError(error_msg, retryable=False)
+
         # Guard against providers that omit usage data (streaming, certain configs).
         # Tier 3 boundary: use from_dict() to coerce non-int values (float, bool, etc.)
         # rather than known() which trusts values implicitly.
