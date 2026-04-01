@@ -115,6 +115,23 @@ class CoalescePendingCheckpoint:
         if self.elapsed_age_seconds < 0 or not math.isfinite(self.elapsed_age_seconds):
             raise ValueError(f"elapsed_age_seconds must be non-negative and finite, got {self.elapsed_age_seconds!r}")
         freeze_fields(self, "branches", "lost_branches")
+        # Validate branch keys are non-empty strings
+        for branch_key in self.branches:
+            if not isinstance(branch_key, str) or not branch_key:
+                raise ValueError(f"branches key must be a non-empty string, got {type(branch_key).__name__}: {branch_key!r}")
+        # Validate branch key matches embedded token's branch_name (dual-encoding consistency)
+        for branch_key, token_ckpt in self.branches.items():
+            if token_ckpt.branch_name != branch_key:
+                raise AuditIntegrityError(
+                    f"Branch key '{branch_key}' does not match token's branch_name '{token_ckpt.branch_name}'. "
+                    f"Dual-encoded branch identity must agree — corrupted checkpoint."
+                )
+        # Validate lost_branches keys and values are non-empty strings
+        for lb_key, lb_val in self.lost_branches.items():
+            if not isinstance(lb_key, str) or not lb_key:
+                raise ValueError(f"lost_branches key must be a non-empty string, got {type(lb_key).__name__}: {lb_key!r}")
+            if not isinstance(lb_val, str) or not lb_val:
+                raise ValueError(f"lost_branches[{lb_key!r}] must be a non-empty string, got {type(lb_val).__name__}: {lb_val!r}")
         overlap = set(self.branches) & set(self.lost_branches)
         if overlap:
             raise ValueError(f"branches and lost_branches must not overlap, shared keys: {sorted(overlap)}")

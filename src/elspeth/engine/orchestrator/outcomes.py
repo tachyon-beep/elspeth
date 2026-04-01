@@ -244,6 +244,7 @@ def handle_coalesce_timeouts(
                 )
             else:
                 counters.rows_coalesce_failed += 1
+                counters.rows_failed += len(outcome.consumed_tokens)
 
 
 def flush_coalesce_pending(
@@ -293,3 +294,4 @@ def flush_coalesce_pending(
             )
         else:
             counters.rows_coalesce_failed += 1
+            counters.rows_failed += len(outcome.consumed_tokens)

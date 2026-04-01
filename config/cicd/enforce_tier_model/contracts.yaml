@@ -55,9 +55,9 @@ per_file_rules:
 - pattern: contracts/coalesce_checkpoint.py
   rules:
   - R5
-  reason: Deep-freeze guards and from_dict deserialization validation
+  reason: Deep-freeze guards, from_dict deserialization, and branch-key/lost-branch validation
   expires: null
-  max_hits: 13
+  max_hits: 16
 - pattern: contracts/config/runtime.py
   rules:
   - R5

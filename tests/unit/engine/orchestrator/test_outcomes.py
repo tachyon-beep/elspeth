@@ -693,10 +693,14 @@ class TestHandleCoalesceTimeouts:
         )
 
     def test_failure_increments_coalesce_failed(self) -> None:
-        """Failed coalesce (missing branches) increments coalesce_failed."""
+        """Failed coalesce (missing branches) increments coalesce_failed and rows_failed.
+
+        Regression: elspeth-045f60670c — rows_failed must reflect consumed tokens.
+        """
         outcome = Mock()
         outcome.merged_token = None
         outcome.failure_reason = "quorum_not_met"
+        outcome.consumed_tokens = (Mock(), Mock(), Mock())  # 3 consumed tokens
 
         executor, processor, counters, pending, node_map = self._setup(
             timed_out_outcomes=[outcome],
@@ -713,6 +717,7 @@ class TestHandleCoalesceTimeouts:
         )
 
         assert counters.rows_coalesce_failed == 1
+        assert counters.rows_failed == 3  # one per consumed token
         assert counters.rows_coalesced == 0
 
 
@@ -809,11 +814,15 @@ class TestFlushCoalescePending:
         )
 
     def test_failure_increments_coalesce_failed(self) -> None:
-        """Failed flush outcomes increment coalesce_failed counter."""
+        """Failed flush outcomes increment coalesce_failed and rows_failed counters.
+
+        Regression: elspeth-045f60670c — rows_failed must reflect consumed tokens.
+        """
         outcome = Mock()
         outcome.merged_token = None
         outcome.failure_reason = "incomplete_branches"
         outcome.coalesce_name = None
+        outcome.consumed_tokens = (Mock(), Mock())  # 2 consumed tokens
 
         coalesce_executor = Mock()
         coalesce_executor.flush_pending.return_value = [outcome]
@@ -832,6 +841,7 @@ class TestFlushCoalescePending:
         )
 
         assert counters.rows_coalesce_failed == 1
+        assert counters.rows_failed == 2
 
     def test_empty_flush_is_noop(self) -> None:
         """No pending coalesces means nothing happens."""

@@ -171,6 +171,33 @@ class TestCoalescePendingCheckpointPostInit:
                 lost_branches={"path_a": "timed_out"},
             )
 
+    def test_rejects_branch_key_mismatch(self) -> None:
+        """Branch key must match embedded token's branch_name.
+
+        Regression: elspeth-1d5cc9c4a2 — dual-encoded branch identity must agree.
+        """
+        token = _valid_token()  # branch_name="path_a"
+        with pytest.raises(AuditIntegrityError, match="does not match"):
+            CoalescePendingCheckpoint(
+                coalesce_name="merge_1",
+                row_id="row-1",
+                elapsed_age_seconds=1.0,
+                branches={"WRONG_KEY": token},  # key != token.branch_name
+                lost_branches={},
+            )
+
+    def test_rejects_empty_lost_branches_value(self) -> None:
+        """lost_branches values must be non-empty strings."""
+        valid = _valid_token()
+        with pytest.raises(ValueError, match=r"lost_branches.*non-empty string"):
+            CoalescePendingCheckpoint(
+                coalesce_name="merge_1",
+                row_id="row-1",
+                elapsed_age_seconds=1.0,
+                branches={"path_a": valid},
+                lost_branches={"path_b": ""},
+            )
+
 
 class TestCoalesceTokenCheckpointFromDict:
     """from_dict validation for CoalesceTokenCheckpoint."""
