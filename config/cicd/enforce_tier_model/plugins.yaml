@@ -182,11 +182,11 @@ allow_hits:
   owner: feature
   reason: Intentional fallback - reverse mapping may not contain all fields (transform-added)
   safety: Falls back to original field name - correct behavior for fields not in source
-- key: plugins/sinks/csv_sink.py:R1:CSVSink:_get_field_names_and_display:fp=0155f461a13bc0c9
+- key: plugins/sinks/csv_sink.py:R1:CSVSink:_get_field_names_and_display:fp=bc5894572130666a
   owner: feature
   reason: Intentional fallback - display mapping may not contain all fields (transform-added)
   safety: Falls back to normalized field name - correct behavior for fields not in source
-- key: plugins/sinks/json_sink.py:R1:JSONSink:validate_output_target:fp=a96553acb6efa982
+- key: plugins/sinks/json_sink.py:R1:JSONSink:validate_output_target:fp=1011c279ee1a5b44
   owner: feature
   reason: Display header mapping - fields not in map keep original name (transform-added fields)
   safety: Intentional fallback to original field name, not bug hiding

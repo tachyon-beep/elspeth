@@ -376,7 +376,7 @@ class DataverseSink(BaseSink):
                     "method": "PATCH",
                     "url": url,
                     "headers": fingerprint_headers(response.request_headers),
-                    "field_names": sorted(payload.keys()),
+                    "json": payload,
                 }
                 response_data = {"status_code": response.status_code}
                 try:
@@ -408,7 +408,7 @@ class DataverseSink(BaseSink):
                 request_data = {
                     "method": "PATCH",
                     "url": url,
-                    "field_names": sorted(payload.keys()),
+                    "json": payload,
                 }
                 ctx.record_call(
                     call_type=CallType.HTTP,

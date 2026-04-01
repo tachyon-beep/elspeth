@@ -7,6 +7,7 @@ output correct types. Wrong types = upstream bug = crash.
 """
 
 import hashlib
+import io
 import json
 import os
 from pathlib import Path
@@ -280,21 +281,41 @@ class JSONSink(BaseSink):
         output_rows = apply_display_headers(self, rows)
 
         if self._format == "jsonl":
-            self._write_jsonl_batch(output_rows)
+            # Track pre-write position for rollback on post-write failure.
+            # If flush/hash/stat fails after bytes are written, truncate back
+            # so the file doesn't contain data with no corresponding audit record.
+            pre_write_pos = self._file.tell() if self._file is not None else 0
+
+            try:
+                self._write_jsonl_batch(output_rows)
+
+                # Flush persistent file handle to ensure content is on disk for hashing.
+                if self._file is not None:
+                    self._file.flush()
+
+                content_hash = self._compute_file_hash()
+                size_bytes = self._path.stat().st_size
+            except Exception:
+                if self._file is not None and self._file.writable():
+                    try:
+                        self._file.seek(pre_write_pos)
+                        self._file.truncate(pre_write_pos)
+                        self._file.flush()
+                        os.fsync(self._file.fileno())
+                    except OSError as rollback_err:
+                        raise RuntimeError(
+                            f"JSONL write failed and rollback also failed — file may be corrupted at byte {pre_write_pos}"
+                        ) from rollback_err
+                raise
         else:
             # Buffer rows for JSON array format
             self._rows.extend(output_rows)
-            # Write immediately (file is rewritten on each write for JSON format)
+            # Write immediately (file is rewritten on each write for JSON format).
+            # JSON array uses atomic temp-file writes (already safe), no rollback needed.
             self._write_json_array()
 
-        # JSONL path: flush persistent file handle to ensure content is on disk for hashing.
-        # JSON array path: no-op — _write_json_array handles its own fsync via atomic write.
-        if self._file is not None:
-            self._file.flush()
-
-        # Compute content hash from file
-        content_hash = self._compute_file_hash()
-        size_bytes = self._path.stat().st_size
+            content_hash = self._compute_file_hash()
+            size_bytes = self._path.stat().st_size
 
         return SinkWriteResult(
             artifact=ArtifactDescriptor.for_file(
@@ -332,9 +353,11 @@ class JSONSink(BaseSink):
 
             self._file = open(self._path, file_mode, encoding=self._encoding)  # noqa: SIM115
 
-        for row in rows:
-            json.dump(row, self._file, allow_nan=False)
-            self._file.write("\n")
+        with io.StringIO() as staging:
+            for row in rows:
+                json.dump(row, staging, allow_nan=False)
+                staging.write("\n")
+            self._file.write(staging.getvalue())
 
     def _write_json_array(self) -> None:
         """Write buffered rows as JSON array (atomic write via temp file).

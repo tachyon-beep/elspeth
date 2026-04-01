@@ -601,3 +601,70 @@ class TestIdempotentFlag:
         """Config rejects modes other than 'upsert' (Literal['upsert'])."""
         with pytest.raises(PluginConfigError):
             DataverseSinkConfig.from_dict(_config(mode="create"))
+
+
+# ---------------------------------------------------------------------------
+# Bug fix: request_data records JSON payload (elspeth review finding)
+# ---------------------------------------------------------------------------
+
+
+class TestRequestDataRecordsJsonPayload:
+    """Verify that record_call request_data contains 'json': payload, not 'field_names'."""
+
+    @patch("elspeth.plugins.sinks.dataverse.create_schema_from_config", return_value=MagicMock())
+    def test_request_data_contains_json_payload(self, _mock_schema: MagicMock) -> None:
+        """request_data must contain 'json' key with the mapped payload dict."""
+        sink = DataverseSink(_config())
+
+        mock_client = MagicMock()
+        mock_client.upsert.return_value = _make_204_response()
+        mock_client.get_auth_headers.return_value = {"Authorization": "Bearer fake-token"}
+        sink._client = mock_client
+
+        ctx = MagicMock()
+        ctx.record_call = MagicMock()
+        ctx.run_id = "test-run-123"
+
+        rows = [{"email": "alice@example.com", "name": "Alice"}]
+        sink.write(rows, ctx)
+
+        call_kwargs = ctx.record_call.call_args_list[0].kwargs
+        request_data = call_kwargs["request_data"]
+
+        # "json" key must exist and contain the mapped payload
+        assert "json" in request_data
+        expected_payload = {"emailaddress1": "alice@example.com", "fullname": "Alice"}
+        assert request_data["json"] == expected_payload
+
+        # Old format "field_names" must NOT exist
+        assert "field_names" not in request_data
+
+    @patch("elspeth.plugins.sinks.dataverse.create_schema_from_config", return_value=MagicMock())
+    def test_error_request_data_also_contains_json(self, _mock_schema: MagicMock) -> None:
+        """Even on error, request_data must contain 'json' with the mapped payload."""
+        sink = DataverseSink(_config())
+
+        mock_client = MagicMock()
+        mock_client.upsert.side_effect = DataverseClientError(
+            "Bad request (400)",
+            retryable=False,
+            status_code=400,
+        )
+        mock_client.get_auth_headers.return_value = {"Authorization": "Bearer fake-token"}
+        sink._client = mock_client
+
+        ctx = MagicMock()
+        ctx.record_call = MagicMock()
+        ctx.run_id = "test-run-123"
+
+        rows = [{"email": "alice@example.com", "name": "Alice"}]
+        with pytest.raises(DataverseClientError):
+            sink.write(rows, ctx)
+
+        call_kwargs = ctx.record_call.call_args_list[0].kwargs
+        request_data = call_kwargs["request_data"]
+
+        assert "json" in request_data
+        expected_payload = {"emailaddress1": "alice@example.com", "fullname": "Alice"}
+        assert request_data["json"] == expected_payload
+        assert "field_names" not in request_data

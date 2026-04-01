@@ -1295,3 +1295,161 @@ class TestJSONSourceArrayModeUnicodeDecodeError:
         assert len(results) == 1
         assert results[0].is_quarantined is True
         assert results[0].quarantine_error is not None
+
+
+class TestJSONSourceKeyNormalization:
+    """Tests for JSON source field name normalization and resolution.
+
+    JSON keys may contain spaces, mixed case, or other characters that
+    are not valid Python identifiers. The source normalizes these at
+    the Tier 3 boundary.
+    """
+
+    @pytest.fixture
+    def ctx(self) -> PluginContext:
+        """Create a plugin context with proper FK records for validation error recording."""
+        return make_source_context(plugin_name="json")
+
+    def test_nontrivial_key_normalization(self, tmp_path: Path, ctx: PluginContext) -> None:
+        """JSON keys with spaces and mixed case are normalized to snake_case identifiers."""
+        from elspeth.plugins.sources.json_source import JSONSource
+
+        json_file = tmp_path / "data.json"
+        data = [
+            {"Customer Name": "Alice", "Order ID": 101},
+            {"Customer Name": "Bob", "Order ID": 102},
+        ]
+        json_file.write_text(json.dumps(data))
+
+        source = JSONSource(
+            {
+                "path": str(json_file),
+                "schema": {"mode": "observed"},
+                "on_validation_failure": "quarantine",
+            }
+        )
+        rows = list(source.load(ctx))
+
+        assert len(rows) == 2
+        assert all(not r.is_quarantined for r in rows)
+        # Keys should be normalized to snake_case
+        assert rows[0].row == {"customer_name": "Alice", "order_id": 101}
+        assert rows[1].row == {"customer_name": "Bob", "order_id": 102}
+
+    def test_field_mapping_override(self, tmp_path: Path, ctx: PluginContext) -> None:
+        """field_mapping config overrides default normalization for specified keys."""
+        from elspeth.plugins.sources.json_source import JSONSource
+
+        json_file = tmp_path / "data.json"
+        data = [
+            {"Customer Name": "Alice", "Order ID": 101},
+        ]
+        json_file.write_text(json.dumps(data))
+
+        source = JSONSource(
+            {
+                "path": str(json_file),
+                "schema": {"mode": "observed"},
+                "on_validation_failure": "quarantine",
+                "field_mapping": {"customer_name": "client_name"},
+            }
+        )
+        rows = list(source.load(ctx))
+
+        assert len(rows) == 1
+        assert not rows[0].is_quarantined
+        # "Customer Name" uses field_mapping override, "Order ID" uses default normalization
+        assert rows[0].row["client_name"] == "Alice"
+        assert rows[0].row["order_id"] == 101
+
+    def test_get_field_resolution_returns_mapping(self, tmp_path: Path, ctx: PluginContext) -> None:
+        """get_field_resolution() returns the resolution mapping after load()."""
+        from elspeth.plugins.sources.json_source import JSONSource
+
+        json_file = tmp_path / "data.json"
+        data = [{"Customer Name": "Alice", "Order ID": 101}]
+        json_file.write_text(json.dumps(data))
+
+        source = JSONSource(
+            {
+                "path": str(json_file),
+                "schema": {"mode": "observed"},
+                "on_validation_failure": "quarantine",
+            }
+        )
+
+        # Before load, field resolution is None
+        assert source.get_field_resolution() is None
+
+        list(source.load(ctx))
+
+        resolution = source.get_field_resolution()
+        assert resolution is not None
+        mapping, version = resolution
+        # Mapping contains original->normalized entries
+        assert mapping["Customer Name"] == "customer_name"
+        assert mapping["Order ID"] == "order_id"
+        assert version is not None
+
+    def test_first_row_quarantined_key_rebuild(self, tmp_path: Path, ctx: PluginContext) -> None:
+        """When first row is quarantined and second row has different keys, resolution rebuilds.
+
+        If the first row's keys produce a stale resolution mapping, subsequent rows
+        with different keys should trigger a rebuild so normalization is correct.
+        """
+        from elspeth.plugins.sources.json_source import JSONSource
+
+        # First object fails FIXED schema validation (missing required 'score' field),
+        # second object succeeds but has an extra key not in the first row.
+        json_file = tmp_path / "data.json"
+        data = [
+            {"id": 1, "name": "alice"},  # Missing 'score' -- quarantined by FLEXIBLE schema
+            {"id": 2, "name": "bob", "score": 95, "Extra Field": "bonus"},  # Valid + extra key
+        ]
+        json_file.write_text(json.dumps(data))
+
+        source = JSONSource(
+            {
+                "path": str(json_file),
+                "schema": {
+                    "mode": "flexible",
+                    "fields": ["id: int", "name: str", "score: int"],
+                },
+                "on_validation_failure": "quarantine",
+            }
+        )
+        rows = list(source.load(ctx))
+
+        assert len(rows) == 2
+        # First row quarantined (missing required 'score')
+        assert rows[0].is_quarantined is True
+        # Second row valid -- "Extra Field" should be normalized
+        assert rows[1].is_quarantined is False
+        assert rows[1].row["extra_field"] == "bonus"
+        assert rows[1].row["score"] == 95
+
+    def test_fixed_schema_fast_path_sets_contract_in_init(self, tmp_path: Path) -> None:
+        """FIXED schema sets contract immediately in __init__ without waiting for first row."""
+        from elspeth.plugins.sources.json_source import JSONSource
+
+        json_file = tmp_path / "data.json"
+        json_file.write_text("[]")  # Empty -- we only test __init__ behavior
+
+        source = JSONSource(
+            {
+                "path": str(json_file),
+                "schema": {
+                    "mode": "fixed",
+                    "fields": ["id: int", "name: str"],
+                },
+                "on_validation_failure": "quarantine",
+            }
+        )
+
+        # Contract should be set immediately (fast path), not deferred
+        contract = source.get_schema_contract()
+        assert contract is not None
+        assert contract.locked is True
+        assert contract.mode == "FIXED"
+        # ContractBuilder should be None (not needed for FIXED)
+        assert source._contract_builder is None
