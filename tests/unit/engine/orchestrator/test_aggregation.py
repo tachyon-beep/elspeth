@@ -182,13 +182,18 @@ class TestHandleIncompleteBatches:
         batch.status = BatchStatus.EXECUTING
         batch.batch_id = "batch-123"
 
+        retry_batch = Mock()
+        retry_batch.batch_id = "batch-123-retry"
+
         recorder = Mock()
         recorder.get_incomplete_batches.return_value = [batch]
+        recorder.retry_batch.return_value = retry_batch
 
-        handle_incomplete_batches(recorder, "run-1")
+        mapping = handle_incomplete_batches(recorder, "run-1")
 
         recorder.update_batch_status.assert_called_once_with("batch-123", BatchStatus.FAILED)
         recorder.retry_batch.assert_called_once_with("batch-123")
+        assert mapping == {"batch-123": "batch-123-retry"}
 
     def test_failed_batch_retried(self) -> None:
         """FAILED batch is retried directly."""
@@ -196,13 +201,18 @@ class TestHandleIncompleteBatches:
         batch.status = BatchStatus.FAILED
         batch.batch_id = "batch-456"
 
+        retry_batch = Mock()
+        retry_batch.batch_id = "batch-456-retry"
+
         recorder = Mock()
         recorder.get_incomplete_batches.return_value = [batch]
+        recorder.retry_batch.return_value = retry_batch
 
-        handle_incomplete_batches(recorder, "run-1")
+        mapping = handle_incomplete_batches(recorder, "run-1")
 
         recorder.update_batch_status.assert_not_called()
         recorder.retry_batch.assert_called_once_with("batch-456")
+        assert mapping == {"batch-456": "batch-456-retry"}
 
     def test_draft_batch_left_alone(self) -> None:
         """DRAFT batch continues collection — no action taken."""
@@ -213,20 +223,22 @@ class TestHandleIncompleteBatches:
         recorder = Mock()
         recorder.get_incomplete_batches.return_value = [batch]
 
-        handle_incomplete_batches(recorder, "run-1")
+        mapping = handle_incomplete_batches(recorder, "run-1")
 
         recorder.update_batch_status.assert_not_called()
         recorder.retry_batch.assert_not_called()
+        assert mapping == {}
 
     def test_no_incomplete_batches(self) -> None:
         """No incomplete batches means no action."""
         recorder = Mock()
         recorder.get_incomplete_batches.return_value = []
 
-        handle_incomplete_batches(recorder, "run-1")
+        mapping = handle_incomplete_batches(recorder, "run-1")
 
         recorder.update_batch_status.assert_not_called()
         recorder.retry_batch.assert_not_called()
+        assert mapping == {}
 
     def test_multiple_batches_handled_independently(self) -> None:
         """Each batch handled according to its own status."""
@@ -234,13 +246,128 @@ class TestHandleIncompleteBatches:
         failed = Mock(status=BatchStatus.FAILED, batch_id="b2")
         draft = Mock(status=BatchStatus.DRAFT, batch_id="b3")
 
+        retry_b1 = Mock()
+        retry_b1.batch_id = "b1-retry"
+        retry_b2 = Mock()
+        retry_b2.batch_id = "b2-retry"
+
         recorder = Mock()
         recorder.get_incomplete_batches.return_value = [executing, failed, draft]
+        recorder.retry_batch.side_effect = [retry_b1, retry_b2]
 
-        handle_incomplete_batches(recorder, "run-1")
+        mapping = handle_incomplete_batches(recorder, "run-1")
 
         assert recorder.update_batch_status.call_count == 1
         assert recorder.retry_batch.call_count == 2
+        assert mapping == {"b1": "b1-retry", "b2": "b2-retry"}
+
+
+# =============================================================================
+# rebind_checkpoint_batch_ids
+# =============================================================================
+
+
+class TestRebindCheckpointBatchIds:
+    """Tests for batch_id rebinding in checkpoint state after retry."""
+
+    def test_rebinds_matching_batch_id(self) -> None:
+        """Node with a retried batch_id gets the new batch_id."""
+        from elspeth.contracts.aggregation_checkpoint import (
+            AggregationCheckpointState,
+            AggregationNodeCheckpoint,
+        )
+        from elspeth.engine.orchestrator.aggregation import rebind_checkpoint_batch_ids
+
+        node = AggregationNodeCheckpoint(
+            tokens=(),
+            batch_id="old-batch",
+            elapsed_age_seconds=0.0,
+            count_fire_offset=None,
+            condition_fire_offset=None,
+            contract={"version": "1"},
+        )
+        state = AggregationCheckpointState(version="3.0", nodes={"agg-0": node})
+
+        rebound = rebind_checkpoint_batch_ids(state, {"old-batch": "new-batch"})
+
+        assert rebound.nodes["agg-0"].batch_id == "new-batch"
+        # Original is unchanged (frozen)
+        assert state.nodes["agg-0"].batch_id == "old-batch"
+
+    def test_leaves_unmapped_batch_id_unchanged(self) -> None:
+        """Node whose batch_id is not in the mapping (e.g. DRAFT) is unchanged."""
+        from elspeth.contracts.aggregation_checkpoint import (
+            AggregationCheckpointState,
+            AggregationNodeCheckpoint,
+        )
+        from elspeth.engine.orchestrator.aggregation import rebind_checkpoint_batch_ids
+
+        node = AggregationNodeCheckpoint(
+            tokens=(),
+            batch_id="draft-batch",
+            elapsed_age_seconds=1.5,
+            count_fire_offset=None,
+            condition_fire_offset=None,
+            contract={"version": "1"},
+        )
+        state = AggregationCheckpointState(version="3.0", nodes={"agg-0": node})
+
+        rebound = rebind_checkpoint_batch_ids(state, {"other-batch": "retry-batch"})
+
+        assert rebound.nodes["agg-0"].batch_id == "draft-batch"
+
+    def test_empty_mapping_returns_same_state(self) -> None:
+        """Empty mapping is a no-op — returns the original state object."""
+        from elspeth.contracts.aggregation_checkpoint import (
+            AggregationCheckpointState,
+            AggregationNodeCheckpoint,
+        )
+        from elspeth.engine.orchestrator.aggregation import rebind_checkpoint_batch_ids
+
+        node = AggregationNodeCheckpoint(
+            tokens=(),
+            batch_id="batch-1",
+            elapsed_age_seconds=0.0,
+            count_fire_offset=None,
+            condition_fire_offset=None,
+            contract={"version": "1"},
+        )
+        state = AggregationCheckpointState(version="3.0", nodes={"agg-0": node})
+
+        rebound = rebind_checkpoint_batch_ids(state, {})
+
+        assert rebound is state  # Identity — no copy needed
+
+    def test_multiple_nodes_rebound_independently(self) -> None:
+        """Each node's batch_id is rebound independently."""
+        from elspeth.contracts.aggregation_checkpoint import (
+            AggregationCheckpointState,
+            AggregationNodeCheckpoint,
+        )
+        from elspeth.engine.orchestrator.aggregation import rebind_checkpoint_batch_ids
+
+        node_a = AggregationNodeCheckpoint(
+            tokens=(),
+            batch_id="batch-a",
+            elapsed_age_seconds=0.0,
+            count_fire_offset=None,
+            condition_fire_offset=None,
+            contract={"version": "1"},
+        )
+        node_b = AggregationNodeCheckpoint(
+            tokens=(),
+            batch_id="batch-b",
+            elapsed_age_seconds=2.0,
+            count_fire_offset=None,
+            condition_fire_offset=None,
+            contract={"version": "1"},
+        )
+        state = AggregationCheckpointState(version="3.0", nodes={"agg-0": node_a, "agg-1": node_b})
+
+        rebound = rebind_checkpoint_batch_ids(state, {"batch-a": "retry-a", "batch-b": "retry-b"})
+
+        assert rebound.nodes["agg-0"].batch_id == "retry-a"
+        assert rebound.nodes["agg-1"].batch_id == "retry-b"
 
 
 # =============================================================================

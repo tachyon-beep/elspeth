@@ -2061,5 +2061,187 @@ class TestAzureBatchContentFabrication:
         assert result.rows[0]["llm_response"] == "Hello"
 
 
+class TestAzureBatchAuditIntegrityOnRecordCallFailure:
+    """Verify AuditIntegrityError is raised when record_call fails at all three sites."""
+
+    def test_record_per_row_failure_calls_raises_audit_integrity_error(self) -> None:
+        """_record_per_row_failure_calls must raise AuditIntegrityError on record_call failure."""
+        from elspeth.contracts.errors import AuditIntegrityError
+
+        config = {
+            "deployment_name": "gpt-4o-batch",
+            "endpoint": "https://test.openai.azure.com",
+            "api_key": "test-key",
+            "template": "Analyze: {{ row.text }}",
+            "schema": {"mode": "observed"},
+            "required_input_fields": [],
+        }
+        transform = AzureBatchLLMTransform(config)
+
+        ctx = MagicMock()
+        ctx.record_call = MagicMock(side_effect=RuntimeError("DB write failed"))
+
+        checkpoint = BatchCheckpointState(
+            batch_id="batch-fail-001",
+            input_file_id="input-file-001",
+            row_mapping={
+                "row-0-abc": RowMappingEntry(index=0, variables_hash="hash0"),
+            },
+            template_errors=[],
+            submitted_at="2024-01-01T00:00:00Z",
+            row_count=1,
+            requests={
+                "row-0-abc": {
+                    "messages": [{"role": "user", "content": "test"}],
+                    "model": "gpt-4o-batch",
+                },
+            },
+        )
+
+        with pytest.raises(AuditIntegrityError, match="batch-fail-001") as exc_info:
+            transform._record_per_row_failure_calls(checkpoint, ctx, "failed")
+
+        assert exc_info.value.__cause__ is not None
+        assert "row-0-abc" in str(exc_info.value)
+
+    def test_download_results_missing_result_raises_audit_integrity_error(self) -> None:
+        """Per-row error recording in _download_results must raise AuditIntegrityError on failure."""
+        from elspeth.contracts import CallType
+        from elspeth.contracts.errors import AuditIntegrityError
+
+        config = {
+            "deployment_name": "gpt-4o-batch",
+            "endpoint": "https://test.openai.azure.com",
+            "api_key": "test-key",
+            "template": "Analyze: {{ row.text }}",
+            "schema": {"mode": "observed"},
+            "required_input_fields": [],
+        }
+        transform = AzureBatchLLMTransform(config)
+
+        ctx = MagicMock()
+        ctx.run_id = "test-run"
+        ctx.state_id = "batch-state-123"
+
+        # Fail only on LLM call_type (per-row), succeed on HTTP calls
+        def _selective_fail(**kwargs: Any) -> MagicMock:
+            if kwargs.get("call_type") == CallType.LLM:
+                raise RuntimeError("DB write failed")
+            return MagicMock()
+
+        ctx.record_call = MagicMock(side_effect=_selective_fail)
+
+        checkpoint_state = BatchCheckpointState(
+            batch_id="batch-missing-001",
+            input_file_id="input-file-001",
+            row_mapping={
+                "row-0-abc": RowMappingEntry(index=0, variables_hash="hash0"),
+            },
+            template_errors=[],
+            submitted_at="2024-01-01T00:00:00Z",
+            row_count=1,
+            requests={
+                "row-0-abc": {
+                    "messages": [{"role": "user", "content": "test"}],
+                    "model": "gpt-4o-batch",
+                },
+            },
+        )
+        ctx.get_checkpoint.return_value = checkpoint_state
+
+        rows = [make_pipeline_row({"text": "test"})]
+        mock_batch = MagicMock()
+        mock_batch.id = "batch-missing-001"
+        mock_batch.output_file_id = "output-file-001"
+
+        # Empty output file — all rows will be "result_not_found"
+        mock_output_content = Mock()
+        mock_output_content.text = ""
+
+        with patch.object(transform, "_get_client") as mock_client:
+            mock_client.return_value.files.content.return_value = mock_output_content
+
+            with pytest.raises(AuditIntegrityError, match="batch-missing-001") as exc_info:
+                transform._download_results(mock_batch, checkpoint_state, rows, ctx)
+
+        assert exc_info.value.__cause__ is not None
+
+    def test_download_results_success_recording_raises_audit_integrity_error(self) -> None:
+        """Per-row result recording in _download_results must raise AuditIntegrityError on failure."""
+        from elspeth.contracts import CallType
+        from elspeth.contracts.errors import AuditIntegrityError
+
+        config = {
+            "deployment_name": "gpt-4o-batch",
+            "endpoint": "https://test.openai.azure.com",
+            "api_key": "test-key",
+            "template": "Analyze: {{ row.text }}",
+            "schema": {"mode": "observed"},
+            "required_input_fields": [],
+        }
+        transform = AzureBatchLLMTransform(config)
+
+        ctx = MagicMock()
+        ctx.run_id = "test-run"
+        ctx.state_id = "batch-state-123"
+        ctx.clear_checkpoint = MagicMock()
+
+        # Fail only on LLM call_type (per-row), succeed on HTTP calls
+        def _selective_fail(**kwargs: Any) -> MagicMock:
+            if kwargs.get("call_type") == CallType.LLM:
+                raise RuntimeError("DB write failed")
+            return MagicMock()
+
+        ctx.record_call = MagicMock(side_effect=_selective_fail)
+
+        checkpoint_state = BatchCheckpointState(
+            batch_id="batch-success-001",
+            input_file_id="input-file-001",
+            row_mapping={
+                "row-0-abc": RowMappingEntry(index=0, variables_hash="hash0"),
+            },
+            template_errors=[],
+            submitted_at="2024-01-01T00:00:00Z",
+            row_count=1,
+            requests={
+                "row-0-abc": {
+                    "messages": [{"role": "user", "content": "test"}],
+                    "model": "gpt-4o-batch",
+                },
+            },
+        )
+        ctx.get_checkpoint.return_value = checkpoint_state
+
+        rows = [make_pipeline_row({"text": "test"})]
+        mock_batch = MagicMock()
+        mock_batch.id = "batch-success-001"
+        mock_batch.output_file_id = "output-file-001"
+
+        # Valid JSONL output with a successful result
+        output_line = json.dumps(
+            {
+                "custom_id": "row-0-abc",
+                "response": {
+                    "status_code": 200,
+                    "body": {
+                        "choices": [{"message": {"content": "Hello"}}],
+                        "usage": {"prompt_tokens": 10, "completion_tokens": 5, "total_tokens": 15},
+                        "model": "gpt-4o-batch",
+                    },
+                },
+            }
+        )
+        mock_output_content = MagicMock()
+        mock_output_content.text = output_line
+
+        with patch.object(transform, "_get_client") as mock_client:
+            mock_client.return_value.files.content.return_value = mock_output_content
+
+            with pytest.raises(AuditIntegrityError, match="batch-success-001") as exc_info:
+                transform._download_results(mock_batch, checkpoint_state, rows, ctx)
+
+        assert exc_info.value.__cause__ is not None
+
+
 # RowMappingEntry tests moved to tests/unit/contracts/test_batch_checkpoint.py
 # (class is now in contracts.batch_checkpoint, not azure_batch)

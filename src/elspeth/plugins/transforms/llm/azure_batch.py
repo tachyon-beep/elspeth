@@ -730,20 +730,28 @@ class AzureBatchLLMTransform(BaseTransform):
             if error_detail:
                 error_info["detail"] = error_detail
 
-            # NOTE: Not wrapped in AuditIntegrityError — per-row recording in batch
-            # loop. Crashing here would lose all progress for remaining rows.
-            ctx.record_call(
-                call_type=CallType.LLM,
-                status=CallStatus.ERROR,
-                request_data={
-                    "custom_id": custom_id,
-                    "row_index": row_index,
-                    **original_request,
-                },
-                response_data=None,
-                error=error_info,
-                provider="azure",
-            )
+            # Audit completeness is non-negotiable (Tier 1 trust model). If we
+            # cannot record the per-row call, the audit trail is compromised and
+            # partial progress is worthless — crash immediately.
+            try:
+                ctx.record_call(
+                    call_type=CallType.LLM,
+                    status=CallStatus.ERROR,
+                    request_data={
+                        "custom_id": custom_id,
+                        "row_index": row_index,
+                        **original_request,
+                    },
+                    response_data=None,
+                    error=error_info,
+                    provider="azure",
+                )
+            except Exception as exc:
+                raise AuditIntegrityError(
+                    f"Failed to record per-row LLM call audit for batch {checkpoint.batch_id!r}, "
+                    f"custom_id={custom_id!r}, row_index={row_index}. "
+                    f"Audit trail integrity compromised."
+                ) from exc
 
     def _check_batch_status(
         self,
@@ -1308,22 +1316,28 @@ class AzureBatchLLMTransform(BaseTransform):
                 # Record Call for audit trail completeness - request WAS made but no response
                 # Without this, explain(token_id) would show incomplete lineage
                 # Access directly from checkpoint (Tier 1 data - we wrote it)
-                # NOTE: Not wrapping record_call in AuditIntegrityError here because this
-                # is a per-row error recording inside a batch result loop. Crashing mid-batch
-                # on a single audit failure would lose progress for all already-processed rows.
+                # Audit completeness is non-negotiable (Tier 1 trust model). If we
+                # cannot record the per-row call, the audit trail is compromised.
                 original_request = checkpoint.requests[custom_id]
-                ctx.record_call(
-                    call_type=CallType.LLM,
-                    status=CallStatus.ERROR,
-                    request_data={
-                        "custom_id": custom_id,
-                        "row_index": idx,
-                        **original_request,
-                    },
-                    response_data=None,
-                    error={"reason": error_reason, "custom_id": custom_id},
-                    provider="azure",
-                )
+                try:
+                    ctx.record_call(
+                        call_type=CallType.LLM,
+                        status=CallStatus.ERROR,
+                        request_data={
+                            "custom_id": custom_id,
+                            "row_index": idx,
+                            **original_request,
+                        },
+                        response_data=None,
+                        error={"reason": error_reason, "custom_id": custom_id},
+                        provider="azure",
+                    )
+                except Exception as exc:
+                    raise AuditIntegrityError(
+                        f"Failed to record per-row LLM call audit for batch {checkpoint.batch_id!r}, "
+                        f"custom_id={custom_id!r}, row_index={idx}. "
+                        f"Audit trail integrity compromised."
+                    ) from exc
                 continue
 
             result = results_by_id[custom_id]
@@ -1436,21 +1450,28 @@ class AzureBatchLLMTransform(BaseTransform):
                 error_data = None
 
             # Record LLM call with custom_id for token mapping
-            # NOTE: Not wrapping record_call in AuditIntegrityError here because this
-            # is a per-row result recording inside a batch loop. Crashing mid-batch
-            # on a single audit failure would lose progress for all already-processed rows.
-            ctx.record_call(
-                call_type=CallType.LLM,
-                status=call_status,
-                request_data={
-                    "custom_id": custom_id,
-                    "row_index": row_index,
-                    **original_request,
-                },
-                response_data=response_data,
-                error=error_data,
-                provider="azure",
-            )
+            # Audit completeness is non-negotiable (Tier 1 trust model). If we
+            # cannot record the per-row call, the audit trail is compromised and
+            # partial progress is worthless — crash immediately.
+            try:
+                ctx.record_call(
+                    call_type=CallType.LLM,
+                    status=call_status,
+                    request_data={
+                        "custom_id": custom_id,
+                        "row_index": row_index,
+                        **original_request,
+                    },
+                    response_data=response_data,
+                    error=error_data,
+                    provider="azure",
+                )
+            except Exception as exc:
+                raise AuditIntegrityError(
+                    f"Failed to record per-row LLM call audit for batch {checkpoint.batch_id!r}, "
+                    f"custom_id={custom_id!r}, row_index={row_index}. "
+                    f"Audit trail integrity compromised."
+                ) from exc
 
         # Clear checkpoint after successful completion
         self._clear_checkpoint(ctx)

@@ -210,7 +210,11 @@ class ChromaSink(BaseSink):
         # the row rather than aborting the entire batch.
         ids: list[str] = []
         documents: list[str] = []
-        metadatas_list: list[dict[str, Any]] = []
+        # Per-row metadata: non-empty dict if metadata was extracted, None if the row
+        # had none of the configured metadata fields present. ChromaDB rejects empty
+        # metadata dicts {}, so rows with no extractable metadata must be sent in a
+        # separate batch with metadatas=None.
+        per_row_metadata: list[dict[str, Any] | None] = []
         valid_indices: list[int] = []
 
         for i, row in enumerate(rows):
@@ -245,7 +249,7 @@ class ChromaSink(BaseSink):
             # ChromaDB accepts str|int|float|bool|None — anything else is a per-row
             # data problem, not a plugin bug.
             if fm.metadata_fields:
-                meta = {}
+                meta: dict[str, Any] = {}
                 bad_fields: dict[str, str] = {}
                 for field in fm.metadata_fields:
                     try:
@@ -266,14 +270,35 @@ class ChromaSink(BaseSink):
                         reason=f"Invalid ChromaDB metadata types: {bad_fields}",
                     )
                     continue
-                metadatas_list.append(meta)
+                # ChromaDB rejects empty metadata dicts — mark as None so the row
+                # can be sent in a metadata-free sub-batch instead of crashing.
+                per_row_metadata.append(meta if meta else None)
+            else:
+                per_row_metadata.append(None)
 
             ids.append(raw_id)
             documents.append(raw_doc)
             valid_indices.append(i)
 
-        # ChromaDB rejects empty metadata dicts — pass None when no metadata fields configured
-        metadatas: list[dict[str, Any]] | None = metadatas_list if fm.metadata_fields else None
+        # Partition rows by metadata availability.  ChromaDB rejects empty
+        # metadata dicts {}, so rows where all configured metadata fields were
+        # absent must be sent in a separate API call with metadatas=None.
+        # When metadata_fields is not configured, per_row_metadata is all-None
+        # and every row lands in the no-metadata partition.
+        meta_ids: list[str] = []
+        meta_documents: list[str] = []
+        meta_metadatas: list[dict[str, Any]] = []
+        nometa_ids: list[str] = []
+        nometa_documents: list[str] = []
+
+        for id_, doc, m in zip(ids, documents, per_row_metadata, strict=True):
+            if m is not None:
+                meta_ids.append(id_)
+                meta_documents.append(doc)
+                meta_metadatas.append(m)
+            else:
+                nometa_ids.append(id_)
+                nometa_documents.append(doc)
 
         # Handle all-rejected case: nothing to write, return zero-write artifact
         if not ids:
@@ -309,68 +334,91 @@ class ChromaSink(BaseSink):
                 diversions=self._get_diversions(),
             )
 
-        # These will be updated for skip/error mode to reflect actual payload sent
-        write_ids = ids
-        write_documents = documents
-        write_metadatas = metadatas
-        rows_written = len(ids)
-        rows_skipped = 0
-        skipped_ids: list[str] = []
+        # Build the sub-batches to send.  Most batches are homogeneous (all
+        # rows have metadata or none do), so we usually make a single call.
+        # Mixed batches produce two calls.
+        sub_batches: list[tuple[list[str], list[str], list[dict[str, Any]] | None]] = []
+        if meta_ids:
+            sub_batches.append((meta_ids, meta_documents, meta_metadatas))
+        if nometa_ids:
+            sub_batches.append((nometa_ids, nometa_documents, None))
+
+        # Aggregate write-ids/documents/metadatas across sub-batches for audit.
+        # These will be updated for skip/error mode to reflect actual payload sent.
+        all_write_ids: list[str] = []
+        all_write_documents: list[str] = []
+        all_write_metadatas: list[dict[str, Any]] = []
+        total_rows_written = 0
+        total_rows_skipped = 0
+        all_skipped_ids: list[str] = []
 
         start_time = time.perf_counter()
         try:
-            if self._config.on_duplicate == "overwrite":
-                try:
-                    collection.upsert(
-                        ids=ids,
-                        documents=documents,
-                        metadatas=metadatas,  # type: ignore[arg-type]  # chromadb stub Metadata vs dict[str, Any]
-                    )
-                except ValueError as ve:
-                    raise _ChromaPayloadRejection(str(ve)) from ve
-            elif self._config.on_duplicate == "skip":
-                existing = collection.get(ids=ids)
-                existing_ids = set(existing["ids"])
-                new_indices = [i for i, id_ in enumerate(ids) if id_ not in existing_ids]
+            for batch_ids, batch_docs, batch_metadatas in sub_batches:
+                write_ids = batch_ids
+                write_documents = batch_docs
+                write_metadatas = batch_metadatas
+                rows_written = len(batch_ids)
 
-                skipped_ids = [id_ for id_ in ids if id_ in existing_ids]
-                rows_skipped = len(skipped_ids)
-
-                if new_indices:
-                    write_ids = [ids[i] for i in new_indices]
-                    write_documents = [documents[i] for i in new_indices]
-                    write_metadatas = [metadatas[i] for i in new_indices] if metadatas is not None else None
-                    rows_written = len(new_indices)
+                if self._config.on_duplicate == "overwrite":
                     try:
-                        collection.add(
-                            ids=write_ids,
-                            documents=write_documents,
-                            metadatas=write_metadatas,  # type: ignore[arg-type]  # chromadb stub Metadata vs dict[str, Any]
+                        collection.upsert(
+                            ids=batch_ids,
+                            documents=batch_docs,
+                            metadatas=batch_metadatas,  # type: ignore[arg-type]  # chromadb stub Metadata vs dict[str, Any]
                         )
                     except ValueError as ve:
                         raise _ChromaPayloadRejection(str(ve)) from ve
-                else:
-                    write_ids = []
-                    write_documents = []
-                    write_metadatas = None
-                    rows_written = 0
-            elif self._config.on_duplicate == "error":
-                existing = collection.get(ids=ids)
-                existing_ids = set(existing["ids"])
-                duplicates = [id_ for id_ in ids if id_ in existing_ids]
-                if duplicates:
-                    raise DuplicateDocumentError(
-                        collection=self._config.collection,
-                        duplicate_ids=duplicates,
-                    )
-                try:
-                    collection.add(
-                        ids=ids,
-                        documents=documents,
-                        metadatas=metadatas,  # type: ignore[arg-type]  # chromadb stub Metadata vs dict[str, Any]
-                    )
-                except ValueError as ve:
-                    raise _ChromaPayloadRejection(str(ve)) from ve
+                elif self._config.on_duplicate == "skip":
+                    existing = collection.get(ids=batch_ids)
+                    existing_ids = set(existing["ids"])
+                    new_indices = [i for i, id_ in enumerate(batch_ids) if id_ not in existing_ids]
+
+                    skipped_ids = [id_ for id_ in batch_ids if id_ in existing_ids]
+                    all_skipped_ids.extend(skipped_ids)
+                    total_rows_skipped += len(skipped_ids)
+
+                    if new_indices:
+                        write_ids = [batch_ids[i] for i in new_indices]
+                        write_documents = [batch_docs[i] for i in new_indices]
+                        write_metadatas = [batch_metadatas[i] for i in new_indices] if batch_metadatas is not None else None
+                        rows_written = len(new_indices)
+                        try:
+                            collection.add(
+                                ids=write_ids,
+                                documents=write_documents,
+                                metadatas=write_metadatas,  # type: ignore[arg-type]  # chromadb stub Metadata vs dict[str, Any]
+                            )
+                        except ValueError as ve:
+                            raise _ChromaPayloadRejection(str(ve)) from ve
+                    else:
+                        write_ids = []
+                        write_documents = []
+                        write_metadatas = None
+                        rows_written = 0
+                elif self._config.on_duplicate == "error":
+                    existing = collection.get(ids=batch_ids)
+                    existing_ids = set(existing["ids"])
+                    duplicates = [id_ for id_ in batch_ids if id_ in existing_ids]
+                    if duplicates:
+                        raise DuplicateDocumentError(
+                            collection=self._config.collection,
+                            duplicate_ids=duplicates,
+                        )
+                    try:
+                        collection.add(
+                            ids=batch_ids,
+                            documents=batch_docs,
+                            metadatas=batch_metadatas,  # type: ignore[arg-type]  # chromadb stub Metadata vs dict[str, Any]
+                        )
+                    except ValueError as ve:
+                        raise _ChromaPayloadRejection(str(ve)) from ve
+
+                all_write_ids.extend(write_ids)
+                all_write_documents.extend(write_documents)
+                if write_metadatas is not None:
+                    all_write_metadatas.extend(write_metadatas)
+                total_rows_written += rows_written
 
             latency_ms = (time.perf_counter() - start_time) * 1000
         except (chromadb.errors.ChromaError, DuplicateDocumentError, _ChromaPayloadRejection) as write_exc:
@@ -399,24 +447,27 @@ class ChromaSink(BaseSink):
                 ) from audit_exc
             raise
 
-        # Hash the actual payload sent, not the full batch (critical for skip mode)
-        content_hash, payload_size = self._compute_payload_hash(write_ids, write_documents, write_metadatas)
+        # Hash the actual payload sent, not the full batch (critical for skip mode).
+        # When some rows had metadata and some didn't, the hash covers the metadatas
+        # that were actually sent (or None if none were).
+        hash_metadatas: list[dict[str, Any]] | None = all_write_metadatas if all_write_metadatas else None
+        content_hash, payload_size = self._compute_payload_hash(all_write_ids, all_write_documents, hash_metadatas)
 
         diversions = self._get_diversions()
 
         try:
-            response_data: dict[str, Any] = {"rows_written": rows_written}
-            if rows_skipped > 0:
-                response_data["rows_skipped"] = rows_skipped
-                response_data["skipped_ids"] = skipped_ids
+            response_data: dict[str, Any] = {"rows_written": total_rows_written}
+            if total_rows_skipped > 0:
+                response_data["rows_skipped"] = total_rows_skipped
+                response_data["skipped_ids"] = all_skipped_ids
 
             request_data: dict[str, Any] = {
                 "operation": self._config.on_duplicate.upper(),
                 "collection": self._config.collection,
-                "row_count": rows_written,
-                "document_ids": write_ids,
+                "row_count": total_rows_written,
+                "document_ids": all_write_ids,
             }
-            if rows_skipped > 0 or diversions:
+            if total_rows_skipped > 0 or diversions:
                 request_data["batch_size"] = len(rows)
 
             ctx.record_call(
@@ -430,11 +481,11 @@ class ChromaSink(BaseSink):
         except Exception as exc:
             raise AuditIntegrityError(
                 f"Failed to record successful ChromaDB write to audit trail "
-                f"(collection={self._config.collection!r}, row_count={rows_written}). "
+                f"(collection={self._config.collection!r}, row_count={total_rows_written}). "
                 f"Write completed but audit record is missing."
             ) from exc
 
-        self._total_written += rows_written
+        self._total_written += total_rows_written
         self._total_bytes += payload_size
 
         return SinkWriteResult(
@@ -443,7 +494,7 @@ class ChromaSink(BaseSink):
                 table=self._config.collection,
                 content_hash=content_hash,
                 payload_size=payload_size,
-                row_count=rows_written,
+                row_count=total_rows_written,
             ),
             diversions=diversions,
         )

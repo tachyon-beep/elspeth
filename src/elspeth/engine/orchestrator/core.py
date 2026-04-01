@@ -97,6 +97,7 @@ from elspeth.engine.orchestrator.aggregation import (
     check_aggregation_timeouts,
     flush_remaining_aggregation_buffers,
     handle_incomplete_batches,
+    rebind_checkpoint_batch_ids,
 )
 from elspeth.engine.orchestrator.export import (
     export_landscape,
@@ -2587,15 +2588,16 @@ class Orchestrator:
         recorder = LandscapeRecorder(self._db, payload_store=payload_store)
 
         # 1. Handle incomplete batches - call module function directly
-        handle_incomplete_batches(recorder, run_id)
+        batch_id_mapping = handle_incomplete_batches(recorder, run_id)
 
         # 2. Update run status to running
         recorder.update_run_status(run_id, RunStatus.RUNNING)
 
-        # 3. Build restored aggregation state map
+        # 3. Build restored aggregation state map, rebinding batch_ids to retry batches
         restored_state: dict[str, AggregationCheckpointState] = {}
         if resume_point.aggregation_state is not None:
-            restored_state[resume_point.node_id] = resume_point.aggregation_state
+            rebound_state = rebind_checkpoint_batch_ids(resume_point.aggregation_state, batch_id_mapping)
+            restored_state[resume_point.node_id] = rebound_state
         restored_coalesce_state = resume_point.coalesce_state
 
         # 4. Get unprocessed row data from payload store

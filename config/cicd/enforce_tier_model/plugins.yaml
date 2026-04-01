@@ -420,12 +420,12 @@ allow_hits:
   reason: Tier 2→external trust boundary — isinstance(float) guards non-finite metadata values (NaN/Infinity) before they reach canonical_json() hashing; diverts affected rows instead of crashing the batch
   safety: Non-finite float rows diverted via _divert_row() with per-field detail; valid rows written normally; no silent data loss
   expires: null
-- key: plugins/sinks/chroma_sink.py:R1:ChromaSink:write:fp=ce331265ef3a3ae1
+- key: plugins/sinks/chroma_sink.py:R1:ChromaSink:write:fp=54913df13e849326
   owner: feature
   reason: Collection.get() is the ChromaDB SDK method for retrieving documents by ID, not dict.get() — false positive from R1 rule matching `.get(` syntax
   safety: Returns GetResult dict with "ids" key; subscript access on result["ids"] crashes if ChromaDB SDK contract breaks
   expires: null
-- key: plugins/sinks/chroma_sink.py:R1:ChromaSink:write:fp=945f83a101c66b53
+- key: plugins/sinks/chroma_sink.py:R1:ChromaSink:write:fp=d73338019df5a202
   owner: feature
   reason: Collection.get() is the ChromaDB SDK method for retrieving documents by ID, not dict.get() — false positive from R1 rule matching `.get(` syntax
   safety: Returns GetResult dict with "ids" key; subscript access on result["ids"] crashes if ChromaDB SDK contract breaks

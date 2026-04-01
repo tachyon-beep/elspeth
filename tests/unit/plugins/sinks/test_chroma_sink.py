@@ -649,3 +649,153 @@ class TestChromaSinkNonFiniteMetadata:
 
         mock_collection.upsert.assert_not_called()
         assert len(result.diversions) == 1
+
+
+class TestChromaSinkEmptyMetadata:
+    """Empty metadata dicts {} crash ChromaDB — rows with all metadata fields absent
+    must be sent with metadatas=None, not metadatas=[{}]."""
+
+    def test_all_metadata_fields_absent_single_row(self) -> None:
+        """A row missing ALL configured metadata fields must not produce {}."""
+        mock_collection = MagicMock()
+        config = _make_config(
+            field_mapping={
+                "document_field": "text",
+                "id_field": "doc_id",
+                "metadata_fields": ["topic", "category"],
+            },
+            schema={"mode": "flexible", "fields": ["doc_id: str", "text: str"]},
+        )
+        sink = ChromaSink(config)
+        sink._collection = mock_collection
+
+        mock_ctx = MagicMock()
+        # Row has id and document but none of the configured metadata fields
+        rows = [{"doc_id": "d1", "text": "hello"}]
+        result = sink.write(rows, mock_ctx)
+
+        # Row must be written (not diverted — missing metadata is not an error)
+        mock_collection.upsert.assert_called_once()
+        call_kwargs = mock_collection.upsert.call_args.kwargs
+        assert call_kwargs["ids"] == ["d1"]
+        assert call_kwargs["documents"] == ["hello"]
+        # metadatas must be None, NOT [{}]
+        assert call_kwargs["metadatas"] is None
+        assert result.artifact.metadata is not None
+        assert result.artifact.metadata["row_count"] == 1
+        assert len(result.diversions) == 0
+
+    def test_mixed_batch_metadata_present_and_absent(self) -> None:
+        """Batch with some rows having metadata and others not — both are written."""
+        mock_collection = MagicMock()
+        config = _make_config(
+            field_mapping={
+                "document_field": "text",
+                "id_field": "doc_id",
+                "metadata_fields": ["topic"],
+            },
+            schema={"mode": "flexible", "fields": ["doc_id: str", "text: str"]},
+        )
+        sink = ChromaSink(config)
+        sink._collection = mock_collection
+
+        mock_ctx = MagicMock()
+        rows = [
+            {"doc_id": "d1", "text": "with meta", "topic": "science"},
+            {"doc_id": "d2", "text": "no meta"},  # topic absent
+        ]
+        result = sink.write(rows, mock_ctx)
+
+        # Both rows must be written — two sub-batch calls
+        assert mock_collection.upsert.call_count == 2
+
+        # First call: row with metadata
+        first_call = mock_collection.upsert.call_args_list[0].kwargs
+        assert first_call["ids"] == ["d1"]
+        assert first_call["metadatas"] == [{"topic": "science"}]
+
+        # Second call: row without metadata
+        second_call = mock_collection.upsert.call_args_list[1].kwargs
+        assert second_call["ids"] == ["d2"]
+        assert second_call["metadatas"] is None
+
+        assert result.artifact.metadata is not None
+        assert result.artifact.metadata["row_count"] == 2
+        assert len(result.diversions) == 0
+
+    def test_all_metadata_fields_absent_skip_mode(self) -> None:
+        """Skip mode works correctly when metadata fields are absent."""
+        mock_collection = MagicMock()
+        mock_collection.get.return_value = {"ids": []}
+        config = _make_config(
+            field_mapping={
+                "document_field": "text",
+                "id_field": "doc_id",
+                "metadata_fields": ["topic"],
+            },
+            on_duplicate="skip",
+            schema={"mode": "flexible", "fields": ["doc_id: str", "text: str"]},
+        )
+        sink = ChromaSink(config)
+        sink._collection = mock_collection
+
+        mock_ctx = MagicMock()
+        rows = [{"doc_id": "d1", "text": "hello"}]
+        result = sink.write(rows, mock_ctx)
+
+        # Row is new (not in existing), so it's added
+        mock_collection.add.assert_called_once()
+        call_kwargs = mock_collection.add.call_args.kwargs
+        assert call_kwargs["metadatas"] is None
+        assert result.artifact.metadata is not None
+        assert result.artifact.metadata["row_count"] == 1
+
+    def test_all_metadata_fields_absent_error_mode(self) -> None:
+        """Error mode works correctly when metadata fields are absent."""
+        mock_collection = MagicMock()
+        mock_collection.get.return_value = {"ids": []}
+        config = _make_config(
+            field_mapping={
+                "document_field": "text",
+                "id_field": "doc_id",
+                "metadata_fields": ["topic"],
+            },
+            on_duplicate="error",
+            schema={"mode": "flexible", "fields": ["doc_id: str", "text: str"]},
+        )
+        sink = ChromaSink(config)
+        sink._collection = mock_collection
+
+        mock_ctx = MagicMock()
+        rows = [{"doc_id": "d1", "text": "hello"}]
+        result = sink.write(rows, mock_ctx)
+
+        mock_collection.add.assert_called_once()
+        call_kwargs = mock_collection.add.call_args.kwargs
+        assert call_kwargs["metadatas"] is None
+        assert result.artifact.metadata is not None
+        assert result.artifact.metadata["row_count"] == 1
+
+    def test_partial_metadata_fields_not_empty(self) -> None:
+        """Row with SOME metadata fields present produces a non-empty dict (not affected)."""
+        mock_collection = MagicMock()
+        config = _make_config(
+            field_mapping={
+                "document_field": "text",
+                "id_field": "doc_id",
+                "metadata_fields": ["topic", "category"],
+            },
+            schema={"mode": "flexible", "fields": ["doc_id: str", "text: str"]},
+        )
+        sink = ChromaSink(config)
+        sink._collection = mock_collection
+
+        mock_ctx = MagicMock()
+        # Row has topic but not category — meta is {"topic": "science"}, not empty
+        rows = [{"doc_id": "d1", "text": "hello", "topic": "science"}]
+        result = sink.write(rows, mock_ctx)
+
+        mock_collection.upsert.assert_called_once()
+        call_kwargs = mock_collection.upsert.call_args.kwargs
+        assert call_kwargs["metadatas"] == [{"topic": "science"}]
+        assert len(result.diversions) == 0

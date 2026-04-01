@@ -31,6 +31,7 @@ if TYPE_CHECKING:
     from collections.abc import Mapping, Sequence
 
     from elspeth.contracts import TransformProtocol
+    from elspeth.contracts.aggregation_checkpoint import AggregationCheckpointState
     from elspeth.contracts.plugin_context import PluginContext
     from elspeth.contracts.results import RowResult
     from elspeth.core.landscape import LandscapeRecorder
@@ -80,7 +81,7 @@ def find_aggregation_transform(
 def handle_incomplete_batches(
     recorder: LandscapeRecorder,
     run_id: str,
-) -> None:
+) -> dict[str, str]:
     """Find and handle incomplete batches for recovery.
 
     - EXECUTING batches: Mark as failed (crash interrupted), then retry
@@ -90,20 +91,71 @@ def handle_incomplete_batches(
     Args:
         recorder: LandscapeRecorder for database operations
         run_id: Run being recovered
+
+    Returns:
+        Mapping of old_batch_id to new_batch_id for retried batches.
+        Callers must use this to rebind batch_ids in restored checkpoint
+        state so that resumed execution references the retry batches,
+        not the dead originals.
     """
     from elspeth.contracts.enums import BatchStatus
 
     incomplete = recorder.get_incomplete_batches(run_id)
+    batch_id_mapping: dict[str, str] = {}
 
     for batch in incomplete:
         if batch.status == BatchStatus.EXECUTING:
             # Crash interrupted mid-execution, mark failed then retry
             recorder.update_batch_status(batch.batch_id, BatchStatus.FAILED)
-            recorder.retry_batch(batch.batch_id)
+            retry = recorder.retry_batch(batch.batch_id)
+            batch_id_mapping[batch.batch_id] = retry.batch_id
         elif batch.status == BatchStatus.FAILED:
             # Previous failure, retry
-            recorder.retry_batch(batch.batch_id)
+            retry = recorder.retry_batch(batch.batch_id)
+            batch_id_mapping[batch.batch_id] = retry.batch_id
         # DRAFT batches continue normally (collection resumes)
+
+    return batch_id_mapping
+
+
+def rebind_checkpoint_batch_ids(
+    state: AggregationCheckpointState,
+    batch_id_mapping: dict[str, str],
+) -> AggregationCheckpointState:
+    """Create a new checkpoint state with batch_ids rebound to retry batches.
+
+    When ``handle_incomplete_batches()`` retries failed/executing batches, the
+    checkpoint still references the dead original batch_ids. This function
+    produces a new ``AggregationCheckpointState`` where each node's batch_id
+    is replaced with the corresponding retry batch_id from the mapping.
+
+    Nodes whose batch_id is not in the mapping are left unchanged (e.g. DRAFT
+    batches that were not retried).
+
+    Args:
+        state: Original checkpoint state from the resume point.
+        batch_id_mapping: old_batch_id -> new_batch_id from ``handle_incomplete_batches()``.
+
+    Returns:
+        New ``AggregationCheckpointState`` with rebound batch_ids.
+    """
+    from dataclasses import replace
+
+    from elspeth.contracts.aggregation_checkpoint import (
+        AggregationNodeCheckpoint,
+    )
+
+    if not batch_id_mapping:
+        return state
+
+    rebound_nodes: dict[str, AggregationNodeCheckpoint] = {}
+    for node_id, node_ckpt in state.nodes.items():
+        if node_ckpt.batch_id in batch_id_mapping:
+            rebound_nodes[node_id] = replace(node_ckpt, batch_id=batch_id_mapping[node_ckpt.batch_id])
+        else:
+            rebound_nodes[node_id] = node_ckpt
+
+    return replace(state, nodes=rebound_nodes)
 
 
 def _process_flush_results(
