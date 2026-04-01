@@ -84,7 +84,7 @@ def _custom_excepthook(args: threading.ExceptHookArgs) -> None:
                 "Suppressed expected pyrate-limiter cleanup exception",
                 thread_ident=thread_ident,
                 thread_name=args.thread.name if args.thread else None,
-                exc_type=args.exc_type.__name__ if args.exc_type else None,
+                exc_type=args.exc_type.__name__ if args.exc_type is not None else None,
             )
             return
         # Capture original reference inside lock (may be uninstalled by another thread)

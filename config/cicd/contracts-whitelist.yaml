@@ -276,6 +276,8 @@ allowed_dict_patterns:
   - "src/elspeth/plugins/sources/dataverse.py:DataverseSource._strip_odata_metadata:return"
   - "src/elspeth/plugins/sources/dataverse.py:DataverseSource._normalize_row_fields:row"
   - "src/elspeth/plugins/sources/dataverse.py:DataverseSource._normalize_row_fields:return"
+  - "src/elspeth/plugins/sources/json_source.py:JSONSource._normalize_row_keys:row"
+  - "src/elspeth/plugins/sources/json_source.py:JSONSource._normalize_row_keys:return"
   - "src/elspeth/plugins/sinks/dataverse.py:DataverseSink.__init__:config"
   - "src/elspeth/plugins/sinks/dataverse.py:DataverseSink._map_row:row"
   - "src/elspeth/plugins/sinks/dataverse.py:DataverseSink._map_row:return"

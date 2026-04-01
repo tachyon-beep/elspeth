@@ -56,7 +56,6 @@ class DatabaseSinkConfig(DataPluginConfig):
     url: str
     table: str
     if_exists: Literal["append", "replace"] = "append"
-    validate_input: bool = False  # Optional runtime validation of incoming rows
 
     @field_validator("table")
     @classmethod
@@ -83,7 +82,10 @@ class DatabaseSink(BaseSink):
         table: Table name (required)
         schema: Schema configuration (required, via DataPluginConfig)
         if_exists: "append" or "replace" (default: "append")
-        validate_input: Validate incoming rows against schema (default: False)
+
+    Input validation is always enabled. Incoming rows are validated against
+    the schema before INSERT — wrong types indicate an upstream plugin bug
+    and will crash the pipeline (Tier 2 contract).
 
     The schema can be:
         - Observed: {"mode": "observed"} - accept any fields (columns inferred from first row)
@@ -118,7 +120,7 @@ class DatabaseSink(BaseSink):
         self._sanitized_url = SanitizedDatabaseUrl.from_raw_url(cfg.url, fail_if_no_key=fail_if_no_key)  # For audit trail
         self._table_name = cfg.table
         self._if_exists = cfg.if_exists
-        self.validate_input = cfg.validate_input
+        self.validate_input = True  # Always validate — wrong types are upstream bugs
 
         # Store schema config for audit trail
         # DataPluginConfig ensures schema_config is not None
@@ -458,7 +460,7 @@ class DatabaseSink(BaseSink):
             ArtifactDescriptor with content_hash (SHA-256) and size_bytes
 
         Raises:
-            ValidationError: If validate_input=True and a row fails validation.
+            ValidationError: If a row fails schema validation.
                 This indicates a bug in an upstream transform.
         """
         # Compute canonical JSON payload ONCE before any database operation.

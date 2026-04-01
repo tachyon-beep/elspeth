@@ -702,8 +702,11 @@ class TestAzureBlobSourceErrors:
         assert rows[0].quarantine_destination == QUARANTINE_SINK
 
     def test_csv_malformed_line_not_silently_dropped(self, mock_blob_client: MagicMock, ctx: PluginContext) -> None:
-        """Malformed CSV line causes parse quarantine instead of silent drop."""
-        bad_csv = b'id,name\n1,"alice\n2,bob\n'
+        """Malformed CSV with column count mismatch quarantines bad rows individually."""
+        # Use a genuine column count mismatch (3 fields where 2 expected)
+        # rather than an unclosed quote (which csv.reader treats as valid
+        # multi-line quoting per RFC 4180).
+        bad_csv = b"id,name\n1,alice,EXTRA_FIELD\n2,bob\n"
         mock_client = MagicMock()
         mock_client.download_blob.return_value.readall.return_value = bad_csv
         mock_blob_client.return_value = mock_client
@@ -711,14 +714,17 @@ class TestAzureBlobSourceErrors:
         source = AzureBlobSource(make_config(format="csv", on_validation_failure="quarantine"))
         rows = list(source.load(ctx))
 
-        assert len(rows) == 1
+        # Row 1 (3 fields) quarantined, row 2 (2 fields) valid
+        assert len(rows) == 2
         assert rows[0].is_quarantined is True
         assert rows[0].quarantine_error is not None
-        assert "CSV parse error" in rows[0].quarantine_error
+        assert "expected 2 fields, got 3" in rows[0].quarantine_error
+        assert rows[1].is_quarantined is False
+        assert rows[1].row["name"] == "bob"
 
     def test_csv_structural_failure_quarantines_blob(self, mock_blob_client: MagicMock, ctx: PluginContext) -> None:
         """BUG-BLOB-01: Catastrophic CSV structure failure quarantines blob, doesn't crash."""
-        # Empty file triggers EmptyDataError - completely unparseable
+        # Empty file — no header row to parse
         bad_csv = b""
         mock_client = MagicMock()
         mock_client.download_blob.return_value.readall.return_value = bad_csv

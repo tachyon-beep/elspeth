@@ -8,13 +8,14 @@ This is the ONLY place in the pipeline where coercion is allowed.
 
 from __future__ import annotations
 
+import csv
 import io
+import itertools
 import json
 import time
 from collections.abc import Iterator, Mapping
 from typing import TYPE_CHECKING, Any, Literal, Self
 
-import pandas as pd
 import structlog
 from pydantic import BaseModel, Field, ValidationError, field_validator, model_validator
 
@@ -530,69 +531,95 @@ class AzureBlobSource(BaseSource):
                 )
             return
 
-        # Wrap pandas CSV parsing to quarantine on structural errors.
-        # Even with pandas' robustness, severely malformed CSVs can cause parse failures.
-        try:
-            # Use pandas for robust CSV parsing (consistent with CSVSource)
-            header_arg = 0 if has_header else None
+        # Parse CSV row-by-row using csv.reader for per-row error handling.
+        # This allows quarantining individual bad rows instead of the entire file.
+        reader = csv.reader(io.StringIO(text_data), delimiter=delimiter)
 
-            # When headerless CSV with explicit schema, use schema field names
-            names_arg = None
-            if not has_header:
-                if self._columns is not None:
-                    names_arg = self._columns
-                elif not self._schema_config.is_observed and self._schema_config.fields:
-                    names_arg = [field_def.name for field_def in self._schema_config.fields]
+        # Track a peeked first data row (used for headerless CSV with no schema)
+        first_data_row: list[str] | None = None
 
-            df = pd.read_csv(
-                io.StringIO(text_data),
-                delimiter=delimiter,
-                header=header_arg,
-                names=names_arg,  # Map columns to schema field names
-                dtype=str,  # Keep all values as strings for consistent handling
-                keep_default_na=False,  # Don't convert empty strings to NaN
-                on_bad_lines="error",  # Quarantine parse failures; never silently drop malformed lines
-            )
-        except (pd.errors.ParserError, pd.errors.EmptyDataError) as e:
-            # Catastrophic CSV structure failure - entire file unparseable
-            # This is rare with pandas but can happen with severely malformed files
-            error_msg = f"CSV parse error: Unable to parse blob structure: {e}"
-            raw_row = {"__raw_blob_preview__": text_data[:200], "__encoding__": encoding}
-
-            ctx.record_validation_error(
-                row=raw_row,
-                error=error_msg,
-                schema_mode="parse",
-                destination=self._on_validation_failure,
-            )
-
-            if self._on_validation_failure != "discard":
-                yield SourceRow.quarantined(
+        # Determine headers
+        if has_header:
+            try:
+                raw_headers = next(reader)
+            except StopIteration:
+                # Empty file — quarantine as structural failure (Tier 3)
+                raw_row = {
+                    "__raw_blob_preview__": text_data[:200],
+                    "__encoding__": encoding,
+                }
+                error_msg = "CSV parse error: empty file contains no header row"
+                ctx.record_validation_error(
                     row=raw_row,
                     error=error_msg,
+                    schema_mode="parse",
                     destination=self._on_validation_failure,
                 )
-            return  # No rows to process if file is completely unparseable
+                if self._on_validation_failure != "discard":
+                    yield SourceRow.quarantined(
+                        row=raw_row,
+                        error=error_msg,
+                        destination=self._on_validation_failure,
+                    )
+                return
+            except csv.Error as e:
+                # Header parse failure at source boundary (Tier 3)
+                raw_row = {
+                    "__raw_blob_preview__": text_data[:200],
+                    "__encoding__": encoding,
+                }
+                error_msg = f"CSV parse error in blob header: {e}"
+                ctx.record_validation_error(
+                    row=raw_row,
+                    error=error_msg,
+                    schema_mode="parse",
+                    destination=self._on_validation_failure,
+                )
+                if self._on_validation_failure != "discard":
+                    yield SourceRow.quarantined(
+                        row=raw_row,
+                        error=error_msg,
+                        destination=self._on_validation_failure,
+                    )
+                return
 
-        if has_header:
-            raw_headers = [str(header) for header in df.columns]
             self._field_resolution = resolve_field_names(
                 raw_headers=raw_headers,
                 field_mapping=self._field_mapping,
                 columns=None,
             )
-            final_headers = self._field_resolution.final_headers
-            if list(final_headers) != raw_headers:
-                df.columns = list(final_headers)
+            headers = self._field_resolution.final_headers
         elif self._columns is not None:
             self._field_resolution = resolve_field_names(
                 raw_headers=None,
                 field_mapping=self._field_mapping,
                 columns=self._columns,
             )
-            final_headers = self._field_resolution.final_headers
-            if list(df.columns) != list(final_headers):
-                df.columns = list(final_headers)
+            headers = self._field_resolution.final_headers
+        else:
+            # Headerless CSV with schema-defined field names
+            if not self._schema_config.is_observed and self._schema_config.fields:
+                schema_names = [field_def.name for field_def in self._schema_config.fields]
+                self._field_resolution = resolve_field_names(
+                    raw_headers=None,
+                    field_mapping=self._field_mapping,
+                    columns=schema_names,
+                )
+                headers = self._field_resolution.final_headers
+            else:
+                # No headers, no columns, no schema — peek at first row
+                # to generate numeric column names (matching pandas behavior)
+                try:
+                    first_row = next(reader)
+                except StopIteration:
+                    return  # Empty headerless file — no data to process
+                numeric_names = [str(i) for i in range(len(first_row))]
+                headers = tuple(numeric_names)
+                # Push the first row back by re-creating the reader chain
+                # We'll process first_row manually, then continue with reader
+                first_data_row = first_row
+
+        expected_count = len(headers)
 
         # Create contract now that field_resolution is known (CSV path)
         if self._contract_builder is None and self._format == "csv":
@@ -608,14 +635,80 @@ class AzureBlobSource(BaseSource):
             else:
                 self._contract_builder = ContractBuilder(initial_contract)
 
-        # Log row count for operator visibility
-        row_count = len(df)
-        logger.info("csv_blob_parsed", row_count=row_count, blob_path=self._blob_path)
+        # Process data rows with per-row error handling.
+        # csv.Error can corrupt parser state, so we stop on csv.Error (matching CSVSource).
+        # Column count mismatches quarantine the individual row and continue.
+        # If first_data_row was peeked (headerless, no schema), process it first.
+        row_source: Iterator[list[str]] = itertools.chain([first_data_row], reader) if first_data_row is not None else reader
+        row_count = 0
+        while True:
+            try:
+                values = next(row_source)
+            except StopIteration:
+                break
+            except csv.Error as e:
+                # csv.Error can leave parser in corrupted state — stop processing
+                row_count += 1
+                physical_line = reader.line_num
+                raw_row = {
+                    "__raw_line__": "(unparseable due to csv.Error)",
+                    "__line_number__": str(physical_line),
+                    "__row_number__": str(row_count),
+                }
+                error_msg = (
+                    f"CSV parse error at line {physical_line}: {e}. "
+                    f"Stopping blob processing — csv.Error can corrupt parser state, "
+                    f"making subsequent rows untrustworthy."
+                )
+                ctx.record_validation_error(
+                    row=raw_row,
+                    error=error_msg,
+                    schema_mode="parse",
+                    destination=self._on_validation_failure,
+                )
+                if self._on_validation_failure != "discard":
+                    yield SourceRow.quarantined(
+                        row=raw_row,
+                        error=error_msg,
+                        destination=self._on_validation_failure,
+                    )
+                break
 
-        # DataFrame columns are strings from CSV headers
-        for record in df.to_dict(orient="records"):
-            row = {str(k): v for k, v in record.items()}
+            # Skip blank lines
+            if not values:
+                continue
+
+            row_count += 1
+            physical_line = reader.line_num
+
+            # Column count validation — quarantine malformed rows individually
+            if len(values) != expected_count:
+                raw_row = {
+                    "__raw_line__": delimiter.join(values),
+                    "__line_number__": str(physical_line),
+                    "__row_number__": str(row_count),
+                }
+                error_msg = f"CSV parse error at line {physical_line}: expected {expected_count} fields, got {len(values)}"
+                ctx.record_validation_error(
+                    row=raw_row,
+                    error=error_msg,
+                    schema_mode="parse",
+                    destination=self._on_validation_failure,
+                )
+                if self._on_validation_failure != "discard":
+                    yield SourceRow.quarantined(
+                        row=raw_row,
+                        error=error_msg,
+                        destination=self._on_validation_failure,
+                    )
+                continue
+
+            # Build row dict — csv.reader returns strings, matching dtype=str behavior
+            row = dict(zip(headers, values, strict=True))
             yield from self._validate_and_yield(row, ctx)
+
+        # Log row count for operator visibility
+        logger.info("csv_blob_parsed", row_count=row_count, blob_path=self._blob_path)
 
     def _load_json_array(self, blob_data: bytes, ctx: SourceContext) -> Iterator[SourceRow]:
         """Load rows from JSON array blob data.

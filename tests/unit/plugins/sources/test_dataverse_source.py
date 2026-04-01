@@ -1464,3 +1464,107 @@ class TestUrlPercentEncoding:
         source = _make_source(_base_config(select=["contactid", "fullname"]))
         url = source._build_query_url()
         assert "$select=contactid,fullname" in url  # literal, no encoding
+
+
+# ---------------------------------------------------------------------------
+# Bug fix: unmapped fields trigger field resolution rebuild (review finding)
+# ---------------------------------------------------------------------------
+
+
+class TestUnmappedFieldsRebuildResolution:
+    """Verify that rows with fields not in the initial mapping trigger a
+    _field_resolution rebuild so new fields are correctly normalized."""
+
+    def test_new_field_on_page2_is_normalized(self) -> None:
+        """When page 2 introduces a field not in page 1, the new field
+        appears correctly normalized in output rows and the field
+        resolution mapping is rebuilt to include it."""
+        pages = [
+            _make_page(
+                [{"contactid": "1", "fullname": "Alice"}],
+                next_link="https://myorg.crm.dynamics.com/api/data/v9.2/contacts?$skiptoken=1",
+            ),
+            _make_page(
+                [{"contactid": "2", "fullname": "Bob", "jobtitle": "Engineer"}],
+            ),
+        ]
+        source = _make_source_for_load(pages, _base_config())
+        ctx = _mock_source_context()
+
+        rows = list(source.load(ctx))
+
+        assert len(rows) == 2
+        # All rows should be valid (not quarantined)
+        assert all(not r.is_quarantined for r in rows)
+
+        # Page 1 row has only contactid and fullname
+        assert "contactid" in rows[0].row
+        assert "fullname" in rows[0].row
+
+        # Page 2 row has the new field "jobtitle" correctly normalized
+        assert "jobtitle" in rows[1].row
+        assert rows[1].row["jobtitle"] == "Engineer"
+
+        # Field resolution should have been rebuilt to include jobtitle
+        resolution = source.get_field_resolution()
+        assert resolution is not None
+        mapping, _ = resolution
+        assert "jobtitle" in mapping
+
+    def test_new_field_with_non_identifier_name_is_normalized(self) -> None:
+        """New fields with non-identifier names (e.g., spaces) are
+        normalized through the same algorithm on rebuild."""
+        pages = [
+            _make_page(
+                [{"contactid": "1", "fullname": "Alice"}],
+                next_link="https://myorg.crm.dynamics.com/next",
+            ),
+            _make_page(
+                [{"contactid": "2", "fullname": "Bob", "Job Title": "Engineer"}],
+            ),
+        ]
+        source = _make_source_for_load(pages, _base_config())
+        ctx = _mock_source_context()
+
+        rows = list(source.load(ctx))
+
+        assert len(rows) == 2
+        assert all(not r.is_quarantined for r in rows)
+
+        # The new field should be normalized (spaces -> underscore, lowered)
+        row2 = rows[1].row
+        assert "job_title" in row2
+        assert row2["job_title"] == "Engineer"
+
+        # Resolution mapping should include the new field after rebuild
+        resolution = source.get_field_resolution()
+        assert resolution is not None
+        mapping, _ = resolution
+        assert "Job Title" in mapping
+        assert mapping["Job Title"] == "job_title"
+
+    def test_resolution_not_rebuilt_when_fields_match(self) -> None:
+        """Field resolution is NOT rebuilt when a subsequent row has the
+        same fields as the initial mapping."""
+        pages = [
+            _make_page(
+                [{"contactid": "1", "fullname": "Alice"}],
+                next_link="https://myorg.crm.dynamics.com/next",
+            ),
+            _make_page(
+                [{"contactid": "2", "fullname": "Bob"}],
+            ),
+        ]
+        source = _make_source_for_load(pages, _base_config())
+        ctx = _mock_source_context()
+
+        # Process first page to establish initial resolution
+        rows = list(source.load(ctx))
+        assert len(rows) == 2
+
+        # Resolution should not have changed (same fields on both pages)
+        resolution = source.get_field_resolution()
+        assert resolution is not None
+        mapping, _ = resolution
+        # Only the original fields should be in the mapping
+        assert set(mapping.keys()) == {"contactid", "fullname"}

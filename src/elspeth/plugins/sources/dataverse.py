@@ -410,12 +410,26 @@ class DataverseSource(BaseSource):
         # Schema validation (lines below) quarantines rows with unexpected fields.
         mapping = self._field_resolution.resolution_mapping
         result: dict[str, Any] = {}
+        has_unmapped_fields = False
         for k, v in row.items():
             normalized_name = mapping.get(k)
             if normalized_name is None:
                 # Field not in initial mapping — normalize individually
                 normalized_name = normalize_field_name(k)
+                has_unmapped_fields = True
             result[normalized_name] = v
+
+        # If this row had fields not in the initial mapping, rebuild
+        # field resolution from this row's complete key set. This ensures
+        # the resolution mapping used for contract inference covers all
+        # fields, not just those from the (possibly quarantined) first row.
+        if has_unmapped_fields:
+            self._field_resolution = resolve_field_names(
+                raw_headers=list(row.keys()),
+                field_mapping=self._field_mapping,
+                columns=None,
+            )
+
         return result
 
     def _emit_telemetry(
@@ -676,8 +690,29 @@ class DataverseSource(BaseSource):
                         self.set_schema_contract(self._contract_builder.contract)
                         self._first_valid_row_processed = True
 
-                    rows_yielded += 1
+                    # Validate against locked contract to catch type drift on
+                    # inferred fields. Pydantic extra="allow" accepts any type
+                    # for extras — the contract enforces inferred types here.
                     contract = self._contract_builder.contract if self._contract_builder is not None else self.get_schema_contract()
+                    if contract is not None and contract.locked:
+                        violations = contract.validate(validated_row)
+                        if violations:
+                            error_msg = "; ".join(str(v) for v in violations)
+                            ctx.record_validation_error(
+                                row=validated_row,
+                                error=error_msg,
+                                schema_mode=self._schema_config.mode,
+                                destination=self._on_validation_failure,
+                            )
+                            if self._on_validation_failure != "discard":
+                                yield SourceRow.quarantined(
+                                    row=validated_row,
+                                    error=error_msg,
+                                    destination=self._on_validation_failure,
+                                )
+                            continue
+
+                    rows_yielded += 1
                     yield SourceRow.valid(validated_row, contract=contract)
 
         except DataverseClientError as e:

@@ -132,6 +132,138 @@ class TestCSVSinkAtomicBatchWrite:
 
 
 # =============================================================================
+# Bug 6: Write-mode first-batch failure cleanup
+# =============================================================================
+
+
+class TestCSVSinkWriteModeRollback:
+    """Regression tests for write-mode first-batch failure cleanup.
+
+    When the first batch fails during staging (e.g., extra fields), the file
+    must never be created. When staging succeeds but the post-open write/flush/
+    hash/stat phase fails, the newly-created file must be cleaned up.
+    """
+
+    def test_staging_failure_never_creates_file(self, tmp_path: Path, ctx: PluginContext) -> None:
+        """If staging fails (extra fields), the file is never created.
+
+        The deferred-truncation design means _open_file_write_mode is never
+        called when staging fails, so no file should exist.
+        """
+        from elspeth.plugins.sinks.csv_sink import CSVSink
+
+        output_file = tmp_path / "output.csv"
+        sink = CSVSink({"path": str(output_file), "schema": FIXED_SCHEMA})
+
+        # Row has an extra field that fixed schema rejects during staging
+        with pytest.raises(ValueError, match="c"):
+            sink.write([{"id": 1, "name": "alice", "c": "extra"}], ctx)
+
+        # File must never have been created
+        assert not output_file.exists()
+
+        sink.close()
+
+    def test_write_failure_after_open_removes_file(self, tmp_path: Path, ctx: PluginContext) -> None:
+        """If file.write() fails after open, the newly-created file is removed.
+
+        This tests the rollback guard around the post-open mutation phase.
+        """
+        from elspeth.plugins.sinks.csv_sink import CSVSink
+
+        output_file = tmp_path / "output.csv"
+        sink = CSVSink({"path": str(output_file), "schema": FIXED_SCHEMA})
+
+        # Patch file.write to fail AFTER the file is opened (staging succeeds
+        # because it uses a separate StringIO buffer, so we target the real file)
+        original_open = open
+
+        call_count = 0
+
+        def patched_open(*args, **kwargs):
+            nonlocal call_count
+            f = original_open(*args, **kwargs)
+            # The first open call with "w" mode is _open_file_write_mode.
+            # We want file.write to fail on the staged_content write (second write
+            # to the real file, after the header). Wrap the file to fail on the
+            # second call to write().
+            if len(args) >= 2 and args[1] == "w":
+                original_write = f.write
+                write_call_count = 0
+
+                def failing_write(data):
+                    nonlocal write_call_count
+                    write_call_count += 1
+                    # Let header writes through (writeheader), fail on staged content
+                    if write_call_count > 1:
+                        raise OSError("Simulated disk full")
+                    return original_write(data)
+
+                f.write = failing_write
+            return f
+
+        with patch("builtins.open", side_effect=patched_open), pytest.raises(IOError, match="Simulated disk full"):
+            sink.write([{"id": 1, "name": "alice"}], ctx)
+
+        # File must have been cleaned up by the rollback guard
+        assert not output_file.exists()
+        assert sink._file is None
+        assert sink._writer is None
+
+    def test_append_mode_rollback_failure_chains_exceptions(self, tmp_path: Path, ctx: PluginContext) -> None:
+        """If append-mode rollback itself fails, exceptions are chained.
+
+        The original write exception must not be silently replaced by the
+        rollback failure.
+        """
+        from elspeth.plugins.sinks.csv_sink import CSVSink
+
+        output_file = tmp_path / "output.csv"
+        sink = CSVSink({"path": str(output_file), "schema": FIXED_SCHEMA, "mode": "append"})
+
+        # First batch succeeds (establishes file)
+        sink.write([{"id": 1, "name": "alice"}], ctx)
+        sink.flush()
+
+        # Strategy: make the hash read fail (triggers rollback), then make
+        # seek fail (rollback itself fails). We patch builtins.open so that
+        # the binary-mode hash read raises, while leaving the file handle
+        # methods untouched (avoids tell/flush interactions).
+        original_file = sink._file
+        real_open = open
+
+        def open_that_fails_on_binary_read(*args, **kwargs):
+            # Fail when the hash computation tries to open in "rb" mode
+            if len(args) >= 2 and args[1] == "rb":
+                raise OSError("simulated read failure")
+            if len(args) >= 1 and kwargs.get("mode") == "rb":
+                raise OSError("simulated read failure")
+            return real_open(*args, **kwargs)
+
+        # Also patch seek so rollback fails
+        original_seek = original_file.seek
+
+        def failing_seek(pos):
+            raise OSError("seek failed during rollback")
+
+        original_file.seek = failing_seek
+
+        with (
+            patch("builtins.open", side_effect=open_that_fails_on_binary_read),
+            pytest.raises(RuntimeError, match="rollback also failed") as exc_info,
+        ):
+            sink.write([{"id": 2, "name": "bob"}], ctx)
+
+        # Verify exception chain: RuntimeError caused by OSError
+        assert exc_info.value.__cause__ is not None
+        assert isinstance(exc_info.value.__cause__, OSError)
+
+        # Restore original methods for cleanup
+        original_file.seek = original_seek
+        sink.close()
+
+
+# =============================================================================
 # Bug 3: DatabaseSink accepts schema-invalid rows
 # =============================================================================
 
