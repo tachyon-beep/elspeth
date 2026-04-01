@@ -233,6 +233,17 @@ def explain(
                 f"not found for token '{token_id}'. The token_parents table references "
                 f"a non-existent parent. This indicates database corruption."
             )
+        # Parent must belong to the same run. Cross-run parent references are
+        # corruption — lineage operations (fork/coalesce/expand) are always
+        # within a single run. (Note: cross-row parents ARE valid for coalesce,
+        # where multiple rows merge into one output token.)
+        if parent_token.run_id != run_id:
+            raise AuditIntegrityError(
+                f"Audit integrity violation: parent token '{parent.parent_token_id}' "
+                f"belongs to run '{parent_token.run_id}' but child token '{token_id}' "
+                f"belongs to run '{run_id}'. Cross-run parent lineage is impossible — "
+                f"this indicates database corruption in token_parents."
+            )
         parent_tokens.append(parent_token)
 
     # Get validation errors for this row (by hash)

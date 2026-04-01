@@ -266,11 +266,28 @@ class ExecutionRepository:
         if duration_ms is None:
             raise ValueError("duration_ms is required when completing a node state")
 
+        # Required fields per status
         if status == NodeStateStatus.COMPLETED and output_data is None:
             raise ValueError("COMPLETED node state requires output_data (output_hash would be NULL)")
 
         if status == NodeStateStatus.FAILED and error is None:
             raise ValueError("FAILED node state requires error details")
+
+        # Forbidden fields per status — prevent writing impossible states to Tier 1 data.
+        # These mirror the read-side checks in NodeStateLoader.load().
+        if status == NodeStateStatus.PENDING:
+            if output_data is not None:
+                raise ValueError("PENDING node state must not have output_data")
+            if error is not None:
+                raise ValueError("PENDING node state must not have error")
+            if success_reason is not None:
+                raise ValueError("PENDING node state must not have success_reason")
+
+        if status == NodeStateStatus.COMPLETED and error is not None:
+            raise ValueError("COMPLETED node state must not have error (contradicts success)")
+
+        if status == NodeStateStatus.FAILED and success_reason is not None:
+            raise ValueError("FAILED node state must not have success_reason (contradicts failure)")
 
         timestamp = now()
         output_hash = stable_hash(output_data) if output_data is not None else None

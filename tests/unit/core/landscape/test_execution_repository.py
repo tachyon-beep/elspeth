@@ -245,6 +245,49 @@ class TestCompleteNodeStateCrashPaths:
         assert isinstance(result_f, NodeStateFailed)
 
 
+class TestCompleteNodeStateForbiddenFields:
+    """Regression tests for elspeth-22e2bca0c1: forbidden fields per status."""
+
+    def test_pending_rejects_output_data(self) -> None:
+        _db, repo, _rec, tok = _make_repo_with_token()
+        repo.begin_node_state(tok, "transform-1", "run-1", 1, {"a": 1}, state_id="s-1")
+        with pytest.raises(ValueError, match=r"PENDING.*must not have output_data"):
+            repo.complete_node_state("s-1", NodeStateStatus.PENDING, output_data={"x": 1}, duration_ms=5.0)
+
+    def test_pending_rejects_error(self) -> None:
+        from elspeth.contracts.errors import ExecutionError
+
+        _db, repo, _rec, tok = _make_repo_with_token()
+        repo.begin_node_state(tok, "transform-1", "run-1", 1, {"a": 1}, state_id="s-1")
+        err = ExecutionError(exception="oops", exception_type="ValueError")
+        with pytest.raises(ValueError, match=r"PENDING.*must not have error"):
+            repo.complete_node_state("s-1", NodeStateStatus.PENDING, error=err, duration_ms=5.0)
+
+    def test_pending_rejects_success_reason(self) -> None:
+        _db, repo, _rec, tok = _make_repo_with_token()
+        repo.begin_node_state(tok, "transform-1", "run-1", 1, {"a": 1}, state_id="s-1")
+        with pytest.raises(ValueError, match=r"PENDING.*must not have success_reason"):
+            repo.complete_node_state("s-1", NodeStateStatus.PENDING, success_reason={"reason": "ok"}, duration_ms=5.0)
+
+    def test_completed_rejects_error(self) -> None:
+        from elspeth.contracts.errors import ExecutionError
+
+        _db, repo, _rec, tok = _make_repo_with_token()
+        repo.begin_node_state(tok, "transform-1", "run-1", 1, {"a": 1}, state_id="s-1")
+        err = ExecutionError(exception="oops", exception_type="ValueError")
+        with pytest.raises(ValueError, match=r"COMPLETED.*must not have error"):
+            repo.complete_node_state("s-1", NodeStateStatus.COMPLETED, output_data={"x": 1}, error=err, duration_ms=5.0)
+
+    def test_failed_rejects_success_reason(self) -> None:
+        from elspeth.contracts.errors import ExecutionError
+
+        _db, repo, _rec, tok = _make_repo_with_token()
+        repo.begin_node_state(tok, "transform-1", "run-1", 1, {"a": 1}, state_id="s-1")
+        err = ExecutionError(exception="oops", exception_type="ValueError")
+        with pytest.raises(ValueError, match=r"FAILED.*must not have success_reason"):
+            repo.complete_node_state("s-1", NodeStateStatus.FAILED, error=err, success_reason={"reason": "ok"}, duration_ms=5.0)
+
+
 # ---------------------------------------------------------------------------
 # H5: record_routing_events rowcount=0 AuditIntegrityError
 # ---------------------------------------------------------------------------

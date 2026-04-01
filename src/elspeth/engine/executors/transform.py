@@ -374,26 +374,24 @@ class TransformExecutor:
                         raise OrchestrationInvariantError("has_output_data guarantees rows when row is None")
                     output_data = [r.to_dict() for r in result.rows]
 
-                # Record schema evolution BEFORE completing the state.
-                # This ensures that if contract evolution fails, the state is
+                # Record the transform's output contract BEFORE completing the state.
+                # This ensures that if contract recording fails, the state is
                 # auto-completed as FAILED by the guard (no "completed-then-crash"
                 # window).  Fix for B1 terminality bug.
-                if result.row is not None and transform.declared_output_fields:
-                    from elspeth.contracts.contract_propagation import propagate_contract
+                #
+                # Use the contract from the result directly — the plugin emitted
+                # it and success_multi() guarantees all rows share the same instance.
+                output_contract = None
+                if result.row is not None:
+                    output_contract = result.row.contract
+                elif result.rows is not None and result.rows:
+                    output_contract = result.rows[0].contract
 
-                    # Compute evolved contract: input contract + fields added by transform
-                    input_contract = token.row_data.contract
-                    evolved_contract = propagate_contract(
-                        input_contract=input_contract,
-                        output_row=result.row.to_dict(),
-                        transform_adds_fields=True,
-                    )
-
-                    # Record to landscape for audit completeness
+                if output_contract is not None and output_contract is not token.row_data.contract:
                     self._recorder.update_node_output_contract(
                         run_id=ctx.run_id,
                         node_id=transform.node_id,
-                        contract=evolved_contract,
+                        contract=output_contract,
                     )
 
                 # NOW complete as COMPLETED — all validation has succeeded

@@ -163,15 +163,10 @@ def list_tokens(
     """
     from sqlalchemy import select
 
-    from elspeth.core.landscape.schema import rows_table, tokens_table
+    from elspeth.core.landscape.schema import tokens_table
 
     with db.connection() as conn:
-        query = (
-            select(tokens_table)
-            .join(rows_table, tokens_table.c.row_id == rows_table.c.row_id)
-            .where(rows_table.c.run_id == run_id)
-            .limit(limit)
-        )
+        query = select(tokens_table).where(tokens_table.c.run_id == run_id).order_by(tokens_table.c.created_at).limit(limit)
 
         if row_id is not None:
             query = query.where(tokens_table.c.row_id == row_id)

@@ -304,6 +304,32 @@ class TestExplainParentIntegrity:
         with pytest.raises(AuditIntegrityError, match=r"parent token.*not found"):
             explain(recorder, "run-1", token_id="tok-1")
 
+    def test_parent_from_different_run_raises(self) -> None:
+        """Parent token from a different run is audit corruption.
+
+        Regression test for elspeth-4126073aa8: explain() previously only checked
+        that parent tokens exist, not that they belong to the same run.
+        """
+        child_token = _make_token(token_id="child-1", fork_group_id="fg-1")
+        # Parent belongs to a different run
+        parent_token = Token(
+            token_id="parent-1",
+            row_id="row-1",
+            created_at=child_token.created_at,
+            run_id="DIFFERENT-RUN",  # <-- cross-run corruption
+        )
+        row_lineage = _make_row_lineage()
+        parent_ref = TokenParent(token_id="child-1", parent_token_id="parent-1", ordinal=0)
+        recorder = _make_recorder(
+            token=child_token,
+            row_lineage=row_lineage,
+            token_parents=[parent_ref],
+        )
+        recorder.get_token.side_effect = lambda tid: child_token if tid == "child-1" else parent_token
+
+        with pytest.raises(AuditIntegrityError, match="Cross-run parent lineage"):
+            explain(recorder, "run-1", token_id="child-1")
+
 
 # ===========================================================================
 # LineageResult structure
