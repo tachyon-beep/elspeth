@@ -167,7 +167,7 @@ class TestMultiWorkerEnforcement:
     @patch.dict("os.environ", {"WEB_CONCURRENCY": "4"})
     def test_raises_on_multi_worker(self, tmp_path) -> None:
         """Application factory rejects WEB_CONCURRENCY > 1."""
-        with pytest.raises(RuntimeError, match="WEB_CONCURRENCY=4 is not supported"):
+        with pytest.raises(RuntimeError, match=r"WEB_CONCURRENCY=4\) but is not supported"):
             create_app(_settings(tmp_path))
 
     @patch.dict("os.environ", {"WEB_CONCURRENCY": "1"})

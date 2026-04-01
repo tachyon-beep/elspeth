@@ -204,11 +204,19 @@ class ExecutionServiceImpl:
         # UUID() can raise ValueError on malformed strings; if that happens
         # after create_run(), the pending run blocks the session permanently
         # because the except block below only cleans up _shutdown_events.
+        #
+        # Defense-in-depth: verify the blob belongs to this session via the
+        # DB ownership record. Without this, a crafted composition state
+        # could reference another session's blob path (which would pass the
+        # shared-root path allowlist above).
         parsed_blob_id: UUID | None = None
         if composition_state.source is not None and self._blob_service is not None:
             blob_ref = composition_state.source.options.get("blob_ref")
             if blob_ref is not None:
                 parsed_blob_id = UUID(blob_ref)
+                blob_record = await self._blob_service.get_blob(parsed_blob_id)
+                if blob_record.session_id != session_id:
+                    raise ValueError(f"Blob {blob_ref} does not belong to session {session_id}")
 
         # B9 fix: create_run() generates its own UUID internally and returns
         # a RunRecord. Read the run_id back from the returned record so our

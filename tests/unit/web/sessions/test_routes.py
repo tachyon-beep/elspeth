@@ -168,6 +168,50 @@ class TestSessionCRUDRoutes:
         get_resp = client.get(f"/api/sessions/{session_id}")
         assert get_resp.status_code == 404
 
+    @pytest.mark.asyncio
+    async def test_delete_session_blocked_by_active_run(self, tmp_path) -> None:
+        """Deleting a session with a pending/running run returns 409.
+
+        Without this guard, archive_session() deletes run rows and blob
+        directories out from under the background pipeline worker.
+        """
+        app, service = _make_app(tmp_path)
+        client = TestClient(app)
+
+        create_resp = client.post("/api/sessions", json={"title": "Active Run"})
+        session_id = uuid.UUID(create_resp.json()["id"])
+
+        # Create a pending run via the service layer
+        state = await service.save_composition_state(
+            session_id,
+            CompositionStateData(is_valid=True),
+        )
+        await service.create_run(session_id, state.id)
+
+        del_resp = client.delete(f"/api/sessions/{session_id}")
+        assert del_resp.status_code == 409
+        assert "active" in del_resp.json()["detail"].lower()
+
+    @pytest.mark.asyncio
+    async def test_delete_session_allowed_after_run_completes(self, tmp_path) -> None:
+        """After a run reaches a terminal state, deletion is allowed."""
+        app, service = _make_app(tmp_path)
+        client = TestClient(app)
+
+        create_resp = client.post("/api/sessions", json={"title": "Completed Run"})
+        session_id = uuid.UUID(create_resp.json()["id"])
+
+        state = await service.save_composition_state(
+            session_id,
+            CompositionStateData(is_valid=True),
+        )
+        run = await service.create_run(session_id, state.id)
+        await service.update_run_status(run.id, "running")
+        await service.update_run_status(run.id, "completed")
+
+        del_resp = client.delete(f"/api/sessions/{session_id}")
+        assert del_resp.status_code == 204
+
 
 class TestIDORProtection:
     """Tests for W5 -- IDOR protection on all session-scoped routes.

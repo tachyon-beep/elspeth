@@ -183,9 +183,22 @@ def create_session_router() -> APIRouter:
         request: Request,
         user: UserIdentity = Depends(get_current_user),  # noqa: B008
     ) -> None:
-        """Archive (delete) a session and all associated data."""
+        """Archive (delete) a session and all associated data.
+
+        Rejects deletion while a pipeline run is active — archive_session()
+        would delete run rows and blob directories out from under the
+        background worker, causing status update failures and data loss.
+        """
         session = await _verify_session_ownership(session_id, user, request)
         service = request.app.state.session_service
+
+        active_run = await service.get_active_run(session.id)
+        if active_run is not None:
+            raise HTTPException(
+                status_code=409,
+                detail="Cannot delete session while a pipeline run is active. Cancel the run first.",
+            )
+
         await service.archive_session(session.id)
 
     @router.post(

@@ -546,11 +546,13 @@ class TestCancelMechanism:
     ) -> None:
         """Race fix part 2: _shutdown_events registration must happen before
         blob linkage, so cancel() finds the event during the blob window."""
+        session_id = uuid4()
         run_id = uuid4()
         blob_ref = str(uuid4())
         mock_session_service.create_run.return_value = MagicMock(id=run_id)
 
         blob_service = MagicMock()
+        blob_service.get_blob = AsyncMock(return_value=MagicMock(session_id=session_id))
 
         async def tracking_link(*args: Any, **kwargs: Any) -> None:
             # At the time blob linkage runs, the event MUST already exist
@@ -570,7 +572,7 @@ class TestCancelMechanism:
         }
 
         with patch.object(service, "_run_pipeline"):
-            await service.execute(session_id=uuid4())
+            await service.execute(session_id=session_id)
 
     @pytest.mark.asyncio
     async def test_shutdown_event_cleaned_up_on_blob_linkage_failure(
@@ -580,11 +582,13 @@ class TestCancelMechanism:
     ) -> None:
         """If blob linkage raises after event registration, the event must
         be cleaned up to avoid leaking into _shutdown_events."""
+        session_id = uuid4()
         run_id = uuid4()
         blob_ref = str(uuid4())
         mock_session_service.create_run.return_value = MagicMock(id=run_id)
 
         blob_service = MagicMock()
+        blob_service.get_blob = AsyncMock(return_value=MagicMock(session_id=session_id))
         blob_service.link_blob_to_run = AsyncMock(side_effect=RuntimeError("blob storage unavailable"))
         cast(Any, service)._blob_service = blob_service
 
@@ -598,7 +602,7 @@ class TestCancelMechanism:
         }
 
         with pytest.raises(RuntimeError, match="blob storage unavailable"):
-            await service.execute(session_id=uuid4())
+            await service.execute(session_id=session_id)
 
         assert str(run_id) not in service._shutdown_events
 
@@ -643,11 +647,87 @@ class TestBlobRefPreValidation:
         mock_session_service: MagicMock,
     ) -> None:
         """Valid UUID blob_ref is parsed early and passed to link_blob_to_run."""
+        session_id = uuid4()
         run_id = uuid4()
         blob_ref = str(uuid4())
         mock_session_service.create_run.return_value = MagicMock(id=run_id)
 
         blob_service = MagicMock()
+        blob_service.link_blob_to_run = AsyncMock()
+        # get_blob returns a record matching the executing session
+        blob_service.get_blob = AsyncMock(return_value=MagicMock(session_id=session_id))
+        cast(Any, service)._blob_service = blob_service
+
+        state = mock_session_service.get_current_state.return_value
+        state.source = {
+            "plugin": "csv",
+            "on_success": "continue",
+            "options": {"blob_ref": blob_ref},
+            "on_validation_failure": "quarantine",
+        }
+
+        with patch.object(service, "_run_pipeline"):
+            await service.execute(session_id=session_id)
+
+        blob_service.link_blob_to_run.assert_called_once_with(
+            blob_id=UUID(blob_ref),
+            run_id=run_id,
+            direction="input",
+        )
+
+
+# ── Blob Ownership (Cross-Session IDOR) ──────────────────────────────
+
+
+class TestBlobOwnership:
+    """P2 defense-in-depth: blob_ref must belong to the executing session.
+
+    Without this, a crafted composition state could reference another
+    session's blob path — the shared-root path allowlist would pass it.
+    """
+
+    @pytest.mark.asyncio
+    async def test_cross_session_blob_ref_rejected(
+        self,
+        service: ExecutionServiceImpl,
+        mock_session_service: MagicMock,
+    ) -> None:
+        """Blob belonging to a different session is rejected."""
+        executing_session_id = uuid4()
+        other_session_id = uuid4()
+        blob_ref = str(uuid4())
+
+        blob_service = MagicMock()
+        # Blob belongs to other_session_id, not executing_session_id
+        blob_service.get_blob = AsyncMock(return_value=MagicMock(session_id=other_session_id))
+        cast(Any, service)._blob_service = blob_service
+
+        state = mock_session_service.get_current_state.return_value
+        state.source = {
+            "plugin": "csv",
+            "on_success": "continue",
+            "options": {"blob_ref": blob_ref},
+            "on_validation_failure": "quarantine",
+        }
+
+        with pytest.raises(ValueError, match="does not belong to session"):
+            await service.execute(session_id=executing_session_id)
+
+        # Critical: create_run was never called (rejected before run creation)
+        mock_session_service.create_run.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_same_session_blob_ref_accepted(
+        self,
+        service: ExecutionServiceImpl,
+        mock_session_service: MagicMock,
+    ) -> None:
+        """Blob belonging to the same session passes ownership check."""
+        session_id = uuid4()
+        blob_ref = str(uuid4())
+
+        blob_service = MagicMock()
+        blob_service.get_blob = AsyncMock(return_value=MagicMock(session_id=session_id))
         blob_service.link_blob_to_run = AsyncMock()
         cast(Any, service)._blob_service = blob_service
 
@@ -660,13 +740,8 @@ class TestBlobRefPreValidation:
         }
 
         with patch.object(service, "_run_pipeline"):
-            await service.execute(session_id=uuid4())
-
-        blob_service.link_blob_to_run.assert_called_once_with(
-            blob_id=UUID(blob_ref),
-            run_id=run_id,
-            direction="input",
-        )
+            run_id = await service.execute(session_id=session_id)
+        assert isinstance(run_id, UUID)
 
 
 # ── One Active Run (B6) ───────────────────────────────────────────────

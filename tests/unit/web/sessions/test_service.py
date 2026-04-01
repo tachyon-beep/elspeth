@@ -746,6 +746,89 @@ class TestCancelOrphanedRuns:
         assert len(cancelled) == 0
 
 
+class TestCancelAllOrphanedRuns:
+    """Tests for cancel_all_orphaned_runs (global startup cleanup)."""
+
+    @pytest.mark.asyncio
+    async def test_cancels_all_non_terminal_runs_without_age_filter(self, service) -> None:
+        """Default (max_age_seconds=None) cancels ALL pending/running runs,
+        not just old ones. Critical for single-process server restarts."""
+        session = await service.create_session("alice", "Pipeline", "local")
+        state = await service.save_composition_state(
+            session.id,
+            CompositionStateData(is_valid=True),
+        )
+        # Create a fresh run (just created, zero age)
+        run = await service.create_run(session.id, state.id)
+        await service.update_run_status(run.id, "running")
+
+        # No age filter — should cancel even a brand-new run
+        cancelled = await service.cancel_all_orphaned_runs()
+        assert cancelled == 1
+
+        updated = await service.get_run(run.id)
+        assert updated.status == "cancelled"
+
+    @pytest.mark.asyncio
+    async def test_cancels_pending_runs_without_age_filter(self, service) -> None:
+        """Pending runs (never transitioned to running) are also cancelled."""
+        session = await service.create_session("alice", "Pipeline", "local")
+        state = await service.save_composition_state(
+            session.id,
+            CompositionStateData(is_valid=True),
+        )
+        await service.create_run(session.id, state.id)
+
+        cancelled = await service.cancel_all_orphaned_runs()
+        assert cancelled == 1
+
+    @pytest.mark.asyncio
+    async def test_does_not_cancel_terminal_runs(self, service) -> None:
+        """Completed/cancelled/failed runs are never touched."""
+        session = await service.create_session("alice", "Pipeline", "local")
+        state = await service.save_composition_state(
+            session.id,
+            CompositionStateData(is_valid=True),
+        )
+        run = await service.create_run(session.id, state.id)
+        await service.update_run_status(run.id, "running")
+        await service.update_run_status(run.id, "completed")
+
+        cancelled = await service.cancel_all_orphaned_runs()
+        assert cancelled == 0
+
+    @pytest.mark.asyncio
+    async def test_age_filter_still_works_when_provided(self, service) -> None:
+        """When max_age_seconds is given, only old runs are cancelled."""
+        session = await service.create_session("alice", "Pipeline", "local")
+        state = await service.save_composition_state(
+            session.id,
+            CompositionStateData(is_valid=True),
+        )
+        run = await service.create_run(session.id, state.id)
+        await service.update_run_status(run.id, "running")
+
+        # Run was just created — 3600s filter should skip it
+        cancelled = await service.cancel_all_orphaned_runs(max_age_seconds=3600)
+        assert cancelled == 0
+
+    @pytest.mark.asyncio
+    async def test_unblocks_session_after_cancellation(self, service) -> None:
+        """After cancelling orphaned runs, session can accept new runs."""
+        session = await service.create_session("alice", "Pipeline", "local")
+        state = await service.save_composition_state(
+            session.id,
+            CompositionStateData(is_valid=True),
+        )
+        await service.create_run(session.id, state.id)
+
+        await service.cancel_all_orphaned_runs()
+
+        # Session should now be unblocked
+        run2 = await service.create_run(session.id, state.id)
+        assert run2.status == "pending"
+
+
 class TestArchiveSessionWithActiveRun:
     """Tests for archive_session when a run is active."""
 

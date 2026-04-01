@@ -53,12 +53,12 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
 
     slog = structlog.get_logger()
 
-    # Cancel runs orphaned by a previous server crash (D5)
+    # Cancel runs orphaned by a previous server crash (D5).
+    # Single-process server: every non-terminal run is orphaned after restart.
+    # No age filter — cancel ALL pending/running runs immediately.
     settings: WebSettings = app.state.settings
     session_service = app.state.session_service
-    cancelled = await session_service.cancel_all_orphaned_runs(
-        max_age_seconds=settings.orphan_run_max_age_seconds,
-    )
+    cancelled = await session_service.cancel_all_orphaned_runs()
     if cancelled:
         slog.info("cancelled_orphaned_runs", count=cancelled)
 

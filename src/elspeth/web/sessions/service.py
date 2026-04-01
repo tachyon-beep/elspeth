@@ -16,7 +16,7 @@ from pathlib import Path
 from typing import Any, Literal, cast
 from uuid import UUID
 
-from sqlalchemy import Engine, delete, desc, func, insert, select, update
+from sqlalchemy import ColumnElement, Engine, delete, desc, func, insert, select, update
 from sqlalchemy.exc import IntegrityError
 
 from elspeth.contracts.freeze import deep_thaw
@@ -741,24 +741,28 @@ class SessionServiceImpl:
 
     async def cancel_all_orphaned_runs(
         self,
-        max_age_seconds: int = 3600,
+        max_age_seconds: int | None = None,
     ) -> int:
-        """Force-cancel stale runs across all sessions.
+        """Force-cancel orphaned runs across all sessions.
 
         Called on startup to recover sessions blocked by runs orphaned
         during a previous server crash. Returns the count of cancelled runs.
+
+        Args:
+            max_age_seconds: Only cancel runs older than this. None cancels
+                all non-terminal runs (correct for single-process servers
+                where every non-terminal run is orphaned after restart).
         """
         now = self._now()
-        cutoff = now - timedelta(seconds=max_age_seconds)
 
         def _sync() -> int:
             with self._engine.begin() as conn:
-                stale_rows = conn.execute(
-                    select(runs_table.c.id).where(
-                        runs_table.c.status.in_(["pending", "running"]),
-                        runs_table.c.started_at <= cutoff,
-                    )
-                ).fetchall()
+                conditions: list[ColumnElement[bool]] = [runs_table.c.status.in_(["pending", "running"])]
+                if max_age_seconds is not None:
+                    cutoff = now - timedelta(seconds=max_age_seconds)
+                    conditions.append(runs_table.c.started_at <= cutoff)
+
+                stale_rows = conn.execute(select(runs_table.c.id).where(*conditions)).fetchall()
 
                 for row in stale_rows:
                     conn.execute(update(runs_table).where(runs_table.c.id == row.id).values(status="cancelled", finished_at=now))

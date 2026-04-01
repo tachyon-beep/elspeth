@@ -348,11 +348,16 @@ class SessionServiceProtocol(Protocol):
 
     async def cancel_all_orphaned_runs(
         self,
-        max_age_seconds: int = 3600,
+        max_age_seconds: int | None = None,
     ) -> int:
-        """Force-cancel stale runs across all sessions.
+        """Force-cancel orphaned runs across all sessions.
 
         Called on startup to recover sessions blocked by runs orphaned
         during a previous server crash. Returns the count of cancelled runs.
+
+        Args:
+            max_age_seconds: Only cancel runs older than this. None cancels
+                all non-terminal runs (correct for single-process servers
+                where every non-terminal run is orphaned after restart).
         """
         ...
