@@ -199,23 +199,37 @@ class BatchReplicate(BaseTransform):
                 retryable=False,
             )
 
-        # Build contract from union of ALL valid output row keys (not just first)
-        all_keys: dict[str, None] = {}
-        for r in valid_rows:
-            for key in r:
-                all_keys[key] = None
+        # Build contract by merging input row contracts (preserving metadata).
+        # Use the first row's contract as base and add copy_index if configured.
+        first_contract = rows[0].contract
+        for i, row in enumerate(rows[1:], start=1):
+            if row.contract.mode != first_contract.mode:
+                raise ValueError(
+                    f"Heterogeneous contract modes in batch: row 0 has mode "
+                    f"'{first_contract.mode}', row {i} has mode '{row.contract.mode}'. "
+                    f"All rows in a batch must share the same contract mode."
+                )
+        merged_fields: dict[str, FieldContract] = {}
+        for row in rows:
+            for fc in row.contract.fields:
+                if fc.normalized_name not in merged_fields:
+                    merged_fields[fc.normalized_name] = fc
 
-        fields = tuple(
-            FieldContract(
-                normalized_name=key,
-                original_name=key,
-                python_type=object,  # OBSERVED mode - infer all as object type
+        # Add copy_index as a new inferred field if configured
+        if self._include_copy_index:
+            merged_fields["copy_index"] = FieldContract(
+                normalized_name="copy_index",
+                original_name="copy_index",
+                python_type=int,
                 required=False,
                 source="inferred",
             )
-            for key in all_keys
+
+        output_contract = SchemaContract(
+            mode=first_contract.mode,
+            fields=tuple(merged_fields.values()),
+            locked=True,
         )
-        output_contract = SchemaContract(mode="OBSERVED", fields=fields, locked=True)
 
         # Record each quarantine decision in the audit trail so an auditor
         # can trace which specific source rows were dropped and why.

@@ -241,6 +241,17 @@ class CSVFormatter:
             full_key = f"{prefix}.{key}" if prefix else key
 
             if isinstance(value, dict):
+                if not value:
+                    # Preserve empty dicts as JSON "{}" — an empty object is a
+                    # distinct datum from absence. Auditors must be able to tell
+                    # "config was explicitly empty" from "config was not present".
+                    if full_key in result:
+                        raise ValueError(
+                            f"CSV flatten key collision: '{full_key}' already exists. "
+                            f"Audit export would lose data."
+                        )
+                    result[full_key] = "{}"
+                    continue
                 nested = self.flatten(value, full_key)
                 for nested_key, nested_val in nested.items():
                     if nested_key in result:

@@ -43,6 +43,10 @@ _NOISY_LOGGERS: tuple[str, ...] = (
     "httpcore",
 )
 
+# Track ELSPETH-owned handler ids for selective removal on reconfiguration.
+# Using id-set instead of getattr() to comply with the defensive programming ban.
+_elspeth_handler_ids: set[int] = set()
+
 
 def _remove_internal_fields(
     logger: logging.Logger | None,
@@ -127,9 +131,13 @@ def configure_logging(
         )
     )
 
-    # Replace root logger handlers
+    # Remove only ELSPETH-owned handlers (preserve others like pytest caplog)
     root = logging.getLogger()
-    root.handlers = []
+    root.handlers = [h for h in root.handlers if id(h) not in _elspeth_handler_ids]
+    _elspeth_handler_ids.discard(id(handler))  # Avoid stale entries
+
+    # Track our handler by id so we can find it later
+    _elspeth_handler_ids.add(id(handler))
     root.addHandler(handler)
     root.setLevel(log_level)
 

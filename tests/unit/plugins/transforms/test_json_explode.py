@@ -863,3 +863,50 @@ class TestOutputSchemaConfig:
         )
         assert transform._output_schema_config is not None
         assert frozenset(transform._output_schema_config.guaranteed_fields) == frozenset({"item"})
+
+
+class TestJSONExplodeOutputSchemaExcludesArrayField:
+    """Tests that array_field is NOT in _output_schema_config.guaranteed_fields.
+
+    Bug fix: JSONExplode called _build_output_schema_config() which copies input
+    guaranteed_fields into output. But JSONExplode removes array_field at runtime,
+    so it must not appear in output guarantees.
+    """
+
+    def test_array_field_not_in_guaranteed_fields_when_in_input(self):
+        """array_field from input guaranteed_fields is excluded from output."""
+        from elspeth.plugins.transforms.json_explode import JSONExplode
+
+        transform = JSONExplode(
+            {
+                "array_field": "items",
+                "output_field": "item",
+                "include_index": True,
+                "schema": {"mode": "observed", "guaranteed_fields": ["id", "items"]},
+            }
+        )
+        assert transform._output_schema_config is not None
+        guaranteed = frozenset(transform._output_schema_config.guaranteed_fields)
+        assert "items" not in guaranteed
+        assert "item" in guaranteed
+        assert "item_index" in guaranteed
+        assert "id" in guaranteed
+
+    def test_output_preserves_non_array_guaranteed_fields(self):
+        """Non-array guaranteed fields from input are preserved in output."""
+        from elspeth.plugins.transforms.json_explode import JSONExplode
+
+        transform = JSONExplode(
+            {
+                "array_field": "tags",
+                "output_field": "tag",
+                "include_index": False,
+                "schema": {"mode": "observed", "guaranteed_fields": ["id", "name", "tags"]},
+            }
+        )
+        assert transform._output_schema_config is not None
+        guaranteed = frozenset(transform._output_schema_config.guaranteed_fields)
+        assert "tags" not in guaranteed
+        assert "tag" in guaranteed
+        assert "id" in guaranteed
+        assert "name" in guaranteed

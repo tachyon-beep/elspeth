@@ -292,6 +292,58 @@ class TestExplainPassphraseResolution:
         assert "yaml" not in result.output.lower() or result.exit_code == 0
 
 
+class TestExplainSecretLoading:
+    """explain must use _load_settings_with_secrets, not load_settings.
+
+    Bug: elspeth-866ccf203b — explain bypassed the secret-loading flow
+    when reloading --settings for passphrase resolution. Secrets were
+    never injected, so encrypted audit databases became unreadable.
+    """
+
+    def test_explain_uses_secret_loading_path(self, tmp_path: Path) -> None:
+        """explain --settings should call _load_settings_with_secrets, not load_settings."""
+        from unittest.mock import MagicMock
+
+        from elspeth.cli import app
+        from elspeth.contracts import RunStatus
+        from elspeth.core.landscape import LandscapeDB
+        from tests.fixtures.landscape import make_recorder
+
+        # Create a valid Landscape database with one run
+        db_path = tmp_path / "audit.db"
+        db = LandscapeDB.from_url(f"sqlite:///{db_path}")
+        recorder = make_recorder(db)
+        recorder.begin_run(config={}, canonical_version="v1", run_id="run-1")
+        recorder.complete_run("run-1", RunStatus.COMPLETED)
+        db.close()
+
+        # Create a valid settings file
+        settings_file = tmp_path / "settings.yaml"
+        settings_file.write_text("source:\n  plugin: csv\n  options:\n    file: test.csv\n")
+
+        # Patch _load_settings_with_secrets to verify it's called
+        mock_settings = MagicMock()
+        mock_settings.landscape = None
+        with patch(
+            "elspeth.cli._load_settings_with_secrets",
+            return_value=(mock_settings, []),
+        ) as mock_load:
+            runner.invoke(
+                app,
+                [
+                    "explain",
+                    "--database",
+                    str(db_path),
+                    "--settings",
+                    str(settings_file),
+                    "--run",
+                    "run-1",
+                    "--no-tui",
+                ],
+            )
+            mock_load.assert_called_once()
+
+
 class TestBuildResumeGraphs:
     """Test _build_resume_graphs accepts connection-valued on_success.
 

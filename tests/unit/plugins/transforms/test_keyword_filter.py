@@ -399,8 +399,8 @@ class TestKeywordFilterProcessing:
 
         assert result.status == "error"
 
-    def test_skips_missing_configured_field(self) -> None:
-        """Transform skips fields not present in the row."""
+    def test_missing_named_field_fails_closed(self) -> None:
+        """Named field missing from row must fail closed — security check incomplete."""
         from elspeth.plugins.transforms.keyword_filter import KeywordFilter
 
         transform = KeywordFilter(
@@ -411,31 +411,48 @@ class TestKeywordFilterProcessing:
             }
         )
 
-        # Row is missing "optional_field" but has "content"
         row = {"content": "safe data", "id": 1}
-        result = transform.process(make_pipeline_row(row), make_context())
-
-        assert result.status == "success"
-
-    def test_detects_pattern_in_present_field_when_other_missing(self) -> None:
-        """Transform still detects patterns in fields that ARE present."""
-        from elspeth.plugins.transforms.keyword_filter import KeywordFilter
-
-        transform = KeywordFilter(
-            {
-                "fields": ["content", "optional_field"],
-                "blocked_patterns": [r"secret"],
-                "schema": {"mode": "observed"},
-            }
-        )
-
-        # Row is missing "optional_field" but "content" has blocked pattern
-        row = {"content": "contains secret data", "id": 1}
         result = transform.process(make_pipeline_row(row), make_context())
 
         assert result.status == "error"
         assert result.reason is not None
-        assert result.reason["field"] == "content"
+        assert result.reason["reason"] == "missing_scan_field"
+        assert result.reason["field"] == "optional_field"
+
+    def test_missing_named_field_not_retryable(self) -> None:
+        """Missing named field error is not retryable — data issue, not transient."""
+        from elspeth.plugins.transforms.keyword_filter import KeywordFilter
+
+        transform = KeywordFilter(
+            {
+                "fields": ["missing_field"],
+                "blocked_patterns": [r"secret"],
+                "schema": {"mode": "observed"},
+            }
+        )
+
+        row = {"content": "safe data"}
+        result = transform.process(make_pipeline_row(row), make_context())
+
+        assert result.status == "error"
+        assert result.retryable is False
+
+    def test_missing_field_in_all_mode_passes(self) -> None:
+        """'all' mode skips missing fields — only scans present string fields."""
+        from elspeth.plugins.transforms.keyword_filter import KeywordFilter
+
+        transform = KeywordFilter(
+            {
+                "fields": "all",
+                "blocked_patterns": [r"secret"],
+                "schema": {"mode": "observed"},
+            }
+        )
+
+        row = {"content": "safe data", "id": 1}
+        result = transform.process(make_pipeline_row(row), make_context())
+
+        assert result.status == "success"
 
     def test_blocks_when_config_uses_original_field_name(self) -> None:
         """Configured original field names resolve through PipelineRow contract."""

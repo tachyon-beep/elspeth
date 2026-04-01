@@ -19,10 +19,14 @@ Therefore, JSONExplode inherits from DataPluginConfig (NOT TransformDataConfig)
 and has no on_error configuration.
 """
 
+from __future__ import annotations
+
 import copy
 from typing import Any
 
 from pydantic import Field, field_validator, model_validator
+
+from elspeth.contracts.schema import SchemaConfig
 
 from elspeth.contracts.contexts import TransformContext
 from elspeth.contracts.contract_propagation import narrow_contract_to_output
@@ -127,12 +131,37 @@ class JSONExplode(BaseTransform):
             fields.append("item_index")
         self.declared_output_fields = frozenset(fields)
 
+        self._schema_config = cfg.schema_config
+
         self.input_schema, self.output_schema = self._create_schemas(
             cfg.schema_config,
             "JSONExplode",
             adds_fields=True,
         )
-        self._output_schema_config = self._build_output_schema_config(cfg.schema_config)
+        self._output_schema_config = self._build_json_explode_output_schema_config(cfg)
+
+    def _build_json_explode_output_schema_config(self, cfg: JSONExplodeConfig) -> SchemaConfig:
+        """Build output schema config excluding array_field.
+
+        JSONExplode removes array_field from output and adds output_field
+        (and optionally item_index). The base _build_output_schema_config()
+        incorrectly retains array_field in guaranteed_fields.
+        """
+        base_guaranteed = set(cfg.schema_config.guaranteed_fields or ())
+
+        # Remove array_field from output guarantees (it's consumed at runtime)
+        base_guaranteed.discard(cfg.array_field)
+
+        # Add declared output fields (output_field + optionally item_index)
+        output_fields = base_guaranteed | self.declared_output_fields
+
+        return SchemaConfig(
+            mode=cfg.schema_config.mode,
+            fields=cfg.schema_config.fields,
+            guaranteed_fields=tuple(sorted(output_fields)) if output_fields else None,
+            audit_fields=cfg.schema_config.audit_fields,
+            required_fields=cfg.schema_config.required_fields,
+        )
 
     def process(self, row: PipelineRow, ctx: TransformContext) -> TransformResult:
         """Explode array field into multiple rows.

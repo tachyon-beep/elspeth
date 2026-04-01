@@ -281,7 +281,7 @@ class TestCSVFormatter:
         assert flat["nested.also_none"] is None
 
     def test_csv_formatter_handles_empty_dict(self) -> None:
-        """CSV formatter should handle empty nested dicts."""
+        """CSV formatter preserves empty dicts as '{}' — distinct from absence."""
         formatter = CSVFormatter()
 
         record = {
@@ -292,8 +292,25 @@ class TestCSVFormatter:
         flat = formatter.flatten(record)
 
         assert flat["record_type"] == "test"
-        # Empty dict produces no keys for that prefix
-        assert "empty" not in flat
+        # Empty dict is preserved as JSON "{}" — an empty object is a
+        # distinct datum from absence.
+        assert flat["empty"] == "{}"
+
+    def test_csv_formatter_empty_dict_nested(self) -> None:
+        """Empty dict inside a nested path is preserved."""
+        formatter = CSVFormatter()
+
+        record = {
+            "outer": {
+                "config": {},
+                "name": "test",
+            },
+        }
+
+        flat = formatter.flatten(record)
+
+        assert flat["outer.config"] == "{}"
+        assert flat["outer.name"] == "test"
 
     def test_csv_formatter_rejects_nan_in_list(self) -> None:
         """CSV formatter must reject NaN in lists per CLAUDE.md audit integrity.

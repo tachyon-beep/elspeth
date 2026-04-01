@@ -334,25 +334,40 @@ class CallVerifier:
                 # verification even though the full payload is missing. Per CLAUDE.md:
                 # "Hashes survive payload deletion — integrity is always verifiable."
                 if call.response_hash is not None:
-                    live_hash = stable_hash(live_response)
-                    is_match = live_hash == call.response_hash
-                    if is_match:
-                        self._report.matches += 1
-                    else:
-                        self._report.mismatches += 1
-                    result = VerificationResult.missing_payload(
-                        request_hash=request_hash,
-                        live_response=live_response,
-                        is_match=is_match,
-                        differences={
-                            "hash_mismatch": {
-                                "recorded_hash": call.response_hash,
-                                "live_hash": live_hash,
+                    # Hash comparison is only valid when comparison settings are
+                    # equivalent to exact match (no ignore_paths, no ignore_order).
+                    # With ignore_paths or ignore_order, the configured comparison
+                    # defines a LOOSER equivalence than raw hash equality.
+                    can_verify_by_hash = not self._ignore_paths and not self._ignore_order
+
+                    if can_verify_by_hash:
+                        live_hash = stable_hash(live_response)
+                        is_match = live_hash == call.response_hash
+                        if is_match:
+                            self._report.matches += 1
+                        else:
+                            self._report.mismatches += 1
+                        result = VerificationResult.missing_payload(
+                            request_hash=request_hash,
+                            live_response=live_response,
+                            is_match=is_match,
+                            differences={
+                                "hash_mismatch": {
+                                    "recorded_hash": call.response_hash,
+                                    "live_hash": live_hash,
+                                }
                             }
-                        }
-                        if not is_match
-                        else None,
-                    )
+                            if not is_match
+                            else None,
+                        )
+                    else:
+                        # Cannot perform meaningful verification: payload is gone and
+                        # hash comparison would be stricter than the configured semantic
+                        # comparison (ignore_paths/ignore_order not applicable to hashes).
+                        result = VerificationResult.missing_payload(
+                            request_hash=request_hash,
+                            live_response=live_response,
+                        )
                 else:
                     # No hash available — cannot verify, just mark as missing
                     result = VerificationResult.missing_payload(

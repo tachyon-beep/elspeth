@@ -18,6 +18,8 @@ from elspeth.plugins.infrastructure.base import BaseTransform
 from elspeth.plugins.infrastructure.config_base import TransformDataConfig
 from elspeth.plugins.infrastructure.results import TransformResult
 
+from elspeth.contracts.schema import SchemaConfig
+
 
 class BatchStatsConfig(TransformDataConfig):
     """Configuration for batch statistics transform.
@@ -90,7 +92,8 @@ class BatchStats(BaseTransform):
         stat_fields: set[str] = {"count", "sum", "batch_size"}
         if cfg.compute_mean:
             stat_fields.add("mean")
-        self.declared_output_fields = frozenset(stat_fields)
+        # _all_possible_output_keys is stat fields + conditional fields (without group_by)
+        # used for collision detection before group_by is added to output guarantees.
         self._all_possible_output_keys = frozenset(stat_fields | {"skipped_non_finite", "skipped_non_finite_indices"})
 
         if cfg.group_by is not None and cfg.group_by in self._all_possible_output_keys:
@@ -99,14 +102,41 @@ class BatchStats(BaseTransform):
                 f"Choose a group_by field name that is not one of: {', '.join(sorted(self._all_possible_output_keys))}"
             )
 
-        self._schema_config = cfg.schema_config
+        # group_by is guaranteed on every successful result when configured.
+        # Added after the collision check so it doesn't self-collide.
+        if cfg.group_by is not None:
+            stat_fields.add(cfg.group_by)
+        self.declared_output_fields = frozenset(stat_fields)
+
+        # Declare group_by as required input when configured, so the DAG builder
+        # can validate upstream output guarantees. value_field is enforced at
+        # runtime via direct field access (KeyError = upstream bug) rather than
+        # build-time schema requirements — observed-mode schemas don't declare
+        # guaranteed fields, so a build-time requirement would reject valid pipelines.
+        if cfg.group_by is not None:
+            base_required = set(cfg.schema_config.required_fields or ())
+            base_required.add(cfg.group_by)
+            if base_required != set(cfg.schema_config.required_fields or ()):
+                schema_config = SchemaConfig(
+                    mode=cfg.schema_config.mode,
+                    fields=cfg.schema_config.fields,
+                    guaranteed_fields=cfg.schema_config.guaranteed_fields,
+                    audit_fields=cfg.schema_config.audit_fields,
+                    required_fields=tuple(base_required),
+                )
+            else:
+                schema_config = cfg.schema_config
+        else:
+            schema_config = cfg.schema_config
+
+        self._schema_config = schema_config
 
         self.input_schema, self.output_schema = self._create_schemas(
-            cfg.schema_config,
+            schema_config,
             "BatchStats",
             adds_fields=True,
         )
-        self._output_schema_config = self._build_output_schema_config(cfg.schema_config)
+        self._output_schema_config = self._build_output_schema_config(schema_config)
 
     def process(  # type: ignore[override] # Batch signature: list[PipelineRow] instead of PipelineRow
         self, rows: list[PipelineRow], ctx: TransformContext

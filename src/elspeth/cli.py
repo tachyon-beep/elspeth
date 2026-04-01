@@ -690,7 +690,7 @@ def explain(
     landscape_settings = config.landscape if config else None
     if landscape_settings is None and settings_path is not None and settings_path.exists():
         try:
-            settings_for_passphrase = load_settings(settings_path)
+            settings_for_passphrase, _ = _load_settings_with_secrets(Path(settings_path).expanduser())
             landscape_settings = settings_for_passphrase.landscape
         except (FileNotFoundError, yaml.YAMLError, YamlParserError, YamlScannerError) as e:
             # User explicitly provided --settings (guarded by settings_path is not None

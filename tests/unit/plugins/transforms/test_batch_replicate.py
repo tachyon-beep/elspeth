@@ -494,3 +494,113 @@ class TestOutputSchemaConfig:
         )
         assert transform._output_schema_config is not None
         assert frozenset(transform._output_schema_config.guaranteed_fields) == frozenset()
+
+
+class TestBatchReplicateContractPreservation:
+    """Tests that output rows preserve input contract metadata.
+
+    Bug fix: BatchReplicate was building SchemaContract from scratch with
+    mode=OBSERVED, python_type=object, source=inferred for ALL keys. This
+    discards the input contracts' mode, original_name, python_type, and field types.
+    The fix merges input row contracts to preserve metadata.
+    """
+
+    @pytest.fixture
+    def ctx(self) -> PluginContext:
+        return make_context()
+
+    def test_output_preserves_input_contract_mode(self, ctx: PluginContext) -> None:
+        """Output contract mode should match input contract mode."""
+        from elspeth.contracts.schema_contract import FieldContract, PipelineRow, SchemaContract
+        from elspeth.plugins.transforms.batch_replicate import BatchReplicate
+
+        transform = BatchReplicate(
+            {
+                "schema": DYNAMIC_SCHEMA,
+                "copies_field": "copies",
+                "include_copy_index": True,
+            }
+        )
+
+        contract = SchemaContract(
+            mode="FIXED",
+            fields=(
+                FieldContract(normalized_name="id", original_name="id", python_type=int, required=True, source="declared"),
+                FieldContract(normalized_name="copies", original_name="copies", python_type=int, required=True, source="declared"),
+            ),
+            locked=True,
+        )
+        rows = [PipelineRow({"id": 1, "copies": 2}, contract)]
+
+        result = transform.process(rows, ctx)
+
+        assert result.status == "success"
+        assert result.rows is not None
+        output_contract = result.rows[0].contract
+        assert output_contract.mode == "FIXED"
+
+    def test_output_preserves_field_python_type(self, ctx: PluginContext) -> None:
+        """Output contract fields preserve python_type from input contract."""
+        from elspeth.contracts.schema_contract import FieldContract, PipelineRow, SchemaContract
+        from elspeth.plugins.transforms.batch_replicate import BatchReplicate
+
+        transform = BatchReplicate(
+            {
+                "schema": DYNAMIC_SCHEMA,
+                "copies_field": "copies",
+                "include_copy_index": True,
+            }
+        )
+
+        contract = SchemaContract(
+            mode="OBSERVED",
+            fields=(
+                FieldContract(normalized_name="id", original_name="ID", python_type=int, required=True, source="declared"),
+                FieldContract(normalized_name="copies", original_name="copies", python_type=int, required=False, source="inferred"),
+            ),
+            locked=True,
+        )
+        rows = [PipelineRow({"id": 1, "copies": 1}, contract)]
+
+        result = transform.process(rows, ctx)
+
+        assert result.status == "success"
+        assert result.rows is not None
+        output_contract = result.rows[0].contract
+
+        id_field = output_contract.get_field("id")
+        assert id_field is not None
+        assert id_field.python_type is int
+        assert id_field.original_name == "ID"
+        assert id_field.source == "declared"
+
+    def test_output_copy_index_has_int_type(self, ctx: PluginContext) -> None:
+        """copy_index field in output contract has python_type=int, not object."""
+        from elspeth.contracts.schema_contract import FieldContract, PipelineRow, SchemaContract
+        from elspeth.plugins.transforms.batch_replicate import BatchReplicate
+
+        transform = BatchReplicate(
+            {
+                "schema": DYNAMIC_SCHEMA,
+                "copies_field": "copies",
+                "include_copy_index": True,
+            }
+        )
+
+        contract = SchemaContract(
+            mode="OBSERVED",
+            fields=(
+                FieldContract(normalized_name="id", original_name="id", python_type=int, required=False, source="inferred"),
+                FieldContract(normalized_name="copies", original_name="copies", python_type=int, required=False, source="inferred"),
+            ),
+            locked=True,
+        )
+        rows = [PipelineRow({"id": 1, "copies": 2}, contract)]
+
+        result = transform.process(rows, ctx)
+
+        assert result.status == "success"
+        assert result.rows is not None
+        copy_idx_field = result.rows[0].contract.get_field("copy_index")
+        assert copy_idx_field is not None
+        assert copy_idx_field.python_type is int

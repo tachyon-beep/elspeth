@@ -608,7 +608,9 @@ class TestOutputSchemaConfig:
             }
         )
         assert transform._output_schema_config is not None
-        assert frozenset(transform._output_schema_config.guaranteed_fields) == frozenset()
+        # Empty mapping produces no output guarantees (None or empty tuple)
+        guaranteed = transform._output_schema_config.guaranteed_fields
+        assert guaranteed is None or frozenset(guaranteed) == frozenset()
 
     def test_declared_output_fields_set_from_mapping(self):
         from elspeth.plugins.transforms.field_mapper import FieldMapper
@@ -633,3 +635,63 @@ class TestOutputSchemaConfig:
         )
         # "score" → "score" is identity (excluded), "name" → "display_name" is a rename (included)
         assert transform.declared_output_fields == frozenset({"display_name"})
+
+
+class TestFieldMapperOutputSchemaContract:
+    """Tests for FieldMapper _output_schema_config reflecting actual output shape.
+
+    Bug fix: FieldMapper called _build_output_schema_config() which copies input
+    fields into output guarantees. But FieldMapper removes/renames fields, so the
+    output shape differs from input. The fix builds a custom output schema config.
+    """
+
+    def test_select_only_output_guarantees_are_only_targets(self):
+        """select_only=True: guaranteed fields are ONLY the mapping targets."""
+        from elspeth.plugins.transforms.field_mapper import FieldMapper
+
+        transform = FieldMapper(
+            {
+                "mapping": {"a": "x", "b": "y"},
+                "select_only": True,
+                "schema": {"mode": "observed", "guaranteed_fields": ["a", "b", "c"]},
+            }
+        )
+        assert transform._output_schema_config is not None
+        guaranteed = frozenset(transform._output_schema_config.guaranteed_fields)
+        # Only mapping targets, not input fields
+        assert guaranteed == frozenset({"x", "y"})
+        # Input fields that were dropped should NOT be present
+        assert "a" not in guaranteed
+        assert "b" not in guaranteed
+        assert "c" not in guaranteed
+
+    def test_rename_removes_source_adds_target_in_guarantees(self):
+        """Rename mapping removes source field and adds target in guaranteed_fields."""
+        from elspeth.plugins.transforms.field_mapper import FieldMapper
+
+        transform = FieldMapper(
+            {
+                "mapping": {"old_name": "new_name"},
+                "schema": {"mode": "observed", "guaranteed_fields": ["old_name", "keep_me"]},
+            }
+        )
+        assert transform._output_schema_config is not None
+        guaranteed = frozenset(transform._output_schema_config.guaranteed_fields)
+        assert "new_name" in guaranteed
+        assert "keep_me" in guaranteed
+        assert "old_name" not in guaranteed
+
+    def test_identity_mapping_preserves_field_in_guarantees(self):
+        """Identity mapping (source == target) keeps the field in guaranteed_fields."""
+        from elspeth.plugins.transforms.field_mapper import FieldMapper
+
+        transform = FieldMapper(
+            {
+                "mapping": {"id": "id"},
+                "schema": {"mode": "observed", "guaranteed_fields": ["id", "name"]},
+            }
+        )
+        assert transform._output_schema_config is not None
+        guaranteed = frozenset(transform._output_schema_config.guaranteed_fields)
+        assert "id" in guaranteed
+        assert "name" in guaranteed

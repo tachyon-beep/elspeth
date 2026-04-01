@@ -178,6 +178,7 @@ class AzureContentSafety(BaseAzureSafetyTransform):
 
         try:
             result: dict[str, int] = dict.fromkeys(_EXPECTED_CATEGORIES, 0)
+            seen_categories: set[str] = set()
 
             for item in data["categoriesAnalysis"]:
                 azure_category = item["category"]
@@ -190,6 +191,13 @@ class AzureContentSafety(BaseAzureSafetyTransform):
                         f"Known categories: {sorted(_AZURE_CATEGORY_MAP.keys())}. "
                         f"Update _AZURE_CATEGORY_MAP to handle this category."
                     )
+                if internal_name in seen_categories:
+                    raise MalformedResponseError(
+                        f"Duplicate Azure Content Safety category: {azure_category!r} "
+                        f"(internal: {internal_name!r}). A malformed response with duplicate "
+                        f"categories could downgrade a previously flagged severity."
+                    )
+                seen_categories.add(internal_name)
                 severity = item["severity"]
                 if type(severity) is not int or not (0 <= severity <= 6):
                     raise MalformedResponseError(f"severity for {azure_category!r} must be int in [0, 6], got {severity!r}")

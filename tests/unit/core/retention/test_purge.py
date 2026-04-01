@@ -727,6 +727,46 @@ class TestInterruptedRunNotPurgeEligible:
         refs = set(manager.find_expired_payload_refs(retention_days=30, as_of=now))
         assert "ref-interrupted-all" not in refs
 
+    def test_interrupted_run_protects_shared_blobs(self, db: LandscapeDB) -> None:
+        """Shared blobs between expired and interrupted runs must not be purged.
+
+        Bug: elspeth-d4297f57fa — payloads are content-addressable and shared
+        across runs. The run_active_condition must include "interrupted" so
+        the anti-join protects blobs still needed by interrupted runs.
+        """
+        manager = PurgeManager(db, MockPayloadStore())
+        now = datetime(2026, 2, 14, tzinfo=UTC)
+        old = now - timedelta(days=60)
+
+        with db.connection() as conn:
+            # Expired completed run with a shared blob
+            _create_run(conn, "run-completed-old", status=RunStatus.COMPLETED, completed_at=old)
+            _create_node(conn, "run-completed-old", "node-completed-old")
+            _create_row(
+                conn,
+                "run-completed-old",
+                "node-completed-old",
+                "row-completed-old",
+                row_index=0,
+                source_data_ref="shared-blob-ref",
+            )
+
+            # Interrupted run referencing the SAME blob (content-addressable)
+            _create_run(conn, "run-interrupted-shared", status=RunStatus.INTERRUPTED, completed_at=old)
+            _create_node(conn, "run-interrupted-shared", "node-interrupted-shared")
+            _create_row(
+                conn,
+                "run-interrupted-shared",
+                "node-interrupted-shared",
+                "row-interrupted-shared",
+                row_index=0,
+                source_data_ref="shared-blob-ref",
+            )
+
+        refs = set(manager.find_expired_payload_refs(retention_days=30, as_of=now))
+        # The shared blob must NOT be purged because an interrupted run needs it
+        assert "shared-blob-ref" not in refs
+
 
 class TestPurgeGradeUpdateFailureResilience:
     """Regression test for elspeth-dfc66ddc10: grade update failure after irreversible payload deletion.
