@@ -2383,7 +2383,7 @@ class TestExecutionGraphRouteMapping:
                 _gate_settings(
                     GateSettings,
                     name="router",
-                    condition="row.get('valid', False)",
+                    condition="row.get('valid') is not None",
                     routes={"true": "clean", "false": "quarantine"},
                 ),
             ],

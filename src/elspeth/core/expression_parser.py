@@ -93,15 +93,12 @@ _BOOL_OPS: MappingProxyType[type[ast.boolop], str] = MappingProxyType(
 )
 
 # Safe built-in functions allowed in expressions (immutable to prevent runtime tampering).
-# All are pure functions with no side effects, no I/O, and no access to the runtime
-# environment. They cannot escape the expression sandbox.
+# Only non-coercive operations are permitted. Coercive builtins (str, int, float, bool)
+# are forbidden because they silently normalize Tier 2 data in gate expressions,
+# masking upstream contract bugs and weakening audit attributability.
 _SAFE_BUILTINS: MappingProxyType[str, Any] = MappingProxyType(
     {
         "len": len,
-        "str": str,
-        "int": int,
-        "float": float,
-        "bool": bool,
         "abs": abs,
     }
 )
@@ -171,9 +168,7 @@ class _ExpressionValidator(ast.NodeVisitor):
                 self.errors.append(f"Forbidden attribute: {node.attr!r} (only 'get' is allowed)")
             elif not self._in_call_func:
                 # name.get without a call is forbidden - returns method object
-                self.errors.append(
-                    f"Bare '{node.value.id}.get' is forbidden; use '{node.value.id}.get(key)' or '{node.value.id}.get(key, default)'"
-                )
+                self.errors.append(f"Bare '{node.value.id}.get' is forbidden; use '{node.value.id}.get(key)'")
         else:
             self.errors.append(f"Forbidden attribute access: {node.attr!r}")
         self.generic_visit(node)
@@ -188,8 +183,12 @@ class _ExpressionValidator(ast.NodeVisitor):
             and node.func.attr == "get"
         ):
             caller_name = node.func.value.id
-            if len(node.args) < 1 or len(node.args) > 2:
-                self.errors.append(f"{caller_name}.get() requires 1 or 2 arguments, got {len(node.args)}")
+            if len(node.args) != 1:
+                self.errors.append(
+                    f"{caller_name}.get() requires exactly 1 argument (key only), got {len(node.args)}. "
+                    f"Default values are forbidden — they fabricate data the source never provided. "
+                    f"Use '{caller_name}.get(key) is not None' to test for field presence."
+                )
             if node.keywords:
                 self.errors.append(f"{caller_name}.get() does not accept keyword arguments")
             # Visit func with context flag set to allow row.get attribute
@@ -604,8 +603,8 @@ class ExpressionParser:
 
     Allowed operations:
     - Subscript access: name['field'], name['key1']['key2']
-    - Method: name.get('field'), name.get('field', default)
-    - Safe builtins: len(), str(), int(), float(), bool(), abs()
+    - Method: name.get('field') (single-arg only — defaults are fabrication)
+    - Safe builtins: len(), abs()
     - Comparisons: ==, !=, <, >, <=, >=
     - Boolean operators: and, or, not
     - Membership: in, not in
@@ -722,10 +721,6 @@ class ExpressionParser:
         # Ternary: boolean if both branches are boolean
         if isinstance(node, ast.IfExp):
             return self._is_boolean_node(node.body) and self._is_boolean_node(node.orelse)
-
-        # Function calls: bool() always returns bool
-        if isinstance(node, ast.Call):
-            return isinstance(node.func, ast.Name) and node.func.id == "bool"
 
         # Everything else (field access, arithmetic, etc.) is not guaranteed boolean
         return False

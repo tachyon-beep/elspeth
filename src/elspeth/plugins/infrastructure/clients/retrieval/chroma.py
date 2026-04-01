@@ -143,6 +143,16 @@ class ChromaSearchProvider:
                 ssl=config.ssl,
             )
 
+        # Detect whether the collection pre-existed before we get_or_create it.
+        # check_readiness() uses this to distinguish "empty because it already
+        # existed with no documents" from "empty because we just auto-created
+        # it (possible typo in collection name)".
+        try:
+            self._client.get_collection(name=config.collection)
+            self._collection_pre_existed = True
+        except Exception:
+            self._collection_pre_existed = False
+
         try:
             self._collection = self._client.get_or_create_collection(
                 name=config.collection,
@@ -352,13 +362,17 @@ class ChromaSearchProvider:
 
         try:
             count = self._collection.count()
+            if count > 0:
+                message = f"Collection '{collection_name}' has {count} documents"
+            elif not self._collection_pre_existed:
+                message = f"Collection '{collection_name}' was auto-created (empty) — verify the collection name is correct"
+            else:
+                message = f"Collection '{collection_name}' is empty"
             return CollectionReadinessResult(
                 collection=collection_name,
                 reachable=True,
                 count=count,
-                message=(
-                    f"Collection '{collection_name}' has {count} documents" if count > 0 else f"Collection '{collection_name}' is empty"
-                ),
+                message=message,
             )
         except (chromadb.errors.ChromaError, ConnectionError, OSError) as exc:
             return CollectionReadinessResult(

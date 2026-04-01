@@ -5,6 +5,7 @@ from __future__ import annotations
 import pytest
 
 from elspeth.contracts.diversion import RowDiversion, SinkWriteResult
+from elspeth.contracts.errors import PluginContractViolation
 from elspeth.contracts.results import ArtifactDescriptor
 
 
@@ -69,6 +70,15 @@ class TestSinkWriteResult:
         result = SinkWriteResult(artifact=self._make_artifact())
         with pytest.raises(AttributeError):
             result.artifact = self._make_artifact()  # type: ignore[misc]
+
+    def test_duplicate_row_index_rejected(self) -> None:
+        """Duplicate row_index values crash — would silently collapse in executor."""
+        divs = (
+            RowDiversion(row_index=1, reason="first", row_data={"x": 1}),
+            RowDiversion(row_index=1, reason="second", row_data={"x": 2}),
+        )
+        with pytest.raises(PluginContractViolation, match="duplicate diversion row_index=1"):
+            SinkWriteResult(artifact=self._make_artifact(), diversions=divs)
 
     def test_diversions_tuple_not_list(self) -> None:
         """Diversions must be a tuple (immutable), not a list."""

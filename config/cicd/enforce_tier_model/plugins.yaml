@@ -435,3 +435,8 @@ allow_hits:
   reason: Offensive isinstance assertion — detects Pydantic validator bug if allowed_hosts is not list[str] after validation
   safety: Crashes immediately with descriptive error; better than silently iterating string characters as ip_network calls
   expires: null
+- key: plugins/infrastructure/clients/retrieval/chroma.py:R4:ChromaSearchProvider:__init__:fp=3e8977a9015f46a2
+  owner: architecture
+  reason: Pre-existence probe before get_or_create_collection — broad catch because any exception (NotFoundError, ConnectionError, etc.) means we can't confirm pre-existence
+  safety: Boolean flag only — false negative (collection_pre_existed=False when it did exist) produces a slightly more cautious readiness message; no correctness impact
+  expires: null

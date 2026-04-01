@@ -51,6 +51,7 @@ class NodeStateGuard:
     __slots__ = (
         "_attempt",
         "_completed",
+        "_completion_attempted",
         "_enter_time",
         "_input_data",
         "_node_id",
@@ -82,6 +83,7 @@ class NodeStateGuard:
         self._enter_time: float = 0.0
         self._state: NodeStateOpen | None = None
         self._completed = False
+        self._completion_attempted = False
 
     # -- context manager protocol ------------------------------------------
 
@@ -104,6 +106,12 @@ class NodeStateGuard:
         exc_tb: TracebackType | None,
     ) -> None:
         if self._completed:
+            return
+
+        if self._completion_attempted:
+            # complete() was called but the recorder raised after committing.
+            # The DB state is (probably) already terminal — writing FAILED on top
+            # would corrupt the audit trail. Let the original exception propagate.
             return
 
         duration_ms = (time.perf_counter() - self._enter_time) * 1000
@@ -193,7 +201,14 @@ class NodeStateGuard:
         success_reason: TransformSuccessReason | None = None,
         context_after: NodeStateContext | None = None,
     ) -> None:
-        """Complete the node state.  Guard will not intervene after this."""
+        """Complete the node state.  Guard will not intervene after this.
+
+        Sets ``_completion_attempted`` BEFORE the recorder call so that if
+        ``complete_node_state()`` commits but then raises (post-commit
+        validation), ``__exit__`` will not overwrite the already-persisted
+        terminal state with FAILED.
+        """
+        self._completion_attempted = True
         self._recorder.complete_node_state(  # type: ignore[call-overload,misc]  # generic NodeStateStatus vs Literal overloads
             state_id=self.state_id,
             status=status,

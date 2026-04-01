@@ -1141,7 +1141,7 @@ class TestGateSettings:
         gate = GateSettings(
             name="complex_gate",
             input="source_out",
-            condition="row['confidence'] >= 0.85 and row.get('category', 'unknown') != 'spam'",
+            condition="row['confidence'] >= 0.85 and row['category'] != 'spam'",
             routes={"true": "quality_ok", "false": "quarantine"},
         )
         assert "and" in gate.condition

@@ -154,8 +154,9 @@ class SinkExecutor:
         """Write tokens to sink with artifact recording and failsink routing.
 
         CRITICAL: Creates a node_state for EACH token written AND records
-        token outcomes. Both records are created AFTER sink.flush()
-        to ensure they only exist when data is durably written.
+        token outcomes. Node_states are opened BEFORE I/O so that Phase 1
+        failures result in FAILED states (not silent drops). States are
+        completed as COMPLETED only after sink.flush() confirms durability.
 
         This is the ONLY place terminal outcomes should be recorded for sink-bound
         tokens. Recording here (not in the orchestrator processing loop) ensures the
@@ -163,9 +164,10 @@ class SinkExecutor:
         - Invariant 3: "COMPLETED/ROUTED implies the token has a completed sink node_state"
         - Invariant 4: "Completed sink node_state implies a terminal token_outcome"
 
-        Three-phase flow:
-        - Phase 1: Call sink.write() → discover diversions
-        - Phase 2: Open/complete states for primary (non-diverted) tokens
+        Four-phase flow:
+        - Pre-phase: Open node_states for ALL tokens at primary sink
+        - Phase 1: Call sink.write() → discover diversions (FAILED on error)
+        - Phase 2: Complete states for primary (non-diverted) tokens
         - Phase 3: Handle diversions (failsink write or discard)
 
         Args:
@@ -224,60 +226,136 @@ class SinkExecutor:
         # CRITICAL: Clear state_id before entering operation context.
         ctx.state_id = None
 
+        # ── PRE-PHASE: Open node_states for ALL tokens at primary sink ──
+        # Opened BEFORE I/O so that Phase 1 failures can record FAILED states,
+        # preserving the invariant that every token reaches a terminal state.
+        # We don't yet know which tokens will be diverted — that's discovered
+        # by sink.write() — so we open states for ALL tokens and partition later.
+        all_states: list[tuple[TokenInfo, NodeStateOpen]] = []
+        try:
+            for token in tokens:
+                input_dict = token.row_data.to_dict()
+                state = self._recorder.begin_node_state(
+                    token_id=token.token_id,
+                    node_id=sink_node_id,
+                    run_id=ctx.run_id,
+                    step_index=step_in_pipeline,
+                    input_data=input_dict,
+                )
+                all_states.append((token, state))
+        except (FrameworkBugError, AuditIntegrityError) as e:
+            if all_states:
+                self._best_effort_cleanup(all_states, e, "begin_node_state")
+            raise
+        except Exception as e:
+            if all_states:
+                begin_error = ExecutionError(
+                    exception=str(e),
+                    exception_type=type(e).__name__,
+                    phase="begin_node_state",
+                )
+                try:
+                    self._complete_states_failed(
+                        states=all_states,
+                        duration_ms=0.0,
+                        error=begin_error,
+                    )
+                except Exception as cleanup_exc:
+                    logger.warning(
+                        "Cleanup of %d OPEN states also failed — original error preserved. Cleanup error: %s: %s",
+                        len(all_states),
+                        type(cleanup_exc).__name__,
+                        cleanup_exc,
+                    )
+            raise
+
+        # Index by token_id for O(1) lookup in Phases 2 and 3.
+        state_by_token_id: dict[str, NodeStateOpen] = {token.token_id: state for token, state in all_states}
+
         # ── PHASE 1: External I/O (inside track_operation) ──
-        with track_operation(
-            recorder=self._recorder,
-            run_id=self._run_id,
-            node_id=sink_node_id,
-            operation_type="sink_write",
-            ctx=ctx,
-            input_data={"sink_plugin": sink.name, "row_count": len(tokens)},
-        ) as handle:
-            sink_token_ids = [t.token_id for t in tokens]
-            with self._spans.sink_span(
-                sink.name,
+        # If any operation here raises, complete ALL pre-opened states as FAILED
+        # before re-raising — no token may exit this method without a terminal state.
+        try:
+            with track_operation(
+                recorder=self._recorder,
+                run_id=self._run_id,
                 node_id=sink_node_id,
-                token_ids=sink_token_ids,
-            ):
-                # Centralized input validation (before sink.write)
-                if sink.validate_input:
-                    from pydantic import ValidationError
+                operation_type="sink_write",
+                ctx=ctx,
+                input_data={"sink_plugin": sink.name, "row_count": len(tokens)},
+            ) as handle:
+                sink_token_ids = [t.token_id for t in tokens]
+                with self._spans.sink_span(
+                    sink.name,
+                    node_id=sink_node_id,
+                    token_ids=sink_token_ids,
+                ):
+                    # Centralized input validation (before sink.write)
+                    if sink.validate_input:
+                        from pydantic import ValidationError
 
-                    for row in rows:
-                        try:
-                            sink.input_schema.model_validate(row)
-                        except ValidationError as e:
-                            raise PluginContractViolation(
-                                f"Sink '{sink.name}' input validation failed: {e}. This indicates an upstream transform/source schema bug."
-                            ) from e
+                        for row in rows:
+                            try:
+                                sink.input_schema.model_validate(row)
+                            except ValidationError as e:
+                                raise PluginContractViolation(
+                                    f"Sink '{sink.name}' input validation failed: {e}. This indicates an upstream transform/source schema bug."
+                                ) from e
 
-                if sink.declared_required_fields:
-                    for row_index, row in enumerate(rows):
-                        missing = sorted(f for f in sink.declared_required_fields if f not in row)
-                        if missing:
+                    if sink.declared_required_fields:
+                        for row_index, row in enumerate(rows):
+                            missing = sorted(f for f in sink.declared_required_fields if f not in row)
+                            if missing:
+                                raise PluginContractViolation(
+                                    f"Sink '{sink.name}' row {row_index} is missing required fields "
+                                    f"{missing}. This indicates an upstream transform/schema bug."
+                                )
+
+                    # Reset diversion log and call sink.write()
+                    sink._reset_diversion_log()
+                    start = time.perf_counter()
+                    write_result: SinkWriteResult = sink.write(rows, ctx)
+                    artifact_info = write_result.artifact
+                    diversions = write_result.diversions
+                    duration_ms = (time.perf_counter() - start) * 1000
+
+                    # Validate diversion indices against the batch we passed in.
+                    # SinkWriteResult.__post_init__ already rejects duplicates;
+                    # here we check range (only the executor knows the batch size).
+                    batch_size = len(tokens)
+                    for d in diversions:
+                        if d.row_index >= batch_size:
                             raise PluginContractViolation(
-                                f"Sink '{sink.name}' row {row_index} is missing required fields "
-                                f"{missing}. This indicates an upstream transform/schema bug."
+                                f"Sink '{sink.name}' returned diversion with row_index={d.row_index} "
+                                f"but batch has only {batch_size} rows (valid range: 0..{batch_size - 1}). "
+                                f"This is a sink plugin bug."
                             )
 
-                # Reset diversion log and call sink.write()
-                sink._reset_diversion_log()
-                start = time.perf_counter()
-                write_result: SinkWriteResult = sink.write(rows, ctx)
-                artifact_info = write_result.artifact
-                diversions = write_result.diversions
-                duration_ms = (time.perf_counter() - start) * 1000
+                # Flush primary sink for durability
+                sink.flush()
 
-            # Flush primary sink for durability
-            sink.flush()
+                # Set output data on operation handle for audit trail
+                handle.output_data = {
+                    "artifact_path": artifact_info.path_or_uri,
+                    "content_hash": artifact_info.content_hash,
+                }
+        except (FrameworkBugError, AuditIntegrityError) as e:
+            self._best_effort_cleanup(all_states, e, "sink_write")
+            raise
+        except Exception as e:
+            io_error = ExecutionError(
+                exception=str(e),
+                exception_type=type(e).__name__,
+                phase="sink_write",
+            )
+            self._complete_states_failed(
+                states=all_states,
+                duration_ms=0.0,
+                error=io_error,
+            )
+            raise
 
-            # Set output data on operation handle for audit trail
-            handle.output_data = {
-                "artifact_path": artifact_info.path_or_uri,
-                "content_hash": artifact_info.content_hash,
-            }
-
-        # ── PHASE 2: Partition and record primary tokens ──
+        # ── PHASE 2: Partition and complete primary tokens ──
         diverted_indices = {d.row_index for d in diversions}
         primary_tokens = [(token, i) for i, token in enumerate(tokens) if i not in diverted_indices]
         diverted_tokens = [(token, i) for i, token in enumerate(tokens) if i in diverted_indices]
@@ -285,44 +363,10 @@ class SinkExecutor:
         artifact: Artifact | None = None
 
         if primary_tokens:
-            # Open and complete node_states for primary tokens
-            primary_states: list[tuple[TokenInfo, NodeStateOpen]] = []
-            try:
-                for token, _ in primary_tokens:
-                    input_dict = token.row_data.to_dict()
-                    state = self._recorder.begin_node_state(
-                        token_id=token.token_id,
-                        node_id=sink_node_id,
-                        run_id=ctx.run_id,
-                        step_index=step_in_pipeline,
-                        input_data=input_dict,
-                    )
-                    primary_states.append((token, state))
-            except (FrameworkBugError, AuditIntegrityError) as e:
-                if primary_states:
-                    self._best_effort_cleanup(primary_states, e, "begin_node_state")
-                raise
-            except Exception as e:
-                if primary_states:
-                    begin_error = ExecutionError(
-                        exception=str(e),
-                        exception_type=type(e).__name__,
-                        phase="begin_node_state",
-                    )
-                    try:
-                        self._complete_states_failed(
-                            states=primary_states,
-                            duration_ms=0.0,
-                            error=begin_error,
-                        )
-                    except Exception as cleanup_exc:
-                        logger.warning(
-                            "Cleanup of %d OPEN primary states also failed — original error preserved. Cleanup error: %s: %s",
-                            len(primary_states),
-                            type(cleanup_exc).__name__,
-                            cleanup_exc,
-                        )
-                raise
+            # Retrieve pre-opened states for primary tokens.
+            primary_states: list[tuple[TokenInfo, NodeStateOpen]] = [
+                (token, state_by_token_id[token.token_id]) for token, _ in primary_tokens
+            ]
 
             # Amortize batch write time across ALL tokens (including diverted)
             # since sink.write() processed the entire batch
@@ -383,57 +427,18 @@ class SinkExecutor:
                         ) from exc
 
         # ── PHASE 3: Handle diversions ──
-        # Every diverted token gets a node_state at the PRIMARY sink (the routing
-        # node). This matches the quarantine/transform-error pattern: the routing
-        # decision is recorded where it happened. Failsink-mode tokens ALSO get
-        # a state at the failsink node (the destination).
+        # Diverted tokens already have node_states at the PRIMARY sink from
+        # the pre-phase. These are the routing anchors — routing_event.state_id
+        # points here. Failsink-mode tokens ALSO get a NEW state at the
+        # failsink node (the destination).
         diversion_count = len(diverted_tokens)
         if diverted_tokens:
             diversion_by_index = {d.row_index: d for d in diversions}
 
-            # Open node_states at the PRIMARY sink for all diverted tokens.
-            # These are the routing anchors — routing_event.state_id points here.
-            primary_divert_states: list[tuple[TokenInfo, int, NodeStateOpen]] = []
-            try:
-                for token, idx in diverted_tokens:
-                    input_dict = token.row_data.to_dict()
-                    state = self._recorder.begin_node_state(
-                        token_id=token.token_id,
-                        node_id=sink_node_id,
-                        run_id=ctx.run_id,
-                        step_index=step_in_pipeline,
-                        input_data=input_dict,
-                    )
-                    primary_divert_states.append((token, idx, state))
-            except (FrameworkBugError, AuditIntegrityError) as e:
-                if primary_divert_states:
-                    self._best_effort_cleanup(
-                        [(t, s) for t, _, s in primary_divert_states],
-                        e,
-                        "begin_node_state_divert",
-                    )
-                raise
-            except Exception as e:
-                if primary_divert_states:
-                    begin_error = ExecutionError(
-                        exception=str(e),
-                        exception_type=type(e).__name__,
-                        phase="begin_node_state_divert",
-                    )
-                    try:
-                        self._complete_states_failed(
-                            states=[(t, s) for t, _, s in primary_divert_states],
-                            duration_ms=0.0,
-                            error=begin_error,
-                        )
-                    except Exception as cleanup_exc:
-                        logger.warning(
-                            "Cleanup of %d OPEN divert states also failed — original error preserved. Cleanup error: %s: %s",
-                            len(primary_divert_states),
-                            type(cleanup_exc).__name__,
-                            cleanup_exc,
-                        )
-                raise
+            # Retrieve pre-opened states for diverted tokens.
+            primary_divert_states: list[tuple[TokenInfo, int, NodeStateOpen]] = [
+                (token, idx, state_by_token_id[token.token_id]) for token, idx in diverted_tokens
+            ]
 
             if failsink is not None:
                 # Failsink mode: write enriched rows to failsink

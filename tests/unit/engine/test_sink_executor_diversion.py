@@ -15,7 +15,7 @@ import pytest
 from elspeth.contracts import PendingOutcome, RowOutcome, TokenInfo
 from elspeth.contracts.diversion import RowDiversion, SinkWriteResult
 from elspeth.contracts.enums import NodeStateStatus, RoutingMode
-from elspeth.contracts.errors import AuditIntegrityError
+from elspeth.contracts.errors import AuditIntegrityError, PluginContractViolation
 from elspeth.contracts.results import ArtifactDescriptor
 from elspeth.engine.executors.sink import SinkExecutor
 
@@ -829,3 +829,32 @@ class TestSystemErrorStateCleanup:
         assert total_complete_calls > 2, (
             f"Expected cleanup calls after mid-loop AuditIntegrityError, got only {total_complete_calls} complete_node_state calls"
         )
+
+
+class TestDiversionIndexValidation:
+    """Regression: SinkExecutor must reject out-of-range diversion indices."""
+
+    def test_out_of_range_diversion_index_crashes(self) -> None:
+        """row_index >= batch size is a plugin bug — crash before audit recording."""
+        executor, recorder = _make_executor()
+        tokens = [_make_token("t1"), _make_token("t2")]
+        # row_index=5 is out of range for a 2-token batch
+        sink = _make_sink(
+            diversions=(RowDiversion(row_index=5, reason="bad", row_data={"x": 1}),),
+        )
+        pending = PendingOutcome(outcome=RowOutcome.COMPLETED)
+
+        with pytest.raises(PluginContractViolation, match=r"row_index=5.*batch has only 2 rows"):
+            executor.write(
+                sink,
+                tokens,
+                MagicMock(),
+                step_in_pipeline=0,
+                sink_name="out",
+                pending_outcome=pending,
+            )
+
+        # Pre-opened states should be completed as FAILED (Phase 1 error path)
+        assert recorder.begin_node_state.call_count == 2
+        failed_calls = [c for c in recorder.complete_node_state.call_args_list if c.kwargs.get("status") == NodeStateStatus.FAILED]
+        assert len(failed_calls) == 2

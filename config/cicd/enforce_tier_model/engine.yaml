@@ -86,20 +86,20 @@ allow_hits:
   reason: Best-effort cleanup of OPEN node_states before system error crash — broad catch prevents cleanup failure from masking original FrameworkBugError/AuditIntegrityError
   safety: Logs warning with cleanup exception details; always re-raises the original system error
   expires: null
-- key: engine/executors/sink.py:R4:SinkExecutor:write:fp=2413582fe62e5eea
+- key: engine/executors/sink.py:R4:SinkExecutor:write:fp=e5819470e5a23b36
   owner: architecture
-  reason: Cleanup of OPEN primary states after begin_node_state failure must not mask original error
-  safety: Logs warning with cleanup exception details; always re-raises the original error
-  expires: null
-- key: engine/executors/sink.py:R4:SinkExecutor:write:fp=a9c50be16144303d
-  owner: architecture
-  reason: Cleanup of OPEN divert states after begin_node_state failure must not mask original error
+  reason: Cleanup of OPEN pre-phase states after begin_node_state failure must not mask original error
   safety: Logs warning with cleanup exception details; always re-raises the original error
   expires: null
 - key: engine/processor.py:TC:_module_:fp=873d5f90adf363e0
   owner: architecture
   reason: TYPE_CHECKING import of TelemetryManager — RowProcessor emits telemetry events
   safety: No runtime coupling — annotation-only import behind TYPE_CHECKING guard
+  expires: null
+- key: engine/commencement.py:R5:evaluate_commencement_gates:fp=18ca009ccd49b5e0
+  owner: architecture
+  reason: Offensive isinstance check — gate results must be bool before recording in audit trail. Non-boolean results from expression evaluation are a config bug, not data to coerce.
+  safety: Crashes with CommencementGateFailedError explaining the type mismatch; no coercion
   expires: null
 - key: engine/orchestrator/core.py:TC:_module_:fp=aea9837d6932e65d
   owner: architecture
