@@ -45,7 +45,7 @@ class TestCheckpointVersionValidation:
         Scenario:
         1. Create AggregationExecutor
         2. Get checkpoint state
-        3. Verify: State contains "_version" field with value "3.0"
+        3. Verify: State contains "_version" field with value "4.0"
 
         This is Bug #12 fix: checkpoint state must include version for
         future compatibility when checkpoint format changes.
@@ -63,7 +63,7 @@ class TestCheckpointVersionValidation:
         assert isinstance(state, AggregationCheckpointState)
 
         # Verify version field
-        assert state.version == "3.0", f"Expected version '3.0', got {state.version!r}"
+        assert state.version == "4.0", f"Expected version '4.0', got {state.version!r}"
         # Verify wire format includes _version key
         state_dict = state.to_dict()
         assert "_version" in state_dict, "Checkpoint wire format must include _version field (Bug #12 fix)"
@@ -102,7 +102,7 @@ class TestCheckpointVersionValidation:
         error_msg = str(exc_info.value)
         assert "Incompatible checkpoint version" in error_msg
         assert "1.1" in error_msg
-        assert "3.0" in error_msg
+        assert "4.0" in error_msg
         assert "Cannot resume" in error_msg
 
     def test_restore_fails_without_version(self) -> None:
@@ -165,7 +165,7 @@ class TestCheckpointVersionValidation:
         contract_version = contract.version_hash()
         valid_state = AggregationCheckpointState.from_dict(
             {
-                "_version": "3.0",
+                "_version": "4.0",
                 "test_node": {
                     "tokens": [
                         {
@@ -177,13 +177,13 @@ class TestCheckpointVersionValidation:
                             "join_group_id": None,
                             "expand_group_id": None,
                             "contract_version": contract_version,
+                            "contract": contract.to_checkpoint_format(),
                         }
                     ],
                     "batch_id": "batch-001",
                     "elapsed_age_seconds": 0.0,
                     "count_fire_offset": None,
                     "condition_fire_offset": None,
-                    "contract": contract.to_checkpoint_format(),
                 },
             }
         )

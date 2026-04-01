@@ -1004,6 +1004,8 @@ def _execute_pipeline_with_instances(
             formatter_prefix="Run",
             output_format=output_format,
         ) as ctx:
+            from elspeth.cli_helpers import _make_sink_factory
+
             result = ctx.orchestrator.run(
                 ctx.pipeline_config,
                 graph=graph,
@@ -1011,6 +1013,7 @@ def _execute_pipeline_with_instances(
                 payload_store=payload_store,
                 secret_resolutions=secret_resolutions,
                 preflight_results=preflight_results,
+                sink_factory=_make_sink_factory(config),
             )
 
             return {

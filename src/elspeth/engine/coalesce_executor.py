@@ -631,174 +631,191 @@ class CoalesceExecutor:
                 outcomes_recorded=True,  # Bug 9z8 fix: token outcomes already recorded above
             )
 
-        # ─────────────────────────────────────────────────────────────────────
-        # Merge row data according to strategy (returns dict)
-        # We do this FIRST so we can derive contract from actual data shape
-        # ─────────────────────────────────────────────────────────────────────
-        merged_data_dict, union_collisions = self._merge_data(settings, pending.branches)
+        try:
+            # ─────────────────────────────────────────────────────────────────────
+            # Merge row data according to strategy (returns dict)
+            # We do this FIRST so we can derive contract from actual data shape
+            # ─────────────────────────────────────────────────────────────────────
+            merged_data_dict, union_collisions = self._merge_data(settings, pending.branches)
 
-        # ─────────────────────────────────────────────────────────────────────
-        # Build contract based on merge strategy and actual data shape
-        # ─────────────────────────────────────────────────────────────────────
-        contracts: list[SchemaContract] = [e.token.row_data.contract for e in pending.branches.values()]
+            # ─────────────────────────────────────────────────────────────────────
+            # Build contract based on merge strategy and actual data shape
+            # ─────────────────────────────────────────────────────────────────────
+            contracts: list[SchemaContract] = [e.token.row_data.contract for e in pending.branches.values()]
 
-        if settings.merge == "union":
-            # Union: Merge all contracts (current behavior - correct)
-            merged_contract = contracts[0]
-            for c in contracts[1:]:
-                try:
-                    merged_contract = merged_contract.merge(c)
-                except Exception as e:
-                    # Contract merge failure is an orchestration invariant violation
-                    # Contracts with conflicting types cannot be merged
-                    slog.error(
-                        "contract_merge_failed",
-                        coalesce_name=coalesce_name,
-                        branches=list(pending.branches.keys()),
-                        error=str(e),
+            if settings.merge == "union":
+                # Union: Merge all contracts (current behavior - correct)
+                merged_contract = contracts[0]
+                for c in contracts[1:]:
+                    try:
+                        merged_contract = merged_contract.merge(c)
+                    except Exception as e:
+                        # Contract merge failure is an orchestration invariant violation
+                        # Contracts with conflicting types cannot be merged
+                        slog.error(
+                            "contract_merge_failed",
+                            coalesce_name=coalesce_name,
+                            branches=list(pending.branches.keys()),
+                            error=str(e),
+                        )
+                        raise OrchestrationInvariantError(
+                            f"Contract merge failed at coalesce point '{coalesce_name}'. Branches: {list(pending.branches.keys())}. Error: {e}"
+                        ) from e
+
+                slog.info(
+                    "contract_merge_success",
+                    coalesce_name=coalesce_name,
+                    merge_strategy="union",
+                    branch_count=len(pending.branches),
+                    branches=list(pending.branches.keys()),
+                )
+
+            elif settings.merge == "nested":
+                # Nested: Contract declares branch keys with object type
+                # Data shape is {branch_a: {...}, branch_b: {...}} where each value
+                # is the full row data from that branch as a plain dict.
+                # We use object (the "any" type in VALID_FIELD_TYPES) because dict
+                # is not a valid FieldContract type and the contract only needs to
+                # declare that the field exists, not constrain its inner structure.
+                branch_fields = tuple(
+                    FieldContract(
+                        original_name=branch_name,
+                        normalized_name=branch_name,
+                        python_type=object,
+                        required=branch_name in pending.branches,
+                        source="declared",
                     )
-                    raise OrchestrationInvariantError(
-                        f"Contract merge failed at coalesce point '{coalesce_name}'. Branches: {list(pending.branches.keys())}. Error: {e}"
-                    ) from e
-
-            slog.info(
-                "contract_merge_success",
-                coalesce_name=coalesce_name,
-                merge_strategy="union",
-                branch_count=len(pending.branches),
-                branches=list(pending.branches.keys()),
-            )
-
-        elif settings.merge == "nested":
-            # Nested: Contract declares branch keys with object type
-            # Data shape is {branch_a: {...}, branch_b: {...}} where each value
-            # is the full row data from that branch as a plain dict.
-            # We use object (the "any" type in VALID_FIELD_TYPES) because dict
-            # is not a valid FieldContract type and the contract only needs to
-            # declare that the field exists, not constrain its inner structure.
-            branch_fields = tuple(
-                FieldContract(
-                    original_name=branch_name,
-                    normalized_name=branch_name,
-                    python_type=object,
-                    required=branch_name in pending.branches,
-                    source="declared",
+                    for branch_name in settings.branches
                 )
-                for branch_name in settings.branches
-            )
-            merged_contract = SchemaContract(
-                fields=branch_fields,
-                mode="FIXED",
-                locked=True,
-            )
-
-            slog.info(
-                "contract_created_for_nested_merge",
-                coalesce_name=coalesce_name,
-                merge_strategy="nested",
-                branch_count=len(pending.branches),
-                branches=list(pending.branches.keys()),
-                output_keys=list(merged_data_dict.keys()),
-            )
-
-        elif settings.merge == "select":
-            # Select: Use selected branch's contract directly (data has only those fields)
-            # Find the selected branch's contract
-            if settings.select_branch is None:
-                raise RuntimeError(
-                    f"select_branch is None for select merge strategy at coalesce '{settings.name}'. This indicates a config validation bug."
+                merged_contract = SchemaContract(
+                    fields=branch_fields,
+                    mode="FIXED",
+                    locked=True,
                 )
 
-            # Get the token for the selected branch
-            selected_entry = pending.branches[settings.select_branch]
-            merged_contract = selected_entry.token.row_data.contract
+                slog.info(
+                    "contract_created_for_nested_merge",
+                    coalesce_name=coalesce_name,
+                    merge_strategy="nested",
+                    branch_count=len(pending.branches),
+                    branches=list(pending.branches.keys()),
+                    output_keys=list(merged_data_dict.keys()),
+                )
 
-            slog.info(
-                "contract_from_selected_branch",
-                coalesce_name=coalesce_name,
-                merge_strategy="select",
-                selected_branch=settings.select_branch,
+            elif settings.merge == "select":
+                # Select: Use selected branch's contract directly (data has only those fields)
+                # Find the selected branch's contract
+                if settings.select_branch is None:
+                    raise RuntimeError(
+                        f"select_branch is None for select merge strategy at coalesce '{settings.name}'. This indicates a config validation bug."
+                    )
+
+                # Get the token for the selected branch
+                selected_entry = pending.branches[settings.select_branch]
+                merged_contract = selected_entry.token.row_data.contract
+
+                slog.info(
+                    "contract_from_selected_branch",
+                    coalesce_name=coalesce_name,
+                    merge_strategy="select",
+                    selected_branch=settings.select_branch,
+                    branches_arrived=tuple(pending.branches.keys()),
+                )
+
+            else:
+                # Unreachable - config validation ensures merge is one of the above
+                raise RuntimeError(f"Unknown merge strategy: {settings.merge}")
+
+            # Create PipelineRow with strategy-appropriate contract
+            merged_data = PipelineRow(merged_data_dict, merged_contract)
+
+            # Get list of consumed tokens
+            consumed_tokens = tuple(e.token for e in pending.branches.values())
+
+            # Create merged token via TokenManager
+            merged_token = self._token_manager.coalesce_tokens(
+                parents=list(consumed_tokens),
+                merged_data=merged_data,
+                node_id=node_id,
+            )
+
+            # Build audit metadata BEFORE completing node states (Bug l4h fix)
+            # This allows us to include it in context_after for each consumed token
+            coalesce_metadata = CoalesceMetadata.for_merge(
+                policy=CoalescePolicy(settings.policy),
+                merge_strategy=MergeStrategy(settings.merge),
+                expected_branches=tuple(settings.branches),
                 branches_arrived=tuple(pending.branches.keys()),
+                branches_lost=pending.lost_branches,
+                arrival_order=[
+                    ArrivalOrderEntry(
+                        branch=branch,
+                        arrival_offset_ms=(entry.arrival_time - pending.first_arrival) * 1000,
+                    )
+                    for branch, entry in sorted(pending.branches.items(), key=lambda x: x[1].arrival_time)
+                ],
+                wait_duration_ms=(now - pending.first_arrival) * 1000,
             )
 
-        else:
-            # Unreachable - config validation ensures merge is one of the above
-            raise RuntimeError(f"Unknown merge strategy: {settings.merge}")
+            # Include union merge collision info in audit trail if present
+            if union_collisions:
+                coalesce_metadata = CoalesceMetadata.with_collisions(coalesce_metadata, union_collisions)
 
-        # Create PipelineRow with strategy-appropriate contract
-        merged_data = PipelineRow(merged_data_dict, merged_contract)
-
-        # Get list of consumed tokens
-        consumed_tokens = tuple(e.token for e in pending.branches.values())
-
-        # Create merged token via TokenManager
-        merged_token = self._token_manager.coalesce_tokens(
-            parents=list(consumed_tokens),
-            merged_data=merged_data,
-            node_id=node_id,
-        )
-
-        # Build audit metadata BEFORE completing node states (Bug l4h fix)
-        # This allows us to include it in context_after for each consumed token
-        coalesce_metadata = CoalesceMetadata.for_merge(
-            policy=CoalescePolicy(settings.policy),
-            merge_strategy=MergeStrategy(settings.merge),
-            expected_branches=tuple(settings.branches),
-            branches_arrived=tuple(pending.branches.keys()),
-            branches_lost=pending.lost_branches,
-            arrival_order=[
-                ArrivalOrderEntry(
-                    branch=branch,
-                    arrival_offset_ms=(entry.arrival_time - pending.first_arrival) * 1000,
+            # Complete pending node states for consumed tokens
+            # (These states were created as "pending" when tokens were held in accept())
+            for _branch_name, entry in pending.branches.items():
+                # Complete it now that merge is happening
+                # Bug l4h fix: include coalesce metadata in context_after for audit trail
+                self._recorder.complete_node_state(
+                    state_id=entry.state_id,
+                    status=NodeStateStatus.COMPLETED,
+                    output_data={"merged_into": merged_token.token_id},
+                    duration_ms=(now - entry.arrival_time) * 1000,
+                    context_after=coalesce_metadata,
                 )
-                for branch, entry in sorted(pending.branches.items(), key=lambda x: x[1].arrival_time)
-            ],
-            wait_duration_ms=(now - pending.first_arrival) * 1000,
-        )
 
-        # Include union merge collision info in audit trail if present
-        if union_collisions:
-            coalesce_metadata = CoalesceMetadata.with_collisions(coalesce_metadata, union_collisions)
+                # Record terminal token outcome (COALESCED)
+                self._recorder.record_token_outcome(
+                    run_id=self._run_id,
+                    token_id=entry.token.token_id,
+                    outcome=RowOutcome.COALESCED,
+                    join_group_id=merged_token.join_group_id,
+                )
 
-        # Complete pending node states for consumed tokens
-        # (These states were created as "pending" when tokens were held in accept())
-        for _branch_name, entry in pending.branches.items():
-            # Complete it now that merge is happening
-            # Bug l4h fix: include coalesce metadata in context_after for audit trail
-            self._recorder.complete_node_state(
-                state_id=entry.state_id,
-                status=NodeStateStatus.COMPLETED,
-                output_data={"merged_into": merged_token.token_id},
-                duration_ms=(now - entry.arrival_time) * 1000,
-                context_after=coalesce_metadata,
+            # NOTE: The merged token does NOT get COALESCED recorded here.
+            # - Consumed tokens: COALESCED (terminal) - they've been absorbed into the merge
+            # - Merged token: Will get COMPLETED when it reaches a sink, or COALESCED if
+            #   consumed by an outer coalesce (nested coalesce scenario)
+            # Recording COALESCED for merged token here would break nested coalesces where
+            # the inner merge result becomes a consumed token in the outer merge.
+
+            # Clean up pending state and mark as completed
+            del self._pending[key]
+            self._mark_completed(key)  # Track completion to reject late arrivals (bounded)
+
+            return CoalesceOutcome(
+                held=False,
+                merged_token=merged_token,
+                consumed_tokens=consumed_tokens,
+                coalesce_metadata=coalesce_metadata,
+                coalesce_name=coalesce_name,
             )
-
-            # Record terminal token outcome (COALESCED)
-            self._recorder.record_token_outcome(
-                run_id=self._run_id,
-                token_id=entry.token.token_id,
-                outcome=RowOutcome.COALESCED,
-                join_group_id=merged_token.join_group_id,
-            )
-
-        # NOTE: The merged token does NOT get COALESCED recorded here.
-        # - Consumed tokens: COALESCED (terminal) - they've been absorbed into the merge
-        # - Merged token: Will get COMPLETED when it reaches a sink, or COALESCED if
-        #   consumed by an outer coalesce (nested coalesce scenario)
-        # Recording COALESCED for merged token here would break nested coalesces where
-        # the inner merge result becomes a consumed token in the outer merge.
-
-        # Clean up pending state and mark as completed
-        del self._pending[key]
-        self._mark_completed(key)  # Track completion to reject late arrivals (bounded)
-
-        return CoalesceOutcome(
-            held=False,
-            merged_token=merged_token,
-            consumed_tokens=consumed_tokens,
-            coalesce_metadata=coalesce_metadata,
-            coalesce_name=coalesce_name,
-        )
+        except Exception:
+            for _branch, entry in pending.branches.items():
+                try:
+                    self._recorder.complete_node_state(
+                        state_id=entry.state_id,
+                        status=NodeStateStatus.FAILED,
+                        output_data={},
+                        duration_ms=0.0,
+                    )
+                except Exception as cleanup_exc:
+                    slog.error(
+                        "coalesce_merge_cleanup_failed",
+                        state_id=entry.state_id,
+                        error=str(cleanup_exc),
+                    )
+            raise
 
     def _merge_data(
         self,

@@ -2429,13 +2429,13 @@ class TestAggregationExecutor:
         with pytest.raises(OrchestrationInvariantError, match="not_configured"):
             executor.get_restored_state(unknown)
         with pytest.raises(OrchestrationInvariantError, match="not_configured"):
-            executor.restore_state(unknown, AggregationCheckpointState(version="3.0", nodes={}))
+            executor.restore_state(unknown, AggregationCheckpointState(version=AGGREGATION_CHECKPOINT_VERSION, nodes={}))
 
     # --- restore_state / get_restored_state ---
 
     def test_restore_state_and_get(self) -> None:
         executor, _, nid = self._make_agg_executor()
-        state = AggregationCheckpointState(version="3.0", nodes={})
+        state = AggregationCheckpointState(version=AGGREGATION_CHECKPOINT_VERSION, nodes={})
         executor.restore_state(nid, state)
         assert executor.get_restored_state(nid) == state
 
@@ -2525,8 +2525,8 @@ class TestAggregationExecutor:
         checkpoint = executor.get_checkpoint_state()
         assert isinstance(checkpoint, AggregationCheckpointState)
         node_checkpoint = checkpoint.nodes[str(nid)]
-        assert node_checkpoint.contract is not None
-        assert all(t.contract_version for t in node_checkpoint.tokens), "Checkpoint must include contract info for PipelineRow restoration"
+        assert all(t.contract for t in node_checkpoint.tokens), "Checkpoint must include contract info for PipelineRow restoration"
+        assert all(t.contract_version for t in node_checkpoint.tokens), "Checkpoint must include contract_version for integrity verification"
 
     def test_restore_from_checkpoint_creates_pipeline_row(self) -> None:
         """restore_from_checkpoint should reconstruct TokenInfo with PipelineRow."""

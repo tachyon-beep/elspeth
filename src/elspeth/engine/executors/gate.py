@@ -160,17 +160,17 @@ class GateExecutor:
                 )
 
             action = RoutingAction.fork_to_paths(fork_branches, reason=reason)
-            self._record_routing(
-                state_id=state_id,
-                node_id=node_id,
-                action=action,
-            )
             child_tokens, _fork_group_id = token_manager.fork_token(
                 parent_token=token,
                 branches=fork_branches,
                 node_id=NodeID(node_id),
                 run_id=ctx.run_id,
                 row_data=token.row_data,
+            )
+            self._record_routing(
+                state_id=state_id,
+                node_id=node_id,
+                action=action,
             )
             return _RouteDispatchOutcome(action=action, child_tokens=tuple(child_tokens))
 

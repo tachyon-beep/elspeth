@@ -81,6 +81,11 @@ allow_hits:
   reason: 'Tier 3 validation: raw YAML from operator files — isinstance checks validate each entry is a mapping'
   safety: Raises ValueError with index and type info on malformed entry
   expires: null
+- key: engine/coalesce_executor.py:R4:CoalesceExecutor:_execute_merge:fp=c04fe2a4210f7361
+  owner: architecture
+  reason: Best-effort cleanup of OPEN branch node_states after merge failure — broad catch prevents cleanup failure from masking original merge exception
+  safety: Logs error with state_id and cleanup exception details; always re-raises the original error
+  expires: null
 - key: engine/executors/sink.py:R4:SinkExecutor:_best_effort_cleanup:fp=969cb02b411813bf
   owner: architecture
   reason: Best-effort cleanup of OPEN node_states before system error crash — broad catch prevents cleanup failure from masking original FrameworkBugError/AuditIntegrityError
@@ -155,7 +160,7 @@ allow_hits:
   reason: Tier-3 boundary — quarantined row data may contain NaN/Infinity that stable_hash rejects
   safety: Falls back to repr_hash with debug logging; audit trail uses separate hashing path
   expires: '2026-05-12'
-- key: engine/orchestrator/export.py:R1:_json_schema_to_python_type:fp=68c02edb0f31f966
+- key: engine/orchestrator/export.py:R1:_json_schema_to_python_type:fp=d5998b3c1fcca701
   owner: bugfix
   reason: Framework boundary - Pydantic JSON schema anyOf entries may be $ref (no "type" key) or typed (has "type" key); .get()
     filters null vs non-null items

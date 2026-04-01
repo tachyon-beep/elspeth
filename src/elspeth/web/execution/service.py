@@ -557,6 +557,8 @@ class ExecutionServiceImpl:
             # B2 fix: ALWAYS pass shutdown_event — suppresses signal handler
             # installation from background thread (Python forbids
             # signal.signal() from non-main threads)
+            from elspeth.cli_helpers import _make_sink_factory
+
             result = orchestrator.run(
                 pipeline_config,
                 graph=graph,
@@ -564,6 +566,7 @@ class ExecutionServiceImpl:
                 payload_store=payload_store,
                 secret_resolutions=secret_resolution_inputs or None,
                 shutdown_event=shutdown_event,  # B2: NEVER omit this
+                sink_factory=_make_sink_factory(settings),
             )
 
             # Orchestrator.run() returns normally ONLY on completion.
