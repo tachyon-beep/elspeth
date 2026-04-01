@@ -614,11 +614,16 @@ class TestAuditedLLMClient:
         assert raw_response["choices"][2]["message"]["content"] == "Option C"
         assert raw_response["choices"][2]["finish_reason"] == "length"
 
-    def test_tool_calls_preserved_in_raw_response(self) -> None:
-        """Tool calls are preserved in raw_response for function calling."""
+    def test_tool_calls_raises_error_and_records_audit(self) -> None:
+        """Tool calls response raises LLMClientError and records ERROR in audit trail.
+
+        ELSPETH does not support tool_calls — a provider returning tool_calls
+        must be recorded as ERROR (not fabricated to SUCCESS with content="").
+        The raw response is preserved so the audit trail shows what the provider
+        actually returned.
+        """
         recorder = self._create_mock_recorder()
 
-        # Response with tool calls
         full_response = {
             "id": "chatcmpl-tools",
             "choices": [
@@ -626,7 +631,7 @@ class TestAuditedLLMClient:
                     "index": 0,
                     "message": {
                         "role": "assistant",
-                        "content": None,  # No text content when tool calls
+                        "content": None,
                         "tool_calls": [
                             {
                                 "id": "call_abc123",
@@ -634,14 +639,6 @@ class TestAuditedLLMClient:
                                 "function": {
                                     "name": "get_weather",
                                     "arguments": '{"location": "London"}',
-                                },
-                            },
-                            {
-                                "id": "call_def456",
-                                "type": "function",
-                                "function": {
-                                    "name": "get_time",
-                                    "arguments": '{"timezone": "UTC"}',
                                 },
                             },
                         ],
@@ -654,7 +651,7 @@ class TestAuditedLLMClient:
         }
 
         message = Mock()
-        message.content = None  # Tool call responses have no text content
+        message.content = None
 
         choice = Mock()
         choice.message = message
@@ -681,20 +678,23 @@ class TestAuditedLLMClient:
             underlying_client=openai_client,
         )
 
-        client.chat_completion(
-            model="gpt-4",
-            messages=[{"role": "user", "content": "What's the weather?"}],
-        )
+        with pytest.raises(LLMClientError, match=r"tool_calls response.*not supported"):
+            client.chat_completion(
+                model="gpt-4",
+                messages=[{"role": "user", "content": "What's the weather?"}],
+            )
 
-        # Verify tool calls are preserved in raw_response
+        # Verify ERROR call recorded in audit trail (not dropped)
         call_kwargs = recorder.record_call.call_args[1]
-        raw_response = call_kwargs["response_data"].to_dict()["raw_response"]
+        assert call_kwargs["status"] == CallStatus.ERROR
+        assert call_kwargs["error"].type == "UnsupportedResponseError"
 
+        # Verify raw response preserved for audit
+        raw_response = call_kwargs["response_data"].to_dict()["raw_response"]
         assert raw_response["choices"][0]["finish_reason"] == "tool_calls"
         tool_calls = raw_response["choices"][0]["message"]["tool_calls"]
-        assert len(tool_calls) == 2
+        assert len(tool_calls) == 1
         assert tool_calls[0]["function"]["name"] == "get_weather"
-        assert tool_calls[1]["function"]["name"] == "get_time"
 
     # NOTE: test_raw_response_none_when_model_dump_unavailable was removed because
     # we require openai>=2.15 which guarantees model_dump() exists on all responses.
@@ -969,8 +969,13 @@ class TestContentFabrication:
         assert event.response_payload is not None
         assert event.token_usage is not None
 
-    def test_empty_choices_raises_error(self) -> None:
-        """Empty choices array must raise, not IndexError."""
+    def test_empty_choices_raises_error_and_records_audit(self) -> None:
+        """Empty choices array must raise AND record ERROR in audit trail.
+
+        The LLM call happened (consuming call_index and tokens), so the
+        audit trail must reflect it — raising without recording creates
+        an unexplained audit gap.
+        """
         recorder = self._create_mock_recorder()
 
         response = Mock()
@@ -989,6 +994,11 @@ class TestContentFabrication:
                 model="gpt-4",
                 messages=[{"role": "user", "content": "Hello"}],
             )
+
+        # Verify ERROR call recorded in audit trail (not dropped)
+        call_kwargs = recorder.record_call.call_args[1]
+        assert call_kwargs["status"] == CallStatus.ERROR
+        assert call_kwargs["error"].type == "EmptyChoicesError"
 
     def test_empty_string_content_is_valid(self) -> None:
         """content="" is a legitimate response — must NOT raise."""

@@ -388,15 +388,116 @@ class AuditedLLMClient(AuditedClientBase):
 
         # Tier 3 boundary: validate LLM response structure immediately
         if not response.choices:
-            raise LLMClientError(
-                "LLM returned empty choices array — abnormal response",
-                retryable=False,
+            error_msg = "LLM returned empty choices array — abnormal response"
+            # The LLM call happened — record it before raising so the audit
+            # trail reflects the consumed call_index. Without this, empty-choices
+            # responses create unexplained audit gaps.
+            try:
+                raw_response = response.model_dump()
+            except (TypeError, ValueError, RecursionError, AttributeError) as dump_exc:
+                # model_dump() failed on Tier 3 data — still record the call
+                # to prevent call-index gaps, then re-raise.
+                self._recorder.record_call(
+                    state_id=self._state_id,
+                    call_index=call_index,
+                    call_type=CallType.LLM,
+                    status=CallStatus.ERROR,
+                    request_data=request_dto,
+                    error=LLMCallError(
+                        type="ResponseProcessingError",
+                        message=f"model_dump() failed in empty-choices path: {dump_exc}",
+                        retryable=False,
+                    ),
+                    latency_ms=latency_ms,
+                )
+                raise LLMClientError(
+                    f"Failed to serialize LLM response in empty-choices path: {dump_exc}",
+                    retryable=False,
+                ) from dump_exc
+            usage = (
+                TokenUsage.from_dict({"prompt_tokens": response.usage.prompt_tokens, "completion_tokens": response.usage.completion_tokens})
+                if response.usage is not None
+                else TokenUsage.unknown()
             )
+            response_dto = LLMCallResponse(
+                content="",  # No content available
+                model=response.model,
+                usage=usage,
+                raw_response=raw_response,
+            )
+            self._recorder.record_call(
+                state_id=self._state_id,
+                call_index=call_index,
+                call_type=CallType.LLM,
+                status=CallStatus.ERROR,
+                request_data=request_dto,
+                response_data=response_dto,
+                error=LLMCallError(
+                    type="EmptyChoicesError",
+                    message=error_msg,
+                    retryable=False,
+                ),
+                latency_ms=latency_ms,
+            )
+            raise LLMClientError(error_msg, retryable=False)
         content = response.choices[0].message.content
+        finish_reason = response.choices[0].finish_reason
         if content is None:
-            # Tool call responses legitimately have no text content
-            if response.choices[0].finish_reason == "tool_calls":
-                content = ""
+            # Tool call responses have no text content — ELSPETH does not support
+            # tool_calls, so this is an error (not a fabrication opportunity).
+            # Record the call as ERROR with raw response preserved, then raise.
+            if finish_reason == "tool_calls":
+                error_msg = "LLM returned tool_calls response (not supported by ELSPETH)"
+                try:
+                    raw_response = response.model_dump()
+                except (TypeError, ValueError, RecursionError, AttributeError) as dump_exc:
+                    # model_dump() failed on Tier 3 data — still record the call
+                    # to prevent call-index gaps, then re-raise.
+                    self._recorder.record_call(
+                        state_id=self._state_id,
+                        call_index=call_index,
+                        call_type=CallType.LLM,
+                        status=CallStatus.ERROR,
+                        request_data=request_dto,
+                        error=LLMCallError(
+                            type="ResponseProcessingError",
+                            message=f"model_dump() failed in tool-calls path: {dump_exc}",
+                            retryable=False,
+                        ),
+                        latency_ms=latency_ms,
+                    )
+                    raise LLMClientError(
+                        f"Failed to serialize LLM response in tool-calls path: {dump_exc}",
+                        retryable=False,
+                    ) from dump_exc
+                usage = (
+                    TokenUsage.from_dict(
+                        {"prompt_tokens": response.usage.prompt_tokens, "completion_tokens": response.usage.completion_tokens}
+                    )
+                    if response.usage is not None
+                    else TokenUsage.unknown()
+                )
+                response_dto = LLMCallResponse(
+                    content="",  # No text content available
+                    model=response.model,
+                    usage=usage,
+                    raw_response=raw_response,
+                )
+                self._recorder.record_call(
+                    state_id=self._state_id,
+                    call_index=call_index,
+                    call_type=CallType.LLM,
+                    status=CallStatus.ERROR,
+                    request_data=request_dto,
+                    response_data=response_dto,
+                    error=LLMCallError(
+                        type="UnsupportedResponseError",
+                        message=error_msg,
+                        retryable=False,
+                    ),
+                    latency_ms=latency_ms,
+                )
+                raise LLMClientError(error_msg, retryable=False)
             else:
                 # Record the call BEFORE raising — the LLM call happened and must
                 # appear in the audit trail even though the response is unusable.

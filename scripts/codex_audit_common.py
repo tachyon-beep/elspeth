@@ -82,6 +82,16 @@ EXCLUDE_DIRS = {
 
 EXCLUDE_SUFFIXES = {".pyc", ".pyo"}
 
+# Skills that encode project-specific local rules (tier model, engine patterns, etc.)
+# These are auto-loaded into agent context so static analysis prompts have the full
+# authoritative rule set, not just the CLAUDE.md summary.
+SKILL_FILES = [
+    ".claude/skills/tier-model-deep-dive/SKILL.md",
+    ".claude/skills/engine-patterns-reference/SKILL.md",
+    ".claude/skills/config-contracts-guide/SKILL.md",
+    ".claude/skills/logging-telemetry-policy/SKILL.md",
+]
+
 
 # === Infrastructure Functions ===
 
@@ -170,17 +180,33 @@ def ensure_log_file(log_path: Path, *, header_title: str) -> None:
 # === Evidence Processing Functions ===
 
 
-def load_context(repo_root: Path, extra_files: list[str] | None = None) -> str:
-    """Load context from CLAUDE.md and optional extra files for agent prompts.
+def load_context(
+    repo_root: Path,
+    extra_files: list[str] | None = None,
+    *,
+    include_skills: bool = False,
+) -> str:
+    """Load context from CLAUDE.md, skills, and optional extra files for agent prompts.
 
-    Returns concatenated content of CLAUDE.md and any additional context files,
-    separated by headers showing filename.
+    Returns concatenated content separated by headers showing filename.
+
+    Args:
+        repo_root: Repository root directory.
+        extra_files: Additional context files (relative to repo root).
+        include_skills: If True, auto-load project skill files (tier model,
+            engine patterns, config contracts, logging/telemetry policy).
     """
     parts = []
 
     claude_md = repo_root / "CLAUDE.md"
     if claude_md.exists():
         parts.append(f"--- CLAUDE.md ---\n{claude_md.read_text(encoding='utf-8')}")
+
+    if include_skills:
+        for skill_path in SKILL_FILES:
+            full_path = repo_root / skill_path
+            if full_path.exists():
+                parts.append(f"--- Skill: {Path(skill_path).parent.name} ---\n{full_path.read_text(encoding='utf-8')}")
 
     if extra_files:
         for filename in extra_files:

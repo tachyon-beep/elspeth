@@ -527,6 +527,85 @@ class TestOpenRouterBatchErrorHandling:
         assert result.row["llm_response"] is None
         assert result.row["llm_response_error"]["reason"] == "empty_choices"
 
+    def test_tool_calls_finish_reason_returns_failure(self, chaosllm_server) -> None:
+        """tool_calls finish_reason must produce per-row failure, not success."""
+        transform, ctx = _create_transform_with_context()
+        row = {"text": "Test"}
+
+        body = json.dumps(
+            {
+                "choices": [{"message": {"role": "assistant", "content": None}, "finish_reason": "tool_calls"}],
+                "model": "openai/gpt-4o-mini",
+                "usage": {"prompt_tokens": 10, "completion_tokens": 5},
+            }
+        )
+        response = _create_mock_response(
+            chaosllm_server,
+            raw_body=body,
+            headers={"content-type": "application/json"},
+        )
+
+        with mock_httpx_client(chaosllm_server, response):
+            result = transform.process(make_pipeline_row(row), ctx)
+
+        assert result.status == "success"
+        assert result.row is not None
+        assert result.row["llm_response"] is None
+        assert result.row["llm_response_error"]["reason"] == "content_filtered"
+
+    def test_length_finish_reason_returns_failure(self, chaosllm_server) -> None:
+        """finish_reason=length (truncated) must produce per-row failure, not success."""
+        transform, ctx = _create_transform_with_context()
+        row = {"text": "Test"}
+
+        body = json.dumps(
+            {
+                "choices": [{"message": {"role": "assistant", "content": "partial answer"}, "finish_reason": "length"}],
+                "model": "openai/gpt-4o-mini",
+                "usage": {"prompt_tokens": 10, "completion_tokens": 100},
+            }
+        )
+        response = _create_mock_response(
+            chaosllm_server,
+            raw_body=body,
+            headers={"content-type": "application/json"},
+        )
+
+        with mock_httpx_client(chaosllm_server, response):
+            result = transform.process(make_pipeline_row(row), ctx)
+
+        assert result.status == "success"
+        assert result.row is not None
+        assert result.row["llm_response"] is None
+        assert result.row["llm_response_error"]["reason"] == "non_stop_finish_reason"
+        assert result.row["llm_response_error"]["finish_reason"] == "length"
+
+    def test_stop_finish_reason_succeeds(self, chaosllm_server) -> None:
+        """finish_reason=stop is the normal success case — must produce row with content."""
+        transform, ctx = _create_transform_with_context()
+        row = {"text": "Test"}
+
+        body = json.dumps(
+            {
+                "choices": [{"message": {"role": "assistant", "content": "Complete answer"}, "finish_reason": "stop"}],
+                "model": "openai/gpt-4o-mini",
+                "usage": {"prompt_tokens": 10, "completion_tokens": 5},
+            }
+        )
+        response = _create_mock_response(
+            chaosllm_server,
+            raw_body=body,
+            headers={"content-type": "application/json"},
+        )
+
+        with mock_httpx_client(chaosllm_server, response):
+            result = transform.process(make_pipeline_row(row), ctx)
+
+        assert result.status == "success"
+        assert result.row is not None
+        assert result.row["llm_response"] == "Complete answer"
+        assert result.row.get("llm_response_error") is None
+
     def test_missing_state_id_raises_runtime_error(self, chaosllm_server) -> None:
         """Missing state_id on context is a framework bug and must crash."""
         transform, ctx = _create_transform_with_context()

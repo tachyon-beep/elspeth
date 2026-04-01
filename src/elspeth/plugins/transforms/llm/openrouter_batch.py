@@ -714,6 +714,48 @@ class OpenRouterBatchLLMTransform(BaseTransform):
                 },
             )
 
+        # Tier 3 boundary: validate content is string
+        if not isinstance(content, str):
+            return _RowFailure(
+                error={
+                    "reason": "malformed_content_type",
+                    "error": f"Expected string content, got {type(content).__name__}",
+                },
+            )
+
+        # Tier 3 boundary: validate finish_reason
+        # Matches the unified provider validation in providers/openrouter.py.
+        raw_finish_reason = choices[0].get("finish_reason") if isinstance(choices[0], dict) else None
+        if raw_finish_reason == "tool_calls":
+            return _RowFailure(
+                error={
+                    "reason": "unsupported_finish_reason",
+                    "finish_reason": "tool_calls",
+                    "error": "LLM returned tool_calls response (not supported by ELSPETH)",
+                },
+            )
+
+        # Empty/whitespace content — provider returned a string but no meaningful text
+        if not content.strip():
+            return _RowFailure(
+                error={
+                    "reason": "empty_content",
+                    "finish_reason": raw_finish_reason,
+                    "error": f"LLM returned empty content (finish_reason={raw_finish_reason})",
+                },
+            )
+
+        # Non-stop finish reasons with content indicate truncation or content filtering
+        # that the provider didn't flag via null content. Record as failure.
+        if raw_finish_reason is not None and raw_finish_reason not in ("stop",):
+            return _RowFailure(
+                error={
+                    "reason": "non_stop_finish_reason",
+                    "finish_reason": raw_finish_reason,
+                    "error": f"LLM response has finish_reason={raw_finish_reason!r} (expected 'stop')",
+                },
+            )
+
         # Note: "usage" and "model" are optional in OpenAI/OpenRouter API responses
         # (e.g., streaming responses may omit usage). Tier 3 boundary: coerce to TokenUsage.
         usage = TokenUsage.from_dict(data.get("usage"))

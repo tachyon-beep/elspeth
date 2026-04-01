@@ -9,7 +9,9 @@ import subprocess
 import sys
 from datetime import UTC, datetime
 from pathlib import Path
+from typing import Any
 
+import yaml
 from codex_audit_common import (  # type: ignore[import-not-found]
     AsyncTqdm,
     chunked,
@@ -31,7 +33,49 @@ def _is_python_file(path: Path) -> bool:
     return path.suffix == ".py" and not path.name.startswith("test_")
 
 
-def _build_prompt(file_path: Path, template: str, context: str, extra_message: str | None = None) -> str:
+def _load_tier_allowlist(repo_root: Path) -> list[dict[str, Any]]:
+    """Load the tier model enforcement allowlist from contracts.yaml."""
+    path = repo_root / "config" / "cicd" / "enforce_tier_model" / "contracts.yaml"
+    if not path.exists():
+        return []
+    data = yaml.safe_load(path.read_text(encoding="utf-8"))
+    return data.get("per_file_rules", [])
+
+
+def _allowlist_entries_for_file(file_path: Path, root_dir: Path, allowlist: list[dict[str, Any]]) -> str | None:
+    """Extract tier-model allowlist entries relevant to a specific target file.
+
+    Returns formatted text for prompt injection, or None if no entries match.
+    """
+    relative = str(file_path.relative_to(root_dir))
+    matches: list[str] = []
+    for entry in allowlist:
+        pattern = entry.get("pattern", "")
+        # Match if the file path ends with the allowlist pattern
+        if relative.endswith(pattern) or relative == pattern:
+            rules = ", ".join(entry.get("rules", []))
+            reason = entry.get("reason", "no reason given")
+            max_hits = entry.get("max_hits")
+            line = f"  - Rules {rules}: {reason}"
+            if max_hits is not None:
+                line += f" (max_hits={max_hits})"
+            matches.append(line)
+    if not matches:
+        return None
+    return (
+        "Tier Model Allowlist Entries for This File:\n"
+        "The following defensive patterns are ALLOWLISTED in this file and should\n"
+        "NOT be reported as bugs unless they exceed their max_hits count:\n" + "\n".join(matches)
+    )
+
+
+def _build_prompt(
+    file_path: Path,
+    template: str,
+    context: str,
+    extra_message: str | None = None,
+    allowlist_context: str | None = None,
+) -> str:
     return (
         "You are a static analysis agent doing a deep bug audit.\n"
         f"Target file: {file_path}\n\n"
@@ -127,6 +171,8 @@ def _build_prompt(file_path: Path, template: str, context: str, extra_message: s
         "\n"
         "Analysis Depth Checklist:\n"
         "- [ ] Read CLAUDE.md sections relevant to this file's subsystem\n"
+        "- [ ] Consult the Skill references (tier model, engine patterns, config\n"
+        "      contracts, logging/telemetry) included in the repository context below\n"
         "- [ ] Check plugin protocol compliance (hookspec signatures)\n"
         "- [ ] Verify schema contracts match implementation\n"
         "- [ ] Trace data flow for audit trail completeness\n"
@@ -134,8 +180,7 @@ def _build_prompt(file_path: Path, template: str, context: str, extra_message: s
         "- [ ] Validate integration tests exist for edge cases\n"
         "- [ ] Look for untested error conditions\n"
         "- [ ] Check for missing type annotations\n"
-        "\n"
-        "Repository context (read-only):\n"
+        "\n" + (f"{allowlist_context}\n\n" if allowlist_context else "") + "Repository context (read-only):\n"
         f"{context}\n\n"
         "Bug report template:\n"
         f"{template}\n"
@@ -338,6 +383,7 @@ async def _run_batches(
     bugs_open_dir: Path | None,
     deduplicate: bool,
     extra_message: str | None = None,
+    tier_allowlist: list[dict[str, Any]] | None = None,
 ) -> dict[str, int]:
     """Run analysis in batches. Returns statistics."""
     log_lock = asyncio.Lock()
@@ -364,7 +410,8 @@ async def _run_batches(
                 pbar.update(1)
                 continue
 
-            prompt = _build_prompt(file_path, prompt_template, context, extra_message)
+            allowlist_ctx = _allowlist_entries_for_file(file_path, root_dir, tier_allowlist) if tier_allowlist else None
+            prompt = _build_prompt(file_path, prompt_template, context, extra_message, allowlist_ctx)
             batch_files.append(file_path)
 
             task = asyncio.create_task(
@@ -747,9 +794,10 @@ Examples:
             print(f"  ... and {len(files) - 20} more")
         return 0
 
-    # Load template and context
+    # Load template, context (with skills), and tier model allowlist
     template_text = template_path.read_text(encoding="utf-8")
-    context_text = load_context(repo_root, extra_files=args.context_files)
+    context_text = load_context(repo_root, extra_files=args.context_files, include_skills=True)
+    tier_allowlist = _load_tier_allowlist(repo_root)
     ensure_log_file(log_path, header_title="Codex Bug Hunt Log")
 
     # Run analysis
@@ -770,6 +818,7 @@ Examples:
             bugs_open_dir=bugs_open_dir,
             deduplicate=args.deduplicate,
             extra_message=args.extra_message,
+            tier_allowlist=tier_allowlist,
         )
     )
 
