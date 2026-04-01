@@ -313,6 +313,176 @@ class TestUpsertEdge:
         assert "source" in result.affected_nodes
         assert "t1" in result.affected_nodes
 
+    def test_edge_to_output_syncs_node_on_success(self) -> None:
+        """Edge from node to output updates node's on_success to output name."""
+        state = _empty_state()
+        catalog = _mock_catalog()
+        # Add a node with on_success pointing elsewhere
+        r1 = execute_tool(
+            "upsert_node",
+            {
+                "id": "t1",
+                "node_type": "transform",
+                "plugin": "uppercase",
+                "input": "in",
+                "on_success": "old_stream",
+                "options": {},
+            },
+            state,
+            catalog,
+        )
+        # Add an output
+        r2 = execute_tool(
+            "set_output",
+            {"sink_name": "csv_out", "plugin": "csv", "options": {}, "on_write_failure": "discard"},
+            r1.updated_state,
+            catalog,
+        )
+        # Add edge from node to output with on_success type
+        r3 = execute_tool(
+            "upsert_edge",
+            {"id": "e1", "from_node": "t1", "to_node": "csv_out", "edge_type": "on_success"},
+            r2.updated_state,
+            catalog,
+        )
+        assert r3.success is True
+        node = next(n for n in r3.updated_state.nodes if n.id == "t1")
+        assert node.on_success == "csv_out"
+
+    def test_edge_to_output_syncs_node_on_error(self) -> None:
+        """Edge from node to output with on_error updates node's on_error."""
+        state = _empty_state()
+        catalog = _mock_catalog()
+        r1 = execute_tool(
+            "upsert_node",
+            {
+                "id": "t1",
+                "node_type": "transform",
+                "plugin": "uppercase",
+                "input": "in",
+                "on_success": "out",
+                "options": {},
+            },
+            state,
+            catalog,
+        )
+        r2 = execute_tool(
+            "set_output",
+            {"sink_name": "err_out", "plugin": "csv", "options": {}, "on_write_failure": "discard"},
+            r1.updated_state,
+            catalog,
+        )
+        r3 = execute_tool(
+            "upsert_edge",
+            {"id": "e1", "from_node": "t1", "to_node": "err_out", "edge_type": "on_error"},
+            r2.updated_state,
+            catalog,
+        )
+        assert r3.success is True
+        node = next(n for n in r3.updated_state.nodes if n.id == "t1")
+        assert node.on_error == "err_out"
+
+    def test_edge_to_output_syncs_source_on_success(self) -> None:
+        """Edge from source to output updates source's on_success."""
+        state = _empty_state()
+        catalog = _mock_catalog()
+        r1 = execute_tool(
+            "set_source",
+            {"plugin": "csv", "on_success": "old_stream", "options": {}},
+            state,
+            catalog,
+        )
+        r2 = execute_tool(
+            "set_output",
+            {"sink_name": "main", "plugin": "csv", "options": {}, "on_write_failure": "discard"},
+            r1.updated_state,
+            catalog,
+        )
+        r3 = execute_tool(
+            "upsert_edge",
+            {"id": "e1", "from_node": "source", "to_node": "main", "edge_type": "on_success"},
+            r2.updated_state,
+            catalog,
+        )
+        assert r3.success is True
+        assert r3.updated_state.source.on_success == "main"
+
+    def test_edge_to_node_does_not_sync(self) -> None:
+        """Edge from node to another node does NOT change connection fields."""
+        state = _empty_state()
+        catalog = _mock_catalog()
+        r1 = execute_tool(
+            "upsert_node",
+            {
+                "id": "t1",
+                "node_type": "transform",
+                "plugin": "uppercase",
+                "input": "in",
+                "on_success": "stream_a",
+                "options": {},
+            },
+            state,
+            catalog,
+        )
+        r2 = execute_tool(
+            "upsert_node",
+            {
+                "id": "t2",
+                "node_type": "transform",
+                "plugin": "uppercase",
+                "input": "stream_a",
+                "on_success": "out",
+                "options": {},
+            },
+            r1.updated_state,
+            catalog,
+        )
+        r3 = execute_tool(
+            "upsert_edge",
+            {"id": "e1", "from_node": "t1", "to_node": "t2", "edge_type": "on_success"},
+            r2.updated_state,
+            catalog,
+        )
+        assert r3.success is True
+        node = next(n for n in r3.updated_state.nodes if n.id == "t1")
+        assert node.on_success == "stream_a"  # unchanged
+
+    def test_edge_to_output_already_matching_is_noop(self) -> None:
+        """Edge to output where on_success already matches does not double-bump version."""
+        state = _empty_state()
+        catalog = _mock_catalog()
+        r1 = execute_tool(
+            "upsert_node",
+            {
+                "id": "t1",
+                "node_type": "transform",
+                "plugin": "uppercase",
+                "input": "in",
+                "on_success": "csv_out",
+                "options": {},
+            },
+            state,
+            catalog,
+        )
+        r2 = execute_tool(
+            "set_output",
+            {"sink_name": "csv_out", "plugin": "csv", "options": {}, "on_write_failure": "discard"},
+            r1.updated_state,
+            catalog,
+        )
+        v_before = r2.updated_state.version
+        r3 = execute_tool(
+            "upsert_edge",
+            {"id": "e1", "from_node": "t1", "to_node": "csv_out", "edge_type": "on_success"},
+            r2.updated_state,
+            catalog,
+        )
+        assert r3.success is True
+        node = next(n for n in r3.updated_state.nodes if n.id == "t1")
+        assert node.on_success == "csv_out"
+        # with_edge bumps version once; with_node should NOT be called
+        assert r3.updated_state.version == v_before + 1
+
 
 class TestRemoveNode:
     def test_removes_node_and_edges(self) -> None:

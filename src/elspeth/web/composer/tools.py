@@ -10,7 +10,7 @@ L3 (web/composer/state, web/catalog/protocol).
 from __future__ import annotations
 
 from collections.abc import Callable, Mapping
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Any
 
@@ -875,16 +875,44 @@ def _execute_upsert_edge(
     args: dict[str, Any],
     state: CompositionState,
 ) -> ToolResult:
-    """Add or update an edge."""
+    """Add or update an edge.
+
+    When the edge targets an output (sink), synchronises the source
+    node's connection field so that generate_yaml() produces a
+    working pipeline.  Edges to non-output nodes are visual only.
+    """
+    from_node = args["from_node"]
+    to_node = args["to_node"]
+    edge_type = args["edge_type"]
+
     edge = EdgeSpec(
         id=args["id"],
-        from_node=args["from_node"],
-        to_node=args["to_node"],
-        edge_type=args["edge_type"],
+        from_node=from_node,
+        to_node=to_node,
+        edge_type=edge_type,
         label=args.get("label"),
     )
     new_state = state.with_edge(edge)
-    return _mutation_result(new_state, (args["from_node"], args["to_node"]))
+
+    # Synchronise connection field when the edge targets an output.
+    # generate_yaml() and the engine use on_success/on_error values
+    # (not edges) to route data to sinks, so the connection field
+    # must match the output name for the pipeline to work at runtime.
+    output_names = {o.name for o in new_state.outputs}
+    if to_node in output_names:
+        if from_node == "source" and edge_type == "on_success":
+            if new_state.source is not None and new_state.source.on_success != to_node:
+                new_source = replace(new_state.source, on_success=to_node)
+                new_state = new_state.with_source(new_source)
+        else:
+            node = next((n for n in new_state.nodes if n.id == from_node), None)
+            if node is not None:
+                if edge_type == "on_success" and node.on_success != to_node:
+                    new_state = new_state.with_node(replace(node, on_success=to_node))
+                elif edge_type == "on_error" and node.on_error != to_node:
+                    new_state = new_state.with_node(replace(node, on_error=to_node))
+
+    return _mutation_result(new_state, (from_node, to_node))
 
 
 def _execute_remove_node(
