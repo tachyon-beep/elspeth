@@ -2666,17 +2666,11 @@ async def get_run_results(
 
 # ── WebSocket Endpoint ─────────────────────────────────────────────────
 
-def get_auth_provider() -> Any:
-    raise NotImplementedError("Wire via app factory")
-
-
 @router.websocket("/ws/runs/{run_id}")
 async def websocket_run_progress(
     websocket: WebSocket,
     run_id: str,
     token: str | None = None,
-    broadcaster: ProgressBroadcaster = Depends(get_broadcaster),
-    auth_provider: Any = Depends(get_auth_provider),
 ) -> None:
     """Stream RunEvent JSON payloads for a specific run.
 
@@ -2692,14 +2686,21 @@ async def websocket_run_progress(
     5. Loop: await queue.get() -> send_json(event)
     6. Close on terminal event (completed/error/cancelled)
     7. Unsubscribe in finally block (ensures cleanup on disconnect)
+
+    NOTE (post-impl fix): Uses AuthProvider.authenticate() (the protocol
+    method), not the non-existent validate_token(). Auth provider is
+    accessed from app.state, not via Depends (WebSocket limitation).
     """
+    broadcaster = websocket.app.state.broadcaster
+    auth_provider: AuthProvider = websocket.app.state.auth_provider
+
     # Auth: validate JWT from query parameter
     if token is None:
         await websocket.close(code=4001, reason="Missing authentication token")
         return
     try:
-        user = auth_provider.validate_token(token)
-    except Exception:
+        user = await auth_provider.authenticate(token)
+    except AuthenticationError:
         await websocket.close(code=4001, reason="Invalid authentication token")
         return
 

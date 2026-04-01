@@ -38,6 +38,17 @@ async def get_current_user(request: Request) -> UserIdentity:
 
     token = parts[1].strip()
     request.state.auth_token = token
+
+    # Decode claims without verification for downstream use (e.g. iat
+    # for refresh chain enforcement).  The authenticated call below
+    # verifies the signature — this is a pure parse, not a trust decision.
+    import jwt as _jwt
+
+    try:
+        request.state.auth_claims = _jwt.decode(token, options={"verify_signature": False}, algorithms=["HS256"])
+    except _jwt.PyJWTError:
+        request.state.auth_claims = {}
+
     auth_provider: AuthProvider = request.app.state.auth_provider
 
     try:

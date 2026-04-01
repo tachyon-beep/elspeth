@@ -356,6 +356,91 @@ class TestMessageRoutes:
         assert messages[1]["role"] == "assistant"
 
 
+class TestRecomposeConvergencePartialState:
+    """Tests for partial state persistence on composer convergence failure."""
+
+    def test_recompose_convergence_preserves_partial_state(self, tmp_path) -> None:
+        """When recompose hits convergence error with partial state,
+        the state is persisted and included in the 422 response."""
+        import asyncio
+
+        from elspeth.web.composer.protocol import ComposerConvergenceError
+
+        partial = CompositionState(
+            source=None,
+            nodes=(),
+            edges=(),
+            outputs=(),
+            metadata=PipelineMetadata(),
+            version=2,  # > initial (1), so it's a real mutation
+        )
+
+        mock_composer = AsyncMock()
+        mock_composer.compose = AsyncMock(
+            side_effect=ComposerConvergenceError(
+                max_turns=5,
+                budget_exhausted="composition",
+                partial_state=partial,
+            ),
+        )
+
+        app, service = _make_app(tmp_path)
+        app.state.composer_service = mock_composer
+        client = TestClient(app, raise_server_exceptions=False)
+
+        # Create session
+        resp = client.post("/api/sessions", json={"title": "Test"})
+        session_id = resp.json()["id"]
+
+        # Simulate a failed send_message: user message saved, no assistant
+        # response. This is the precondition for recompose — the last
+        # message must be a user turn.
+        loop = asyncio.new_event_loop()
+        loop.run_until_complete(service.add_message(uuid.UUID(session_id), "user", "Build a CSV pipeline"))
+        loop.close()
+
+        recompose_resp = client.post(f"/api/sessions/{session_id}/recompose")
+
+        assert recompose_resp.status_code == 422
+        detail = recompose_resp.json()["detail"]
+        assert detail["error_type"] == "convergence"
+        assert "partial_state" in detail
+
+    def test_recompose_convergence_without_partial_state(self, tmp_path) -> None:
+        """When convergence error has no partial state (no mutations),
+        response omits partial_state key."""
+        import asyncio
+
+        from elspeth.web.composer.protocol import ComposerConvergenceError
+
+        mock_composer = AsyncMock()
+        mock_composer.compose = AsyncMock(
+            side_effect=ComposerConvergenceError(
+                max_turns=3,
+                budget_exhausted="discovery",
+                partial_state=None,
+            ),
+        )
+
+        app, service = _make_app(tmp_path)
+        app.state.composer_service = mock_composer
+        client = TestClient(app, raise_server_exceptions=False)
+
+        resp = client.post("/api/sessions", json={"title": "Test"})
+        session_id = resp.json()["id"]
+
+        loop = asyncio.new_event_loop()
+        loop.run_until_complete(service.add_message(uuid.UUID(session_id), "user", "Build something"))
+        loop.close()
+
+        recompose_resp = client.post(f"/api/sessions/{session_id}/recompose")
+
+        assert recompose_resp.status_code == 422
+        detail = recompose_resp.json()["detail"]
+        assert detail["error_type"] == "convergence"
+        assert "partial_state" not in detail
+
+
 class TestStateRoutes:
     """Tests for composition state endpoints."""
 
