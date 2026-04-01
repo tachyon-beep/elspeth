@@ -178,6 +178,71 @@ class TestSchemaCompatibilityGuards:
         assert "To fix this, either:" in msg
         instance.close()
 
+    def test_missing_check_constraint_raises_compatibility_error(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Missing required check constraints must be listed in the error."""
+        db_path = tmp_path / "missing_check.db"
+        engine = create_engine(f"sqlite:///{db_path}")
+        metadata.create_all(engine)
+        engine.dispose()
+
+        instance = _make_instance(f"sqlite:///{db_path}")
+        monkeypatch.setattr(
+            database_module,
+            "_REQUIRED_CHECK_CONSTRAINTS",
+            (("runs", "ck_nonexistent_constraint"),),
+        )
+
+        with pytest.raises(SchemaCompatibilityError) as exc_info:
+            instance._validate_schema()
+
+        msg = str(exc_info.value)
+        assert "Missing check constraints:" in msg
+        assert "runs.ck_nonexistent_constraint" in msg
+        assert "To fix this, either:" in msg
+        instance.close()
+
+    def test_missing_index_raises_compatibility_error(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Missing required indexes must be listed in the error."""
+        db_path = tmp_path / "missing_index.db"
+        engine = create_engine(f"sqlite:///{db_path}")
+        metadata.create_all(engine)
+        engine.dispose()
+
+        instance = _make_instance(f"sqlite:///{db_path}")
+        monkeypatch.setattr(
+            database_module,
+            "_REQUIRED_INDEXES",
+            (("runs", "ix_nonexistent_index"),),
+        )
+
+        with pytest.raises(SchemaCompatibilityError) as exc_info:
+            instance._validate_schema()
+
+        msg = str(exc_info.value)
+        assert "Missing indexes:" in msg
+        assert "runs.ix_nonexistent_index" in msg
+        assert "To fix this, either:" in msg
+        instance.close()
+
+    def test_non_sqlite_require_existing_schema_rejects_empty_database(self, tmp_path: Path) -> None:
+        """Non-SQLite path must reject empty databases when _require_existing_schema is set."""
+        db_path = tmp_path / "empty_non_sqlite.db"
+        engine = create_engine(f"sqlite:///{db_path}")
+        # Do NOT call metadata.create_all — database has no Landscape tables
+        engine.dispose()
+
+        instance = _make_instance(f"sqlite:///{db_path}")
+        # Override connection_string to trigger the non-SQLite path
+        instance.connection_string = "postgresql://user:pass@host/db"
+        instance._require_existing_schema = True
+
+        with pytest.raises(SchemaCompatibilityError) as exc_info:
+            instance._validate_schema()
+
+        msg = str(exc_info.value)
+        assert "does not contain any Landscape tables" in msg
+        instance.close()
+
     def test_validate_schema_translates_sqlcipher_error_on_get_table_names(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
         """SQLCipher passphrase errors during get_table_names() must produce SchemaCompatibilityError.
 

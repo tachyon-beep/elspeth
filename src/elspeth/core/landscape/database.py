@@ -61,6 +61,21 @@ _REQUIRED_FOREIGN_KEYS: tuple[tuple[str, str, str], ...] = (
     ("transform_errors", "transform_id", "nodes"),
 )
 
+# Required check constraints for audit integrity.
+# Format: (table_name, constraint_name)
+_REQUIRED_CHECK_CONSTRAINTS: tuple[tuple[str, str], ...] = (
+    ("calls", "calls_has_parent"),
+    ("preflight_results", "ck_preflight_result_type"),
+)
+
+# Required indexes (including partial unique indexes) for audit integrity.
+# Format: (table_name, index_name)
+_REQUIRED_INDEXES: tuple[tuple[str, str], ...] = (
+    ("calls", "ix_calls_state_call_index_unique"),
+    ("calls", "ix_calls_operation_call_index_unique"),
+    ("token_outcomes", "ix_token_outcomes_terminal_unique"),
+)
+
 
 class LandscapeDB:
     """Landscape database connection manager."""
@@ -311,17 +326,33 @@ class LandscapeDB:
             self._set_sqlite_schema_epoch(SQLITE_SCHEMA_EPOCH)
 
     def _validate_schema(self) -> None:
-        """Validate that existing database has all required columns and foreign keys.
+        """Validate that existing database has the required schema.
 
-        Only validates SQLite databases. PostgreSQL deployments are expected
-        to use Alembic migrations which handle schema evolution properly.
-        This check catches developers using stale local audit.db files.
+        For non-SQLite backends, validates table existence when
+        _require_existing_schema is set (inspection callers like MCP/CLI).
+        For SQLite, performs full validation of columns, foreign keys,
+        check constraints, and indexes to catch stale local audit.db files.
 
         Raises:
-            SchemaCompatibilityError: If database is missing required columns or FKs,
-                or if an encrypted database is opened without the correct passphrase.
+            SchemaCompatibilityError: If database is missing required schema
+                elements, or if an encrypted database is opened without the
+                correct passphrase.
         """
         if not self.connection_string.startswith("sqlite"):
+            # Backend-agnostic existence check for inspection callers
+            if self._require_existing_schema:
+                from sqlalchemy import inspect as sa_inspect
+
+                inspector = sa_inspect(self.engine)
+                existing_tables = set(inspector.get_table_names())
+                expected_tables = set(metadata.tables.keys())
+                if not existing_tables & expected_tables:
+                    raise SchemaCompatibilityError(
+                        "Database does not contain any Landscape tables.\n\n"
+                        "This does not appear to be an ELSPETH audit database. "
+                        "Verify the database path is correct.\n\n"
+                        f"Database: {self.connection_string}"
+                    )
             return
 
         from sqlalchemy import inspect
@@ -401,8 +432,34 @@ class LandscapeDB:
             if not has_correct_fk:
                 missing_fks.append((table_name, column_name, referenced_table))
 
-        # Raise errors for missing columns or FKs
-        if missing_tables or missing_columns or missing_fks:
+        # Check for required check constraints (Tier 1 audit integrity)
+        missing_checks: list[tuple[str, str]] = []
+
+        for table_name, constraint_name in _REQUIRED_CHECK_CONSTRAINTS:
+            if table_name not in existing_tables:
+                continue
+
+            checks = inspector.get_check_constraints(table_name)
+            has_constraint = any(c["name"] == constraint_name for c in checks)
+
+            if not has_constraint:
+                missing_checks.append((table_name, constraint_name))
+
+        # Check for required indexes (Tier 1 audit integrity)
+        missing_indexes: list[tuple[str, str]] = []
+
+        for table_name, index_name in _REQUIRED_INDEXES:
+            if table_name not in existing_tables:
+                continue
+
+            indexes = inspector.get_indexes(table_name)
+            has_index = any(idx["name"] == index_name for idx in indexes)
+
+            if not has_index:
+                missing_indexes.append((table_name, index_name))
+
+        # Raise errors for missing columns, FKs, check constraints, or indexes
+        if missing_tables or missing_columns or missing_fks or missing_checks or missing_indexes:
             error_parts = []
 
             if missing_tables:
@@ -416,6 +473,14 @@ class LandscapeDB:
             if missing_fks:
                 missing_fk_str = ", ".join(f"{t}.{c} → {ref}" for t, c, ref in missing_fks)
                 error_parts.append(f"Missing foreign keys: {missing_fk_str}")
+
+            if missing_checks:
+                missing_checks_str = ", ".join(f"{t}.{name}" for t, name in missing_checks)
+                error_parts.append(f"Missing check constraints: {missing_checks_str}")
+
+            if missing_indexes:
+                missing_indexes_str = ", ".join(f"{t}.{name}" for t, name in missing_indexes)
+                error_parts.append(f"Missing indexes: {missing_indexes_str}")
 
             raise SchemaCompatibilityError(
                 "Landscape database schema is outdated.\n\n" + "\n".join(error_parts) + "\n\n"

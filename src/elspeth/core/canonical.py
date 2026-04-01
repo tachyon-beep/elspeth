@@ -225,6 +225,7 @@ def compute_full_topology_hash(graph: ExecutionGraph) -> str:
                 {
                     "node_id": n,
                     "plugin_name": graph.get_node_info(n).plugin_name,
+                    "node_type": graph.get_node_info(n).node_type.value,
                     "config_hash": stable_hash(graph.get_node_info(n).config),
                 }
                 for n in nx_graph.nodes()

@@ -184,8 +184,9 @@ class TestCreateToken:
             row_index=0,
             data={"col": "val"},
         )
-        token = recorder.create_token(row.row_id, branch_name="path-a")
+        token = recorder.create_token(row.row_id, branch_name="path-a", fork_group_id="fg-1")
         assert token.branch_name == "path-a"
+        assert token.fork_group_id == "fg-1"
 
     def test_creates_token_with_fork_group_id(self):
         _db, recorder = _setup()
@@ -1453,5 +1454,68 @@ class TestTokenRunIdConsistency:
                     is_terminal=1,
                     recorded_at=now(),
                     sink_name="output",
+                )
+            )
+
+    def test_schema_composite_fk_prevents_cross_run_node_state(self):
+        """Schema composite FK on node_states must reject mismatched (token_id, run_id).
+
+        The composite ForeignKeyConstraint on node_states ensures that a node_state
+        row cannot reference a token from a different run, preventing cross-run
+        contamination in the audit trail.
+        """
+        from sqlalchemy.exc import IntegrityError
+
+        from elspeth.core.landscape._helpers import generate_id, now
+        from elspeth.core.landscape.schema import node_states_table
+
+        db = make_landscape_db()
+        recorder = make_recorder(db)
+
+        # Set up run-A with row + token
+        recorder.begin_run(config={}, canonical_version="v1", run_id="run-A")
+        recorder.register_node(
+            run_id="run-A",
+            plugin_name="csv",
+            node_type=NodeType.SOURCE,
+            plugin_version="1.0",
+            config={},
+            node_id="source-0",
+            schema_config=_DYNAMIC_SCHEMA,
+        )
+        row_a = recorder.create_row(
+            run_id="run-A",
+            source_node_id="source-0",
+            row_index=0,
+            data={"col": "value"},
+        )
+        token_a = recorder.create_token(row_a.row_id)
+
+        # Set up run-B with its own node (but no tokens)
+        recorder.begin_run(config={}, canonical_version="v1", run_id="run-B")
+        recorder.register_node(
+            run_id="run-B",
+            plugin_name="csv",
+            node_type=NodeType.SOURCE,
+            plugin_version="1.0",
+            config={},
+            node_id="source-0",
+            schema_config=_DYNAMIC_SCHEMA,
+        )
+
+        # Try to insert a node_state with token_id from run-A but run_id from run-B
+        # The composite FK should reject this
+        with pytest.raises(IntegrityError), db.connection() as conn:
+            conn.execute(
+                node_states_table.insert().values(
+                    state_id=f"state_{generate_id()[:12]}",
+                    run_id="run-B",
+                    token_id=token_a.token_id,
+                    node_id="source-0",
+                    step_index=0,
+                    attempt=1,
+                    status="open",
+                    input_hash="fake-hash",
+                    started_at=now(),
                 )
             )

@@ -943,9 +943,13 @@ def build_execution_graph(
             # Nested merge: output has branch names as top-level fields, each
             # containing the branch's row data as a nested dict.  Since the type
             # system only supports flat types, declare branch fields as "any".
+            # For partial-arrival policies, branch fields are optional since not
+            # all branches may arrive at runtime.
+            optional = coal_config.policy != "require_all"
+            suffix = "?" if optional else ""
             graph.get_node_info(coalesce_id).config["schema"] = {
                 "mode": "flexible",
-                "fields": [f"{branch}: any" for branch in branch_to_schema],
+                "fields": [f"{branch}: any{suffix}" for branch in branch_to_schema],
             }
 
     # Config gate schema resolution (pass 2): resolve gates that were deferred

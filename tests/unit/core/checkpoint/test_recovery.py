@@ -932,6 +932,58 @@ def test_get_unprocessed_rows_handles_delegation_token_with_completed_leaf(
     assert recovery_manager.get_unprocessed_rows(run_id) == []
 
 
+def test_get_unprocessed_row_data_corrupt_utf8_raises_audit_integrity(
+    db: LandscapeDB,
+    recovery_manager: RecoveryManager,
+    payload_store: PayloadStore,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Corrupt UTF-8 payload must raise AuditIntegrityError, not UnicodeDecodeError.
+
+    Regression: If persisted payload bytes are not valid UTF-8 (e.g. disk corruption,
+    encoding mismatch), get_unprocessed_row_data must raise AuditIntegrityError
+    with a clear message rather than leaking a raw UnicodeDecodeError.
+    """
+    corrupt_bytes = b"\xff\xfe invalid"
+    payload_ref = payload_store.store(corrupt_bytes)
+    with db.connection() as conn:
+        _insert_run(conn, "run-corrupt-utf8", status=RunStatus.FAILED)
+        _insert_node(conn, "run-corrupt-utf8", "source-node", node_type=NodeType.SOURCE)
+        _insert_row(conn, "run-corrupt-utf8", "row-1", row_index=0, source_data_ref=payload_ref)
+
+    monkeypatch.setattr(recovery_manager, "get_unprocessed_rows", lambda _run_id: ["row-1"])
+    with pytest.raises(AuditIntegrityError, match="Corrupt payload"):
+        recovery_manager.get_unprocessed_row_data(
+            "run-corrupt-utf8", payload_store, source_schema_class=_SimpleSchema
+        )
+
+
+def test_get_unprocessed_row_data_non_dict_json_raises_audit_integrity(
+    db: LandscapeDB,
+    recovery_manager: RecoveryManager,
+    payload_store: PayloadStore,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """JSON payload that decodes to non-dict must raise AuditIntegrityError.
+
+    Regression: If persisted payload is valid JSON but not a dict (e.g. a list),
+    get_unprocessed_row_data must raise AuditIntegrityError with "expected dict"
+    rather than silently passing a list where a dict is expected.
+    """
+    non_dict_bytes = b"[1, 2, 3]"
+    payload_ref = payload_store.store(non_dict_bytes)
+    with db.connection() as conn:
+        _insert_run(conn, "run-non-dict", status=RunStatus.FAILED)
+        _insert_node(conn, "run-non-dict", "source-node", node_type=NodeType.SOURCE)
+        _insert_row(conn, "run-non-dict", "row-1", row_index=0, source_data_ref=payload_ref)
+
+    monkeypatch.setattr(recovery_manager, "get_unprocessed_rows", lambda _run_id: ["row-1"])
+    with pytest.raises(AuditIntegrityError, match="expected dict"):
+        recovery_manager.get_unprocessed_row_data(
+            "run-non-dict", payload_store, source_schema_class=_SimpleSchema
+        )
+
+
 def test_get_resume_point_reads_latest_checkpoint_after_can_resume(
     db: LandscapeDB,
     checkpoint_manager: CheckpointManager,

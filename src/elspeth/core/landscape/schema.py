@@ -208,8 +208,8 @@ node_states_table = Table(
     "node_states",
     metadata,
     Column("state_id", String(64), primary_key=True),
-    Column("token_id", String(64), ForeignKey("tokens.token_id"), nullable=False),
-    Column("run_id", String(64), ForeignKey("runs.run_id"), nullable=False),  # Added for composite FK
+    Column("token_id", String(64), nullable=False),
+    Column("run_id", String(64), ForeignKey("runs.run_id"), nullable=False),
     Column("node_id", String(64), nullable=False),
     Column("step_index", Integer, nullable=False),
     Column("attempt", Integer, nullable=False, default=0),
@@ -225,6 +225,8 @@ node_states_table = Table(
     Column("completed_at", DateTime(timezone=True)),
     UniqueConstraint("token_id", "node_id", "attempt"),
     UniqueConstraint("token_id", "step_index", "attempt"),
+    # Composite FK: enforces token_id and run_id belong together (prevents cross-run contamination)
+    ForeignKeyConstraint(["token_id", "run_id"], ["tokens.token_id", "tokens.run_id"]),
     # Composite FK to nodes (node_id, run_id)
     ForeignKeyConstraint(["node_id", "run_id"], ["nodes.node_id", "nodes.run_id"]),
 )
@@ -477,7 +479,7 @@ checkpoints_table = Table(
     metadata,
     Column("checkpoint_id", String(64), primary_key=True),
     Column("run_id", String(64), ForeignKey("runs.run_id"), nullable=False),
-    Column("token_id", String(64), ForeignKey("tokens.token_id"), nullable=False),
+    Column("token_id", String(64), nullable=False),
     Column("node_id", String(64), nullable=False),  # Part of composite FK to nodes
     Column("sequence_number", Integer, nullable=False),  # Monotonic progress marker
     Column("aggregation_state_json", Text),  # Serialized aggregation buffers (if any)
@@ -492,6 +494,8 @@ checkpoints_table = Table(
     # Version 3: Phase 2 traversal refactor checkpoint break
     # Version 4: Pending coalesce state persisted in checkpoints
     Column("format_version", Integer, nullable=True),  # Nullable — populated on new runs, NULL for checkpoints created before this column
+    # Composite FK: enforces token_id and run_id belong together (prevents cross-run contamination)
+    ForeignKeyConstraint(["token_id", "run_id"], ["tokens.token_id", "tokens.run_id"]),
     # Composite FK to nodes (node_id, run_id)
     ForeignKeyConstraint(
         ["node_id", "run_id"],

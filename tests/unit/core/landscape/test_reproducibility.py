@@ -12,9 +12,11 @@ Tests cover:
 
 from __future__ import annotations
 
+from datetime import UTC, datetime
+
 import pytest
 
-from elspeth.contracts import Determinism, NodeType
+from elspeth.contracts import CallStatus, CallType, Determinism, NodeStateStatus, NodeType
 from elspeth.contracts.errors import AuditIntegrityError
 from elspeth.contracts.schema import SchemaConfig
 from elspeth.core.landscape import LandscapeDB, LandscapeRecorder
@@ -23,7 +25,13 @@ from elspeth.core.landscape.reproducibility import (
     compute_grade,
     update_grade_after_purge,
 )
-from elspeth.core.landscape.schema import runs_table
+from elspeth.core.landscape.schema import (
+    calls_table,
+    node_states_table,
+    rows_table,
+    runs_table,
+    tokens_table,
+)
 from tests.fixtures.landscape import make_landscape_db, make_recorder
 
 _DYNAMIC_SCHEMA = SchemaConfig.from_dict({"mode": "observed"})
@@ -171,16 +179,128 @@ def _set_grade(db: LandscapeDB, run_id: str, grade: ReproducibilityGrade) -> Non
         conn.execute(runs_table.update().where(runs_table.c.run_id == run_id).values(reproducibility_grade=grade.value))
 
 
+def _create_nondeterministic_call(
+    db: LandscapeDB,
+    recorder: LandscapeRecorder,
+    *,
+    determinism: Determinism = Determinism.NON_DETERMINISTIC,
+    response_ref: str | None = None,
+    response_hash: str | None = "resp_hash",
+    node_id: str = "nd-node",
+    state_id: str = "st-1",
+    call_id: str = "call-1",
+) -> None:
+    """Create a node + node_state + call chain for purge testing."""
+    recorder.register_node(
+        run_id="run-1",
+        plugin_name="llm",
+        node_type=NodeType.TRANSFORM,
+        plugin_version="1.0",
+        config={},
+        node_id=node_id,
+        schema_config=_DYNAMIC_SCHEMA,
+        determinism=determinism,
+    )
+    with db.connection() as conn:
+        # Row and token are needed for node_state FK
+        conn.execute(
+            rows_table.insert().values(
+                row_id=f"row-{node_id}",
+                run_id="run-1",
+                source_node_id=node_id,
+                row_index=0,
+                source_data_hash="src_hash",
+                created_at=datetime.now(UTC),
+            )
+        )
+        conn.execute(
+            tokens_table.insert().values(
+                token_id=f"tok-{node_id}",
+                row_id=f"row-{node_id}",
+                run_id="run-1",
+                created_at=datetime.now(UTC),
+            )
+        )
+        conn.execute(
+            node_states_table.insert().values(
+                state_id=state_id,
+                token_id=f"tok-{node_id}",
+                run_id="run-1",
+                node_id=node_id,
+                step_index=0,
+                attempt=0,
+                status=NodeStateStatus.COMPLETED,
+                input_hash="in_hash",
+                output_hash="out_hash",
+                started_at=datetime.now(UTC),
+            )
+        )
+        conn.execute(
+            calls_table.insert().values(
+                call_id=call_id,
+                state_id=state_id,
+                operation_id=None,
+                call_index=0,
+                call_type=CallType.HTTP,
+                status=CallStatus.SUCCESS,
+                request_hash="req_hash",
+                response_hash=response_hash,
+                response_ref=response_ref,
+                created_at=datetime.now(UTC),
+            )
+        )
+
+
 class TestUpdateGradeAfterPurge:
     """Tests for update_grade_after_purge — degrades REPLAY → ATTRIBUTABLE."""
 
-    def test_replay_degrades_to_attributable(self) -> None:
+    def test_replay_degrades_when_nondeterministic_response_purged(self) -> None:
+        """Downgrade when a nondeterministic node's response payload has been purged."""
         db, recorder = _setup()
+        # Create a nondeterministic node with a purged response
+        # (response_hash set but response_ref is None = purged)
+        _create_nondeterministic_call(db, recorder, response_ref=None, response_hash="resp_hash")
         _set_grade(db, "run-1", ReproducibilityGrade.REPLAY_REPRODUCIBLE)
         update_grade_after_purge(db, "run-1")
         run = recorder.get_run("run-1")
         assert run is not None
         assert run.reproducibility_grade == ReproducibilityGrade.ATTRIBUTABLE_ONLY
+
+    def test_replay_unchanged_when_only_deterministic_payloads_purged(self) -> None:
+        """Do NOT downgrade when only deterministic node payloads are purged."""
+        db, recorder = _setup()
+        # Create a deterministic node with a purged response — not replay-critical
+        _create_nondeterministic_call(
+            db, recorder,
+            determinism=Determinism.DETERMINISTIC,
+            response_ref=None,
+            response_hash="resp_hash",
+        )
+        _set_grade(db, "run-1", ReproducibilityGrade.REPLAY_REPRODUCIBLE)
+        update_grade_after_purge(db, "run-1")
+        run = recorder.get_run("run-1")
+        assert run is not None
+        assert run.reproducibility_grade == ReproducibilityGrade.REPLAY_REPRODUCIBLE
+
+    def test_replay_unchanged_when_nondeterministic_response_intact(self) -> None:
+        """Do NOT downgrade when nondeterministic responses are still present."""
+        db, recorder = _setup()
+        # Create a nondeterministic node with response still present
+        _create_nondeterministic_call(db, recorder, response_ref="ref://still-there", response_hash="resp_hash")
+        _set_grade(db, "run-1", ReproducibilityGrade.REPLAY_REPRODUCIBLE)
+        update_grade_after_purge(db, "run-1")
+        run = recorder.get_run("run-1")
+        assert run is not None
+        assert run.reproducibility_grade == ReproducibilityGrade.REPLAY_REPRODUCIBLE
+
+    def test_replay_unchanged_when_no_calls_exist(self) -> None:
+        """Do NOT downgrade when run has no calls at all (nothing to purge)."""
+        db, recorder = _setup()
+        _set_grade(db, "run-1", ReproducibilityGrade.REPLAY_REPRODUCIBLE)
+        update_grade_after_purge(db, "run-1")
+        run = recorder.get_run("run-1")
+        assert run is not None
+        assert run.reproducibility_grade == ReproducibilityGrade.REPLAY_REPRODUCIBLE
 
     def test_full_unchanged_after_purge(self) -> None:
         db, recorder = _setup()

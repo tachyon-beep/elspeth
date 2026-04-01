@@ -137,6 +137,52 @@ def test_checkpoint_roundtrip_nested_datetime_and_user_data() -> None:
     assert result["normal"] == "value"
 
 
+# ===========================================================================
+# Tuple round-trip tests
+# ===========================================================================
+
+
+def test_checkpoint_roundtrip_tuple() -> None:
+    """Tuples must survive checkpoint serialization round-trip.
+
+    Regression: JSON has no tuple type — tuples must be encoded via
+    the __elspeth_type__/tuple envelope and restored on loads.
+    """
+    data = {"key": (1, "x", True)}
+    result = checkpoint_loads(checkpoint_dumps(data))
+
+    assert result["key"] == (1, "x", True)
+    assert isinstance(result["key"], tuple)
+
+
+def test_checkpoint_roundtrip_nested_tuple() -> None:
+    """Tuples nested inside dicts and lists must survive round-trip."""
+    data = {"outer": [(1, 2), (3, 4)]}
+    result = checkpoint_loads(checkpoint_dumps(data))
+
+    assert result["outer"] == [(1, 2), (3, 4)]
+    assert isinstance(result["outer"][0], tuple)
+    assert isinstance(result["outer"][1], tuple)
+
+
+def test_checkpoint_roundtrip_tuple_with_datetime() -> None:
+    """Tuples containing datetime values must survive round-trip."""
+    dt = datetime(2024, 1, 1, tzinfo=UTC)
+    data = {"key": (dt, "value")}
+    result = checkpoint_loads(checkpoint_dumps(data))
+
+    assert isinstance(result["key"], tuple)
+    assert result["key"][0] == dt
+    assert isinstance(result["key"][0], datetime)
+    assert result["key"][1] == "value"
+
+
+def test_checkpoint_dumps_rejects_nan_in_tuple() -> None:
+    """Non-finite floats inside tuples must be rejected like any other container."""
+    with pytest.raises(ValueError, match="non-finite float"):
+        checkpoint_dumps({"k": (float("nan"),)})
+
+
 def test_checkpoint_new_envelope_used_in_dumps_output() -> None:
     """Verify the serialized form uses __elspeth_type__ not __datetime__."""
     import json

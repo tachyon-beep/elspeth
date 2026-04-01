@@ -396,6 +396,27 @@ class DataFlowRepository:
         # Derive run_id from the row record (Tier 1 -- our data, must exist)
         run_id = self._resolve_run_id_for_row(row_id)
 
+        # Validate lineage metadata invariants (Tier 1 write-side enforcement)
+        # The read side (explain) assumes these are mutually exclusive.
+        group_ids = [gid for gid in (fork_group_id, join_group_id) if gid is not None]
+        if len(group_ids) > 1:
+            raise AuditIntegrityError(
+                f"create_token: conflicting lineage metadata — at most one of "
+                f"fork_group_id, join_group_id may be set. "
+                f"Got fork_group_id={fork_group_id!r}, join_group_id={join_group_id!r}"
+            )
+
+        # branch_name requires fork_group_id (it names which fork branch this token is on)
+        if branch_name is not None and fork_group_id is None:
+            raise AuditIntegrityError(
+                f"create_token: branch_name={branch_name!r} requires fork_group_id to be set"
+            )
+
+        # Reject empty-string group IDs (should be None, not "")
+        for name, value in [("fork_group_id", fork_group_id), ("join_group_id", join_group_id)]:
+            if value is not None and not value.strip():
+                raise AuditIntegrityError(f"create_token: {name} must be None or non-empty, got {value!r}")
+
         token = Token(
             token_id=token_id,
             row_id=row_id,
@@ -562,6 +583,12 @@ class DataFlowRepository:
             AuditIntegrityError: If parent tokens do not belong to specified row
                 or if parent tokens span multiple runs
         """
+        if not parent_token_ids:
+            raise AuditIntegrityError(
+                "coalesce_tokens requires at least one parent token — "
+                "a coalesce with zero parents creates an unexplainable audit state"
+            )
+
         # Validate all parent tokens belong to the same row and run (Tier 1 invariant)
         run_id: str | None = None
         for parent_id in parent_token_ids:
