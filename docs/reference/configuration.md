@@ -476,8 +476,10 @@ Multiple triggers can be combined (first to fire wins):
 trigger:
   count: 1000
   timeout_seconds: 3600
-  condition: "row['type'] == 'flush_signal'"
+  condition: "row['batch_count'] >= 500 and row['batch_age_seconds'] < 30"
 ```
+
+**Important:** Trigger conditions operate at the **batch level**, not the row level. Only `batch_count` and `batch_age_seconds` are available as row keys. For row-level routing decisions, use Gates instead.
 
 **Note:** End-of-source is always checked implicitly and doesn't need configuration.
 
@@ -1189,7 +1191,8 @@ Gate conditions and aggregation triggers use a restricted expression language.
 
 | Construct | Example |
 |-----------|---------|
-| Field access | `row['field']`, `row.get('field', default)` |
+| Field access | `row['field']`, `row.get('field')` |
+| Built-in functions | `len()`, `abs()` |
 | Comparisons | `==`, `!=`, `<`, `<=`, `>`, `>=` |
 | Boolean operators | `and`, `or`, `not` |
 | Arithmetic | `+`, `-`, `*`, `/`, `%` |
@@ -1197,38 +1200,34 @@ Gate conditions and aggregation triggers use a restricted expression language.
 | Literals | `True`, `False`, `None`, numbers, strings |
 | Ternary | `x if condition else y` |
 
+**`row.get()` does not accept default values.** `row.get('field')` returns `None` if the key is missing. `row.get('field', 'fallback')` is **forbidden** — default values fabricate data the source never provided. Use `row.get('field') is not None` to test for field presence.
+
 ### Forbidden Constructs
 
 | Forbidden | Reason |
 |-----------|--------|
-| Function calls (`int()`, `len()`, `str()`) | Security - no arbitrary function execution |
+| Coercive function calls (`int()`, `str()`, `float()`, `bool()`) | Not needed — the source schema guarantees type safety before expressions run |
 | Imports | Security |
 | Lambda expressions | Security |
 | Comprehensions | Security |
-| Attribute access (except `row.get`) | Security |
+| Attribute access (except `row.get()`) | Security |
 | F-strings | Security |
 
-### Type Coercion
+### Type Safety
 
-The expression parser does **not** allow type coercion functions. Instead, coerce types at the source:
+Type coercion functions like `int()` are not needed in expressions. The source schema handles type conversion at the boundary — by the time data reaches a gate or trigger, fields already have the types declared in the schema:
 
 ```yaml
-# CORRECT - coerce at source
 source:
   plugin: csv
   options:
     schema:
       fields:
-        - "amount: int"  # CSV strings coerced to int
+        - "amount: int"  # CSV strings are coerced to int at load time
 
 gates:
   - name: threshold
-    condition: "row['amount'] > 1000"  # amount is already int
-
-# WRONG - function calls not allowed
-gates:
-  - name: threshold
-    condition: "int(row['amount']) > 1000"  # ERROR: int() forbidden
+    condition: "row['amount'] > 1000"  # amount is guaranteed to be int here
 ```
 
 ---

@@ -94,6 +94,64 @@ def process(self, row: PipelineRow, ctx: PluginContext) -> TransformResult:
 
 **Serialization does not change trust tier.** Data we wrote to our own database or checkpoint file is still Tier 1 when we read it back, even though it passes through `json.loads()` or SQLAlchemy deserialization. The trust boundary is about *who authored the data*, not the transport format. Checkpoints, audit records, and Landscape tables are all our data — we defined the schema, we wrote the values, we own the invariants. If a deserialized checkpoint is missing a `"tokens"` key or a `"row_id"` field, that is corruption in our system, not a data quality issue to handle gracefully. Crash immediately.
 
+## Wrapping Discipline at Tier 3 Boundaries
+
+Wrapping at a Tier 3 boundary involves **two independent decisions**. Conflating them is a common mistake:
+
+| Decision | Question | Answer |
+|----------|----------|--------|
+| **1. Do I wrap?** | Is this an operation on external data? | Always yes at Tier 3 |
+| **2. What do I catch?** | What can this operation actually throw? | Only the specific exceptions |
+
+**Never resolve a "broad except" warning by removing the try/except.** The wrapping is correct — the catch clause is lazy. Fix the catch, not the wrap.
+
+**Never resolve a "silent except" warning by swallowing to a default.** The catch should record what happened and re-raise, not silently degrade.
+
+### The resolution ladder for CI warnings
+
+| CI Rule | Warning | Wrong Fix | Right Fix |
+|---------|---------|-----------|-----------|
+| R4 (broad-except) | `except Exception` at Tier 3 boundary | Remove the try/except | Narrow to specific exceptions |
+| R6 (silent-except) | Catch swallows without re-raise | Swallow to a default value | Record the error, then re-raise |
+
+### Example: SDK serialization on Tier 3 response
+
+```python
+# WRONG — broad catch, silent swallow
+try:
+    raw_response = response.model_dump()
+except Exception:
+    raw_response = None  # Silently lost the error
+
+# WRONG — removed the wrapping entirely
+raw_response = response.model_dump()  # Crashes on malformed Tier 3 data
+
+# RIGHT — specific catch, record-then-reraise
+try:
+    raw_response = response.model_dump()
+except (TypeError, ValueError, RecursionError, AttributeError) as dump_exc:
+    # Record minimal audit entry before re-raising
+    recorder.record_call(
+        state_id=state_id,
+        call_index=call_index,
+        call_type=CallType.LLM,
+        status=CallStatus.ERROR,
+        request_data=request_dto,
+        error=LLMCallError(
+            type="ResponseProcessingError",
+            message=f"model_dump() failed: {dump_exc}",
+            retryable=False,
+        ),
+        latency_ms=latency_ms,
+    )
+    raise LLMClientError(
+        f"Failed to serialize LLM response: {dump_exc}",
+        retryable=False,
+    ) from dump_exc
+```
+
+**Why `model_dump()` needs wrapping:** The response object is Tier 3 — it came from an external provider. `model_dump()` operates on that external data. If the provider returned something malformed enough to break serialization, that's an external data problem, not a bug in our code. We wrap it, catch what it can throw, record what happened, and re-raise — we never crash silently, and we never pretend it didn't happen.
+
 ## Pipeline Templates as Tier 2 Data
 
 Pipeline templates (Jinja2 prompt templates in YAML config) are **Tier 2 — user-provided, validated at load time, trusted during rendering**. This creates two distinct error categories:
