@@ -547,6 +547,9 @@ class TestNodeRecords:
         assert n["config"] == {"path": "data.csv"}
         assert n["schema_mode"] == "observed"
         assert n["sequence_in_pipeline"] == 0
+        assert n["registered_at"] is not None
+        assert isinstance(n["registered_at"], str)
+        assert n["registered_at"] == _DT.isoformat()
 
 
 class TestEdgeRecords:
@@ -563,6 +566,9 @@ class TestEdgeRecords:
         assert e["to_node_id"] == "node-2"
         assert e["label"] == "continue"
         assert e["default_mode"] == "move"
+        assert e["created_at"] is not None
+        assert isinstance(e["created_at"], str)
+        assert e["created_at"] == _DT.isoformat()
 
 
 class TestOperationRecords:
@@ -610,6 +616,9 @@ class TestRowRecords:
         assert r["row_index"] == 0
         assert r["source_node_id"] == "node-1"
         assert r["source_data_hash"] == "data-hash"
+        assert r["created_at"] is not None
+        assert isinstance(r["created_at"], str)
+        assert r["created_at"] == _DT.isoformat()
 
 
 class TestTokenRecords:
@@ -624,6 +633,9 @@ class TestTokenRecords:
         assert t["token_id"] == "tok-1"
         assert t["row_id"] == "row-1"
         assert t["step_in_pipeline"] == 0
+        assert t["created_at"] is not None
+        assert isinstance(t["created_at"], str)
+        assert t["created_at"] == _DT.isoformat()
 
     def test_token_parent_fields(self) -> None:
         exporter = _make_exporter(
@@ -860,6 +872,9 @@ class TestArtifactRecords:
         assert a["artifact_type"] == "csv"
         assert a["content_hash"] == "content-hash"
         assert a["size_bytes"] == 1024
+        assert a["created_at"] is not None
+        assert isinstance(a["created_at"], str)
+        assert a["created_at"] == _DT.isoformat()
 
 
 # ===========================================================================
@@ -1071,9 +1086,14 @@ class TestTimestampPreservation:
         # Map of record_type -> timestamp fields that must be non-None
         expected_timestamps: dict[str, list[str]] = {
             "run": ["started_at", "completed_at"],
+            "node": ["registered_at"],
+            "edge": ["created_at"],
             "operation": ["started_at", "completed_at"],
+            "row": ["created_at"],
+            "token": ["created_at"],
             "routing_event": ["created_at"],
             "batch": ["created_at", "completed_at"],
+            "artifact": ["created_at"],
         }
         # Both call records (operation-parented and state-parented) have created_at
         call_records = [r for r in records if r["record_type"] == "call"]

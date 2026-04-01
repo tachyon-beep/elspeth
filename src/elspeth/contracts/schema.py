@@ -28,10 +28,28 @@ from __future__ import annotations
 import re
 from collections.abc import Mapping
 from dataclasses import dataclass
-from typing import Any, Literal
+from typing import Annotated, Any, Literal
+
+from pydantic import Field
 
 # Supported field types for schema definitions
 SUPPORTED_TYPES = frozenset({"str", "int", "float", "bool", "any"})
+
+# Finite float: rejects NaN/Infinity per audit integrity requirements.
+# NaN/Infinity cannot be represented in RFC 8785 canonical JSON and must be
+# rejected at trust boundaries rather than silently corrupting the audit trail.
+FiniteFloat = Annotated[float, Field(allow_inf_nan=False)]
+
+# Canonical mapping from schema field type strings to Python/Pydantic types.
+# Used by DAG graph validation (L1) and plugin schema factory (L3) to build
+# dynamic Pydantic models from config-driven schema definitions.
+FIELD_TYPE_MAP: dict[str, type] = {
+    "str": str,
+    "int": int,
+    "float": FiniteFloat,  # type: ignore[dict-item]
+    "bool": bool,
+    "any": Any,  # type: ignore[dict-item]  # Any is a special form, not a type
+}
 
 # Pattern: "field_name: type" or "field_name: type?"
 # Field names must be valid Python identifiers (letters, digits, underscores)

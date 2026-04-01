@@ -49,6 +49,7 @@ class NodeExportRecord(TypedDict):
     schema_mode: str | None
     schema_fields: list[dict[str, object]] | None
     sequence_in_pipeline: int | None
+    registered_at: str
 
 
 class EdgeExportRecord(TypedDict):
@@ -59,6 +60,7 @@ class EdgeExportRecord(TypedDict):
     to_node_id: str
     label: str | None
     default_mode: str
+    created_at: str
 
 
 class OperationExportRecord(TypedDict):
@@ -108,6 +110,7 @@ class RowExportRecord(TypedDict):
     row_index: int
     source_node_id: str
     source_data_hash: str | None
+    created_at: str
 
 
 class TokenExportRecord(TypedDict):
@@ -120,6 +123,7 @@ class TokenExportRecord(TypedDict):
     fork_group_id: str | None
     join_group_id: str | None
     expand_group_id: str | None
+    created_at: str
 
 
 class TokenParentExportRecord(TypedDict):
@@ -221,6 +225,7 @@ class ArtifactExportRecord(TypedDict):
     content_hash: str | None
     size_bytes: int | None
     idempotency_key: str | None
+    created_at: str
 
 
 ExportRecord = (

@@ -262,6 +262,7 @@ class LandscapeExporter:
                 "schema_mode": node.schema_mode,
                 "schema_fields": deep_thaw(node.schema_fields) if node.schema_fields is not None else None,
                 "sequence_in_pipeline": node.sequence_in_pipeline,
+                "registered_at": node.registered_at.isoformat(),
             }
             yield node_record
 
@@ -275,6 +276,7 @@ class LandscapeExporter:
                 "to_node_id": edge.to_node_id,
                 "label": edge.label,
                 "default_mode": edge.default_mode.value,
+                "created_at": edge.created_at.isoformat(),
             }
             yield edge_record
 
@@ -378,6 +380,7 @@ class LandscapeExporter:
                 "row_index": row.row_index,
                 "source_node_id": row.source_node_id,
                 "source_data_hash": row.source_data_hash,
+                "created_at": row.created_at.isoformat(),
             }
             yield row_record
 
@@ -393,6 +396,7 @@ class LandscapeExporter:
                     "fork_group_id": token.fork_group_id,
                     "join_group_id": token.join_group_id,
                     "expand_group_id": token.expand_group_id,
+                    "created_at": token.created_at.isoformat(),
                 }
                 yield token_record
 
@@ -601,6 +605,7 @@ class LandscapeExporter:
                 "content_hash": artifact.content_hash,
                 "size_bytes": artifact.size_bytes,
                 "idempotency_key": artifact.idempotency_key,
+                "created_at": artifact.created_at.isoformat(),
             }
             yield artifact_record
 

@@ -7,21 +7,24 @@ is a thin facade that delegates to builder.build_execution_graph().
 
 from __future__ import annotations
 
+import itertools
 from collections import Counter
 from collections.abc import Mapping, Sequence
-from typing import TYPE_CHECKING, cast
+from typing import TYPE_CHECKING, Any, cast
 
 import networkx as nx
+from pydantic import ConfigDict, create_model
 from networkx import MultiDiGraph
 
 from elspeth.contracts import (
     EdgeInfo,
+    PluginSchema,
     RouteDestination,
     RoutingMode,
     check_compatibility,
 )
 from elspeth.contracts.enums import NodeType
-from elspeth.contracts.schema import SchemaConfig
+from elspeth.contracts.schema import FIELD_TYPE_MAP, FieldDefinition, SchemaConfig
 from elspeth.contracts.types import (
     AggregationName,
     BranchName,
@@ -40,7 +43,7 @@ from elspeth.core.dag.models import (
 )
 
 if TYPE_CHECKING:
-    from elspeth.contracts import PluginSchema, SinkProtocol, SourceProtocol, TransformProtocol
+    from elspeth.contracts import SinkProtocol, SourceProtocol, TransformProtocol
     from elspeth.core.config import (
         AggregationSettings,
         CoalesceSettings,
@@ -48,6 +51,46 @@ if TYPE_CHECKING:
         SourceSettings,
     )
     from elspeth.core.dag.models import WiredTransform
+
+
+_coalesce_schema_counter = itertools.count(1)
+
+
+def _build_coalesce_schema(schema_dict: Mapping[str, Any]) -> type[PluginSchema]:
+    """Build a PluginSchema class from a synthesized coalesce schema dict.
+
+    Used by get_effective_producer_schema() to enable PHASE 2 type validation
+    on union-merge coalesce edges.  The schema dict is produced by the builder
+    and contains ``mode`` and ``fields`` keys (list of ``"name: type"`` specs).
+
+    Raises:
+        GraphValidationError: If the schema dict is missing required keys or
+            contains unparseable field specs (indicates a builder bug).
+    """
+    counter = next(_coalesce_schema_counter)
+
+    # schema_dict is Tier 1 (builder-synthesized) — direct access, crash on anomaly.
+    fields_raw: Sequence[str] = schema_dict["fields"]
+
+    field_definitions: dict[str, Any] = {}
+    for spec in fields_raw:
+        fd = FieldDefinition.parse(spec)
+        python_type = FIELD_TYPE_MAP[fd.field_type]
+        if fd.required:
+            field_definitions[fd.name] = (python_type, ...)
+        else:
+            field_definitions[fd.name] = (python_type | None, None)
+
+    mode: str = schema_dict["mode"]
+    extra_mode: str = "allow" if mode == "flexible" else "forbid"
+
+    return create_model(
+        f"_CoalesceUnionSchema_{counter}",
+        __base__=PluginSchema,
+        __module__=__name__,
+        __config__=ConfigDict(extra=extra_mode, strict=True),
+        **field_definitions,
+    )
 
 
 class ExecutionGraph:
@@ -1142,7 +1185,8 @@ class ExecutionGraph:
         # strategy (nested wraps in {branch: data}, union merges fields, select
         # picks a branch).  Strategy-aware handling:
         #   - select: passes through one branch unchanged → trace that branch's schema
-        #   - union/nested: output shape differs from any input → return None (dynamic)
+        #   - union:  builder synthesizes typed field schema → build PluginSchema class
+        #   - nested: all fields are "any" type → return None (nothing useful to validate)
         if node_info.node_type == NodeType.COALESCE:
             merge_strategy = node_info.config["merge"]
             if merge_strategy == "select":
@@ -1166,6 +1210,16 @@ class ExecutionGraph:
                 result = self.get_effective_producer_schema(last, _cache)
                 _cache[node_id] = result
                 return result
+            if merge_strategy == "union" and "schema" in node_info.config:
+                # Union merge: the builder synthesizes a schema dict into
+                # config["schema"] with concrete field types.  Build a PluginSchema
+                # class from it so PHASE 2 edge validation can type-check downstream.
+                schema_dict = node_info.config["schema"]
+                if schema_dict["mode"] != "observed":
+                    result = _build_coalesce_schema(schema_dict)
+                    _cache[node_id] = result
+                    return result
+            # nested merge, observed union, or no synthesized schema: return None (dynamic)
             _cache[node_id] = None
             return None
 

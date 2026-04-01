@@ -260,9 +260,23 @@ class RecoveryManager:
             # Retrieve from payload store
             try:
                 payload_bytes = payload_store.retrieve(source_data_ref)
-                degraded_data = json.loads(payload_bytes.decode("utf-8"))
             except PayloadNotFoundError as exc:
                 raise ValueError(f"Row {row_id} payload has been purged (hash={exc.content_hash}) - cannot resume") from exc
+
+            try:
+                degraded_data = json.loads(payload_bytes.decode("utf-8"))
+            except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+                raise AuditIntegrityError(
+                    f"Corrupt payload for row {row_id} (ref={source_data_ref}) — "
+                    f"cannot decode persisted row data (Tier 1 violation). "
+                    f"Error: {exc}"
+                ) from exc
+
+            if not isinstance(degraded_data, dict):
+                raise AuditIntegrityError(
+                    f"Corrupt payload for row {row_id} (ref={source_data_ref}) — "
+                    f"expected dict, got {type(degraded_data).__name__} (Tier 1 violation)"
+                )
 
             # TYPE FIDELITY RESTORATION:
             # Re-validate through source schema to restore types.
