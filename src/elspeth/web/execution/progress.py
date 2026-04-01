@@ -16,9 +16,19 @@ create_app(), because it depends on the broadcaster instance.
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import threading
 
+import structlog
+
 from elspeth.web.execution.schemas import RunEvent
+
+slog = structlog.get_logger()
+
+# Backpressure: maximum events buffered per WebSocket subscriber.
+# A stalled client that cannot drain its queue will have oldest events
+# dropped rather than accumulating unboundedly toward OOM.
+_SUBSCRIBER_QUEUE_MAXSIZE = 1000
 
 
 class ProgressBroadcaster:
@@ -47,7 +57,7 @@ class ProgressBroadcaster:
         Called from the WebSocket handler when a client connects.
         Returns the queue that the handler awaits on.
         """
-        queue: asyncio.Queue[RunEvent] = asyncio.Queue()
+        queue: asyncio.Queue[RunEvent] = asyncio.Queue(maxsize=_SUBSCRIBER_QUEUE_MAXSIZE)
         with self._lock:
             self._subscribers.setdefault(run_id, set()).add(queue)
         return queue
@@ -75,7 +85,26 @@ class ProgressBroadcaster:
         with self._lock:
             subs = set(self._subscribers.get(run_id, ()))
         for queue in subs:
-            self._loop.call_soon_threadsafe(queue.put_nowait, event)
+            self._loop.call_soon_threadsafe(self._safe_put, queue, event, run_id)
+
+    @staticmethod
+    def _safe_put(queue: asyncio.Queue[RunEvent], event: RunEvent, run_id: str) -> None:
+        """Put an event on the queue, dropping the oldest on backpressure.
+
+        Called via call_soon_threadsafe — runs on the event loop thread.
+        If the queue is full (stalled client), discard the oldest event
+        and retry. If the retry also fails (another callback filled the
+        slot between get and put), the event is logged and dropped.
+        """
+        try:
+            queue.put_nowait(event)
+        except asyncio.QueueFull:
+            with contextlib.suppress(asyncio.QueueEmpty):
+                queue.get_nowait()  # Drop oldest
+            try:
+                queue.put_nowait(event)
+            except asyncio.QueueFull:
+                slog.warning("subscriber_queue_drop", run_id=run_id)
 
     def cleanup_run(self, run_id: str) -> None:
         """Remove all subscribers for a completed/failed run.

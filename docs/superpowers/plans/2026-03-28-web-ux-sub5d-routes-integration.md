@@ -536,19 +536,15 @@ async def get_run_results(
 
 # ── WebSocket Endpoint ─────────────────────────────────────────────────
 
-def get_auth_provider() -> Any:
-    raise NotImplementedError("Wire via app factory")
-
-
 @router.websocket("/ws/runs/{run_id}")
 async def websocket_run_progress(
     websocket: WebSocket,
     run_id: str,
     token: str | None = None,
-    broadcaster: ProgressBroadcaster = Depends(get_broadcaster),
-    auth_provider: Any = Depends(get_auth_provider),
-    service: ExecutionServiceImpl = Depends(get_execution_service),
 ) -> None:
+    # NOTE (post-impl fix): Auth provider and broadcaster accessed from
+    # app.state, not via Depends (WebSocket limitation). Uses
+    # AuthProvider.authenticate(), not the non-existent validate_token().
     """Stream RunEvent JSON payloads for a specific run.
 
     AC #12: Authentication via ?token=<jwt> query parameter.

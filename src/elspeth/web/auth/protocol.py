@@ -50,9 +50,14 @@ class CredentialAuthProvider(AuthProvider, Protocol):
         """
         ...
 
-    async def refresh(self, user_id: str, username: str) -> str:
+    async def refresh(self, user_id: str, username: str, *, original_iat: int | None = None) -> str:
         """Issue a new JWT for an already-authenticated user.
 
-        Raises AuthenticationError if the user no longer exists.
+        Args:
+            original_iat: The ``iat`` claim from the token being refreshed.
+                Carried forward to enforce a maximum refresh chain lifetime.
+
+        Raises AuthenticationError if the user no longer exists or the
+        refresh chain has expired.
         """
         ...

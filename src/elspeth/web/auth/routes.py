@@ -141,15 +141,23 @@ def create_auth_router() -> APIRouter:
     ) -> TokenResponse:
         """Re-issue a JWT from a valid existing token (local auth only).
 
-        Uses the provider's public refresh() method rather than
-        reaching into private attributes.
+        Passes the original ``iat`` claim through so the provider can
+        enforce a maximum refresh chain lifetime.
         """
         settings: WebSettings = request.app.state.settings
         if settings.auth_provider != "local":
             raise HTTPException(status_code=404, detail="Not found")
 
+        # Extract iat from the claims already decoded by the auth middleware.
+        # The middleware stashes parsed claims on request.state.auth_claims
+        # after signature verification by authenticate().
+        original_iat: int | None = request.state.auth_claims.get("iat")
+
         provider: CredentialAuthProvider = request.app.state.auth_provider
-        new_token = await provider.refresh(user.user_id, user.username)
+        try:
+            new_token = await provider.refresh(user.user_id, user.username, original_iat=original_iat)
+        except AuthenticationError as exc:
+            raise HTTPException(status_code=401, detail=exc.detail) from exc
         return TokenResponse(access_token=new_token)
 
     @router.get("/config", response_model=AuthConfigResponse)

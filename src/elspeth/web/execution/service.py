@@ -103,6 +103,10 @@ class ExecutionServiceImpl:
         # rows_failed.
         self._executor = ThreadPoolExecutor(max_workers=1)
         self._shutdown_events: dict[str, threading.Event] = {}
+        self._shutdown_events_lock = threading.Lock()
+        # Per-session asyncio lock to prevent TOCTOU on the active-run check.
+        # Keyed by session_id string; lazily created, never cleaned up (lightweight).
+        self._session_locks: dict[str, asyncio.Lock] = {}
 
     def _call_async(self, coro: Coroutine[Any, Any, T]) -> T:
         """Bridge an async call from the background thread to the main event loop.
@@ -124,7 +128,9 @@ class ExecutionServiceImpl:
         Sets all active shutdown events first so running pipelines can
         terminate gracefully before blocking on executor.shutdown(wait=True).
         """
-        for event in list(self._shutdown_events.values()):
+        with self._shutdown_events_lock:
+            events = list(self._shutdown_events.values())
+        for event in events:
             event.set()
         self._executor.shutdown(wait=True)
 
@@ -144,6 +150,16 @@ class ExecutionServiceImpl:
         Note: async because SessionService methods are async. The pipeline
         itself runs in a background thread — only setup is async.
         """
+        # TOCTOU fix: per-session asyncio lock serialises the
+        # get_active_run → create_run window so two concurrent execute()
+        # calls cannot both pass the check before either creates a run.
+        session_key = str(session_id)
+        lock = self._session_locks.setdefault(session_key, asyncio.Lock())
+        async with lock:
+            return await self._execute_locked(session_id, state_id, user_id=user_id)
+
+    async def _execute_locked(self, session_id: UUID, state_id: UUID | None = None, *, user_id: str | None = None) -> UUID:
+        """Inner execute — runs under the per-session asyncio.Lock."""
         # B6: One active run per session (AC #17: via SessionService)
         active = await self._session_service.get_active_run(session_id)
         if active is not None:
@@ -233,7 +249,8 @@ class ExecutionServiceImpl:
         # bypasses the event and updates DB to "cancelled" directly — causing
         # an illegal cancelled→running transition when _run_pipeline starts.
         shutdown_event = threading.Event()
-        self._shutdown_events[str(run_id)] = shutdown_event
+        with self._shutdown_events_lock:
+            self._shutdown_events[str(run_id)] = shutdown_event
 
         try:
             # Record blob-to-run linkage for input blobs
@@ -247,7 +264,8 @@ class ExecutionServiceImpl:
             # Submit to thread pool
             future = self._executor.submit(self._run_pipeline, str(run_id), pipeline_yaml, shutdown_event, user_id)
         except BaseException as exc:
-            self._shutdown_events.pop(str(run_id), None)
+            with self._shutdown_events_lock:
+                self._shutdown_events.pop(str(run_id), None)
             # Transition run out of pending so the one-active-run constraint
             # doesn't permanently block this session.
             with contextlib.suppress(Exception):
@@ -346,7 +364,8 @@ class ExecutionServiceImpl:
         Async because the pending-run path awaits SessionService (we're in
         the event loop thread, not the background thread).
         """
-        event = self._shutdown_events.get(str(run_id))
+        with self._shutdown_events_lock:
+            event = self._shutdown_events.get(str(run_id))
         if event is not None:
             event.set()
         else:
@@ -381,6 +400,22 @@ class ExecutionServiceImpl:
         landscape_db: LandscapeDB | None = None
         run_uuid = UUID(run_id)
         try:
+            # Early shutdown check: if cancel()/shutdown() fired before we
+            # start setup, skip the expensive LandscapeDB/plugin/graph work.
+            if shutdown_event.is_set():
+                self._call_async(self._session_service.update_run_status(run_uuid, status="cancelled"))
+                self._broadcaster.broadcast(
+                    run_id,
+                    RunEvent(
+                        run_id=run_id,
+                        timestamp=datetime.now(tz=UTC),
+                        event_type="cancelled",
+                        data={},
+                    ),
+                )
+                self._finalize_output_blobs(run_id, success=False)
+                return
+
             # B8/C1: SessionService is async — bridge from background thread.
             # Race defence: if cancel() updated DB to "cancelled" before we
             # started, this transition raises ValueError. Detect that specific
@@ -636,7 +671,8 @@ class ExecutionServiceImpl:
             raise  # Re-raise so future.add_done_callback sees it
         finally:
             # Always clean up, regardless of success or failure
-            self._shutdown_events.pop(run_id, None)
+            with self._shutdown_events_lock:
+                self._shutdown_events.pop(run_id, None)
             if landscape_db is not None:
                 landscape_db.close()
             self._broadcaster.cleanup_run(run_id)

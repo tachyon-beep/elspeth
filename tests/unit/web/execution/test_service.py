@@ -477,10 +477,19 @@ class TestCancelMechanism:
         mock_result.rows_failed = 2
         mock_orch.run.return_value = mock_result
 
-        # Event is set (simulating late cancel() call) but orchestrator
-        # returned normally — run completed before cancel was processed.
+        # Simulate late cancel: event is set DURING orchestrator.run()
+        # (after it returns its result), not before _run_pipeline starts.
+        # This tests the race where cancel() fires after the orchestrator
+        # finishes but before status is persisted.
         shutdown_event = threading.Event()
-        shutdown_event.set()
+
+        original_return = mock_result
+
+        def set_event_on_run(*args: object, **kwargs: object) -> MagicMock:
+            shutdown_event.set()
+            return original_return
+
+        mock_orch.run.side_effect = set_event_on_run
         run_id = str(uuid4())
 
         service._run_pipeline(run_id, "source:\n  plugin: csv", shutdown_event)
@@ -519,6 +528,33 @@ class TestCancelMechanism:
 
         # Only the one failed "running" attempt — no "failed" status update
         assert mock_session_service.update_run_status.call_count == 1
+
+    @patch("elspeth.web.execution.service.LandscapeDB")
+    @patch("elspeth.web.execution.service.FilesystemPayloadStore")
+    def test_run_pipeline_early_shutdown_skips_setup(
+        self,
+        mock_payload: MagicMock,
+        mock_landscape: MagicMock,
+        service: ExecutionServiceImpl,
+        mock_session_service: MagicMock,
+    ) -> None:
+        """If shutdown_event is already set when _run_pipeline starts,
+        skip all setup and immediately transition to cancelled."""
+        run_id = str(uuid4())
+
+        shutdown_event = threading.Event()
+        shutdown_event.set()
+
+        service._run_pipeline(run_id, "source:\n  plugin: csv", shutdown_event)
+
+        # No LandscapeDB or PayloadStore constructed (skipped setup)
+        mock_landscape.assert_not_called()
+        mock_payload.assert_not_called()
+
+        # Status updated to "cancelled"
+        status_calls = mock_session_service.update_run_status.call_args_list
+        assert len(status_calls) == 1
+        assert "cancelled" in str(status_calls[0])
 
     @patch("elspeth.web.execution.service.LandscapeDB")
     @patch("elspeth.web.execution.service.FilesystemPayloadStore")

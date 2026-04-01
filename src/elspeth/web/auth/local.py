@@ -35,10 +35,12 @@ class LocalAuthProvider:
         db_path: Path,
         secret_key: str,
         token_expiry_hours: int = 24,
+        max_refresh_chain_hours: int = 168,
     ) -> None:
         self._db_path = db_path
         self._secret_key = secret_key
         self._token_expiry_hours = token_expiry_hours
+        self._max_refresh_chain_hours = max_refresh_chain_hours
         self._ensure_schema()
 
     def _get_conn(self) -> sqlite3.Connection:
@@ -118,15 +120,17 @@ class LocalAuthProvider:
         if not bcrypt.checkpw(password.encode(), row[0].encode()):
             raise AuthenticationError("Invalid credentials")
 
+        now = int(time.time())
         payload = {
             "sub": username,
             "username": username,
-            "exp": int(time.time()) + self._token_expiry_hours * 3600,
+            "iat": now,
+            "exp": now + self._token_expiry_hours * 3600,
         }
         token: str = jwt.encode(payload, self._secret_key, algorithm="HS256")
         return token
 
-    async def refresh(self, user_id: str, username: str) -> str:
+    async def refresh(self, user_id: str, username: str, *, original_iat: int | None = None) -> str:
         """Issue a new JWT for an already-authenticated user.
 
         Verifies the user still exists in the database — a deleted
@@ -138,10 +142,21 @@ class LocalAuthProvider:
 
         Blocking sqlite work is offloaded via asyncio.to_thread().
         """
-        return await asyncio.to_thread(self._refresh_sync, user_id, username)
+        return await asyncio.to_thread(self._refresh_sync, user_id, username, original_iat)
 
-    def _refresh_sync(self, user_id: str, username: str) -> str:
+    def _refresh_sync(self, user_id: str, username: str, original_iat: int | None = None) -> str:
         """Synchronous refresh — called via asyncio.to_thread."""
+        now = int(time.time())
+
+        # Max refresh chain: reject if the original token was issued too
+        # long ago.  This bounds how long a stolen token can be refreshed
+        # indefinitely without re-authentication.  Without a session DB
+        # (Sub-2c/2d), this is the only revocation-like mechanism.
+        if original_iat is not None:
+            chain_age_hours = (now - original_iat) / 3600
+            if chain_age_hours > self._max_refresh_chain_hours:
+                raise AuthenticationError("Token refresh chain expired — please re-authenticate")
+
         with self._get_conn() as conn:
             row = conn.execute(
                 "SELECT 1 FROM users WHERE user_id = ?",
@@ -150,10 +165,14 @@ class LocalAuthProvider:
         if row is None:
             raise AuthenticationError("User not found")
 
+        # Carry forward the original iat so the chain age accumulates.
+        # New logins get a fresh iat; refreshes preserve the original.
+        token_iat = original_iat if original_iat is not None else now
         payload = {
             "sub": user_id,
             "username": username,
-            "exp": int(time.time()) + self._token_expiry_hours * 3600,
+            "iat": token_iat,
+            "exp": now + self._token_expiry_hours * 3600,
         }
         token: str = jwt.encode(payload, self._secret_key, algorithm="HS256")
         return token

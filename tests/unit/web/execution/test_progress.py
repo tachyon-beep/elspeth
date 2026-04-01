@@ -85,8 +85,8 @@ class TestProgressBroadcasterThreadSafety:
 
         broadcaster.broadcast("run-1", event)
 
-        # Verify call_soon_threadsafe was called with put_nowait
-        mock_loop.call_soon_threadsafe.assert_called_once_with(queue.put_nowait, event)
+        # Verify call_soon_threadsafe was called with _safe_put wrapper
+        mock_loop.call_soon_threadsafe.assert_called_once_with(ProgressBroadcaster._safe_put, queue, event, "run-1")
 
     def test_broadcast_to_multiple_subscribers(self) -> None:
         """Each subscriber queue gets its own call_soon_threadsafe call."""
@@ -181,6 +181,52 @@ class TestProgressBroadcasterThreadSafety:
         broadcaster.broadcast("run-1", event)
 
         mock_loop.call_soon_threadsafe.assert_not_called()
+
+
+class TestProgressBroadcasterBackpressure:
+    """Verify backpressure: bounded queue + drop-head on QueueFull."""
+
+    def test_subscribe_creates_bounded_queue(self) -> None:
+        """Subscriber queues must have maxsize to prevent OOM."""
+        from elspeth.web.execution.progress import _SUBSCRIBER_QUEUE_MAXSIZE
+
+        loop = asyncio.new_event_loop()
+        try:
+            broadcaster = ProgressBroadcaster(loop)
+            queue = broadcaster.subscribe("run-1")
+            assert queue.maxsize == _SUBSCRIBER_QUEUE_MAXSIZE
+        finally:
+            loop.close()
+
+    def test_safe_put_succeeds_when_queue_has_room(self) -> None:
+        """Normal case: event is placed on the queue."""
+        queue: asyncio.Queue[RunEvent] = asyncio.Queue(maxsize=10)
+        event = _make_event()
+
+        ProgressBroadcaster._safe_put(queue, event, "run-1")
+
+        assert queue.qsize() == 1
+
+    def test_safe_put_drops_oldest_when_full(self) -> None:
+        """When queue is full, oldest event is evicted and new event inserted."""
+        queue: asyncio.Queue[RunEvent] = asyncio.Queue(maxsize=3)
+        events = [_make_event(event_type="progress") for _ in range(3)]
+        for e in events:
+            queue.put_nowait(e)
+        assert queue.full()
+
+        new_event = _make_event(event_type="completed")
+        ProgressBroadcaster._safe_put(queue, new_event, "run-1")
+
+        # Queue still at maxsize, oldest was evicted
+        assert queue.qsize() == 3
+        # The first item should be events[1] (events[0] was evicted)
+        first = queue.get_nowait()
+        assert first is events[1]
+        # Last item should be our new event
+        _ = queue.get_nowait()  # events[2]
+        last = queue.get_nowait()
+        assert last is new_event
 
 
 class TestProgressBroadcasterCleanup:

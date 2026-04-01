@@ -446,6 +446,34 @@ def create_session_router() -> APIRouter:
                 "turns_used": exc.max_turns,
                 "budget_exhausted": exc.budget_exhausted,
             }
+            if exc.partial_state is not None:
+                try:
+                    validation = exc.partial_state.validate()
+                except (ValueError, TypeError, KeyError, AttributeError) as val_err:
+                    slog.warning("recompose_convergence_validation_failed", error=str(val_err))
+                    validation = ValidationSummary(is_valid=False, errors=("validation_failed",))
+
+                try:
+                    state_d = exc.partial_state.to_dict()
+                    state_data = CompositionStateData(
+                        source=state_d["source"],
+                        nodes=state_d["nodes"],
+                        edges=state_d["edges"],
+                        outputs=state_d["outputs"],
+                        metadata_=state_d["metadata"],
+                        is_valid=validation.is_valid,
+                        validation_errors=list(validation.errors) if validation.errors else None,
+                    )
+                    await service.save_composition_state(session.id, state_data)
+                    response_body["partial_state"] = state_d
+                except (ValueError, TypeError, KeyError, IntegrityError) as save_err:
+                    slog.error(
+                        "recompose_convergence_partial_state_save_failed",
+                        session_id=str(session_id),
+                        error=str(save_err),
+                        exc_info=True,
+                    )
+
             raise HTTPException(status_code=422, detail=response_body) from exc
         except LiteLLMAuthError as exc:
             raise HTTPException(

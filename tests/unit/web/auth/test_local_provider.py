@@ -251,3 +251,43 @@ class TestRefresh:
         token = await provider.refresh("alice", "alice")
         assert isinstance(token, str)
         assert len(token.split(".")) == 3
+
+    @pytest.mark.asyncio
+    async def test_refresh_with_iat_within_limit_succeeds(self, provider) -> None:
+        """Refresh with original_iat within max_refresh_chain_hours succeeds."""
+        provider.create_user("alice", "pw", display_name="Alice")
+        recent_iat = int(time.time()) - 3600  # 1 hour ago
+        token = await provider.refresh("alice", "alice", original_iat=recent_iat)
+        assert isinstance(token, str)
+        assert len(token.split(".")) == 3
+
+    @pytest.mark.asyncio
+    async def test_refresh_with_expired_chain_raises(self, provider) -> None:
+        """Refresh with original_iat older than max_refresh_chain_hours raises."""
+        provider.create_user("alice", "pw", display_name="Alice")
+        # Default max_refresh_chain_hours=168 (7 days). Set iat to 8 days ago.
+        old_iat = int(time.time()) - (8 * 24 * 3600)
+        with pytest.raises(AuthenticationError, match="Token refresh chain expired"):
+            await provider.refresh("alice", "alice", original_iat=old_iat)
+
+    @pytest.mark.asyncio
+    async def test_refresh_carries_original_iat_forward(self, provider) -> None:
+        """Refreshed token preserves the original iat, not a fresh one."""
+        import jwt
+
+        provider.create_user("alice", "pw", display_name="Alice")
+        original_iat = int(time.time()) - 7200  # 2 hours ago
+        token = await provider.refresh("alice", "alice", original_iat=original_iat)
+        claims = jwt.decode(token, "test-secret-key-for-unit-tests", algorithms=["HS256"])
+        assert claims["iat"] == original_iat
+
+    @pytest.mark.asyncio
+    async def test_refresh_without_iat_gets_fresh_timestamp(self, provider) -> None:
+        """Refresh with no original_iat (legacy token) gets a current iat."""
+        import jwt
+
+        provider.create_user("alice", "pw", display_name="Alice")
+        before = int(time.time())
+        token = await provider.refresh("alice", "alice", original_iat=None)
+        claims = jwt.decode(token, "test-secret-key-for-unit-tests", algorithms=["HS256"])
+        assert claims["iat"] >= before
