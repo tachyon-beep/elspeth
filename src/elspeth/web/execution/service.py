@@ -183,6 +183,21 @@ class ExecutionServiceImpl:
                     if not any(resolved.is_relative_to(d) for d in allowed_dirs):
                         raise ValueError(f"Source {key}='{value}' resolves outside allowed directories")
 
+        # Sink path allowlist — prevents arbitrary file writes via sink options.
+        # Without this, a client can set sink options.path to any absolute or
+        # ../ path and /execute will write there.
+        if composition_state.outputs:
+            from elspeth.web.composer.tools import _allowed_sink_directories
+
+            allowed_sink_dirs = _allowed_sink_directories(str(self._settings.data_dir))
+            for output in composition_state.outputs:
+                for key in ("path", "file"):
+                    value = output.options.get(key)
+                    if value is not None:
+                        resolved = Path(value).resolve()
+                        if not any(resolved.is_relative_to(d) for d in allowed_sink_dirs):
+                            raise ValueError(f"Sink '{output.name}' {key}='{value}' resolves outside allowed output directories")
+
         pipeline_yaml = self._yaml_generator.generate_yaml(composition_state)
 
         # Pre-validate blob_ref UUID before creating the run record.
@@ -448,6 +463,7 @@ class ExecutionServiceImpl:
                 coalesce_settings=(list(settings.coalesce) if settings.coalesce else None),
             )
             graph.validate()
+            graph.validate_edge_compatibility()
 
             # Include aggregation transforms alongside regular transforms,
             # following the CLI pattern (cli.py:868-878)

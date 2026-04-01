@@ -141,12 +141,13 @@ def validate_pipeline(
     errors: list[ValidationError] = []
     tmp_path: Path | None = None
 
-    # Step 1: Source path allowlist check (C3/S2 defense-in-depth)
-    # Any `path` or `file` key in source options must resolve under
-    # an allowed source directory. Uses the shared helper from AD-4.
-    from elspeth.web.composer.tools import _allowed_source_directories
+    # Step 1: Source + sink path allowlist check (C3/S2 defense-in-depth)
+    # Any `path` or `file` key in source/sink options must resolve under
+    # an allowed directory. Uses the shared helpers from AD-4.
+    from elspeth.web.composer.tools import _allowed_sink_directories, _allowed_source_directories
 
-    allowed_dirs = _allowed_source_directories(str(settings.data_dir))
+    allowed_source_dirs = _allowed_source_directories(str(settings.data_dir))
+    allowed_sink_dirs = _allowed_sink_directories(str(settings.data_dir))
     # state is a CompositionState (typed domain object). state.source is a
     # SourceSpec with typed .options attribute (Mapping[str, Any]).
     source_options = dict(state.source.options) if state.source is not None else {}
@@ -156,7 +157,7 @@ def validate_pipeline(
         if value is not None:
             path_checked = True
             resolved = Path(value).resolve()
-            if not any(resolved.is_relative_to(d) for d in allowed_dirs):
+            if not any(resolved.is_relative_to(d) for d in allowed_source_dirs):
                 return ValidationResult(
                     is_valid=False,
                     checks=[
@@ -176,13 +177,42 @@ def validate_pipeline(
                         ),
                     ],
                 )
+
+    # Sink path allowlist — prevents arbitrary file writes via sink options.
+    for output in state.outputs or ():
+        for key in ("path", "file"):
+            value = output.options.get(key)
+            if value is not None:
+                path_checked = True
+                resolved = Path(value).resolve()
+                if not any(resolved.is_relative_to(d) for d in allowed_sink_dirs):
+                    return ValidationResult(
+                        is_valid=False,
+                        checks=[
+                            ValidationCheck(
+                                name="source_path_allowlist",
+                                passed=False,
+                                detail=f"Sink '{output.name}' {key} '{value}' is outside allowed output directories",
+                            ),
+                            *_skipped_checks("source_path_allowlist"),
+                        ],
+                        errors=[
+                            ValidationError(
+                                component_id=output.name,
+                                component_type="sink",
+                                message=f"Path traversal blocked: sink '{output.name}' {key}='{value}' resolves outside allowed directories",
+                                suggestion="Use a path within the outputs or blobs directory.",
+                            ),
+                        ],
+                    )
+
     # B11 fix: Always record the source_path_allowlist check
     if path_checked:
         checks.append(
             ValidationCheck(
                 name=_CHECK_PATH_ALLOWLIST,
                 passed=True,
-                detail="Source path within allowed upload directory",
+                detail="All paths within allowed directories",
             )
         )
     else:

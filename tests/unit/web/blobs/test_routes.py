@@ -130,6 +130,38 @@ class TestUploadBlob:
         )
         assert resp.status_code == 415
 
+    def test_upload_csv_with_excel_mime_accepted(self, tmp_path) -> None:
+        """Browsers report .csv as application/vnd.ms-excel on Windows.
+
+        The server-side content sniff detects text/csv from the actual
+        content, overriding the browser's (untrusted) MIME declaration.
+        """
+        app, _, _ = _make_app(tmp_path)
+        client = TestClient(app)
+        session_id = _create_session(client)
+
+        resp = client.post(
+            f"/api/sessions/{session_id}/blobs",
+            files={"file": ("data.csv", io.BytesIO(b"name,age\nAlice,30"), "application/vnd.ms-excel")},
+        )
+        assert resp.status_code == 201
+        body = resp.json()
+        assert body["mime_type"] == "text/csv"
+
+    def test_upload_csv_with_octet_stream_mime_accepted(self, tmp_path) -> None:
+        """Some browsers send application/octet-stream for unknown extensions."""
+        app, _, _ = _make_app(tmp_path)
+        client = TestClient(app)
+        session_id = _create_session(client)
+
+        resp = client.post(
+            f"/api/sessions/{session_id}/blobs",
+            files={"file": ("data.csv", io.BytesIO(b"x,y,z\n1,2,3"), "application/octet-stream")},
+        )
+        assert resp.status_code == 201
+        body = resp.json()
+        assert body["mime_type"] == "text/csv"
+
     def test_upload_blob_enforces_size_limit(self, tmp_path) -> None:
         """Resource exhaustion: oversized uploads rejected before full read."""
         app, _, _ = _make_app(tmp_path, max_upload_bytes=100)

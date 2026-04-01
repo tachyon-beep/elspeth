@@ -764,6 +764,16 @@ def _allowed_source_directories(data_dir: str) -> tuple[Path, ...]:
     return (base / "uploads", base / "blobs")
 
 
+def _allowed_sink_directories(data_dir: str) -> tuple[Path, ...]:
+    """Return the set of directories to which sink paths may write.
+
+    AD-4 extension: Mirrors _allowed_source_directories for output paths.
+    Sinks write to data_dir/outputs (not uploads, which is for ingestion).
+    """
+    base = Path(data_dir).resolve()
+    return (base / "outputs", base / "blobs")
+
+
 def _validate_source_path(
     options: dict[str, Any],
     data_dir: str | None,

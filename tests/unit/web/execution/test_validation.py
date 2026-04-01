@@ -38,7 +38,8 @@ class FakeNodeSpec:
 class FakeOutputSpec:
     """Minimal stand-in for OutputSpec during validation tests."""
 
-    def __init__(self, options: dict[str, Any] | None = None) -> None:
+    def __init__(self, options: dict[str, Any] | None = None, name: str = "primary") -> None:
+        self.name = name
         self.options = options or {}
 
 
@@ -120,6 +121,76 @@ class TestValidatePipelinePathAllowlist:
         path_check = next(c for c in result.checks if c.name == "source_path_allowlist")
         assert path_check.passed is True
         assert "skipped" in path_check.detail.lower()
+
+
+class TestValidatePipelineSinkPathAllowlist:
+    """Sink path allowlist — prevents arbitrary file writes via sink options."""
+
+    def test_sink_path_outside_outputs_blocked(self) -> None:
+        state = FakeCompositionState(
+            source_options={},
+            outputs=(FakeOutputSpec(name="evil_sink", options={"path": "/etc/cron.d/backdoor.csv"}),),
+        )
+        settings = FakeWebSettings(data_dir="/tmp/test_data")
+        mock_yaml_gen = MagicMock()
+        result = validate_pipeline(state, settings, mock_yaml_gen)
+        assert result.is_valid is False
+        assert any("Path traversal" in e.message for e in result.errors)
+        assert any("evil_sink" in e.message for e in result.errors)
+
+    def test_sink_path_traversal_blocked(self) -> None:
+        state = FakeCompositionState(
+            source_options={},
+            outputs=(FakeOutputSpec(name="tricky", options={"path": "/tmp/test_data/outputs/../../etc/passwd"}),),
+        )
+        settings = FakeWebSettings(data_dir="/tmp/test_data")
+        mock_yaml_gen = MagicMock()
+        result = validate_pipeline(state, settings, mock_yaml_gen)
+        assert result.is_valid is False
+
+    def test_sink_path_under_outputs_passes(self) -> None:
+        state = FakeCompositionState(
+            source_options={},
+            outputs=(FakeOutputSpec(name="primary", options={"path": "/tmp/test_data/outputs/result.csv"}),),
+        )
+        settings = FakeWebSettings(data_dir="/tmp/test_data")
+        mock_yaml_gen = MagicMock()
+        mock_yaml_gen.generate_yaml.return_value = "source:\n  plugin: csv_source"
+        with patch("elspeth.web.execution.validation.load_settings") as mock_load:
+            mock_load.side_effect = FileNotFoundError("no temp file")
+            result = validate_pipeline(state, settings, mock_yaml_gen)
+        path_check = next(c for c in result.checks if c.name == "source_path_allowlist")
+        assert path_check.passed is True
+        assert "All paths within allowed directories" in path_check.detail
+
+    def test_sink_path_under_blobs_passes(self) -> None:
+        state = FakeCompositionState(
+            source_options={},
+            outputs=(FakeOutputSpec(name="blob_out", options={"path": "/tmp/test_data/blobs/out.json"}),),
+        )
+        settings = FakeWebSettings(data_dir="/tmp/test_data")
+        mock_yaml_gen = MagicMock()
+        mock_yaml_gen.generate_yaml.return_value = "source:\n  plugin: csv_source"
+        with patch("elspeth.web.execution.validation.load_settings") as mock_load:
+            mock_load.side_effect = FileNotFoundError("no temp file")
+            result = validate_pipeline(state, settings, mock_yaml_gen)
+        path_check = next(c for c in result.checks if c.name == "source_path_allowlist")
+        assert path_check.passed is True
+
+    def test_sink_without_path_passes(self) -> None:
+        """Sinks without path/file options (e.g. database) skip the check."""
+        state = FakeCompositionState(
+            source_options={},
+            outputs=(FakeOutputSpec(name="db_sink", options={"connection_string": "sqlite:///out.db"}),),
+        )
+        settings = FakeWebSettings(data_dir="/tmp/test_data")
+        mock_yaml_gen = MagicMock()
+        mock_yaml_gen.generate_yaml.return_value = "source:\n  plugin: csv_source"
+        with patch("elspeth.web.execution.validation.load_settings") as mock_load:
+            mock_load.side_effect = FileNotFoundError("no temp file")
+            result = validate_pipeline(state, settings, mock_yaml_gen)
+        path_check = next(c for c in result.checks if c.name == "source_path_allowlist")
+        assert path_check.passed is True
 
 
 class TestValidatePipelineSuccess:

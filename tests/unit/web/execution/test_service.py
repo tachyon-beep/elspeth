@@ -938,3 +938,196 @@ class TestVerifyRunOwnership:
         user = MagicMock(user_id="alice")
         with pytest.raises(ValueError, match="Run not found"):
             await svc.verify_run_ownership(user, str(uuid4()))
+
+
+# ── Sink Path Restriction ─────────────────────────────────────────────
+
+
+class TestSinkPathRestriction:
+    """P1 security fix: Sink output paths must be confined to allowed directories.
+
+    Without this, a client can set sink options.path to an arbitrary absolute
+    or ../ path and /execute will write there — turning the executor into an
+    arbitrary file-write surface.
+    """
+
+    @pytest.mark.asyncio
+    async def test_sink_path_outside_allowed_dirs_raises(
+        self,
+        service: ExecutionServiceImpl,
+        mock_session_service: MagicMock,
+        mock_settings: MagicMock,
+    ) -> None:
+        """Sink with path pointing outside data_dir/outputs must be rejected."""
+        mock_settings.data_dir = "/tmp/elspeth_data"
+        state = mock_session_service.get_current_state.return_value
+        state.source = None
+        state.outputs = [
+            {
+                "name": "primary",
+                "plugin": "csv",
+                "options": {"path": "/etc/cron.d/backdoor.csv"},
+                "on_write_failure": "discard",
+            }
+        ]
+        state.nodes = None
+        state.edges = None
+
+        with pytest.raises(ValueError, match="resolves outside allowed output directories"):
+            await service.execute(session_id=uuid4())
+
+    @pytest.mark.asyncio
+    async def test_sink_path_traversal_rejected(
+        self,
+        service: ExecutionServiceImpl,
+        mock_session_service: MagicMock,
+        mock_settings: MagicMock,
+    ) -> None:
+        """Sink with ../ traversal in path must be rejected."""
+        mock_settings.data_dir = "/tmp/elspeth_data"
+        state = mock_session_service.get_current_state.return_value
+        state.source = None
+        state.outputs = [
+            {
+                "name": "results",
+                "plugin": "json",
+                "options": {"path": "/tmp/elspeth_data/outputs/../../etc/passwd"},
+                "on_write_failure": "discard",
+            }
+        ]
+        state.nodes = None
+        state.edges = None
+
+        with pytest.raises(ValueError, match="resolves outside allowed output directories"):
+            await service.execute(session_id=uuid4())
+
+    @pytest.mark.asyncio
+    async def test_sink_path_under_outputs_accepted(
+        self,
+        service: ExecutionServiceImpl,
+        mock_session_service: MagicMock,
+        mock_settings: MagicMock,
+    ) -> None:
+        """Sink with path under data_dir/outputs is allowed."""
+        mock_settings.data_dir = "/tmp/elspeth_data"
+        state = mock_session_service.get_current_state.return_value
+        state.source = None
+        state.outputs = [
+            {
+                "name": "primary",
+                "plugin": "csv",
+                "options": {"path": "/tmp/elspeth_data/outputs/result.csv"},
+                "on_write_failure": "discard",
+            }
+        ]
+        state.nodes = None
+        state.edges = None
+
+        with patch.object(service, "_run_pipeline"):
+            run_id = await service.execute(session_id=uuid4())
+        assert isinstance(run_id, UUID)
+
+    @pytest.mark.asyncio
+    async def test_sink_without_path_option_passes(
+        self,
+        service: ExecutionServiceImpl,
+        mock_session_service: MagicMock,
+        mock_settings: MagicMock,
+    ) -> None:
+        """Sink with no path/file options (e.g. database sink) passes check."""
+        mock_settings.data_dir = "/tmp/elspeth_data"
+        state = mock_session_service.get_current_state.return_value
+        state.source = None
+        state.outputs = [
+            {
+                "name": "db_sink",
+                "plugin": "database",
+                "options": {"connection_string": "sqlite:///out.db"},
+                "on_write_failure": "discard",
+            }
+        ]
+        state.nodes = None
+        state.edges = None
+
+        with patch.object(service, "_run_pipeline"):
+            run_id = await service.execute(session_id=uuid4())
+        assert isinstance(run_id, UUID)
+
+
+# ── Edge Compatibility in _run_pipeline ───────────────────────────────
+
+
+class TestEdgeCompatibility:
+    """P2 fix: _run_pipeline must call validate_edge_compatibility() so that
+    schema-incompatible pipelines are rejected before execution begins."""
+
+    @patch("elspeth.web.execution.service.Orchestrator")
+    @patch("elspeth.web.execution.service.load_settings_from_yaml_string")
+    @patch("elspeth.web.execution.service.instantiate_plugins_from_config")
+    @patch("elspeth.web.execution.service.ExecutionGraph")
+    @patch("elspeth.web.execution.service.LandscapeDB")
+    @patch("elspeth.web.execution.service.FilesystemPayloadStore")
+    def test_validate_edge_compatibility_called(
+        self,
+        mock_payload: MagicMock,
+        mock_landscape: MagicMock,
+        mock_graph_cls: MagicMock,
+        mock_instantiate: MagicMock,
+        mock_load: MagicMock,
+        mock_orch_cls: MagicMock,
+        service: ExecutionServiceImpl,
+    ) -> None:
+        """_run_pipeline must call graph.validate_edge_compatibility()
+        after graph.validate() to catch schema mismatches."""
+        mock_load.return_value = MagicMock()
+        mock_bundle = MagicMock()
+        mock_bundle.source = MagicMock()
+        mock_bundle.source_settings = MagicMock()
+        mock_bundle.transforms = ()
+        mock_bundle.sinks = {"primary": MagicMock()}
+        mock_bundle.aggregations = {}
+        mock_instantiate.return_value = mock_bundle
+        mock_graph = MagicMock()
+        mock_graph_cls.from_plugin_instances.return_value = mock_graph
+        mock_orch = MagicMock()
+        mock_orch_cls.return_value = mock_orch
+        mock_orch.run.return_value = MagicMock(run_id="r1")
+
+        service._run_pipeline(str(uuid4()), "source:\n  plugin: csv", threading.Event())
+
+        mock_graph.validate.assert_called_once()
+        mock_graph.validate_edge_compatibility.assert_called_once()
+
+    @patch("elspeth.web.execution.service.load_settings_from_yaml_string")
+    @patch("elspeth.web.execution.service.instantiate_plugins_from_config")
+    @patch("elspeth.web.execution.service.ExecutionGraph")
+    @patch("elspeth.web.execution.service.LandscapeDB")
+    @patch("elspeth.web.execution.service.FilesystemPayloadStore")
+    def test_edge_compatibility_failure_crashes_pipeline(
+        self,
+        mock_payload: MagicMock,
+        mock_landscape: MagicMock,
+        mock_graph_cls: MagicMock,
+        mock_instantiate: MagicMock,
+        mock_load: MagicMock,
+        service: ExecutionServiceImpl,
+    ) -> None:
+        """If edge compatibility fails, the pipeline must not execute."""
+        from elspeth.core.dag.models import GraphValidationError
+
+        mock_load.return_value = MagicMock()
+        mock_bundle = MagicMock()
+        mock_bundle.source = MagicMock()
+        mock_bundle.source_settings = MagicMock()
+        mock_bundle.transforms = ()
+        mock_bundle.sinks = {"primary": MagicMock()}
+        mock_bundle.aggregations = {}
+        mock_instantiate.return_value = mock_bundle
+        mock_graph = MagicMock()
+        mock_graph_cls.from_plugin_instances.return_value = mock_graph
+        mock_graph.validate_edge_compatibility.side_effect = GraphValidationError(
+            "Schema mismatch: source outputs str but transform expects int"
+        )
+
+        with pytest.raises(GraphValidationError, match="Schema mismatch"):
+            service._run_pipeline(str(uuid4()), "yaml", threading.Event())

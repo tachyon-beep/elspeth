@@ -1,4 +1,4 @@
-"""Tests for auth API routes -- /api/auth/login, /api/auth/token, /api/auth/me."""
+"""Tests for auth API routes -- /api/auth/login, /api/auth/register, /api/auth/token, /api/auth/me."""
 
 from __future__ import annotations
 
@@ -89,6 +89,135 @@ class TestLoginEndpoint:
             json={"username": "alice", "password": "pw"},
         )
         assert response.status_code == 404
+
+
+class TestRegisterEndpoint:
+    """Tests for POST /api/auth/register."""
+
+    def test_register_open_mode_creates_user_and_returns_token(self, tmp_path) -> None:
+        provider = LocalAuthProvider(
+            db_path=tmp_path / "auth.db",
+            secret_key="test-key",
+        )
+        app = _create_test_app(provider, registration_mode="open")
+        client = TestClient(app)
+
+        response = client.post(
+            "/api/auth/register",
+            json={"username": "bob", "password": "pw123", "display_name": "Bob"},
+        )
+        assert response.status_code == 200
+        body = response.json()
+        assert "access_token" in body
+        assert body["token_type"] == "bearer"
+        assert len(body["access_token"].split(".")) == 3
+
+    def test_register_open_mode_with_email(self, tmp_path) -> None:
+        provider = LocalAuthProvider(
+            db_path=tmp_path / "auth.db",
+            secret_key="test-key",
+        )
+        app = _create_test_app(provider, registration_mode="open")
+        client = TestClient(app)
+
+        response = client.post(
+            "/api/auth/register",
+            json={
+                "username": "bob",
+                "password": "pw123",
+                "display_name": "Bob",
+                "email": "bob@example.com",
+            },
+        )
+        assert response.status_code == 200
+
+    def test_register_closed_mode_returns_404(self, tmp_path) -> None:
+        provider = LocalAuthProvider(
+            db_path=tmp_path / "auth.db",
+            secret_key="test-key",
+        )
+        app = _create_test_app(provider, registration_mode="closed")
+        client = TestClient(app)
+
+        response = client.post(
+            "/api/auth/register",
+            json={"username": "bob", "password": "pw123", "display_name": "Bob"},
+        )
+        assert response.status_code == 404
+
+    def test_register_email_verified_mode_returns_501(self, tmp_path) -> None:
+        provider = LocalAuthProvider(
+            db_path=tmp_path / "auth.db",
+            secret_key="test-key",
+        )
+        app = _create_test_app(provider, registration_mode="email_verified")
+        client = TestClient(app)
+
+        response = client.post(
+            "/api/auth/register",
+            json={"username": "bob", "password": "pw123", "display_name": "Bob"},
+        )
+        assert response.status_code == 501
+        assert "Email verification" in response.json()["detail"]
+
+    def test_register_non_local_provider_returns_404(self) -> None:
+        provider = AsyncMock()
+        app = _create_test_app(
+            provider,
+            auth_provider_type="oidc",
+            registration_mode="open",
+            **_OIDC_FIELDS,
+        )
+        client = TestClient(app)
+
+        response = client.post(
+            "/api/auth/register",
+            json={"username": "bob", "password": "pw123", "display_name": "Bob"},
+        )
+        assert response.status_code == 404
+
+    def test_register_duplicate_username_returns_409(self, tmp_path) -> None:
+        provider = LocalAuthProvider(
+            db_path=tmp_path / "auth.db",
+            secret_key="test-key",
+        )
+        provider.create_user("bob", "existing", display_name="Bob")
+        app = _create_test_app(provider, registration_mode="open")
+        client = TestClient(app)
+
+        response = client.post(
+            "/api/auth/register",
+            json={"username": "bob", "password": "pw123", "display_name": "Bob"},
+        )
+        assert response.status_code == 409
+
+    def test_register_blank_username_returns_422(self, tmp_path) -> None:
+        provider = LocalAuthProvider(
+            db_path=tmp_path / "auth.db",
+            secret_key="test-key",
+        )
+        app = _create_test_app(provider, registration_mode="open")
+        client = TestClient(app)
+
+        response = client.post(
+            "/api/auth/register",
+            json={"username": "  ", "password": "pw123", "display_name": "Bob"},
+        )
+        assert response.status_code == 422
+
+    def test_register_blank_password_returns_422(self, tmp_path) -> None:
+        provider = LocalAuthProvider(
+            db_path=tmp_path / "auth.db",
+            secret_key="test-key",
+        )
+        app = _create_test_app(provider, registration_mode="open")
+        client = TestClient(app)
+
+        response = client.post(
+            "/api/auth/register",
+            json={"username": "bob", "password": "", "display_name": "Bob"},
+        )
+        assert response.status_code == 422
 
 
 class TestTokenRefreshEndpoint:
@@ -196,6 +325,7 @@ class TestAuthConfigEndpoint:
         assert response.status_code == 200
         body = response.json()
         assert body["provider"] == "local"
+        assert body["registration_mode"] == "open"
         assert body["oidc_issuer"] is None
         assert body["oidc_client_id"] is None
 

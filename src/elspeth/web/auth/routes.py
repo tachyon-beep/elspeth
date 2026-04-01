@@ -1,6 +1,7 @@
-"""Auth API routes -- /api/auth/login, /api/auth/token, /api/auth/config, /api/auth/me.
+"""Auth API routes -- /api/auth/login, /api/auth/register, /api/auth/token, /api/auth/config, /api/auth/me.
 
 POST /login is only available when auth_provider is "local".
+POST /register is only available when auth_provider is "local" and registration is open.
 POST /token re-issues a JWT from a valid existing token (local only).
 GET /config returns auth configuration for frontend discovery (unauthenticated).
 GET /me returns the full UserProfile for any auth provider.
@@ -8,9 +9,12 @@ GET /me returns the full UserProfile for any auth provider.
 
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends, HTTPException, Request
-from pydantic import BaseModel
+import asyncio
 
+from fastapi import APIRouter, Depends, HTTPException, Request
+from pydantic import BaseModel, field_validator
+
+from elspeth.web.auth.local import LocalAuthProvider
 from elspeth.web.auth.middleware import get_current_user
 from elspeth.web.auth.models import AuthenticationError, UserIdentity
 from elspeth.web.auth.protocol import AuthProvider, CredentialAuthProvider
@@ -22,6 +26,22 @@ class LoginRequest(BaseModel):
 
     username: str
     password: str
+
+
+class RegisterRequest(BaseModel):
+    """Request body for POST /api/auth/register."""
+
+    username: str
+    password: str
+    display_name: str
+    email: str | None = None
+
+    @field_validator("username", "password", "display_name")
+    @classmethod
+    def _must_not_be_blank(cls, v: str) -> str:
+        if not v.strip():
+            raise ValueError("must not be blank")
+        return v
 
 
 class TokenResponse(BaseModel):
@@ -45,6 +65,7 @@ class AuthConfigResponse(BaseModel):
     """Response for GET /api/auth/config."""
 
     provider: str
+    registration_mode: str
     oidc_issuer: str | None = None
     oidc_client_id: str | None = None
     authorization_endpoint: str | None = None
@@ -77,6 +98,42 @@ def create_auth_router() -> APIRouter:
 
         return TokenResponse(access_token=token)
 
+    @router.post("/register", response_model=TokenResponse)
+    async def register(body: RegisterRequest, request: Request) -> TokenResponse:
+        """Register a new user account (local auth, open registration only).
+
+        Creates the user with bcrypt-hashed password (offloaded to a thread),
+        then auto-logs in and returns a JWT so the caller can proceed
+        immediately without a separate login round-trip.
+        """
+        settings: WebSettings = request.app.state.settings
+        if settings.auth_provider != "local":
+            raise HTTPException(status_code=404, detail="Not found")
+
+        if settings.registration_mode == "closed":
+            raise HTTPException(status_code=404, detail="Not found")
+
+        if settings.registration_mode == "email_verified":
+            raise HTTPException(
+                status_code=501,
+                detail="Email verification not yet available",
+            )
+
+        provider: LocalAuthProvider = request.app.state.auth_provider
+        try:
+            await asyncio.to_thread(
+                provider.create_user,
+                body.username,
+                body.password,
+                body.display_name,
+                body.email,
+            )
+        except ValueError as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
+
+        token = await provider.login(body.username, body.password)
+        return TokenResponse(access_token=token)
+
     @router.post("/token", response_model=TokenResponse)
     async def refresh_token(
         request: Request,
@@ -105,6 +162,7 @@ def create_auth_router() -> APIRouter:
         settings: WebSettings = request.app.state.settings
         return AuthConfigResponse(
             provider=settings.auth_provider,
+            registration_mode=settings.registration_mode,
             oidc_issuer=settings.oidc_issuer,
             oidc_client_id=settings.oidc_client_id,
             authorization_endpoint=request.app.state.oidc_authorization_endpoint,

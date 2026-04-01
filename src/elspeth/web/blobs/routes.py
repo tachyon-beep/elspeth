@@ -105,13 +105,12 @@ def create_blobs_router() -> APIRouter:
         blob_service = await _verify_session_and_get_blob_service(session_id, user, request)
         settings = request.app.state.settings
 
-        # Validate MIME type
+        # Record the browser-declared MIME type but do NOT reject based on
+        # it alone. Browser MIME assignment is Tier 3 (untrusted) — browsers
+        # commonly report .csv files as "application/vnd.ms-excel" or other
+        # non-standard types. Server-side content sniffing below determines
+        # the effective type.
         mime_type = file.content_type or "application/octet-stream"
-        if mime_type not in ALLOWED_MIME_TYPES:
-            raise HTTPException(
-                status_code=415,
-                detail=f"Unsupported content type: {mime_type}. Allowed types: CSV, JSON, JSONL, plain text.",
-            )
 
         # Read content with size enforcement
         original_filename = file.filename or "upload"
