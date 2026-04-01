@@ -19,6 +19,7 @@ from typing import Any
 from mcp.server import Server
 from mcp.server.stdio import stdio_server
 from mcp.types import CallToolResult, TextContent, Tool
+from pydantic import BaseModel
 
 from elspeth.composer_mcp.session import SessionManager, SessionNotFoundError
 from elspeth.web.catalog.protocol import CatalogService
@@ -126,6 +127,17 @@ def _build_tool_defs() -> list[dict[str, Any]]:
     return composer_defs + list(_SESSION_TOOL_DEFS)
 
 
+def _ensure_serializable(obj: Any) -> Any:
+    """Recursively convert Pydantic models and other non-serializable types to plain dicts/lists."""
+    if isinstance(obj, BaseModel):
+        return obj.model_dump()
+    if isinstance(obj, dict):
+        return {k: _ensure_serializable(v) for k, v in obj.items()}
+    if isinstance(obj, (list, tuple)):
+        return [_ensure_serializable(item) for item in obj]
+    return obj
+
+
 def _dispatch_tool(
     tool_name: str,
     arguments: dict[str, Any],
@@ -148,6 +160,10 @@ def _dispatch_tool(
         result = execute_tool(tool_name, arguments, state, catalog, data_dir=None)
         response = result.to_dict()
         response["state"] = result.updated_state.to_dict()
+        # Discovery tools return Pydantic models (PluginSummary, PluginSchemaInfo)
+        # that aren't JSON-serializable. Recursively convert them.
+        if "data" in response:
+            response["data"] = _ensure_serializable(response["data"])
         return response
 
     return {

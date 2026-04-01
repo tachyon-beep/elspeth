@@ -10,3 +10,9 @@ per_file_rules:
   reason: Broad except at MCP protocol boundary - all tool errors returned as text responses
   expires: null
   max_hits: 1
+- pattern: composer_mcp/server.py
+  rules:
+  - R5
+  reason: Serialization boundary — isinstance checks convert Pydantic models and containers to JSON-safe types
+  expires: null
+  max_hits: 3
