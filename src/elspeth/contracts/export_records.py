@@ -220,6 +220,7 @@ class ArtifactExportRecord(TypedDict):
     path_or_uri: str | None
     content_hash: str | None
     size_bytes: int | None
+    idempotency_key: str | None
 
 
 ExportRecord = (

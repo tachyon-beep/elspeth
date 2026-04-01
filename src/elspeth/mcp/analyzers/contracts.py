@@ -49,6 +49,7 @@ def get_run_contract(db: LandscapeDB, recorder: LandscapeRecorder, run_id: str) 
             "original_name": f.original_name,
             "python_type": f.python_type.__name__,
             "required": f.required,
+            "nullable": f.nullable,
             "source": f.source,
         }
         for f in contract.fields
@@ -111,6 +112,7 @@ def explain_field(
         "original_name": field_contract.original_name,
         "python_type": field_contract.python_type.__name__,
         "required": field_contract.required,
+        "nullable": field_contract.nullable,
         "source": field_contract.source,
         "contract_mode": contract.mode,
     }

@@ -419,9 +419,11 @@ def test_artifact_export_record_construction() -> None:
         "path_or_uri": "/output/result.csv",
         "content_hash": "sha256:abc",
         "size_bytes": 1024,
+        "idempotency_key": "retry-key-1",
     }
     assert record["record_type"] == "artifact"
     assert record["size_bytes"] == 1024
+    assert record["idempotency_key"] == "retry-key-1"
 
 
 def test_artifact_export_record_optional_none() -> None:
@@ -435,6 +437,8 @@ def test_artifact_export_record_optional_none() -> None:
         "path_or_uri": None,
         "content_hash": None,
         "size_bytes": None,
+        "idempotency_key": None,
     }
     assert record["produced_by_state_id"] is None
     assert record["size_bytes"] is None
+    assert record["idempotency_key"] is None

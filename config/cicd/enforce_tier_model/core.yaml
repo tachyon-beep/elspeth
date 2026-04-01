@@ -121,10 +121,10 @@ allow_hits:
 - key: core/landscape/query_repository.py:R6:QueryRepository:explain_row:fp=60bbaf31e9f6472d
   owner: architecture
   reason: PayloadNotFoundError from PayloadStore when payload purged by retention policy — expected, not corruption
-- key: core/canonical.py:R6:_normalize_value:fp=20ccee9926534392
+- key: core/canonical.py:R6:_normalize_value:fp=b132c8b99f3017ce
   owner: architecture
-  reason: Silent recovery with explicit error handling path
-  safety: Code reviewed - legitimate pattern
+  reason: TypeError from np.isnan/isinf on non-numeric dtypes is expected — non-numeric arrays can't contain NaN
+  safety: Only catches TypeError from np.isnan/isinf, lets all other exceptions propagate
   expires: '2026-05-02'
 - key: core/rate_limit/limiter.py:R6:RateLimiter:try_acquire:fp=3e1bc5e9e76ba71f
   owner: architecture

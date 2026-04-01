@@ -429,7 +429,7 @@ class FailureTransformError(TypedDict):
 class FailureValidationError(TypedDict):
     """A validation error in failure context."""
 
-    plugin: str
+    plugin: str | None
     row_hash: str | None
     sample_data: dict[str, Any] | None
 
@@ -484,6 +484,7 @@ class ContractField(TypedDict):
     original_name: str
     python_type: str
     required: bool
+    nullable: bool
     source: str
 
 
@@ -506,6 +507,7 @@ class FieldExplanation(TypedDict):
     original_name: str
     python_type: str
     required: bool
+    nullable: bool
     source: str
     contract_mode: str
 

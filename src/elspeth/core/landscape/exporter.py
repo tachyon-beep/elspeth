@@ -600,6 +600,7 @@ class LandscapeExporter:
                 "path_or_uri": artifact.path_or_uri,
                 "content_hash": artifact.content_hash,
                 "size_bytes": artifact.size_bytes,
+                "idempotency_key": artifact.idempotency_key,
             }
             yield artifact_record
 

@@ -87,7 +87,7 @@ _TOOLS: dict[str, _ToolDef] = {
         schema_properties={
             "limit": {"type": "integer", "description": "Max runs to return (default 50)", "default": 50},
             "status": {
-                "type": "string",
+                "type": ["string", "null"],
                 "description": "Filter by status",
                 "enum": [s.value for s in RunStatus],
             },
@@ -148,7 +148,7 @@ _TOOLS: dict[str, _ToolDef] = {
         ),
         schema_properties={
             "run_id": {"type": "string", "description": "Run ID to query"},
-            "row_id": {"type": "string", "description": "Optional row ID to filter by"},
+            "row_id": {"type": ["string", "null"], "description": "Optional row ID to filter by"},
             "limit": {"type": "integer", "description": "Max tokens (default 100)", "default": 100},
         },
     ),
@@ -168,12 +168,12 @@ _TOOLS: dict[str, _ToolDef] = {
         schema_properties={
             "run_id": {"type": "string", "description": "Run ID to query"},
             "operation_type": {
-                "type": "string",
+                "type": ["string", "null"],
                 "description": "Filter by type",
                 "enum": ["source_load", "sink_write"],
             },
             "status": {
-                "type": "string",
+                "type": ["string", "null"],
                 "description": "Filter by status",
                 "enum": ["open", "completed", "failed", "pending"],
             },
@@ -202,9 +202,9 @@ _TOOLS: dict[str, _ToolDef] = {
         ),
         schema_properties={
             "run_id": {"type": "string", "description": "Run ID"},
-            "token_id": {"type": "string", "description": "Token ID (preferred for DAGs with forks)"},
-            "row_id": {"type": "string", "description": "Row ID (alternative to token_id)"},
-            "sink": {"type": "string", "description": "Sink name to disambiguate multiple terminals"},
+            "token_id": {"type": ["string", "null"], "description": "Token ID (preferred for DAGs with forks)"},
+            "row_id": {"type": ["string", "null"], "description": "Row ID (alternative to token_id)"},
+            "sink": {"type": ["string", "null"], "description": "Sink name to disambiguate multiple terminals"},
         },
     ),
     "get_errors": _ToolDef(
@@ -245,9 +245,9 @@ _TOOLS: dict[str, _ToolDef] = {
         ),
         schema_properties={
             "run_id": {"type": "string", "description": "Run ID to query"},
-            "node_id": {"type": "string", "description": "Optional node ID filter"},
+            "node_id": {"type": ["string", "null"], "description": "Optional node ID filter"},
             "status": {
-                "type": "string",
+                "type": ["string", "null"],
                 "description": "Optional status filter",
                 "enum": ["open", "pending", "completed", "failed"],
             },
@@ -274,7 +274,7 @@ _TOOLS: dict[str, _ToolDef] = {
         ),
         schema_properties={
             "sql": {"type": "string", "description": "SQL SELECT query"},
-            "params": {"type": "object", "description": "Optional query parameters"},
+            "params": {"type": ["object", "null"], "description": "Optional query parameters"},
         },
     ),
     "get_dag_structure": _ToolDef(

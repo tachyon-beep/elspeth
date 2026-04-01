@@ -528,14 +528,14 @@ def get_llm_usage_report(db: LandscapeDB, recorder: LandscapeRecorder, run_id: s
         ).group_by(combined_types.c.call_type)
         call_type_rows = conn.execute(call_types_query).fetchall()
 
-    if not llm_rows and not call_type_rows:
+    call_type_summary = {row.call_type: row.count for row in call_type_rows}
+
+    if not llm_rows:
         return {
             "run_id": run_id,
-            "message": "No external calls found in this run",
-            "call_types": {},
+            "message": "No LLM calls found in this run",
+            "call_types": call_type_summary,  # type: ignore[typeddict-item]  # SA Row attr types
         }
-
-    call_type_summary = {row.call_type: row.count for row in call_type_rows}
 
     llm_by_plugin: dict[str, dict[str, Any]] = {}
     for row in llm_rows:

@@ -540,6 +540,66 @@ class TestSanitizeForCanonical:
         result = sanitize_for_canonical({"x": np.longdouble(3.14)})
         assert result == {"x": np.longdouble(3.14)}
 
+    def test_sanitize_numpy_longdouble_large_finite_unchanged(self) -> None:
+        """Finite np.longdouble values that overflow float64 must NOT be replaced with None.
+
+        Bug fix: sanitize_for_canonical used math.isfinite(float(obj)) which
+        falsely treats large-but-finite np.longdouble values as non-finite
+        because float() overflows to inf for values outside IEEE 754 double range.
+        """
+        from elspeth.core.canonical import sanitize_for_canonical
+
+        # 2^1024 is finite in np.longdouble (max_exp=16384) but overflows float64
+        large_val = np.longdouble(2.0) ** np.longdouble(1024)
+        assert np.isfinite(large_val), "Test precondition: value must be finite in longdouble"
+
+        result = sanitize_for_canonical({"x": large_val})
+        # Sanitizer only replaces truly non-finite values — this is finite
+        assert result["x"] is not None
+        assert np.isfinite(result["x"])
+
+
+class TestNumpyLongdoubleCanonicalOverflow:
+    """np.longdouble values that are finite but overflow IEEE 754 double.
+
+    Bug fix for elspeth-7ab03de217: _normalize_value used math.isnan/isinf
+    which implicitly downcast np.longdouble through float(), causing:
+    - Finite values falsely rejected as non-finite
+    - Distinct high-precision values collapsing onto the same hash
+    """
+
+    def test_normalize_longdouble_overflow_raises_clear_error(self) -> None:
+        """Finite longdouble that overflows float64 must raise a clear error, not misreport as non-finite."""
+        from elspeth.core.canonical import _normalize_value
+
+        large_val = np.longdouble(2.0) ** np.longdouble(1024)
+        assert np.isfinite(large_val), "Test precondition"
+
+        with pytest.raises(ValueError, match="exceeds IEEE 754 double range"):
+            _normalize_value(large_val)
+
+    def test_normalize_longdouble_nan_rejected_correctly(self) -> None:
+        """np.longdouble NaN must still be rejected as non-finite."""
+        from elspeth.core.canonical import _normalize_value
+
+        with pytest.raises(ValueError, match="non-finite"):
+            _normalize_value(np.longdouble("nan"))
+
+    def test_normalize_longdouble_inf_rejected_correctly(self) -> None:
+        """np.longdouble Infinity must still be rejected as non-finite."""
+        from elspeth.core.canonical import _normalize_value
+
+        with pytest.raises(ValueError, match="non-finite"):
+            _normalize_value(np.longdouble("inf"))
+
+    def test_normalize_longdouble_representable_value_works(self) -> None:
+        """np.longdouble values within float64 range convert normally."""
+        from elspeth.core.canonical import _normalize_value
+
+        result = _normalize_value(np.longdouble(3.14))
+        assert result == 3.14
+        assert type(result) is float
+
 
 class TestNumpyDatetime64Normalization:
     """np.datetime64 values must be normalized to ISO 8601 strings.

@@ -90,9 +90,9 @@ per_file_rules:
 - pattern: plugins/infrastructure/schema_factory.py
   rules:
   - R5
-  reason: Numpy floating type detection for schema inference
+  reason: Numpy floating type detection for schema inference and ndarray non-finite scanning
   expires: null
-  max_hits: 1
+  max_hits: 3
 - pattern: plugins/infrastructure/utils.py
   rules:
   - R5
@@ -136,6 +136,11 @@ per_file_rules:
   expires: null
   max_hits: 4
 allow_hits:
+- key: plugins/infrastructure/schema_factory.py:R6:_find_non_finite_value_path:fp=79e9d16456d34bf8
+  owner: bugfix
+  reason: TypeError from np.isfinite on non-numeric dtypes (e.g., string arrays) is expected — non-numeric arrays can't contain NaN
+  safety: Only catches TypeError from np.isfinite, lets all other exceptions propagate
+  expires: '2026-05-02'
 - key: plugins/infrastructure/manager.py:R4:PluginManager:register:fp=11625f985e95cd76
   owner: bugfix
   reason: Rollback protection — catch any rollback failure so secondary exception doesn't bury original diagnostic

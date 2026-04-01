@@ -57,11 +57,22 @@ def _normalize_value(obj: Any) -> Any:
         ValueError: If value contains NaN or Infinity
     """
     # Check for NaN/Infinity FIRST (before type coercion)
-    if isinstance(obj, float | np.floating):
+    if isinstance(obj, np.floating):
+        # Use NumPy-native finiteness check — math.isnan/isinf implicitly
+        # downcast through float(), which overflows for np.longdouble values
+        # outside IEEE 754 double range (falsely treating finite values as inf).
+        if not np.isfinite(obj):
+            raise ValueError(f"Cannot canonicalize non-finite float: {obj}. Use None for missing values, not NaN.")
+        converted = float(obj)
+        if not math.isfinite(converted):
+            raise ValueError(
+                f"Cannot canonicalize {type(obj).__name__} value: exceeds IEEE 754 double range. "
+                f"Value is finite in native representation but overflows JSON number format."
+            )
+        return converted
+    if isinstance(obj, float):
         if math.isnan(obj) or math.isinf(obj):
             raise ValueError(f"Cannot canonicalize non-finite float: {obj}. Use None for missing values, not NaN.")
-        if isinstance(obj, np.floating):
-            return float(obj)
         return obj
 
     # Primitives pass through unchanged
@@ -278,6 +289,8 @@ def sanitize_for_canonical(obj: Any) -> Any:
     if isinstance(obj, float) and (math.isnan(obj) or math.isinf(obj)):
         return None
     # numpy floating scalars (longdouble, float16, float32, float64, etc.)
-    if isinstance(obj, np.floating) and not math.isfinite(float(obj)):
+    # Use np.isfinite() — math.isfinite(float(obj)) overflows for np.longdouble
+    # values outside IEEE 754 double range, falsely treating finite values as inf.
+    if isinstance(obj, np.floating) and not np.isfinite(obj):
         return None
     return obj
