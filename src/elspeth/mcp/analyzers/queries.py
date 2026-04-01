@@ -767,7 +767,17 @@ def query(db: LandscapeDB, recorder: LandscapeRecorder, sql: str, params: dict[s
 
     with db.connection() as conn:
         result = conn.execute(text(sql), params or {})
-        columns = result.keys()
+        columns = list(result.keys())
         rows = result.fetchall()
 
-    return [dict(zip(columns, [_serialize_datetime(v) for v in row], strict=False)) for row in rows]
+    if len(columns) != len(set(columns)):
+        from collections import Counter
+
+        dupes = [name for name, count in Counter(columns).items() if count > 1]
+        raise ValueError(
+            f"Query returns duplicate column names: {dupes}. "
+            f"Use AS aliases to disambiguate (e.g., SELECT a.id AS a_id, b.id AS b_id). "
+            f"Duplicate columns cause silent data loss in dict conversion."
+        )
+
+    return [dict(zip(columns, [_serialize_datetime(v) for v in row], strict=True)) for row in rows]

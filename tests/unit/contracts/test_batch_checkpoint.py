@@ -275,3 +275,27 @@ class TestBatchCheckpointTier1TypeGuards:
         d["template_errors"] = [[0, "err0"], [3, "err1"]]
         restored = BatchCheckpointState.from_dict(d)
         assert restored.template_errors == ((0, "err0"), (3, "err1"))
+
+    def test_requests_entry_non_dict_value_crashes(self) -> None:
+        """Regression: elspeth-841c5ba7f4 — requests values must be dicts (request bodies).
+
+        A corrupted checkpoint with string values would crash later on **original_request.
+        """
+        d = _make_state().to_dict()
+        d["requests"] = {"custom-0": "not-a-dict"}
+        with pytest.raises(AuditIntegrityError, match=r"must be a dict.*request body"):
+            BatchCheckpointState.from_dict(d)
+
+    def test_requests_entry_list_value_crashes(self) -> None:
+        """List value in requests is structural corruption."""
+        d = _make_state().to_dict()
+        d["requests"] = {"custom-0": [1, 2, 3]}
+        with pytest.raises(AuditIntegrityError, match=r"must be a dict.*request body"):
+            BatchCheckpointState.from_dict(d)
+
+    def test_requests_entry_none_value_crashes(self) -> None:
+        """None value in requests is structural corruption."""
+        d = _make_state().to_dict()
+        d["requests"] = {"custom-0": None}
+        with pytest.raises(AuditIntegrityError, match=r"must be a dict.*request body"):
+            BatchCheckpointState.from_dict(d)

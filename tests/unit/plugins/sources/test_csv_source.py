@@ -384,6 +384,64 @@ class TestCSVSourceQuarantineYielding:
         assert not results[2].is_quarantined
         assert results[2].row == {"id": "3", "name": "carol"}
 
+    def test_csv_error_in_data_rows_stops_processing(self, tmp_path: Path, ctx: PluginContext) -> None:
+        """csv.Error in the main row loop stops processing — no silent continuation.
+
+        Regression test for elspeth-b4f43cb5c3: csv.Error can leave the parser
+        in a corrupted state where subsequent next() calls skip, merge, or
+        misattribute rows. The skip_rows path already stops on csv.Error; the
+        main row loop must do the same.
+        """
+        from unittest.mock import patch
+
+        from elspeth.plugins.sources.csv_source import CSVSource
+
+        csv_file = tmp_path / "data.csv"
+        csv_file.write_text("id,name\n1,alice\n2,bob\n3,carol\n")
+
+        source = CSVSource(
+            {
+                "path": str(csv_file),
+                "on_validation_failure": "quarantine",
+                "schema": DYNAMIC_SCHEMA,
+            }
+        )
+
+        # Inject csv.Error on the 3rd next() call (after header + first data row)
+        original_csv_reader = csv.reader
+
+        def patched_reader(*args, **kwargs):
+            real_reader = original_csv_reader(*args, **kwargs)
+            calls = {"count": 0}
+            original_next = real_reader.__next__
+
+            class ErrorInjectingReader:
+                def __iter__(self):
+                    return self
+
+                def __next__(self):
+                    calls["count"] += 1
+                    if calls["count"] == 3:  # 1=header, 2=alice, 3=bob (error here)
+                        raise csv.Error("injected: unmatched quote corrupted parser")
+                    return original_next()
+
+                @property
+                def line_num(self):
+                    return real_reader.line_num
+
+            return ErrorInjectingReader()
+
+        with patch("elspeth.plugins.sources.csv_source.csv.reader", side_effect=patched_reader):
+            results = list(source.load(ctx))
+
+        # Should get: 1 valid row (alice) + 1 quarantined row (bob's csv.Error)
+        # carol should NOT appear — processing stops after csv.Error
+        assert len(results) == 2
+        assert not results[0].is_quarantined
+        assert results[0].row["name"] == "alice"
+        assert results[1].is_quarantined is True
+        assert "corrupted parser" in results[1].quarantine_error.lower()
+
     def test_skip_rows_line_numbers_are_accurate(self, tmp_path: Path, ctx: PluginContext) -> None:
         """Line numbers in error messages should be accurate when skip_rows > 0.
 

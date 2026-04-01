@@ -496,6 +496,40 @@ class TokenOutcomeLoader:
                 f"TokenOutcome {row.outcome_id} has inconsistent is_terminal={row.is_terminal!r} for outcome={outcome.value!r} "
                 f"(expected {1 if outcome.is_terminal else 0}) - audit integrity violation"
             )
+        # Outcome-specific invariants (mirrors _validate_outcome_fields on write path).
+        # Tier 1: if the audit DB has impossible field combinations, crash immediately.
+        oid = row.outcome_id
+        if outcome in (RowOutcome.COMPLETED, RowOutcome.ROUTED) and row.sink_name is None:
+            raise AuditIntegrityError(
+                f"TokenOutcome {oid} has outcome={outcome.value!r} but sink_name is NULL — "
+                f"audit integrity violation (COMPLETED/ROUTED require sink_name)"
+            )
+        if outcome == RowOutcome.FORKED and row.fork_group_id is None:
+            raise AuditIntegrityError(
+                f"TokenOutcome {oid} has outcome=FORKED but fork_group_id is NULL — "
+                f"audit integrity violation (FORKED requires fork_group_id)"
+            )
+        if outcome == RowOutcome.COALESCED and row.join_group_id is None:
+            raise AuditIntegrityError(
+                f"TokenOutcome {oid} has outcome=COALESCED but join_group_id is NULL — "
+                f"audit integrity violation (COALESCED requires join_group_id)"
+            )
+        if outcome == RowOutcome.EXPANDED and row.expand_group_id is None:
+            raise AuditIntegrityError(
+                f"TokenOutcome {oid} has outcome=EXPANDED but expand_group_id is NULL — "
+                f"audit integrity violation (EXPANDED requires expand_group_id)"
+            )
+        if outcome in (RowOutcome.FAILED, RowOutcome.QUARANTINED) and row.error_hash is None:
+            raise AuditIntegrityError(
+                f"TokenOutcome {oid} has outcome={outcome.value!r} but error_hash is NULL — "
+                f"audit integrity violation (FAILED/QUARANTINED require error_hash)"
+            )
+        if outcome in (RowOutcome.CONSUMED_IN_BATCH, RowOutcome.BUFFERED) and row.batch_id is None:
+            raise AuditIntegrityError(
+                f"TokenOutcome {oid} has outcome={outcome.value!r} but batch_id is NULL — "
+                f"audit integrity violation (CONSUMED_IN_BATCH/BUFFERED require batch_id)"
+            )
+
         return TokenOutcome(
             outcome_id=row.outcome_id,
             run_id=row.run_id,

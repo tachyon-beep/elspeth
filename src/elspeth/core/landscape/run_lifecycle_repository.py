@@ -374,11 +374,17 @@ class RunLifecycleRepository:
             to RUNNING during resume (orchestrator recovery path).
         """
         with self._db.connection() as conn:
+            # When resuming to RUNNING, clear completed_at atomically.
+            # A run cannot be simultaneously RUNNING and completed — that's
+            # an impossible state that confuses operational tooling and auditors.
+            values: dict[str, Any] = {"status": status}
+            if status == RunStatus.RUNNING:
+                values["completed_at"] = None
             result = conn.execute(
                 runs_table.update()
                 .where(runs_table.c.run_id == run_id)
                 .where(runs_table.c.status != RunStatus.COMPLETED.value)
-                .values(status=status)
+                .values(**values)
             )
             if result.rowcount == 0:
                 existing = conn.execute(select(runs_table.c.status).where(runs_table.c.run_id == run_id)).fetchone()

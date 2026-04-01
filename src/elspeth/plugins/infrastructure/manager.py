@@ -297,9 +297,13 @@ def get_shared_plugin_manager() -> PluginManager:
     Creates a PluginManager and calls register_builtin_plugins() on first
     invocation.  Returns the same instance on all subsequent calls.
     Used by both CLI and web entry points.
+
+    If registration fails, the global is NOT set — the next call will retry
+    rather than returning a half-initialized manager.
     """
     global _shared_instance
     if _shared_instance is None:
-        _shared_instance = PluginManager()
-        _shared_instance.register_builtin_plugins()
+        manager = PluginManager()
+        manager.register_builtin_plugins()
+        _shared_instance = manager
     return _shared_instance

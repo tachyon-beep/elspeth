@@ -654,6 +654,41 @@ class TestUpdateRunStatus:
         assert run is not None
         assert run.status == RunStatus.RUNNING
 
+    def test_failed_to_running_clears_completed_at(self) -> None:
+        """Regression: FAILED→RUNNING must clear completed_at atomically.
+
+        elspeth-55696f7fa5: previously, update_run_status only set status,
+        leaving completed_at set — creating an impossible state where a run
+        is simultaneously RUNNING and has a completion timestamp.
+        """
+        _, repo = _make_repo()
+        repo.complete_run("run-1", RunStatus.FAILED)
+        # Verify completed_at is set after failure
+        run = repo.get_run("run-1")
+        assert run is not None
+        assert run.completed_at is not None
+
+        # Resume: FAILED → RUNNING
+        repo.update_run_status("run-1", RunStatus.RUNNING)
+        run = repo.get_run("run-1")
+        assert run is not None
+        assert run.status == RunStatus.RUNNING
+        assert run.completed_at is None  # Must be cleared
+
+    def test_interrupted_to_running_clears_completed_at(self) -> None:
+        """INTERRUPTED→RUNNING must also clear completed_at."""
+        _, repo = _make_repo()
+        repo.complete_run("run-1", RunStatus.INTERRUPTED)
+        run = repo.get_run("run-1")
+        assert run is not None
+        assert run.completed_at is not None
+
+        repo.update_run_status("run-1", RunStatus.RUNNING)
+        run = repo.get_run("run-1")
+        assert run is not None
+        assert run.status == RunStatus.RUNNING
+        assert run.completed_at is None
+
 
 # ---------------------------------------------------------------------------
 # finalize_run — nondeterministic and failed edge cases

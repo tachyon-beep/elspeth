@@ -351,7 +351,10 @@ class CSVSource(BaseSource):
                 break  # End of file
             except csv.Error as e:
                 # CSV parsing error (bad quoting, unmatched quotes, etc.)
-                # Quarantine this row instead of crashing the run
+                # CRITICAL: csv.Error can leave the parser in a corrupted state where
+                # subsequent next() calls skip, merge, or misattribute rows.  The
+                # skip_rows path already stops on csv.Error for this reason (see above).
+                # We must do the same here — record the failure and stop processing.
                 row_num += 1
                 physical_line = reader.line_num
                 raw_row = {
@@ -359,7 +362,11 @@ class CSVSource(BaseSource):
                     "__line_number__": physical_line,
                     "__row_number__": row_num,
                 }
-                error_msg = f"CSV parse error at line {physical_line}: {e}"
+                error_msg = (
+                    f"CSV parse error at line {physical_line}: {e}. "
+                    f"Stopping file processing — csv.Error can corrupt parser state, "
+                    f"making subsequent rows untrustworthy."
+                )
 
                 ctx.record_validation_error(
                     row=raw_row,
@@ -374,7 +381,7 @@ class CSVSource(BaseSource):
                         error=error_msg,
                         destination=self._on_validation_failure,
                     )
-                continue  # Skip to next row
+                return  # Don't continue with corrupted parser state
 
             # Skip empty rows (blank lines in CSV)
             # csv.reader returns [] for blank lines, which would cause field count mismatch

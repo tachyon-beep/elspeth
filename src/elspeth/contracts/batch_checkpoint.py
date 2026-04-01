@@ -142,6 +142,16 @@ class BatchCheckpointState:
         requests = data["requests"]
         if not isinstance(requests, dict):
             raise AuditIntegrityError(f"Corrupted batch checkpoint: 'requests' must be a dict, got {type(requests).__name__}: {requests!r}")
+        for custom_id, request_body in requests.items():
+            if not isinstance(custom_id, str):
+                raise AuditIntegrityError(
+                    f"Corrupted batch checkpoint: requests key must be str, got {type(custom_id).__name__}: {custom_id!r}"
+                )
+            if not isinstance(request_body, dict):
+                raise AuditIntegrityError(
+                    f"Corrupted batch checkpoint: requests[{custom_id!r}] must be a dict (request body), "
+                    f"got {type(request_body).__name__}: {request_body!r}"
+                )
 
         raw_errors = data["template_errors"]
         template_errors: list[tuple[int, str]] = []

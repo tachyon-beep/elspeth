@@ -82,26 +82,35 @@ Gate Expression Syntax Reference
 Variables:
   row      - The current row as a dict. Access fields via row['field_name'].
 
+Field access:
+  row['field_name']       Direct access (raises KeyError if missing)
+  row.get('field_name')   Returns None if missing (NO default argument allowed)
+
 Operators:
   ==, !=, <, >, <=, >=   Comparison
   and, or, not            Boolean logic
   in, not in              Membership test
   +, -, *, /, //, %       Arithmetic
 
-Built-in functions:
-  len(), str(), int(), float(), bool(), abs(), min(), max(), round()
-  isinstance(), type()
+Built-in functions (only these are allowed):
+  len()    Length of a sequence or string
+  abs()    Absolute value of a number
+
+Type coercion functions (int, str, float, bool) are NOT available.
+Types are guaranteed by the source schema — no coercion is needed in expressions.
 
 Examples:
   row['confidence'] >= 0.85
   row['status'] == 'approved'
   row['category'] in ('A', 'B', 'C')
-  len(row.get('tags', [])) > 0
+  row.get('optional_field') is not None
   row['score'] > 0.5 and row['status'] != 'rejected'
+  len(row['name']) > 0
 
-Security:
-  Expressions are validated by ExpressionParser. Attribute access, imports,
-  function calls to non-builtins, and dunder access are forbidden.
+Forbidden:
+  row.get('field', default)   Default values fabricate data — use 'is not None' test
+  int(row['x'])               Type coercion — coerce at source schema instead
+  Imports, lambdas, comprehensions, attribute access (except row.get)
 """
 
 

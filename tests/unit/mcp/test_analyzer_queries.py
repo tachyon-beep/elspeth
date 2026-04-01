@@ -974,3 +974,39 @@ class TestExplainTokenErrorHandling:
         result = analyzer.explain_token("et-ambig", row_id=row.row_id)
 
         assert "error" in result
+
+
+class TestQueryDuplicateColumns:
+    """Regression test for elspeth-fc7e25384c: query() silently drops duplicate columns."""
+
+    def test_duplicate_column_names_rejected(self) -> None:
+        """query() must reject SQL that produces duplicate column names.
+
+        dict(zip(columns, values)) silently drops earlier values for
+        duplicate keys — silent data loss in the audit surface.
+        """
+        from elspeth.mcp.analyzers.queries import query
+
+        setup = make_recorder_with_run(run_id="dup-col")
+        recorder = setup.recorder
+        recorder.complete_run("dup-col", RunStatus.COMPLETED)
+
+        # Self-join produces duplicate column names (e.g., run_id, run_id)
+        sql = "SELECT a.run_id, b.run_id FROM runs a, runs b WHERE a.run_id = b.run_id"
+
+        with pytest.raises(ValueError, match="duplicate column names"):
+            query(setup.db, recorder, sql)
+
+    def test_aliased_columns_work(self) -> None:
+        """Aliased columns (no duplicates) should work fine."""
+        from elspeth.mcp.analyzers.queries import query
+
+        setup = make_recorder_with_run(run_id="alias-col")
+        recorder = setup.recorder
+        recorder.complete_run("alias-col", RunStatus.COMPLETED)
+
+        sql = "SELECT a.run_id AS a_run_id, b.run_id AS b_run_id FROM runs a, runs b WHERE a.run_id = b.run_id"
+        results = query(setup.db, recorder, sql)
+        assert len(results) == 1
+        assert "a_run_id" in results[0]
+        assert "b_run_id" in results[0]

@@ -262,20 +262,32 @@ class TestGateOutcome:
         assert outcome.sink_name is None
         assert outcome.next_node_id is None
 
-    def test_custom_values(self) -> None:
-        result = GateResult(row={"a": 1}, action=RoutingAction.continue_())
+    def test_route_to_sink(self) -> None:
+        """ROUTE action with sink_name is a valid routing outcome."""
+        result = GateResult(row={"a": 1}, action=RoutingAction.route("error", reason=None))
+        token = _make_token()
+        outcome = GateOutcome(
+            result=result,
+            updated_token=token,
+            sink_name="error_sink",
+        )
+        assert outcome.sink_name == "error_sink"
+        assert outcome.next_node_id is None
+        assert outcome.child_tokens == ()
+
+    def test_fork_with_children(self) -> None:
+        """FORK_TO_PATHS action with child_tokens is a valid routing outcome."""
+        result = GateResult(row={"a": 1}, action=RoutingAction.fork_to_paths(["path_a", "path_b"]))
         token = _make_token()
         child = _make_token(token_id="child_1")
         outcome = GateOutcome(
             result=result,
             updated_token=token,
             child_tokens=(child,),
-            sink_name="error_sink",
         )
         assert len(outcome.child_tokens) == 1
         assert outcome.child_tokens[0].token_id == "child_1"
-        assert outcome.sink_name == "error_sink"
-        assert outcome.next_node_id is None
+        assert outcome.sink_name is None
 
     def test_frozen_rejects_field_reassignment(self) -> None:
         """Frozen dataclass prevents post-construction mutation of fields."""
@@ -287,7 +299,7 @@ class TestGateOutcome:
 
     def test_child_tokens_is_tuple(self) -> None:
         """child_tokens is converted to tuple for deep immutability."""
-        result = GateResult(row={"a": 1}, action=RoutingAction.continue_())
+        result = GateResult(row={"a": 1}, action=RoutingAction.fork_to_paths(["a", "b"]))
         token = _make_token()
         child = _make_token(token_id="child_1")
         outcome = GateOutcome(
@@ -296,6 +308,42 @@ class TestGateOutcome:
             child_tokens=(child,),
         )
         assert isinstance(outcome.child_tokens, tuple)
+
+    def test_continue_rejects_sink_name(self) -> None:
+        """CONTINUE action with sink_name is an impossible routing state."""
+        result = GateResult(row={"a": 1}, action=RoutingAction.continue_())
+        with pytest.raises(ValueError, match="CONTINUE action cannot have sink_name"):
+            GateOutcome(result=result, updated_token=_make_token(), sink_name="oops")
+
+    def test_continue_rejects_child_tokens(self) -> None:
+        """CONTINUE action with child_tokens is an impossible routing state."""
+        result = GateResult(row={"a": 1}, action=RoutingAction.continue_())
+        with pytest.raises(ValueError, match="CONTINUE action cannot have child_tokens"):
+            GateOutcome(result=result, updated_token=_make_token(), child_tokens=(_make_token(),))
+
+    def test_route_rejects_child_tokens(self) -> None:
+        """ROUTE action cannot produce child tokens."""
+        result = GateResult(row={"a": 1}, action=RoutingAction.route("sink_a"))
+        with pytest.raises(ValueError, match="ROUTE action cannot have child_tokens"):
+            GateOutcome(result=result, updated_token=_make_token(), child_tokens=(_make_token(),), sink_name="s")
+
+    def test_route_requires_destination(self) -> None:
+        """ROUTE action must specify either sink_name or next_node_id."""
+        result = GateResult(row={"a": 1}, action=RoutingAction.route("label"))
+        with pytest.raises(ValueError, match="ROUTE action must have either"):
+            GateOutcome(result=result, updated_token=_make_token())
+
+    def test_fork_requires_child_tokens(self) -> None:
+        """FORK_TO_PATHS action without children is an impossible state."""
+        result = GateResult(row={"a": 1}, action=RoutingAction.fork_to_paths(["a", "b"]))
+        with pytest.raises(ValueError, match="FORK_TO_PATHS action must have non-empty child_tokens"):
+            GateOutcome(result=result, updated_token=_make_token())
+
+    def test_fork_rejects_sink_name(self) -> None:
+        """FORK_TO_PATHS action cannot have sink_name."""
+        result = GateResult(row={"a": 1}, action=RoutingAction.fork_to_paths(["a", "b"]))
+        with pytest.raises(ValueError, match="FORK_TO_PATHS action cannot have sink_name"):
+            GateOutcome(result=result, updated_token=_make_token(), child_tokens=(_make_token(),), sink_name="s")
 
 
 # =============================================================================
