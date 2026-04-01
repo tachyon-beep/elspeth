@@ -224,7 +224,7 @@ sources:
     type: csv_source
     path: data/input.csv
     schema:
-      mode: strict
+      mode: fixed
       fields:
         name: {type: string}
         age: {type: integer}

@@ -395,7 +395,7 @@ Examples:
     extra_files = ["config/cicd/contracts-whitelist.yaml"]
     if args.context_files:
         extra_files.extend(args.context_files)
-    context_text = load_context(repo_root, extra_files=extra_files)
+    context_text = load_context(repo_root, extra_files=extra_files, include_skills=True)
     ensure_log_file(log_path, header_title="Codex Exemption Validation Log")
 
     # Ensure output directory exists

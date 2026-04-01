@@ -397,7 +397,7 @@ Examples:
 
     # Load template and context
     template_text = template_path.read_text(encoding="utf-8")
-    context_text = load_context(repo_root, extra_files=args.context_files)
+    context_text = load_context(repo_root, extra_files=args.context_files, include_skills=True)
     ensure_log_file(log_path, header_title="Codex Integration Seam Hunt Log")
 
     # Ensure output directory exists
