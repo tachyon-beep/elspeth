@@ -275,18 +275,21 @@ class TestNoResultsQuarantineContext:
 class TestRAGTransformReadinessGuard:
     """Tests for the readiness check in on_start()."""
 
-    def _make_mock_provider(self, *, reachable: bool = True, count: int = 10, collection: str = "test-index") -> MagicMock:
+    def _make_mock_provider(self, *, reachable: bool = True, count: int | None = 10, collection: str = "test-index") -> MagicMock:
         """Build a mock provider with check_readiness pre-configured."""
         from elspeth.contracts.probes import CollectionReadinessResult
 
         mock_provider = MagicMock()
         mock_provider.last_skipped_count = 0
-        if count > 0:
+        if not reachable:
+            message = f"Collection '{collection}' unreachable"
+            count = None  # Unreachable → count unknown
+        elif count is not None and count > 0:
             message = f"Collection '{collection}' has {count} documents"
-        elif reachable:
+        elif count == 0:
             message = f"Collection '{collection}' is empty"
         else:
-            message = f"Collection '{collection}' unreachable"
+            message = f"Collection '{collection}' count unknown"
 
         mock_provider.check_readiness.return_value = CollectionReadinessResult(
             collection=collection,

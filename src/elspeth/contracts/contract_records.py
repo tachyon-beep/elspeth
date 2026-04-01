@@ -178,6 +178,12 @@ class ContractAuditRecord:
         if mode not in _VALID_MODES:
             raise AuditIntegrityError(f"Invalid contract mode '{mode}' in audit record. Valid modes: {', '.join(sorted(_VALID_MODES))}")
 
+        # Tier 1: boolean fields must be exactly bool, not truthy ints/strings.
+        # Non-boolean locked silently changes contract enforcement semantics.
+        locked = data["locked"]
+        if not isinstance(locked, bool):
+            raise AuditIntegrityError(f"Contract 'locked' must be bool, got {type(locked).__name__}: {locked!r}")
+
         fields: list[FieldAuditRecord] = []
         for f in data["fields"]:
             source = f["source"]
@@ -194,20 +200,31 @@ class ContractAuditRecord:
                     f"'{f['normalized_name']}' in audit record. "
                     f"Valid types: {', '.join(sorted(CONTRACT_TYPE_MAP.keys()))}"
                 )
+            # Tier 1: boolean fields must be exactly bool.
+            required = f["required"]
+            nullable = f["nullable"]
+            if not isinstance(required, bool):
+                raise AuditIntegrityError(
+                    f"Field '{f['normalized_name']}' 'required' must be bool, got {type(required).__name__}: {required!r}"
+                )
+            if not isinstance(nullable, bool):
+                raise AuditIntegrityError(
+                    f"Field '{f['normalized_name']}' 'nullable' must be bool, got {type(nullable).__name__}: {nullable!r}"
+                )
             fields.append(
                 FieldAuditRecord(
                     normalized_name=f["normalized_name"],
                     original_name=f["original_name"],
                     python_type=python_type,
-                    required=f["required"],
+                    required=required,
                     source=source,
-                    nullable=f["nullable"],
+                    nullable=nullable,
                 )
             )
 
         return cls(
             mode=mode,
-            locked=data["locked"],
+            locked=locked,
             version_hash=data["version_hash"],
             fields=tuple(fields),
         )
@@ -235,6 +252,10 @@ class ContractAuditRecord:
                 f"Invalid contract mode '{self.mode}' in audit record. Valid modes: {', '.join(sorted(_VALID_MODES))}"
             )
 
+        # Tier 1: validate boolean fields before constructing live contracts.
+        if not isinstance(self.locked, bool):
+            raise AuditIntegrityError(f"Contract 'locked' must be bool, got {type(self.locked).__name__}: {self.locked!r}")
+
         for f in self.fields:
             if f.source not in _VALID_SOURCES:
                 raise AuditIntegrityError(
@@ -247,6 +268,14 @@ class ContractAuditRecord:
                     f"Invalid python_type '{f.python_type}' for field "
                     f"'{f.normalized_name}' in audit record. "
                     f"Valid types: {', '.join(sorted(CONTRACT_TYPE_MAP.keys()))}"
+                )
+            if not isinstance(f.required, bool):
+                raise AuditIntegrityError(
+                    f"Field '{f.normalized_name}' 'required' must be bool, got {type(f.required).__name__}: {f.required!r}"
+                )
+            if not isinstance(f.nullable, bool):
+                raise AuditIntegrityError(
+                    f"Field '{f.normalized_name}' 'nullable' must be bool, got {type(f.nullable).__name__}: {f.nullable!r}"
                 )
 
         fields = tuple(

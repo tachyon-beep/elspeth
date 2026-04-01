@@ -74,11 +74,13 @@ class ChromaCollectionProbe:
                 ),
             )
         except chromadb.errors.NotFoundError:
-            # Collection doesn't exist — server reachable, collection absent
+            # Collection doesn't exist — server reachable, collection absent.
+            # count=None: we reached the server but the collection is absent,
+            # so the count is unknown (not zero — zero means "empty").
             return CollectionReadinessResult(
                 collection=self.collection_name,
                 reachable=True,
-                count=0,
+                count=None,
                 message=f"Collection '{self.collection_name}' not found",
             )
         except (chromadb.errors.ChromaError, ConnectionError, OSError) as exc:
@@ -87,7 +89,7 @@ class ChromaCollectionProbe:
             return CollectionReadinessResult(
                 collection=self.collection_name,
                 reachable=False,
-                count=0,
+                count=None,
                 message=f"Collection '{self.collection_name}' unreachable: {type(exc).__name__}: {exc}",
             )
 

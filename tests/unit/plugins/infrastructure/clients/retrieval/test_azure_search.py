@@ -415,7 +415,7 @@ class TestAzureSearchProviderReadiness:
             result = provider.check_readiness()
 
         assert result.reachable is True
-        assert result.count == 0
+        assert result.count is None
         assert "not found" in result.message.lower()
 
     def test_connection_error(self) -> None:
@@ -426,7 +426,7 @@ class TestAzureSearchProviderReadiness:
             result = provider.check_readiness()
 
         assert result.reachable is False
-        assert result.count == 0
+        assert result.count is None
         assert "Connection refused" in result.message
 
     def test_auth_header_sent(self) -> None:
@@ -460,7 +460,7 @@ class TestAzureSearchProviderReadiness:
 
         # Reachable (HTTP 200) but unparseable — distinct from unreachable
         assert result.reachable is True
-        assert result.count == 0
+        assert result.count is None
         assert "non-integer" in result.message.lower()
 
     def test_server_error_during_probe(self) -> None:
@@ -471,7 +471,7 @@ class TestAzureSearchProviderReadiness:
             result = provider.check_readiness()
 
         assert result.reachable is False
-        assert result.count == 0
+        assert result.count is None
 
     def test_managed_identity_sends_bearer_token(self) -> None:
         """Managed identity readiness probe acquires a Bearer token via DefaultAzureCredential."""

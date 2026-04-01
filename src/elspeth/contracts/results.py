@@ -489,7 +489,7 @@ class SourceRow:
     Example usage in a source:
         try:
             validated = schema.model_validate(row)
-            yield SourceRow.valid(validated.to_row())
+            yield SourceRow.valid(validated.to_row(), contract=contract)
         except ValidationError as e:
             if on_validation_failure != "discard":
                 yield SourceRow.quarantined(
@@ -526,6 +526,10 @@ class SourceRow:
                 raise ValueError(f"Non-quarantined SourceRow must not have quarantine_error, got: {self.quarantine_error!r}")
             if self.quarantine_destination is not None:
                 raise ValueError(f"Non-quarantined SourceRow must not have quarantine_destination, got: {self.quarantine_destination!r}")
+            # Valid rows MUST have a contract — the engine requires it at
+            # tokenization. Catching it here prevents a misleading crash later.
+            if self.contract is None:
+                raise ValueError("Valid SourceRow must have a contract. Pass contract= to SourceRow.valid().")
 
     @classmethod
     def valid(

@@ -20,6 +20,7 @@ from elspeth.core.dag import ExecutionGraph
 from elspeth.core.landscape.database import LandscapeDB
 from elspeth.core.payload_store import FilesystemPayloadStore
 from elspeth.plugins.infrastructure.base import BaseSource
+from elspeth.testing import make_contract
 from tests.fixtures.landscape import make_recorder
 
 
@@ -37,8 +38,8 @@ class SourceWithoutSchema(BaseSource):
 
     def load(self, ctx: SourceContext) -> Iterator[SourceRow]:
         """Yield test rows."""
-        yield SourceRow.valid({"id": 1, "value": "row1"})
-        yield SourceRow.valid({"id": 2, "value": "row2"})
+        yield SourceRow.valid({"id": 1, "value": "row1"}, contract=make_contract({"id": 1, "value": "row1"}))
+        yield SourceRow.valid({"id": 2, "value": "row2"}, contract=make_contract({"id": 2, "value": "row2"}))
 
     def on_start(self, ctx: LifecycleContext) -> None:
         pass

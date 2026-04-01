@@ -148,7 +148,7 @@ class RAGRetrievalTransform(BaseTransform):
             )
 
         # Then guard on the result
-        if not readiness.reachable or readiness.count <= 0:
+        if not readiness.reachable or readiness.count is None or readiness.count <= 0:
             raise RetrievalNotReadyError(
                 collection=readiness.collection,
                 reason=readiness.message,

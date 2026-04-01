@@ -971,17 +971,19 @@ class TestArtifactDescriptorDeepFreeze:
 
 
 class TestSourceRowExceptionType:
-    """SourceRow.to_pipeline_row must raise FrameworkBugError for missing contract."""
+    """SourceRow construction and to_pipeline_row exception types."""
 
-    def test_no_contract_raises_framework_bug_error(self) -> None:
-        """Regression: elspeth-a286241cfb — missing contract is a framework bug,
-        not a ValueError. Consistent with GateResult.to_pipeline_row()."""
-        from elspeth.contracts.errors import FrameworkBugError
+    def test_no_contract_raises_at_construction(self) -> None:
+        """Valid SourceRow without contract raises ValueError at construction.
+
+        Bug fix: elspeth-a27e71979f — the invariant is now enforced in
+        __post_init__ instead of deferring to to_pipeline_row(). This
+        supersedes elspeth-a286241cfb which moved the error to FrameworkBugError.
+        """
         from elspeth.contracts.results import SourceRow
 
-        row = SourceRow(row={"id": 1}, is_quarantined=False, contract=None)
-        with pytest.raises(FrameworkBugError, match="no contract"):
-            row.to_pipeline_row()
+        with pytest.raises(ValueError, match=r"[Vv]alid.*contract"):
+            SourceRow(row={"id": 1}, is_quarantined=False, contract=None)
 
     def test_quarantined_row_still_raises_value_error(self) -> None:
         """Quarantined rows raise ValueError — this is a state violation, not a bug."""

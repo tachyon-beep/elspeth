@@ -105,7 +105,7 @@ class TestChromaCollectionProbeBehavior:
             result = probe.probe()
 
         assert result.reachable is True
-        assert result.count == 0
+        assert result.count is None
         assert "not found" in result.message
 
     def test_auth_error_reports_unreachable(self) -> None:

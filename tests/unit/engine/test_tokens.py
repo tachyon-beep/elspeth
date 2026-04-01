@@ -828,15 +828,11 @@ class TestTokenManagerBoundaryPaths:
     """Coverage for error guards and quarantine/resume token paths."""
 
     def test_create_initial_token_requires_contract(self) -> None:
-        manager, _recorder, run_id, source_node_id = _make_manager_context()
-
-        with pytest.raises(OrchestrationInvariantError, match="must have contract"):
-            manager.create_initial_token(
-                run_id=run_id,
-                source_node_id=source_node_id,
-                row_index=0,
-                source_row=SourceRow.valid({"value": 42}, contract=None),
-            )
+        # Since elspeth-a27e71979f, SourceRow.__post_init__ rejects contract=None
+        # at construction time, so the engine's guard is now unreachable via
+        # normal construction. Verify the earlier guard fires instead.
+        with pytest.raises(ValueError, match=r"[Vv]alid.*contract"):
+            SourceRow.valid({"value": 42})
 
     def test_create_quarantine_token_rejects_non_quarantined_source_row(self) -> None:
         manager, _recorder, run_id, source_node_id = _make_manager_context()

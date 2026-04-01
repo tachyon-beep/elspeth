@@ -349,10 +349,11 @@ class AzureSearchProvider:
             response = httpx.get(count_url, headers=headers, timeout=10.0)
 
             if response.status_code == 404:
+                # Index absent — count is unknown, not zero.
                 return CollectionReadinessResult(
                     collection=index_name,
                     reachable=True,
-                    count=0,
+                    count=None,
                     message=f"Index '{index_name}' not found",
                 )
 
@@ -364,10 +365,11 @@ class AzureSearchProvider:
             try:
                 count = int(response.text.strip())
             except ValueError:
+                # Malformed $count response — count is unknown, not zero.
                 return CollectionReadinessResult(
                     collection=index_name,
                     reachable=True,
-                    count=0,
+                    count=None,
                     message=f"Index '{index_name}' returned non-integer $count body: {response.text!r}",
                 )
 
@@ -381,7 +383,7 @@ class AzureSearchProvider:
             return CollectionReadinessResult(
                 collection=index_name,
                 reachable=False,
-                count=0,
+                count=None,
                 message=f"Index '{index_name}' unreachable: {type(exc).__name__}: {exc}",
             )
 

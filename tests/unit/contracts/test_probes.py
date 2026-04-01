@@ -32,15 +32,35 @@ class TestCollectionReadinessResult:
         with pytest.raises(AttributeError):
             result.count = 99  # type: ignore[misc]
 
-    def test_unreachable_result(self) -> None:
+    def test_unreachable_with_none_count(self) -> None:
+        """Unreachable collections can have count=None (unknown).
+
+        Bug fix: elspeth-ed5125c3e1. Previously, probes were forced to
+        fabricate count=0 when the count was unknown.
+        """
         result = CollectionReadinessResult(
             collection="missing",
             reachable=False,
-            count=0,
-            message="Collection 'missing' not found",
+            count=None,
+            message="Collection 'missing' unreachable",
         )
         assert result.reachable is False
-        assert result.count == 0
+        assert result.count is None
+
+    def test_reachable_with_none_count(self) -> None:
+        """Reachable collections can have count=None (e.g., malformed response).
+
+        Bug fix: elspeth-ed5125c3e1. A probe that reaches the server
+        but can't parse the count should not fabricate count=0.
+        """
+        result = CollectionReadinessResult(
+            collection="weird",
+            reachable=True,
+            count=None,
+            message="Index returned non-integer $count body",
+        )
+        assert result.reachable is True
+        assert result.count is None
 
     def test_empty_collection_result(self) -> None:
         result = CollectionReadinessResult(
@@ -64,6 +84,15 @@ class TestCollectionReadinessResult:
         """bool is a subclass of int in Python — require_int rejects it."""
         with pytest.raises(TypeError, match="count must be int"):
             CollectionReadinessResult(collection="test", reachable=True, count=True, message="ok")
+
+    def test_unreachable_with_known_count_raises(self) -> None:
+        """Unreachable with a known count is contradictory.
+
+        Bug fix: elspeth-ed5125c3e1. If we can't reach the collection,
+        we can't know its count. count must be None when unreachable.
+        """
+        with pytest.raises(ValueError, match=r"[Uu]nreachable.*count"):
+            CollectionReadinessResult(collection="test", reachable=False, count=5, message="down")
 
     def test_valid_construction(self) -> None:
         result = CollectionReadinessResult(

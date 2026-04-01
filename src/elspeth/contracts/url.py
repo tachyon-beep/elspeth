@@ -210,10 +210,13 @@ class SanitizedWebhookUrl:
     def __post_init__(self) -> None:
         """Enforce invariant: sanitized_url must not contain credentials."""
         parsed = urlparse(self.sanitized_url)
-        # Check for password in netloc (Basic Auth)
-        if parsed.password:
+        # Check for ANY userinfo in netloc (username, password, or both).
+        # Must match the sanitizer's rule: username OR password = sensitive.
+        # Many services use username for bearer tokens (e.g., https://token@host).
+        if parsed.username is not None or parsed.password is not None:
             raise ValueError(
-                "SanitizedWebhookUrl cannot contain a password in the URL. Use SanitizedWebhookUrl.from_raw_url() to sanitize first."
+                "SanitizedWebhookUrl cannot contain userinfo (username/password) in the URL. "
+                "Use SanitizedWebhookUrl.from_raw_url() to sanitize first."
             )
         # Check for sensitive query parameters
         query_params = parse_qs(parsed.query, keep_blank_values=True)

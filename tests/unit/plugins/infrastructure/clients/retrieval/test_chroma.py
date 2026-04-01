@@ -677,7 +677,7 @@ class TestChromaSearchProviderReadiness:
         result = provider.check_readiness()
 
         assert result.reachable is False
-        assert result.count == 0
+        assert result.count is None
         assert "Connection refused" in result.message
 
     def test_uncaught_exception_crashes_through(self) -> None:

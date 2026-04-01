@@ -364,7 +364,7 @@ class ChromaSearchProvider:
             return CollectionReadinessResult(
                 collection=collection_name,
                 reachable=False,
-                count=0,
+                count=None,
                 message=f"Collection '{collection_name}' unreachable: {type(exc).__name__}: {exc}",
             )
 

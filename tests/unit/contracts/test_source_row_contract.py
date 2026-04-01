@@ -30,13 +30,6 @@ class TestSourceRowWithContract:
         assert source_row.is_quarantined is False
         assert source_row.contract is sample_contract
 
-    def test_valid_without_contract(self) -> None:
-        """SourceRow.valid() works without contract (backwards compatible)."""
-        row_data = {"id": 1}
-        source_row = SourceRow.valid(row_data)
-
-        assert source_row.contract is None
-
     def test_quarantined_no_contract(self) -> None:
         """Quarantined rows don't carry contracts."""
         source_row = SourceRow.quarantined(
@@ -58,14 +51,14 @@ class TestSourceRowWithContract:
         assert pipeline_row["id"] == 1
         assert pipeline_row["name"] == "Alice"
 
-    def test_to_pipeline_row_raises_without_contract(self) -> None:
-        """to_pipeline_row() raises FrameworkBugError if no contract attached."""
-        from elspeth.contracts.errors import FrameworkBugError
+    def test_valid_without_contract_raises(self) -> None:
+        """SourceRow.valid() without contract raises at construction.
 
-        source_row = SourceRow.valid({"id": 1})
-
-        with pytest.raises(FrameworkBugError, match="no contract"):
-            source_row.to_pipeline_row()
+        Bug fix: elspeth-a27e71979f. The invariant is now enforced in
+        __post_init__ instead of failing later at to_pipeline_row().
+        """
+        with pytest.raises(ValueError, match=r"[Vv]alid.*contract"):
+            SourceRow.valid({"id": 1})
 
     def test_to_pipeline_row_raises_if_quarantined(self, sample_contract: SchemaContract) -> None:
         """to_pipeline_row() raises for quarantined rows."""
@@ -79,11 +72,46 @@ class TestSourceRowWithContract:
             source_row.to_pipeline_row()
 
 
+class TestSourceRowContractInvariant:
+    """Valid SourceRow must have a contract — catches bugs at construction, not tokenization."""
+
+    def test_valid_without_contract_raises(self) -> None:
+        """SourceRow.valid() without contract raises ValueError.
+
+        Bug fix: elspeth-a27e71979f. Previously, contract=None was accepted
+        for valid rows, causing a crash later at tokenization.
+        """
+        with pytest.raises(ValueError, match=r"[Vv]alid.*contract"):
+            SourceRow.valid({"id": 1})
+
+    def test_valid_with_contract_succeeds(self) -> None:
+        """SourceRow.valid() with contract succeeds."""
+        from elspeth.contracts.schema_contract import SchemaContract
+        from elspeth.testing import make_field
+
+        contract = SchemaContract(
+            mode="OBSERVED",
+            fields=(make_field("id", int, original_name="id"),),
+            locked=True,
+        )
+        row = SourceRow.valid({"id": 1}, contract=contract)
+        assert row.contract is contract
+        assert not row.is_quarantined
+
+    def test_quarantined_without_contract_succeeds(self) -> None:
+        """Quarantined rows don't need a contract (they failed validation)."""
+        row = SourceRow.quarantined(row={"bad": True}, error="invalid", destination="quarantine")
+        assert row.contract is None
+        assert row.is_quarantined
+
+
 class TestSourceRowImmutability:
     """SourceRow is frozen — fields cannot be reassigned after construction."""
 
     def test_frozen_rejects_field_reassignment(self) -> None:
-        source_row = SourceRow.valid({"id": 1})
+        from elspeth.testing import make_contract
+
+        source_row = SourceRow.valid({"id": 1}, contract=make_contract({"id": 1}))
         with pytest.raises(AttributeError):
             source_row.row = {"id": 2}  # type: ignore[misc]
 

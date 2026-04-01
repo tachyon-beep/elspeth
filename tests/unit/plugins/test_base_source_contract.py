@@ -8,7 +8,7 @@ from elspeth.contracts import SourceRow
 from elspeth.contracts.contexts import SourceContext
 from elspeth.contracts.schema_contract import SchemaContract
 from elspeth.plugins.infrastructure.base import BaseSource
-from elspeth.testing import make_field
+from elspeth.testing import make_contract, make_field
 
 
 class StubSource(BaseSource):
@@ -25,7 +25,7 @@ class StubSource(BaseSource):
         self.output_schema = PluginSchema
 
     def load(self, ctx: SourceContext) -> Iterator[SourceRow]:
-        yield SourceRow.valid({"id": 1})
+        yield SourceRow.valid({"id": 1}, contract=make_contract({"id": 1}))
 
     def close(self) -> None:
         pass

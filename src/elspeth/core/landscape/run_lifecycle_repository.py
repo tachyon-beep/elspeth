@@ -634,7 +634,7 @@ class RunLifecycleRepository:
         name: str,
         collection: str,
         reachable: bool,
-        count: int,
+        count: int | None,
         message: str,
     ) -> None:
         """Record a readiness check result in the audit trail.

@@ -649,7 +649,7 @@ class BaseSource(ABC):
                 with open(self.config["path"]) as f:
                     reader = csv.DictReader(f)
                     for row in reader:
-                        yield SourceRow.valid(row)
+                        yield SourceRow.valid(row, contract=contract)
 
             def close(self) -> None:
                 pass  # File already closed by context manager

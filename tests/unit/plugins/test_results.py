@@ -347,8 +347,9 @@ class TestSourceRow:
     def test_valid_factory_passes_post_init(self) -> None:
         """SourceRow.valid() produces a row that passes __post_init__ validation."""
         from elspeth.contracts import SourceRow
+        from elspeth.testing import make_contract
 
-        row = SourceRow.valid({"a": 1})
+        row = SourceRow.valid({"a": 1}, contract=make_contract({"a": 1}))
         assert not row.is_quarantined
         assert row.quarantine_error is None
         assert row.quarantine_destination is None

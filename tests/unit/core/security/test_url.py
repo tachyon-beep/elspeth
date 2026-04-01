@@ -452,6 +452,52 @@ class TestSanitizedWebhookUrl:
         assert result.fingerprint is not None
 
 
+class TestSanitizedWebhookUrlPostInit:
+    """Tests for SanitizedWebhookUrl.__post_init__ constructor guards."""
+
+    def test_rejects_username_only_auth(self) -> None:
+        """Direct construction with username-only auth is rejected.
+
+        Bug fix: elspeth-80090f1076. A bearer token in the username field
+        (e.g., https://token@host) bypassed the __post_init__ guard because
+        it only checked `parsed.password`, not `parsed.username`.
+        """
+        with pytest.raises(ValueError, match=r"cannot contain.*userinfo"):
+            SanitizedWebhookUrl(
+                sanitized_url="https://bearer-token@api.example.com/webhook",
+                fingerprint=None,
+            )
+
+    def test_rejects_empty_password_auth(self) -> None:
+        """Direct construction with user:@host (empty password) is rejected.
+
+        Bug fix: elspeth-80090f1076. Empty-password Basic Auth like
+        https://token:@host has parsed.password="" (falsy), so the old
+        `if parsed.password:` guard missed it.
+        """
+        with pytest.raises(ValueError, match=r"cannot contain.*userinfo"):
+            SanitizedWebhookUrl(
+                sanitized_url="https://token:@api.example.com/webhook",
+                fingerprint=None,
+            )
+
+    def test_rejects_full_basic_auth(self) -> None:
+        """Direct construction with user:pass@host is still rejected."""
+        with pytest.raises(ValueError, match="cannot contain"):
+            SanitizedWebhookUrl(
+                sanitized_url="https://user:secret@api.example.com/webhook",
+                fingerprint=None,
+            )
+
+    def test_accepts_clean_url(self) -> None:
+        """Direct construction with no userinfo is accepted."""
+        result = SanitizedWebhookUrl(
+            sanitized_url="https://api.example.com/webhook",
+            fingerprint=None,
+        )
+        assert result.sanitized_url == "https://api.example.com/webhook"
+
+
 class TestExtractRawPort:
     """Tests for _extract_raw_port helper."""
 

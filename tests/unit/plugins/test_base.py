@@ -6,7 +6,7 @@ from typing import Any
 import pytest
 
 from elspeth.contracts import PipelineRow
-from elspeth.testing import make_pipeline_row
+from elspeth.testing import make_contract, make_pipeline_row
 from tests.fixtures.factories import make_context
 from tests.fixtures.landscape import make_recorder
 
@@ -291,7 +291,7 @@ class TestBaseSource:
 
             def load(self, ctx: SourceContext) -> Iterator[SourceRow]:
                 for _row in self._data:
-                    yield SourceRow.valid(_row)
+                    yield SourceRow.valid(_row, contract=make_contract(_row))
 
             def close(self) -> None:
                 pass

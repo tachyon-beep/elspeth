@@ -53,7 +53,7 @@ class SourceProtocol(Protocol):
                 with open(self.path) as f:
                     reader = csv.DictReader(f)
                     for row in reader:
-                        yield SourceRow.valid(row)
+                        yield SourceRow.valid(row, contract=contract)
     """
 
     name: str

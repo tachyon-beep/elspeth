@@ -57,6 +57,15 @@ def propagate_contract(
                 # access and losing field lineage in sinks.
                 python_type = object
 
+            # Null-like values normalize to type(None), but for inference
+            # that means "type unknown, field is nullable" — not "field is
+            # always NoneType". Use object+nullable to avoid order-dependent
+            # contracts that break on subsequent rows with real values.
+            nullable = False
+            if python_type is type(None):
+                python_type = object
+                nullable = True
+
             new_fields.append(
                 FieldContract(
                     normalized_name=name,
@@ -64,6 +73,7 @@ def propagate_contract(
                     python_type=python_type,
                     required=False,  # Inferred fields are never required
                     source="inferred",
+                    nullable=nullable,
                 )
             )
 
@@ -164,6 +174,14 @@ def narrow_contract_to_output(
                 )
                 continue
 
+            # Null-like values normalize to type(None), but for inference
+            # that means "type unknown, field is nullable" — not "field is
+            # always NoneType". Same fix as propagate_contract().
+            nullable = False
+            if python_type is type(None):
+                python_type = object
+                nullable = True
+
             new_fields.append(
                 FieldContract(
                     normalized_name=name,
@@ -171,6 +189,7 @@ def narrow_contract_to_output(
                     python_type=python_type,
                     required=False,  # Inferred fields are never required
                     source="inferred",
+                    nullable=nullable,
                 )
             )
 

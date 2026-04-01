@@ -6,7 +6,7 @@ from typing import Any, ClassVar
 
 from elspeth.contracts import PipelineRow, SourceRow
 from elspeth.contracts.schema import SchemaConfig
-from elspeth.testing import make_pipeline_row
+from elspeth.testing import make_contract, make_pipeline_row
 from tests.fixtures.factories import make_context
 from tests.fixtures.landscape import make_recorder
 
@@ -43,7 +43,7 @@ class TestSourceProtocol:
 
             def load(self, ctx: PluginContext) -> Iterator[SourceRow]:
                 for i in range(3):
-                    yield SourceRow.valid({"value": i})
+                    yield SourceRow.valid({"value": i}, contract=make_contract({"value": i}))
 
             def close(self) -> None:
                 pass
@@ -116,7 +116,7 @@ class TestSourceProtocol:
                 self.config = config
 
             def load(self, ctx: PluginContext) -> Iterator[SourceRow]:
-                yield SourceRow.valid({"value": 1})
+                yield SourceRow.valid({"value": 1}, contract=make_contract({"value": 1}))
 
             def close(self) -> None:
                 pass

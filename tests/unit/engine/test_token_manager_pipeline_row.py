@@ -5,7 +5,6 @@ from unittest.mock import MagicMock, Mock
 
 import pytest
 
-from elspeth.contracts.errors import OrchestrationInvariantError
 from elspeth.contracts.identity import TokenInfo
 from elspeth.contracts.schema_contract import PipelineRow, SchemaContract
 from elspeth.contracts.types import NodeID
@@ -79,19 +78,13 @@ class TestTokenManagerCreateInitialToken:
         from elspeth.engine.tokens import TokenManager
 
         recorder = _make_mock_recorder()
-        manager = TokenManager(recorder, step_resolver=_make_step_resolver())
+        TokenManager(recorder, step_resolver=_make_step_resolver())
 
-        # SourceRow without contract -- uses SourceRow.valid directly because
-        # make_source_row auto-creates a contract when contract=None
-        source_row = SourceRow.valid({"amount": 100}, contract=None)
-
-        with pytest.raises(OrchestrationInvariantError, match="must have contract"):
-            manager.create_initial_token(
-                run_id="run_001",
-                source_node_id="source_001",
-                row_index=0,
-                source_row=source_row,
-            )
+        # Since elspeth-a27e71979f, SourceRow.__post_init__ rejects contract=None
+        # at construction time, so the engine's guard is now unreachable via
+        # normal construction. Verify the earlier guard fires instead.
+        with pytest.raises(ValueError, match=r"[Vv]alid.*contract"):
+            SourceRow.valid({"amount": 100})
 
 
 class TestTokenManagerForkToken:

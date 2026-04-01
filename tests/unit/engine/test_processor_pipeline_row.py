@@ -5,7 +5,6 @@ from unittest.mock import MagicMock, Mock
 
 import pytest
 
-from elspeth.contracts.errors import OrchestrationInvariantError
 from elspeth.contracts.schema_contract import PipelineRow, SchemaContract
 from elspeth.contracts.types import NodeID
 from elspeth.engine.processor import DAGTraversalContext
@@ -143,7 +142,7 @@ class TestRowProcessorPipelineRow:
         recorder = _make_mock_recorder()
         span_factory = _make_mock_span_factory()
 
-        processor = RowProcessor(
+        RowProcessor(
             recorder=recorder,
             span_factory=span_factory,
             run_id="run_001",
@@ -152,22 +151,13 @@ class TestRowProcessorPipelineRow:
             traversal=_empty_traversal(),
         )
 
-        # SourceRow without contract -- uses SourceRow.valid directly because
-        # make_source_row auto-creates a contract when contract=None
+        # Since elspeth-a27e71979f, SourceRow.__post_init__ rejects contract=None
+        # at construction time, so the engine's guard is now unreachable via
+        # normal construction. Verify the earlier guard fires instead.
         from elspeth.contracts import SourceRow
 
-        source_row = SourceRow.valid({"amount": 100}, contract=None)
-        landscape_db = make_landscape_db()
-        landscape_recorder = make_recorder(landscape_db)
-        ctx = make_context(run_id="run_001", landscape=landscape_recorder)
-
-        with pytest.raises(OrchestrationInvariantError, match="must have contract"):
-            processor.process_row(
-                row_index=0,
-                source_row=source_row,
-                transforms=[],
-                ctx=ctx,
-            )
+        with pytest.raises(ValueError, match=r"[Vv]alid.*contract"):
+            SourceRow.valid({"amount": 100})
 
 
 class TestRowProcessorExistingRow:

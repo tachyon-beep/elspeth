@@ -13,9 +13,9 @@ per_file_rules:
 - pattern: contracts/contract_records.py
   rules:
   - R5
-  reason: Violation type dispatch requires isinstance() for polymorphic serialization of ContractViolation subclasses, plus Tier 1 structural validation of JSON shape in from_json()
+  reason: Violation type dispatch requires isinstance() for polymorphic serialization of ContractViolation subclasses, plus Tier 1 structural validation of JSON shape and boolean fields in from_json() and to_schema_contract()
   expires: null
-  max_hits: 6
+  max_hits: 12
 - pattern: contracts/type_normalization.py
   rules:
   - R5
@@ -175,7 +175,7 @@ allow_hits:
   reason: Optional field access at trust boundary
   safety: Code reviewed - legitimate pattern
   expires: '2026-05-02'
-- key: contracts/contract_builder.py:R6:ContractBuilder:process_first_row:fp=542d3ab0951d6c56
+- key: contracts/contract_builder.py:R6:ContractBuilder:process_first_row:fp=e1e21d94387cca2c
   owner: bugfix
   reason: TypeError from normalize_type_for_contract for unsupported types (dict, list, Decimal) — maps to object
   safety: Preserves field in contract as 'any' type; no data loss or silent skip

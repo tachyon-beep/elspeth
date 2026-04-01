@@ -289,7 +289,7 @@ class LandscapeRecorder:
         name: str,
         collection: str,
         reachable: bool,
-        count: int,
+        count: int | None,
         message: str,
     ) -> None:
         """Record a readiness check result. Delegates to RunLifecycleRepository."""
