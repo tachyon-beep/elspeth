@@ -15,6 +15,7 @@ from __future__ import annotations
 from collections.abc import Callable
 from threading import Lock
 from typing import TYPE_CHECKING, Any
+from urllib.parse import urlparse
 
 import httpx
 import structlog
@@ -62,11 +63,26 @@ class BaseAzureSafetyConfig(TransformDataConfig):
     )
     max_capacity_retry_seconds: int = Field(3600, gt=0, description="Max seconds to retry capacity errors")
 
-    @field_validator("endpoint", "api_key")
+    @field_validator("endpoint")
     @classmethod
-    def _reject_empty_credentials(cls, v: str, info: Any) -> str:
+    def _validate_endpoint_url(cls, v: str) -> str:
+        v = v.strip()
+        if not v:
+            raise ValueError("endpoint must not be empty")
+        parsed = urlparse(v)
+        if parsed.scheme != "https":
+            raise ValueError(f"endpoint must use HTTPS, got scheme '{parsed.scheme}'")
+        if not parsed.hostname:
+            raise ValueError("endpoint must include a hostname")
+        if parsed.username or parsed.password:
+            raise ValueError("endpoint must not contain embedded credentials")
+        return v
+
+    @field_validator("api_key")
+    @classmethod
+    def _reject_empty_api_key(cls, v: str) -> str:
         if not v.strip():
-            raise ValueError(f"{info.field_name} must not be empty")
+            raise ValueError("api_key must not be empty")
         return v
 
     @field_validator("fields")

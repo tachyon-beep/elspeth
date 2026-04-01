@@ -432,13 +432,11 @@ class TestResolveQueries:
                 }
             )
 
-    def test_reserved_suffix_warns(self, caplog: pytest.LogCaptureFixture) -> None:
-        """Output field with reserved _error suffix logs warning."""
-        import logging
-
+    def test_reserved_suffix_raises_error(self) -> None:
+        """Output field with reserved _error suffix raises ValueError."""
         from elspeth.plugins.transforms.llm.multi_query import resolve_queries
 
-        with caplog.at_level(logging.WARNING, logger="elspeth.plugins.transforms.llm.multi_query"):
+        with pytest.raises(ValueError, match="reserved LLM suffix"):
             resolve_queries(
                 {
                     "q1": {
@@ -447,15 +445,12 @@ class TestResolveQueries:
                     },
                 }
             )
-        assert any("reserved" in r.message.lower() for r in caplog.records)
 
-    def test_reserved_suffix_from_constants_warns(self, caplog: pytest.LogCaptureFixture) -> None:
-        """Output field with suffix derived from LLM_GUARANTEED_SUFFIXES (e.g., 'usage') warns."""
-        import logging
-
+    def test_reserved_suffix_from_constants_raises_error(self) -> None:
+        """Output field with suffix derived from LLM_GUARANTEED_SUFFIXES (e.g., 'usage') raises ValueError."""
         from elspeth.plugins.transforms.llm.multi_query import resolve_queries
 
-        with caplog.at_level(logging.WARNING, logger="elspeth.plugins.transforms.llm.multi_query"):
+        with pytest.raises(ValueError, match="reserved LLM suffix"):
             resolve_queries(
                 {
                     "q1": {
@@ -464,7 +459,6 @@ class TestResolveQueries:
                     },
                 }
             )
-        assert any("reserved" in r.message.lower() for r in caplog.records)
 
     def test_single_query_returns_one_element_list(self) -> None:
         from elspeth.plugins.transforms.llm.multi_query import resolve_queries

@@ -176,6 +176,7 @@ class PurgeManager:
             runs_table.c.completed_at >= cutoff,
             runs_table.c.completed_at.is_(None),
             runs_table.c.status == "running",
+            runs_table.c.status == "interrupted",  # Interrupted runs are recovery candidates
         )
 
         # === Build joins (shared between expired and active queries) ===

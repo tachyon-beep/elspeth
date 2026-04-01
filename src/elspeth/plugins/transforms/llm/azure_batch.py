@@ -1522,16 +1522,29 @@ class AzureBatchLLMTransform(BaseTransform):
             system_prompt_source=self._system_prompt_source,
         )
 
+        # Collect all quarantined row indices for engine visibility.
+        # Without quarantined_indices in metadata, the engine marks ALL rows as
+        # CONSUMED_IN_BATCH — error rows silently pass as successfully processed.
+        quarantined_indices = sorted(
+            template_error_indices | {e["row_index"] for e in row_errors}
+        )
+
+        success_reason: dict[str, Any] = {
+            "action": "enriched",
+            "fields_added": [self._response_field],
+            "metadata": {
+                "batch_size": len(output_rows),
+                **batch_audit,
+            },
+        }
+        if quarantined_indices:
+            success_reason["metadata"]["quarantined_indices"] = quarantined_indices
+            success_reason["metadata"]["quarantined_count"] = len(quarantined_indices)
+            success_reason["metadata"]["row_errors"] = row_errors
+
         return TransformResult.success_multi(
             [PipelineRow(r, output_contract) for r in output_rows],
-            success_reason={
-                "action": "enriched",
-                "fields_added": [self._response_field],
-                "metadata": {
-                    "batch_size": len(output_rows),
-                    **batch_audit,
-                },
-            },
+            success_reason=success_reason,
         )
 
     @property

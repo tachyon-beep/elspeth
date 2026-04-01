@@ -13,14 +13,10 @@ from enum import StrEnum
 from types import MappingProxyType
 from typing import Any
 
-import structlog
 from pydantic import Field, model_validator
 
 from elspeth.contracts.schema_contract import PipelineRow
 from elspeth.plugins.infrastructure.config_base import PluginConfig
-
-logger = structlog.get_logger(__name__)
-
 
 class OutputFieldType(StrEnum):
     """Supported types for structured output fields."""
@@ -244,11 +240,10 @@ def resolve_queries(
             for field in spec.output_fields:
                 # Warn on reserved suffixes
                 if field.suffix in reserved_suffixes:
-                    logger.warning(
-                        "reserved_suffix_conflict",
-                        query=spec.name,
-                        suffix=field.suffix,
-                        detail="Output field suffix matches a reserved LLM suffix, may cause conflicts",
+                    raise ValueError(
+                        f"Query '{spec.name}' output field suffix '{field.suffix}' collides with "
+                        f"reserved LLM suffix. Reserved suffixes: {sorted(reserved_suffixes)}. "
+                        f"Choose a different suffix to prevent silent data loss."
                     )
                 # Check for cross-query output key collisions.
                 # Output keys are "{query_name}_{suffix}" (see MultiQueryStrategy),

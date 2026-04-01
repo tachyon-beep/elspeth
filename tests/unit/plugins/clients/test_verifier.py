@@ -588,7 +588,8 @@ class TestCallVerifier:
         recorder.find_call_by_request_hash.return_value = mock_call
         recorder.get_call_response_data.return_value = CallDataResult(state=CallDataState.PURGED, data=None)
 
-        verifier = CallVerifier(recorder, source_run_id="run_abc123")
+        # ignore_order=False required for hash-based verification
+        verifier = CallVerifier(recorder, source_run_id="run_abc123", ignore_order=False)
         result = verifier.verify(
             call_type=CallType.LLM,
             request_data=request_data,
@@ -625,7 +626,8 @@ class TestCallVerifier:
         recorder.find_call_by_request_hash.return_value = mock_call
         recorder.get_call_response_data.return_value = CallDataResult(state=CallDataState.PURGED, data=None)
 
-        verifier = CallVerifier(recorder, source_run_id="run_abc123")
+        # ignore_order=False required for hash-based verification
+        verifier = CallVerifier(recorder, source_run_id="run_abc123", ignore_order=False)
         result = verifier.verify(
             call_type=CallType.LLM,
             request_data=request_data,
@@ -698,7 +700,8 @@ class TestCallVerifier:
         recorder.find_call_by_request_hash.return_value = mock_call
         recorder.get_call_response_data.return_value = CallDataResult(state=CallDataState.HASH_ONLY, data=None)
 
-        verifier = CallVerifier(recorder, source_run_id="run_abc123")
+        # ignore_order=False required for hash-based verification
+        verifier = CallVerifier(recorder, source_run_id="run_abc123", ignore_order=False)
         result = verifier.verify(
             call_type=CallType.LLM,
             request_data=request_data,
@@ -727,7 +730,8 @@ class TestCallVerifier:
         recorder.find_call_by_request_hash.return_value = mock_call
         recorder.get_call_response_data.return_value = CallDataResult(state=CallDataState.HASH_ONLY, data=None)
 
-        verifier = CallVerifier(recorder, source_run_id="run_abc123")
+        # ignore_order=False required for hash-based verification
+        verifier = CallVerifier(recorder, source_run_id="run_abc123", ignore_order=False)
         result = verifier.verify(
             call_type=CallType.LLM,
             request_data=request_data,
@@ -740,6 +744,113 @@ class TestCallVerifier:
         report = verifier.get_report()
         assert report.mismatches == 1
         assert report.missing_payloads == 1
+
+    def test_verify_hash_skipped_when_ignore_paths_configured(self) -> None:
+        """Hash verification must be skipped when ignore_paths is configured.
+
+        Bug: elspeth-116d98f421 — hash comparison is stricter than semantic
+        comparison. When ignore_paths or ignore_order is set, a hash mismatch
+        could be a false alarm (the difference might be in an ignored path).
+        """
+        recorder = self._create_mock_recorder()
+        request_data = {"model": "gpt-4", "messages": []}
+        request_hash = stable_hash(request_data)
+        original_response = {"content": "Hello", "latency": 100}
+        response_hash = stable_hash(original_response)
+
+        mock_call = self._create_mock_call(
+            request_hash=request_hash,
+            response_ref="payload_ref_123",
+            response_hash=response_hash,
+        )
+        recorder.find_call_by_request_hash.return_value = mock_call
+        recorder.get_call_response_data.return_value = CallDataResult(state=CallDataState.PURGED, data=None)
+
+        # With ignore_paths configured, hash comparison is unreliable
+        verifier = CallVerifier(
+            recorder,
+            source_run_id="run_abc123",
+            ignore_paths=["root['latency']"],
+        )
+        result = verifier.verify(
+            call_type=CallType.LLM,
+            request_data=request_data,
+            live_response={"content": "Hello", "latency": 999},  # Only ignored field differs
+        )
+
+        # Should NOT attempt hash verification — result is "cannot verify"
+        assert result.payload_missing is True
+        assert result.is_match is False  # Cannot confirm match without payload
+        report = verifier.get_report()
+        assert report.matches == 0
+        assert report.mismatches == 0  # No false alarm
+
+    def test_verify_hash_skipped_when_ignore_order_true(self) -> None:
+        """Hash verification must be skipped when ignore_order=True (the default).
+
+        Bug: elspeth-116d98f421 — with ignore_order=True, semantic comparison
+        treats [1,2,3] and [3,2,1] as equal, but their hashes differ.
+        """
+        recorder = self._create_mock_recorder()
+        request_data = {"id": 1}
+        request_hash = stable_hash(request_data)
+        original_response = {"items": ["a", "b", "c"]}
+        response_hash = stable_hash(original_response)
+
+        mock_call = self._create_mock_call(
+            request_hash=request_hash,
+            response_ref="payload_ref_123",
+            response_hash=response_hash,
+        )
+        recorder.find_call_by_request_hash.return_value = mock_call
+        recorder.get_call_response_data.return_value = CallDataResult(state=CallDataState.PURGED, data=None)
+
+        # Default ignore_order=True
+        verifier = CallVerifier(recorder, source_run_id="run_abc123")
+        result = verifier.verify(
+            call_type=CallType.LLM,
+            request_data=request_data,
+            live_response={"items": ["c", "a", "b"]},  # Same items, different order
+        )
+
+        # Should NOT attempt hash verification — cannot verify
+        assert result.payload_missing is True
+        assert result.is_match is False
+        report = verifier.get_report()
+        assert report.matches == 0
+        assert report.mismatches == 0
+
+    def test_verify_hash_works_when_strict_comparison(self) -> None:
+        """Hash verification proceeds when no ignore_paths and ignore_order=False."""
+        recorder = self._create_mock_recorder()
+        request_data = {"id": 1}
+        request_hash = stable_hash(request_data)
+        original_response = {"content": "Hello"}
+        response_hash = stable_hash(original_response)
+
+        mock_call = self._create_mock_call(
+            request_hash=request_hash,
+            response_ref="payload_ref_123",
+            response_hash=response_hash,
+        )
+        recorder.find_call_by_request_hash.return_value = mock_call
+        recorder.get_call_response_data.return_value = CallDataResult(state=CallDataState.PURGED, data=None)
+
+        # Strict: no ignore_paths, ignore_order=False
+        verifier = CallVerifier(
+            recorder, source_run_id="run_abc123", ignore_order=False
+        )
+        result = verifier.verify(
+            call_type=CallType.LLM,
+            request_data=request_data,
+            live_response=original_response,
+        )
+
+        # Hash verification should succeed
+        assert result.is_match is True
+        assert result.payload_missing is True
+        report = verifier.get_report()
+        assert report.matches == 1
 
     def test_verify_order_independent_with_default_config(self) -> None:
         """Default configuration (ignore_order=True) ignores list ordering."""

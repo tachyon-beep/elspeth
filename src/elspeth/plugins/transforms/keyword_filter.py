@@ -159,7 +159,16 @@ class KeywordFilter(BaseTransform):
             # Use PipelineRow access semantics so configured fields can be either
             # original names or normalized names from the contract.
             if field_name not in row:
-                continue  # Skip fields not present in this row
+                if named_fields:
+                    return TransformResult.error(
+                        {
+                            "reason": "missing_scan_field",
+                            "field": field_name,
+                            "message": f"Configured scan field '{field_name}' not found in row",
+                        },
+                        retryable=False,
+                    )
+                continue
 
             value = row[field_name]
 

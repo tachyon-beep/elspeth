@@ -380,7 +380,7 @@ class TestBatchStatsGroupByHomogeneity:
 
 class TestOutputSchemaConfig:
     def test_guaranteed_fields_with_mean_and_group_by(self):
-        """group_by is a passthrough field — NOT in declared_output_fields."""
+        """group_by IS guaranteed on every successful result when configured."""
         from elspeth.plugins.transforms.batch_stats import BatchStats
 
         transform = BatchStats(
@@ -392,7 +392,7 @@ class TestOutputSchemaConfig:
             }
         )
         assert transform._output_schema_config is not None
-        assert frozenset(transform._output_schema_config.guaranteed_fields) == frozenset({"count", "sum", "batch_size", "mean"})
+        assert frozenset(transform._output_schema_config.guaranteed_fields) == frozenset({"count", "sum", "batch_size", "mean", "category"})
 
     def test_guaranteed_fields_minimal(self):
         from elspeth.plugins.transforms.batch_stats import BatchStats
@@ -407,7 +407,8 @@ class TestOutputSchemaConfig:
         assert transform._output_schema_config is not None
         assert frozenset(transform._output_schema_config.guaranteed_fields) == frozenset({"count", "sum", "batch_size"})
 
-    def test_declared_output_fields_excludes_group_by(self):
+    def test_declared_output_fields_includes_group_by(self):
+        """group_by is guaranteed on every successful result when configured."""
         from elspeth.plugins.transforms.batch_stats import BatchStats
 
         transform = BatchStats(
@@ -417,8 +418,8 @@ class TestOutputSchemaConfig:
                 "group_by": "region",
             }
         )
-        assert transform.declared_output_fields == frozenset({"count", "sum", "batch_size", "mean"})
-        assert "region" not in transform.declared_output_fields
+        assert transform.declared_output_fields == frozenset({"count", "sum", "batch_size", "mean", "region"})
+        assert "region" in transform.declared_output_fields
 
 
 # =============================================================================
@@ -535,5 +536,67 @@ class TestGroupByCollisionAtInit:
                     "schema": DYNAMIC_SCHEMA,
                     "value_field": "amount",
                     "group_by": "count",
+                }
+            )
+
+
+class TestBatchStatsGroupByInOutputContract:
+    """Tests for group_by appearing in declared_output_fields when configured.
+
+    Bug fix: group_by was consumed at runtime but never declared in output
+    guarantees. This meant the DAG builder couldn't validate that downstream
+    transforms requiring group_by would receive it.
+    """
+
+    def test_group_by_in_declared_output_fields(self):
+        """group_by appears in declared_output_fields when configured."""
+        from elspeth.plugins.transforms.batch_stats import BatchStats
+
+        transform = BatchStats(
+            {
+                "schema": DYNAMIC_SCHEMA,
+                "value_field": "amount",
+                "group_by": "category",
+            }
+        )
+        assert "category" in transform.declared_output_fields
+
+    def test_group_by_in_guaranteed_fields(self):
+        """group_by appears in _output_schema_config.guaranteed_fields when configured."""
+        from elspeth.plugins.transforms.batch_stats import BatchStats
+
+        transform = BatchStats(
+            {
+                "schema": DYNAMIC_SCHEMA,
+                "value_field": "amount",
+                "group_by": "region",
+            }
+        )
+        assert transform._output_schema_config is not None
+        assert "region" in transform._output_schema_config.guaranteed_fields
+
+    def test_no_group_by_not_in_declared_fields(self):
+        """Without group_by, only stat fields are in declared_output_fields."""
+        from elspeth.plugins.transforms.batch_stats import BatchStats
+
+        transform = BatchStats(
+            {
+                "schema": DYNAMIC_SCHEMA,
+                "value_field": "amount",
+            }
+        )
+        # Only stat fields, no group_by
+        assert transform.declared_output_fields == frozenset({"count", "sum", "batch_size", "mean"})
+
+    def test_group_by_collision_still_detected(self):
+        """group_by collision with stat fields is still detected at init."""
+        from elspeth.plugins.transforms.batch_stats import BatchStats
+
+        with pytest.raises(ValueError, match="collides"):
+            BatchStats(
+                {
+                    "schema": DYNAMIC_SCHEMA,
+                    "value_field": "amount",
+                    "group_by": "sum",
                 }
             )

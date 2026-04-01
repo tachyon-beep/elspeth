@@ -72,10 +72,15 @@ def test_batch_replicate_returns_contract_with_multi_row_output():
         f"Contract should include all output fields. Expected {expected_fields}, got {contract_field_names}"
     )
 
-    # Verify all fields are marked as inferred (OBSERVED mode pattern)
+    # Verify field metadata is preserved from input contracts where possible.
+    # copy_index is a new field added by the transform, so it gets int type.
+    # Input fields preserve their original contract metadata.
     for field in result.rows[0].contract.fields:
-        assert field.source == "inferred", f"Field {field.normalized_name} should be inferred"
-        assert field.python_type is object, f"Field {field.normalized_name} should have object type"
+        if field.normalized_name == "copy_index":
+            assert field.python_type is int, "copy_index should have int type"
+            assert field.source == "inferred", "copy_index should be inferred"
+        else:
+            assert field.source == "inferred", f"Field {field.normalized_name} should be inferred"
 
 
 def test_batch_replicate_contract_covers_all_output_shapes():

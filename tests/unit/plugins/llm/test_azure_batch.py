@@ -2243,5 +2243,250 @@ class TestAzureBatchAuditIntegrityOnRecordCallFailure:
         assert exc_info.value.__cause__ is not None
 
 
+class TestAzureBatchQuarantinedIndices:
+    """Tests for quarantined_indices in success_reason metadata (elspeth-8faacc7c8b).
+
+    When some rows fail during _download_results, the transform must include
+    quarantined_indices in the success_reason metadata so the engine can mark
+    those tokens as QUARANTINED instead of CONSUMED_IN_BATCH.
+    """
+
+    @pytest.fixture
+    def transform(self) -> AzureBatchLLMTransform:
+        """Create a basic transform."""
+        return AzureBatchLLMTransform(
+            {
+                "deployment_name": "my-gpt4o-batch",
+                "endpoint": "https://my-resource.openai.azure.com",
+                "api_key": "azure-api-key",
+                "template": "{{ row.text }}",
+                "schema": DYNAMIC_SCHEMA,
+                "required_input_fields": [],
+            }
+        )
+
+    def test_api_error_rows_produce_quarantined_indices(self, transform: AzureBatchLLMTransform) -> None:
+        """Rows with API errors appear in quarantined_indices metadata."""
+        from datetime import UTC, datetime
+
+        ctx = _make_batch_ctx()
+        recent_timestamp = datetime.now(UTC).isoformat()
+        ctx.set_checkpoint(
+            BatchCheckpointState(
+                batch_id="batch-q1",
+                input_file_id="file-123",
+                row_mapping={
+                    "row-0-aaa": RowMappingEntry(index=0, variables_hash="hash0"),
+                    "row-1-bbb": RowMappingEntry(index=1, variables_hash="hash1"),
+                    "row-2-ccc": RowMappingEntry(index=2, variables_hash="hash2"),
+                },
+                template_errors=[],
+                submitted_at=recent_timestamp,
+                row_count=3,
+                requests={
+                    "row-0-aaa": {"messages": [{"role": "user", "content": "a"}], "model": "gpt-4o-batch"},
+                    "row-1-bbb": {"messages": [{"role": "user", "content": "b"}], "model": "gpt-4o-batch"},
+                    "row-2-ccc": {"messages": [{"role": "user", "content": "c"}], "model": "gpt-4o-batch"},
+                },
+            )
+        )
+
+        mock_client = Mock()
+        mock_batch = Mock()
+        mock_batch.id = "batch-q1"
+        mock_batch.status = "completed"
+        mock_batch.output_file_id = "output-789"
+        mock_batch.error_file_id = None
+        mock_client.batches.retrieve.return_value = mock_batch
+
+        # Row 0: success, Row 1: API error, Row 2: success
+        output_lines = [
+            json.dumps({
+                "custom_id": "row-0-aaa",
+                "response": {"body": {"choices": [{"message": {"content": "A"}}], "usage": {}}},
+            }),
+            json.dumps({
+                "custom_id": "row-1-bbb",
+                "error": {"code": "content_filter", "message": "Content blocked"},
+            }),
+            json.dumps({
+                "custom_id": "row-2-ccc",
+                "response": {"body": {"choices": [{"message": {"content": "C"}}], "usage": {}}},
+            }),
+        ]
+        output_content = Mock()
+        output_content.text = "\n".join(output_lines)
+        mock_client.files.content.return_value = output_content
+
+        transform._client = mock_client
+        rows = [{"text": "a"}, {"text": "b"}, {"text": "c"}]
+        result = transform.process([make_pipeline_row(d) for d in rows], ctx)
+
+        assert result.status == "success"
+        assert result.success_reason is not None
+        metadata = result.success_reason["metadata"]
+        assert metadata["quarantined_indices"] == [1]
+        assert metadata["quarantined_count"] == 1
+        assert len(metadata["row_errors"]) == 1
+        assert metadata["row_errors"][0]["row_index"] == 1
+
+    def test_template_errors_produce_quarantined_indices(self, transform: AzureBatchLLMTransform) -> None:
+        """Rows with template errors appear in quarantined_indices metadata."""
+        from datetime import UTC, datetime
+
+        ctx = _make_batch_ctx()
+        recent_timestamp = datetime.now(UTC).isoformat()
+        ctx.set_checkpoint(
+            BatchCheckpointState(
+                batch_id="batch-q2",
+                input_file_id="file-123",
+                row_mapping={
+                    "row-1-bbb": RowMappingEntry(index=1, variables_hash="hash1"),
+                },
+                template_errors=[(0, "Jinja rendering failed")],
+                submitted_at=recent_timestamp,
+                row_count=2,
+                requests={
+                    "row-1-bbb": {"messages": [{"role": "user", "content": "b"}], "model": "gpt-4o-batch"},
+                },
+            )
+        )
+
+        mock_client = Mock()
+        mock_batch = Mock()
+        mock_batch.id = "batch-q2"
+        mock_batch.status = "completed"
+        mock_batch.output_file_id = "output-789"
+        mock_batch.error_file_id = None
+        mock_client.batches.retrieve.return_value = mock_batch
+
+        output_lines = [
+            json.dumps({
+                "custom_id": "row-1-bbb",
+                "response": {"body": {"choices": [{"message": {"content": "B"}}], "usage": {}}},
+            }),
+        ]
+        output_content = Mock()
+        output_content.text = "\n".join(output_lines)
+        mock_client.files.content.return_value = output_content
+
+        transform._client = mock_client
+        rows = [{"text": "a"}, {"text": "b"}]
+        result = transform.process([make_pipeline_row(d) for d in rows], ctx)
+
+        assert result.status == "success"
+        assert result.success_reason is not None
+        metadata = result.success_reason["metadata"]
+        assert metadata["quarantined_indices"] == [0]
+        assert metadata["quarantined_count"] == 1
+
+    def test_no_quarantined_indices_when_all_succeed(self, transform: AzureBatchLLMTransform) -> None:
+        """No quarantined_indices in metadata when all rows succeed."""
+        from datetime import UTC, datetime
+
+        ctx = _make_batch_ctx()
+        recent_timestamp = datetime.now(UTC).isoformat()
+        ctx.set_checkpoint(
+            BatchCheckpointState(
+                batch_id="batch-q3",
+                input_file_id="file-123",
+                row_mapping={
+                    "row-0-aaa": RowMappingEntry(index=0, variables_hash="hash0"),
+                },
+                template_errors=[],
+                submitted_at=recent_timestamp,
+                row_count=1,
+                requests={
+                    "row-0-aaa": {"messages": [{"role": "user", "content": "a"}], "model": "gpt-4o-batch"},
+                },
+            )
+        )
+
+        mock_client = Mock()
+        mock_batch = Mock()
+        mock_batch.id = "batch-q3"
+        mock_batch.status = "completed"
+        mock_batch.output_file_id = "output-789"
+        mock_batch.error_file_id = None
+        mock_client.batches.retrieve.return_value = mock_batch
+
+        output_lines = [
+            json.dumps({
+                "custom_id": "row-0-aaa",
+                "response": {"body": {"choices": [{"message": {"content": "A"}}], "usage": {}}},
+            }),
+        ]
+        output_content = Mock()
+        output_content.text = "\n".join(output_lines)
+        mock_client.files.content.return_value = output_content
+
+        transform._client = mock_client
+        rows = [{"text": "a"}]
+        result = transform.process([make_pipeline_row(d) for d in rows], ctx)
+
+        assert result.status == "success"
+        assert result.success_reason is not None
+        metadata = result.success_reason["metadata"]
+        assert "quarantined_indices" not in metadata
+
+    def test_mixed_error_types_combine_quarantined_indices(self, transform: AzureBatchLLMTransform) -> None:
+        """Template errors and API errors combine into quarantined_indices."""
+        from datetime import UTC, datetime
+
+        ctx = _make_batch_ctx()
+        recent_timestamp = datetime.now(UTC).isoformat()
+        ctx.set_checkpoint(
+            BatchCheckpointState(
+                batch_id="batch-q4",
+                input_file_id="file-123",
+                row_mapping={
+                    "row-1-bbb": RowMappingEntry(index=1, variables_hash="hash1"),
+                    "row-2-ccc": RowMappingEntry(index=2, variables_hash="hash2"),
+                },
+                template_errors=[(0, "Jinja rendering failed")],
+                submitted_at=recent_timestamp,
+                row_count=3,
+                requests={
+                    "row-1-bbb": {"messages": [{"role": "user", "content": "b"}], "model": "gpt-4o-batch"},
+                    "row-2-ccc": {"messages": [{"role": "user", "content": "c"}], "model": "gpt-4o-batch"},
+                },
+            )
+        )
+
+        mock_client = Mock()
+        mock_batch = Mock()
+        mock_batch.id = "batch-q4"
+        mock_batch.status = "completed"
+        mock_batch.output_file_id = "output-789"
+        mock_batch.error_file_id = None
+        mock_client.batches.retrieve.return_value = mock_batch
+
+        # Row 1: success, Row 2: API error (row 0 had template error)
+        output_lines = [
+            json.dumps({
+                "custom_id": "row-1-bbb",
+                "response": {"body": {"choices": [{"message": {"content": "B"}}], "usage": {}}},
+            }),
+            json.dumps({
+                "custom_id": "row-2-ccc",
+                "error": {"code": "rate_limit", "message": "Too many requests"},
+            }),
+        ]
+        output_content = Mock()
+        output_content.text = "\n".join(output_lines)
+        mock_client.files.content.return_value = output_content
+
+        transform._client = mock_client
+        rows = [{"text": "a"}, {"text": "b"}, {"text": "c"}]
+        result = transform.process([make_pipeline_row(d) for d in rows], ctx)
+
+        assert result.status == "success"
+        assert result.success_reason is not None
+        metadata = result.success_reason["metadata"]
+        # Row 0: template error, Row 2: API error — both quarantined
+        assert metadata["quarantined_indices"] == [0, 2]
+        assert metadata["quarantined_count"] == 2
+
+
 # RowMappingEntry tests moved to tests/unit/contracts/test_batch_checkpoint.py
 # (class is now in contracts.batch_checkpoint, not azure_batch)

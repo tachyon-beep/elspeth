@@ -6,10 +6,14 @@ IMPORTANT: Transforms use allow_coercion=False to catch upstream bugs.
 If the source outputs wrong types, the transform crashes immediately.
 """
 
+from __future__ import annotations
+
 import copy
 from typing import Any
 
 from pydantic import Field, model_validator
+
+from elspeth.contracts.schema import SchemaConfig
 
 from elspeth.contracts.contexts import TransformContext
 from elspeth.contracts.contract_propagation import narrow_contract_to_output
@@ -103,7 +107,43 @@ class FieldMapper(BaseTransform):
             "FieldMapper",
             adds_fields=True,
         )
-        self._output_schema_config = self._build_output_schema_config(cfg.schema_config)
+        self._output_schema_config = self._build_field_mapper_output_schema_config(cfg)
+
+    def _build_field_mapper_output_schema_config(self, cfg: FieldMapperConfig) -> SchemaConfig:
+        """Build output schema config reflecting the mapped output shape.
+
+        FieldMapper is shape-changing: it removes source fields and adds target fields.
+        The base _build_output_schema_config() incorrectly copies input fields into
+        output guarantees. This method builds the correct output field set.
+
+        When select_only=True: output guarantees are ONLY the mapping targets.
+        When select_only=False: output guarantees are input fields MINUS removed
+            sources PLUS new targets.
+        """
+        base_guaranteed = set(cfg.schema_config.guaranteed_fields or ())
+
+        if cfg.select_only:
+            # Only mapped targets appear in output
+            output_fields = set(cfg.mapping.values())
+        else:
+            # Input fields minus removed sources plus new targets.
+            # A source is removed from output when it's renamed to a different target.
+            removed_sources = {
+                source for source, target in cfg.mapping.items()
+                if source != target and "." not in source
+            }
+            output_fields = (base_guaranteed - removed_sources) | set(cfg.mapping.values())
+
+        # Always include declared_output_fields (targets that aren't also sources)
+        output_fields |= self.declared_output_fields
+
+        return SchemaConfig(
+            mode=cfg.schema_config.mode,
+            fields=cfg.schema_config.fields,
+            guaranteed_fields=tuple(sorted(output_fields)) if output_fields else None,
+            audit_fields=cfg.schema_config.audit_fields,
+            required_fields=cfg.schema_config.required_fields,
+        )
 
     def process(self, row: PipelineRow, ctx: TransformContext) -> TransformResult:
         """Apply field mapping to row.
