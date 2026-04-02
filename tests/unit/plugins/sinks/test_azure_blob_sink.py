@@ -430,12 +430,19 @@ class TestAzureBlobSinkAudit:
             sink.write([{"x": 1}], ctx)
 
     def test_buffer_not_committed_on_upload_failure(self) -> None:
-        sink = AzureBlobSink(_base_config())
+        sink = AzureBlobSink(_base_config(format="json"))
         ctx = _make_sink_ctx()
         mock_service, mock_blob = _mock_blob_upload()
+
+        # First write succeeds — buffer grows to [row1]
+        with patch(PATCH_AUTH, return_value=mock_service):
+            sink.write([{"id": 1}], ctx)
+        assert len(sink._buffered_rows) == 1
+
+        # Second write fails — buffer must stay at [row1], not grow to [row1, row2]
         mock_blob.upload_blob.side_effect = ConnectionError("network down")
-
         with patch(PATCH_AUTH, return_value=mock_service), pytest.raises(RuntimeError):
-            sink.write([{"x": 1}], ctx)
+            sink.write([{"id": 2}], ctx)
 
-        assert sink._buffered_rows == []
+        assert len(sink._buffered_rows) == 1
+        assert sink._buffered_rows[0]["id"] == 1
