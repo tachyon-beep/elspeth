@@ -4,16 +4,25 @@ Bug fixes covered:
 - Phase 0 fix #10: MCP Mermaid non-unique IDs (node_id[:8] truncation)
 - P1-2026-02-14: get_performance_report truncates node_id
 - P1-2026-02-14: get_outcome_analysis returns is_terminal as DB integer
+
+Coverage additions:
+- get_error_analysis: corruption guard, validation/transform grouping, sample data, run not found
 """
 
 from __future__ import annotations
 
+import json
 import re
 from unittest.mock import MagicMock
 
-from elspeth.contracts.enums import NodeType, RoutingMode
+import pytest
+
+from elspeth.contracts.enums import CallStatus, NodeType, RoutingMode
+from elspeth.contracts.errors import AuditIntegrityError
 from elspeth.mcp.analyzers.reports import (
     get_dag_structure,
+    get_error_analysis,
+    get_llm_usage_report,
     get_outcome_analysis,
     get_performance_report,
 )
@@ -293,3 +302,509 @@ class TestHighVarianceZeroDuration:
         assert "error" not in result
         high_variance = result["high_variance_nodes"]
         assert len(high_variance) == 0
+
+
+# ---------------------------------------------------------------------------
+# get_error_analysis tests
+# ---------------------------------------------------------------------------
+
+
+def _make_db_and_recorder(run_exists: bool = True) -> tuple[MagicMock, MagicMock]:
+    """Create mock db/recorder pair for get_error_analysis tests."""
+    db = MagicMock()
+    recorder = MagicMock()
+    if run_exists:
+        recorder.get_run.return_value = MagicMock()
+    else:
+        recorder.get_run.return_value = None
+    return db, recorder
+
+
+def _wire_conn(db: MagicMock, val_rows: list, trans_rows: list, sample_val: list, sample_trans: list) -> None:
+    """Wire up mock connection with 4 sequential execute().fetchall() calls."""
+    mock_conn = MagicMock()
+    call_count = 0
+
+    def side_effect_execute(*args, **kwargs):
+        nonlocal call_count
+        call_count += 1
+        result = MagicMock()
+        if call_count == 1:
+            result.fetchall.return_value = val_rows
+        elif call_count == 2:
+            result.fetchall.return_value = trans_rows
+        elif call_count == 3:
+            result.fetchall.return_value = sample_val
+        elif call_count == 4:
+            result.fetchall.return_value = sample_trans
+        return result
+
+    mock_conn.execute = side_effect_execute
+    db.connection.return_value.__enter__ = MagicMock(return_value=mock_conn)
+    db.connection.return_value.__exit__ = MagicMock(return_value=False)
+
+
+def _mock_row(**kwargs: object) -> MagicMock:
+    """Create a mock DB row with named attributes."""
+    row = MagicMock()
+    for k, v in kwargs.items():
+        setattr(row, k, v)
+    return row
+
+
+class TestErrorAnalysisRunNotFound:
+    """get_error_analysis returns error dict when run_id doesn't exist."""
+
+    def test_returns_error_when_run_not_found(self) -> None:
+        db, recorder = _make_db_and_recorder(run_exists=False)
+
+        result = get_error_analysis(db, recorder, "nonexistent-run")
+
+        assert result == {"error": "Run 'nonexistent-run' not found"}
+
+
+class TestErrorAnalysisCorruptionGuard:
+    """Tier 1 corruption guard: None plugin_name in transform errors raises AuditIntegrityError."""
+
+    def test_none_plugin_name_raises_audit_integrity_error(self) -> None:
+        """Transform errors referencing a non-existent node must crash, not silently pass."""
+        db, recorder = _make_db_and_recorder()
+        corrupt_row = _mock_row(plugin_name=None, count=3)
+        _wire_conn(db, val_rows=[], trans_rows=[corrupt_row], sample_val=[], sample_trans=[])
+
+        with pytest.raises(AuditIntegrityError, match="Tier-1 corruption"):
+            get_error_analysis(db, recorder, "run-corrupt")
+
+    def test_corruption_guard_includes_count_and_run_id(self) -> None:
+        """Error message must include the orphan count and run_id for diagnostics."""
+        db, recorder = _make_db_and_recorder()
+        corrupt_row = _mock_row(plugin_name=None, count=7)
+        _wire_conn(db, val_rows=[], trans_rows=[corrupt_row], sample_val=[], sample_trans=[])
+
+        with pytest.raises(AuditIntegrityError, match=r"7 transform_errors row.*run_id='run-abc'"):
+            get_error_analysis(db, recorder, "run-abc")
+
+    def test_corruption_guard_fires_even_with_valid_rows_present(self) -> None:
+        """A single None plugin_name row triggers the guard even alongside valid rows."""
+        db, recorder = _make_db_and_recorder()
+        valid_row = _mock_row(plugin_name="good_transform", count=10)
+        corrupt_row = _mock_row(plugin_name=None, count=1)
+        _wire_conn(db, val_rows=[], trans_rows=[valid_row, corrupt_row], sample_val=[], sample_trans=[])
+
+        with pytest.raises(AuditIntegrityError):
+            get_error_analysis(db, recorder, "run-mixed")
+
+
+class TestErrorAnalysisValidationGrouping:
+    """Validation errors are grouped by source plugin_name and schema_mode."""
+
+    def test_groups_validation_errors_by_plugin_and_schema_mode(self) -> None:
+        db, recorder = _make_db_and_recorder()
+        val_row_1 = _mock_row(plugin_name="csv_source", schema_mode="strict", count=5)
+        val_row_2 = _mock_row(plugin_name="csv_source", schema_mode="coerce", count=2)
+        _wire_conn(db, val_rows=[val_row_1, val_row_2], trans_rows=[], sample_val=[], sample_trans=[])
+
+        result = get_error_analysis(db, recorder, "run-val")
+
+        assert "error" not in result
+        val_errors = result["validation_errors"]
+        assert val_errors["total"] == 7
+        assert len(val_errors["by_source"]) == 2
+        assert val_errors["by_source"][0] == {"source_plugin": "csv_source", "schema_mode": "strict", "count": 5}
+        assert val_errors["by_source"][1] == {"source_plugin": "csv_source", "schema_mode": "coerce", "count": 2}
+
+    def test_empty_validation_errors(self) -> None:
+        db, recorder = _make_db_and_recorder()
+        _wire_conn(db, val_rows=[], trans_rows=[], sample_val=[], sample_trans=[])
+
+        result = get_error_analysis(db, recorder, "run-empty")
+
+        assert result["validation_errors"]["total"] == 0
+        assert result["validation_errors"]["by_source"] == []
+
+
+class TestErrorAnalysisTransformGrouping:
+    """Transform errors are grouped by transform plugin_name."""
+
+    def test_groups_transform_errors_by_plugin(self) -> None:
+        db, recorder = _make_db_and_recorder()
+        trans_row_1 = _mock_row(plugin_name="llm_classifier", count=3)
+        trans_row_2 = _mock_row(plugin_name="field_mapper", count=1)
+        _wire_conn(db, val_rows=[], trans_rows=[trans_row_1, trans_row_2], sample_val=[], sample_trans=[])
+
+        result = get_error_analysis(db, recorder, "run-trans")
+
+        assert "error" not in result
+        trans_errors = result["transform_errors"]
+        assert trans_errors["total"] == 4
+        assert len(trans_errors["by_transform"]) == 2
+        assert trans_errors["by_transform"][0] == {"transform_plugin": "llm_classifier", "count": 3}
+        assert trans_errors["by_transform"][1] == {"transform_plugin": "field_mapper", "count": 1}
+
+
+class TestErrorAnalysisSampleData:
+    """Sample error data is extracted and JSON-parsed."""
+
+    def test_parses_sample_validation_data(self) -> None:
+        db, recorder = _make_db_and_recorder()
+        sample_json = json.dumps({"field": "age", "value": "not_a_number"})
+        sample_row = MagicMock()
+        sample_row.__getitem__ = lambda self, idx: sample_json if idx == 0 else None
+        _wire_conn(db, val_rows=[], trans_rows=[], sample_val=[sample_row], sample_trans=[])
+
+        result = get_error_analysis(db, recorder, "run-sample")
+
+        assert result["validation_errors"]["sample_data"] == [{"field": "age", "value": "not_a_number"}]
+
+    def test_parses_sample_transform_details(self) -> None:
+        db, recorder = _make_db_and_recorder()
+        details_json = json.dumps({"error": "division by zero", "node": "calc"})
+        sample_row = MagicMock()
+        sample_row.__getitem__ = lambda self, idx: details_json if idx == 0 else None
+        _wire_conn(db, val_rows=[], trans_rows=[], sample_val=[], sample_trans=[sample_row])
+
+        result = get_error_analysis(db, recorder, "run-sample-trans")
+
+        assert result["transform_errors"]["sample_details"] == [{"error": "division by zero", "node": "calc"}]
+
+    def test_none_sample_data_preserved_as_none(self) -> None:
+        """When row_data_json is NULL/None, the sample entry should be None, not crash."""
+        db, recorder = _make_db_and_recorder()
+        null_row = MagicMock()
+        null_row.__getitem__ = lambda self, idx: None
+        _wire_conn(db, val_rows=[], trans_rows=[], sample_val=[null_row], sample_trans=[])
+
+        result = get_error_analysis(db, recorder, "run-null-sample")
+
+        assert result["validation_errors"]["sample_data"] == [None]
+
+
+# ---------------------------------------------------------------------------
+# LLM Usage Report Tests
+# ---------------------------------------------------------------------------
+
+
+def _make_llm_row(
+    plugin_name: str,
+    call_type: str,
+    status: CallStatus,
+    count: int,
+    avg_latency: float,
+    min_latency: float,
+    max_latency: float,
+    total_latency: float,
+) -> MagicMock:
+    """Create a mock aggregated LLM row (result of GROUP BY query)."""
+    row = MagicMock()
+    row.plugin_name = plugin_name
+    row.call_type = call_type
+    row.status = status
+    row.count = count
+    row.avg_latency = avg_latency
+    row.min_latency = min_latency
+    row.max_latency = max_latency
+    row.total_latency = total_latency
+    return row
+
+
+def _make_call_type_row(call_type: str, count: int) -> MagicMock:
+    """Create a mock call type summary row."""
+    row = MagicMock()
+    row.call_type = call_type
+    row.count = count
+    return row
+
+
+def _make_llm_db_and_recorder(
+    run_exists: bool = True,
+) -> tuple[MagicMock, MagicMock]:
+    """Create db and recorder mocks for LLM usage report tests."""
+    db = MagicMock()
+    mock_conn = MagicMock()
+    db.connection.return_value.__enter__ = MagicMock(return_value=mock_conn)
+    db.connection.return_value.__exit__ = MagicMock(return_value=False)
+
+    recorder = MagicMock()
+    if run_exists:
+        recorder.get_run.return_value = MagicMock(run_id="test-run")
+    else:
+        recorder.get_run.return_value = None
+
+    return db, recorder
+
+
+def _wire_llm_conn(
+    db: MagicMock,
+    llm_rows: list[MagicMock],
+    call_type_rows: list[MagicMock],
+) -> None:
+    """Wire mock connection to return llm_rows then call_type_rows on sequential execute calls."""
+    mock_conn = db.connection.return_value.__enter__.return_value
+    call_count = 0
+
+    def side_effect_execute(*args: object, **kwargs: object) -> MagicMock:
+        nonlocal call_count
+        call_count += 1
+        result = MagicMock()
+        if call_count == 1:
+            result.fetchall.return_value = llm_rows
+        elif call_count == 2:
+            result.fetchall.return_value = call_type_rows
+        return result
+
+    mock_conn.execute = side_effect_execute
+
+
+class TestLLMUsageReportRunNotFound:
+    """get_llm_usage_report returns error when run doesn't exist."""
+
+    def test_returns_error_for_missing_run(self) -> None:
+        db, recorder = _make_llm_db_and_recorder(run_exists=False)
+
+        result = get_llm_usage_report(db, recorder, "nonexistent-run")
+
+        assert "error" in result
+        assert "nonexistent-run" in result["error"]
+
+
+class TestLLMUsageReportNoLLMCalls:
+    """get_llm_usage_report handles runs with no LLM calls."""
+
+    def test_returns_message_when_no_llm_calls(self) -> None:
+        db, recorder = _make_llm_db_and_recorder()
+        _wire_llm_conn(
+            db,
+            llm_rows=[],
+            call_type_rows=[
+                _make_call_type_row("http", 5),
+                _make_call_type_row("database", 3),
+            ],
+        )
+
+        result = get_llm_usage_report(db, recorder, "test-run")
+
+        assert result["message"] == "No LLM calls found in this run"
+        assert result["call_types"] == {"http": 5, "database": 3}
+        assert "llm_summary" not in result
+        assert "by_plugin" not in result
+
+    def test_returns_empty_call_types_when_no_calls_at_all(self) -> None:
+        db, recorder = _make_llm_db_and_recorder()
+        _wire_llm_conn(db, llm_rows=[], call_type_rows=[])
+
+        result = get_llm_usage_report(db, recorder, "test-run")
+
+        assert result["message"] == "No LLM calls found in this run"
+        assert result["call_types"] == {}
+
+
+class TestLLMUsageReportSinglePlugin:
+    """get_llm_usage_report aggregates correctly for a single plugin."""
+
+    def test_single_plugin_success_only(self) -> None:
+        db, recorder = _make_llm_db_and_recorder()
+        _wire_llm_conn(
+            db,
+            llm_rows=[
+                _make_llm_row(
+                    plugin_name="llm_classifier",
+                    call_type="llm",
+                    status=CallStatus.SUCCESS,
+                    count=10,
+                    avg_latency=150.0,
+                    min_latency=50.0,
+                    max_latency=300.0,
+                    total_latency=1500.0,
+                ),
+            ],
+            call_type_rows=[
+                _make_call_type_row("llm", 10),
+            ],
+        )
+
+        result = get_llm_usage_report(db, recorder, "test-run")
+
+        assert result["run_id"] == "test-run"
+        assert result["call_types"] == {"llm": 10}
+
+        plugin_stats = result["by_plugin"]["llm_classifier"]
+        assert plugin_stats["total_calls"] == 10
+        assert plugin_stats["successful"] == 10
+        assert plugin_stats["failed"] == 0
+        assert plugin_stats["avg_latency_ms"] == 150.0
+        assert plugin_stats["total_latency_ms"] == 1500.0
+
+        assert result["llm_summary"]["total_calls"] == 10
+        assert result["llm_summary"]["total_latency_ms"] == 1500.0
+        assert result["llm_summary"]["avg_latency_ms"] == 150.0
+
+
+class TestLLMUsageReportSuccessFailureSplit:
+    """get_llm_usage_report correctly splits successful and failed counts using CallStatus."""
+
+    def test_success_and_failure_counts_split_correctly(self) -> None:
+        db, recorder = _make_llm_db_and_recorder()
+        _wire_llm_conn(
+            db,
+            llm_rows=[
+                _make_llm_row(
+                    plugin_name="llm_classifier",
+                    call_type="llm",
+                    status=CallStatus.SUCCESS,
+                    count=8,
+                    avg_latency=100.0,
+                    min_latency=50.0,
+                    max_latency=200.0,
+                    total_latency=800.0,
+                ),
+                _make_llm_row(
+                    plugin_name="llm_classifier",
+                    call_type="llm",
+                    status=CallStatus.ERROR,
+                    count=2,
+                    avg_latency=500.0,
+                    min_latency=400.0,
+                    max_latency=600.0,
+                    total_latency=1000.0,
+                ),
+            ],
+            call_type_rows=[
+                _make_call_type_row("llm", 10),
+            ],
+        )
+
+        result = get_llm_usage_report(db, recorder, "test-run")
+
+        plugin_stats = result["by_plugin"]["llm_classifier"]
+        assert plugin_stats["total_calls"] == 10
+        assert plugin_stats["successful"] == 8
+        assert plugin_stats["failed"] == 2
+        assert plugin_stats["total_latency_ms"] == 1800.0
+
+
+class TestLLMUsageReportAverageLatency:
+    """get_llm_usage_report calculates average latency as total_latency_ms / total_calls, rounded to 2dp."""
+
+    def test_average_latency_calculation(self) -> None:
+        db, recorder = _make_llm_db_and_recorder()
+        _wire_llm_conn(
+            db,
+            llm_rows=[
+                _make_llm_row(
+                    plugin_name="llm_summarizer",
+                    call_type="llm",
+                    status=CallStatus.SUCCESS,
+                    count=3,
+                    avg_latency=100.0,
+                    min_latency=80.0,
+                    max_latency=120.0,
+                    total_latency=333.33,
+                ),
+            ],
+            call_type_rows=[_make_call_type_row("llm", 3)],
+        )
+
+        result = get_llm_usage_report(db, recorder, "test-run")
+
+        plugin_stats = result["by_plugin"]["llm_summarizer"]
+        # 333.33 / 3 = 111.11
+        assert plugin_stats["avg_latency_ms"] == 111.11
+
+        assert result["llm_summary"]["avg_latency_ms"] == 111.11
+
+    def test_average_latency_rounds_to_two_decimals(self) -> None:
+        db, recorder = _make_llm_db_and_recorder()
+        _wire_llm_conn(
+            db,
+            llm_rows=[
+                _make_llm_row(
+                    plugin_name="llm_router",
+                    call_type="llm",
+                    status=CallStatus.SUCCESS,
+                    count=7,
+                    avg_latency=100.0,
+                    min_latency=50.0,
+                    max_latency=200.0,
+                    total_latency=1000.0,
+                ),
+            ],
+            call_type_rows=[_make_call_type_row("llm", 7)],
+        )
+
+        result = get_llm_usage_report(db, recorder, "test-run")
+
+        # 1000.0 / 7 = 142.857142... -> 142.86
+        assert result["by_plugin"]["llm_router"]["avg_latency_ms"] == 142.86
+        assert result["llm_summary"]["avg_latency_ms"] == 142.86
+
+
+class TestLLMUsageReportMultiplePlugins:
+    """get_llm_usage_report aggregates correctly across multiple plugins."""
+
+    def test_multiple_plugins_aggregated_independently(self) -> None:
+        db, recorder = _make_llm_db_and_recorder()
+        _wire_llm_conn(
+            db,
+            llm_rows=[
+                _make_llm_row(
+                    plugin_name="llm_classifier",
+                    call_type="llm",
+                    status=CallStatus.SUCCESS,
+                    count=5,
+                    avg_latency=100.0,
+                    min_latency=50.0,
+                    max_latency=150.0,
+                    total_latency=500.0,
+                ),
+                _make_llm_row(
+                    plugin_name="llm_classifier",
+                    call_type="llm",
+                    status=CallStatus.ERROR,
+                    count=1,
+                    avg_latency=800.0,
+                    min_latency=800.0,
+                    max_latency=800.0,
+                    total_latency=800.0,
+                ),
+                _make_llm_row(
+                    plugin_name="llm_summarizer",
+                    call_type="llm",
+                    status=CallStatus.SUCCESS,
+                    count=10,
+                    avg_latency=200.0,
+                    min_latency=100.0,
+                    max_latency=300.0,
+                    total_latency=2000.0,
+                ),
+            ],
+            call_type_rows=[
+                _make_call_type_row("llm", 16),
+                _make_call_type_row("http", 4),
+            ],
+        )
+
+        result = get_llm_usage_report(db, recorder, "test-run")
+
+        # Classifier: 5 success + 1 error = 6 total, 1300ms total latency
+        classifier = result["by_plugin"]["llm_classifier"]
+        assert classifier["total_calls"] == 6
+        assert classifier["successful"] == 5
+        assert classifier["failed"] == 1
+        assert classifier["total_latency_ms"] == 1300.0
+        assert classifier["avg_latency_ms"] == round(1300.0 / 6, 2)
+
+        # Summarizer: 10 success, 2000ms total latency
+        summarizer = result["by_plugin"]["llm_summarizer"]
+        assert summarizer["total_calls"] == 10
+        assert summarizer["successful"] == 10
+        assert summarizer["failed"] == 0
+        assert summarizer["total_latency_ms"] == 2000.0
+        assert summarizer["avg_latency_ms"] == 200.0
+
+        # Overall summary: 16 total calls, 3300ms total latency
+        assert result["llm_summary"]["total_calls"] == 16
+        assert result["llm_summary"]["total_latency_ms"] == 3300.0
+        assert result["llm_summary"]["avg_latency_ms"] == round(3300.0 / 16, 2)
+
+        # Call types include non-LLM types
+        assert result["call_types"] == {"llm": 16, "http": 4}
