@@ -5,7 +5,6 @@ Invalid state combinations are prevented at the type level.
 """
 
 from dataclasses import dataclass, field
-from enum import Enum, auto
 
 import structlog
 from sqlalchemy.exc import DatabaseError, OperationalError
@@ -36,22 +35,12 @@ class InvalidStateTransitionError(Exception):
         super().__init__(f"{method}() requires state in [{allowed}], but current state is {current_state}")
 
 
-class ScreenStateType(Enum):
-    """Discriminator for screen state types."""
-
-    UNINITIALIZED = auto()  # No data source configured
-    LOADING_FAILED = auto()  # Data source configured but loading failed
-    LOADED = auto()  # Data loaded successfully
-
-
 @dataclass(frozen=True, slots=True)
 class UninitializedState:
     """Screen has no data source configured.
 
     This is the default state when created without db/run_id.
     """
-
-    state_type: ScreenStateType = ScreenStateType.UNINITIALIZED
 
 
 @dataclass(frozen=True, slots=True)
@@ -65,7 +54,6 @@ class LoadingFailedState:
     db: LandscapeDB
     run_id: str
     error: str | None = field(default=None)
-    state_type: ScreenStateType = field(default=ScreenStateType.LOADING_FAILED)
 
 
 @dataclass(frozen=True, slots=True)
@@ -79,7 +67,6 @@ class LoadedState:
     run_id: str
     lineage_data: LineageData
     tree: LineageTree
-    state_type: ScreenStateType = ScreenStateType.LOADED
 
 
 # Discriminated union type - exhaustive pattern matching possible

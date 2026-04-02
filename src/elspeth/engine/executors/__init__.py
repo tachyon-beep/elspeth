@@ -7,8 +7,6 @@ Each executor handles a specific plugin type:
 - SinkExecutor: Output sinks
 """
 
-from elspeth.contracts import TokenInfo
-from elspeth.contracts.enums import TriggerType
 from elspeth.engine.executors.aggregation import AGGREGATION_CHECKPOINT_VERSION, AggregationExecutor
 from elspeth.engine.executors.gate import GateExecutor
 from elspeth.engine.executors.sink import SinkExecutor
@@ -24,7 +22,5 @@ __all__ = [
     "MissingEdgeError",
     "NodeStateGuard",
     "SinkExecutor",
-    "TokenInfo",
     "TransformExecutor",
-    "TriggerType",
 ]

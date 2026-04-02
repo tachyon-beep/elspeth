@@ -39,7 +39,7 @@ class TokenManager:
         )
 
         # After transform
-        token = manager.update_row_data(token, {"value": 42, "processed": True})
+        token = token.with_updated_data(PipelineRow({"value": 42, "processed": True}))
 
         # Fork to branches (node_id resolved to step internally)
         children = manager.fork_token(
@@ -303,22 +303,6 @@ class TokenManager:
             row_data=merged_data,
             join_group_id=merged.join_group_id,
         )
-
-    def update_row_data(
-        self,
-        token: TokenInfo,
-        new_data: PipelineRow,
-    ) -> TokenInfo:
-        """Update token's row data after a transform.
-
-        Args:
-            token: Token to update
-            new_data: New PipelineRow with updated data
-
-        Returns:
-            Updated TokenInfo (same token_id, new row_data, all lineage preserved)
-        """
-        return token.with_updated_data(new_data)
 
     def expand_token(
         self,

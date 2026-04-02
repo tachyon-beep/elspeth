@@ -115,28 +115,6 @@ class TestLineageTreeWidget:
         assert any("high" in label for label in node_labels)
         assert any("low" in label for label in node_labels)
 
-    def test_toggle_node_expansion(self) -> None:
-        """Can toggle node expansion state."""
-        from elspeth.tui.widgets.lineage_tree import LineageTree
-
-        lineage_data: LineageData = {
-            "run_id": "run-001",
-            "source": SourceInfo(name="csv_source", node_id="node-001"),
-            "transforms": [],
-            "sinks": [NodeInfo(name="output", node_id="node-002", node_type="sink")],
-            "tokens": [],
-        }
-
-        tree = LineageTree(lineage_data)
-
-        # Toggle source node
-        new_state = tree.toggle_node("node-001")
-        assert new_state is False  # Was expanded, now collapsed
-
-        # Toggle again
-        new_state = tree.toggle_node("node-001")
-        assert new_state is True  # Back to expanded
-
     def test_get_node_by_id(self) -> None:
         """Can find nodes by their ID."""
         from elspeth.tui.widgets.lineage_tree import LineageTree

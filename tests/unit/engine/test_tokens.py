@@ -94,27 +94,6 @@ class TestTokenManager:
         assert isinstance(children[0].row_data, PipelineRow)
         assert children[0].row_data.to_dict() == {"value": 42}
 
-    def test_update_row_data(self) -> None:
-        from elspeth.engine.tokens import TokenManager
-
-        setup = make_recorder_with_run()
-        recorder, run_id, source_node_id = setup.recorder, setup.run_id, setup.source_node_id
-
-        manager = TokenManager(recorder, step_resolver=_make_step_resolver())
-        token_info = manager.create_initial_token(
-            run_id=run_id,
-            source_node_id=source_node_id,
-            row_index=0,
-            source_row=_make_source_row({"x": 1}),
-        )
-
-        new_row = _make_pipeline_row({"x": 1, "y": 2})
-        updated = manager.update_row_data(token_info, new_data=new_row)
-
-        assert isinstance(updated.row_data, PipelineRow)
-        assert updated.row_data.to_dict() == {"x": 1, "y": 2}
-        assert updated.token_id == token_info.token_id
-
 
 class TestTokenManagerCoalesce:
     """Test token coalescing (join operations)."""
@@ -141,13 +120,11 @@ class TestTokenManagerCoalesce:
             run_id=run_id,
         )
 
-        stats_token = manager.update_row_data(
-            children[0],
-            new_data=_make_pipeline_row({"value": 42, "mean": 10.5}),
+        stats_token = children[0].with_updated_data(
+            _make_pipeline_row({"value": 42, "mean": 10.5}),
         )
-        classifier_token = manager.update_row_data(
-            children[1],
-            new_data=_make_pipeline_row({"value": 42, "label": "A"}),
+        classifier_token = children[1].with_updated_data(
+            _make_pipeline_row({"value": 42, "label": "A"}),
         )
 
         merged = manager.coalesce_tokens(
@@ -515,9 +492,8 @@ class TestTokenManagerEdgeCases:
             run_id=run_id,
         )
 
-        updated = manager.update_row_data(
-            children[0],
-            new_data=_make_pipeline_row({"x": 1, "y": 2}),
+        updated = children[0].with_updated_data(
+            _make_pipeline_row({"x": 1, "y": 2}),
         )
 
         assert updated.branch_name == "my_branch"
@@ -547,9 +523,8 @@ class TestTokenManagerEdgeCases:
         assert forked_token.fork_group_id == fork_group_id
         assert forked_token.branch_name == "stats_branch"
 
-        updated = manager.update_row_data(
-            forked_token,
-            new_data=_make_pipeline_row({"x": 1, "y": 2}),
+        updated = forked_token.with_updated_data(
+            _make_pipeline_row({"x": 1, "y": 2}),
         )
 
         assert updated.row_data.to_dict() == {"x": 1, "y": 2}, "row_data should be updated"
@@ -583,9 +558,8 @@ class TestTokenManagerEdgeCases:
 
         assert expanded_token.expand_group_id == expand_group_id
 
-        updated = manager.update_row_data(
-            expanded_token,
-            new_data=_make_pipeline_row({"id": 1, "processed": True}),
+        updated = expanded_token.with_updated_data(
+            _make_pipeline_row({"id": 1, "processed": True}),
         )
 
         assert updated.expand_group_id == expand_group_id, "expand_group_id must be preserved"
@@ -619,9 +593,8 @@ class TestTokenManagerEdgeCases:
 
         assert merged.join_group_id is not None
 
-        updated = manager.update_row_data(
-            merged,
-            new_data=_make_pipeline_row({"value": 42, "merged": True, "enriched": "yes"}),
+        updated = merged.with_updated_data(
+            _make_pipeline_row({"value": 42, "merged": True, "enriched": "yes"}),
         )
 
         assert updated.join_group_id == merged.join_group_id, "join_group_id must be preserved"

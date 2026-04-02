@@ -57,7 +57,6 @@ from elspeth.core.landscape.execution_repository import ExecutionRepository
 from elspeth.core.landscape.exporter import LandscapeExporter
 from elspeth.core.landscape.formatters import (
     CSVFormatter,
-    ExportFormatter,
     JSONFormatter,
     LineageTextFormatter,
     dataclass_to_dict,
@@ -105,7 +104,6 @@ __all__ = [
     "DataFlowRepository",
     "Edge",
     "ExecutionRepository",
-    "ExportFormatter",
     "FieldAuditRecord",
     "JSONFormatter",
     "LandscapeDB",

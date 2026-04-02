@@ -203,18 +203,3 @@ class LineageTree:
             if found:
                 return found
         return None
-
-    def toggle_node(self, node_id: str) -> bool:
-        """Toggle expansion state of a node.
-
-        Args:
-            node_id: Node ID to toggle
-
-        Returns:
-            New expansion state
-        """
-        node = self.get_node_by_id(node_id)
-        if node:
-            node.expanded = not node.expanded
-            return node.expanded
-        return False

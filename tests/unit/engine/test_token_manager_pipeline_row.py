@@ -255,38 +255,29 @@ class TestPipelineRowDeepCopy:
         assert copied.to_dict()["items"] is not original.to_dict()["items"]
 
 
-class TestTokenManagerUpdateRowData:
-    """Tests for TokenManager.update_row_data() with PipelineRow."""
+class TestTokenInfoWithUpdatedData:
+    """Tests for TokenInfo.with_updated_data() with PipelineRow."""
 
-    def test_update_row_data_accepts_pipeline_row(self) -> None:
-        """update_row_data should accept PipelineRow and return updated TokenInfo."""
-        from elspeth.engine.tokens import TokenManager
-
+    def test_with_updated_data_accepts_pipeline_row(self) -> None:
+        """with_updated_data should accept PipelineRow and return updated TokenInfo."""
         contract = _make_contract()
-        recorder = _make_mock_recorder()
-        manager = TokenManager(recorder, step_resolver=_make_step_resolver())
 
         original_row = make_row({"amount": 100}, contract=contract)
         token = TokenInfo(row_id="row_001", token_id="token_001", row_data=original_row)
 
         new_row = make_row({"amount": 200, "computed": True}, contract=contract)
-        updated = manager.update_row_data(token, new_row)
+        updated = token.with_updated_data(new_row)
 
         assert isinstance(updated.row_data, PipelineRow)
-        # Use to_dict() for fields that may not be in the original contract
         data = updated.row_data.to_dict()
         assert data["amount"] == 200
         assert data["computed"] is True
         assert updated.token_id == token.token_id
         assert updated.row_id == token.row_id
 
-    def test_update_row_data_preserves_lineage(self) -> None:
-        """update_row_data should preserve all lineage fields."""
-        from elspeth.engine.tokens import TokenManager
-
+    def test_with_updated_data_preserves_lineage(self) -> None:
+        """with_updated_data should preserve all lineage fields."""
         contract = _make_contract()
-        recorder = _make_mock_recorder()
-        manager = TokenManager(recorder, step_resolver=_make_step_resolver())
 
         original_row = make_row({"amount": 100}, contract=contract)
         token = TokenInfo(
@@ -299,9 +290,8 @@ class TestTokenManagerUpdateRowData:
         )
 
         new_row = make_row({"amount": 200}, contract=contract)
-        updated = manager.update_row_data(token, new_row)
+        updated = token.with_updated_data(new_row)
 
-        # All lineage preserved
         assert updated.branch_name == "my_branch"
         assert updated.fork_group_id == "fork_001"
         assert updated.expand_group_id == "expand_001"

@@ -24,8 +24,6 @@ if TYPE_CHECKING:
 class GraphValidationError(ValueError):
     """Raised when graph validation fails."""
 
-    pass
-
 
 @dataclass(frozen=True, slots=True)
 class GraphValidationWarning:

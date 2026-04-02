@@ -197,8 +197,6 @@ allowed_dict_patterns:
   # FORMATTERS - Record formatting for export
   # Formatters work with audit records that have dynamic structure
   # ═══════════════════════════════════════════════════════════════════════════
-  - "src/elspeth/core/landscape/formatters.py:ExportFormatter.format:record"
-  - "src/elspeth/core/landscape/formatters.py:ExportFormatter.format:return"
   - "src/elspeth/core/landscape/formatters.py:JSONFormatter.format:record"
   - "src/elspeth/core/landscape/formatters.py:CSVFormatter.flatten:record"
   - "src/elspeth/core/landscape/formatters.py:CSVFormatter.flatten:return"

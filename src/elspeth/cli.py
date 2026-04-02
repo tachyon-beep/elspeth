@@ -792,8 +792,6 @@ def explain(
         tui_app = ExplainApp(
             db=db,
             run_id=resolved_run_id,
-            token_id=token,
-            row_id=row,
         )
         tui_app.run()
 

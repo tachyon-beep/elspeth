@@ -11,14 +11,14 @@ with sink output configuration.
 
 from __future__ import annotations
 
-from enum import Enum, auto
+from enum import StrEnum, auto
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
     from elspeth.contracts.schema_contract import SchemaContract
 
 
-class HeaderMode(Enum):
+class HeaderMode(StrEnum):
     """Header output mode for sinks."""
 
     NORMALIZED = auto()  # Python identifiers: "amount_usd"

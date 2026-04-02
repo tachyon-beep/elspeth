@@ -172,6 +172,48 @@ class TestExecuteEndpoint:
             assert "detail" in body
 
 
+class TestExecuteIDORAndPathTraversal:
+    """IDOR and path traversal defense-in-depth checks in execute()."""
+
+    @pytest.mark.asyncio
+    async def test_execute_cross_session_state_id_returns_404(self) -> None:
+        """state_id belonging to a different session is rejected (IDOR)."""
+        svc = MagicMock()
+        svc.execute = AsyncMock(side_effect=ValueError("State xyz does not belong to session abc"))
+        app = _create_test_app(execution_service=svc)
+        session_id = uuid4()
+        foreign_state_id = uuid4()
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+            resp = await client.post(
+                f"/api/sessions/{session_id}/execute",
+                params={"state_id": str(foreign_state_id)},
+            )
+            assert resp.status_code == 404
+            assert "does not belong" in resp.json()["detail"]
+
+    @pytest.mark.asyncio
+    async def test_execute_source_path_traversal_returns_404(self) -> None:
+        """Source path escaping allowed directories is rejected."""
+        svc = MagicMock()
+        svc.execute = AsyncMock(side_effect=ValueError("Source path='../../etc/passwd' resolves outside allowed directories"))
+        app = _create_test_app(execution_service=svc)
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+            resp = await client.post(f"/api/sessions/{uuid4()}/execute")
+            assert resp.status_code == 404
+            assert "resolves outside" in resp.json()["detail"]
+
+    @pytest.mark.asyncio
+    async def test_execute_sink_path_traversal_returns_404(self) -> None:
+        """Sink path escaping allowed output directories is rejected."""
+        svc = MagicMock()
+        svc.execute = AsyncMock(side_effect=ValueError("Sink 'out' path='../../../tmp/evil' resolves outside allowed output directories"))
+        app = _create_test_app(execution_service=svc)
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+            resp = await client.post(f"/api/sessions/{uuid4()}/execute")
+            assert resp.status_code == 404
+            assert "resolves outside" in resp.json()["detail"]
+
+
 class TestRunStatusEndpoint:
     """GET /api/runs/{run_id}"""
 

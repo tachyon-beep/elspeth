@@ -1,0 +1,131 @@
+"""Tests for WebSocket /ws/runs/{run_id} endpoint.
+
+Verifies authentication close codes (4001), IDOR protection close codes
+(4004), and the pre-accept vs post-accept distinction: auth failures close
+BEFORE accept (client never sees a successful connection), while IDOR
+failures close AFTER accept (connection established, then terminated).
+"""
+
+from __future__ import annotations
+
+from unittest.mock import AsyncMock, MagicMock
+
+import pytest
+from fastapi import FastAPI
+from starlette.testclient import TestClient
+from starlette.websockets import WebSocketDisconnect
+
+from elspeth.web.auth.models import AuthenticationError
+
+# ── Helpers ───────────────────────────────────────────────────────────
+
+_TEST_USER_ID = "ws-test-user"
+
+
+def _create_ws_test_app(
+    auth_provider: MagicMock | None = None,
+    execution_service: MagicMock | None = None,
+    broadcaster: MagicMock | None = None,
+) -> FastAPI:
+    """Create a minimal app with only the WebSocket route wired.
+
+    Unlike the REST test app, WebSocket auth uses query-parameter tokens
+    and calls auth_provider.authenticate() directly (no get_current_user
+    dependency override).
+    """
+    from elspeth.web.execution.routes import create_execution_router
+
+    app = FastAPI()
+    app.state.auth_provider = auth_provider or MagicMock()
+    app.state.execution_service = execution_service or MagicMock()
+    app.state.broadcaster = broadcaster or MagicMock()
+
+    app.include_router(create_execution_router())
+    return app
+
+
+def _make_broadcaster() -> MagicMock:
+    """Create a mock broadcaster with subscribe/unsubscribe."""
+    broadcaster = MagicMock()
+    broadcaster.subscribe.return_value = MagicMock()
+    return broadcaster
+
+
+# ── Auth Close Code Tests (4001 — before accept) ─────────────────────
+
+
+class TestWebSocketAuth:
+    """Close code 4001 on authentication failure."""
+
+    def test_missing_token_closes_4001(self) -> None:
+        """No ?token= query parameter → 4001 before accept."""
+        app = _create_ws_test_app()
+        client = TestClient(app)
+        with pytest.raises(WebSocketDisconnect) as exc_info, client.websocket_connect("/ws/runs/some-run-id"):
+            pass  # Should not reach here
+        assert exc_info.value.code == 4001
+        assert "Missing" in (exc_info.value.reason or "")
+
+    def test_invalid_token_closes_4001(self) -> None:
+        """Invalid JWT → auth_provider.authenticate() raises → 4001."""
+        auth = MagicMock()
+        auth.authenticate = AsyncMock(side_effect=AuthenticationError("bad token"))
+        app = _create_ws_test_app(auth_provider=auth)
+        client = TestClient(app)
+        with pytest.raises(WebSocketDisconnect) as exc_info, client.websocket_connect("/ws/runs/some-run-id?token=bad-jwt"):
+            pass
+        assert exc_info.value.code == 4001
+        assert "Invalid" in (exc_info.value.reason or "")
+
+
+# ── IDOR Close Code Tests (4004 — after accept) ─────────────────────
+
+
+class TestWebSocketIDOR:
+    """Close code 4004 on ownership verification failure."""
+
+    def test_wrong_user_closes_4004(self) -> None:
+        """Authenticated user does not own the run's session → 4004."""
+        from elspeth.web.auth.models import UserIdentity
+
+        auth = MagicMock()
+        user = UserIdentity(user_id=_TEST_USER_ID, username="testuser")
+        auth.authenticate = AsyncMock(return_value=user)
+
+        svc = MagicMock()
+        svc.verify_run_ownership = AsyncMock(return_value=False)
+
+        broadcaster = _make_broadcaster()
+        app = _create_ws_test_app(
+            auth_provider=auth,
+            execution_service=svc,
+            broadcaster=broadcaster,
+        )
+        client = TestClient(app)
+        with client.websocket_connect("/ws/runs/some-run-id?token=valid") as ws, pytest.raises(WebSocketDisconnect) as exc_info:
+            ws.receive_json()
+        assert exc_info.value.code == 4004
+        assert "not found" in (exc_info.value.reason or "").lower()
+
+    def test_nonexistent_run_closes_4004(self) -> None:
+        """Run ID not found → verify_run_ownership raises ValueError → 4004."""
+        from elspeth.web.auth.models import UserIdentity
+
+        auth = MagicMock()
+        user = UserIdentity(user_id=_TEST_USER_ID, username="testuser")
+        auth.authenticate = AsyncMock(return_value=user)
+
+        svc = MagicMock()
+        svc.verify_run_ownership = AsyncMock(side_effect=ValueError("Run not found"))
+
+        broadcaster = _make_broadcaster()
+        app = _create_ws_test_app(
+            auth_provider=auth,
+            execution_service=svc,
+            broadcaster=broadcaster,
+        )
+        client = TestClient(app)
+        with client.websocket_connect("/ws/runs/nonexistent?token=valid") as ws, pytest.raises(WebSocketDisconnect) as exc_info:
+            ws.receive_json()
+        assert exc_info.value.code == 4004
+        assert "not found" in (exc_info.value.reason or "").lower()

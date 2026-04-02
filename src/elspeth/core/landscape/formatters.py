@@ -10,7 +10,7 @@ import math
 from dataclasses import is_dataclass
 from datetime import datetime
 from enum import Enum
-from typing import TYPE_CHECKING, Any, Protocol, overload
+from typing import TYPE_CHECKING, Any, overload
 
 from elspeth.contracts.errors import AuditIntegrityError
 
@@ -110,14 +110,6 @@ def dataclass_to_dict(obj: Any) -> Any:
                 result[field_name] = serialize_datetime(value)
         return result
     return obj
-
-
-class ExportFormatter(Protocol):
-    """Protocol for export formatters."""
-
-    def format(self, record: dict[str, Any]) -> str | dict[str, Any]:
-        """Format a record for output."""
-        ...
 
 
 class JSONFormatter:
