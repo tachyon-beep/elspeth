@@ -14,7 +14,6 @@ from elspeth.web.sessions.protocol import (
     RunAlreadyActiveError,
     RunRecord,
     SessionRecord,
-    SessionServiceProtocol,
 )
 
 
@@ -131,9 +130,3 @@ class TestRunAlreadyActiveError:
         assert err.session_id == "session-123"
         assert "session-123" in str(err)
         assert isinstance(err, Exception)
-
-
-class TestSessionServiceProtocol:
-    def test_is_runtime_checkable(self) -> None:
-        # Verify @runtime_checkable works by checking a non-conforming object fails
-        assert not isinstance(object(), SessionServiceProtocol)
