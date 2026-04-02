@@ -13,7 +13,7 @@ from __future__ import annotations
 import json
 from typing import Any
 
-from elspeth.web.catalog.protocol import PluginKind
+from elspeth.web.catalog.protocol import CatalogService, PluginKind
 from elspeth.web.catalog.schemas import PluginSchemaInfo, PluginSummary
 from elspeth.web.composer.prompts import SYSTEM_PROMPT, build_context_string, build_messages
 from elspeth.web.composer.state import CompositionState
@@ -56,6 +56,12 @@ class StubCatalog:
         raise ValueError(f"Not implemented for stub: {plugin_type}/{name}")
 
 
+def _stub_catalog() -> CatalogService:
+    """Return a protocol-typed stub so mypy verifies conformance."""
+    catalog: CatalogService = StubCatalog()
+    return catalog
+
+
 def _empty_state() -> CompositionState:
     """A minimal empty CompositionState for testing."""
     return CompositionState.from_dict(
@@ -76,7 +82,7 @@ class TestBuildMessages:
     def test_returns_new_list_each_call(self) -> None:
         """Critical: each call returns a distinct list object to prevent cross-turn contamination."""
         state = _empty_state()
-        catalog = StubCatalog()
+        catalog = _stub_catalog()
         history: list[dict[str, Any]] = []
 
         list1 = build_messages(history, state, "Hello", catalog)
@@ -86,7 +92,7 @@ class TestBuildMessages:
     def test_mutating_returned_list_does_not_affect_next_call(self) -> None:
         """Appending to a returned list must not leak into subsequent calls."""
         state = _empty_state()
-        catalog = StubCatalog()
+        catalog = _stub_catalog()
 
         list1 = build_messages([], state, "Hello", catalog)
         list1.append({"role": "assistant", "content": "I was injected"})
@@ -98,7 +104,7 @@ class TestBuildMessages:
     def test_message_ordering_system_history_user(self) -> None:
         """Messages must be: system, then history, then user."""
         state = _empty_state()
-        catalog = StubCatalog()
+        catalog = _stub_catalog()
         history = [
             {"role": "user", "content": "previous question"},
             {"role": "assistant", "content": "previous answer"},
@@ -116,7 +122,7 @@ class TestBuildMessages:
 
     def test_empty_history_produces_system_and_user_only(self) -> None:
         state = _empty_state()
-        catalog = StubCatalog()
+        catalog = _stub_catalog()
 
         messages = build_messages([], state, "my question", catalog)
 
@@ -127,7 +133,7 @@ class TestBuildMessages:
 
     def test_system_message_contains_prompt_and_context(self) -> None:
         state = _empty_state()
-        catalog = StubCatalog()
+        catalog = _stub_catalog()
 
         messages = build_messages([], state, "test", catalog)
         system_content = messages[0]["content"]
@@ -144,7 +150,7 @@ class TestBuildContextString:
 
     def test_contains_state_and_plugins(self) -> None:
         state = _empty_state()
-        catalog = StubCatalog()
+        catalog = _stub_catalog()
 
         context = build_context_string(state, catalog)
         parsed = json.loads(context.split("\n", 1)[1])  # Skip header line
@@ -158,7 +164,7 @@ class TestBuildContextString:
 
     def test_includes_validation_summary(self) -> None:
         state = _empty_state()
-        catalog = StubCatalog()
+        catalog = _stub_catalog()
 
         context = build_context_string(state, catalog)
         parsed = json.loads(context.split("\n", 1)[1])
@@ -169,7 +175,7 @@ class TestBuildContextString:
 
     def test_metadata_included(self) -> None:
         state = _empty_state()
-        catalog = StubCatalog()
+        catalog = _stub_catalog()
 
         context = build_context_string(state, catalog)
         parsed = json.loads(context.split("\n", 1)[1])

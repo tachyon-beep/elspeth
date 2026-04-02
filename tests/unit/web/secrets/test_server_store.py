@@ -10,8 +10,6 @@ Verifies:
 
 from __future__ import annotations
 
-import os
-
 import pytest
 
 from elspeth.contracts.secrets import SecretInventoryItem
@@ -46,8 +44,10 @@ class TestHasSecret:
         monkeypatch.setenv("ALLOWED_KEY_A", "some-value")
         assert store.has_secret("ALLOWED_KEY_A") is True
 
-    def test_allowlisted_but_unset_returns_false(self, store: ServerSecretStore) -> None:
-        os.environ.pop("ALLOWED_KEY_A", None)
+    def test_allowlisted_but_unset_returns_false(
+        self, store: ServerSecretStore, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.delenv("ALLOWED_KEY_A", raising=False)
         assert store.has_secret("ALLOWED_KEY_A") is False
 
     def test_allowlisted_but_empty_returns_false(
@@ -87,8 +87,10 @@ class TestGetSecret:
         with pytest.raises(SecretNotFoundError):
             store.get_secret("NOT_ALLOWED")
 
-    def test_allowlisted_but_unset_raises(self, store: ServerSecretStore) -> None:
-        os.environ.pop("ALLOWED_KEY_B", None)
+    def test_allowlisted_but_unset_raises(
+        self, store: ServerSecretStore, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.delenv("ALLOWED_KEY_B", raising=False)
         with pytest.raises(SecretNotFoundError):
             store.get_secret("ALLOWED_KEY_B")
 
@@ -124,7 +126,7 @@ class TestListSecrets:
         self, store: ServerSecretStore, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         monkeypatch.setenv("ALLOWED_KEY_A", "val-a")
-        os.environ.pop("ALLOWED_KEY_B", None)
+        monkeypatch.delenv("ALLOWED_KEY_B", raising=False)
         items = store.list_secrets()
         assert len(items) == 2
         by_name = {item.name: item for item in items}
@@ -151,4 +153,4 @@ class TestListSecrets:
         monkeypatch.setenv("ALLOWED_KEY_A", "super-secret")
         items = store.list_secrets()
         item = items[0]
-        assert not hasattr(item, "value")
+        assert "value" not in SecretInventoryItem.__slots__
