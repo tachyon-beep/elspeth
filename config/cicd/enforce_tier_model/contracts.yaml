@@ -19,9 +19,9 @@ per_file_rules:
 - pattern: contracts/type_normalization.py
   rules:
   - R5
-  reason: Type normalization requires isinstance() for polymorphic serialization of numeric types
+  reason: Type normalization requires isinstance() for polymorphic serialization of numeric types — includes both strict (normalize_type_for_contract) and non-throwing (classify_runtime_type) variants
   expires: null
-  max_hits: 7
+  max_hits: 14
 - pattern: contracts/aggregation_checkpoint.py
   rules:
   - R5

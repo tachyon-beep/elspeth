@@ -26,6 +26,7 @@ from elspeth.contracts.freeze import deep_freeze, deep_thaw
 from elspeth.contracts.type_normalization import (
     ALLOWED_CONTRACT_TYPES,
     CONTRACT_TYPE_MAP,
+    classify_runtime_type,
     normalize_type_for_contract,
 )
 
@@ -269,9 +270,11 @@ class SchemaContract:
                 if value is None and (not fc.required or fc.nullable):
                     continue
 
-                # Normalize runtime type for comparison
-                # (handles numpy.int64 matching int, etc.)
-                actual_type = normalize_type_for_contract(value)
+                # Classify runtime type for comparison (non-throwing).
+                # Uses classify_runtime_type instead of normalize_type_for_contract
+                # so that unsupported types produce TypeMismatchViolation instead
+                # of crashing the pipeline (Tier 3 data should be quarantined).
+                actual_type = classify_runtime_type(value)
                 # type(None) matches None values (for explicitly declared type(None) fields)
                 if actual_type != fc.python_type:
                     violations.append(

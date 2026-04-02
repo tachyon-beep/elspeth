@@ -461,18 +461,22 @@ class DataverseClient:
         auth_headers = self.get_auth_headers()
         headers = {**auth_headers, **(extra_headers or {})}
 
-        # When SSRF-safe request is provided, connect to the pinned IP
-        # and set the Host header for virtual hosting. The sni_hostname
-        # extension tells httpx/httpcore to use the original domain for
-        # TLS SNI and certificate verification instead of the IP literal.
+        # IP-pinning SSRF validation on every outbound request.
+        # When ssrf_safe is pre-validated (e.g., from paginate_odata nextLink
+        # handling), reuse it. Otherwise, validate now — even for config-derived
+        # URLs, because DNS rebinding can occur between __init__ domain check
+        # and the actual TCP connect.
+        if ssrf_safe is None:
+            ssrf_safe = self._validate_url_ssrf(url)
+
+        # Connect to the pinned IP and set the Host header for virtual hosting.
+        # The sni_hostname extension tells httpx/httpcore to use the original
+        # domain for TLS SNI and certificate verification instead of the IP literal.
         extensions: dict[str, bytes] | None = None
-        if ssrf_safe is not None:
-            connection_url = ssrf_safe.connection_url
-            headers["Host"] = ssrf_safe.host_header
-            if ssrf_safe.scheme == "https":
-                extensions = {"sni_hostname": ssrf_safe.sni_hostname.encode("ascii")}
-        else:
-            connection_url = url
+        connection_url = ssrf_safe.connection_url
+        headers["Host"] = ssrf_safe.host_header
+        if ssrf_safe.scheme == "https":
+            extensions = {"sni_hostname": ssrf_safe.sni_hostname.encode("ascii")}
 
         start = time.perf_counter()
         try:
@@ -705,9 +709,6 @@ class DataverseClient:
                 or protocol errors
         """
         url = initial_url
-        # No SSRF pinning on initial URL — it comes from config (operator trust),
-        # and was already domain-validated in __init__. The environment_url is
-        # built from config, not from external data.
         ssrf_safe: SSRFSafeRequest | None = None
         consecutive_empty = 0
 
@@ -795,8 +796,20 @@ class DataverseClient:
                     retryable=False,
                     error_category="protocol_violation",
                 )
-            if not page.more_records or page.paging_cookie is None:
+            if not page.more_records:
                 break
+
+            # Tier 3 boundary: morerecords=True with no paging cookie is a
+            # contradictory signal — Dataverse claims more data exists but
+            # provides no mechanism to retrieve it. Surface as protocol error
+            # rather than silently truncating the result set.
+            if page.paging_cookie is None:
+                raise DataverseClientError(
+                    "FetchXML pagination: morerecords=True but no paging cookie provided. "
+                    "Cannot retrieve remaining pages — refusing to silently truncate results.",
+                    retryable=False,
+                    error_category="protocol_violation",
+                )
 
             # Inject paging cookie into the existing ET root.
             # The paging cookie is Tier 3 data — ET.set() handles

@@ -268,7 +268,7 @@ from elspeth.contracts.transform_contract import (
     create_output_contract_from_schema,
     validate_output_against_contract,
 )
-from elspeth.contracts.type_normalization import normalize_type_for_contract
+from elspeth.contracts.type_normalization import classify_runtime_type, normalize_type_for_contract
 from elspeth.contracts.types import (
     AggregationName,
     BranchName,
@@ -505,6 +505,7 @@ __all__ = [  # Grouped by category for readability
     "create_contract_from_config",
     "FieldContract",
     "map_schema_mode",
+    "classify_runtime_type",
     "normalize_type_for_contract",
     "PipelineRow",
     "PipelineRunner",

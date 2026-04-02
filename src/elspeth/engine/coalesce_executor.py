@@ -20,7 +20,7 @@ from elspeth.contracts.coalesce_checkpoint import (
 from elspeth.contracts.coalesce_enums import CoalescePolicy, MergeStrategy
 from elspeth.contracts.coalesce_metadata import ArrivalOrderEntry, CoalesceMetadata
 from elspeth.contracts.enums import NodeStateStatus, RowOutcome
-from elspeth.contracts.errors import AuditIntegrityError, CoalesceFailureReason, OrchestrationInvariantError
+from elspeth.contracts.errors import AuditIntegrityError, CoalesceFailureReason, ExecutionError, OrchestrationInvariantError
 from elspeth.contracts.freeze import deep_thaw
 from elspeth.contracts.schema_contract import FieldContract, PipelineRow, SchemaContract
 from elspeth.contracts.types import NodeID, StepResolver
@@ -631,6 +631,7 @@ class CoalesceExecutor:
                 outcomes_recorded=True,  # Bug 9z8 fix: token outcomes already recorded above
             )
 
+        completed_state_ids: set[str] = set()
         try:
             # ─────────────────────────────────────────────────────────────────────
             # Merge row data according to strategy (returns dict)
@@ -773,6 +774,7 @@ class CoalesceExecutor:
                     duration_ms=(now - entry.arrival_time) * 1000,
                     context_after=coalesce_metadata,
                 )
+                completed_state_ids.add(entry.state_id)
 
                 # Record terminal token outcome (COALESCED)
                 self._recorder.record_token_outcome(
@@ -800,14 +802,29 @@ class CoalesceExecutor:
                 coalesce_metadata=coalesce_metadata,
                 coalesce_name=coalesce_name,
             )
-        except Exception:
+        except Exception as merge_exc:
+            # If the audit database is already compromised, don't write more
+            # records to it — leaving node states as pending is more honest
+            # than writing FAILED to an untrustworthy database.
+            if isinstance(merge_exc, AuditIntegrityError):
+                raise
+
             for _branch, entry in pending.branches.items():
+                # Skip branches already completed in the happy path —
+                # overwriting COMPLETED with FAILED would corrupt the audit trail.
+                if entry.state_id in completed_state_ids:
+                    continue
                 try:
                     self._recorder.complete_node_state(
                         state_id=entry.state_id,
                         status=NodeStateStatus.FAILED,
                         output_data={},
                         duration_ms=0.0,
+                        error=ExecutionError(
+                            exception=str(merge_exc),
+                            exception_type=type(merge_exc).__name__,
+                            phase="coalesce_merge_cleanup",
+                        ),
                     )
                 except Exception as cleanup_exc:
                     slog.error(
