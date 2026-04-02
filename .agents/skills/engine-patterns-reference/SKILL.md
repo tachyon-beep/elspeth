@@ -55,7 +55,7 @@ source:
   plugin: csv
   options:
     schema:
-      fields: dynamic
+      mode: observed
       guaranteed_fields: [customer_id, amount]
 
 # Transform requires these fields in input

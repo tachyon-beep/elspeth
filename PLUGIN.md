@@ -117,7 +117,7 @@ transforms:
   on_success: doubled        # Named output connection
   options:
     schema:
-      fields: dynamic
+      mode: observed
     field: price
 ```
 
@@ -131,7 +131,7 @@ from .test_transform_protocol import TransformContractPropertyTestBase
 class TestDoubleValueContract(TransformContractPropertyTestBase):
     @pytest.fixture
     def transform(self):
-        return DoubleValueTransform({"schema": {"fields": "dynamic"}, "field": "value"})
+        return DoubleValueTransform({"schema": {"mode": "observed"}, "field": "value"})
 
     @pytest.fixture
     def valid_input(self):
@@ -395,7 +395,7 @@ class MySource(BaseSource):
                 ctx.record_validation_error(
                     row=row,
                     error=str(e),
-                    schema_mode=self._schema_config.mode or "dynamic",
+                    schema_mode=self._schema_config.mode or "observed",
                     destination=self._on_validation_failure,
                 )
                 if self._on_validation_failure != "discard":
@@ -555,11 +555,11 @@ All data-processing plugins require schema configuration.
 ```yaml
 # Accept anything
 schema:
-  fields: dynamic
+  mode: observed
 
-# Strict - only these fields
+# Fixed - only these fields
 schema:
-  mode: strict
+  mode: fixed
   fields:
     - "id: int"
     - "name: str"
@@ -596,7 +596,7 @@ class TestMyTransformContract(TransformContractPropertyTestBase):
     @pytest.fixture
     def transform(self):
         return MyTransform({
-            "schema": {"fields": "dynamic"},
+            "schema": {"mode": "observed"},
             "multiplier": 2.0,
         })
 

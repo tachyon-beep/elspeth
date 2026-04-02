@@ -340,7 +340,7 @@ source:
   options:
     path: data/input.csv
     schema:
-      fields: dynamic
+      mode: observed
 
 transforms:
 - name: enrich
@@ -349,7 +349,7 @@ transforms:
   on_success: enriched        # Named output connection
   options:
     schema:
-      fields: dynamic
+      mode: observed
     mapping:
       old_name: new_name
 
