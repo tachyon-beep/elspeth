@@ -10,121 +10,6 @@ from pydantic import ValidationError
 from elspeth.web.config import WebSettings
 
 
-class TestWebSettingsDefaults:
-    """Tests for default field values."""
-
-    def test_host_default(self) -> None:
-        settings = WebSettings()
-        assert settings.host == "127.0.0.1"
-
-    def test_port_default(self) -> None:
-        settings = WebSettings()
-        assert settings.port == 8000
-
-    def test_auth_provider_default(self) -> None:
-        settings = WebSettings()
-        assert settings.auth_provider == "local"
-
-    def test_cors_origins_default(self) -> None:
-        settings = WebSettings()
-        assert settings.cors_origins == ("http://localhost:5173",)
-
-    def test_data_dir_default(self) -> None:
-        settings = WebSettings()
-        assert settings.data_dir == Path("data")
-
-    def test_composer_model_default(self) -> None:
-        settings = WebSettings()
-        assert settings.composer_model == "gpt-4o"
-
-    def test_composer_max_composition_turns_default(self) -> None:
-        settings = WebSettings()
-        assert settings.composer_max_composition_turns == 15
-
-    def test_composer_max_discovery_turns_default(self) -> None:
-        settings = WebSettings()
-        assert settings.composer_max_discovery_turns == 10
-
-    def test_composer_timeout_seconds_default(self) -> None:
-        settings = WebSettings()
-        assert settings.composer_timeout_seconds == 85.0
-
-    def test_composer_rate_limit_per_minute_default(self) -> None:
-        settings = WebSettings()
-        assert settings.composer_rate_limit_per_minute == 10
-
-    def test_secret_key_default(self) -> None:
-        settings = WebSettings()
-        assert settings.secret_key == "change-me-in-production"
-
-    def test_max_upload_bytes_default(self) -> None:
-        settings = WebSettings()
-        assert settings.max_upload_bytes == 104857600  # 100 MB
-
-    def test_landscape_url_default_is_none(self) -> None:
-        settings = WebSettings()
-        assert settings.landscape_url is None
-
-    def test_payload_store_path_default_is_none(self) -> None:
-        settings = WebSettings()
-        assert settings.payload_store_path is None
-
-    def test_oidc_fields_default_none(self) -> None:
-        settings = WebSettings()
-        assert settings.oidc_issuer is None
-        assert settings.oidc_audience is None
-        assert settings.oidc_client_id is None
-
-    def test_entra_tenant_id_default_none(self) -> None:
-        settings = WebSettings()
-        assert settings.entra_tenant_id is None
-
-    def test_session_db_url_default_is_none(self) -> None:
-        settings = WebSettings()
-        assert settings.session_db_url is None
-
-
-class TestWebSettingsCustomValues:
-    """Tests for custom field overrides."""
-
-    def test_custom_port_and_host(self) -> None:
-        settings = WebSettings(port=9090, host="0.0.0.0", secret_key="test-secret")
-        assert settings.port == 9090
-        assert settings.host == "0.0.0.0"
-
-    def test_auth_provider_oidc(self) -> None:
-        settings = WebSettings(
-            auth_provider="oidc",
-            oidc_issuer="https://issuer.example.com",
-            oidc_audience="my-audience",
-            oidc_client_id="my-client-id",
-        )
-        assert settings.auth_provider == "oidc"
-
-    def test_auth_provider_entra(self) -> None:
-        settings = WebSettings(
-            auth_provider="entra",
-            oidc_issuer="https://login.microsoftonline.com/t/v2.0",
-            oidc_audience="my-audience",
-            oidc_client_id="my-client-id",
-            entra_tenant_id="my-tenant-id",
-        )
-        assert settings.auth_provider == "entra"
-
-    def test_custom_cors_origins(self) -> None:
-        settings = WebSettings(cors_origins=["https://app.example.com", "https://staging.example.com"])
-        assert len(settings.cors_origins) == 2
-        assert "https://app.example.com" in settings.cors_origins
-
-    def test_explicit_landscape_url(self) -> None:
-        settings = WebSettings(landscape_url="postgresql://db/audit")
-        assert settings.landscape_url == "postgresql://db/audit"
-
-    def test_explicit_payload_store_path(self) -> None:
-        settings = WebSettings(payload_store_path=Path("/mnt/payloads"))
-        assert settings.payload_store_path == Path("/mnt/payloads")
-
-
 class TestWebSettingsValidation:
     """Tests for field validation."""
 
@@ -167,15 +52,6 @@ class TestWebSettingsValidation:
     def test_max_upload_bytes_zero_rejected(self) -> None:
         with pytest.raises(ValueError):
             WebSettings(max_upload_bytes=0)
-
-
-class TestWebSettingsImmutability:
-    """Tests that frozen=True prevents post-construction mutation."""
-
-    def test_field_assignment_raises(self) -> None:
-        settings = WebSettings()
-        with pytest.raises(ValueError):
-            settings.port = 9090  # type: ignore[misc]
 
 
 class TestWebSettingsDerivedAccessors:

@@ -478,7 +478,7 @@ class TestDiscoverExporterRegistryEdgeCases:
             def elspeth_get_exporters(self):
                 return "not_a_list"  # Common mistake: returning name instead of [class]
 
-        with pytest.raises(TelemetryExporterError, match="str.*expected iterable"):
+        with pytest.raises(TelemetryExporterError, match=r"str.*expected iterable"):
             _discover_exporter_registry(exporter_plugins=(StringPlugin(),))
 
     def test_hook_returning_bytes_raises_actionable_error(self):
@@ -489,5 +489,5 @@ class TestDiscoverExporterRegistryEdgeCases:
             def elspeth_get_exporters(self):
                 return b"not_a_list"
 
-        with pytest.raises(TelemetryExporterError, match="bytes.*expected iterable"):
+        with pytest.raises(TelemetryExporterError, match=r"bytes.*expected iterable"):
             _discover_exporter_registry(exporter_plugins=(BytesPlugin(),))

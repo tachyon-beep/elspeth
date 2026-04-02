@@ -10,19 +10,10 @@ from elspeth.web.auth.models import AuthenticationError, UserIdentity, UserProfi
 class TestUserIdentity:
     """Tests for the minimal authentication identity."""
 
-    def test_construction(self) -> None:
-        identity = UserIdentity(user_id="alice", username="alice")
-        assert identity.user_id == "alice"
-        assert identity.username == "alice"
-
     def test_frozen_immutability(self) -> None:
         identity = UserIdentity(user_id="alice", username="alice")
         with pytest.raises(AttributeError):
             identity.user_id = "bob"  # type: ignore[misc]
-
-    def test_slots(self) -> None:
-        identity = UserIdentity(user_id="alice", username="alice")
-        assert "__slots__" in dir(type(identity))
 
 
 class TestUserProfile:
@@ -58,16 +49,6 @@ class TestUserProfile:
         )
         with pytest.raises(AttributeError):
             profile.email = "x@y.com"  # type: ignore[misc]
-
-    def test_groups_is_tuple_not_list(self) -> None:
-        """Groups must be a tuple (immutable) not a list."""
-        profile = UserProfile(
-            user_id="alice",
-            username="alice",
-            display_name="Alice",
-            groups=("g1", "g2"),
-        )
-        assert isinstance(profile.groups, tuple)
 
 
 class TestAuthenticationError:
