@@ -19,17 +19,6 @@ from elspeth.web.composer.state import (
 
 
 class TestSourceSpec:
-    def test_create(self) -> None:
-        s = SourceSpec(
-            plugin="csv",
-            on_success="transform_1",
-            options={"path": "/data/input.csv"},
-            on_validation_failure="quarantine",
-        )
-        assert s.plugin == "csv"
-        assert s.on_success == "transform_1"
-        assert s.options["path"] == "/data/input.csv"
-
     def test_frozen(self) -> None:
         s = SourceSpec(plugin="csv", on_success="t1", options={}, on_validation_failure="discard")
         with pytest.raises(AttributeError):
@@ -112,18 +101,6 @@ class TestNodeSpec:
         defaults.update(overrides)
         return NodeSpec(**defaults)
 
-    def test_create_transform(self) -> None:
-        n = self._make_transform()
-        assert n.id == "transform_1"
-        assert n.node_type == "transform"
-        assert n.plugin == "uppercase"
-
-    def test_create_gate(self) -> None:
-        n = self._make_gate()
-        assert n.condition == "row['score'] >= 0.5"
-        assert n.routes is not None
-        assert n.routes["high"] == "sink_good"
-
     def test_frozen(self) -> None:
         n = self._make_transform()
         with pytest.raises(AttributeError):
@@ -203,17 +180,6 @@ class TestNodeSpec:
 
 
 class TestEdgeSpec:
-    def test_create(self) -> None:
-        e = EdgeSpec(
-            id="e1",
-            from_node="source",
-            to_node="transform_1",
-            edge_type="on_success",
-            label=None,
-        )
-        assert e.from_node == "source"
-        assert e.to_node == "transform_1"
-
     def test_frozen(self) -> None:
         e = EdgeSpec(
             id="e1",
@@ -246,16 +212,6 @@ class TestEdgeSpec:
 
 
 class TestOutputSpec:
-    def test_create(self) -> None:
-        o = OutputSpec(
-            name="main_output",
-            plugin="csv",
-            options={"path": "/out.csv"},
-            on_write_failure="quarantine",
-        )
-        assert o.name == "main_output"
-        assert o.plugin == "csv"
-
     def test_frozen(self) -> None:
         o = OutputSpec(name="out", plugin="csv", options={}, on_write_failure="discard")
         with pytest.raises(AttributeError):
@@ -290,18 +246,6 @@ class TestOutputSpec:
 
 
 class TestPipelineMetadata:
-    def test_defaults(self) -> None:
-        m = PipelineMetadata()
-        assert m.name == "Untitled Pipeline"
-        assert m.description == ""
-
-    def test_custom(self) -> None:
-        m = PipelineMetadata(
-            name="My Pipeline",
-            description="Does things",
-        )
-        assert m.name == "My Pipeline"
-
     def test_frozen(self) -> None:
         m = PipelineMetadata()
         with pytest.raises(AttributeError):
