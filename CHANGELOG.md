@@ -4,22 +4,216 @@ All notable changes to ELSPETH are documented here.
 
 ---
 
-## [Unreleased]
+## [Unreleased] (RC-4.2 — Web UX Composer + Systematic Hardening)
+
+Full web application platform for chat-first pipeline composition, three-provider authentication, session management with versioning, blob storage, secret management, background pipeline execution with WebSocket progress, and a React frontend themed to DTA/AGDS guidelines. Also: sink failsink pattern for per-row write failure routing, pipeline composer MCP server, a 100+ P1 bug closure campaign across all subsystems, and a comprehensive test hygiene sweep removing ~500 low-value tests while adding ~200 gap-filling tests.
 
 ### Added
 
-- **Web UX Composer MVP** — `elspeth web` now starts the new FastAPI web
-  application for chat-first pipeline composition, validation, execution, and
-  run-history inspection.
-- **React frontend bundle** — the web app serves the built SPA from
-  `src/elspeth/web/frontend/dist/`, with Vite development support and proxying
-  for `/api` and `/ws`.
+#### Web UX Composer Platform
+
+- **`elspeth web` CLI command** — FastAPI app factory with `[webui]` extra, `WebSettings` config model, and default port 8451. Serves the React SPA from `src/elspeth/web/frontend/dist/`.
+- **React frontend bundle** — Vite-built SPA with `/api` and `/ws` proxying for development.
+- **DTA/AGDS theming** — deep teal, green accent, and GOLD semantic colours matching Australian Government Design System guidelines.
+- **Frontend UX** — logout UI, session creation guards, archive sessions, confirm destructive actions, version loading, bumped font sizes.
+- **Accessibility** — skip-to-content links, reduced motion support, touch target sizing.
+
+#### Authentication Subsystem
+
+- **`AuthProvider` protocol** — pluggable identity model with `AuthenticationError` base exception.
+- **`LocalAuthProvider`** — bcrypt password hashing with JWT token issuance.
+- **`OIDCAuthProvider`** — OpenID Connect with JWKS discovery and key caching.
+- **`EntraAuthProvider`** — Microsoft Entra ID with tenant validation and group claims.
+- **`get_current_user` middleware** — FastAPI dependency for route-level authentication.
+- **Auth routes** — login, token refresh, user profile, configuration endpoints.
+- **Registration endpoint** — configurable mode (`open`, `email_verified`, `closed`).
+- **python-jose → PyJWT migration** — replaced unmaintained library across all auth code.
+
+#### Plugin Catalog
+
+- **`CatalogService` protocol and implementation** — plugin discovery service with REST API routes wired into the app factory.
+
+#### Session Management
+
+- **SQLAlchemy Core table definitions** — session database schema with migrations.
+- **`SessionServiceProtocol`** and `SessionServiceImpl` — CRUD, versioning, run enforcement, with `RunAlreadyActiveError`.
+- **Session API routes** — full REST API with pagination, state pruning, upload hardening.
+- **Fork-from-message** — create new session versions branching from specific conversation messages, with text source plugin.
+- **TOCTOU race elimination** — DB-level constraints replacing application-level checks (batch 6).
+- **Thread pool executor** — all DB calls moved off the async event loop (batch 5).
+- **Orphan cleanup** — wired into FastAPI lifespan, UUID path parameters.
+
+#### Blob Storage Manager
+
+- **Phase 1** — data model, service foundation, migration.
+- **Phase 2** — REST API routes and app wiring.
+- **Phases 3–6** — frontend integration, composer tools, execution integration, schema inference.
+- **Upload dedup, quota enforcement, and file cleanup.**
+
+#### Secret Reference System
+
+- **`SecretResolution` audit extension** — accepts `"env"` and `"user"` sources for web-originated secrets.
+- **`resolve_secret_refs()` tree-walk** — recursive config replacement of `$secret{name}` references.
+- **`ServerSecretStore`** and `WebSecretService` — chained resolution with allowlist enforcement, env-var boundary, fingerprint audit.
+- **REST API, composer tools, execution integration, frontend wiring.**
+- **Security hardening** — audit trail, fingerprints, leakage prevention, input validation.
+
+#### Pipeline Execution Layer
+
+- **Background pipeline runs** — `ExecutionServiceImpl` with WebSocket progress streaming and dry-run validation.
+- **Cancel-vs-execute race closure** — atomic state transition preventing concurrent execution attempts.
+- **Late WebSocket client seeding** — clients connecting after run start receive current state.
+
+#### Pipeline Composer (LLM Tool-Use)
+
+- **Frozen data models** — `SourceSpec`, `NodeSpec`, `EdgeSpec`, `OutputSpec`, `PipelineMetadata` with deep immutability.
+- **Composition tools and YAML generator** — Sub-4B + 4C tool implementations.
+- **`ComposerService` protocol** — LLM tool-use loop with prompts and message management (Sub-4D).
+- **Wired to session routes** — composer integrated into session API.
+- **Sub-4x hardening** — dual-counter loop guard, discovery cache, partial state recovery, rate limiting, tool registry.
+- **Enhanced Stage 1 validation** — warnings, suggestions, and status tint.
+
+#### Pipeline Inspector
+
+- **Inspector UX overhaul** — EdgeSpec/NodeSpec fixes, graph readability improvements, version selector, catalog drawer.
+
+#### Pipeline Composer MCP Server
+
+- **`elspeth-composer` MCP server** — full pipeline composition toolset via Model Context Protocol. Tools for plugin discovery, pipeline state mutation, validation, YAML generation, and session persistence.
+- **Pipeline-composer skill pack** — Claude Code skill for interactive MCP-driven pipeline building.
+- **Pydantic model serialization** — fixed discovery tool responses.
+- **Wave 4 tools** — `clear_source`, `explain_validation_error`, `list_models`, `preview_pipeline`.
+- **Connection field sync** — when edges target outputs.
+- **Path allowlist** — on `patch_source_options`, null argument guards.
+
+#### Sink Failsink Pattern
+
+- **`RowDiversion` and `SinkWriteResult`** — new contracts for per-row write failure routing.
+- **`DIVERTED` outcome** — new terminal row state and `rows_diverted` counter.
+- **`on_write_failure` mandatory config field** — `SinkSettings` requires explicit failure handling (`route_to`, `discard`, `fail`).
+- **`BaseSink._divert_row()`** — with `FrameworkBugError` guard and protocol update.
+- **`__failsink__` DIVERT edges** — DAG builder creates automatic diversion edges for sink failsink routing.
+- **`validate_sink_failsink_destinations()`** — construction-time validation of failsink routing.
+- **`SinkExecutor.write()` routing** — failsink dispatch on per-row write failure.
+- **Hypothesis property tests** — partition-completeness and exactly-once routing invariants.
+
+#### Server Configuration
+
+- **Default port 8451** — server config design with skill restoration.
+
+### Fixed
+
+#### P1 Bug Closure Campaign (~100+ bugs)
+
+- **13 Landscape/Checkpoint/DAG integrity bugs** — audit write ordering, checkpoint restore invariants, DAG validation edge cases.
+- **16 plugin transform bugs** — LLM response handling, multi-query field extraction, batch adapter identity, and miscellaneous isolates.
+- **9 plugin source/sink bugs** — contract violations, atomicity gaps, and boundary validation.
+- **10 engine orchestrator/processor/executor bugs** — execution loop invariants, processor state, executor edge cases.
+- **7 web execution service bugs** — setup, race conditions, and state management.
+- **3 checkpoint/coalesce integrity bugs** — resume state corruption and barrier restoration.
+- **4 Landscape audit integrity bugs** — write guard gaps and recording consistency.
+- **8 silent-failure and impossible-state validation bugs** — crash-on-invalid replacing silent skip.
+- **3 LLM bugs** — empty choices audit gap, `tool_calls` fabrication, batch `finish_reason`.
+- **7 web execution setup and contract silent-failure invariant bugs.**
+- **9 sink phase ordering, expression parser coercion, and audit integrity bugs.**
+- **4 `cluster:null-check` bugs** — retry `batch_id`, Chroma metadata, Azure audit, Annotated constraints.
+- **3 `cluster:null-check` LLM bugs** — schema type erasure, content type validation.
+- **8 `cluster:null-check` bugs** — NumPy float overflow, MCP contract drift, exporter field, LLM report condition.
+- **6 `cluster:null-check` contract bugs** — NoneType inference, boolean guards, fabrication, userinfo leak, contract invariant.
+- **7 pool shutdown, batch identity, and utils cluster bugs.**
+- **4 SSRF gap, silent truncation, type crash, double-completion bugs.**
+- **11 code review findings** — auth bypass, JSONL rollback, error narrowing.
+
+#### Web Platform Hardening
+
+- **Blob IDOR guard** — session deletion guard, orphan run cleanup.
+- **21 code review findings** — across sessions, blobs, auth, execution.
+- **17 code review findings** — FK constraints, 34 new tests.
+- **6 code review findings** — Entra issuer, secret audit, cancel race, SNI, regex, fork timestamps.
+- **3 code review findings** — `blob_ref` validation, fork guard, budget classification.
+- **5 code review findings** — stranded runs, litellm dep, Chroma audit, WS race, shutdown iteration.
+- **16 review findings** — across web epic subsystems.
+- **Startup and auth regressions** — from code review integration.
+- **Aggregation wiring, OIDC flow, and blob quota atomicity.**
+- **Runtime routing fields** — for W1 output reachability check.
+
+#### Plugin Hardening
+
+- **Dataverse, RAG, and retrieval plugins** — 11 fixes from 5-agent review.
+
+#### Deep Immutability
+
+- **6 frozen dataclasses** — enforce deep immutability on mutable containers (contracts layer).
+- **5 frozen dataclasses** — additional deep immutability enforcement.
+
+#### Engine and Infrastructure
+
+- **Terminal immutability in `complete_run()`** — Landscape enforces immutability on completed runs.
+- **Tier 1 corruption guards** — added to MCP diagnostics and report analyzers.
+- **Resource leaks closed** — weight validation added, error contracts hardened.
+- **Non-finite float rejection** — at serialization and configuration boundaries.
+- **`validate_input` unconditional** — removed opt-in flag; executor validates all input.
+- **Validation error enrichment** — deterministic `repr_hash`, 8 test repairs.
+- **6 pre-existing test failures** — across export, grades, and examples.
+- **8 sweep findings** — dead code, redundant types, stale abstractions.
+
+#### Code Review Synthesis
+
+- **6-agent PR review findings** — metadata validation, `RunResult` hardening, consistency.
+- **Failsink review** — cross-field checks, docstrings, test coverage.
+- **6 correctness issues from PR review** — audit accuracy, fail-fast ordering, per-row diversion.
+- **15 bugfixes from systematic code review** — expression parser, sink executor, Chroma, probes, bootstrap.
+- **`hasattr` ban enforcement** — env isolation, type-check stubs.
 
 ### Changed
 
-- **README web startup docs** — added explicit instructions for installing the
-  `.[webui]` extra, building the frontend, setting `ELSPETH_WEB__SECRET_KEY`,
-  creating a local auth user, and running the MVP locally.
+- **README web startup docs** — explicit instructions for `.[webui]` extra, building the frontend, `ELSPETH_WEB__SECRET_KEY`, creating a local auth user, and running the MVP locally.
+- **Plugin manager singleton** — extracted from `cli.py` to `manager.py`.
+- **532 mypy/ruff errors resolved** — across the full test suite.
+- **CI hygiene** — format, mypy, stale allowlists from Sub-2 merge.
+
+### Removed
+
+- **errorworks test suite** — tests belong in the standalone package.
+
+### Tests
+
+#### Test Hygiene Sweep
+
+Systematic removal of low-value tests and replacement with behavioural gap-filling tests across all subsystems. Net result: fewer tests, better coverage of actual behavior.
+
+- **Contracts** — removed 236 low-value tests, added 40 gap-filling tests.
+- **Config** — removed 24 Pydantic default/assignment/frozen guarantee tests.
+- **TUI** — removed 8 trivial import/existence checks, 11 TypedDict construction/duplicate tests; added 6 ExplainScreen loading tests, 3 node selection tests.
+- **Telemetry** — removed 28 redundant tests, added 5 gap-fill tests.
+- **MCP** — removed 8 trivial enum identity and method-existence tests; added 18 `get_error_analysis`/`get_llm_usage_report` tests.
+- **Plugins** — removed 18 constructor passthrough/isinstance/decorator tests, 3 duplicate `PluginRetryableError` tests; added Truncate transform and `safety_utils` boundary tests.
+- **Engine** — removed `test_run_status.py`, `test_diverted_counters.py`; added 11 orchestrator execution loop integration tests, partial purge failure invariant test.
+- **Clock** — trimmed 9 redundant tests covered by property tests.
+- **Models** — removed 54 low-value mutation-gap defaults tests.
+- **Landscape** — consolidated 70 `where_exactness` tests into 36, 12 noncanonical validation error tests into 5; removed 4 stdlib-testing NaN guard tests.
+- **Enums** — removed `test_enums.py`, `test_hookspecs.py`.
+
+#### New Coverage
+
+- **Azure Blob** — source and sink unit tests (config, CSV, JSON, JSONL, schema, audit) plus property-based tests.
+- **DAG validation** — 15 error path tests.
+- **Lineage** — 3 missing validation tests.
+- **Builder** — validation gap tests, removed 34 low-value tests.
+- **Web/Composer** — comprehensive `CompositionState` mutation and Stage 1 validation tests.
+- **Web/Auth** — `ServerSecretStore` allowlist enforcement, env-var boundary, fingerprint audit tests.
+- **Web/Prompts** — message isolation, ordering, context injection tests.
+- **Buffer rollback** — strengthened to verify two-write scenario.
+
+### Design Documentation
+
+- **Web UX LLM Composer MVP** — design spec, 6 sub-specs, 6 sub-plans, program overview.
+- **Sink failsink pattern** — design spec and 2-part implementation plan.
+- **Fork-from-message** — sub-plan 04.
+- **Composer hardening (Sub-4x)** — spec and implementation plan.
+- **System Landscape spec** — platform-level audit trail.
+- **Web test hygiene plan.**
+- **Server config design.**
 
 ## [0.4.1] (RC-4.1 — RAG Ingestion Pipeline)
 
