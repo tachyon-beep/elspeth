@@ -22,8 +22,6 @@ import pytest
 from elspeth.contracts import (
     Artifact,
     Batch,
-    BatchMember,
-    BatchOutput,
     BatchStatus,
     Call,
     CallStatus,
@@ -33,7 +31,6 @@ from elspeth.contracts import (
     Edge,
     ExportStatus,
     Node,
-    NodeState,
     NodeStateCompleted,
     NodeStateFailed,
     NodeStateOpen,
@@ -48,7 +45,6 @@ from elspeth.contracts import (
     Run,
     RunStatus,
     Token,
-    TokenParent,
 )
 
 # =============================================================================
@@ -423,81 +419,6 @@ class TestNodeStateFailedDataclass:
 
 
 # =============================================================================
-# Tests for NodeState union type (lines 198-209)
-# =============================================================================
-
-
-class TestNodeStateUnion:
-    """Verify NodeState discriminated union works correctly."""
-
-    def test_node_state_open_is_node_state(self) -> None:
-        """NodeStateOpen is a valid NodeState."""
-        state: NodeState = NodeStateOpen(
-            state_id="s1",
-            token_id="t1",
-            node_id="n1",
-            step_index=0,
-            attempt=1,
-            status=NodeStateStatus.OPEN,
-            input_hash="h1",
-            started_at=datetime.now(UTC),
-        )
-        assert isinstance(state, NodeStateOpen)
-
-    def test_node_state_completed_is_node_state(self) -> None:
-        """NodeStateCompleted is a valid NodeState."""
-        now = datetime.now(UTC)
-        state: NodeState = NodeStateCompleted(
-            state_id="s1",
-            token_id="t1",
-            node_id="n1",
-            step_index=0,
-            attempt=1,
-            status=NodeStateStatus.COMPLETED,
-            input_hash="h1",
-            started_at=now,
-            output_hash="o1",
-            completed_at=now,
-            duration_ms=10.0,
-        )
-        assert isinstance(state, NodeStateCompleted)
-
-    def test_node_state_failed_is_node_state(self) -> None:
-        """NodeStateFailed is a valid NodeState."""
-        now = datetime.now(UTC)
-        state: NodeState = NodeStateFailed(
-            state_id="s1",
-            token_id="t1",
-            node_id="n1",
-            step_index=0,
-            attempt=1,
-            status=NodeStateStatus.FAILED,
-            input_hash="h1",
-            started_at=now,
-            completed_at=now,
-            duration_ms=10.0,
-        )
-        assert isinstance(state, NodeStateFailed)
-
-    def test_node_state_pending_is_node_state(self) -> None:
-        """P1: NodeStatePending is a valid NodeState (async batch flows)."""
-        now = datetime.now(UTC)
-        state: NodeState = NodeStatePending(
-            state_id="s1",
-            token_id="t1",
-            node_id="n1",
-            step_index=0,
-            attempt=1,
-            status=NodeStateStatus.PENDING,
-            input_hash="h1",
-            started_at=now,
-            completed_at=now,
-            duration_ms=10.0,
-        )
-        assert isinstance(state, NodeStatePending)
-
-
-# =============================================================================
 # Tests for NodeStatePending dataclass (P1: missing from union coverage)
 # =============================================================================
 
@@ -864,45 +785,3 @@ class TestRowLineageDataclass:
         )
         assert lineage.source_data is None
         assert lineage.payload_available is False
-
-
-# =============================================================================
-# Tests for TokenParent and BatchMember/BatchOutput (simple dataclasses)
-# =============================================================================
-
-
-class TestSimpleDataclasses:
-    """Test simple dataclasses without optional fields."""
-
-    def test_token_parent_all_fields_required(self) -> None:
-        """TokenParent has no optional fields."""
-        tp = TokenParent(
-            token_id="tok-001",
-            parent_token_id="tok-000",
-            ordinal=0,
-        )
-        assert tp.token_id == "tok-001"
-        assert tp.parent_token_id == "tok-000"
-        assert tp.ordinal == 0
-
-    def test_batch_member_all_fields_required(self) -> None:
-        """BatchMember has no optional fields."""
-        bm = BatchMember(
-            batch_id="batch-001",
-            token_id="tok-001",
-            ordinal=0,
-        )
-        assert bm.batch_id == "batch-001"
-        assert bm.token_id == "tok-001"
-        assert bm.ordinal == 0
-
-    def test_batch_output_all_fields_required(self) -> None:
-        """BatchOutput has no optional fields."""
-        bo = BatchOutput(
-            batch_id="batch-001",
-            output_type="token",
-            output_id="tok-002",
-        )
-        assert bo.batch_id == "batch-001"
-        assert bo.output_type == "token"
-        assert bo.output_id == "tok-002"

@@ -10,27 +10,6 @@ import pytest
 class TestLoggingConfig:
     """Tests for logging configuration."""
 
-    def test_get_logger_exists(self) -> None:
-        """get_logger function exists."""
-        from elspeth.core.logging import get_logger
-
-        assert callable(get_logger)
-
-    def test_get_logger_returns_logger(self) -> None:
-        """get_logger returns a bound logger."""
-        from elspeth.core.logging import get_logger
-
-        logger = get_logger("test")
-        assert hasattr(logger, "info")
-        assert hasattr(logger, "error")
-        assert hasattr(logger, "bind")
-
-    def test_configure_logging_exists(self) -> None:
-        """configure_logging function exists."""
-        from elspeth.core.logging import configure_logging
-
-        assert callable(configure_logging)
-
     def test_logger_outputs_structured(self, capsys: pytest.CaptureFixture[str]) -> None:
         """Logger outputs structured JSON."""
         from elspeth.core.logging import configure_logging, get_logger

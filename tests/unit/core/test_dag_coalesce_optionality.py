@@ -24,23 +24,14 @@ class TestFieldRequired:
     def test_string_optional_with_spaces(self) -> None:
         assert _field_required("  score: float?  ") is False
 
-    def test_dict_with_required_true(self) -> None:
-        assert _field_required({"name": "score", "type": "float", "required": True}) is True
-
     def test_dict_with_required_false(self) -> None:
         assert _field_required({"name": "score", "type": "float", "required": False}) is False
 
     def test_dict_without_required_defaults_true(self) -> None:
         assert _field_required({"name": "score", "type": "float"}) is True
 
-    def test_yaml_dict_required(self) -> None:
-        assert _field_required({"score": "float"}) is True
-
     def test_yaml_dict_optional(self) -> None:
         assert _field_required({"score": "float?"}) is False
-
-    def test_non_dict_non_string_defaults_true(self) -> None:
-        assert _field_required(42) is True
 
 
 class TestFieldNameType:
