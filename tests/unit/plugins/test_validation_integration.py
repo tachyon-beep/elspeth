@@ -100,3 +100,41 @@ def test_validator_provides_field_level_errors():
     assert "skip_rows" in error_msg  # Field name present
     # Should have human-readable message about type
     assert "int" in error_msg.lower() or "type" in error_msg.lower()  # Type mismatch mentioned
+
+
+class TestValidatorRecognisesMissingPluginTypes:
+    """Validator dispatch tables must include all shipped plugins.
+
+    These tests verify that get_source/transform/sink_config_model()
+    return a config class (not None, not UnknownPluginTypeError) for
+    plugin types that were previously missing from the if/elif chains.
+    """
+
+    def test_source_dataverse_recognised(self) -> None:
+        from elspeth.plugins.infrastructure.validation import PluginConfigValidator
+
+        validator = PluginConfigValidator()
+        model = validator.get_source_config_model("dataverse")
+        assert model is not None
+        assert model.__name__ == "DataverseSourceConfig"
+
+    def test_transform_rag_retrieval_recognised(self) -> None:
+        from elspeth.plugins.infrastructure.validation import PluginConfigValidator
+
+        validator = PluginConfigValidator()
+        model = validator.get_transform_config_model("rag_retrieval")
+        assert model.__name__ == "RAGRetrievalConfig"
+
+    def test_sink_dataverse_recognised(self) -> None:
+        from elspeth.plugins.infrastructure.validation import PluginConfigValidator
+
+        validator = PluginConfigValidator()
+        model = validator.get_sink_config_model("dataverse")
+        assert model.__name__ == "DataverseSinkConfig"
+
+    def test_sink_chroma_sink_recognised(self) -> None:
+        from elspeth.plugins.infrastructure.validation import PluginConfigValidator
+
+        validator = PluginConfigValidator()
+        model = validator.get_sink_config_model("chroma_sink")
+        assert model.__name__ == "ChromaSinkConfig"

@@ -244,6 +244,11 @@ class RowReorderBuffer[T]:
                 raise KeyError(f"Ticket {ticket.sequence} (row_id={ticket.row_id}) was never submitted")
 
             entry = self._pending[ticket.sequence]
+            if entry.row_id != ticket.row_id:
+                raise RuntimeError(
+                    f"Ticket identity mismatch: ticket.row_id={ticket.row_id!r} "
+                    f"but pending entry has row_id={entry.row_id!r} at sequence {ticket.sequence}"
+                )
             if entry.is_complete:
                 raise ValueError(f"Ticket {ticket.sequence} (row_id={ticket.row_id}) already completed")
 
@@ -351,6 +356,11 @@ class RowReorderBuffer[T]:
                 return False  # Already released or never submitted
 
             entry = self._pending[ticket.sequence]
+            if entry.row_id != ticket.row_id:
+                raise RuntimeError(
+                    f"Ticket identity mismatch: ticket.row_id={ticket.row_id!r} "
+                    f"but pending entry has row_id={entry.row_id!r} at sequence {ticket.sequence}"
+                )
             if entry.is_complete:
                 return False  # Already complete, will be released soon
 

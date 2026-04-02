@@ -116,6 +116,10 @@ class PluginConfigValidator:
             from elspeth.plugins.sources.azure_blob_source import AzureBlobSourceConfig
 
             return AzureBlobSourceConfig
+        elif source_type == "dataverse":
+            from elspeth.plugins.sources.dataverse import DataverseSourceConfig
+
+            return DataverseSourceConfig
         elif source_type == "null":
             # NullSource has no config class (resume-only source)
             # Return None to signal "no validation needed"
@@ -313,6 +317,10 @@ class PluginConfigValidator:
             from elspeth.plugins.transforms.web_scrape import WebScrapeConfig
 
             return WebScrapeConfig
+        elif transform_type == "rag_retrieval":
+            from elspeth.plugins.transforms.rag.config import RAGRetrievalConfig
+
+            return RAGRetrievalConfig
         else:
             raise UnknownPluginTypeError(f"Unknown transform type: {transform_type}")
 
@@ -339,6 +347,14 @@ class PluginConfigValidator:
             from elspeth.plugins.sinks.azure_blob_sink import AzureBlobSinkConfig
 
             return AzureBlobSinkConfig
+        elif sink_type == "dataverse":
+            from elspeth.plugins.sinks.dataverse import DataverseSinkConfig
+
+            return DataverseSinkConfig
+        elif sink_type == "chroma_sink":
+            from elspeth.plugins.sinks.chroma_sink import ChromaSinkConfig
+
+            return ChromaSinkConfig
         else:
             raise UnknownPluginTypeError(f"Unknown sink type: {sink_type}")
 

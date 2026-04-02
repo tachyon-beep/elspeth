@@ -167,4 +167,10 @@ class ReorderBuffer[T]:
                 del self._entries[self._next_emit]
                 self._next_emit += 1
 
+            # Reset counters when fully drained so a reused buffer starts fresh
+            if not self._entries:
+                self._next_submit = 0
+                self._next_emit = 0
+                self._complete_counter = 0
+
             return ready

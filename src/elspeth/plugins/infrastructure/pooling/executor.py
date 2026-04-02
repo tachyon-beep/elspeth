@@ -461,6 +461,16 @@ class PooledExecutor:
                 # min_dispatch_delay_ms between ALL dispatches across ALL workers.
                 self._wait_for_dispatch_gate()
 
+                # Check shutdown before dispatching to external service
+                if self._shutdown_event.is_set():
+                    return (
+                        buffer_idx,
+                        TransformResult.error(
+                            {"reason": "shutdown_requested", "error": "Shutdown requested before dispatch"},
+                            retryable=False,
+                        ),
+                    )
+
                 try:
                     result = process_fn(row, state_id)
                     self._throttle.on_success()

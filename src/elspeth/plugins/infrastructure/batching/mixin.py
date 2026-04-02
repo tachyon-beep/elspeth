@@ -194,6 +194,10 @@ class BatchTransformMixin:
             ValueError: If ctx.token is None
             ShutdownError: If batch processing is shut down
         """
+        # Guard: reject rows after shutdown signal (before touching buffer)
+        if self._batch_shutdown.is_set():
+            raise ShutdownError("Batch processing has been shut down")
+
         # No defensive fallback - ctx.token is required (CLAUDE.md compliance)
         if ctx.token is None:
             raise ValueError("BatchTransformMixin requires ctx.token to be set. This is a bug in the calling code.")

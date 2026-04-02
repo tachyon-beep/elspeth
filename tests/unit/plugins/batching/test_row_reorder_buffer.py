@@ -12,6 +12,7 @@ from hypothesis import strategies as st
 
 from elspeth.plugins.infrastructure.batching.row_reorder_buffer import (
     RowReorderBuffer,
+    RowTicket,
     ShutdownError,
 )
 
@@ -416,3 +417,64 @@ class TestSubmitValidation:
         buffer.complete(ticket, "result")
         entry = buffer.wait_for_next_release(timeout=0.1)
         assert entry.result == "result"
+
+
+class TestTicketIdentityVerification:
+    """Tests for Tier 1 identity verification on complete() and evict().
+
+    RowTicket has three identity fields (sequence, row_id, submitted_at).
+    complete() and evict() must verify that ticket.row_id matches the
+    pending entry's row_id to catch ticket misuse or corruption.
+    """
+
+    def test_complete_rejects_mismatched_row_id(self) -> None:
+        """complete() raises RuntimeError when ticket.row_id doesn't match pending entry."""
+        buffer: RowReorderBuffer[str] = RowReorderBuffer(max_pending=10)
+
+        ticket_a = buffer.submit("row-A")
+        buffer.submit("row-B")
+
+        # Forge a ticket with sequence=0 (row-A's slot) but row_id="row-B"
+        forged = RowTicket(
+            sequence=ticket_a.sequence,
+            row_id="row-B",
+            submitted_at=ticket_a.submitted_at,
+        )
+
+        with pytest.raises(RuntimeError, match=r"Ticket identity mismatch.*row_id='row-B'.*row_id='row-A'"):
+            buffer.complete(forged, "result")
+
+    def test_evict_rejects_mismatched_row_id(self) -> None:
+        """evict() raises RuntimeError when ticket.row_id doesn't match pending entry."""
+        buffer: RowReorderBuffer[str] = RowReorderBuffer(max_pending=10)
+
+        ticket_a = buffer.submit("row-A")
+        buffer.submit("row-B")
+
+        # Forge a ticket with sequence=0 (row-A's slot) but row_id="row-B"
+        forged = RowTicket(
+            sequence=ticket_a.sequence,
+            row_id="row-B",
+            submitted_at=ticket_a.submitted_at,
+        )
+
+        with pytest.raises(RuntimeError, match=r"Ticket identity mismatch.*row_id='row-B'.*row_id='row-A'"):
+            buffer.evict(forged)
+
+    def test_complete_succeeds_with_matching_row_id(self) -> None:
+        """complete() succeeds when ticket identity matches pending entry."""
+        buffer: RowReorderBuffer[str] = RowReorderBuffer(max_pending=10)
+
+        ticket = buffer.submit("row-A")
+        buffer.complete(ticket, "result-A")
+
+        entry = buffer.wait_for_next_release(timeout=1.0)
+        assert entry.result == "result-A"
+        assert entry.row_id == "row-A"
+
+    def test_evict_succeeds_with_matching_row_id(self) -> None:
+        """evict() succeeds when ticket identity matches pending entry."""
+        buffer: RowReorderBuffer[str] = RowReorderBuffer(max_pending=10)
+
+        ticket = buffer.submit("row-A")
+        assert buffer.evict(ticket) is True

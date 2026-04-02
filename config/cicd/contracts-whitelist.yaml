@@ -154,6 +154,9 @@ allowed_dict_patterns:
   # Canonical representation - deterministic JSON for hashing
   - "src/elspeth/core/canonical.py:_edge_to_canonical_dict:return"
 
+  # JSON parsing - object_pairs_hook must return dict (json.loads contract)
+  - "src/elspeth/plugins/infrastructure/clients/json_utils.py:_reject_duplicate_keys:return"
+
   # DAG builder - schema dict extraction from node info
   - "src/elspeth/core/dag/builder.py:_best_schema_dict:return"
 

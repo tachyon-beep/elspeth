@@ -798,3 +798,38 @@ class TestShutdownRaisesOnThreadTimeout:
 
         # Shutdown should complete without raising — thread is already dead
         transform.shutdown_batch_processing(timeout=5.0)
+
+
+class TestBatchTransformMixinShutdownGuard:
+    """Tests for accept_row() rejecting rows after shutdown."""
+
+    def test_accept_row_raises_after_shutdown_signal(self) -> None:
+        """accept_row() checks _batch_shutdown before touching the buffer.
+
+        The mixin must guard at accept_row() level, not rely on the buffer's
+        own shutdown check. This matters because _batch_shutdown is set before
+        the buffer is shut down (step 1 vs step 3 of shutdown_batch_processing).
+        The guard prevents new rows entering during drain.
+        """
+        from elspeth.plugins.infrastructure.batching.row_reorder_buffer import ShutdownError
+
+        collector = CollectorOutputPort()
+        transform = SimpleBatchTransform()
+        transform.connect_output(collector, max_pending=5)
+
+        # Set the shutdown signal directly (without full shutdown_batch_processing)
+        # to isolate the mixin's own guard from the buffer's shutdown
+        transform._batch_shutdown.set()
+
+        token = make_token("row-post-shutdown")
+        ctx = make_context(
+            landscape=_make_recorder(),
+            token=token,
+            state_id="state-post-shutdown",
+        )
+
+        with pytest.raises(ShutdownError, match="shut down"):
+            transform.accept({"data": "should-fail"}, ctx)
+
+        # Clean up: do full shutdown so threads stop
+        transform.shutdown_batch_processing()

@@ -895,6 +895,55 @@ class TestPooledExecutorBugFixes:
 
         executor.shutdown()
 
+    def test_shutdown_prevents_initial_dispatch(self) -> None:
+        """Workers past the dispatch gate should not call process_fn after shutdown.
+
+        Bug: _execute_single() had no shutdown check between _wait_for_dispatch_gate()
+        and process_fn(). Workers that passed the gate before shutdown was signalled
+        would still dispatch to the external service.
+        """
+        config = PoolConfig(pool_size=2, min_dispatch_delay_ms=0)
+        executor = PooledExecutor(config)
+
+        first_worker_entered = threading.Event()
+        call_count = 0
+        lock = Lock()
+
+        def mock_process(row: dict[str, Any], state_id: str) -> TransformResult:
+            nonlocal call_count
+            idx = row["idx"]
+            with lock:
+                call_count += 1
+            if idx == 0:
+                # First worker signals it has entered, then triggers shutdown
+                first_worker_entered.set()
+                executor.shutdown(wait=False)
+                # Simulate slow processing so other workers see shutdown
+                time.sleep(0.1)
+            return TransformResult.success(make_pipeline_row(row), success_reason={"action": "processed"})
+
+        # Submit 4 items with pool_size=2. Workers 0 and 1 start immediately.
+        # Worker 0 triggers shutdown inside process_fn. Workers 2+ should see
+        # shutdown_requested after they pass the dispatch gate.
+        contexts = [RowContext(row={"idx": i}, state_id=f"state_{i}", row_index=i) for i in range(4)]
+
+        entries = executor.execute_batch(contexts, mock_process)
+
+        # All entries should be returned (no silent drops)
+        assert len(entries) == 4
+
+        # At least one entry should have shutdown_requested error (workers that
+        # passed the gate after shutdown was signalled)
+        shutdown_entries = [
+            e
+            for e in entries
+            if e.result.status == "error" and e.result.reason is not None and e.result.reason["reason"] == "shutdown_requested"
+        ]
+        assert len(shutdown_entries) >= 1, (
+            f"Expected at least 1 shutdown_requested error, got {len(shutdown_entries)}. "
+            f"Statuses: {[(e.result.status, e.result.reason) for e in entries]}"
+        )
+
     def test_shutdown_event_stops_retries(self) -> None:
         """Workers should stop retrying after shutdown is requested.
 
