@@ -330,6 +330,45 @@ class TestExplainParentIntegrity:
         with pytest.raises(AuditIntegrityError, match="Cross-run parent lineage"):
             explain(recorder, "run-1", token_id="child-1")
 
+    def test_join_token_without_parents_raises(self) -> None:
+        """Token with join_group_id but no parents is audit corruption."""
+        token = _make_token(join_group_id="jg-1")
+        recorder = _make_recorder(
+            token=token,
+            row_lineage=_make_row_lineage(),
+            token_parents=[],
+        )
+        with pytest.raises(AuditIntegrityError, match=r"join_group_id.*no parent"):
+            explain(recorder, "run-1", token_id="tok-1")
+
+    def test_expand_token_without_parents_raises(self) -> None:
+        """Token with expand_group_id but no parents is audit corruption."""
+        token = _make_token(expand_group_id="eg-1")
+        recorder = _make_recorder(
+            token=token,
+            row_lineage=_make_row_lineage(),
+            token_parents=[],
+        )
+        with pytest.raises(AuditIntegrityError, match=r"expand_group_id.*no parent"):
+            explain(recorder, "run-1", token_id="tok-1")
+
+    def test_parents_without_any_group_id_raises(self) -> None:
+        """Token with parent records but no group ID is audit corruption.
+
+        Exercises lineage.py lines 217-222: if parents exist but no
+        fork/join/expand group_id is set, the parent relationships have
+        no lineage operation to belong to.
+        """
+        token = _make_token()  # All group IDs are None
+        parent_ref = TokenParent(token_id="tok-1", parent_token_id="parent-1", ordinal=0)
+        recorder = _make_recorder(
+            token=token,
+            row_lineage=_make_row_lineage(),
+            token_parents=[parent_ref],
+        )
+        with pytest.raises(AuditIntegrityError, match=r"parent relationships.*but no group ID"):
+            explain(recorder, "run-1", token_id="tok-1")
+
 
 # ===========================================================================
 # LineageResult structure

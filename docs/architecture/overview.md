@@ -897,18 +897,12 @@ gates:
       pass: continue
       fail: routine_log
 
-  - plugin: threshold_gate
-    type: gate
-    options:
-      rules:
-        - field: wind_speed
-          operator: ">="
-          value: 150
-          result: emergency
-      on_success: routine_log
+  - name: wind_threshold
+    input: confidence_check.pass
+    condition: "row['wind_speed'] >= 150"
     routes:
       emergency: emergency_broadcast
-      normal: continue
+      normal: routine_log
 
 landscape:
   enabled: true

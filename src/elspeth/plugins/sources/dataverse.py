@@ -14,7 +14,7 @@ import urllib.parse
 import xml.etree.ElementTree as ET
 from collections.abc import Iterator, Mapping
 from datetime import UTC, datetime
-from typing import TYPE_CHECKING, Any, Self
+from typing import Any, Self
 
 import structlog
 from pydantic import Field, ValidationError, field_validator, model_validator
@@ -22,8 +22,10 @@ from pydantic import Field, ValidationError, field_validator, model_validator
 from elspeth.contracts import CallStatus, CallType, Determinism, PluginSchema, SourceRow
 from elspeth.contracts.call_data import RawCallPayload
 from elspeth.contracts.contexts import LifecycleContext, SourceContext
+from elspeth.contracts.contract_builder import ContractBuilder
 from elspeth.contracts.errors import AuditIntegrityError, FrameworkBugError
 from elspeth.contracts.events import ExternalCallCompleted
+from elspeth.contracts.schema_contract_factory import create_contract_from_config
 from elspeth.core.canonical import stable_hash
 from elspeth.plugins.infrastructure.base import BaseSource
 from elspeth.plugins.infrastructure.clients.dataverse import (
@@ -40,9 +42,6 @@ from elspeth.plugins.sources.field_normalization import (
     normalize_field_name,
     resolve_field_names,
 )
-
-if TYPE_CHECKING:
-    from elspeth.contracts.contract_builder import ContractBuilder
 
 logger = structlog.get_logger(__name__)
 
@@ -222,9 +221,6 @@ class DataverseSource(BaseSource):
         self.output_schema = self._schema_class
 
         # Contract setup — Dataverse responses are JSON (no CSV header resolution needed)
-        from elspeth.contracts.contract_builder import ContractBuilder
-        from elspeth.contracts.schema_contract_factory import create_contract_from_config
-
         initial_contract = create_contract_from_config(self._schema_config)
         if initial_contract.locked:
             self.set_schema_contract(initial_contract)

@@ -21,20 +21,17 @@ allow_hits:
   expires: null
 - key: web/catalog/routes.py:R1:get_schema:fp=bc80b0854f0cb34e
   owner: web-catalog
-  reason: Tier 3 boundary — plugin_type from URL path parameter, lookup in constant
-    dict
+  reason: Tier 3 boundary — plugin_type from URL path parameter, lookup in constant dict
   safety: Returns None on miss, handled by 404 response
   expires: null
 - key: web/catalog/service.py:R6:CatalogServiceImpl:_resolve_config_model:fp=5e0056175f439976
   owner: web-catalog
-  reason: Expected error path — UnknownPluginTypeError caught and returns None to
-    caller
+  reason: Expected error path — UnknownPluginTypeError caught and returns None to caller
   safety: Caller checks None return and skips config extraction; no silent data loss
   expires: null
 - key: web/catalog/service.py:R1:CatalogServiceImpl:_extract_config_fields:fp=4ff2ba785b505451
   owner: web-catalog
-  reason: Tier 3 boundary — Pydantic-generated JSON schema 'properties' key may be
-    absent
+  reason: Tier 3 boundary — Pydantic-generated JSON schema 'properties' key may be absent
   safety: Default empty dict; no properties means no config fields
   expires: null
 - key: web/catalog/service.py:R1:CatalogServiceImpl:_extract_config_fields:fp=1f5f1cda6e9c0466
@@ -85,21 +82,17 @@ allow_hits:
 - key: web/auth/oidc.py:R1:JWKSTokenValidator:decode_token:fp=43b5f14ace609f1d
   owner: web-auth
   reason: Tier 3 boundary — JWT header kid field is optional per RFC 7515
-  safety: Missing kid falls through to first key in JWKS; AuthenticationError on decode
-    failure
+  safety: Missing kid falls through to first key in JWKS; AuthenticationError on decode failure
   expires: null
 - key: web/auth/oidc.py:R1:OIDCAuthProvider:authenticate:fp=a8c6a2b695a3d754
   owner: web-auth
-  reason: Tier 3 boundary — preferred_username is optional in OIDC tokens, falls back
-    to sub
-  safety: Default is payload['sub'] which is required; absence of optional claim is
-    expected
+  reason: Tier 3 boundary — preferred_username is optional in OIDC tokens, falls back to sub
+  safety: Default is payload['sub'] which is required; absence of optional claim is expected
   expires: null
 - key: web/auth/oidc.py:R1:OIDCAuthProvider:get_user_info:fp=a3787dad45249f67
   owner: web-auth
   reason: Tier 3 boundary — groups claim is optional in OIDC tokens; None = no groups
-  safety: None returns empty groups; non-list raises AuthenticationError; no silent
-    discard
+  safety: None returns empty groups; non-list raises AuthenticationError; no silent discard
   expires: null
 - key: web/auth/oidc.py:R5:OIDCAuthProvider:get_user_info:fp=8ca64d6c43cc262d
   owner: web-auth
@@ -108,8 +101,7 @@ allow_hits:
   expires: null
 - key: web/auth/oidc.py:R1:OIDCAuthProvider:get_user_info:fp=e9a89464d499fed3
   owner: web-auth
-  reason: Tier 3 boundary — preferred_username is optional in OIDC tokens, falls back
-    to sub
+  reason: Tier 3 boundary — preferred_username is optional in OIDC tokens, falls back to sub
   safety: Default is payload['sub'] which is required
   expires: null
 - key: web/auth/oidc.py:R1:OIDCAuthProvider:get_user_info:fp=50e2c5aea8128cfe
@@ -149,15 +141,12 @@ allow_hits:
   expires: null
 - key: web/auth/entra.py:R1:EntraAuthProvider:authenticate:fp=fd48174d76f75c9d
   owner: web-auth
-  reason: Tier 3 boundary — preferred_username is optional in Entra tokens, falls
-    back to sub
-  safety: Default is payload['sub'] which is required; absence of optional claim is
-    expected
+  reason: Tier 3 boundary — preferred_username is optional in Entra tokens, falls back to sub
+  safety: Default is payload['sub'] which is required; absence of optional claim is expected
   expires: null
 - key: web/auth/entra.py:R1:EntraAuthProvider:get_user_info:fp=011fa8f44233c8e6
   owner: web-auth
-  reason: Tier 3 boundary — preferred_username is optional in Entra tokens, falls
-    back to sub
+  reason: Tier 3 boundary — preferred_username is optional in Entra tokens, falls back to sub
   safety: Default is payload['sub'] which is required
   expires: null
 - key: web/auth/entra.py:R1:EntraAuthProvider:get_user_info:fp=cf8febe0ecd5d91c
@@ -182,14 +171,12 @@ allow_hits:
   expires: null
 - key: web/app.py:R5:_settings_from_env:fp=bb118a9028ce2eff
   owner: web-app
-  reason: Tier 3 boundary — JSON-parsed env var may be a list; isinstance check classifies
-    for tuple conversion
+  reason: Tier 3 boundary — JSON-parsed env var may be a list; isinstance check classifies for tuple conversion
   safety: isinstance used only for type dispatch; no contract masking
   expires: null
 - key: web/app.py:R6:_settings_from_env:fp=4bd0041b827e4b56
   owner: web-app
-  reason: Tier 3 boundary — env var value that isn't valid JSON is treated as plain
-    string (the common case)
+  reason: Tier 3 boundary — env var value that isn't valid JSON is treated as plain string (the common case)
   safety: JSONDecodeError caught only to fall back to raw string; no silent data loss
   expires: null
 - key: web/blobs/routes.py:R1:create_blobs_router:list_blobs:fp=be5f3aed9b28c617
@@ -207,16 +194,6 @@ allow_hits:
   reason: False positive — @router.get() is FastAPI HTTP route decorator, not dict.get()
   safety: No dict access involved
   expires: null
-- key: web/sessions/routes.py:R1:create_session_router:list_sessions:fp=60d9bd145263a299
-  owner: web-sessions
-  reason: False positive — @router.get() is FastAPI HTTP route decorator, not dict.get()
-  safety: No dict access involved
-  expires: null
-- key: web/sessions/routes.py:R1:create_session_router:get_session:fp=71d385ab0bc7d9aa
-  owner: web-sessions
-  reason: False positive — @router.get() is FastAPI HTTP route decorator, not dict.get()
-  safety: No dict access involved
-  expires: null
 - key: web/execution/routes.py:R1:create_execution_router:get_run_status:fp=d08d1e4253439ed0
   owner: web-execution
   reason: False positive — @router.get() is FastAPI HTTP route decorator, not dict.get()
@@ -230,14 +207,12 @@ allow_hits:
 - key: web/execution/progress.py:R8:ProgressBroadcaster:subscribe:fp=e8ef5588226d0270
   owner: web-execution
   reason: Subscriber map creates the per-run queue set lazily on first subscription
-  safety: Mutation is guarded by the broadcaster lock and only initializes empty internal
-    state
+  safety: Mutation is guarded by the broadcaster lock and only initializes empty internal state
   expires: null
 - key: web/execution/progress.py:R1:ProgressBroadcaster:broadcast:fp=3a209ff2d0c9740c
   owner: web-execution
   reason: Broadcast treats an absent run entry as 'no subscribers' for that run
-  safety: A missing subscriber set results in a no-op broadcast, which is the correct
-    behavior
+  safety: A missing subscriber set results in a no-op broadcast, which is the correct behavior
   expires: null
 - key: web/execution/progress.py:R6:ProgressBroadcaster:_safe_put:fp=fb0d3946bc2737fd
   owner: web-execution
@@ -256,8 +231,7 @@ allow_hits:
   expires: null
 - key: web/execution/progress.py:R9:ProgressBroadcaster:cleanup_run:fp=7c47e683391777b0
   owner: web-execution
-  reason: Run cleanup is idempotent because unsubscribe and explicit cleanup can both
-    remove the same run entry
+  reason: Run cleanup is idempotent because unsubscribe and explicit cleanup can both remove the same run entry
   safety: Missing key simply means there are no remaining subscribers to clean up
   expires: null
 - key: web/auth/middleware.py:R6:get_current_user:fp=ea59abc681792adb
@@ -267,8 +241,7 @@ allow_hits:
   expires: null
 - key: web/auth/middleware.py:R1:get_current_user:fp=27850ac518f1116d
   owner: web-auth
-  reason: Tier 3 boundary — request.headers.get('Authorization') reads untrusted HTTP
-    header
+  reason: Tier 3 boundary — request.headers.get('Authorization') reads untrusted HTTP header
   safety: Missing header returns 401; malformed header returns 401; no default fabrication
   expires: null
 - key: web/auth/routes.py:R1:create_auth_router:refresh_token:fp=319f439a08e7dbab
@@ -278,38 +251,32 @@ allow_hits:
   expires: null
 - key: web/composer/state.py:R1:NodeSpec:from_dict:fp=20c83cd0fd6616b3
   owner: web-composer
-  reason: Optional fields — to_dict() conditionally omits None fields; from_dict()
-    defaults to None
+  reason: Optional fields — to_dict() conditionally omits None fields; from_dict() defaults to None
   safety: Missing = None; matches dataclass field default; round-trip invariant tested
   expires: null
 - key: web/composer/state.py:R1:NodeSpec:from_dict:fp=4809b8ba976f8b58
   owner: web-composer
-  reason: Optional fields — to_dict() conditionally omits None fields; from_dict()
-    defaults to None
+  reason: Optional fields — to_dict() conditionally omits None fields; from_dict() defaults to None
   safety: Missing = None; matches dataclass field default; round-trip invariant tested
   expires: null
 - key: web/composer/state.py:R1:NodeSpec:from_dict:fp=6a5f0200a9edf866
   owner: web-composer
-  reason: Optional fields — to_dict() conditionally omits None fields; from_dict()
-    defaults to None
+  reason: Optional fields — to_dict() conditionally omits None fields; from_dict() defaults to None
   safety: Missing = None; matches dataclass field default; round-trip invariant tested
   expires: null
 - key: web/composer/state.py:R1:NodeSpec:from_dict:fp=00c36fa768e34907
   owner: web-composer
-  reason: Optional fields — to_dict() conditionally omits None fields; from_dict()
-    defaults to None
+  reason: Optional fields — to_dict() conditionally omits None fields; from_dict() defaults to None
   safety: Missing = None; matches dataclass field default; round-trip invariant tested
   expires: null
 - key: web/composer/state.py:R1:NodeSpec:from_dict:fp=75c72c0b05e76f0e
   owner: web-composer
-  reason: Optional fields — to_dict() conditionally omits None fields; from_dict()
-    defaults to None
+  reason: Optional fields — to_dict() conditionally omits None fields; from_dict() defaults to None
   safety: Missing = None; matches dataclass field default; round-trip invariant tested
   expires: null
 - key: web/composer/state.py:R1:NodeSpec:from_dict:fp=3b24769d26df767e
   owner: web-composer
-  reason: Optional fields — to_dict() conditionally omits None fields; from_dict()
-    defaults to None
+  reason: Optional fields — to_dict() conditionally omits None fields; from_dict() defaults to None
   safety: Missing = None; matches dataclass field default; round-trip invariant tested
   expires: null
 - key: web/composer/state.py:R1:CompositionState:with_metadata:fp=e4ed52bc9bfb29d5
@@ -324,20 +291,19 @@ allow_hits:
   expires: null
 - key: web/composer/state.py:R1:CompositionState:validate:fp=d8f82ae3c0a7445b
   owner: web-composer
-  reason: W4 extension check — output.options is a Mapping of user-authored config;
-    path key is optional and may not exist
+  reason: W4 extension check — output.options is a Mapping of user-authored config; path key is optional and may not exist
   safety: Missing path key returns None; no warning emitted; no fabrication
   expires: null
 - key: web/composer/state.py:R5:CompositionState:validate:fp=22b391db6486c675
   owner: web-composer
-  reason: W4 extension check — path_val from options Mapping may be any type;
-    isinstance guards against non-string values before PurePosixPath parsing
+  reason: W4 extension check — path_val from options Mapping may be any type; isinstance guards against non-string values
+    before PurePosixPath parsing
   safety: Non-string path_val is skipped; no warning emitted; no type coercion
   expires: null
 - key: web/composer/state.py:R1:CompositionState:validate:fp=45756dff83441453
   owner: web-composer
-  reason: W4 extension check — _plugin_exts lookup for plugins not in the map;
-    unknown plugins are silently skipped (no warning emitted)
+  reason: W4 extension check — _plugin_exts lookup for plugins not in the map; unknown plugins are silently skipped (no warning
+    emitted)
   safety: Unknown plugin returns None; no warning emitted; no false positive
   expires: null
 - key: web/composer/tools.py:R6:_execute_list_models:fp=a9bd06ea6cd1e052
@@ -347,10 +313,8 @@ allow_hits:
   expires: null
 - key: web/execution/validation.py:R1:validate_pipeline:fp=367920a48603c655
   owner: web-execution
-  reason: Validation checks optional source path/file keys supplied by composition
-    state
-  safety: Absent keys are treated honestly as 'no path provided' and the check is
-    recorded as skipped/passed
+  reason: Validation checks optional source path/file keys supplied by composition state
+  safety: Absent keys are treated honestly as 'no path provided' and the check is recorded as skipped/passed
   expires: null
 - key: web/execution/validation.py:R1:validate_pipeline:fp=ecae81e096193d96
   owner: web-execution
@@ -359,33 +323,27 @@ allow_hits:
   expires: null
 - key: web/secrets/server_store.py:R1:ServerSecretStore:has_secret:fp=4c611b234b52a51a
   owner: web-secrets
-  reason: Tier 3 boundary — os.environ.get() checks env var presence for has_secret
-    fast path
+  reason: Tier 3 boundary — os.environ.get() checks env var presence for has_secret fast path
   safety: Returns bool only; no secret value exposed; no default fabrication
   expires: null
 - key: web/secrets/server_store.py:R1:ServerSecretStore:get_secret:fp=baad87e6c2e61bb4
   owner: web-secrets
-  reason: Tier 3 boundary — os.environ.get() reads external env var; unset/empty raises
-    SecretNotFoundError
+  reason: Tier 3 boundary — os.environ.get() reads external env var; unset/empty raises SecretNotFoundError
   safety: Missing env var raises SecretNotFoundError; no default fabrication
   expires: null
 - key: web/secrets/server_store.py:R1:ServerSecretStore:list_secrets:fp=a12f8cf908d2c98d
   owner: web-secrets
-  reason: Tier 3 boundary — os.environ.get() checks env var presence for availability
-    metadata
+  reason: Tier 3 boundary — os.environ.get() checks env var presence for availability metadata
   safety: Only produces bool available flag; no secret value exposed
   expires: null
 - key: web/secrets/service.py:R6:WebSecretService:resolve:fp=9c915e3f931310ca
   owner: web-secrets
-  reason: Chained resolution — user store miss falls through to server store; SecretNotFoundError
-    is the expected miss signal
-  safety: Only SecretNotFoundError is caught; all other exceptions propagate; no data
-    loss
+  reason: Chained resolution — user store miss falls through to server store; SecretNotFoundError is the expected miss signal
+  safety: Only SecretNotFoundError is caught; all other exceptions propagate; no data loss
   expires: null
 - key: web/secrets/service.py:R6:WebSecretService:resolve:fp=e0a95062e1360fdb
   owner: web-secrets
-  reason: Chained resolution — server store miss returns None; SecretNotFoundError
-    is the expected miss signal
+  reason: Chained resolution — server store miss returns None; SecretNotFoundError is the expected miss signal
   safety: Only SecretNotFoundError is caught; caller receives None for genuine absence
   expires: null
 - key: web/secrets/routes.py:R1:create_secrets_router:list_secrets:fp=5618b82e58dad600
@@ -395,8 +353,7 @@ allow_hits:
   expires: null
 - key: web/execution/validation.py:R5:_collect_secret_refs:fp=7955508cb148c972
   owner: web-execution
-  reason: Tree-walk — isinstance() dispatches dict/list/scalar branches in recursive
-    config traversal
+  reason: Tree-walk — isinstance() dispatches dict/list/scalar branches in recursive config traversal
   safety: No contract masking; structural dispatch on deserialized YAML (Tier 3 data)
   expires: null
 - key: web/execution/validation.py:R5:_collect_secret_refs:fp=c7f127a19ae9acd8
@@ -406,8 +363,7 @@ allow_hits:
   expires: null
 - key: web/execution/validation.py:R5:_collect_secret_refs:fp=9d372da2d9050ede
   owner: web-execution
-  reason: Tree-walk — isinstance() dispatches list/tuple branch in recursive config
-    traversal
+  reason: Tree-walk — isinstance() dispatches list/tuple branch in recursive config traversal
   safety: No contract masking; structural dispatch on deserialized YAML (Tier 3 data)
   expires: null
 - key: web/app.py:R1:create_app:fp=c6b4a1556ba16eff
@@ -449,56 +405,6 @@ allow_hits:
   owner: web-blobs
   reason: Best-effort cleanup on fork failure — delete_blob may fail if DB disconnected
   safety: Falls back to file unlink; original error re-raised
-  expires: null
-- key: web/sessions/routes.py:R1:create_session_router:get_current_state:fp=4266fe51e1fbe28d
-  owner: web-sessions
-  reason: False positive — @router.get() is FastAPI route decorator
-  safety: No dict access involved
-  expires: null
-- key: web/sessions/routes.py:R1:create_session_router:get_messages:fp=1783be04c8760b2e
-  owner: web-sessions
-  reason: False positive — @router.get() is FastAPI route decorator
-  safety: No dict access involved
-  expires: null
-- key: web/sessions/routes.py:R1:create_session_router:get_state_versions:fp=46c0aa464be5aaa3
-  owner: web-sessions
-  reason: False positive — @router.get() is FastAPI route decorator
-  safety: No dict access involved
-  expires: null
-- key: web/sessions/routes.py:R1:create_session_router:get_state_yaml:fp=c9ea890c53e0e5b6
-  owner: web-sessions
-  reason: False positive — @router.get() is FastAPI route decorator
-  safety: No dict access involved
-  expires: null
-- key: web/sessions/routes.py:R1:create_session_router:list_session_runs:fp=143ddde837bf9e7b
-  owner: web-sessions
-  reason: False positive — @router.get() is FastAPI route decorator
-  safety: No dict access involved
-  expires: null
-- key: web/sessions/routes.py:R1:create_session_router:fork_from_message:fp=093cc4a0ab7d686a
-  owner: web-sessions
-  reason: source_dict.get() on Tier 3 composition state — optional source options
-  safety: Returns empty dict default
-  expires: null
-- key: web/sessions/routes.py:R1:create_session_router:fork_from_message:fp=66b11b38ca907e8d
-  owner: web-sessions
-  reason: options.get() on Tier 3 state source — blob_ref is optional
-  safety: Returns None; no rewrite if absent
-  expires: null
-- key: web/sessions/routes.py:R5:create_session_router:fork_from_message:fp=13ea430f169d87ca
-  owner: web-sessions
-  reason: isinstance check on deserialized composition state source
-  safety: Skips rewrite if not dict
-  expires: null
-- key: web/sessions/routes.py:R5:create_session_router:fork_from_message:fp=9a052b8fb6efade5
-  owner: web-sessions
-  reason: isinstance check on blob_ref — may be str or UUID from persisted state
-  safety: UUID conversion handles both types; ValueError guard handles non-UUID strings
-  expires: null
-- key: web/sessions/routes.py:R6:create_session_router:fork_from_message:fp=87c12b2a54b96f4e
-  owner: web-sessions
-  reason: Tier 3 boundary — persisted blob_ref may be non-UUID string; skip rewrite gracefully
-  safety: ValueError caught only for UUID parse; fork proceeds without blob_ref remap
   expires: null
 - key: web/sessions/service.py:R5:SessionServiceImpl:_unwrap_envelope:fp=92be5b7dd57e1352
   owner: web-sessions
@@ -612,8 +518,7 @@ allow_hits:
   expires: null
 - key: web/blobs/service.py:R6:BlobServiceImpl:finalize_run_output_blobs:_sync:fp=c09366e02831de24
   owner: web-blobs
-  reason: Quota exceeded during finalization marks blob as error instead of crashing
-    run
+  reason: Quota exceeded during finalization marks blob as error instead of crashing run
   safety: Over-quota file deleted; blob marked error; run still finalized
   expires: null
 - key: web/execution/routes.py:R1:create_execution_router:websocket_run_progress:fp=59475b47a61c42da
@@ -628,8 +533,7 @@ allow_hits:
   expires: null
 - key: web/execution/routes.py:R4:create_execution_router:websocket_run_progress:fp=e1fde533c619942d
   owner: web-execution
-  reason: WebSocket transport writes can fail with varied connection-state exceptions
-    across ASGI servers
+  reason: WebSocket transport writes can fail with varied connection-state exceptions across ASGI servers
   safety: Breaks out of loop; falls through to unsubscribe
   expires: null
 - key: web/execution/routes.py:R6:create_execution_router:websocket_run_progress:fp=f70460a861072998
@@ -639,50 +543,23 @@ allow_hits:
   expires: null
 - key: web/execution/routes.py:R4:create_execution_router:websocket_run_progress:fp=8051d9a2c963899b
   owner: web-execution
-  reason: Top-level WebSocket handler guard converts unexpected failures into clean
-    1011 close
+  reason: Top-level WebSocket handler guard converts unexpected failures into clean 1011 close
   safety: Logged; clean close sent to client
   expires: null
 - key: web/execution/routes.py:R4:create_execution_router:websocket_run_progress:fp=3e188822ed707289
   owner: web-execution
-  reason: Best-effort websocket.close() can raise transport-specific exceptions after
-    primary failure
+  reason: Best-effort websocket.close() can raise transport-specific exceptions after primary failure
   safety: Logged; already in error path
-  expires: null
-- key: web/sessions/routes.py:R6:create_session_router:recompose:fp=6a0af11bd854aea9
-  owner: web-sessions
-  reason: Recompose validation — user-authored composition state may have data-shape errors
-  safety: Narrowed to ValueError/TypeError/KeyError; returns 422; AttributeError propagates as bug
-  expires: null
-- key: web/sessions/routes.py:R6:create_session_router:recompose:fp=84e658d80da505cd
-  owner: web-sessions
-  reason: Recompose persistence — save may fail with data-shape or DB integrity errors
-  safety: Narrowed to ValueError/TypeError/KeyError/IntegrityError; returns 422; code bugs propagate
-  expires: null
-- key: web/sessions/routes.py:R6:create_session_router:send_message:fp=a7fceef5542eb88d
-  owner: web-sessions
-  reason: Convergence partial-state validation may fail on damaged LLM output — narrowed
-    to data-shape errors
-  safety: Narrowed to ValueError/TypeError/KeyError; AttributeError propagates as bug
-  expires: null
-- key: web/sessions/routes.py:R6:create_session_router:send_message:fp=32746eeb2416b323
-  owner: web-sessions
-  reason: Convergence partial-state save may fail — narrowed to data-shape and DB
-    integrity errors
-  safety: Error logged; 422 still returned to client; code bugs propagate
   expires: null
 - key: web/execution/routes.py:R6:create_execution_router:websocket_run_progress:fp=0717a723027c2e78
   owner: web-execution
-  reason: WebSocket auth — narrowed from except (AuthenticationError, Exception) to
-    except AuthenticationError only
-  safety: Only auth failures close with 4001; infrastructure errors propagate to outer
-    handler
+  reason: WebSocket auth — narrowed from except (AuthenticationError, Exception) to except AuthenticationError only
+  safety: Only auth failures close with 4001; infrastructure errors propagate to outer handler
   expires: null
 - key: web/execution/routes.py:R6:create_execution_router:websocket_run_progress:fp=e26ebed511a767cd
   owner: web-execution
   reason: Run-ownership IDOR gate — narrowed from except Exception to except ValueError
-  safety: Only not-found errors return 4004; infrastructure errors propagate to outer
-    handler
+  safety: Only not-found errors return 4004; infrastructure errors propagate to outer handler
   expires: null
 - key: web/execution/routes.py:R6:create_execution_router:websocket_run_progress:fp=5be1557e3cf02771
   owner: web-execution
@@ -696,9 +573,78 @@ allow_hits:
   expires: null
 - key: web/secrets/user_store.py:R1:_compute_fingerprint:fp=1c5082907e8fb795
   owner: web-secrets
-  reason: Tier 3 — fingerprint key from deployment environment; os.environ.get followed
-    by check-and-crash
+  reason: Tier 3 — fingerprint key from deployment environment; os.environ.get followed by check-and-crash
   safety: Missing key raises RuntimeError immediately; no silent default
+  expires: null
+- key: web/sessions/routes.py:R6:_handle_convergence_error:fp=207d9ab24ede032c
+  owner: web-sessions
+  reason: Convergence partial-state validation may fail on damaged LLM output — narrowed to data-shape errors
+  safety: Returns 422 with structured error, does not swallow
+  expires: null
+- key: web/sessions/routes.py:R6:_handle_convergence_error:fp=55096436124ec1bc
+  owner: web-sessions
+  reason: Convergence partial-state save may fail — narrowed to data-shape and DB integrity errors
+  safety: Returns 422 with structured error, does not swallow
+  expires: null
+- key: web/sessions/routes.py:R1:create_session_router:list_sessions:fp=e4fc1ae0724da91c
+  owner: web-sessions
+  reason: False positive — @router.get() is FastAPI HTTP route decorator, not dict.get()
+  safety: No dict access involved
+  expires: null
+- key: web/sessions/routes.py:R1:create_session_router:get_session:fp=c3ac0897dc5917d2
+  owner: web-sessions
+  reason: False positive — @router.get() is FastAPI HTTP route decorator, not dict.get()
+  safety: No dict access involved
+  expires: null
+- key: web/sessions/routes.py:R1:create_session_router:get_messages:fp=8ff4b0f8424aabbe
+  owner: web-sessions
+  reason: False positive — @router.get() is FastAPI HTTP route decorator, not dict.get()
+  safety: No dict access involved
+  expires: null
+- key: web/sessions/routes.py:R1:create_session_router:list_session_runs:fp=a36e00032eabf083
+  owner: web-sessions
+  reason: False positive — @router.get() is FastAPI HTTP route decorator, not dict.get()
+  safety: No dict access involved
+  expires: null
+- key: web/sessions/routes.py:R1:create_session_router:get_current_state:fp=c756aa20196fe282
+  owner: web-sessions
+  reason: False positive — @router.get() is FastAPI HTTP route decorator, not dict.get()
+  safety: No dict access involved
+  expires: null
+- key: web/sessions/routes.py:R1:create_session_router:get_state_versions:fp=6349b38d7438a2af
+  owner: web-sessions
+  reason: False positive — @router.get() is FastAPI HTTP route decorator, not dict.get()
+  safety: No dict access involved
+  expires: null
+- key: web/sessions/routes.py:R1:create_session_router:get_state_yaml:fp=715d771227ed6645
+  owner: web-sessions
+  reason: False positive — @router.get() is FastAPI HTTP route decorator, not dict.get()
+  safety: No dict access involved
+  expires: null
+- key: web/sessions/routes.py:R5:create_session_router:fork_from_message:fp=023437ef69eedd86
+  owner: web-sessions
+  reason: isinstance check on deserialized composition state source — Tier 3 boundary
+  safety: Validates structure from persisted state
+  expires: null
+- key: web/sessions/routes.py:R1:create_session_router:fork_from_message:fp=054abc0b0e94026a
+  owner: web-sessions
+  reason: source_dict.get() on Tier 3 composition state — optional source options
+  safety: Default empty dict is safe for optional field
+  expires: null
+- key: web/sessions/routes.py:R1:create_session_router:fork_from_message:fp=c1134152465a6c22
+  owner: web-sessions
+  reason: options.get() on Tier 3 state source — blob_ref is optional
+  safety: Returns None on miss, handled by conditional below
+  expires: null
+- key: web/sessions/routes.py:R5:create_session_router:fork_from_message:fp=7b11e9e3fa323448
+  owner: web-sessions
+  reason: isinstance check on blob_ref — may be str or UUID from persisted state
+  safety: Tier 3 boundary — persisted blob_ref type is not guaranteed
+  expires: null
+- key: web/sessions/routes.py:R6:create_session_router:fork_from_message:fp=305adee697acd92c
+  owner: web-sessions
+  reason: Tier 3 boundary — persisted blob_ref may be non-UUID string; skip rewrite gracefully
+  safety: Falls through to use original ref unchanged
   expires: null
 per_file_rules:
 - pattern: web/composer/tools.py
@@ -706,13 +652,12 @@ per_file_rules:
   - R1
   - R5
   - R9
-  reason: Tier 3 boundary — LLM tool call arguments are external data with optional
-    fields per JSON schema; pop-with-default implements RFC 7386 merge patch null semantics
+  reason: Tier 3 boundary — LLM tool call arguments are external data with optional fields per JSON schema; pop-with-default
+    implements RFC 7386 merge patch null semantics
   expires: null
 - pattern: web/composer/service.py
   rules:
   - R6
-  reason: Tier 3 boundary — LLM tool call arguments may contain malformed JSON (JSONDecodeError)
-    or missing required keys (KeyError/TypeError). Errors returned to LLM for self-correction,
-    not swallowed.
+  reason: Tier 3 boundary — LLM tool call arguments may contain malformed JSON (JSONDecodeError) or missing required keys
+    (KeyError/TypeError). Errors returned to LLM for self-correction, not swallowed.
   expires: null

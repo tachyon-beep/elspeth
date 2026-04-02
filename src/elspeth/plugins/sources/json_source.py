@@ -18,6 +18,8 @@ from pydantic import ValidationError, field_validator, model_validator
 
 from elspeth.contracts import PluginSchema, SourceRow
 from elspeth.contracts.contexts import SourceContext
+from elspeth.contracts.contract_builder import ContractBuilder
+from elspeth.contracts.schema_contract_factory import create_contract_from_config
 from elspeth.plugins.infrastructure.base import BaseSource
 from elspeth.plugins.infrastructure.config_base import SourceDataConfig
 from elspeth.plugins.infrastructure.schema_factory import create_schema_from_config
@@ -166,9 +168,6 @@ class JSONSource(BaseSource):
 
         # Contract creation: FIXED schemas can be set immediately (fast path),
         # FLEXIBLE/OBSERVED defer until first row when field_resolution is known.
-        from elspeth.contracts.contract_builder import ContractBuilder
-        from elspeth.contracts.schema_contract_factory import create_contract_from_config
-
         initial_contract = create_contract_from_config(self._schema_config)
         if initial_contract.locked:
             self.set_schema_contract(initial_contract)
@@ -400,9 +399,6 @@ class JSONSource(BaseSource):
             # Create contract builder only if no contract is set yet (FIXED
             # schemas set the contract in __init__ and skip the builder).
             if self._contract_builder is None and self.get_schema_contract() is None:
-                from elspeth.contracts.contract_builder import ContractBuilder
-                from elspeth.contracts.schema_contract_factory import create_contract_from_config
-
                 initial_contract = create_contract_from_config(
                     self._schema_config,
                     field_resolution=self._field_resolution.resolution_mapping,

@@ -18,6 +18,8 @@ from pydantic import ValidationError, field_validator
 
 from elspeth.contracts import PluginSchema, SourceRow
 from elspeth.contracts.contexts import SourceContext
+from elspeth.contracts.contract_builder import ContractBuilder
+from elspeth.contracts.schema_contract_factory import create_contract_from_config
 from elspeth.plugins.infrastructure.base import BaseSource
 from elspeth.plugins.infrastructure.config_base import SourceDataConfig
 from elspeth.plugins.infrastructure.schema_factory import create_schema_from_config
@@ -75,9 +77,6 @@ class TextSource(BaseSource):
             allow_coercion=True,
         )
         self.output_schema = self._schema_class
-
-        from elspeth.contracts.contract_builder import ContractBuilder
-        from elspeth.contracts.schema_contract_factory import create_contract_from_config
 
         initial_contract = create_contract_from_config(self._schema_config)
         if initial_contract.locked:

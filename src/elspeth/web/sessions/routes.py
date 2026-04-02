@@ -129,6 +129,70 @@ async def _verify_session_ownership(
     return session
 
 
+async def _handle_convergence_error(
+    exc: ComposerConvergenceError,
+    service: SessionServiceProtocol,
+    session_id: UUID,
+    log_prefix: str,
+) -> dict[str, object]:
+    """Build 422 response body and persist partial state for convergence errors.
+
+    Shared by send_message and recompose — only the structlog event prefix
+    differs between callers.
+
+    Args:
+        exc: The convergence error with optional partial_state
+        service: Session service for DB persistence
+        session_id: Session to persist partial state to
+        log_prefix: Prefix for structlog event names (e.g. "convergence" or "recompose_convergence")
+
+    Returns:
+        Response body dict for HTTPException(status_code=422)
+    """
+    response_body: dict[str, object] = {
+        "error_type": "convergence",
+        "detail": str(exc),
+        "turns_used": exc.max_turns,
+        "budget_exhausted": exc.budget_exhausted,
+    }
+    if exc.partial_state is not None:
+        # Validate guard: partial_state from the LLM loop may be
+        # structurally damaged. Catch data-shape errors so we can
+        # still persist with is_valid=False rather than losing it.
+        try:
+            validation = exc.partial_state.validate()
+        except (ValueError, TypeError, KeyError) as val_err:
+            slog.warning(f"{log_prefix}_validation_failed", error=str(val_err))
+            validation = ValidationSummary(is_valid=False, errors=("validation_failed",))
+
+        # Persistence guard: DB write failure should not upgrade the
+        # response from 422 (convergence error) to 500 (internal).
+        try:
+            state_d = exc.partial_state.to_dict()
+            state_data = CompositionStateData(
+                source=state_d["source"],
+                nodes=state_d["nodes"],
+                edges=state_d["edges"],
+                outputs=state_d["outputs"],
+                metadata_=state_d["metadata"],
+                is_valid=validation.is_valid,
+                validation_errors=list(validation.errors) if validation.errors else None,
+            )
+            await service.save_composition_state(session_id, state_data)
+            response_body["partial_state"] = state_d
+        except (ValueError, TypeError, KeyError, IntegrityError) as save_err:
+            slog.error(
+                f"{log_prefix}_partial_state_save_failed",
+                session_id=str(session_id),
+                error=str(save_err),
+                exc_info=True,
+            )
+            response_body["partial_state_save_failed"] = True
+            response_body["partial_state_save_error"] = str(save_err)
+
+    return response_body
+
+
 def create_session_router() -> APIRouter:
     """Create the session router with /api/sessions prefix."""
     router = APIRouter(prefix="/api/sessions", tags=["sessions"])
@@ -288,49 +352,7 @@ def create_session_router() -> APIRouter:
         try:
             result = await composer.compose(body.content, chat_messages, state, session_id=str(session_id), user_id=str(user.user_id))
         except ComposerConvergenceError as exc:
-            response_body: dict[str, object] = {
-                "error_type": "convergence",
-                "detail": str(exc),
-                "turns_used": exc.max_turns,
-                "budget_exhausted": exc.budget_exhausted,
-            }
-            if exc.partial_state is not None:
-                # Validate guard: partial_state from the LLM loop may be
-                # structurally damaged.  Catch data-shape errors so we can
-                # still persist with is_valid=False rather than losing it.
-                try:
-                    validation = exc.partial_state.validate()
-                except (ValueError, TypeError, KeyError) as val_err:
-                    from elspeth.web.composer.state import ValidationSummary
-
-                    slog.warning("convergence_validation_failed", error=str(val_err))
-                    validation = ValidationSummary(is_valid=False, errors=("validation_failed",))
-
-                # Persistence guard: DB write failure should not upgrade the
-                # response from 422 (convergence error) to 500 (internal).
-                try:
-                    state_d = exc.partial_state.to_dict()
-                    state_data = CompositionStateData(
-                        source=state_d["source"],
-                        nodes=state_d["nodes"],
-                        edges=state_d["edges"],
-                        outputs=state_d["outputs"],
-                        metadata_=state_d["metadata"],
-                        is_valid=validation.is_valid,
-                        validation_errors=list(validation.errors) if validation.errors else None,
-                    )
-                    await service.save_composition_state(session.id, state_data)
-                    response_body["partial_state"] = state_d
-                except (ValueError, TypeError, KeyError, IntegrityError) as save_err:
-                    slog.error(
-                        "convergence_partial_state_save_failed",
-                        session_id=str(session_id),
-                        error=str(save_err),
-                        exc_info=True,
-                    )
-                    response_body["partial_state_save_failed"] = True
-                    response_body["partial_state_save_error"] = str(save_err)
-
+            response_body = await _handle_convergence_error(exc, service, session.id, "convergence")
             raise HTTPException(status_code=422, detail=response_body) from exc
         except LiteLLMAuthError as exc:
             raise HTTPException(
@@ -440,42 +462,7 @@ def create_session_router() -> APIRouter:
         try:
             result = await composer.compose(last_user_content, chat_messages, state, session_id=str(session_id), user_id=str(user.user_id))
         except ComposerConvergenceError as exc:
-            response_body: dict[str, object] = {
-                "error_type": "convergence",
-                "detail": str(exc),
-                "turns_used": exc.max_turns,
-                "budget_exhausted": exc.budget_exhausted,
-            }
-            if exc.partial_state is not None:
-                try:
-                    validation = exc.partial_state.validate()
-                except (ValueError, TypeError, KeyError) as val_err:
-                    slog.warning("recompose_convergence_validation_failed", error=str(val_err))
-                    validation = ValidationSummary(is_valid=False, errors=("validation_failed",))
-
-                try:
-                    state_d = exc.partial_state.to_dict()
-                    state_data = CompositionStateData(
-                        source=state_d["source"],
-                        nodes=state_d["nodes"],
-                        edges=state_d["edges"],
-                        outputs=state_d["outputs"],
-                        metadata_=state_d["metadata"],
-                        is_valid=validation.is_valid,
-                        validation_errors=list(validation.errors) if validation.errors else None,
-                    )
-                    await service.save_composition_state(session.id, state_data)
-                    response_body["partial_state"] = state_d
-                except (ValueError, TypeError, KeyError, IntegrityError) as save_err:
-                    slog.error(
-                        "recompose_convergence_partial_state_save_failed",
-                        session_id=str(session_id),
-                        error=str(save_err),
-                        exc_info=True,
-                    )
-                    response_body["partial_state_save_failed"] = True
-                    response_body["partial_state_save_error"] = str(save_err)
-
+            response_body = await _handle_convergence_error(exc, service, session.id, "recompose_convergence")
             raise HTTPException(status_code=422, detail=response_body) from exc
         except LiteLLMAuthError as exc:
             raise HTTPException(

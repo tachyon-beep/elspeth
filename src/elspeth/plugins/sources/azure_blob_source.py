@@ -21,7 +21,9 @@ from pydantic import BaseModel, Field, ValidationError, field_validator, model_v
 
 from elspeth.contracts import CallStatus, CallType, PluginSchema, SourceRow
 from elspeth.contracts.contexts import SourceContext
+from elspeth.contracts.contract_builder import ContractBuilder
 from elspeth.contracts.errors import AuditIntegrityError
+from elspeth.contracts.schema_contract_factory import create_contract_from_config
 from elspeth.core.identifiers import validate_field_names
 from elspeth.plugins.infrastructure.azure_auth import AzureAuthConfig
 from elspeth.plugins.infrastructure.base import BaseSource
@@ -349,9 +351,6 @@ class AzureBlobSource(BaseSource):
         # - CSV: needs field_resolution, so ContractBuilder created during load()
         # - JSON/JSONL with FIXED: contract locked immediately
         # - JSON/JSONL with FLEXIBLE/OBSERVED: ContractBuilder for first-row inference
-        from elspeth.contracts.contract_builder import ContractBuilder
-        from elspeth.contracts.schema_contract_factory import create_contract_from_config
-
         if self._format == "csv":
             # CSV needs field_resolution from headers - defer contract creation to load()
             self._contract_builder = None
@@ -623,9 +622,6 @@ class AzureBlobSource(BaseSource):
 
         # Create contract now that field_resolution is known (CSV path)
         if self._contract_builder is None and self._format == "csv":
-            from elspeth.contracts.contract_builder import ContractBuilder
-            from elspeth.contracts.schema_contract_factory import create_contract_from_config
-
             initial_contract = create_contract_from_config(
                 self._schema_config,
                 field_resolution=self._field_resolution.resolution_mapping if self._field_resolution else None,
@@ -708,7 +704,7 @@ class AzureBlobSource(BaseSource):
             yield from self._validate_and_yield(row, ctx)
 
         # Log row count for operator visibility
-        logger.info("csv_blob_parsed", row_count=row_count, blob_path=self._blob_path)
+        logger.info("csv_blob_parsed", rows_encountered=row_count, blob_path=self._blob_path)
 
     def _load_json_array(self, blob_data: bytes, ctx: SourceContext) -> Iterator[SourceRow]:
         """Load rows from JSON array blob data.
