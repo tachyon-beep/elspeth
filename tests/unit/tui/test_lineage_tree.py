@@ -6,12 +6,6 @@ from elspeth.tui.types import LineageData, NodeInfo, SourceInfo, TokenDisplayInf
 class TestLineageTreeWidget:
     """Tests for LineageTree widget."""
 
-    def test_can_import_widget(self) -> None:
-        """LineageTree widget can be imported."""
-        from elspeth.tui.widgets.lineage_tree import LineageTree
-
-        assert LineageTree is not None
-
     def test_widget_accepts_lineage_data(self) -> None:
         """Widget can be initialized with lineage data."""
         from elspeth.tui.widgets.lineage_tree import LineageTree
