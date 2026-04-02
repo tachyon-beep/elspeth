@@ -12,8 +12,37 @@ from typing import Any
 
 import pytest
 
-from elspeth.core.dag.builder import _field_required
+from elspeth.core.dag.builder import _field_name_type, _field_required
 from elspeth.core.dag.models import GraphValidationError
+
+
+class TestFieldNameTypeRejectsUnparseable:
+    """_field_name_type must raise ValueError for inputs that aren't str or single-key dict."""
+
+    def test_list_input_raises(self) -> None:
+        """List is not a valid field spec format."""
+        with pytest.raises(ValueError, match="Cannot parse field spec"):
+            _field_name_type([1, 2])
+
+    def test_integer_input_raises(self) -> None:
+        """Bare integer is not a valid field spec format."""
+        with pytest.raises(ValueError, match="Cannot parse field spec"):
+            _field_name_type(42)
+
+    def test_multi_key_dict_raises(self) -> None:
+        """Dict with 2+ keys but no name/type pair is unparseable."""
+        with pytest.raises(ValueError, match="Cannot parse field spec"):
+            _field_name_type({"id": "int", "score": "float"})
+
+    def test_empty_dict_raises(self) -> None:
+        """Empty dict has no keys to extract a field spec from."""
+        with pytest.raises(ValueError, match="Cannot parse field spec"):
+            _field_name_type({})
+
+    def test_none_input_raises(self) -> None:
+        """None is not a valid field spec format."""
+        with pytest.raises(ValueError, match="Cannot parse field spec"):
+            _field_name_type(None)
 
 
 class TestFieldRequiredRejectsNonBool:
