@@ -19,7 +19,7 @@ class TestWebSettingsDefaults:
 
     def test_port_default(self) -> None:
         settings = WebSettings()
-        assert settings.port == 8000
+        assert settings.port == 8451
 
     def test_auth_provider_default(self) -> None:
         settings = WebSettings()

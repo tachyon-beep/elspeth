@@ -10,6 +10,36 @@ description: >
 
 # Engine Patterns Reference
 
+> **Model complexity warning:** Engine code touches audit integrity (Tier 1),
+> plugin boundaries, and DAG execution. Do not delegate engine work to fast/simple
+> models — they will produce plausible-looking code that violates composite PK
+> joins, bypasses production code paths in tests, or adds defensive `.get()` on
+> Tier 1 data. Use Sonnet or Opus and include this skill in the prompt.
+
+## Quick Decision Table (Mechanical — No Judgment Required)
+
+For engine code, match the situation to this table. First match wins.
+
+| I'm writing... | Key rule | Common mistake |
+|----------------|----------|----------------|
+| A Landscape query joining `node_states` | Use `node_states.run_id` directly, never join through `nodes` on `node_id` alone | Ambiguous join — `node_id` reused across runs |
+| A `json.loads()` on data from our DB | No try/except — crash on failure. This is Tier 1 data. | Adding `except json.JSONDecodeError: return {}` |
+| A test that builds an `ExecutionGraph` | Use `ExecutionGraph.from_plugin_instances()`, not manual construction | `graph._branch_to_coalesce = {...}` bypasses production logic |
+| A test that loads pipeline config | Use `instantiate_plugins_from_config()`, not manual plugin construction | Building plugins by hand skips validation that production does |
+| Canonical JSON for hashing | Use `rfc8785.dumps()` after `_normalize_for_canonical()`. Reject NaN/Infinity. | `json.dumps(sort_keys=True)` is not deterministic |
+| A `from_settings()` mapping | Map every Settings field explicitly. Run `scripts.check_contracts`. | Adding a field to Settings but forgetting the Runtime*Config mapping |
+| An aggregation trigger | Timeout fires on next row arrival, not during idle. Document this. | Assuming timeout fires in real-time |
+| A retry state row | `(token_id, node_id, attempt)` is unique. Each attempt = separate row. | Updating the previous attempt row instead of inserting a new one |
+| Secret handling code | HMAC fingerprint only. Never store the actual secret. | Logging the secret value, even at DEBUG level |
+| Header/field name logic | Normalize at source boundary only. Use `SchemaContract.original_name` for restoration. | Re-normalizing in transforms or sinks |
+
+## Fix Right, Not Quick
+
+If you are proposing a fix that involves "a patch or temporary workaround," STOP.
+We only have one chance to fix things pre-release. Make the fix right, not quick.
+This especially includes architectural defects. Lint failures, failing tests, and
+CI/CD issues must all be resolved to merge — no exceptions.
+
 ## Composite Primary Key Pattern: nodes Table
 
 **CRITICAL:** The `nodes` table has a composite primary key `(node_id, run_id)`. This means the same `node_id` can exist in multiple runs when the same pipeline runs multiple times.

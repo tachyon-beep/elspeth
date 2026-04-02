@@ -2186,7 +2186,7 @@ def health(
 
 @app.command()
 def web(
-    port: int = typer.Option(8000, help="Port to listen on"),
+    port: int = typer.Option(8451, help="Port to listen on"),
     host: str = typer.Option("127.0.0.1", help="Host to bind to"),
     auth: str = typer.Option("local", help="Auth provider: local, oidc, entra"),
     reload: bool = typer.Option(False, help="Enable auto-reload for development"),

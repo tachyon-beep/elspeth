@@ -24,7 +24,7 @@ class WebSettings(BaseModel):
     model_config = ConfigDict(frozen=True)
 
     host: str = "127.0.0.1"
-    port: int = Field(default=8000, ge=1, le=65535)
+    port: int = Field(default=8451, ge=1, le=65535)
     auth_provider: Literal["local", "oidc", "entra"] = "local"
     registration_mode: Literal["open", "email_verified", "closed"] = "open"
     cors_origins: tuple[str, ...] = ("http://localhost:5173",)

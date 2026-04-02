@@ -36,7 +36,7 @@ class TestCreateApp:
         # create_app(None) uses WebSettings() which defaults data_dir to "data".
         # That won't exist in tests, so we pass explicit settings instead.
         app = create_app(_settings(tmp_path))
-        assert app.state.settings.port == 8000
+        assert app.state.settings.port == 8451
 
     def test_settings_stored_on_app_state(self, tmp_path) -> None:
         settings = _settings(tmp_path, port=9999)
