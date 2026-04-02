@@ -9,8 +9,6 @@ If the source outputs wrong types, the transform crashes immediately.
 import copy
 from typing import Any
 
-from pydantic import Field
-
 from elspeth.contracts.contexts import TransformContext
 from elspeth.contracts.schema_contract import PipelineRow
 from elspeth.plugins.infrastructure.base import BaseTransform
@@ -25,11 +23,6 @@ class PassThroughConfig(TransformDataConfig):
     Use 'schema: {mode: observed}' for dynamic field handling.
     """
 
-    validate_input: bool = Field(
-        default=False,
-        description="If True, validate input against schema (default: False)",
-    )
-
 
 class PassThrough(BaseTransform):
     """Pass rows through unchanged.
@@ -41,7 +34,6 @@ class PassThrough(BaseTransform):
 
     Config options:
         schema: Required. Schema for input/output (use {mode: observed} for any fields)
-        validate_input: If True, validate input against schema (default: False)
     """
 
     name = "passthrough"
@@ -50,7 +42,6 @@ class PassThrough(BaseTransform):
     def __init__(self, config: dict[str, Any]) -> None:
         super().__init__(config)
         cfg = PassThroughConfig.from_dict(config)
-        self.validate_input = cfg.validate_input
 
         self._schema_config = cfg.schema_config
         self.input_schema, self.output_schema = self._create_schemas(cfg.schema_config, "PassThrough")
@@ -66,8 +57,8 @@ class PassThrough(BaseTransform):
             TransformResult with unchanged row data
 
         Raises:
-            ValidationError: If validate_input=True and row fails schema validation.
-                This indicates a bug in the upstream source/transform.
+            PluginContractViolation: Raised by executor if row fails input schema
+                validation. This indicates a bug in the upstream source/transform.
         """
         return TransformResult.success(
             PipelineRow(copy.deepcopy(row.to_dict()), row.contract),

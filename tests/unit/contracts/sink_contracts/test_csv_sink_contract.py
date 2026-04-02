@@ -371,28 +371,3 @@ class TestCSVSinkQuotingCharacters:
 
         assert result1.artifact.content_hash == result2.artifact.content_hash
         assert path1.read_bytes() == path2.read_bytes()
-
-
-class TestCSVSinkValidation:
-    """Contract tests for CSVSink input validation."""
-
-    def test_strict_schema_sets_validate_input_for_executor(self, tmp_path: Path) -> None:
-        """validate_input=True stored as attribute for executor enforcement.
-
-        Input validation is centralized in SinkExecutor. This test verifies
-        the sink correctly sets the attribute from config so the executor
-        rejects wrong types before calling write().
-        """
-        sink = CSVSink(
-            {
-                "path": str(tmp_path / "strict.csv"),
-                "schema": {
-                    "mode": "fixed",
-                    "fields": ["id: int", "name: str"],
-                },
-                "validate_input": True,
-            }
-        )
-
-        # Verify the attribute is set for executor enforcement
-        assert sink.validate_input is True

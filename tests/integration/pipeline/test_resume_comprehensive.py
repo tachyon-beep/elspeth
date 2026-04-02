@@ -606,19 +606,20 @@ class TestResumeComprehensive:
 
         orchestrator = Orchestrator(db, checkpoint_manager=checkpoint_mgr, checkpoint_config=checkpoint_config)
 
-        # Use CSVSink with strict schema matching the data: {"id": int, "timestamp": datetime}
-        # CSVSink stringifies datetime values automatically
-        strict_schema = {"mode": "fixed", "fields": ["id: int", "timestamp: str"]}
-        passthrough = PassThrough({"schema": strict_schema})
+        # Resume schema matches recovery output types: the recovery system
+        # deserializes datetime objects from format: "date-time", not strings.
+        # Schema field specs don't support datetime directly — use 'any'.
+        resume_schema = {"mode": "fixed", "fields": ["id: int", "timestamp: any"]}
+        passthrough = PassThrough({"schema": resume_schema})
         passthrough.on_error = "discard"
         config = PipelineConfig(
             source=_null_source("default"),
             transforms=[passthrough],
-            sinks={"default": CSVSink({"path": str(output_path), "schema": strict_schema, "mode": "append"})},
+            sinks={"default": CSVSink({"path": str(output_path), "schema": resume_schema, "mode": "append"})},
         )
 
         resume_graph = ExecutionGraph()
-        resume_schema_config: dict[str, Any] = {"schema": strict_schema}
+        resume_schema_config: dict[str, Any] = {"schema": resume_schema}
         resume_graph.add_node("src", node_type=NodeType.SOURCE, plugin_name="null", config=resume_schema_config)
         resume_graph.add_node("xform", node_type=NodeType.TRANSFORM, plugin_name="passthrough", config=resume_schema_config)
         resume_graph.add_node("sink", node_type=NodeType.SINK, plugin_name="csv", config=resume_schema_config)
@@ -811,19 +812,19 @@ class TestResumeComprehensive:
 
         orchestrator = Orchestrator(db, checkpoint_manager=checkpoint_mgr, checkpoint_config=checkpoint_config)
 
-        # Use CSVSink with strict schema matching the data: {"id": int, "amount": Decimal}
-        # CSVSink stringifies Decimal values automatically
-        strict_schema = {"mode": "fixed", "fields": ["id: int", "amount: str"]}
-        passthrough = PassThrough({"schema": strict_schema})
+        # Resume schema matches recovery output types: the recovery system
+        # coerces Decimal to float per the schema contract.
+        resume_schema = {"mode": "fixed", "fields": ["id: int", "amount: float"]}
+        passthrough = PassThrough({"schema": resume_schema})
         passthrough.on_error = "discard"
         config = PipelineConfig(
             source=_null_source("default"),
             transforms=[passthrough],
-            sinks={"default": CSVSink({"path": str(output_path), "schema": strict_schema, "mode": "append"})},
+            sinks={"default": CSVSink({"path": str(output_path), "schema": resume_schema, "mode": "append"})},
         )
 
         resume_graph = ExecutionGraph()
-        resume_schema_config: dict[str, Any] = {"schema": strict_schema}
+        resume_schema_config: dict[str, Any] = {"schema": resume_schema}
         resume_graph.add_node("src", node_type=NodeType.SOURCE, plugin_name="null", config=resume_schema_config)
         resume_graph.add_node("xform", node_type=NodeType.TRANSFORM, plugin_name="passthrough", config=resume_schema_config)
         resume_graph.add_node("sink", node_type=NodeType.SINK, plugin_name="csv", config=resume_schema_config)

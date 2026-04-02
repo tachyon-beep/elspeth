@@ -93,14 +93,13 @@ class TestPassThroughStrictSchemaContract(TransformContractTestBase):
 
     @pytest.fixture
     def transform(self) -> TransformProtocol:
-        """Create a PassThrough instance with strict schema and input validation."""
+        """Create a PassThrough instance with strict schema."""
         return PassThrough(
             {
                 "schema": {
                     "mode": "fixed",
                     "fields": ["id: int", "name: str"],
                 },
-                "validate_input": True,
             }
         )
 
@@ -108,17 +107,6 @@ class TestPassThroughStrictSchemaContract(TransformContractTestBase):
     def valid_input(self) -> dict[str, Any]:
         """Provide a valid input row matching the strict schema."""
         return {"id": 1, "name": "test"}
-
-    def test_strict_passthrough_sets_validate_input_for_executor(self, transform: TransformProtocol) -> None:
-        """validate_input=True stored as attribute for executor enforcement.
-
-        Input validation is centralized in TransformExecutor. This test verifies
-        the transform correctly sets the attribute from config so the executor
-        rejects wrong types before calling process().
-        """
-        # Per Three-Tier Trust Model: wrong types in pipeline data = crash
-        # Enforcement is now centralized in the executor, not the plugin
-        assert transform.validate_input is True
 
 
 class TestPassThroughPropertyBased:

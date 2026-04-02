@@ -6,6 +6,8 @@ import time
 from collections.abc import Callable
 from datetime import UTC, datetime
 
+from pydantic import ValidationError
+
 from elspeth.contracts import (
     Artifact,
     ExecutionError,
@@ -290,17 +292,15 @@ class SinkExecutor:
                     node_id=sink_node_id,
                     token_ids=sink_token_ids,
                 ):
-                    # Centralized input validation (before sink.write)
-                    if sink.validate_input:
-                        from pydantic import ValidationError
-
-                        for row in rows:
-                            try:
-                                sink.input_schema.model_validate(row)
-                            except ValidationError as e:
-                                raise PluginContractViolation(
-                                    f"Sink '{sink.name}' input validation failed: {e}. This indicates an upstream transform/source schema bug."
-                                ) from e
+                    # Centralized input validation (before sink.write).
+                    # Wrong types at a sink boundary are upstream plugin bugs (Tier 2).
+                    for row in rows:
+                        try:
+                            sink.input_schema.model_validate(row)
+                        except ValidationError as e:
+                            raise PluginContractViolation(
+                                f"Sink '{sink.name}' input validation failed: {e}. This indicates an upstream transform/source schema bug."
+                            ) from e
 
                     if sink.declared_required_fields:
                         for row_index, row in enumerate(rows):

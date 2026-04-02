@@ -113,21 +113,3 @@ class TestCSVSinkProperties:
                 header = next(reader)
 
             assert header == fieldnames
-
-    def test_csv_sink_validate_input_attribute_set_from_config(self, tmp_path: Path) -> None:
-        """validate_input=True stored as attribute for executor enforcement.
-
-        Input validation is centralized in SinkExecutor. This test verifies
-        the plugin correctly sets the attribute from config.
-        """
-        path = tmp_path / "good.csv"
-
-        sink = CSVSink(
-            {
-                "path": str(path),
-                "schema": {"mode": "fixed", "fields": ["value: int"]},
-                "validate_input": True,
-            }
-        )
-
-        assert sink.validate_input is True

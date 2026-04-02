@@ -3,6 +3,8 @@
 import time
 from typing import TYPE_CHECKING, Any, cast
 
+from pydantic import ValidationError
+
 from elspeth.contracts import (
     ExecutionError,
     TokenInfo,
@@ -223,18 +225,14 @@ class TransformExecutor:
                     )
 
             # --- INPUT VALIDATION (pre-execution) ---
-            # Centralized check: if transform has validate_input=True,
-            # validate input against its input_schema before calling process().
-            if transform.validate_input:
-                from pydantic import ValidationError
-
-                try:
-                    transform.input_schema.model_validate(input_dict)
-                except ValidationError as e:
-                    raise PluginContractViolation(
-                        f"Transform '{transform.name}' input validation failed: {e}. "
-                        f"This indicates an upstream transform/source schema bug."
-                    ) from e
+            # Validate input against input_schema before calling process().
+            # Wrong types at a transform boundary are upstream plugin bugs (Tier 2).
+            try:
+                transform.input_schema.model_validate(input_dict)
+            except ValidationError as e:
+                raise PluginContractViolation(
+                    f"Transform '{transform.name}' input validation failed: {e}. This indicates an upstream transform/source schema bug."
+                ) from e
 
             # Set state_id and node_id on context for external call recording
             # and batch checkpoint lookup (node_id required for _batch_checkpoints keying)

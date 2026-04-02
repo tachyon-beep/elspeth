@@ -243,14 +243,11 @@ class TestFieldMapper:
         with pytest.raises(PluginConfigError, match="schema"):
             FieldMapper({"mapping": {"a": "b"}})
 
-    def test_validate_input_always_enabled(self) -> None:
-        """FieldMapper unconditionally enables input validation.
+    def test_no_validate_input_attribute(self) -> None:
+        """FieldMapper does not carry a validate_input attribute.
 
-        FieldMapper just copies/renames fields — it performs no value-level
-        operation that would naturally crash on bad types. Without mandatory
-        validation, Tier 2 type-contract violations pass through silently.
-        Validation is centralized in TransformExecutor, which checks
-        transform.validate_input before calling process().
+        Input validation is unconditional in the executor — plugins
+        no longer control this via a flag.
         """
         from elspeth.plugins.transforms.field_mapper import FieldMapper
 
@@ -261,14 +258,13 @@ class TestFieldMapper:
             }
         )
 
-        assert transform.validate_input is True
+        assert not hasattr(transform, "validate_input")
 
-    def test_validate_input_with_dynamic_schema(self, ctx: PluginContext) -> None:
-        """Dynamic schema with mandatory validation is effectively a no-op.
+    def test_dynamic_schema_accepts_any_types(self, ctx: PluginContext) -> None:
+        """Dynamic schema imposes no type constraints on input.
 
-        Dynamic schemas accept anything, so validation passes all rows.
-        The validate_input flag is still True, but the schema imposes
-        no constraints.
+        The executor validates unconditionally, but dynamic schemas
+        accept everything — validation is a no-op.
         """
         from elspeth.plugins.transforms.field_mapper import FieldMapper
 
@@ -279,8 +275,6 @@ class TestFieldMapper:
             }
         )
 
-        assert transform.validate_input is True
-        # Any data passes with dynamic schema
         result = transform.process(make_pipeline_row({"anything": "goes", "count": "string"}), ctx)
         assert result.status == "success"
 

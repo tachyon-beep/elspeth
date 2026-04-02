@@ -46,7 +46,6 @@ class CSVSinkConfig(SinkPathConfig):
 
     delimiter: str = ","
     encoding: str = "utf-8"
-    validate_input: bool = False  # Optional runtime validation of incoming rows
     mode: Literal["write", "append"] = "write"
 
     @field_validator("delimiter")
@@ -82,7 +81,6 @@ class CSVSink(BaseSink):
         schema: Schema configuration (required, via PathConfig)
         delimiter: Field delimiter (default: ",")
         encoding: File encoding (default: "utf-8")
-        validate_input: Validate incoming rows against schema (default: False)
         mode: "write" (truncate, default) or "append" (add to existing file)
 
     The schema can be (all use infer-and-lock pattern):
@@ -201,7 +199,6 @@ class CSVSink(BaseSink):
         self._path = cfg.resolved_path()
         self._delimiter = cfg.delimiter
         self._encoding = cfg.encoding
-        self.validate_input = cfg.validate_input
         self._mode = cfg.mode
 
         # Display header state (shared module handles all modes)
@@ -250,8 +247,8 @@ class CSVSink(BaseSink):
             ArtifactDescriptor with content_hash (SHA-256) and size_bytes
 
         Raises:
-            ValidationError: If validate_input=True and a row fails validation.
-                This indicates a bug in an upstream transform.
+            PluginContractViolation: Raised by executor if row fails input schema
+                validation. This indicates a bug in an upstream transform.
         """
         if not rows:
             # Empty batch - return descriptor for empty content

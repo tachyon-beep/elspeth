@@ -216,11 +216,6 @@ class TransformProtocol(Protocol):
     # a corresponding _output_schema_config (raises FrameworkBugError otherwise).
     _output_schema_config: SchemaConfig | None
 
-    # Input validation (centralized in TransformExecutor).
-    # When True, executor validates input against input_schema before process().
-    # Defaults to False — only enabled via plugin config (validate_input: true).
-    validate_input: bool
-
     # Error routing configuration
     # Injected by cli_helpers.py bridge from TransformSettings.on_error.
     # Always non-None at runtime (TransformSettings requires on_error).
@@ -441,11 +436,6 @@ class SinkProtocol(Protocol):
     # Sinks that declare required fields have them checked BEFORE write().
     # Empty frozenset = no required-field check = all fields optional.
     declared_required_fields: frozenset[str]
-
-    # Input validation (centralized in SinkExecutor).
-    # When True, executor validates input against input_schema before write().
-    # Defaults to False — only enabled via plugin config (validate_input: true).
-    validate_input: bool
 
     # Write failure routing — injected by cli_helpers from SinkSettings.
     # "discard" = drop failed rows with audit record, else = failsink name.

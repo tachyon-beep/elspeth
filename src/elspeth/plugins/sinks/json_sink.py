@@ -46,7 +46,6 @@ class JSONSinkConfig(SinkPathConfig):
     format: Literal["json", "jsonl"] | None = None
     indent: int | None = None
     encoding: str = "utf-8"
-    validate_input: bool = False  # Optional runtime validation of incoming rows
     mode: Literal["write", "append"] = "write"  # "write" (truncate) or "append"
 
     @model_validator(mode="after")
@@ -73,7 +72,6 @@ class JSONSink(BaseSink):
         format: "json" (array) or "jsonl" (lines). Auto-detected from extension.
         indent: Indentation for pretty-printing (default: None for compact)
         encoding: File encoding (default: "utf-8")
-        validate_input: Validate incoming rows against schema (default: False)
 
     The schema can be:
         - Observed: {"mode": "observed"} - accept any fields
@@ -207,7 +205,6 @@ class JSONSink(BaseSink):
         self._path = cfg.resolved_path()
         self._encoding = cfg.encoding
         self._indent = cfg.indent
-        self.validate_input = cfg.validate_input
 
         # Display header state (shared module handles all modes)
         init_display_headers(self, cfg.headers_mode, cfg.headers_mapping)
@@ -255,8 +252,8 @@ class JSONSink(BaseSink):
             ArtifactDescriptor with content_hash (SHA-256) and size_bytes
 
         Raises:
-            ValidationError: If validate_input=True and a row fails validation.
-                This indicates a bug in an upstream transform.
+            PluginContractViolation: Raised by executor if row fails input schema
+                validation. This indicates a bug in an upstream transform.
         """
         if not rows:
             # Empty batch - return descriptor for empty content

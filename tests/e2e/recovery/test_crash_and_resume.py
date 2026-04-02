@@ -529,7 +529,7 @@ class TestRetryBehavior:
             determinism = Determinism.DETERMINISTIC
             on_error = "discard"
 
-            def __init__(self, fail_ids: set[str]) -> None:
+            def __init__(self, fail_ids: set[int]) -> None:
                 super().__init__({"schema": {"mode": "observed"}})
                 self._fail_ids = fail_ids
 
@@ -550,12 +550,12 @@ class TestRetryBehavior:
         payload_store = FilesystemPayloadStore(tmp_path / "payloads")
 
         source_data = [
-            {"id": "row_1", "value": 100},
-            {"id": "row_2", "value": 200},
-            {"id": "row_3", "value": 300},
+            {"id": 1, "value": 100},
+            {"id": 2, "value": 200},
+            {"id": 3, "value": 300},
         ]
         source = _ResumeSource(source_data)
-        transform = _ErroringTransform(fail_ids={"row_2"})
+        transform = _ErroringTransform(fail_ids={2})
         sink = _ResumeSink()
         _ResumeSink.results = []
 
@@ -578,10 +578,10 @@ class TestRetryBehavior:
         assert result.status == RunStatus.COMPLETED
         assert result.rows_processed == 3
 
-        # Only 2 rows make it to the sink (row_2 was discarded)
+        # Only 2 rows make it to the sink (id=2 was discarded)
         assert len(_ResumeSink.results) == 2
         sink_ids = {r["id"] for r in _ResumeSink.results}
-        assert sink_ids == {"row_1", "row_3"}
+        assert sink_ids == {1, 3}
 
         # Verify error recorded in transform_errors table
         with db.engine.connect() as conn:
@@ -594,7 +594,7 @@ class TestRetryBehavior:
 
         error_details = json.loads(error.error_details_json)
         assert error_details["reason"] == "validation_failed"
-        assert error_details["error"] == "Row row_2 failed validation"
+        assert error_details["error"] == "Row 2 failed validation"
 
         db.close()
 

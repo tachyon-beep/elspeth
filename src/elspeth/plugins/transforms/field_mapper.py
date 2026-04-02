@@ -89,7 +89,6 @@ class FieldMapper(BaseTransform):
         self._mapping: dict[str, str] = cfg.mapping
         self._select_only: bool = cfg.select_only
         self._strict: bool = cfg.strict
-        self.validate_input = True  # Always validate — wrong types are upstream bugs
 
         # Mapping targets are the fields this transform guarantees in output.
         # Exclude targets that also appear as sources (identity/rename mappings
@@ -150,8 +149,8 @@ class FieldMapper(BaseTransform):
             TransformResult with mapped row data
 
         Raises:
-            ValidationError: If validate_input=True and row fails schema validation.
-                This indicates a bug in the upstream source/transform.
+            PluginContractViolation: Raised by executor if row fails input schema
+                validation. This indicates a bug in the upstream source/transform.
         """
         # Keep a normalized dict view only for validation and dotted-path lookups.
         row_data = row.to_dict()

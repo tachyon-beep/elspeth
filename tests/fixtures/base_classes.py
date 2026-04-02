@@ -139,7 +139,6 @@ class _TestSinkBase:
     node_id: str | None = None
     determinism = Determinism.DETERMINISTIC
     plugin_version = "1.0.0"
-    validate_input: bool = False
     declared_required_fields: frozenset[str] = frozenset()
     _on_write_failure: str = "discard"
 

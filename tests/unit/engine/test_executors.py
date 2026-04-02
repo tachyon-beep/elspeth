@@ -64,6 +64,7 @@ from elspeth.contracts import (
     TransformResult,
 )
 from elspeth.contracts.aggregation_checkpoint import AggregationCheckpointState
+from elspeth.contracts.data import PluginSchema as _PermissiveSchema
 from elspeth.contracts.diversion import SinkWriteResult
 from elspeth.contracts.enums import (
     BatchStatus,
@@ -190,12 +191,12 @@ def _make_transform(
 ) -> MagicMock:
     """Create a mock transform (non-batch)."""
     # Use spec to avoid MagicMock auto-creating 'accept' attribute
-    t = MagicMock(spec=["name", "node_id", "on_error", "declared_output_fields", "validate_input", "_on_start_called", "process"])
+    t = MagicMock(spec=["name", "node_id", "on_error", "declared_output_fields", "input_schema", "_on_start_called", "process"])
     t.name = name
     t.node_id = node_id
     t.on_error = on_error
     t.declared_output_fields = declared_output_fields or frozenset()
-    t.validate_input = False
+    t.input_schema = _PermissiveSchema  # Accepts any row — validation is a no-op
     t._on_start_called = True
     return t
 
@@ -209,7 +210,6 @@ def _make_sink(
     sink.name = name
     sink.node_id = node_id
     sink.declared_required_fields = frozenset()
-    sink.validate_input = False
     sink._on_write_failure = "discard"
     sink._reset_diversion_log = MagicMock()
     sink.write.return_value = SinkWriteResult(
@@ -369,12 +369,11 @@ class TestTransformExecutor:
 
     # --- Input validation (centralized) ---
 
-    def test_validate_input_rejects_wrong_type(self) -> None:
-        """Executor rejects row that fails input schema validation when validate_input=True."""
+    def test_unconditional_input_validation_rejects_wrong_type(self) -> None:
+        """Executor rejects row that fails input schema validation (Tier 2)."""
         recorder = _make_recorder()
         executor = TransformExecutor(recorder, _make_span_factory(), _make_step_resolver())
         transform = _make_transform()
-        transform.validate_input = True
         # Create a schema that expects int — give it a string
         from elspeth.contracts import PluginSchema
 
@@ -389,25 +388,6 @@ class TestTransformExecutor:
             executor.execute_transform(transform, token, ctx)
 
         transform.process.assert_not_called()
-
-    def test_validate_input_disabled_passes_wrong_type(self) -> None:
-        """Executor skips input validation when validate_input=False (default)."""
-        recorder = _make_recorder()
-        executor = TransformExecutor(recorder, _make_span_factory(), _make_step_resolver())
-        contract = _make_contract()
-        transform = _make_transform()
-        transform.validate_input = False
-        transform.process.return_value = TransformResult.success(
-            make_row({"count": "not_an_int"}, contract=contract),
-            success_reason={"action": "test"},
-        )
-        token = _make_token(data={"count": "not_an_int"}, contract=contract)
-        ctx = make_context()
-
-        result, _, _ = executor.execute_transform(transform, token, ctx)
-
-        assert result.status == "success"
-        transform.process.assert_called_once()
 
     # --- Success path ---
 
@@ -2650,8 +2630,8 @@ class TestSinkExecutor:
 
     # --- Input validation (centralized in executor) ---
 
-    def test_sink_validate_input_rejects_wrong_type(self) -> None:
-        """Executor rejects row that fails sink input schema when validate_input=True."""
+    def test_unconditional_sink_input_validation_rejects_wrong_type(self) -> None:
+        """Executor rejects row that fails sink input schema (Tier 2)."""
         from elspeth.contracts import PluginSchema
 
         class StrictSinkSchema(PluginSchema):
@@ -2661,7 +2641,6 @@ class TestSinkExecutor:
         executor = SinkExecutor(recorder, _make_span_factory(), run_id="test-run")
         token = _make_token(data={"count": "not_an_int"})
         sink = _make_sink()
-        sink.validate_input = True
         sink.input_schema = StrictSinkSchema
         ctx = make_context()
         pending = PendingOutcome(outcome=RowOutcome.COMPLETED)
@@ -4424,7 +4403,7 @@ class TestTransformExecutorBatchPath:
         t.node_id = node_id
         t.on_error = on_error
         t.declared_output_fields = frozenset()
-        t.validate_input = False
+        t.input_schema = _PermissiveSchema  # Accepts any row — validation is a no-op
         t._on_start_called = True
         t._pool_size = pool_size
         t._batch_wait_timeout = batch_wait_timeout

@@ -158,10 +158,6 @@ class BaseTransform(ABC):
     # the transform. Empty frozenset = no fields added = no check needed.
     declared_output_fields: frozenset[str] = frozenset()
 
-    # Input validation (centralized in TransformExecutor).
-    # When True, executor validates input against input_schema before process().
-    validate_input: bool = False
-
     # Error routing configuration.
     # Transforms extending TransformDataConfig override this from config.
     # Always non-None at runtime (TransformSettings requires on_error).
@@ -409,10 +405,6 @@ class BaseSink(ABC):
     # Sinks set this from schema_config.get_effective_required_fields() at init.
     # Empty frozenset = no required-field check.
     declared_required_fields: frozenset[str] = frozenset()
-
-    # Input validation (centralized in SinkExecutor).
-    # When True, executor validates input against input_schema before write().
-    validate_input: bool = False
 
     # Failsink infrastructure — set by orchestrator from SinkSettings.on_write_failure.
     # None until injected at pipeline startup; "discard" or sink name at runtime.

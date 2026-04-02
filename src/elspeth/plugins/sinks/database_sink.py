@@ -120,7 +120,6 @@ class DatabaseSink(BaseSink):
         self._sanitized_url = SanitizedDatabaseUrl.from_raw_url(cfg.url, fail_if_no_key=fail_if_no_key)  # For audit trail
         self._table_name = cfg.table
         self._if_exists = cfg.if_exists
-        self.validate_input = True  # Always validate — wrong types are upstream bugs
 
         # Store schema config for audit trail
         # DataPluginConfig ensures schema_config is not None

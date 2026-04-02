@@ -97,22 +97,3 @@ class TestJSONSinkProperties:
 
             assert result.artifact.content_hash == _compute_sha256(path)
             assert result.artifact.size_bytes == path.stat().st_size
-
-    def test_json_sink_validate_input_attribute_set_from_config(self, tmp_path: Path) -> None:
-        """validate_input=True stored as attribute for executor enforcement.
-
-        Input validation is centralized in SinkExecutor. This test verifies
-        the plugin correctly sets the attribute from config.
-        """
-        path = tmp_path / "good.jsonl"
-
-        sink = JSONSink(
-            {
-                "path": str(path),
-                "format": "jsonl",
-                "schema": {"mode": "fixed", "fields": ["value: int"]},
-                "validate_input": True,
-            }
-        )
-
-        assert sink.validate_input is True

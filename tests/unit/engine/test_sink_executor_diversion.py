@@ -46,7 +46,6 @@ def _make_sink(
     sink = MagicMock()
     sink.name = name
     sink.node_id = node_id
-    sink.validate_input = False
     sink.declared_required_fields = frozenset()
     sink.write.return_value = SinkWriteResult(
         artifact=_make_artifact(),
