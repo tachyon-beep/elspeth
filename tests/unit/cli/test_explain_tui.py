@@ -26,16 +26,6 @@ class TestExplainScreen:
 
         assert isinstance(screen.detail_panel, NodeDetailPanel)
 
-    def test_detail_panel_property_accessible(self) -> None:
-        """detail_panel property provides public access to NodeDetailPanel."""
-        from elspeth.tui.screens.explain_screen import ExplainScreen
-        from elspeth.tui.widgets.node_detail import NodeDetailPanel
-
-        screen = ExplainScreen()
-        panel = screen.detail_panel
-
-        assert isinstance(panel, NodeDetailPanel)
-
     def test_render_without_data(self) -> None:
         """Screen renders gracefully without data."""
         from elspeth.tui.screens.explain_screen import ExplainScreen
