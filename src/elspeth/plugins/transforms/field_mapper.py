@@ -13,10 +13,9 @@ from typing import Any
 
 from pydantic import Field, model_validator
 
-from elspeth.contracts.schema import SchemaConfig
-
 from elspeth.contracts.contexts import TransformContext
 from elspeth.contracts.contract_propagation import narrow_contract_to_output
+from elspeth.contracts.schema import SchemaConfig
 from elspeth.contracts.schema_contract import PipelineRow
 from elspeth.plugins.infrastructure.base import BaseTransform
 from elspeth.plugins.infrastructure.config_base import TransformDataConfig
@@ -38,7 +37,7 @@ class FieldMapperConfig(TransformDataConfig):
     validate_input: bool = False  # Optional input validation
 
     @model_validator(mode="after")
-    def _reject_duplicate_targets(self) -> "FieldMapperConfig":
+    def _reject_duplicate_targets(self) -> FieldMapperConfig:
         """Reject mappings where multiple sources map to the same target.
 
         Duplicate targets cause silent data loss: the last write wins,

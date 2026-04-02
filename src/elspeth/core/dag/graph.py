@@ -13,8 +13,8 @@ from collections.abc import Mapping, Sequence
 from typing import TYPE_CHECKING, Any, cast
 
 import networkx as nx
-from pydantic import ConfigDict, create_model
 from networkx import MultiDiGraph
+from pydantic import ConfigDict, create_model
 
 from elspeth.contracts import (
     EdgeInfo,

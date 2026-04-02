@@ -1,9 +1,9 @@
 """Tests for version consistency."""
 
+import tomllib
 from pathlib import Path
 
 import pytest
-import tomllib
 
 
 def test_version_matches_pyproject() -> None:

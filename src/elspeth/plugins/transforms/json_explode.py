@@ -26,10 +26,9 @@ from typing import Any
 
 from pydantic import Field, field_validator, model_validator
 
-from elspeth.contracts.schema import SchemaConfig
-
 from elspeth.contracts.contexts import TransformContext
 from elspeth.contracts.contract_propagation import narrow_contract_to_output
+from elspeth.contracts.schema import SchemaConfig
 from elspeth.contracts.schema_contract import FieldContract, PipelineRow, SchemaContract
 from elspeth.plugins.infrastructure.base import BaseTransform
 from elspeth.plugins.infrastructure.config_base import DataPluginConfig, PluginConfigError
@@ -65,7 +64,7 @@ class JSONExplodeConfig(DataPluginConfig):
         return v
 
     @model_validator(mode="after")
-    def _reject_field_collision(self) -> "JSONExplodeConfig":
+    def _reject_field_collision(self) -> JSONExplodeConfig:
         if self.output_field == self.array_field:
             raise ValueError(f"output_field and array_field must differ, both are '{self.output_field}'")
         return self

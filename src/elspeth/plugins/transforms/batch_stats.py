@@ -13,12 +13,11 @@ from typing import Any
 from pydantic import Field, field_validator
 
 from elspeth.contracts.contexts import TransformContext
+from elspeth.contracts.schema import SchemaConfig
 from elspeth.contracts.schema_contract import FieldContract, PipelineRow, SchemaContract
 from elspeth.plugins.infrastructure.base import BaseTransform
 from elspeth.plugins.infrastructure.config_base import TransformDataConfig
 from elspeth.plugins.infrastructure.results import TransformResult
-
-from elspeth.contracts.schema import SchemaConfig
 
 
 class BatchStatsConfig(TransformDataConfig):

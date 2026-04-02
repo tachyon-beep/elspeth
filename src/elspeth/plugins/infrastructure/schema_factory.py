@@ -18,7 +18,7 @@ from pydantic import ConfigDict, create_model, model_validator
 
 from elspeth.contracts import PluginSchema
 from elspeth.contracts.schema import FIELD_TYPE_MAP as TYPE_MAP
-from elspeth.contracts.schema import FieldDefinition, FiniteFloat, SchemaConfig
+from elspeth.contracts.schema import FieldDefinition, SchemaConfig
 
 # Type alias for extra field handling modes
 ExtraMode = Literal["allow", "forbid"]

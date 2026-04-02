@@ -97,10 +97,7 @@ def _reject_nan_infinity(obj: Any) -> Any:
     elif isinstance(obj, dict):
         for v in obj.values():
             _reject_nan_infinity(v)
-    elif isinstance(obj, list):
-        for v in obj:
-            _reject_nan_infinity(v)
-    elif isinstance(obj, tuple):
+    elif isinstance(obj, (list, tuple)):
         for v in obj:
             _reject_nan_infinity(v)
     return obj

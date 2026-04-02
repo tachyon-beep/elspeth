@@ -18,6 +18,7 @@ from pydantic import Field, model_validator
 from elspeth.contracts.schema_contract import PipelineRow
 from elspeth.plugins.infrastructure.config_base import PluginConfig
 
+
 class OutputFieldType(StrEnum):
     """Supported types for structured output fields."""
 

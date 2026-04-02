@@ -13,28 +13,13 @@ import json
 from typing import Any
 
 from elspeth.web.catalog.protocol import CatalogService
+from elspeth.web.composer.skills import load_skill
 from elspeth.web.composer.state import CompositionState
 
-SYSTEM_PROMPT = """\
-You are an ELSPETH pipeline composer. Your job is to translate the user's \
-natural-language description into a valid pipeline configuration using the \
-provided tools.
+# Load the pipeline composer skill once at module level (static content).
+_PIPELINE_SKILL = load_skill("pipeline_composer")
 
-Rules:
-1. Always check plugin schemas (get_plugin_schema) before configuring a plugin.
-2. Use list_sources/list_transforms/list_sinks to discover available plugins.
-3. After making changes, review the validation result in the tool response. \
-If there are errors, fix them before responding to the user.
-4. When the pipeline is complete and valid, respond with a summary of what \
-was built.
-5. Do not fabricate plugin names or configuration fields. Only use plugins \
-and fields that appear in the catalog.
-6. Use get_expression_grammar to understand gate expression syntax before \
-writing conditions.
-7. Connect nodes with edges using upsert_edge after creating nodes.
-8. Every pipeline needs at least: a source, one or more sinks, and edges \
-connecting them.
-"""
+SYSTEM_PROMPT = _PIPELINE_SKILL
 
 
 def build_context_string(
