@@ -205,3 +205,85 @@ class TestExplainScreenLoading:
 
         assert exc_info.value.method == "load"
         assert exc_info.value.current_state == "LoadedState"
+
+
+class TestExplainScreenNodeSelection:
+    """Tests for ExplainScreen node selection and detail panel updates."""
+
+    def _make_mock_node(self, *, node_id: str, plugin_name: str, node_type: NodeType) -> MagicMock:
+        """Create a mock node matching the LandscapeRecorder return shape."""
+        node = MagicMock()
+        node.node_id = node_id
+        node.plugin_name = plugin_name
+        node.node_type = node_type
+        return node
+
+    def _make_loaded_screen(self, mock_db: MagicMock) -> ExplainScreen:
+        """Create a screen in LoadedState with a simple pipeline."""
+        nodes = [
+            self._make_mock_node(node_id="src-1", plugin_name="csv_source", node_type=NodeType.SOURCE),
+            self._make_mock_node(node_id="tfm-1", plugin_name="filter", node_type=NodeType.TRANSFORM),
+            self._make_mock_node(node_id="sink-1", plugin_name="csv_sink", node_type=NodeType.SINK),
+        ]
+        with patch("elspeth.tui.screens.explain_screen.LandscapeRecorder") as MockRecorder:
+            MockRecorder.return_value.get_nodes.return_value = nodes
+            screen = ExplainScreen(db=mock_db, run_id="run-sel")
+        assert isinstance(screen.state, LoadedState)
+        return screen
+
+    def test_select_node_updates_detail_panel(self) -> None:
+        """Selecting a node loads its state into the detail panel."""
+        mock_db = MagicMock()
+        screen = self._make_loaded_screen(mock_db)
+
+        mock_node = self._make_mock_node(node_id="tfm-1", plugin_name="filter", node_type=NodeType.TRANSFORM)
+        with patch("elspeth.tui.screens.explain_screen.LandscapeRecorder") as MockRecorder:
+            MockRecorder.return_value.get_node.return_value = mock_node
+            screen.on_tree_select("tfm-1")
+
+        content = screen.detail_panel.render_content()
+        assert "filter" in content
+        assert "transform" in content
+
+    def test_select_nonexistent_node_clears_panel(self) -> None:
+        """Selecting a node that doesn't exist in DB sets panel to None state."""
+        mock_db = MagicMock()
+        screen = self._make_loaded_screen(mock_db)
+
+        with patch("elspeth.tui.screens.explain_screen.LandscapeRecorder") as MockRecorder:
+            MockRecorder.return_value.get_node.return_value = None
+            screen.on_tree_select("nonexistent-node")
+
+        content = screen.detail_panel.render_content()
+        assert "No node selected" in content
+
+    def test_select_node_in_uninitialized_state(self) -> None:
+        """Selecting a node in UninitializedState clears the detail panel."""
+        screen = ExplainScreen()
+        assert isinstance(screen.state, UninitializedState)
+
+        screen.on_tree_select("any-node")
+
+        content = screen.detail_panel.render_content()
+        assert "No node selected" in content
+
+    def test_select_node_in_loading_failed_state(self) -> None:
+        """Selecting a node in LoadingFailedState still loads node state from DB."""
+        mock_db = MagicMock()
+
+        # Create a screen that enters LoadingFailedState
+        with patch("elspeth.tui.screens.explain_screen.LandscapeRecorder") as MockRecorder:
+            MockRecorder.return_value.get_nodes.side_effect = OperationalError("connection refused", {}, None)
+            screen = ExplainScreen(db=mock_db, run_id="run-failed")
+
+        assert isinstance(screen.state, LoadingFailedState)
+
+        # Now select a node — should still work via the LoadingFailedState branch
+        mock_node = self._make_mock_node(node_id="tfm-1", plugin_name="filter", node_type=NodeType.TRANSFORM)
+        with patch("elspeth.tui.screens.explain_screen.LandscapeRecorder") as MockRecorder:
+            MockRecorder.return_value.get_node.return_value = mock_node
+            screen.on_tree_select("tfm-1")
+
+        content = screen.detail_panel.render_content()
+        assert "filter" in content
+        assert "transform" in content
