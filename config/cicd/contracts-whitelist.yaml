@@ -66,7 +66,7 @@ allowed_dict_patterns:
   - "src/elspeth/plugins/sinks/csv_sink.py:CSVSink._open_file:rows (list)"
   - "src/elspeth/plugins/sinks/csv_sink.py:CSVSink._get_field_names_and_display:row"
   - "src/elspeth/plugins/sinks/json_sink.py:JSONSink.write:rows (list)"
-  - "src/elspeth/plugins/sinks/json_sink.py:JSONSink._write_jsonl_batch:rows (list)"
+  - "src/elspeth/plugins/sinks/json_sink.py:JSONSink._write_jsonl_content:rows (list)"
   - "src/elspeth/plugins/infrastructure/display_headers.py:apply_display_headers:rows (list)"
   - "src/elspeth/plugins/infrastructure/display_headers.py:apply_display_headers:return (list)"
 

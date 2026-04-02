@@ -133,8 +133,9 @@ def configure_logging(
 
     # Remove only ELSPETH-owned handlers (preserve others like pytest caplog)
     root = logging.getLogger()
+    removed_ids = {id(h) for h in root.handlers if id(h) in _elspeth_handler_ids}
     root.handlers = [h for h in root.handlers if id(h) not in _elspeth_handler_ids]
-    _elspeth_handler_ids.discard(id(handler))  # Avoid stale entries
+    _elspeth_handler_ids.difference_update(removed_ids)
 
     # Track our handler by id so we can find it later
     _elspeth_handler_ids.add(id(handler))

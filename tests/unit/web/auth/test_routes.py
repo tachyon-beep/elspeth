@@ -249,6 +249,50 @@ class TestTokenRefreshEndpoint:
         assert "access_token" in new_body
         assert new_body["token_type"] == "bearer"
 
+    def test_token_refresh_unparseable_claims_rejected(self, tmp_path) -> None:
+        """Refresh must fail if pre-verification claim decode failed.
+
+        When the middleware can't decode claims (auth_claims=None), the refresh
+        endpoint cannot enforce chain lifetime. It must reject with 401 rather
+        than silently skipping the chain age check.
+        """
+        from unittest.mock import patch
+
+        import jwt as pyjwt
+
+        provider = LocalAuthProvider(
+            db_path=tmp_path / "auth.db",
+            secret_key="test-key",
+        )
+        provider.create_user("alice", "pw", display_name="Alice")
+        app = _create_test_app(provider)
+        client = TestClient(app)
+
+        # Login to get a valid token
+        login_resp = client.post(
+            "/api/auth/login",
+            json={"username": "alice", "password": "pw"},
+        )
+        valid_token = login_resp.json()["access_token"]
+
+        # Patch jwt.decode to fail on unverified decode but let authenticate()
+        # succeed (it uses the provider's own decode path, not the middleware's).
+        original_decode = pyjwt.decode
+
+        def selective_decode(token, *args, **kwargs):
+            opts = kwargs.get("options", {})
+            if not opts.get("verify_signature", True):
+                raise pyjwt.PyJWTError("simulated decode failure")
+            return original_decode(token, *args, **kwargs)
+
+        with patch("jwt.decode", side_effect=selective_decode):
+            response = client.post(
+                "/api/auth/token",
+                headers={"Authorization": f"Bearer {valid_token}"},
+            )
+        assert response.status_code == 401
+        assert "claims could not be parsed" in response.json()["detail"]
+
     def test_token_refresh_invalid_token(self, tmp_path) -> None:
         provider = LocalAuthProvider(
             db_path=tmp_path / "auth.db",

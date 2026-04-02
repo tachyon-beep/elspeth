@@ -94,6 +94,7 @@ def export_landscape(
         if "path" not in sink.config:
             raise ValueError(f"CSV export requires file-based sink with 'path' in config, but sink '{sink_name}' has no path configured")
         artifact_path: str = sink.config["path"]
+        sink.close()
         _export_csv_multifile(
             exporter=exporter,
             run_id=run_id,

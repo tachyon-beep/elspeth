@@ -34,7 +34,6 @@ class FieldMapperConfig(TransformDataConfig):
     mapping: dict[str, str] = Field(default_factory=dict)
     select_only: bool = False
     strict: bool = False
-    validate_input: bool = False  # Optional input validation
 
     @model_validator(mode="after")
     def _reject_duplicate_targets(self) -> FieldMapperConfig:
@@ -79,7 +78,6 @@ class FieldMapper(BaseTransform):
             - Nested: {"meta.source": "origin"} extracts nested field
         select_only: If True, only include mapped fields (default: False)
         strict: If True, error on missing source fields (default: False)
-        validate_input: If True, validate input against schema (default: False)
     """
 
     name = "field_mapper"
@@ -91,7 +89,7 @@ class FieldMapper(BaseTransform):
         self._mapping: dict[str, str] = cfg.mapping
         self._select_only: bool = cfg.select_only
         self._strict: bool = cfg.strict
-        self.validate_input = cfg.validate_input
+        self.validate_input = True  # Always validate — wrong types are upstream bugs
 
         # Mapping targets are the fields this transform guarantees in output.
         # Exclude targets that also appear as sources (identity/rename mappings

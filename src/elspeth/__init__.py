@@ -11,4 +11,4 @@ try:
     __version__ = version("elspeth")
 except PackageNotFoundError:
     # Development install without package metadata (e.g., editable install not yet run)
-    __version__ = "0.0.0-dev"
+    __version__ = "UNKNOWN-dev-uninstalled"

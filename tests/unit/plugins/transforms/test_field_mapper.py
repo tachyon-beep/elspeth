@@ -243,12 +243,14 @@ class TestFieldMapper:
         with pytest.raises(PluginConfigError, match="schema"):
             FieldMapper({"mapping": {"a": "b"}})
 
-    def test_validate_input_attribute_set_from_config(self) -> None:
-        """validate_input=True is stored as attribute for executor enforcement.
+    def test_validate_input_always_enabled(self) -> None:
+        """FieldMapper unconditionally enables input validation.
 
-        Input validation is centralized in TransformExecutor. This test verifies
-        the plugin correctly sets the attribute from config so the executor can
-        check it before calling process().
+        FieldMapper just copies/renames fields — it performs no value-level
+        operation that would naturally crash on bad types. Without mandatory
+        validation, Tier 2 type-contract violations pass through silently.
+        Validation is centralized in TransformExecutor, which checks
+        transform.validate_input before calling process().
         """
         from elspeth.plugins.transforms.field_mapper import FieldMapper
 
@@ -256,38 +258,17 @@ class TestFieldMapper:
             {
                 "schema": {"mode": "fixed", "fields": ["count: int"]},
                 "mapping": {},
-                "validate_input": True,
             }
         )
 
         assert transform.validate_input is True
 
-    def test_validate_input_disabled_passes_wrong_type(self, ctx: PluginContext) -> None:
-        """validate_input=False (default) passes wrong types through.
+    def test_validate_input_with_dynamic_schema(self, ctx: PluginContext) -> None:
+        """Dynamic schema with mandatory validation is effectively a no-op.
 
-        When validation is disabled, the transform doesn't check types.
-        This is the default to avoid breaking existing pipelines.
-        """
-        from elspeth.plugins.transforms.field_mapper import FieldMapper
-
-        transform = FieldMapper(
-            {
-                "schema": {"mode": "fixed", "fields": ["count: int"]},
-                "mapping": {},
-                "validate_input": False,  # Explicit default
-            }
-        )
-
-        # String passes through without validation
-        result = transform.process(make_pipeline_row({"count": "not_an_int"}), ctx)
-        assert result.status == "success"
-        assert result.row is not None
-        assert result.row["count"] == "not_an_int"
-
-    def test_validate_input_skipped_for_dynamic_schema(self, ctx: PluginContext) -> None:
-        """validate_input=True with dynamic schema skips validation.
-
-        Dynamic schemas accept anything, so validation is a no-op.
+        Dynamic schemas accept anything, so validation passes all rows.
+        The validate_input flag is still True, but the schema imposes
+        no constraints.
         """
         from elspeth.plugins.transforms.field_mapper import FieldMapper
 
@@ -295,10 +276,10 @@ class TestFieldMapper:
             {
                 "schema": {"mode": "observed"},
                 "mapping": {},
-                "validate_input": True,  # Would validate, but schema is dynamic
             }
         )
 
+        assert transform.validate_input is True
         # Any data passes with dynamic schema
         result = transform.process(make_pipeline_row({"anything": "goes", "count": "string"}), ctx)
         assert result.status == "success"

@@ -41,6 +41,10 @@ def contains_non_finite(obj: Any) -> bool:
     return False
 
 
+class DuplicateJSONKeyError(ValueError):
+    """Raised when a JSON object contains duplicate keys at a given nesting level."""
+
+
 def _reject_duplicate_keys(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
     """Reject JSON objects with duplicate keys at this nesting level.
 
@@ -52,7 +56,7 @@ def _reject_duplicate_keys(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
     result: dict[str, Any] = {}
     for key, value in pairs:
         if key in result:
-            raise ValueError(f"Duplicate JSON key: {key!r}")
+            raise DuplicateJSONKeyError(f"Duplicate JSON key: {key!r}")
         result[key] = value
     return result
 
@@ -74,7 +78,7 @@ def parse_json_strict(text: str) -> tuple[Any, str | None]:
     """
     try:
         parsed = json.loads(text, object_pairs_hook=_reject_duplicate_keys)
-    except (JSONDecodeError, ValueError) as e:
+    except (JSONDecodeError, DuplicateJSONKeyError) as e:
         return None, str(e)
 
     # Check for non-finite values that canonicalization would reject

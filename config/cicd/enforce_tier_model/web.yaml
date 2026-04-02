@@ -260,7 +260,7 @@ allow_hits:
     remove the same run entry
   safety: Missing key simply means there are no remaining subscribers to clean up
   expires: null
-- key: web/auth/middleware.py:R6:get_current_user:fp=814c1106e4881a9a
+- key: web/auth/middleware.py:R6:get_current_user:fp=ea59abc681792adb
   owner: web-auth
   reason: Tier 3 boundary — invalid JWT token raises PyJWTError; returns 401
   safety: Only PyJWTError caught; returns HTTP 401; no silent data loss
@@ -271,7 +271,7 @@ allow_hits:
     header
   safety: Missing header returns 401; malformed header returns 401; no default fabrication
   expires: null
-- key: web/auth/routes.py:R1:create_auth_router:refresh_token:fp=05901c81a69e78b5
+- key: web/auth/routes.py:R1:create_auth_router:refresh_token:fp=319f439a08e7dbab
   owner: web-auth
   reason: Tier 3 boundary — JWT claims dict .get() for optional iat claim
   safety: Missing iat returns None; no fabrication
@@ -649,23 +649,23 @@ allow_hits:
     primary failure
   safety: Logged; already in error path
   expires: null
-- key: web/sessions/routes.py:R6:create_session_router:recompose:fp=2258fded7a873a70
+- key: web/sessions/routes.py:R6:create_session_router:recompose:fp=6a0af11bd854aea9
   owner: web-sessions
   reason: Recompose validation — user-authored composition state may have data-shape errors
-  safety: Narrowed to ValueError/TypeError/KeyError/AttributeError; returns 422; no silent swallow
+  safety: Narrowed to ValueError/TypeError/KeyError; returns 422; AttributeError propagates as bug
   expires: null
-- key: web/sessions/routes.py:R6:create_session_router:recompose:fp=e98b68c0710ee081
+- key: web/sessions/routes.py:R6:create_session_router:recompose:fp=84e658d80da505cd
   owner: web-sessions
   reason: Recompose persistence — save may fail with data-shape or DB integrity errors
   safety: Narrowed to ValueError/TypeError/KeyError/IntegrityError; returns 422; code bugs propagate
   expires: null
-- key: web/sessions/routes.py:R6:create_session_router:send_message:fp=0e4a8c39bdb18689
+- key: web/sessions/routes.py:R6:create_session_router:send_message:fp=a7fceef5542eb88d
   owner: web-sessions
   reason: Convergence partial-state validation may fail on damaged LLM output — narrowed
     to data-shape errors
-  safety: Partial state saved with error flag; non-data-shape exceptions propagate
+  safety: Narrowed to ValueError/TypeError/KeyError; AttributeError propagates as bug
   expires: null
-- key: web/sessions/routes.py:R6:create_session_router:send_message:fp=839aff675bab8765
+- key: web/sessions/routes.py:R6:create_session_router:send_message:fp=32746eeb2416b323
   owner: web-sessions
   reason: Convergence partial-state save may fail — narrowed to data-shape and DB
     integrity errors

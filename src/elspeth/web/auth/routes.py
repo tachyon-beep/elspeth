@@ -148,10 +148,17 @@ def create_auth_router() -> APIRouter:
         if settings.auth_provider != "local":
             raise HTTPException(status_code=404, detail="Not found")
 
-        # Extract iat from the claims already decoded by the auth middleware.
-        # The middleware stashes parsed claims on request.state.auth_claims
-        # after signature verification by authenticate().
-        original_iat: int | None = request.state.auth_claims.get("iat")
+        # Extract iat from claims parsed by the auth middleware.
+        # The middleware decodes claims without signature verification for
+        # downstream use, then verifies the signature via authenticate().
+        # If authenticate() fails, this route handler never executes.
+        #
+        # If claims are None (decode failed despite valid signature), refuse
+        # the refresh — we cannot enforce chain lifetime without iat.
+        claims = request.state.auth_claims
+        if claims is None:
+            raise HTTPException(status_code=401, detail="Token claims could not be parsed — re-authenticate")
+        original_iat: int | None = claims.get("iat")
 
         provider: CredentialAuthProvider = request.app.state.auth_provider
         try:

@@ -281,13 +281,14 @@ class JSONSink(BaseSink):
         output_rows = apply_display_headers(self, rows)
 
         if self._format == "jsonl":
-            # Track pre-write position for rollback on post-write failure.
-            # If flush/hash/stat fails after bytes are written, truncate back
-            # so the file doesn't contain data with no corresponding audit record.
-            pre_write_pos = self._file.tell() if self._file is not None else 0
+            # Ensure file is open BEFORE capturing position — on first call
+            # in append mode the file doesn't exist yet, so we must open it
+            # first to get the correct position (end of existing content).
+            self._ensure_jsonl_file_open()
+            pre_write_pos = self._file.tell()  # type: ignore[union-attr]
 
             try:
-                self._write_jsonl_batch(output_rows)
+                self._write_jsonl_content(output_rows)
 
                 # Flush persistent file handle to ensure content is on disk for hashing.
                 if self._file is not None:
@@ -325,15 +326,12 @@ class JSONSink(BaseSink):
             )
         )
 
-    def _write_jsonl_batch(self, rows: list[dict[str, Any]]) -> None:
-        """Write rows as JSONL.
+    def _ensure_jsonl_file_open(self) -> None:
+        """Open the JSONL output file if not already open.
 
-        Uses write mode (truncate) or append mode based on self._mode.
-        Append mode is used during resume to add to existing output.
-
-        When appending to an existing file with an explicit schema (fixed or
-        flexible), validates schema compatibility before opening. This mirrors
-        CSVSink's append-mode validation and prevents silent schema drift.
+        Separated from content writing so the caller can capture file
+        position between open and write — critical for correct rollback
+        in append mode where pre-existing content must be preserved.
         """
         if self._file is None:
             file_mode = "a" if self._mode == "append" else "w"
@@ -353,6 +351,10 @@ class JSONSink(BaseSink):
 
             self._file = open(self._path, file_mode, encoding=self._encoding)  # noqa: SIM115
 
+    def _write_jsonl_content(self, rows: list[dict[str, Any]]) -> None:
+        """Stage and write JSONL rows to the already-open file handle."""
+        if self._file is None:
+            raise RuntimeError("JSONL file not open — call _ensure_jsonl_file_open() first")
         with io.StringIO() as staging:
             for row in rows:
                 json.dump(row, staging, allow_nan=False)

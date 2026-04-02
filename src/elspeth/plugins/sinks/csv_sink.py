@@ -325,7 +325,10 @@ class CSVSink(BaseSink):
                 content_hash = self._hasher.hexdigest()
                 size_bytes = self._path.stat().st_size
             except Exception:
-                # Write-mode: file was just created — remove it entirely on failure
+                # Write-mode first batch: file was just created by us — no
+                # pre-existing content to preserve.  Remove it entirely so a
+                # partial file doesn't masquerade as a valid artifact.  The
+                # re-raised exception carries all diagnostic context.
                 file.close()
                 self._file = None
                 self._writer = None

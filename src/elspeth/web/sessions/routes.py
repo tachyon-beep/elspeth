@@ -300,7 +300,7 @@ def create_session_router() -> APIRouter:
                 # still persist with is_valid=False rather than losing it.
                 try:
                     validation = exc.partial_state.validate()
-                except (ValueError, TypeError, KeyError, AttributeError) as val_err:
+                except (ValueError, TypeError, KeyError) as val_err:
                     from elspeth.web.composer.state import ValidationSummary
 
                     slog.warning("convergence_validation_failed", error=str(val_err))
@@ -328,8 +328,8 @@ def create_session_router() -> APIRouter:
                         error=str(save_err),
                         exc_info=True,
                     )
-                    # Do NOT include partial_state in response — it was not
-                    # persisted, so the frontend cannot resume from it.
+                    response_body["partial_state_save_failed"] = True
+                    response_body["partial_state_save_error"] = str(save_err)
 
             raise HTTPException(status_code=422, detail=response_body) from exc
         except LiteLLMAuthError as exc:
@@ -449,7 +449,7 @@ def create_session_router() -> APIRouter:
             if exc.partial_state is not None:
                 try:
                     validation = exc.partial_state.validate()
-                except (ValueError, TypeError, KeyError, AttributeError) as val_err:
+                except (ValueError, TypeError, KeyError) as val_err:
                     slog.warning("recompose_convergence_validation_failed", error=str(val_err))
                     validation = ValidationSummary(is_valid=False, errors=("validation_failed",))
 
@@ -473,6 +473,8 @@ def create_session_router() -> APIRouter:
                         error=str(save_err),
                         exc_info=True,
                     )
+                    response_body["partial_state_save_failed"] = True
+                    response_body["partial_state_save_error"] = str(save_err)
 
             raise HTTPException(status_code=422, detail=response_body) from exc
         except LiteLLMAuthError as exc:

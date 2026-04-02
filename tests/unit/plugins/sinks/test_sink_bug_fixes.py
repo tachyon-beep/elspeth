@@ -610,6 +610,47 @@ class TestJSONSinkAppendSchemaValidation:
         assert len(lines) == 2
 
 
+class TestJSONLAppendRollbackPreservesExistingContent:
+    """Regression: JSONL append-mode rollback must not destroy pre-existing content.
+
+    Before the fix, ``pre_write_pos`` was captured before the file was opened
+    on the first call. In append mode with existing content, this defaulted to 0,
+    so rollback would truncate the entire file — destroying pre-existing lines.
+    """
+
+    def test_rollback_preserves_existing_lines(self, tmp_path: Path, ctx: PluginContext) -> None:
+        """Post-write failure in append mode must leave existing content intact."""
+        from elspeth.plugins.sinks.json_sink import JSONSink
+
+        output_file = tmp_path / "output.jsonl"
+
+        # Create pre-existing content via a first sink lifecycle
+        sink1 = JSONSink({"path": str(output_file), "format": "jsonl", "schema": OBSERVED_SCHEMA})
+        sink1.write([{"id": 1, "name": "alice"}, {"id": 2, "name": "bob"}], ctx)
+        sink1.flush()
+        sink1.close()
+
+        original_content = output_file.read_text()
+        assert original_content.count("\n") == 2  # two lines
+
+        # Second sink in append mode — force a failure after write
+        sink2 = JSONSink({"path": str(output_file), "format": "jsonl", "mode": "append", "schema": OBSERVED_SCHEMA})
+
+        # Patch _compute_file_hash to fail AFTER content is written,
+        # triggering the rollback path
+        with (
+            patch.object(sink2, "_compute_file_hash", side_effect=OSError("simulated hash failure")),
+            pytest.raises(OSError, match="simulated hash failure"),
+        ):
+            sink2.write([{"id": 3, "name": "charlie"}], ctx)
+
+        # Pre-existing content must be intact after rollback
+        surviving_content = output_file.read_text()
+        assert surviving_content == original_content
+
+        sink2.close()
+
+
 # =============================================================================
 # Bug 1: Azure blob sink misses required field validation
 # =============================================================================
