@@ -17,12 +17,6 @@ from elspeth.tui.screens.explain_screen import (
 class TestExplainScreen:
     """Tests for ExplainScreen component."""
 
-    def test_can_import_screen(self) -> None:
-        """ExplainScreen can be imported."""
-        from elspeth.tui.screens.explain_screen import ExplainScreen
-
-        assert ExplainScreen is not None
-
     def test_explain_screen_has_detail_panel(self) -> None:
         """Explain screen includes NodeDetailPanel widget."""
         from elspeth.tui.screens.explain_screen import ExplainScreen
