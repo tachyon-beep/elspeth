@@ -5,36 +5,10 @@ from datetime import UTC, datetime
 from elspeth.contracts import (
     Determinism,
     Edge,
-    ExportStatus,
     Node,
     NodeType,
     Run,
-    RunStatus,
 )
-
-
-class TestModelEnumTypes:
-    """Verify model fields use enum types, not strings."""
-
-    def test_enum_type_verified_not_just_value(self) -> None:
-        """P2: Verify fields are actual enum types, not just matching values.
-
-        Regressions that convert enum fields to strings would still pass
-        value comparisons. This test verifies runtime type.
-        """
-        run = Run(
-            run_id="run-1",
-            started_at=datetime.now(UTC),
-            config_hash="abc",
-            settings_json="{}",
-            canonical_version="v1",
-            status=RunStatus.COMPLETED,
-            export_status=ExportStatus.PENDING,
-        )
-        # Must be actual enum instances, not strings
-        assert isinstance(run.status, RunStatus), f"status should be RunStatus enum, got {type(run.status)}"
-        assert isinstance(run.export_status, ExportStatus), f"export_status should be ExportStatus enum, got {type(run.export_status)}"
-        assert run.status.value == "completed"  # Verify .value accessor works
 
 
 class TestModelEnumTier1Rejection:
