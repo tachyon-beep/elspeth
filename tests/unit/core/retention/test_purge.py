@@ -694,6 +694,87 @@ class TestPurgePayloads:
         assert result.failed_refs == ()
         assert result.duration_seconds >= 0
 
+    def test_partial_failure_accounting_invariant(self, db: LandscapeDB, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Mixed success/skip/failure: accounting invariant holds and grade updates scope correctly.
+
+        Scenario: 7 refs total
+          - 2 deleted successfully
+          - 2 skipped (not in store)
+          - 1 exists-check fails (OSError)
+          - 1 delete-call fails (OSError)
+          - 1 delete returns False
+
+        Verify:
+          1. deleted_count + skipped_count + len(failed_refs) == 7
+          2. Grade updates run only for runs linked to deleted refs
+          3. Failed refs don't trigger grade updates
+        """
+        store = _ControlledStore()
+
+        # Store payloads that will be deleted, exist-failed, delete-failed, or false-deleted
+        ok_ref_1 = store.store(b"ok-1")
+        ok_ref_2 = store.store(b"ok-2")
+        exists_fail_ref = store.store(b"exists-fail")
+        delete_fail_ref = store.store(b"delete-fail")
+        false_delete_ref = store.store(b"false-delete")
+
+        store._fail_exists_for.add(exists_fail_ref)
+        store._fail_delete_for.add(delete_fail_ref)
+        store._false_delete_for.add(false_delete_ref)
+
+        manager = PurgeManager(db, store)
+
+        # Map deleted refs → affected run IDs
+        def _mock_affected(refs: list[str]) -> set[str]:
+            # Only deleted refs should arrive here
+            affected = set()
+            if ok_ref_1 in refs:
+                affected.add("run-alpha")
+            if ok_ref_2 in refs:
+                affected.add("run-beta")
+            # Failed/skipped refs must NOT appear
+            assert exists_fail_ref not in refs
+            assert delete_fail_ref not in refs
+            assert false_delete_ref not in refs
+            assert "missing-ref-1" not in refs
+            assert "missing-ref-2" not in refs
+            return affected
+
+        monkeypatch.setattr(manager, "_find_affected_run_ids", _mock_affected)
+
+        grade_updates: list[str] = []
+        monkeypatch.setattr(
+            "elspeth.core.retention.purge.update_grade_after_purge",
+            lambda db_obj, run_id: grade_updates.append(run_id),
+        )
+
+        all_refs = [
+            ok_ref_1,
+            "missing-ref-1",
+            exists_fail_ref,
+            ok_ref_2,
+            delete_fail_ref,
+            "missing-ref-2",
+            false_delete_ref,
+        ]
+
+        result = manager.purge_payloads(all_refs)
+
+        # Accounting invariant
+        assert result.deleted_count == 2
+        assert result.skipped_count == 2
+        assert len(result.failed_refs) == 3
+        assert result.deleted_count + result.skipped_count + len(result.failed_refs) == len(all_refs)
+
+        # Failed refs are exactly the three failure modes
+        assert set(result.failed_refs) == {exists_fail_ref, delete_fail_ref, false_delete_ref}
+
+        # Grade updates ran for both runs linked to successful deletions
+        assert set(grade_updates) == {"run-alpha", "run-beta"}
+
+        # No grade update failures (all mocked to succeed)
+        assert result.grade_update_failures == ()
+
 
 class TestInterruptedRunNotPurgeEligible:
     """Regression test for Phase 0 fix #5: Interrupted run purge.
