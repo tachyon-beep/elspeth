@@ -545,6 +545,11 @@ class ValidationErrorRecord:
     destination: str
     created_at: datetime
     row_data_json: str | None = None
+    violation_type: str | None = None  # "type_mismatch", "missing_field", "extra_field"
+    original_field_name: str | None = None  # Display name e.g. "'Amount USD'"
+    normalized_field_name: str | None = None  # Code name e.g. "amount_usd"
+    expected_type: str | None = None  # e.g. "int", "str"
+    actual_type: str | None = None  # Type of actual value
 
 
 @dataclass(frozen=True, slots=True)

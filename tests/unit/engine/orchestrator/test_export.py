@@ -48,6 +48,13 @@ def _make_sink_and_factory(*, config: dict[str, Any] | None = None, **overrides:
     return sink, lambda name: sink
 
 
+@pytest.fixture(autouse=True)
+def _mock_landscape_recorder():
+    """Prevent export tests from hitting real DB via LandscapeRecorder.register_node()."""
+    with patch("elspeth.core.landscape.recorder.LandscapeRecorder"):
+        yield
+
+
 # =============================================================================
 # export_landscape — JSON format
 # =============================================================================

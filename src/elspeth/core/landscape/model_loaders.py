@@ -427,6 +427,11 @@ class ValidationErrorLoader:
             destination=row.destination,
             created_at=row.created_at,
             row_data_json=row.row_data_json,
+            violation_type=row.violation_type,
+            original_field_name=row.original_field_name,
+            normalized_field_name=row.normalized_field_name,
+            expected_type=row.expected_type,
+            actual_type=row.actual_type,
         )
 
 

@@ -1169,6 +1169,11 @@ class TestValidationErrorLoader:
             destination="quarantine",
             created_at=NOW,
             row_data_json='{"name": "test"}',
+            violation_type="missing_field",
+            original_field_name="Amount USD",
+            normalized_field_name="amount_usd",
+            expected_type="int",
+            actual_type=None,
         )
         loader = ValidationErrorLoader()
         result = loader.load(sa_row)
@@ -1178,6 +1183,11 @@ class TestValidationErrorLoader:
         assert result.error == "Missing required field 'amount'"
         assert result.schema_mode == "fixed"
         assert result.row_data_json == '{"name": "test"}'
+        assert result.violation_type == "missing_field"
+        assert result.original_field_name == "Amount USD"
+        assert result.normalized_field_name == "amount_usd"
+        assert result.expected_type == "int"
+        assert result.actual_type is None
 
     def test_valid_load_with_none_optionals(self) -> None:
         sa_row = _make_sa_row(
@@ -1190,11 +1200,18 @@ class TestValidationErrorLoader:
             destination="quarantine",
             created_at=NOW,
             row_data_json=None,
+            violation_type=None,
+            original_field_name=None,
+            normalized_field_name=None,
+            expected_type=None,
+            actual_type=None,
         )
         loader = ValidationErrorLoader()
         result = loader.load(sa_row)
         assert result.node_id is None
         assert result.row_data_json is None
+        assert result.violation_type is None
+        assert result.original_field_name is None
 
 
 # ---------------------------------------------------------------------------
