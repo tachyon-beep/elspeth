@@ -5,11 +5,10 @@ tests/unit/contracts/transform_contracts/test_truncate_contract.py.
 These tests cover the truncation mechanics: config validation, suffix, boundaries.
 """
 
-from typing import Any
-
 import pytest
 from pydantic import ValidationError
 
+from elspeth.contracts.plugin_context import PluginContext
 from elspeth.contracts.schema import SchemaConfig
 from elspeth.plugins.transforms.truncate import Truncate, TruncateConfig
 from elspeth.testing import make_pipeline_row
@@ -64,10 +63,10 @@ class TestTruncateBehavior:
     """Core truncation mechanics."""
 
     @pytest.fixture
-    def ctx(self) -> Any:
+    def ctx(self) -> PluginContext:
         return make_source_context()
 
-    def test_no_truncation_when_under_limit(self, ctx: Any) -> None:
+    def test_no_truncation_when_under_limit(self, ctx: PluginContext) -> None:
         transform = Truncate({"fields": {"title": 50}, "schema": DYNAMIC_SCHEMA})
         row = make_pipeline_row({"title": "Short"})
         result = transform.process(row, ctx)
@@ -75,7 +74,7 @@ class TestTruncateBehavior:
         assert result.row is not None
         assert result.row["title"] == "Short"
 
-    def test_truncates_at_exact_limit(self, ctx: Any) -> None:
+    def test_truncates_at_exact_limit(self, ctx: PluginContext) -> None:
         transform = Truncate({"fields": {"title": 5}, "schema": DYNAMIC_SCHEMA})
         row = make_pipeline_row({"title": "Hello World"})
         result = transform.process(row, ctx)
@@ -83,7 +82,7 @@ class TestTruncateBehavior:
         assert result.row is not None
         assert result.row["title"] == "Hello"
 
-    def test_no_truncation_at_exact_length(self, ctx: Any) -> None:
+    def test_no_truncation_at_exact_length(self, ctx: PluginContext) -> None:
         """String exactly at max_len should NOT be truncated."""
         transform = Truncate({"fields": {"title": 5}, "schema": DYNAMIC_SCHEMA})
         row = make_pipeline_row({"title": "Hello"})
@@ -92,7 +91,7 @@ class TestTruncateBehavior:
         assert result.row is not None
         assert result.row["title"] == "Hello"
 
-    def test_truncates_with_suffix(self, ctx: Any) -> None:
+    def test_truncates_with_suffix(self, ctx: PluginContext) -> None:
         transform = Truncate({"fields": {"title": 10}, "suffix": "...", "schema": DYNAMIC_SCHEMA})
         row = make_pipeline_row({"title": "A very long title that exceeds the limit"})
         result = transform.process(row, ctx)
@@ -101,7 +100,7 @@ class TestTruncateBehavior:
         assert result.row["title"] == "A very ..."
         assert len(result.row["title"]) == 10
 
-    def test_suffix_not_appended_when_under_limit(self, ctx: Any) -> None:
+    def test_suffix_not_appended_when_under_limit(self, ctx: PluginContext) -> None:
         transform = Truncate({"fields": {"title": 50}, "suffix": "...", "schema": DYNAMIC_SCHEMA})
         row = make_pipeline_row({"title": "Short"})
         result = transform.process(row, ctx)
@@ -109,7 +108,7 @@ class TestTruncateBehavior:
         assert result.row is not None
         assert result.row["title"] == "Short"
 
-    def test_multiple_fields_truncated(self, ctx: Any) -> None:
+    def test_multiple_fields_truncated(self, ctx: PluginContext) -> None:
         transform = Truncate({"fields": {"title": 5, "desc": 3}, "schema": DYNAMIC_SCHEMA})
         row = make_pipeline_row({"title": "Hello World", "desc": "Long description"})
         result = transform.process(row, ctx)
@@ -118,7 +117,7 @@ class TestTruncateBehavior:
         assert result.row["title"] == "Hello"
         assert result.row["desc"] == "Lon"
 
-    def test_non_strict_skips_missing_fields(self, ctx: Any) -> None:
+    def test_non_strict_skips_missing_fields(self, ctx: PluginContext) -> None:
         transform = Truncate({"fields": {"title": 5, "missing": 10}, "strict": False, "schema": DYNAMIC_SCHEMA})
         row = make_pipeline_row({"title": "Hello World"})
         result = transform.process(row, ctx)
@@ -126,7 +125,7 @@ class TestTruncateBehavior:
         assert result.row is not None
         assert result.row["title"] == "Hello"
 
-    def test_unconfigured_fields_pass_through(self, ctx: Any) -> None:
+    def test_unconfigured_fields_pass_through(self, ctx: PluginContext) -> None:
         """Fields not in the truncation config are unmodified."""
         transform = Truncate({"fields": {"title": 5}, "schema": DYNAMIC_SCHEMA})
         row = make_pipeline_row({"title": "Hello World", "other": "untouched value"})
@@ -135,7 +134,7 @@ class TestTruncateBehavior:
         assert result.row is not None
         assert result.row["other"] == "untouched value"
 
-    def test_success_reason_lists_modified_fields(self, ctx: Any) -> None:
+    def test_success_reason_lists_modified_fields(self, ctx: PluginContext) -> None:
         transform = Truncate({"fields": {"title": 3, "desc": 100}, "schema": DYNAMIC_SCHEMA})
         row = make_pipeline_row({"title": "Hello", "desc": "Short"})
         result = transform.process(row, ctx)
@@ -144,7 +143,7 @@ class TestTruncateBehavior:
         assert "title" in result.success_reason["fields_modified"]
         assert "desc" not in result.success_reason["fields_modified"]
 
-    def test_empty_fields_config_passes_through(self, ctx: Any) -> None:
+    def test_empty_fields_config_passes_through(self, ctx: PluginContext) -> None:
         """No fields configured = no truncation, just passthrough."""
         transform = Truncate({"fields": {}, "schema": DYNAMIC_SCHEMA})
         row = make_pipeline_row({"title": "Whatever"})
@@ -153,7 +152,7 @@ class TestTruncateBehavior:
         assert result.row is not None
         assert result.row["title"] == "Whatever"
 
-    def test_deep_copies_row_data(self, ctx: Any) -> None:
+    def test_deep_copies_row_data(self, ctx: PluginContext) -> None:
         """Truncate must not mutate the input row."""
         transform = Truncate({"fields": {"title": 3}, "schema": DYNAMIC_SCHEMA})
         original_data = {"title": "Hello World", "nested": {"key": "val"}}
@@ -169,7 +168,3 @@ class TestTruncateBehavior:
         transform = Truncate({"fields": {"title": 5}, "schema": DYNAMIC_SCHEMA})
         transform.close()
         transform.close()  # Idempotent
-
-    def test_plugin_metadata(self) -> None:
-        assert Truncate.name == "truncate"
-        assert Truncate.plugin_version == "1.0.0"
