@@ -35,7 +35,7 @@ def work_dir(tmp_path: Path) -> Path:
     uploads_dir.mkdir()
     csv_dest = uploads_dir / "input.csv"
     shutil.copy(TEST_CSV, csv_dest)
-    output_dir = tmp_path / "output"
+    output_dir = tmp_path / "outputs"
     output_dir.mkdir()
     audit_dir = tmp_path / "runs"
     audit_dir.mkdir()
@@ -103,7 +103,7 @@ class TestEndToEndPipelineExecution:
 
             # 2. Save composition state programmatically
             csv_path = str(work_dir / "uploads" / "input.csv")
-            output_path = str(work_dir / "output" / "result.csv")
+            output_path = str(work_dir / "outputs" / "result.csv")
 
             state = CompositionState(
                 source=SourceSpec(
@@ -188,7 +188,7 @@ class TestEndToEndPipelineExecution:
             assert status["landscape_run_id"] is not None
 
             # 7. Verify output file was created
-            output_file = work_dir / "output" / "result.csv"
+            output_file = work_dir / "outputs" / "result.csv"
             assert output_file.exists()
 
             # 8. Verify audit database exists

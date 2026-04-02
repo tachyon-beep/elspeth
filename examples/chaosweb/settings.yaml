@@ -55,7 +55,7 @@ gates:
 # Gate: Route short or suspicious content to review
 - name: content_check
   input: scraped
-  condition: len(str(row.get('page_content', ''))) >= 50
+  condition: len(row['page_content']) >= 50
   routes:
     'true': output
     'false': review

@@ -85,10 +85,26 @@ def export_landscape(
     sink = sink_factory(sink_name)
     sink.node_id = f"export:{sink_name}"
 
+    from elspeth.contracts import Determinism, NodeType
+    from elspeth.contracts.schema import SchemaConfig
     from elspeth.core.landscape.recorder import LandscapeRecorder
 
     recorder = LandscapeRecorder(db)
     ctx = PluginContext(run_id=run_id, config={}, landscape=recorder, node_id=sink.node_id)
+
+    # Register the export sink as a node so the FK constraint in `operations` is satisfied.
+    # The export sink writes post-run audit data and is not part of the execution graph,
+    # so it must be registered here before begin_operation() is called.
+    recorder.register_node(
+        run_id=run_id,
+        node_id=sink.node_id,
+        plugin_name=sink.name,
+        node_type=NodeType.SINK,
+        plugin_version=sink.plugin_version,
+        config=dict(sink.config),
+        schema_config=SchemaConfig.from_dict({"mode": "observed"}),
+        determinism=Determinism.IO_WRITE,
+    )
 
     if export_config.format == "csv":
         if "path" not in sink.config:

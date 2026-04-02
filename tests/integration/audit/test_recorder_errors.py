@@ -236,7 +236,7 @@ class TestTransformErrorRecording:
             token_id="tok_nan",
             transform_id="processor",
             row_data=row_data,
-            error_details={"reason": "division_by_zero", "error": "Cannot divide by zero"},  # type: ignore[typeddict-item]  # intentionally invalid reason
+            error_details={"reason": "float_overflow", "error": "Cannot divide by zero"},  # type: ignore[typeddict-item]  # intentionally invalid reason
             destination="error_sink",
         )
 
@@ -254,7 +254,7 @@ class TestTransformErrorRecording:
         assert "__repr__" in row.row_data_json  # NonCanonicalMetadata marker
         assert "__canonical_error__" in row.row_data_json
         assert row.error_details_json is not None
-        assert "division_by_zero" in row.error_details_json
+        assert "float_overflow" in row.error_details_json
 
     def test_record_transform_error_with_infinity_row_data_uses_repr_fallback(self) -> None:
         """record_transform_error handles Infinity in row_data without crashing."""
@@ -278,7 +278,7 @@ class TestTransformErrorRecording:
             token_id="tok_inf",
             transform_id="processor",
             row_data=row_data,
-            error_details={"reason": "overflow", "error": "Value too large"},  # type: ignore[typeddict-item]  # intentionally invalid reason
+            error_details={"reason": "float_overflow", "error": "Value too large"},  # type: ignore[typeddict-item]  # intentionally invalid reason
             destination="discard",
         )
 

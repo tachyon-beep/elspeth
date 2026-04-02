@@ -2,14 +2,97 @@
 
 from __future__ import annotations
 
+from datetime import UTC, datetime
+
 import pytest
 
-from elspeth.contracts import NodeType, RunStatus
+from elspeth.contracts import CallStatus, CallType, Determinism, NodeStateStatus, NodeType, RunStatus
 from elspeth.contracts.errors import AuditIntegrityError
 from elspeth.contracts.schema import SchemaConfig
+from elspeth.core.landscape.database import LandscapeDB
+from elspeth.core.landscape.schema import calls_table, node_states_table, rows_table, tokens_table
 
 # Dynamic schema for tests that don't care about specific fields
 DYNAMIC_SCHEMA = SchemaConfig.from_dict({"mode": "observed"})
+
+
+def _insert_purged_call(
+    db: LandscapeDB,
+    run_id: str,
+    node_id: str,
+    *,
+    state_id: str = "st-purge",
+    call_id: str = "call-purge",
+) -> None:
+    """Insert the minimal row/token/node_state/call chain for a purged response.
+
+    Creates evidence that a nondeterministic node made a call whose response payload
+    has been purged (response_hash set, response_ref NULL). This is the condition
+    update_grade_after_purge checks before downgrading REPLAY_REPRODUCIBLE.
+
+    The node itself must already be registered via recorder.register_node() before
+    calling this helper so that the FK constraints on node_states are satisfied.
+
+    Args:
+        db: LandscapeDB instance
+        run_id: Run the call belongs to
+        node_id: Already-registered nondeterministic node ID
+        state_id: state_id to use for node_states row (must be unique per test)
+        call_id: call_id to use for calls row (must be unique per test)
+    """
+    from elspeth.core.canonical import stable_hash
+
+    now = datetime.now(UTC)
+    row_id = f"row-{node_id}"
+    token_id = f"tok-{node_id}"
+
+    with db.connection() as conn:
+        conn.execute(
+            rows_table.insert().values(
+                row_id=row_id,
+                run_id=run_id,
+                source_node_id=node_id,
+                row_index=0,
+                source_data_hash=stable_hash({"row": row_id}),
+                created_at=now,
+            )
+        )
+        conn.execute(
+            tokens_table.insert().values(
+                token_id=token_id,
+                row_id=row_id,
+                run_id=run_id,
+                created_at=now,
+            )
+        )
+        conn.execute(
+            node_states_table.insert().values(
+                state_id=state_id,
+                token_id=token_id,
+                run_id=run_id,
+                node_id=node_id,
+                step_index=0,
+                attempt=0,
+                status=NodeStateStatus.COMPLETED.value,
+                input_hash="in_hash",
+                output_hash="out_hash",
+                started_at=now,
+            )
+        )
+        conn.execute(
+            calls_table.insert().values(
+                call_id=call_id,
+                state_id=state_id,
+                operation_id=None,
+                call_index=0,
+                call_type=CallType.HTTP.value,
+                status=CallStatus.SUCCESS.value,
+                request_hash="req_hash",
+                response_hash="resp_hash",  # Proof the payload once existed
+                response_ref=None,  # NULL = payload has been purged
+                created_at=now,
+            )
+        )
 
 
 class TestReproducibilityGradeComputation:
@@ -150,8 +233,12 @@ class TestReproducibilityGradeComputation:
         assert completed_run.reproducibility_grade == ReproducibilityGrade.FULL_REPRODUCIBLE
 
     def test_grade_degrades_after_purge(self) -> None:
-        """REPLAY_REPRODUCIBLE degrades to ATTRIBUTABLE_ONLY after purge."""
-        from elspeth.contracts import Determinism
+        """REPLAY_REPRODUCIBLE degrades to ATTRIBUTABLE_ONLY after purge.
+
+        Degradation requires evidence that replay-critical payloads were purged:
+        a call from a nondeterministic node with response_hash set (payload existed)
+        but response_ref NULL (payload has been deleted).
+        """
         from elspeth.core.landscape.database import LandscapeDB
         from elspeth.core.landscape.recorder import LandscapeRecorder
         from elspeth.core.landscape.reproducibility import (
@@ -164,7 +251,7 @@ class TestReproducibilityGradeComputation:
         run = recorder.begin_run(config={}, canonical_version="v1")
 
         # Nondeterministic pipeline
-        recorder.register_node(
+        node = recorder.register_node(
             run_id=run.run_id,
             plugin_name="llm_source",
             node_type=NodeType.SOURCE,
@@ -178,7 +265,11 @@ class TestReproducibilityGradeComputation:
         completed_run = recorder.finalize_run(run.run_id, status=RunStatus.COMPLETED)
         assert completed_run.reproducibility_grade == ReproducibilityGrade.REPLAY_REPRODUCIBLE
 
-        # Simulate purge - grade should degrade
+        # Simulate a purged response: insert a call with response_hash set but
+        # response_ref NULL — this is the evidence update_grade_after_purge looks for.
+        _insert_purged_call(db, run.run_id, node_id=node.node_id)
+
+        # Simulate purge - grade should degrade because replay-critical payload is gone
         update_grade_after_purge(db, run.run_id)
 
         # Check grade was degraded
@@ -250,8 +341,11 @@ class TestReproducibilityGradeComputation:
             update_grade_after_purge(db, "nonexistent_run_id")
 
     def test_attributable_only_unchanged_after_purge(self) -> None:
-        """ATTRIBUTABLE_ONLY remains unchanged after purge (already at lowest grade)."""
-        from elspeth.contracts import Determinism
+        """ATTRIBUTABLE_ONLY remains unchanged after purge (already at lowest grade).
+
+        First purge degrades REPLAY_REPRODUCIBLE → ATTRIBUTABLE_ONLY (requires evidence
+        of purged replay-critical payloads). Second purge is a no-op.
+        """
         from elspeth.core.landscape.database import LandscapeDB
         from elspeth.core.landscape.recorder import LandscapeRecorder
         from elspeth.core.landscape.reproducibility import (
@@ -264,7 +358,7 @@ class TestReproducibilityGradeComputation:
         run = recorder.begin_run(config={}, canonical_version="v1")
 
         # Nondeterministic pipeline
-        recorder.register_node(
+        node = recorder.register_node(
             run_id=run.run_id,
             plugin_name="llm_source",
             node_type=NodeType.SOURCE,
@@ -274,8 +368,13 @@ class TestReproducibilityGradeComputation:
             schema_config=DYNAMIC_SCHEMA,
         )
 
-        # Finalize and degrade to ATTRIBUTABLE_ONLY
+        # Finalize with REPLAY_REPRODUCIBLE grade
         recorder.finalize_run(run.run_id, status=RunStatus.COMPLETED)
+
+        # Insert a purged call record — evidence that a replay-critical payload was deleted
+        _insert_purged_call(db, run.run_id, node_id=node.node_id)
+
+        # First purge: degrades REPLAY_REPRODUCIBLE → ATTRIBUTABLE_ONLY
         update_grade_after_purge(db, run.run_id)
 
         # Verify it's ATTRIBUTABLE_ONLY
@@ -283,7 +382,7 @@ class TestReproducibilityGradeComputation:
         assert run_after_first_purge is not None
         assert run_after_first_purge.reproducibility_grade == ReproducibilityGrade.ATTRIBUTABLE_ONLY
 
-        # Call purge again - should remain ATTRIBUTABLE_ONLY
+        # Second purge: no-op, already at lowest grade
         update_grade_after_purge(db, run.run_id)
 
         run_after_second_purge = recorder.get_run(run.run_id)
