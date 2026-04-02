@@ -4,7 +4,7 @@
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 [![Python 3.12+](https://img.shields.io/badge/python-3.12+-blue.svg)](https://www.python.org/downloads/)
-![Status: RC-4.1](https://img.shields.io/badge/status-RC--4.1-yellow.svg)
+![Status: RC-5](https://img.shields.io/badge/status-RC--5-yellow.svg)
 
 Auditable Sense/Decide/Act pipelines for high-stakes data processing. Every decision traceable to its source.
 
@@ -538,7 +538,7 @@ docker run --rm \
   -v $(pwd)/input:/app/input:ro \
   -v $(pwd)/output:/app/output \
   -v $(pwd)/state:/app/state \
-  ghcr.io/johnm-dta/elspeth:v0.4.1 \
+  ghcr.io/johnm-dta/elspeth:v0.5.0 \
   run --settings /app/config/pipeline.yaml --execute
 
 # Health check

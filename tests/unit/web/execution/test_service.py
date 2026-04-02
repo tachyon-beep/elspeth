@@ -867,12 +867,13 @@ class TestB8AsyncBridging:
         mock_future = MagicMock()
         mock_future.result.return_value = "test_result"
 
+        async def dummy_coro() -> str:
+            return "test_result"
+
+        coro = dummy_coro()
         with patch("asyncio.run_coroutine_threadsafe", return_value=mock_future):
-
-            async def dummy_coro() -> str:
-                return "test_result"
-
-            result = svc._call_async(dummy_coro())
+            result = svc._call_async(coro)
+        coro.close()
         assert result == "test_result"
         mock_future.result.assert_called_once_with(timeout=30.0)
 
@@ -894,13 +895,13 @@ class TestB8AsyncBridging:
         mock_future = MagicMock()
         mock_future.result.side_effect = ValueError("db error")
 
-        with patch("asyncio.run_coroutine_threadsafe", return_value=mock_future):
+        async def failing_coro() -> None:
+            raise ValueError("db error")
 
-            async def failing_coro() -> None:
-                raise ValueError("db error")
-
-            with pytest.raises(ValueError, match="db error"):
-                svc._call_async(failing_coro())
+        coro = failing_coro()
+        with patch("asyncio.run_coroutine_threadsafe", return_value=mock_future), pytest.raises(ValueError, match="db error"):
+            svc._call_async(coro)
+        coro.close()
 
     def test_call_async_raises_timeout_error(
         self,
@@ -920,13 +921,13 @@ class TestB8AsyncBridging:
         mock_future = MagicMock()
         mock_future.result.side_effect = concurrent.futures.TimeoutError()
 
-        with patch("asyncio.run_coroutine_threadsafe", return_value=mock_future):
+        async def hanging_coro() -> None:
+            pass
 
-            async def hanging_coro() -> None:
-                pass
-
-            with pytest.raises(concurrent.futures.TimeoutError):
-                svc._call_async(hanging_coro())
+        coro = hanging_coro()
+        with patch("asyncio.run_coroutine_threadsafe", return_value=mock_future), pytest.raises(concurrent.futures.TimeoutError):
+            svc._call_async(coro)
+        coro.close()
 
 
 # ── W15: Running Status Failure Path ─────────────────────────────────
@@ -954,6 +955,7 @@ class TestRunningStatusFailure:
             nonlocal call_count
             call_count += 1
             if call_count == 1:  # First call = update to "running"
+                coro.close()
                 raise ConnectionError("DB connection lost")
             return original_call_async(coro)
 

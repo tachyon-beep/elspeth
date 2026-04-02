@@ -74,7 +74,7 @@ sinks:
         - 'label: str'
         - 'page_content: str'
         - 'page_fingerprint: str'
-        - 'fetch_status: str'
+        - 'fetch_status: int'
         - 'fetch_url_final: str'
         - 'fetch_url_final_ip: str'
   review:
@@ -90,7 +90,7 @@ sinks:
         - 'label: str'
         - 'page_content: str'
         - 'page_fingerprint: str'
-        - 'fetch_status: str'
+        - 'fetch_status: int'
         - 'fetch_url_final: str'
         - 'fetch_url_final_ip: str'
   scrape_failures:

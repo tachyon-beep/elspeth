@@ -8,6 +8,7 @@ Three modes, all anchored on query_field:
 
 from __future__ import annotations
 
+import multiprocessing as mp
 import re
 from concurrent.futures import ProcessPoolExecutor
 from concurrent.futures import TimeoutError as FuturesTimeoutError
@@ -93,7 +94,7 @@ class QueryBuilder:
             self._compiled_pattern = re.compile(query_pattern)
             # Lazily create the process pool on first use. Single worker
             # bounds concurrent process count while amortizing spawn cost.
-            self._regex_pool = ProcessPoolExecutor(max_workers=1)
+            self._regex_pool = ProcessPoolExecutor(max_workers=1, mp_context=mp.get_context("spawn"))
 
     def build(self, row_data: dict[str, Any]) -> QueryResult:
         """Construct a search query from row data."""
@@ -163,7 +164,7 @@ class QueryBuilder:
             for proc in stuck_processes:
                 if proc.is_alive():
                     proc.kill()
-            self._regex_pool = ProcessPoolExecutor(max_workers=1)
+            self._regex_pool = ProcessPoolExecutor(max_workers=1, mp_context=mp.get_context("spawn"))
             return QueryResult(
                 error={
                     "reason": "no_regex_match",

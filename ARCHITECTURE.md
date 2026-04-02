@@ -2,9 +2,9 @@
 
 C4 model documentation for the ELSPETH auditable pipeline framework.
 
-**Last Updated:** 2026-03-26 (synchronized with RC-4.1 branch)
-**Framework Version:** 0.4.1 (RC-4.1)
-**Architecture Grade:** A- (Production Ready)
+**Last Updated:** 2026-04-03 (synchronized with RC-5 branch)
+**Framework Version:** 0.5.0 (RC-5)
+**Status:** Pre-release
 
 ---
 
@@ -17,9 +17,8 @@ C4 model documentation for the ELSPETH auditable pipeline framework.
 | **Data flow?** | Source → Transforms/Gates → Sinks (all recorded) |
 | **Audit storage?** | SQLite/SQLCipher (dev) / PostgreSQL (prod) |
 | **Extension model?** | pluggy-based plugin system |
-| **Production LOC** | ~80,400 Python lines (243 files) |
-| **Test LOC** | ~232,100 Python lines (624 files, 2.9:1 ratio) |
-| **Architecture Grade** | A- (Production Ready) |
+| **Production LOC** | ~103,900 lines (315 Python, 46 TypeScript/TSX, 1 CSS) |
+| **Test LOC** | ~274,900 Python lines (731 files, 2.6:1 ratio) |
 
 ---
 
@@ -166,7 +165,7 @@ C4Container
 | **Audit DB** | SQLite/SQLCipher/PostgreSQL | — | Complete audit trail storage (21 tables) |
 | **Payload Store** | Filesystem | — | Content-addressable blob storage with retention |
 
-**Total Production LOC:** ~80,400 (243 files) | **Total Test LOC:** ~232,100 (624 files) | **Test Ratio:** 2.9:1
+**Total Production LOC:** ~103,900 (315 Python + 47 frontend files) | **Total Test LOC:** ~274,900 (731 files) | **Test Ratio:** 2.6:1
 
 ---
 
@@ -908,31 +907,28 @@ ELSPETH uses ADRs to document significant architectural choices.
 
 ## Quality Assessment
 
-Based on comprehensive analysis (2026-03-26, RC-4.1), ELSPETH demonstrates exceptional architectural quality.
+Based on automated analysis (2026-03-26) and ongoing CI enforcement.
 
-### Quality Scores
+### Design Characteristics
 
-| Dimension | Grade | Status |
-|-----------|-------|--------|
-| **Maintainability** | A | Excellent - Clean modules, consistent patterns |
-| **Testability** | A+ | Exceptional - 2.9:1 test ratio, mutation testing |
-| **Type Safety** | A | Excellent - mypy strict, protocols, NewType aliases |
-| **Documentation** | A- | Very Good - CLAUDE.md (10K+ words), ADRs, runbooks |
-| **Error Handling** | A | Excellent - Three-tier trust model |
-| **Security** | A | Excellent - HMAC fingerprinting, AST parsing, no eval |
-| **Performance** | B+ | Good - Batch operations, pooling, rate limiting |
-| **Complexity** | B | Acceptable - Some complex areas (aggregation, large files) |
+| Dimension | Evidence |
+|-----------|----------|
+| **Maintainability** | Clean module boundaries, consistent patterns across subsystems |
+| **Testability** | 2.6:1 test-to-production LOC ratio, mutation testing, property tests |
+| **Type Safety** | mypy strict mode, runtime-checkable protocols, NewType aliases |
+| **Documentation** | CLAUDE.md (10K+ words), 6 ADRs, runbooks, architecture docs |
+| **Error Handling** | Three-tier trust model with distinct rules per boundary |
+| **Security** | HMAC fingerprinting, AST-based expression parsing (no eval), SQLCipher support |
+| **Performance** | Batch operations, connection pooling, rate limiting |
+| **Complexity** | Some large files remain (orchestrator ~2,070 LOC, processor ~1,860 LOC) |
 
-**Overall Architecture Grade: A-** (Production Ready)
+### Design Principles
 
-### Key Strengths
-
-1. **Exceptional Auditability** - Complete traceability, "I don't know what happened" is never acceptable
+1. **Auditability** - Complete traceability; "I don't know what happened" is never acceptable
 2. **Three-Tier Trust Model** - Clear rules for data handling at each boundary
-3. **Clean Layering** - Contracts as leaf module, clear separation of concerns
+3. **Clean Layering** - Contracts as leaf module, CI-enforced layer dependencies
 4. **Protocol-Based Design** - Runtime-checkable interfaces, structural typing
-5. **Comprehensive Testing** - 232K test LOC vs 80K production LOC (2.9:1 ratio)
-6. **No Legacy Code Policy** - Clean evolution, no backwards compatibility shims
+5. **No Legacy Code Policy** - Clean evolution, no backwards compatibility shims
 
 ### Areas for Future Improvement
 
@@ -949,7 +945,7 @@ Based on comprehensive analysis (2026-03-26, RC-4.1), ELSPETH demonstrates excep
 |----------|--------|----------|
 | **Audit Integrity** | ✅ Low Risk | Tier 1 crash policy, NaN/Infinity rejected |
 | **Type Safety** | ✅ Low Risk | mypy strict, runtime protocol verification |
-| **Test Coverage** | ✅ Low Risk | 2.9:1 ratio, mutation testing, property tests |
+| **Test Coverage** | ✅ Low Risk | 2.6:1 ratio, mutation testing, property tests |
 | **Resume Safety** | ✅ Low Risk | Full topology hash (BUG-COMPAT-01 fix applied) |
 
 ---
@@ -980,16 +976,16 @@ Based on comprehensive analysis (2026-03-26, RC-4.1), ELSPETH demonstrates excep
 9. **Dependency Graph** - Subsystem relationships and leaf module principle
 10. **Schema Validation** - Contract enforcement at DAG construction
 11. **ADRs** - Documented architectural decisions
-12. **Quality Assessment** - Architecture grade and risk analysis
+12. **Quality Assessment** - Design characteristics and risk analysis
 
 **Key Metrics:**
 
-- Production LOC: ~80,400 (243 Python files)
-- Test LOC: ~232,100 (624 Python files, 2.9:1 ratio)
+- Production LOC: ~103,900 (315 Python + 47 frontend files)
+- Test LOC: ~274,900 (731 Python files, 2.6:1 ratio)
 - Subsystems: 11 major (20+ including sub-components)
-- Plugins: 25
-- ADRs: 6
-- Architecture Grade: A-
+- Plugins: 46
+- ADRs: 8
+- Status: Pre-release (RC-5)
 
 All diagrams use Mermaid syntax for version control compatibility.
 

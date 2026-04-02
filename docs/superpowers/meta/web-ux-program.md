@@ -1,7 +1,7 @@
 # Web UX Composer MVP — Program of Work
 
 **Created:** 2026-03-28
-**Branch:** RC4.2-UX
+**Branch:** RC4.2-UX (released as RC-5)
 **Parent Epic:** Semi-Autonomous Platform (`elspeth-rapid-ea33f5`)
 **Status:** Phase 1 ready for execution; Phases 2-6 require plan body sync + L3 decomposition
 

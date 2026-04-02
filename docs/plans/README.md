@@ -8,7 +8,7 @@ This directory tracks active implementation plans. Completed, superseded, and ca
 
 | Plan | Description | Status |
 |------|-------------|--------|
-| `RC4-initiation.md` | RC4 scope — last maintenance release before feature work | Active |
+| `RC4-initiation.md` | RC4 scope — last maintenance release before feature work | Completed |
 | `ARCH-15-design.md` | Per-branch fork transforms architecture (reviewed, ready for implementation) | Approved |
 
 ### High Value

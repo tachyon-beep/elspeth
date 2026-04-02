@@ -4,7 +4,11 @@ All notable changes to ELSPETH are documented here.
 
 ---
 
-## [Unreleased] (RC-4.2 — Web UX Composer + Systematic Hardening)
+## [Unreleased]
+
+---
+
+## [0.5.0] (RC-5 — Web UX Composer + Systematic Hardening)
 
 Full web application platform for chat-first pipeline composition, three-provider authentication, session management with versioning, blob storage, secret management, background pipeline execution with WebSocket progress, and a React frontend themed to DTA/AGDS guidelines. Also: sink failsink pattern for per-row write failure routing, pipeline composer MCP server, a 100+ P1 bug closure campaign across all subsystems, and a comprehensive test hygiene sweep removing ~500 low-value tests while adding ~200 gap-filling tests.
 
@@ -713,7 +717,8 @@ plugin system, and CLI.
 - [RC-2 Changelog](CHANGELOG-RC2.md) — Sub-releases RC2 through RC2.5 (Feb 2 – Feb 12, 2026)
 
 <!-- Comparison links — tags created at release time -->
-[0.4.1]: https://github.com/tachyon-beep/elspeth/compare/v0.4.0-rc4.0...main
+[0.5.0]: https://github.com/tachyon-beep/elspeth/compare/v0.4.1-rc4.1...main
+[0.4.1]: https://github.com/tachyon-beep/elspeth/compare/v0.4.0-rc4.0...v0.4.1-rc4.1
 [0.4.0]: https://github.com/tachyon-beep/elspeth/compare/v0.3.4-rc3.4...v0.4.0-rc4.0
 [0.3.4]: https://github.com/tachyon-beep/elspeth/compare/v0.3.3-rc3.3...v0.3.4-rc3.4
 [0.3.3]: https://github.com/tachyon-beep/elspeth/compare/v0.3.0-rc3.2...v0.3.3-rc3.3
