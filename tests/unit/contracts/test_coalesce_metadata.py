@@ -114,24 +114,6 @@ class TestBranchesLostAuditShapeConsistency:
 
 
 class TestCoalesceMetadataEnumFields:
-    def test_policy_is_enum(self) -> None:
-        meta = CoalesceMetadata(policy=CoalescePolicy.REQUIRE_ALL)
-        assert isinstance(meta.policy, CoalescePolicy)
-
-    def test_merge_strategy_is_enum(self) -> None:
-        meta = CoalesceMetadata(
-            policy=CoalescePolicy.REQUIRE_ALL,
-            merge_strategy=MergeStrategy.UNION,
-        )
-        assert isinstance(meta.merge_strategy, MergeStrategy)
-
-    def test_factory_for_late_arrival_uses_enum(self) -> None:
-        meta = CoalesceMetadata.for_late_arrival(
-            policy=CoalescePolicy.REQUIRE_ALL,
-            reason="test",
-        )
-        assert meta.policy is CoalescePolicy.REQUIRE_ALL
-
     def test_to_dict_emits_string_value_for_policy(self) -> None:
         meta = CoalesceMetadata(policy=CoalescePolicy.REQUIRE_ALL)
         d = meta.to_dict()

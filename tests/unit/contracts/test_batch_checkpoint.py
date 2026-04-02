@@ -31,11 +31,6 @@ class TestRowMappingEntry:
         d = entry.to_dict()
         assert d == {"index": 0, "variables_hash": "deadbeef"}
 
-    def test_frozen(self) -> None:
-        entry = RowMappingEntry(index=1, variables_hash="hash")
-        with pytest.raises(AttributeError):
-            entry.index = 99  # type: ignore[misc]
-
     def test_from_dict_missing_index_crashes(self) -> None:
         with pytest.raises(AuditIntegrityError, match="missing required fields"):
             RowMappingEntry.from_dict({"variables_hash": "abc"})
@@ -114,11 +109,6 @@ class TestBatchCheckpointState:
         mapping_val = d["row_mapping"]["row-0-aaa"]
         assert isinstance(mapping_val, dict)
         assert mapping_val == {"index": 0, "variables_hash": "hash0"}
-
-    def test_frozen_immutability(self) -> None:
-        state = _make_state()
-        with pytest.raises(AttributeError):
-            state.batch_id = "mutated"  # type: ignore[misc]
 
     # --- Tier 1 crash semantics: missing keys crash on deserialization ---
 

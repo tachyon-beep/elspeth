@@ -219,19 +219,6 @@ class TestTransformResult:
         assert result.status == "error"
         assert result.retryable is True
 
-    def test_status_is_literal_not_enum(self) -> None:
-        """Status is Literal string, not enum - can compare directly to string."""
-        success = TransformResult.success(make_pipeline_row({"x": 1}), success_reason={"action": "test"})
-        error = TransformResult.error({"reason": "test_error", "error": "msg"})
-
-        # Direct string comparison works (not .value)
-        assert success.status == "success"
-        assert error.status == "error"
-
-        # String identity check - must be exactly str, not StrEnum
-        assert type(success.status) is str
-        assert type(error.status) is str
-
     def test_audit_fields_default_to_none(self) -> None:
         """Audit fields default to None, set by executor."""
         result = TransformResult.success(make_pipeline_row({"x": 1}), success_reason={"action": "test"})

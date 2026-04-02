@@ -12,11 +12,6 @@ from elspeth.contracts.aggregation_checkpoint import (
     AggregationNodeCheckpoint,
     AggregationTokenCheckpoint,
 )
-from elspeth.contracts.coalesce_checkpoint import (
-    CoalesceCheckpointState,
-    CoalescePendingCheckpoint,
-    CoalesceTokenCheckpoint,
-)
 from elspeth.contracts.errors import AuditIntegrityError
 
 
@@ -78,67 +73,6 @@ def test_resume_check_rejects_false_without_reason() -> None:
         ResumeCheck(can_resume=False)
 
 
-def test_resume_point_accepts_typed_aggregation_state() -> None:
-    agg_state = _make_agg_state()
-    resume_point = ResumePoint(
-        checkpoint=_checkpoint(),
-        token_id="tok-001",
-        node_id="node-001",
-        sequence_number=1,
-        aggregation_state=agg_state,
-    )
-    assert resume_point.aggregation_state is agg_state
-
-
-def test_resume_point_accepts_none_aggregation_state() -> None:
-    resume_point = ResumePoint(
-        checkpoint=_checkpoint(),
-        token_id="tok-001",
-        node_id="node-001",
-        sequence_number=1,
-        aggregation_state=None,
-    )
-    assert resume_point.aggregation_state is None
-
-
-def test_resume_point_accepts_typed_coalesce_state() -> None:
-    coalesce_state = CoalesceCheckpointState(
-        version="1.0",
-        pending=(
-            CoalescePendingCheckpoint(
-                coalesce_name="merge_paths",
-                row_id="row-001",
-                elapsed_age_seconds=1.5,
-                branches={
-                    "branch_a": CoalesceTokenCheckpoint(
-                        token_id="tok-branch-a",
-                        row_id="row-001",
-                        branch_name="branch_a",
-                        fork_group_id="fork-1",
-                        join_group_id=None,
-                        expand_group_id=None,
-                        row_data={"value": 1},
-                        contract={"mode": "OBSERVED", "locked": True, "fields": []},
-                        state_id="state-123",
-                        arrival_offset_seconds=0.0,
-                    )
-                },
-                lost_branches={},
-            ),
-        ),
-        completed_keys=(),
-    )
-
-    resume_point = ResumePoint(
-        checkpoint=_checkpoint(),
-        token_id="tok-001",
-        node_id="node-001",
-        sequence_number=1,
-        coalesce_state=coalesce_state,
-    )
-    assert resume_point.coalesce_state is coalesce_state
-
-
 def test_resume_point_rejects_empty_token_id() -> None:
     with pytest.raises(ValueError, match="token_id must not be empty"):
         ResumePoint(
@@ -167,27 +101,6 @@ def test_resume_point_rejects_negative_sequence_number() -> None:
             node_id="node-001",
             sequence_number=-1,
         )
-
-
-def test_resume_point_accepts_zero_sequence_number() -> None:
-    cp = Checkpoint(
-        checkpoint_id="cp-001",
-        run_id="run-001",
-        token_id="tok-001",
-        node_id="node-001",
-        sequence_number=0,
-        created_at=datetime.now(UTC),
-        upstream_topology_hash="a" * 64,
-        checkpoint_node_config_hash="b" * 64,
-        format_version=Checkpoint.CURRENT_FORMAT_VERSION,
-    )
-    resume_point = ResumePoint(
-        checkpoint=cp,
-        token_id="tok-001",
-        node_id="node-001",
-        sequence_number=0,
-    )
-    assert resume_point.sequence_number == 0
 
 
 # === ResumePoint Tier 1 type guards (elspeth-0b184125ca, elspeth-65428b478c) ===

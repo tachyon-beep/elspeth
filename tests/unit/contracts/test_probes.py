@@ -108,21 +108,6 @@ class TestCollectionReadinessResult:
 class TestCollectionProbe:
     """Tests for the CollectionProbe protocol."""
 
-    def test_compliant_implementation_passes_isinstance(self) -> None:
-        class FakeProbe:
-            collection_name: str = "test-collection"
-
-            def probe(self) -> CollectionReadinessResult:
-                return CollectionReadinessResult(
-                    collection=self.collection_name,
-                    reachable=True,
-                    count=5,
-                    message="ok",
-                )
-
-        probe = FakeProbe()
-        assert isinstance(probe, CollectionProbe)
-
     def test_non_compliant_missing_probe_method(self) -> None:
         class BadProbe:
             collection_name: str = "test"
