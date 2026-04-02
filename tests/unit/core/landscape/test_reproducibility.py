@@ -271,7 +271,8 @@ class TestUpdateGradeAfterPurge:
         db, recorder = _setup()
         # Create a deterministic node with a purged response — not replay-critical
         _create_nondeterministic_call(
-            db, recorder,
+            db,
+            recorder,
             determinism=Determinism.DETERMINISTIC,
             response_ref=None,
             response_hash="resp_hash",

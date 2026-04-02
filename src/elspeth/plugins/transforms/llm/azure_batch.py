@@ -26,7 +26,16 @@ from typing import Any
 import structlog
 from pydantic import Field
 
-from elspeth.contracts import BatchPendingError, CallStatus, CallType, Determinism, RowErrorEntry, TransformErrorReason, TransformResult
+from elspeth.contracts import (
+    BatchPendingError,
+    CallStatus,
+    CallType,
+    Determinism,
+    RowErrorEntry,
+    TransformErrorReason,
+    TransformResult,
+    TransformSuccessReason,
+)
 from elspeth.contracts.batch_checkpoint import BatchCheckpointState, RowMappingEntry
 from elspeth.contracts.contexts import LifecycleContext, TransformContext
 from elspeth.contracts.errors import AuditIntegrityError
@@ -1525,11 +1534,9 @@ class AzureBatchLLMTransform(BaseTransform):
         # Collect all quarantined row indices for engine visibility.
         # Without quarantined_indices in metadata, the engine marks ALL rows as
         # CONSUMED_IN_BATCH — error rows silently pass as successfully processed.
-        quarantined_indices = sorted(
-            template_error_indices | {e["row_index"] for e in row_errors}
-        )
+        quarantined_indices = sorted(template_error_indices | {e["row_index"] for e in row_errors})
 
-        success_reason: dict[str, Any] = {
+        success_reason: TransformSuccessReason = {
             "action": "enriched",
             "fields_added": [self._response_field],
             "metadata": {

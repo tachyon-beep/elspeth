@@ -244,7 +244,7 @@ class TestDiscoverAllPlugins:
         from elspeth.plugins.infrastructure.discovery import discover_all_plugins
 
         # Expected counts verified during migration from hookimpl files
-        EXPECTED_SOURCE_COUNT = 5  # csv, json, null, azure_blob, dataverse
+        EXPECTED_SOURCE_COUNT = 6  # csv, json, null, azure_blob, dataverse, text
         EXPECTED_TRANSFORM_COUNT = (
             14  # 8 standard transforms + 2 azure safety + llm + azure_batch_llm + openrouter_batch_llm + rag_retrieval
         )

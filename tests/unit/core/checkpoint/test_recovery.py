@@ -955,9 +955,7 @@ def test_get_unprocessed_row_data_corrupt_utf8_raises_audit_integrity(
 
     monkeypatch.setattr(recovery_manager, "get_unprocessed_rows", lambda _run_id: ["row-1"])
     with pytest.raises(AuditIntegrityError, match="Corrupt payload"):
-        recovery_manager.get_unprocessed_row_data(
-            "run-corrupt-utf8", payload_store, source_schema_class=_SimpleSchema
-        )
+        recovery_manager.get_unprocessed_row_data("run-corrupt-utf8", payload_store, source_schema_class=_SimpleSchema)
 
 
 def test_get_unprocessed_row_data_non_dict_json_raises_audit_integrity(
@@ -981,9 +979,7 @@ def test_get_unprocessed_row_data_non_dict_json_raises_audit_integrity(
 
     monkeypatch.setattr(recovery_manager, "get_unprocessed_rows", lambda _run_id: ["row-1"])
     with pytest.raises(AuditIntegrityError, match="expected dict"):
-        recovery_manager.get_unprocessed_row_data(
-            "run-non-dict", payload_store, source_schema_class=_SimpleSchema
-        )
+        recovery_manager.get_unprocessed_row_data("run-non-dict", payload_store, source_schema_class=_SimpleSchema)
 
 
 def test_get_resume_point_reads_latest_checkpoint_after_can_resume(

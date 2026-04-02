@@ -1293,7 +1293,7 @@ class TestRecordCallFrozenData:
         event = emitted_events[0]
         # Token usage must be extracted despite usage being MappingProxyType
         assert event.token_usage is not None
-        assert event.token_usage == TokenUsage(prompt_tokens=10, completion_tokens=5)
+        assert event.token_usage == TokenUsage(prompt_tokens=10, completion_tokens=5, reported_total=15)
 
     def test_raw_call_payload_freezes_data_without_intermediate_thaw(self) -> None:
         """RawCallPayload must receive frozen data and freeze it correctly.

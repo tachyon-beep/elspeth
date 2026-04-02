@@ -105,7 +105,11 @@ def export_landscape(
         sink.on_start(ctx)
         try:
             with track_operation(
-                recorder, run_id, sink.node_id, "sink_write", ctx,
+                recorder,
+                run_id,
+                sink.node_id,
+                "sink_write",
+                ctx,
                 input_data={"export_format": "json", "record_count": len(records)},
             ):
                 if records:

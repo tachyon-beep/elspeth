@@ -837,9 +837,7 @@ class TestCallVerifier:
         recorder.get_call_response_data.return_value = CallDataResult(state=CallDataState.PURGED, data=None)
 
         # Strict: no ignore_paths, ignore_order=False
-        verifier = CallVerifier(
-            recorder, source_run_id="run_abc123", ignore_order=False
-        )
+        verifier = CallVerifier(recorder, source_run_id="run_abc123", ignore_order=False)
         result = verifier.verify(
             call_type=CallType.LLM,
             request_data=request_data,

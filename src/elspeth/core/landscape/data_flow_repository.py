@@ -408,9 +408,7 @@ class DataFlowRepository:
 
         # branch_name requires fork_group_id (it names which fork branch this token is on)
         if branch_name is not None and fork_group_id is None:
-            raise AuditIntegrityError(
-                f"create_token: branch_name={branch_name!r} requires fork_group_id to be set"
-            )
+            raise AuditIntegrityError(f"create_token: branch_name={branch_name!r} requires fork_group_id to be set")
 
         # Reject empty-string group IDs (should be None, not "")
         for name, value in [("fork_group_id", fork_group_id), ("join_group_id", join_group_id)]:
@@ -585,8 +583,7 @@ class DataFlowRepository:
         """
         if not parent_token_ids:
             raise AuditIntegrityError(
-                "coalesce_tokens requires at least one parent token — "
-                "a coalesce with zero parents creates an unexplainable audit state"
+                "coalesce_tokens requires at least one parent token — a coalesce with zero parents creates an unexplainable audit state"
             )
 
         # Validate all parent tokens belong to the same row and run (Tier 1 invariant)

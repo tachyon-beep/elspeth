@@ -127,10 +127,7 @@ class FieldMapper(BaseTransform):
         else:
             # Input fields minus removed sources plus new targets.
             # A source is removed from output when it's renamed to a different target.
-            removed_sources = {
-                source for source, target in cfg.mapping.items()
-                if source != target and "." not in source
-            }
+            removed_sources = {source for source, target in cfg.mapping.items() if source != target and "." not in source}
             output_fields = (base_guaranteed - removed_sources) | set(cfg.mapping.values())
 
         # Always include declared_output_fields (targets that aren't also sources)

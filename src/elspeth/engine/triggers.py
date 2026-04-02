@@ -189,9 +189,7 @@ class TriggerEvaluator:
                     )
                 if result:
                     self._condition_fire_time = (
-                        self._last_condition_check_time
-                        if self._last_condition_check_time is not None
-                        else self._first_accept_time
+                        self._last_condition_check_time if self._last_condition_check_time is not None else self._first_accept_time
                     )
                     candidates.append((self._condition_fire_time, "condition"))
                 else:

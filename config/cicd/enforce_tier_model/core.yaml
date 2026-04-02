@@ -45,7 +45,7 @@ per_file_rules:
   - R5
   reason: Type envelope detection, NaN rejection, and reserved key escaping
   expires: null
-  max_hits: 11
+  max_hits: 13
 - pattern: core/dag/builder.py
   rules:
   - R5
@@ -228,3 +228,8 @@ allow_hits:
   owner: bugfix
   reason: Post-point-of-no-return recovery — payloads are already irreversibly deleted, so ANY failure in grade updates must not abort the loop for remaining runs
   safety: Exception caught and logged via structlog, run_id added to grade_update_failures in PurgeResult, operator informed via CLI output
+- key: core/checkpoint/recovery.py:R5:RecoveryManager:get_unprocessed_row_data:fp=309a6e248bc67595
+  owner: core
+  reason: Tier 1 integrity check — deserialized checkpoint data must be dict; isinstance guards against corrupted checkpoint
+  safety: Raises TypeError if not dict; no silent coercion
+  expires: null

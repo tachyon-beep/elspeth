@@ -47,6 +47,7 @@ def _make_sink_and_factory(*, config: dict[str, Any] | None = None, **overrides:
         setattr(sink, k, v)
     return sink, lambda name: sink
 
+
 # =============================================================================
 # export_landscape — JSON format
 # =============================================================================

@@ -21,7 +21,6 @@ def test_version_matches_pyproject() -> None:
     expected = data["project"]["version"]
     if elspeth.__version__ == "0.0.0-dev":
         pytest.skip(
-            "Package not installed (importlib.metadata fallback active). "
-            "Run 'uv pip install -e .' to enable version consistency check."
+            "Package not installed (importlib.metadata fallback active). Run 'uv pip install -e .' to enable version consistency check."
         )
     assert elspeth.__version__ == expected

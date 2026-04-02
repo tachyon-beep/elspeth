@@ -46,9 +46,9 @@ FiniteFloat = Annotated[float, Field(allow_inf_nan=False)]
 FIELD_TYPE_MAP: dict[str, type] = {
     "str": str,
     "int": int,
-    "float": FiniteFloat,  # type: ignore[dict-item]
+    "float": FiniteFloat,
     "bool": bool,
-    "any": Any,  # type: ignore[dict-item]  # Any is a special form, not a type
+    "any": Any,
 }
 
 # Pattern: "field_name: type" or "field_name: type?"

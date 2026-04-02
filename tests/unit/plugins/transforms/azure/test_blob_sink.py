@@ -462,7 +462,7 @@ class TestAzureBlobSinkWriteJSONL:
         mock_container.get_blob_client.return_value = mock_blob_client
         mock_container_client.return_value = mock_container
 
-        sink = AzureBlobSink(make_config(format="jsonl", headers={"id": "ID"}))
+        sink = AzureBlobSink(make_config(format="jsonl", headers={"id": "ID", "name": "Name"}))
         rows = [
             {"id": 1, "name": "alice"},
         ]
@@ -473,7 +473,7 @@ class TestAzureBlobSinkWriteJSONL:
         lines = uploaded_content.decode().strip().split("\n")
         import json
 
-        assert json.loads(lines[0]) == {"ID": 1, "name": "alice"}
+        assert json.loads(lines[0]) == {"ID": 1, "Name": "alice"}
 
     def test_jsonl_multiple_writes_uploads_cumulative_content(self, mock_container_client: MagicMock, ctx: PluginContext) -> None:
         """JSONL format should rewrite blob with cumulative line-delimited content."""

@@ -227,29 +227,54 @@ allow_hits:
   reason: False positive — @router.get() is FastAPI HTTP route decorator, not dict.get()
   safety: No dict access involved
   expires: null
-- key: web/execution/progress.py:R8:ProgressBroadcaster:subscribe:fp=4e52b3400d28695a
+- key: web/execution/progress.py:R8:ProgressBroadcaster:subscribe:fp=e8ef5588226d0270
   owner: web-execution
   reason: Subscriber map creates the per-run queue set lazily on first subscription
   safety: Mutation is guarded by the broadcaster lock and only initializes empty internal
     state
   expires: null
-- key: web/execution/progress.py:R1:ProgressBroadcaster:broadcast:fp=9e876f45c424ae5e
+- key: web/execution/progress.py:R1:ProgressBroadcaster:broadcast:fp=3a209ff2d0c9740c
   owner: web-execution
   reason: Broadcast treats an absent run entry as 'no subscribers' for that run
   safety: A missing subscriber set results in a no-op broadcast, which is the correct
     behavior
   expires: null
-- key: web/execution/progress.py:R9:ProgressBroadcaster:cleanup_run:fp=743167bc43d078f7
+- key: web/execution/progress.py:R6:ProgressBroadcaster:_safe_put:fp=fb0d3946bc2737fd
+  owner: web-execution
+  reason: QueueFull caught to drain oldest event and retry — bounded queue backpressure
+  safety: Drops oldest event on full queue; no silent data loss (SSE is best-effort)
+  expires: null
+- key: web/execution/progress.py:R7:ProgressBroadcaster:_safe_put:fp=c90317fa83d5ee3a
+  owner: web-execution
+  reason: QueueEmpty suppressed during drain — queue may have been consumed between full check and drain
+  safety: Race-safe no-op; no data loss
+  expires: null
+- key: web/execution/progress.py:R6:ProgressBroadcaster:_safe_put:fp=3ecae08d22e46197
+  owner: web-execution
+  reason: QueueFull after drain — event dropped rather than blocking pipeline thread
+  safety: Best-effort delivery; no silent data loss (SSE is operational visibility)
+  expires: null
+- key: web/execution/progress.py:R9:ProgressBroadcaster:cleanup_run:fp=7c47e683391777b0
   owner: web-execution
   reason: Run cleanup is idempotent because unsubscribe and explicit cleanup can both
     remove the same run entry
   safety: Missing key simply means there are no remaining subscribers to clean up
+  expires: null
+- key: web/auth/middleware.py:R6:get_current_user:fp=814c1106e4881a9a
+  owner: web-auth
+  reason: Tier 3 boundary — invalid JWT token raises PyJWTError; returns 401
+  safety: Only PyJWTError caught; returns HTTP 401; no silent data loss
   expires: null
 - key: web/auth/middleware.py:R1:get_current_user:fp=27850ac518f1116d
   owner: web-auth
   reason: Tier 3 boundary — request.headers.get('Authorization') reads untrusted HTTP
     header
   safety: Missing header returns 401; malformed header returns 401; no default fabrication
+  expires: null
+- key: web/auth/routes.py:R1:create_auth_router:refresh_token:fp=05901c81a69e78b5
+  owner: web-auth
+  reason: Tier 3 boundary — JWT claims dict .get() for optional iat claim
+  safety: Missing iat returns None; no fabrication
   expires: null
 - key: web/composer/state.py:R1:NodeSpec:from_dict:fp=20c83cd0fd6616b3
   owner: web-composer
@@ -490,86 +515,90 @@ allow_hits:
   reason: IntegrityError on duplicate active state is expected race condition
   safety: Upsert-or-skip
   expires: null
-- key: web/execution/service.py:R1:ExecutionServiceImpl:cancel:fp=7dc6e1d5f9900f8e
+- key: web/execution/service.py:R8:ExecutionServiceImpl:execute:fp=48cac8940225e59b
   owner: web-execution
-  reason: Check for live shutdown event before fallback handling
-  safety: Pop returns None if absent
+  reason: Session lock map creates per-session lock lazily on first execution
+  safety: Mutation is thread-safe; setdefault is atomic for dict
   expires: null
-- key: web/execution/service.py:R1:ExecutionServiceImpl:execute:fp=03224facbdf67c54
+- key: web/execution/service.py:R1:ExecutionServiceImpl:_execute_locked:fp=0e48d46549f4e772
+  owner: web-execution
+  reason: Optional keys in user-authored config — source options key may be absent
+  safety: Returns None; validation handles absence
+  expires: null
+- key: web/execution/service.py:R1:ExecutionServiceImpl:_execute_locked:fp=1c3798d199105b17
+  owner: web-execution
+  reason: Optional keys in user-authored config — output options key may be absent
+  safety: Returns None; validation handles absence
+  expires: null
+- key: web/execution/service.py:R1:ExecutionServiceImpl:_execute_locked:fp=a2468a34ab86e3e5
   owner: web-execution
   reason: Optional keys in user-authored config — blob_ref is optional in source options
   safety: Returns None; blob link skipped
   expires: null
-- key: web/execution/service.py:R1:ExecutionServiceImpl:execute:fp=58b6bae3475bc8cf
+- key: web/execution/service.py:R9:ExecutionServiceImpl:_execute_locked:fp=d2bbb58bcaa19a1a
   owner: web-execution
-  reason: blob_ref is optional key in source options — pre-validated before create_run
-  safety: Returns None; blob link skipped
+  reason: Idempotent shutdown-event cleanup on failure path
+  safety: Pop is idempotent; except BaseException handler cleans up before re-raise
   expires: null
-- key: web/execution/service.py:R1:ExecutionServiceImpl:execute:fp=548f51bdc36e5ec5
+- key: web/execution/service.py:R7:ExecutionServiceImpl:_execute_locked:fp=d6dddf09bdd31bcc
   owner: web-execution
-  reason: Optional keys in user-authored config — output options may not contain key
-  safety: Returns None; validation handles absence
+  reason: Best-effort run status cleanup on setup failure — must not mask original exception
+  safety: Status update is best-effort; original exception always re-raised
   expires: null
-- key: web/execution/service.py:R4:ExecutionServiceImpl:_finalize_output_blobs:fp=5874e779a69b9e43
+- key: web/execution/service.py:R1:ExecutionServiceImpl:cancel:fp=322f8b8dd49e6ec0
   owner: web-execution
-  reason: Blob finalization after terminal status — failure must not mask run outcome
-  safety: Logged; run status preserved
+  reason: Check for live shutdown event before fallback handling
+  safety: Returns None if absent; no silent default
   expires: null
-- key: web/execution/service.py:R4:ExecutionServiceImpl:_run_pipeline:fp=985fe337dcdba163
-  owner: web-execution
-  reason: Progress broadcasting is operational visibility
-  safety: Logged; pipeline continues
-  expires: null
-- key: web/execution/service.py:R4:ExecutionServiceImpl:_run_pipeline:_safe_broadcast:fp=d3d07780fcd62762
-  owner: web-execution
-  reason: Progress broadcasting may fail with transport exceptions
-  safety: Logged; pipeline continues
-  expires: null
-- key: web/execution/service.py:R5:ExecutionServiceImpl:_on_pipeline_done:fp=449b19cc1ce2e9ba
-  owner: web-execution
-  reason: Error classification for sanitized client messaging
-  safety: SecretResolutionError triggers safe message
-  expires: null
-- key: web/execution/service.py:R5:ExecutionServiceImpl:_run_pipeline:fp=3b39b1af64fd699c
-  owner: web-execution
-  reason: Error classification — SecretResolutionError triggers safe message
-  safety: Secret names not leaked to client
-  expires: null
-- key: web/execution/service.py:R5:ExecutionServiceImpl:_run_pipeline:fp=53167d837454b31c
-  owner: web-execution
-  reason: BaseException split for process-termination vs ordinary failures
-  safety: Control flow distinction, not type masking
-  expires: null
-- key: web/execution/service.py:R5:ExecutionServiceImpl:_run_pipeline:fp=a7772ad1745bd380
+- key: web/execution/service.py:R5:ExecutionServiceImpl:_run_pipeline:fp=4e50bf35610fe209
   owner: web-execution
   reason: Tier 3 — config from YAML deserialization may be non-dict
   safety: Raises TypeError if not dict; no silent default
   expires: null
-- key: web/execution/service.py:R9:ExecutionServiceImpl:execute:fp=b1e57ac972f5d8ae
+- key: web/execution/service.py:R1:ExecutionServiceImpl:_run_pipeline:fp=fb52ae040917d3bb
   owner: web-execution
-  reason: Idempotent shutdown-event cleanup on blob linkage or submit failure
-  safety: Pop is idempotent; except BaseException handler cleans up before re-raise
-  expires: null
-- key: web/execution/service.py:R9:ExecutionServiceImpl:_run_pipeline:fp=3f7206588a999527
-  owner: web-execution
-  reason: Final shutdown-event cleanup is intentionally idempotent
-  safety: Pop is idempotent
-  expires: null
-- key: web/execution/service.py:R1:ExecutionServiceImpl:_run_pipeline:fp=b19761736c02baed
-  owner: web-execution
-  reason: Scope-to-audit-source mapping — .get() on explicit mapping dict with crash-on-unknown
-    guard
+  reason: Scope-to-audit-source mapping — .get() on explicit mapping dict with crash-on-unknown guard
   safety: Unknown scope raises ValueError immediately; no silent default
   expires: null
-- key: web/execution/service.py:R6:ExecutionServiceImpl:_run_pipeline:fp=a88741d5309a40e7
+- key: web/execution/service.py:R4:ExecutionServiceImpl:_run_pipeline:_safe_broadcast:fp=19f0293eaebdc8dc
+  owner: web-execution
+  reason: Progress broadcasting may fail with transport exceptions
+  safety: Logged; pipeline continues
+  expires: null
+- key: web/execution/service.py:R6:ExecutionServiceImpl:_run_pipeline:fp=92c44b489edba6f8
   owner: web-execution
   reason: GracefulShutdownError is an expected control-flow signal from orchestrator cancellation
   safety: Classified as cancelled; separated from BaseException failure path
   expires: null
-- key: web/execution/service.py:R7:ExecutionServiceImpl:execute:fp=98deaab6e0d91852
+- key: web/execution/service.py:R5:ExecutionServiceImpl:_run_pipeline:fp=ce9571eb0ed099b1
   owner: web-execution
-  reason: Best-effort run status cleanup on setup failure — must not mask original exception
-  safety: Status update is best-effort; original exception always re-raised
+  reason: Error classification — SecretResolutionError triggers safe message
+  safety: Secret names not leaked to client
+  expires: null
+- key: web/execution/service.py:R5:ExecutionServiceImpl:_run_pipeline:fp=3300183fc55d0286
+  owner: web-execution
+  reason: BaseException split for process-termination vs ordinary failures
+  safety: Control flow distinction, not type masking
+  expires: null
+- key: web/execution/service.py:R4:ExecutionServiceImpl:_run_pipeline:fp=fb27c5cfa1c6d809
+  owner: web-execution
+  reason: Status update after pipeline failure — must not mask original exception
+  safety: Logged; original exception re-raised
+  expires: null
+- key: web/execution/service.py:R9:ExecutionServiceImpl:_run_pipeline:fp=fe002a2a3dae193c
+  owner: web-execution
+  reason: Final shutdown-event cleanup is intentionally idempotent
+  safety: Pop is idempotent
+  expires: null
+- key: web/execution/service.py:R4:ExecutionServiceImpl:_finalize_output_blobs:fp=a374659d845fa019
+  owner: web-execution
+  reason: Blob finalization after terminal status — failure must not mask run outcome
+  safety: Logged; run status preserved
+  expires: null
+- key: web/execution/service.py:R5:ExecutionServiceImpl:_on_pipeline_done:fp=dce0bbfe6a06a17c
+  owner: web-execution
+  reason: Error classification for sanitized client messaging
+  safety: SecretResolutionError triggers safe message
   expires: null
 - key: web/app.py:R1:create_app:fp=9a4e11f687906168
   owner: web-app
@@ -619,6 +648,16 @@ allow_hits:
   reason: Best-effort websocket.close() can raise transport-specific exceptions after
     primary failure
   safety: Logged; already in error path
+  expires: null
+- key: web/sessions/routes.py:R6:create_session_router:recompose:fp=2258fded7a873a70
+  owner: web-sessions
+  reason: Recompose validation — user-authored composition state may have data-shape errors
+  safety: Narrowed to ValueError/TypeError/KeyError/AttributeError; returns 422; no silent swallow
+  expires: null
+- key: web/sessions/routes.py:R6:create_session_router:recompose:fp=e98b68c0710ee081
+  owner: web-sessions
+  reason: Recompose persistence — save may fail with data-shape or DB integrity errors
+  safety: Narrowed to ValueError/TypeError/KeyError/IntegrityError; returns 422; code bugs propagate
   expires: null
 - key: web/sessions/routes.py:R6:create_session_router:send_message:fp=0e4a8c39bdb18689
   owner: web-sessions

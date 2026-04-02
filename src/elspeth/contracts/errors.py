@@ -278,6 +278,7 @@ TransformErrorCategory = Literal[
     "transient_error_no_retry",  # Transient error (connection/timeout) but retry disabled
     # Field/validation errors
     "missing_field",
+    "missing_scan_field",
     "type_mismatch",
     "validation_failed",
     "invalid_input",

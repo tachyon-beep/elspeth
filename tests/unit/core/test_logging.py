@@ -87,15 +87,11 @@ class TestLoggingConfig:
         foreign_handler.setFormatter(logging.Formatter("%(message)s"))
         root.addHandler(foreign_handler)
 
-        handler_count_before = len(root.handlers)
-
         # Reconfigure logging — should NOT remove the foreign handler
         configure_logging(json_output=True)
 
         # The foreign handler must still be present
-        assert foreign_handler in root.handlers, (
-            "configure_logging removed a handler it did not create"
-        )
+        assert foreign_handler in root.handlers, "configure_logging removed a handler it did not create"
 
         # Clean up
         root.removeHandler(foreign_handler)

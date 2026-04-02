@@ -2203,13 +2203,21 @@ def web(
         )
         raise typer.Exit(1) from None
 
+    # Fail-fast guard: non-local host with no explicit secret key is always wrong.
+    # Full validation happens in create_app(), but this catches the obvious case
+    # before uvicorn starts — deployments that set ELSPETH_WEB__SECRET_KEY pass.
+    _local_hosts = {"127.0.0.1", "localhost", "::1"}
+    if host not in _local_hosts and "ELSPETH_WEB__SECRET_KEY" not in os.environ:
+        typer.echo(
+            "Error: Non-local host requires an explicit secret_key. "
+            "Set ELSPETH_WEB__SECRET_KEY or use --host 127.0.0.1 for local development.",
+            err=True,
+        )
+        raise typer.Exit(1)
+
     # Bridge CLI args to create_app() via environment variables.
     # uvicorn's factory protocol calls create_app() with no arguments,
     # so we set ELSPETH_WEB__* env vars that _settings_from_env() reads.
-    # Validation happens in create_app() where ALL settings (CLI args +
-    # deployment env vars like SECRET_KEY, OIDC_ISSUER) are available.
-    # Early validation here would reject valid deployments that set
-    # required fields via ELSPETH_WEB__* env vars.
     os.environ["ELSPETH_WEB__HOST"] = host
     os.environ["ELSPETH_WEB__PORT"] = str(port)
     os.environ["ELSPETH_WEB__AUTH_PROVIDER"] = auth

@@ -1773,65 +1773,49 @@ class TestEndpointURLValidation:
     def test_valid_https_endpoint_accepted(self) -> None:
         from elspeth.plugins.transforms.azure.content_safety import AzureContentSafetyConfig
 
-        cfg = AzureContentSafetyConfig.from_dict(
-            self._make_config_dict("https://test.cognitiveservices.azure.com")
-        )
+        cfg = AzureContentSafetyConfig.from_dict(self._make_config_dict("https://test.cognitiveservices.azure.com"))
         assert cfg.endpoint == "https://test.cognitiveservices.azure.com"
 
     def test_http_endpoint_rejected(self) -> None:
         from elspeth.plugins.transforms.azure.content_safety import AzureContentSafetyConfig
 
-        with pytest.raises(PluginConfigError, match="(?i)https"):
-            AzureContentSafetyConfig.from_dict(
-                self._make_config_dict("http://test.cognitiveservices.azure.com")
-            )
+        with pytest.raises(PluginConfigError, match=r"(?i)https"):
+            AzureContentSafetyConfig.from_dict(self._make_config_dict("http://test.cognitiveservices.azure.com"))
 
     def test_ftp_endpoint_rejected(self) -> None:
         from elspeth.plugins.transforms.azure.content_safety import AzureContentSafetyConfig
 
-        with pytest.raises(PluginConfigError, match="(?i)https"):
-            AzureContentSafetyConfig.from_dict(
-                self._make_config_dict("ftp://test.cognitiveservices.azure.com")
-            )
+        with pytest.raises(PluginConfigError, match=r"(?i)https"):
+            AzureContentSafetyConfig.from_dict(self._make_config_dict("ftp://test.cognitiveservices.azure.com"))
 
     def test_empty_endpoint_rejected(self) -> None:
         from elspeth.plugins.transforms.azure.content_safety import AzureContentSafetyConfig
 
-        with pytest.raises(PluginConfigError, match="(?i)empty"):
-            AzureContentSafetyConfig.from_dict(
-                self._make_config_dict("")
-            )
+        with pytest.raises(PluginConfigError, match=r"(?i)empty"):
+            AzureContentSafetyConfig.from_dict(self._make_config_dict(""))
 
     def test_whitespace_only_endpoint_rejected(self) -> None:
         from elspeth.plugins.transforms.azure.content_safety import AzureContentSafetyConfig
 
-        with pytest.raises(PluginConfigError, match="(?i)empty"):
-            AzureContentSafetyConfig.from_dict(
-                self._make_config_dict("   ")
-            )
+        with pytest.raises(PluginConfigError, match=r"(?i)empty"):
+            AzureContentSafetyConfig.from_dict(self._make_config_dict("   "))
 
     def test_no_hostname_rejected(self) -> None:
         from elspeth.plugins.transforms.azure.content_safety import AzureContentSafetyConfig
 
-        with pytest.raises(PluginConfigError, match="(?i)hostname"):
-            AzureContentSafetyConfig.from_dict(
-                self._make_config_dict("https://")
-            )
+        with pytest.raises(PluginConfigError, match=r"(?i)hostname"):
+            AzureContentSafetyConfig.from_dict(self._make_config_dict("https://"))
 
     def test_embedded_credentials_rejected(self) -> None:
         from elspeth.plugins.transforms.azure.content_safety import AzureContentSafetyConfig
 
-        with pytest.raises(PluginConfigError, match="(?i)credentials"):
-            AzureContentSafetyConfig.from_dict(
-                self._make_config_dict("https://user:pass@test.azure.com")
-            )
+        with pytest.raises(PluginConfigError, match=r"(?i)credentials"):
+            AzureContentSafetyConfig.from_dict(self._make_config_dict("https://user:pass@test.azure.com"))
 
     def test_endpoint_with_path_accepted(self) -> None:
         from elspeth.plugins.transforms.azure.content_safety import AzureContentSafetyConfig
 
-        cfg = AzureContentSafetyConfig.from_dict(
-            self._make_config_dict("https://test.azure.com/safety/v1")
-        )
+        cfg = AzureContentSafetyConfig.from_dict(self._make_config_dict("https://test.azure.com/safety/v1"))
         assert cfg.endpoint == "https://test.azure.com/safety/v1"
 
 

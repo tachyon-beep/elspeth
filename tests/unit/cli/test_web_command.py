@@ -95,39 +95,45 @@ class TestWebCommandHappyPath:
         mock_uvicorn.run.assert_called_once()
 
 
-class TestWebCommandAuthWarning:
-    """Tests for --auth non-default handling.
+class TestWebCommandAuthBridging:
+    """Tests for --auth env var bridging.
 
-    Since Sub-2, OIDC/Entra auth providers require their configuration fields
-    (oidc_issuer, oidc_audience, etc.). The CLI validates these via WebSettings
-    and exits with an error if they're missing.
+    The CLI bridges --auth to ELSPETH_WEB__AUTH_PROVIDER for create_app().
+    Full auth provider validation (OIDC required fields, invalid providers)
+    is tested in tests/unit/web/test_config.py at the WebSettings level.
     """
 
-    def test_oidc_without_required_fields_fails_validation(self) -> None:
-        """--auth=oidc without OIDC config fields rejects at WebSettings validation."""
-        mock_uvicorn = MagicMock()
-        with patch.dict("sys.modules", {"uvicorn": mock_uvicorn}):
-            mock_uvicorn.run = MagicMock()
-            result = runner.invoke(app, ["web", "--auth", "oidc"])
+    def test_auth_provider_bridged_to_env_var(self) -> None:
+        """--auth=oidc sets ELSPETH_WEB__AUTH_PROVIDER for create_app()."""
+        import os
 
-        assert result.exit_code != 0
-        # Pydantic validation error is captured in the exception, not stdout
-        assert result.exception is not None
-        error_text = str(result.exception)
-        assert "oidc_issuer" in error_text or "OIDC" in error_text
-
-    def test_default_auth_no_warning(self) -> None:
         mock_uvicorn = MagicMock()
+        captured_env: dict[str, str] = {}
+        original_run = MagicMock()
+
+        def capture_env(*args: object, **kwargs: object) -> None:
+            captured_env["auth"] = os.environ.get("ELSPETH_WEB__AUTH_PROVIDER", "")
+            original_run(*args, **kwargs)
+
         with patch.dict("sys.modules", {"uvicorn": mock_uvicorn}):
-            mock_uvicorn.run = MagicMock()
+            mock_uvicorn.run = MagicMock(side_effect=capture_env)
+            runner.invoke(app, ["web", "--auth", "oidc"])
+
+        assert captured_env["auth"] == "oidc"
+
+    def test_default_auth_bridged_as_local(self) -> None:
+        """Default --auth=local sets ELSPETH_WEB__AUTH_PROVIDER=local."""
+        import os
+
+        mock_uvicorn = MagicMock()
+        captured_env: dict[str, str] = {}
+
+        def capture_env(*args: object, **kwargs: object) -> None:
+            captured_env["auth"] = os.environ.get("ELSPETH_WEB__AUTH_PROVIDER", "")
+
+        with patch.dict("sys.modules", {"uvicorn": mock_uvicorn}):
+            mock_uvicorn.run = MagicMock(side_effect=capture_env)
             result = runner.invoke(app, ["web", "--auth", "local"])
 
         assert result.exit_code == 0
-
-    def test_invalid_auth_rejected_by_pydantic(self) -> None:
-        mock_uvicorn = MagicMock()
-        with patch.dict("sys.modules", {"uvicorn": mock_uvicorn}):
-            mock_uvicorn.run = MagicMock()
-            result = runner.invoke(app, ["web", "--auth", "kerberos"])
-
-        assert result.exit_code != 0
+        assert captured_env["auth"] == "local"

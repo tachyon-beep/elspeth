@@ -2526,7 +2526,9 @@ class TestAggregationExecutor:
         assert isinstance(checkpoint, AggregationCheckpointState)
         node_checkpoint = checkpoint.nodes[str(nid)]
         assert all(t.contract for t in node_checkpoint.tokens), "Checkpoint must include contract info for PipelineRow restoration"
-        assert all(t.contract_version for t in node_checkpoint.tokens), "Checkpoint must include contract_version for integrity verification"
+        assert all(t.contract_version for t in node_checkpoint.tokens), (
+            "Checkpoint must include contract_version for integrity verification"
+        )
 
     def test_restore_from_checkpoint_creates_pipeline_row(self) -> None:
         """restore_from_checkpoint should reconstruct TokenInfo with PipelineRow."""

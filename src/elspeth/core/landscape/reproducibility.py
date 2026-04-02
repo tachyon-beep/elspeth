@@ -163,18 +163,15 @@ def update_grade_after_purge(db: "LandscapeDB", run_id: str) -> None:
         purged_critical = conn.execute(
             select(calls_table.c.call_id)
             .select_from(
-                calls_table
-                .join(node_states_table, calls_table.c.state_id == node_states_table.c.state_id)
-                .join(
+                calls_table.join(node_states_table, calls_table.c.state_id == node_states_table.c.state_id).join(
                     nodes_table,
-                    (node_states_table.c.node_id == nodes_table.c.node_id)
-                    & (node_states_table.c.run_id == nodes_table.c.run_id),
+                    (node_states_table.c.node_id == nodes_table.c.node_id) & (node_states_table.c.run_id == nodes_table.c.run_id),
                 )
             )
             .where(node_states_table.c.run_id == run_id)
             .where(nodes_table.c.determinism.in_([d.value for d in non_reproducible_values]))
             .where(calls_table.c.response_hash.isnot(None))  # Response existed
-            .where(calls_table.c.response_ref.is_(None))      # But has been purged
+            .where(calls_table.c.response_ref.is_(None))  # But has been purged
             .limit(1)  # Only need to know if at least one exists
         ).fetchone()
 

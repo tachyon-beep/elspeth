@@ -2301,18 +2301,24 @@ class TestAzureBatchQuarantinedIndices:
 
         # Row 0: success, Row 1: API error, Row 2: success
         output_lines = [
-            json.dumps({
-                "custom_id": "row-0-aaa",
-                "response": {"body": {"choices": [{"message": {"content": "A"}}], "usage": {}}},
-            }),
-            json.dumps({
-                "custom_id": "row-1-bbb",
-                "error": {"code": "content_filter", "message": "Content blocked"},
-            }),
-            json.dumps({
-                "custom_id": "row-2-ccc",
-                "response": {"body": {"choices": [{"message": {"content": "C"}}], "usage": {}}},
-            }),
+            json.dumps(
+                {
+                    "custom_id": "row-0-aaa",
+                    "response": {"body": {"choices": [{"message": {"content": "A"}}], "usage": {}}},
+                }
+            ),
+            json.dumps(
+                {
+                    "custom_id": "row-1-bbb",
+                    "error": {"code": "content_filter", "message": "Content blocked"},
+                }
+            ),
+            json.dumps(
+                {
+                    "custom_id": "row-2-ccc",
+                    "response": {"body": {"choices": [{"message": {"content": "C"}}], "usage": {}}},
+                }
+            ),
         ]
         output_content = Mock()
         output_content.text = "\n".join(output_lines)
@@ -2361,10 +2367,12 @@ class TestAzureBatchQuarantinedIndices:
         mock_client.batches.retrieve.return_value = mock_batch
 
         output_lines = [
-            json.dumps({
-                "custom_id": "row-1-bbb",
-                "response": {"body": {"choices": [{"message": {"content": "B"}}], "usage": {}}},
-            }),
+            json.dumps(
+                {
+                    "custom_id": "row-1-bbb",
+                    "response": {"body": {"choices": [{"message": {"content": "B"}}], "usage": {}}},
+                }
+            ),
         ]
         output_content = Mock()
         output_content.text = "\n".join(output_lines)
@@ -2411,10 +2419,12 @@ class TestAzureBatchQuarantinedIndices:
         mock_client.batches.retrieve.return_value = mock_batch
 
         output_lines = [
-            json.dumps({
-                "custom_id": "row-0-aaa",
-                "response": {"body": {"choices": [{"message": {"content": "A"}}], "usage": {}}},
-            }),
+            json.dumps(
+                {
+                    "custom_id": "row-0-aaa",
+                    "response": {"body": {"choices": [{"message": {"content": "A"}}], "usage": {}}},
+                }
+            ),
         ]
         output_content = Mock()
         output_content.text = "\n".join(output_lines)
@@ -2463,14 +2473,18 @@ class TestAzureBatchQuarantinedIndices:
 
         # Row 1: success, Row 2: API error (row 0 had template error)
         output_lines = [
-            json.dumps({
-                "custom_id": "row-1-bbb",
-                "response": {"body": {"choices": [{"message": {"content": "B"}}], "usage": {}}},
-            }),
-            json.dumps({
-                "custom_id": "row-2-ccc",
-                "error": {"code": "rate_limit", "message": "Too many requests"},
-            }),
+            json.dumps(
+                {
+                    "custom_id": "row-1-bbb",
+                    "response": {"body": {"choices": [{"message": {"content": "B"}}], "usage": {}}},
+                }
+            ),
+            json.dumps(
+                {
+                    "custom_id": "row-2-ccc",
+                    "error": {"code": "rate_limit", "message": "Too many requests"},
+                }
+            ),
         ]
         output_content = Mock()
         output_content.text = "\n".join(output_lines)

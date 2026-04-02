@@ -10,7 +10,7 @@ from __future__ import annotations
 import itertools
 from collections import Counter
 from collections.abc import Mapping, Sequence
-from typing import TYPE_CHECKING, Any, cast
+from typing import TYPE_CHECKING, Any, Literal, cast
 
 import networkx as nx
 from networkx import MultiDiGraph
@@ -82,7 +82,7 @@ def _build_coalesce_schema(schema_dict: Mapping[str, Any]) -> type[PluginSchema]
             field_definitions[fd.name] = (python_type | None, None)
 
     mode: str = schema_dict["mode"]
-    extra_mode: str = "allow" if mode == "flexible" else "forbid"
+    extra_mode: Literal["allow", "ignore", "forbid"] = "allow" if mode == "flexible" else "forbid"
 
     return create_model(
         f"_CoalesceUnionSchema_{counter}",

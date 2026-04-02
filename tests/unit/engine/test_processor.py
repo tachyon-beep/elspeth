@@ -2712,49 +2712,18 @@ class TestRoutingInvariantFailures:
     """Regression tests for strict fail-closed routing invariants."""
 
     def test_unhandled_config_gate_routing_kind_raises(self) -> None:
-        """Config gate branch must fail closed when CONTINUE invariants are violated."""
-        _db, recorder = _make_recorder()
-        source_row = _make_source_row({"value": 10})
-        ctx = make_context(landscape=recorder)
-
-        source_node = NodeID("source-0")
-        gate_node = NodeID("cfg-gate-1")
-        config_gate = GateSettings(
-            name="cfg_router",
-            input="default",
-            condition="True",
-            routes={"true": "default", "false": "default"},
-        )
-        processor = _make_processor(
-            recorder,
-            source_on_success="source_sink",
-            node_step_map={source_node: 0, gate_node: 1},
-            node_to_next={source_node: gate_node, gate_node: None},
-            first_transform_node_id=gate_node,
-            node_to_plugin={gate_node: config_gate},
-        )
-
-        bad_outcome = GateOutcome(
-            result=GateResult(
-                row={"value": 10},
-                action=RoutingAction.route("branch_a"),
-                contract=_make_contract(),
-            ),
-            updated_token=make_token_info(data={"value": 10}),
-            sink_name=None,
-            next_node_id=None,
-            child_tokens=(),
-        )
-
-        with (
-            patch.object(processor._gate_executor, "execute_config_gate", return_value=bad_outcome),
-            pytest.raises(OrchestrationInvariantError, match="Unhandled config gate routing kind"),
-        ):
-            processor.process_row(
-                row_index=0,
-                source_row=source_row,
-                transforms=[],
-                ctx=ctx,
+        """ROUTE outcome with no sink_name or next_node_id is caught at GateOutcome construction."""
+        with pytest.raises(ValueError, match="ROUTE action must have either sink_name or next_node_id"):
+            GateOutcome(
+                result=GateResult(
+                    row={"value": 10},
+                    action=RoutingAction.route("branch_a"),
+                    contract=_make_contract(),
+                ),
+                updated_token=make_token_info(data={"value": 10}),
+                sink_name=None,
+                next_node_id=None,
+                child_tokens=(),
             )
 
     def test_missing_effective_sink_raises_invariant(self) -> None:

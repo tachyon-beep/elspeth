@@ -282,7 +282,7 @@ class TestJSONSinkHeaders:
                 "path": str(output_file),
                 "format": "json",
                 "schema": {"mode": "observed"},
-                "headers": {"user_id": "User ID"},
+                "headers": {"user_id": "User ID", "status": "Status"},
             }
         )
 
@@ -293,7 +293,7 @@ class TestJSONSinkHeaders:
         with open(output_file) as f:
             data = json.load(f)
             assert len(data) == 1
-            assert data[0] == {"User ID": "u1", "status": "active"}
+            assert data[0] == {"User ID": "u1", "Status": "active"}
 
     def test_original_headers_jsonl(self, tmp_path: Path) -> None:
         """headers: original fetches mapping from Landscape for JSONL."""

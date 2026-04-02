@@ -246,10 +246,7 @@ class CSVFormatter:
                     # distinct datum from absence. Auditors must be able to tell
                     # "config was explicitly empty" from "config was not present".
                     if full_key in result:
-                        raise ValueError(
-                            f"CSV flatten key collision: '{full_key}' already exists. "
-                            f"Audit export would lose data."
-                        )
+                        raise ValueError(f"CSV flatten key collision: '{full_key}' already exists. Audit export would lose data.")
                     result[full_key] = "{}"
                     continue
                 nested = self.flatten(value, full_key)
