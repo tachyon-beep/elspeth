@@ -121,7 +121,7 @@ class TestLandscapeRecorderQueryMethods:
 
         # Coalesce the children
         coalesced = recorder.coalesce_tokens(
-            parent_token_ids=[c.token_id for c in children],
+            parent_refs=[TokenRef(token_id=c.token_id, run_id=run.run_id) for c in children],
             row_id=row.row_id,
         )
 

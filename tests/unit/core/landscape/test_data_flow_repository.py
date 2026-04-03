@@ -607,7 +607,7 @@ class TestCoalesceTokensAtomicity:
 
         with pytest.raises(RuntimeError, match="Injected failure"):
             repo.coalesce_tokens(
-                parent_token_ids=child_ids,
+                parent_refs=[TokenRef(token_id=cid, run_id="run-1") for cid in child_ids],
                 row_id=row_id,
             )
 
@@ -747,7 +747,7 @@ class TestCoalesceTokensRowcountValidation:
 
         with pytest.raises(AuditIntegrityError, match="zero rows"):
             repo.coalesce_tokens(
-                parent_token_ids=child_ids,
+                parent_refs=[TokenRef(token_id=cid, run_id="run-1") for cid in child_ids],
                 row_id=row_id,
             )
 

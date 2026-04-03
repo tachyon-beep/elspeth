@@ -553,7 +553,7 @@ class DataFlowRepository:
 
     def coalesce_tokens(
         self,
-        parent_token_ids: list[str],
+        parent_refs: list[TokenRef],
         row_id: str,
         *,
         step_in_pipeline: int | None = None,
@@ -568,7 +568,7 @@ class DataFlowRepository:
         crashes immediately per Tier 1 trust model.
 
         Args:
-            parent_token_ids: Tokens being merged
+            parent_refs: TokenRefs for tokens being merged (bundled token_id + run_id)
             row_id: Row ID for the merged token
             step_in_pipeline: Step in the DAG where the coalesce occurs
 
@@ -579,22 +579,22 @@ class DataFlowRepository:
             AuditIntegrityError: If parent tokens do not belong to specified row
                 or if parent tokens span multiple runs
         """
-        if not parent_token_ids:
+        if not parent_refs:
             raise AuditIntegrityError(
                 "coalesce_tokens requires at least one parent token — a coalesce with zero parents creates an unexplainable audit state"
             )
 
         # Validate all parent tokens belong to the same row and run (Tier 1 invariant)
         run_id: str | None = None
-        for parent_id in parent_token_ids:
-            self._validate_token_row_ownership(parent_id, row_id)
-            _row_id, parent_run_id = self._resolve_token_ownership(parent_id)
+        for ref in parent_refs:
+            self._validate_token_row_ownership(ref.token_id, row_id)
+            self._validate_token_run_ownership(ref)
             if run_id is None:
-                run_id = parent_run_id
-            elif parent_run_id != run_id:
+                run_id = ref.run_id
+            elif ref.run_id != run_id:
                 raise AuditIntegrityError(
-                    f"Cross-run contamination prevented in coalesce: parent token {parent_id!r} "
-                    f"belongs to run {parent_run_id!r}, but other parents belong to run {run_id!r}. "
+                    f"Cross-run contamination prevented in coalesce: parent token {ref.token_id!r} "
+                    f"belongs to run {ref.run_id!r}, but other parents belong to run {run_id!r}. "
                     f"All parent tokens in a coalesce must belong to the same run."
                 )
 
@@ -622,17 +622,17 @@ class DataFlowRepository:
                 raise AuditIntegrityError(f"coalesce_tokens: merged token INSERT affected zero rows (token_id={token_id})")
 
             # Record all parent relationships
-            for ordinal, parent_id in enumerate(parent_token_ids):
+            for ordinal, ref in enumerate(parent_refs):
                 result = conn.execute(
                     token_parents_table.insert().values(
                         token_id=token_id,
-                        parent_token_id=parent_id,
+                        parent_token_id=ref.token_id,
                         ordinal=ordinal,
                     )
                 )
                 if result.rowcount == 0:
                     raise AuditIntegrityError(
-                        f"coalesce_tokens: token_parent INSERT affected zero rows (child={token_id}, parent={parent_id})"
+                        f"coalesce_tokens: token_parent INSERT affected zero rows (child={token_id}, parent={ref.token_id})"
                     )
 
         return Token(

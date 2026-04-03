@@ -806,14 +806,14 @@ class LandscapeRecorder:
 
     def coalesce_tokens(
         self,
-        parent_token_ids: list[str],
+        parent_refs: list[TokenRef],
         row_id: str,
         *,
         step_in_pipeline: int | None = None,
     ) -> Token:
         """Coalesce multiple tokens. Delegates to DataFlowRepository."""
         return self._data_flow.coalesce_tokens(
-            parent_token_ids,
+            parent_refs,
             row_id,
             step_in_pipeline=step_in_pipeline,
         )

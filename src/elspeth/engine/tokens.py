@@ -267,6 +267,7 @@ class TokenManager:
         parents: list[TokenInfo],
         merged_data: PipelineRow,
         node_id: NodeID,
+        run_id: str,
     ) -> TokenInfo:
         """Coalesce multiple tokens into one.
 
@@ -275,6 +276,7 @@ class TokenManager:
             merged_data: Merged row data as PipelineRow (with merged contract)
             node_id: NodeID of the coalesce node performing the merge (resolved to
                 audit step position internally via step_resolver)
+            run_id: Run ID for constructing TokenRefs
 
         Returns:
             Merged TokenInfo with PipelineRow row_data
@@ -292,7 +294,7 @@ class TokenManager:
         step = self._step_resolver(node_id)
 
         merged = self._recorder.coalesce_tokens(
-            parent_token_ids=[p.token_id for p in parents],
+            parent_refs=[TokenRef(token_id=p.token_id, run_id=run_id) for p in parents],
             row_id=row_id,
             step_in_pipeline=step,
         )

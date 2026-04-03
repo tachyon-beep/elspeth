@@ -377,7 +377,7 @@ class TokenLifecycleStateMachine(RuleBasedStateMachine):
 
         # Coalesce in database
         merged = self.recorder.coalesce_tokens(
-            parent_token_ids=sibling_ids,
+            parent_refs=[TokenRef(token_id=sid, run_id=self.run.run_id) for sid in sibling_ids],
             row_id=model.row_id,
             step_in_pipeline=self.step_counter,
         )
@@ -814,7 +814,7 @@ class TestTokenLifecycleInvariants:
 
             # Coalesce the children
             merged = recorder.coalesce_tokens(
-                parent_token_ids=[c.token_id for c in children],
+                parent_refs=[TokenRef(token_id=c.token_id, run_id=run.run_id) for c in children],
                 row_id=row.row_id,
                 step_in_pipeline=2,
             )

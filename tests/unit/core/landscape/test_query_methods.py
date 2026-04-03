@@ -382,7 +382,7 @@ class TestGetTokenParents:
         recorder.create_token("row-1", token_id="tok-2")
 
         merged = recorder.coalesce_tokens(
-            parent_token_ids=["tok-1", "tok-2"],
+            parent_refs=[TokenRef(token_id="tok-1", run_id="run-1"), TokenRef(token_id="tok-2", run_id="run-1")],
             row_id="row-1",
         )
 
@@ -894,7 +894,7 @@ class TestGetAllTokenParentsForRun:
         recorder.create_token("row-1", token_id="tok-2")
 
         merged = recorder.coalesce_tokens(
-            parent_token_ids=["tok-1", "tok-2"],
+            parent_refs=[TokenRef(token_id="tok-1", run_id="run-1"), TokenRef(token_id="tok-2", run_id="run-1")],
             row_id="row-1",
         )
 

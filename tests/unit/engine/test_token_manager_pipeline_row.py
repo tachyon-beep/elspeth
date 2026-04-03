@@ -207,6 +207,7 @@ class TestTokenManagerCoalesceTokens:
             parents=[parent_a, parent_b],
             merged_data=merged_row,
             node_id=NodeID("coalesce_node"),
+            run_id="test-run",
         )
 
         assert merged_token.token_id == "merged_001"

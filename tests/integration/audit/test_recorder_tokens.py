@@ -203,7 +203,7 @@ class TestLandscapeRecorderTokens:
 
         # Coalesce back together
         merged = recorder.coalesce_tokens(
-            parent_token_ids=[c.token_id for c in children],
+            parent_refs=[TokenRef(token_id=c.token_id, run_id=run.run_id) for c in children],
             row_id=row.row_id,
         )
 
@@ -312,7 +312,7 @@ class TestLandscapeRecorderTokens:
 
         # Coalesce with step_in_pipeline
         merged = recorder.coalesce_tokens(
-            parent_token_ids=[c.token_id for c in children],
+            parent_refs=[TokenRef(token_id=c.token_id, run_id=run.run_id) for c in children],
             row_id=row.row_id,
             step_in_pipeline=3,
         )
@@ -730,7 +730,7 @@ class TestAtomicTokenOperations:
 
         # Coalesce the two fork children
         merged = recorder.coalesce_tokens(
-            parent_token_ids=[c.token_id for c in children],
+            parent_refs=[TokenRef(token_id=c.token_id, run_id=run.run_id) for c in children],
             row_id=row.row_id,
         )
 
@@ -779,7 +779,7 @@ class TestAtomicTokenOperations:
 
         # Step 1: Coalesce creates merged token + parent links
         merged = recorder.coalesce_tokens(
-            parent_token_ids=[c.token_id for c in children],
+            parent_refs=[TokenRef(token_id=c.token_id, run_id=run.run_id) for c in children],
             row_id=row.row_id,
         )
 
@@ -831,7 +831,7 @@ class TestAtomicTokenOperations:
 
         # Coalesce all three fork children
         merged = recorder.coalesce_tokens(
-            parent_token_ids=[c.token_id for c in children],
+            parent_refs=[TokenRef(token_id=c.token_id, run_id=run.run_id) for c in children],
             row_id=row.row_id,
         )
 
@@ -874,7 +874,7 @@ class TestAtomicTokenOperations:
         )
 
         merged = recorder.coalesce_tokens(
-            parent_token_ids=[c.token_id for c in children],
+            parent_refs=[TokenRef(token_id=c.token_id, run_id=run.run_id) for c in children],
             row_id=row.row_id,
         )
 

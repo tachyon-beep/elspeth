@@ -107,7 +107,7 @@ def make_mock_executor(clock: MockClock | None = None) -> CoalesceExecutor:
     # Production CoalesceExecutor._execute_merge() passes merged_data as a
     # PipelineRow (already wrapped with contract). Match TokenManager.coalesce_tokens
     # behavior: use merged_data directly as row_data, don't re-wrap.
-    def mock_coalesce_tokens(parents, merged_data, node_id):
+    def mock_coalesce_tokens(parents, merged_data, node_id, run_id):
         return TokenInfo(
             token_id=f"merged-{parents[0].row_id}",
             row_id=parents[0].row_id,

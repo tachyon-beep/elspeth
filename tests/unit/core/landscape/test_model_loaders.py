@@ -152,7 +152,9 @@ class TestRunLoader:
 
     @pytest.mark.parametrize("status_value", [s.value for s in RunStatus])
     def test_valid_run_status_values(self, status_value: str) -> None:
-        sa_row = self._make_run_row(status=status_value)
+        # COMPLETED requires completed_at; RUNNING must not have it; FAILED/INTERRUPTED may or may not
+        completed_at = None if status_value == RunStatus.RUNNING else LATER
+        sa_row = self._make_run_row(status=status_value, completed_at=completed_at)
         loader = RunLoader()
         result = loader.load(sa_row)
         assert result.status == RunStatus(status_value)
@@ -187,6 +189,20 @@ class TestRunLoader:
         sa_row = self._make_run_row(export_status="")
         loader = RunLoader()
         with pytest.raises(ValueError):
+            loader.load(sa_row)
+
+    def test_completed_without_completed_at_raises_audit_integrity(self) -> None:
+        """Completed run with NULL completed_at is a Tier 1 integrity violation."""
+        sa_row = self._make_run_row(status="completed", completed_at=None)
+        loader = RunLoader()
+        with pytest.raises(AuditIntegrityError, match="completed_at"):
+            loader.load(sa_row)
+
+    def test_running_with_completed_at_raises_audit_integrity(self) -> None:
+        """Running run with completed_at set is a Tier 1 integrity violation."""
+        sa_row = self._make_run_row(status="running", completed_at=LATER)
+        loader = RunLoader()
+        with pytest.raises(AuditIntegrityError, match="completed_at"):
             loader.load(sa_row)
 
 
@@ -585,6 +601,20 @@ class TestCallLoader:
         sa_row = self._make_call_row(status="maybe")
         loader = CallLoader()
         with pytest.raises(ValueError):
+            loader.load(sa_row)
+
+    def test_both_state_and_operation_raises_audit_integrity(self) -> None:
+        """Both state_id and operation_id set is a Tier 1 integrity violation."""
+        sa_row = self._make_call_row(state_id="state-1", operation_id="op-1")
+        loader = CallLoader()
+        with pytest.raises(AuditIntegrityError, match="exactly one"):
+            loader.load(sa_row)
+
+    def test_neither_state_nor_operation_raises_audit_integrity(self) -> None:
+        """Neither state_id nor operation_id set is a Tier 1 integrity violation."""
+        sa_row = self._make_call_row(state_id=None, operation_id=None)
+        loader = CallLoader()
+        with pytest.raises(AuditIntegrityError, match="exactly one"):
             loader.load(sa_row)
 
 
@@ -1677,36 +1707,36 @@ class TestOperationLoader:
         assert result.status == "pending"
         assert result.completed_at == LATER
 
-    # === Lifecycle invariant violations (validated by __post_init__) ===
+    # === Lifecycle invariant violations (validated by OperationLoader, Tier 1) ===
 
     def test_invalid_operation_type_raises(self) -> None:
         sa_row = self._make_operation_row(operation_type="kafka_consume")
         loader = OperationLoader()
-        with pytest.raises(ValueError, match="operation_type"):
+        with pytest.raises(AuditIntegrityError, match="operation_type"):
             loader.load(sa_row)
 
     def test_invalid_status_raises(self) -> None:
         sa_row = self._make_operation_row(status="running")
         loader = OperationLoader()
-        with pytest.raises(ValueError, match="status"):
+        with pytest.raises(AuditIntegrityError, match="status"):
             loader.load(sa_row)
 
     def test_open_with_completed_at_raises(self) -> None:
         sa_row = self._make_operation_row(status="open", completed_at=NOW)
         loader = OperationLoader()
-        with pytest.raises(ValueError, match="completed_at"):
+        with pytest.raises(AuditIntegrityError, match="completed_at"):
             loader.load(sa_row)
 
     def test_open_with_duration_ms_raises(self) -> None:
         sa_row = self._make_operation_row(status="open", duration_ms=100.0)
         loader = OperationLoader()
-        with pytest.raises(ValueError, match="duration_ms"):
+        with pytest.raises(AuditIntegrityError, match="duration_ms"):
             loader.load(sa_row)
 
     def test_open_with_error_message_raises(self) -> None:
         sa_row = self._make_operation_row(status="open", error_message="bad")
         loader = OperationLoader()
-        with pytest.raises(ValueError, match="error_message"):
+        with pytest.raises(AuditIntegrityError, match="error_message"):
             loader.load(sa_row)
 
     def test_completed_with_null_completed_at_raises(self) -> None:
@@ -1716,7 +1746,7 @@ class TestOperationLoader:
             duration_ms=100.0,
         )
         loader = OperationLoader()
-        with pytest.raises(ValueError, match="completed_at"):
+        with pytest.raises(AuditIntegrityError, match="completed_at"):
             loader.load(sa_row)
 
     def test_completed_with_null_duration_ms_raises(self) -> None:
@@ -1726,7 +1756,7 @@ class TestOperationLoader:
             duration_ms=None,
         )
         loader = OperationLoader()
-        with pytest.raises(ValueError, match="duration_ms"):
+        with pytest.raises(AuditIntegrityError, match="duration_ms"):
             loader.load(sa_row)
 
     def test_completed_with_error_message_raises(self) -> None:
@@ -1737,7 +1767,7 @@ class TestOperationLoader:
             error_message="should not be here",
         )
         loader = OperationLoader()
-        with pytest.raises(ValueError, match="error_message"):
+        with pytest.raises(AuditIntegrityError, match="error_message"):
             loader.load(sa_row)
 
     def test_failed_with_null_error_message_raises(self) -> None:
@@ -1748,7 +1778,7 @@ class TestOperationLoader:
             error_message=None,
         )
         loader = OperationLoader()
-        with pytest.raises(ValueError, match="error_message"):
+        with pytest.raises(AuditIntegrityError, match="error_message"):
             loader.load(sa_row)
 
     # === Both operation types accepted ===

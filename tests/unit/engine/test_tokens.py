@@ -131,6 +131,7 @@ class TestTokenManagerCoalesce:
             parents=[stats_token, classifier_token],
             merged_data=_make_pipeline_row({"value": 42, "mean": 10.5, "label": "A"}),
             node_id=NodeID("coalesce_node"),
+            run_id=run_id,
         )
 
         assert merged.token_id is not None
@@ -153,6 +154,7 @@ class TestTokenManagerCoalesceValidation:
                 parents=[],
                 merged_data=_make_pipeline_row({"value": 1}),
                 node_id=NodeID("coalesce_node"),
+                run_id=_run_id,
             )
 
     def test_coalesce_tokens_mismatched_row_ids_raises(self) -> None:
@@ -182,6 +184,7 @@ class TestTokenManagerCoalesceValidation:
                 parents=[token_a, token_b],
                 merged_data=_make_pipeline_row({"value": 1}),
                 node_id=NodeID("coalesce_node"),
+                run_id=run_id,
             )
 
 
@@ -225,6 +228,7 @@ class TestCoalesceMismatchedRowIdsMutationKill:
                 parents=[token_a, token_b],
                 merged_data=_make_pipeline_row({"value": 1}),
                 node_id=NodeID("coalesce_node"),
+                run_id=run_id,
             )
 
     def test_mismatched_row_id_less_than_reference_detected(self) -> None:
@@ -263,6 +267,7 @@ class TestCoalesceMismatchedRowIdsMutationKill:
                 parents=[first, second],
                 merged_data=_make_pipeline_row({"value": 1}),
                 node_id=NodeID("coalesce_node"),
+                run_id=run_id,
             )
 
 
@@ -589,6 +594,7 @@ class TestTokenManagerEdgeCases:
             parents=children,
             merged_data=_make_pipeline_row({"value": 42, "merged": True}),
             node_id=NodeID("coalesce_node"),
+            run_id=run_id,
         )
 
         assert merged.join_group_id is not None
@@ -680,6 +686,7 @@ class TestTokenManagerStepInPipeline:
             parents=children,
             merged_data=_make_pipeline_row({"value": 42, "merged": True}),
             node_id=NodeID("coalesce_node"),
+            run_id=run_id,
         )
 
         merged_token = recorder.get_token(merged.token_id)

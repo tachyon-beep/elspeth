@@ -52,7 +52,7 @@ def _make_mock_token_manager(recorder: MagicMock) -> MagicMock:
     """Create a mock TokenManager."""
     token_manager = MagicMock()
 
-    def coalesce_tokens_impl(parents, merged_data, node_id):
+    def coalesce_tokens_impl(parents, merged_data, node_id, run_id):
         return TokenInfo(
             row_id=parents[0].row_id,
             token_id="merged_001",

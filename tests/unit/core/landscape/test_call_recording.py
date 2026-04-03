@@ -4,6 +4,7 @@ import pytest
 
 from elspeth.contracts import CallStatus, CallType, FrameworkBugError, NodeType
 from elspeth.contracts.call_data import RawCallPayload
+from elspeth.contracts.errors import AuditIntegrityError
 from elspeth.core.canonical import stable_hash
 from elspeth.core.landscape import LandscapeDB, LandscapeRecorder
 from elspeth.core.landscape.row_data import CallDataResult, CallDataState
@@ -327,7 +328,7 @@ class TestCompleteOperation:
         _db, recorder, _state_id, op_id = _setup_with_operation()
         recorder._ops.execute_update(operations_table.update().where(operations_table.c.operation_id == op_id).values(status="corrupt"))
 
-        with pytest.raises(ValueError, match="status"):
+        with pytest.raises(AuditIntegrityError, match="status"):
             recorder.get_operation(op_id)
 
     def test_raises_on_invalid_operation_type_from_db(self):
@@ -336,7 +337,7 @@ class TestCompleteOperation:
             operations_table.update().where(operations_table.c.operation_id == op_id).values(operation_type="corrupt")
         )
 
-        with pytest.raises(ValueError, match="operation_type"):
+        with pytest.raises(AuditIntegrityError, match="operation_type"):
             recorder.get_operation(op_id)
 
     def test_completes_with_failure(self):

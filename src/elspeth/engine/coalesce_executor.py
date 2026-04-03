@@ -736,6 +736,7 @@ class CoalesceExecutor:
                 parents=list(consumed_tokens),
                 merged_data=merged_data,
                 node_id=node_id,
+                run_id=self._run_id,
             )
 
             # Build audit metadata BEFORE completing node states (Bug l4h fix)

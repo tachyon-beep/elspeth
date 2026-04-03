@@ -56,15 +56,36 @@ class RunLoader:
     def load(self, row: SARow[Any]) -> Run:
         """Load Run from database row.
 
-        Converts string fields to enums. Crashes on invalid data.
+        Converts string fields to enums. Validates status-dependent
+        invariants before construction.
+
+        Raises:
+            AuditIntegrityError: If status/completed_at are inconsistent (Tier 1)
         """
+        status = RunStatus(row.status)
+
+        # Tier 1: status-dependent lifecycle invariants
+        if status == RunStatus.RUNNING:
+            if row.completed_at is not None:
+                raise AuditIntegrityError(
+                    f"Run {row.run_id} has status='running' but completed_at is set — "
+                    f"audit integrity violation (running runs must not have completed_at)"
+                )
+        elif status == RunStatus.COMPLETED and row.completed_at is None:
+            raise AuditIntegrityError(
+                f"Run {row.run_id} has status='completed' but completed_at is NULL — "
+                f"audit integrity violation (completed runs must have completed_at)"
+            )
+        # FAILED and INTERRUPTED: completed_at may or may not be set.
+        # complete_run() sets it; update_run_status() (recovery path) does not.
+
         return Run(
             run_id=row.run_id,
             started_at=row.started_at,
             config_hash=row.config_hash,
             settings_json=row.settings_json,
             canonical_version=row.canonical_version,
-            status=RunStatus(row.status),  # Convert HERE
+            status=status,
             completed_at=row.completed_at,
             # Validate reproducibility_grade on read — crash on invalid values (Tier 1)
             reproducibility_grade=ReproducibilityGrade(row.reproducibility_grade) if row.reproducibility_grade is not None else None,
@@ -194,8 +215,22 @@ class CallLoader:
         """Load Call from database row.
 
         Handles both state-parented calls (transform processing) and
-        operation-parented calls (source/sink I/O).
+        operation-parented calls (source/sink I/O). Validates XOR
+        constraint before construction.
+
+        Raises:
+            AuditIntegrityError: If state_id/operation_id XOR violated (Tier 1)
         """
+        # Tier 1: XOR constraint — exactly one parent context
+        has_state = row.state_id is not None
+        has_operation = row.operation_id is not None
+        if has_state == has_operation:
+            raise AuditIntegrityError(
+                f"Call {row.call_id} requires exactly one of state_id or operation_id. "
+                f"Got state_id={row.state_id!r}, operation_id={row.operation_id!r} — "
+                f"audit integrity violation"
+            )
+
         return Call(
             call_id=row.call_id,
             call_index=row.call_index,
@@ -617,14 +652,49 @@ class OperationLoader:
     def load(self, row: SARow[Any]) -> Operation:
         """Load Operation from database row.
 
-        Args:
-            row: Database row from operations table
+        Validates operation_type, status, and status-dependent lifecycle
+        invariants before construction.
 
-        Returns:
-            Operation with all fields mapped and lifecycle invariants validated
+        Raises:
+            AuditIntegrityError: If operation_type/status invalid or lifecycle
+                invariants violated (Tier 1)
         """
+        oid = row.operation_id
+
+        # Tier 1: validate constrained literal fields
+        allowed_types = ("source_load", "sink_write")
+        if row.operation_type not in allowed_types:
+            raise AuditIntegrityError(
+                f"Operation {oid} has invalid operation_type={row.operation_type!r} "
+                f"(expected one of {allowed_types}) — audit integrity violation"
+            )
+
+        allowed_statuses = ("open", "completed", "failed", "pending")
+        if row.status not in allowed_statuses:
+            raise AuditIntegrityError(
+                f"Operation {oid} has invalid status={row.status!r} (expected one of {allowed_statuses}) — audit integrity violation"
+            )
+
+        # Tier 1: status-dependent lifecycle invariants
+        if row.status == "open":
+            if row.completed_at is not None:
+                raise AuditIntegrityError(f"Operation {oid}: status='open' but completed_at is set — audit integrity violation")
+            if row.duration_ms is not None:
+                raise AuditIntegrityError(f"Operation {oid}: status='open' but duration_ms is set — audit integrity violation")
+            if row.error_message is not None:
+                raise AuditIntegrityError(f"Operation {oid}: status='open' but error_message is set — audit integrity violation")
+        elif row.status in ("completed", "failed", "pending"):
+            if row.completed_at is None:
+                raise AuditIntegrityError(f"Operation {oid}: status={row.status!r} but completed_at is NULL — audit integrity violation")
+            if row.duration_ms is None:
+                raise AuditIntegrityError(f"Operation {oid}: status={row.status!r} but duration_ms is NULL — audit integrity violation")
+            if row.status == "failed" and row.error_message is None:
+                raise AuditIntegrityError(f"Operation {oid}: status='failed' but error_message is NULL — audit integrity violation")
+            if row.status == "completed" and row.error_message is not None:
+                raise AuditIntegrityError(f"Operation {oid}: status='completed' but error_message is set — audit integrity violation")
+
         return Operation(
-            operation_id=row.operation_id,
+            operation_id=oid,
             run_id=row.run_id,
             node_id=row.node_id,
             operation_type=row.operation_type,

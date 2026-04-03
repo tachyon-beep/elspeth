@@ -329,7 +329,7 @@ class TestCoalesceTokens:
         row, token_a = _make_row(recorder, row_index=0)
         token_b = recorder.create_token(row.row_id)
         merged = recorder.coalesce_tokens(
-            parent_token_ids=[token_a.token_id, token_b.token_id],
+            parent_refs=[TokenRef(token_id=token_a.token_id, run_id="run-1"), TokenRef(token_id=token_b.token_id, run_id="run-1")],
             row_id=row.row_id,
         )
         assert merged.token_id is not None
@@ -340,7 +340,7 @@ class TestCoalesceTokens:
         row, token_a = _make_row(recorder, row_index=0)
         token_b = recorder.create_token(row.row_id)
         merged = recorder.coalesce_tokens(
-            parent_token_ids=[token_a.token_id, token_b.token_id],
+            parent_refs=[TokenRef(token_id=token_a.token_id, run_id="run-1"), TokenRef(token_id=token_b.token_id, run_id="run-1")],
             row_id=row.row_id,
         )
         assert merged.join_group_id is not None
@@ -351,10 +351,10 @@ class TestCoalesceTokens:
         token_b = recorder.create_token(row.row_id)
         token_c = recorder.create_token(row.row_id)
         merged = recorder.coalesce_tokens(
-            parent_token_ids=[
-                token_a.token_id,
-                token_b.token_id,
-                token_c.token_id,
+            parent_refs=[
+                TokenRef(token_id=token_a.token_id, run_id="run-1"),
+                TokenRef(token_id=token_b.token_id, run_id="run-1"),
+                TokenRef(token_id=token_c.token_id, run_id="run-1"),
             ],
             row_id=row.row_id,
         )
@@ -366,7 +366,7 @@ class TestCoalesceTokens:
         row, token_a = _make_row(recorder, row_index=0)
         token_b = recorder.create_token(row.row_id)
         merged = recorder.coalesce_tokens(
-            parent_token_ids=[token_a.token_id, token_b.token_id],
+            parent_refs=[TokenRef(token_id=token_a.token_id, run_id="run-1"), TokenRef(token_id=token_b.token_id, run_id="run-1")],
             row_id=row.row_id,
             step_in_pipeline=5,
         )
@@ -1207,7 +1207,7 @@ class TestCrossRunContaminationPrevention:
         # coalesce requires row_id match, so this will fail on row ownership first
         with pytest.raises(AuditIntegrityError):
             recorder.coalesce_tokens(
-                parent_token_ids=[token_a.token_id, token_b.token_id],
+                parent_refs=[TokenRef(token_id=token_a.token_id, run_id="run-A"), TokenRef(token_id=token_b.token_id, run_id="run-B")],
                 row_id=row_a.row_id,
             )
 
@@ -1233,7 +1233,7 @@ class TestCrossRunContaminationPrevention:
         # Both tokens belong to row_a, but we say row_b
         with pytest.raises(AuditIntegrityError, match="Cross-row lineage"):
             recorder.coalesce_tokens(
-                parent_token_ids=[token_a.token_id, token_b.token_id],
+                parent_refs=[TokenRef(token_id=token_a.token_id, run_id="run-A"), TokenRef(token_id=token_b.token_id, run_id="run-A")],
                 row_id=row_b.row_id,
             )
 
@@ -1251,7 +1251,7 @@ class TestCrossRunContaminationPrevention:
         token_b = recorder.create_token(row_a.row_id)
 
         merged = recorder.coalesce_tokens(
-            parent_token_ids=[token_a.token_id, token_b.token_id],
+            parent_refs=[TokenRef(token_id=token_a.token_id, run_id="run-A"), TokenRef(token_id=token_b.token_id, run_id="run-A")],
             row_id=row_a.row_id,
         )
         assert merged.token_id is not None
@@ -1311,7 +1311,7 @@ class TestTokenRunIdConsistency:
         row, token_a = _make_row(recorder, row_index=0)
         token_b = recorder.create_token(row.row_id)
         merged = recorder.coalesce_tokens(
-            parent_token_ids=[token_a.token_id, token_b.token_id],
+            parent_refs=[TokenRef(token_id=token_a.token_id, run_id="run-1"), TokenRef(token_id=token_b.token_id, run_id="run-1")],
             row_id=row.row_id,
         )
         assert merged.run_id == "run-1"

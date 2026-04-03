@@ -87,7 +87,7 @@ def _make_executor(
     span_factory = MagicMock()
     token_manager = MagicMock()
 
-    def coalesce_tokens_impl(parents, merged_data, node_id):
+    def coalesce_tokens_impl(parents, merged_data, node_id, run_id):
         return TokenInfo(
             row_id=parents[0].row_id,
             token_id=f"merged_{uuid4().hex[:8]}",
