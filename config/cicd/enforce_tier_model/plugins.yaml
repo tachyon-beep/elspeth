@@ -141,7 +141,7 @@ allow_hits:
   reason: TypeError from np.isfinite on non-numeric dtypes (e.g., string arrays) is expected — non-numeric arrays can't contain NaN
   safety: Only catches TypeError from np.isfinite, lets all other exceptions propagate
   expires: '2026-05-02'
-- key: plugins/infrastructure/manager.py:R4:PluginManager:register:fp=11625f985e95cd76
+- key: plugins/infrastructure/manager.py:R4:PluginManager:register:fp=925b14285040da6e
   owner: bugfix
   reason: Rollback protection — catch any rollback failure so secondary exception doesn't bury original diagnostic
   safety: Logs rollback error then re-raises the original exception unchanged

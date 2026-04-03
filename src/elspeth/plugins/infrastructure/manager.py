@@ -19,9 +19,16 @@ from elspeth.plugins.infrastructure.hookspecs import (
     ElspethSourceSpec,
     ElspethTransformSpec,
 )
-from elspeth.plugins.infrastructure.validation import PluginConfigValidator
+from elspeth.plugins.infrastructure.validation import PluginConfigValidator, ValidationError
 
 _logger = structlog.get_logger(__name__)
+
+
+def _raise_if_invalid(errors: list[ValidationError], label: str, name: str) -> None:
+    """Raise ValueError with formatted message if validation errors exist."""
+    if errors:
+        error_lines = [f"  - {err.field}: {err.message}" for err in errors]
+        raise ValueError(f"Invalid configuration for {label} '{name}':\n" + "\n".join(error_lines))
 
 
 class PluginManager:
@@ -219,11 +226,7 @@ class PluginManager:
         """
         # Validate config first
         errors = self._validator.validate_source_config(source_type, config)
-        if errors:
-            # Format errors into readable message with field names
-            error_lines = [f"  - {err.field}: {err.message}" for err in errors]
-            error_msg = f"Invalid configuration for source '{source_type}':\n" + "\n".join(error_lines)
-            raise ValueError(error_msg)
+        _raise_if_invalid(errors, "source", source_type)
 
         # Get plugin class
         plugin_cls = self.get_source_by_name(source_type)
@@ -246,11 +249,7 @@ class PluginManager:
         """
         # Validate config first
         errors = self._validator.validate_transform_config(transform_type, config)
-        if errors:
-            # Format errors into readable message with field names
-            error_lines = [f"  - {err.field}: {err.message}" for err in errors]
-            error_msg = f"Invalid configuration for transform '{transform_type}':\n" + "\n".join(error_lines)
-            raise ValueError(error_msg)
+        _raise_if_invalid(errors, "transform", transform_type)
 
         # Get plugin class
         plugin_cls = self.get_transform_by_name(transform_type)
@@ -273,11 +272,7 @@ class PluginManager:
         """
         # Validate config first
         errors = self._validator.validate_sink_config(sink_type, config)
-        if errors:
-            # Format errors into readable message with field names
-            error_lines = [f"  - {err.field}: {err.message}" for err in errors]
-            error_msg = f"Invalid configuration for sink '{sink_type}':\n" + "\n".join(error_lines)
-            raise ValueError(error_msg)
+        _raise_if_invalid(errors, "sink", sink_type)
 
         # Get plugin class
         plugin_cls = self.get_sink_by_name(sink_type)
