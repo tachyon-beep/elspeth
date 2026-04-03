@@ -358,6 +358,15 @@ allowed_dict_patterns:
   - "src/elspeth/telemetry/exporters/console.py:ConsoleExporter._serialize_event:return"
 
   # ═══════════════════════════════════════════════════════════════════════════
+  # SPAN FACTORY - OTel attribute bag
+  # OpenTelemetry span attributes are inherently dict[str, Any] — the OTel SDK
+  # accepts str/bool/int/float/Sequence thereof, so a TypedDict cannot express
+  # the full attribute space. _make_span is a private helper that receives the
+  # already-validated attribute dict built by each public span method.
+  # ═══════════════════════════════════════════════════════════════════════════
+  - "src/elspeth/engine/spans.py:SpanFactory._make_span:attributes"
+
+  # ═══════════════════════════════════════════════════════════════════════════
   # STRUCTLOG PROCESSORS - Framework boundary
   # Structlog defines the event_dict type as dict[str, Any]. Processors receive
   # and return this type as part of structlog's processing pipeline.
