@@ -55,6 +55,13 @@ def init_display_headers(
     # is equivalent banned defensive programming.
     _ = sink._output_contract  # Crashes with AttributeError if super().__init__() not called
 
+    if headers_mode == HeaderMode.CUSTOM and headers_custom_mapping is None:
+        raise ValueError(
+            "CUSTOM header mode requires an explicit headers_custom_mapping dict. "
+            "Got headers_mode=CUSTOM with headers_custom_mapping=None — "
+            "this would silently fall back to NORMALIZED mode."
+        )
+
     sink._headers_mode = headers_mode
     sink._headers_custom_mapping = headers_custom_mapping
     sink._resolved_display_headers = None

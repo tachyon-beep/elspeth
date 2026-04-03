@@ -6,7 +6,7 @@ Entry point for the elspeth CLI tool.
 from __future__ import annotations
 
 import os
-from collections.abc import Iterator
+from collections.abc import Iterator, Mapping
 from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path
@@ -861,7 +861,7 @@ def _orchestrator_context(
 
     # Unpack pre-instantiated plugins
     source: SourceProtocol = plugins.source
-    sinks: dict[str, SinkProtocol] = dict(plugins.sinks)
+    sinks: Mapping[str, SinkProtocol] = plugins.sinks
 
     # Build transforms list: row_plugins + aggregations (with node_id)
     transforms: list[RowPlugin] = [wired.plugin for wired in plugins.transforms]

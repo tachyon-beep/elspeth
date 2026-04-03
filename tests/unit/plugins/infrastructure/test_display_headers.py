@@ -57,14 +57,10 @@ class TestGetEffectiveDisplayHeaders:
         sink = _StubSink(HeaderMode.CUSTOM, mapping)
         assert get_effective_display_headers(sink) == mapping
 
-    def test_custom_mode_with_none_mapping_returns_none(self) -> None:
-        """CUSTOM mode with None mapping is a no-op — returns None, same as NORMALIZED."""
-        from elspeth.plugins.infrastructure.display_headers import (
-            get_effective_display_headers,
-        )
-
-        sink = _StubSink(HeaderMode.CUSTOM, None)
-        assert get_effective_display_headers(sink) is None
+    def test_custom_mode_with_none_mapping_raises(self) -> None:
+        """CUSTOM mode with None mapping crashes at init — not a silent fallback."""
+        with pytest.raises(ValueError, match="CUSTOM header mode requires an explicit headers_custom_mapping"):
+            _StubSink(HeaderMode.CUSTOM, None)
 
     def test_original_mode_with_contract(self) -> None:
         from elspeth.contracts.schema_contract import FieldContract, SchemaContract
