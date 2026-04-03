@@ -16,8 +16,7 @@ from typing import TYPE_CHECKING, Any, Literal, TextIO, TypeGuard
 
 import structlog
 
-from elspeth.telemetry.errors import TelemetryExporterError
-from elspeth.telemetry.exporters import TELEMETRY_TRANSPORT_ERRORS
+from elspeth.telemetry.errors import TELEMETRY_TRANSPORT_ERRORS, TelemetryExporterError
 
 if TYPE_CHECKING:
     from elspeth.contracts.events import TelemetryEvent

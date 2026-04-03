@@ -33,8 +33,7 @@ from elspeth.contracts.config import RuntimeTelemetryProtocol
 from elspeth.contracts.config.defaults import INTERNAL_DEFAULTS
 from elspeth.contracts.enums import BackpressureMode
 from elspeth.contracts.events import TelemetryEvent
-from elspeth.telemetry.errors import TelemetryExporterError
-from elspeth.telemetry.exporters import TELEMETRY_TRANSPORT_ERRORS
+from elspeth.telemetry.errors import TELEMETRY_TRANSPORT_ERRORS, TelemetryExporterError
 from elspeth.telemetry.filtering import should_emit
 from elspeth.telemetry.protocols import ExporterProtocol
 

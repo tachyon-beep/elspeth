@@ -295,7 +295,11 @@ class RowReorderBuffer[T]:
                             raise RuntimeError("Invariant violation: is_complete=True but completed_at is None")
 
                         now = time.perf_counter()
-                        buffer_wait_ms = (now - entry.completed_at) * 1000
+                        # Clamp to zero: perf_counter() is not guaranteed monotonic
+                        # across CPU cores in virtualized/NUMA environments, so
+                        # (now - completed_at) can go negative when the worker and
+                        # release threads run on different cores with clock skew.
+                        buffer_wait_ms = max(0.0, (now - entry.completed_at) * 1000)
 
                         result_entry = RowBufferEntry(
                             sequence=entry.sequence,

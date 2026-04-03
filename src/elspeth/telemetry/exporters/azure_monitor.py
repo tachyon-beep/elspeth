@@ -15,8 +15,7 @@ from typing import TYPE_CHECKING, Any
 
 import structlog
 
-from elspeth.telemetry.errors import TelemetryExporterError
-from elspeth.telemetry.exporters import TELEMETRY_TRANSPORT_ERRORS
+from elspeth.telemetry.errors import TELEMETRY_TRANSPORT_ERRORS, TelemetryExporterError
 from elspeth.telemetry.exporters.otlp import (
     _derive_trace_id,
     _generate_span_id,

@@ -19,8 +19,7 @@ from typing import TYPE_CHECKING, Any
 import structlog
 
 from elspeth import __version__ as _elspeth_version
-from elspeth.telemetry.errors import TelemetryExporterError
-from elspeth.telemetry.exporters import TELEMETRY_TRANSPORT_ERRORS
+from elspeth.telemetry.errors import TELEMETRY_TRANSPORT_ERRORS, TelemetryExporterError
 
 if TYPE_CHECKING:
     from opentelemetry.exporter.otlp.proto.grpc.trace_exporter import OTLPSpanExporter

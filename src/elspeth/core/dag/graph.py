@@ -1538,18 +1538,16 @@ class ExecutionGraph:
         return frozenset()
 
     def get_effective_guaranteed_fields(self, node_id: str) -> frozenset[str]:
-        """Get effective output guarantees, walking through pass-through nodes.
+        """Get effective output guarantees for a node.
 
-        Gates inherit guarantees from upstream. Coalesce nodes are strategy-aware:
+        Gates and other non-coalesce nodes return their own guarantees directly
+        (the builder sets output_schema_config on gates via _assign_schema, so
+        computed guarantees are already available).
+
+        Coalesce nodes are strategy-aware:
         - **union**: intersection of branch guarantees (only fields in ALL branches)
         - **nested**: the node's own guarantees (branch names, not inner fields)
         - **select**: the node's own guarantees (selected branch's schema)
-
-        IMPORTANT: Gates ALWAYS inherit from upstream, even if they have raw schema
-        guarantees. This is because gates copy raw config["schema"] from upstream,
-        which may not include computed guarantees from output_schema_config
-        (e.g., LLM transforms compute additional guaranteed_fields like *_usage).
-        Gates copy raw config["schema"] which may omit computed guarantees.
 
         Args:
             node_id: Node to get effective guarantees for

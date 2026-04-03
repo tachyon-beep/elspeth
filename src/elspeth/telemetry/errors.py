@@ -4,6 +4,15 @@ These exceptions are for telemetry subsystem errors only.
 They should NOT be raised for pipeline execution errors.
 """
 
+# Exceptions that represent transport/IO failures — safe to swallow during telemetry export.
+# Everything else is a programming error that must crash.
+# Individual exporters may extend this with SDK-specific transport exceptions.
+TELEMETRY_TRANSPORT_ERRORS: tuple[type[BaseException], ...] = (
+    ConnectionError,
+    TimeoutError,
+    OSError,  # covers socket.error, BrokenPipeError, ConnectionResetError, etc.
+)
+
 
 class TelemetryExporterError(Exception):
     """Raised when an exporter encounters a configuration or initialization error.

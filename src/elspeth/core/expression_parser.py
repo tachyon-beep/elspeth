@@ -388,6 +388,30 @@ class _ExpressionValidator(ast.NodeVisitor):
         super().visit(node)
 
 
+# ── Module-level coupling enforcement ─────────────────────────────────
+# Every type in _HANDLED_EXPR_TYPES must have a visit_* method, and every
+# visit_* method must have a corresponding type.  Without this check,
+# adding a type without a handler silently falls through to generic_visit,
+# bypassing security validation.
+_handler_type_names = {t.__name__ for t in _ExpressionValidator._HANDLED_EXPR_TYPES}
+_visitor_method_names = {
+    name.removeprefix("visit_") for name in vars(_ExpressionValidator) if name.startswith("visit_") and name != "visit"
+}
+
+_missing_handlers = _handler_type_names - _visitor_method_names
+_orphan_visitors = _visitor_method_names - _handler_type_names
+
+if _missing_handlers or _orphan_visitors:
+    _parts: list[str] = []
+    if _missing_handlers:
+        _parts.append(f"types without visit_* handler: {sorted(_missing_handlers)}")
+    if _orphan_visitors:
+        _parts.append(f"visit_* handlers without type entry: {sorted(_orphan_visitors)}")
+    raise TypeError(f"_ExpressionValidator handler/type coupling violation: {'; '.join(_parts)}")
+
+del _handler_type_names, _visitor_method_names, _missing_handlers, _orphan_visitors
+
+
 class _ExpressionEvaluator(ast.NodeVisitor):
     """AST visitor that evaluates validated expressions."""
 
