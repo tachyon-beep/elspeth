@@ -54,6 +54,73 @@ class TestPluginSchemaLocation:
         assert result.compatible is True
 
 
+class TestCompatibilityResultErrorMessage:
+    """Tests for CompatibilityResult.error_message formatting logic."""
+
+    def test_compatible_result_returns_none(self) -> None:
+        from elspeth.contracts import CompatibilityResult
+
+        result = CompatibilityResult(compatible=True)
+        assert result.error_message is None
+
+    def test_missing_fields_only(self) -> None:
+        from elspeth.contracts import CompatibilityResult
+
+        result = CompatibilityResult(compatible=False, missing_fields=("name", "age"))
+        assert result.error_message == "Missing fields: name, age"
+
+    def test_type_mismatches_only(self) -> None:
+        from elspeth.contracts import CompatibilityResult
+
+        result = CompatibilityResult(
+            compatible=False,
+            type_mismatches=(("score", "int", "str"),),
+        )
+        assert result.error_message == "Type mismatches: score (expected int, got str)"
+
+    def test_constraint_mismatches_only(self) -> None:
+        from elspeth.contracts import CompatibilityResult
+
+        result = CompatibilityResult(
+            compatible=False,
+            constraint_mismatches=(("age", "must be positive"),),
+        )
+        assert result.error_message == "Constraint mismatches: age: must be positive"
+
+    def test_extra_fields_only(self) -> None:
+        from elspeth.contracts import CompatibilityResult
+
+        result = CompatibilityResult(compatible=False, extra_fields=("secret", "debug"))
+        assert result.error_message == "Extra fields forbidden by consumer: secret, debug"
+
+    def test_combined_errors_joined_with_semicolon(self) -> None:
+        """When multiple error categories exist, they're joined with '; '."""
+        from elspeth.contracts import CompatibilityResult
+
+        result = CompatibilityResult(
+            compatible=False,
+            missing_fields=("name",),
+            type_mismatches=(("age", "int", "str"),),
+            constraint_mismatches=(("score", "out of range"),),
+            extra_fields=("debug",),
+        )
+        msg = result.error_message
+        assert msg is not None
+        parts = msg.split("; ")
+        assert len(parts) == 4
+        assert parts[0] == "Missing fields: name"
+        assert parts[1] == "Type mismatches: age (expected int, got str)"
+        assert parts[2] == "Constraint mismatches: score: out of range"
+        assert parts[3] == "Extra fields forbidden by consumer: debug"
+
+    def test_incompatible_with_no_details_returns_empty_string(self) -> None:
+        """Edge case: compatible=False but no error details produces empty string."""
+        from elspeth.contracts import CompatibilityResult
+
+        result = CompatibilityResult(compatible=False)
+        assert result.error_message == ""
+
+
 class TestPluginSchemaNotInOldLocation:
     """Verify plugins/schemas.py has been deleted."""
 

@@ -321,6 +321,14 @@ class CoalesceExecutor:
                 retained_count=len(self._completed_keys),
             )
 
+    def _require_quorum_count(self, settings: CoalesceSettings) -> int:
+        """Return quorum_count or crash if None — config validation should have caught this."""
+        if settings.quorum_count is None:
+            raise RuntimeError(
+                f"quorum_count is None for quorum policy at coalesce '{settings.name}'. This indicates a config validation bug."
+            )
+        return settings.quorum_count
+
     def accept(
         self,
         token: TokenInfo,
@@ -472,11 +480,7 @@ class CoalesceExecutor:
             return arrived_count >= 1
 
         elif settings.policy == "quorum":
-            if settings.quorum_count is None:
-                raise RuntimeError(
-                    f"quorum_count is None for quorum policy at coalesce '{settings.name}'. This indicates a config validation bug."
-                )
-            return arrived_count >= settings.quorum_count
+            return arrived_count >= self._require_quorum_count(settings)
 
         elif settings.policy == "best_effort":
             # Merge on timeout (checked elsewhere) or when all branches accounted for.
@@ -495,11 +499,14 @@ class CoalesceExecutor:
         failure_reason: str,
         *,
         is_timeout: bool = False,
+        select_branch: str | None = None,
+        metadata: CoalesceMetadata | None = None,
     ) -> CoalesceOutcome:
         """Fail all arrived tokens in a pending coalesce and clean up.
 
-        Shared helper used by check_timeouts(), flush_pending(), and
-        _evaluate_after_loss() to avoid duplicating failure recording logic.
+        Shared helper used by check_timeouts(), flush_pending(),
+        _evaluate_after_loss(), and _execute_merge() (select_branch_not_arrived)
+        to avoid duplicating failure recording logic.
 
         Args:
             settings: Coalesce settings for metadata
@@ -509,6 +516,10 @@ class CoalesceExecutor:
             is_timeout: Whether this failure was triggered by a timeout.
                 Callers set this explicitly rather than inferring from the
                 failure_reason string.
+            select_branch: Target branch for select merge failures (passed through
+                to CoalesceFailureReason).
+            metadata: Pre-built CoalesceMetadata. When provided, used instead of
+                the default CoalesceMetadata.for_failure() construction.
 
         Returns:
             CoalesceOutcome with failure_reason set and outcomes_recorded=True
@@ -526,6 +537,7 @@ class CoalesceExecutor:
             branches_arrived=tuple(pending.branches.keys()),
             merge_policy=settings.merge,
             timeout_ms=int(settings.timeout_seconds * 1000) if is_timeout and settings.timeout_seconds is not None else None,
+            select_branch=select_branch,
         )
         for _branch_name, entry in pending.branches.items():
             self._recorder.complete_node_state(
@@ -543,18 +555,21 @@ class CoalesceExecutor:
         del self._pending[key]
         self._mark_completed(key)
 
-        return CoalesceOutcome(
-            held=False,
-            failure_reason=failure_reason,
-            consumed_tokens=consumed_tokens,
-            coalesce_metadata=CoalesceMetadata.for_failure(
+        if metadata is None:
+            metadata = CoalesceMetadata.for_failure(
                 policy=CoalescePolicy(settings.policy),
                 expected_branches=tuple(settings.branches),
                 branches_arrived=tuple(pending.branches.keys()),
                 branches_lost=pending.lost_branches,
                 quorum_required=settings.quorum_count,
                 timeout_seconds=settings.timeout_seconds,
-            ),
+            )
+
+        return CoalesceOutcome(
+            held=False,
+            failure_reason=failure_reason,
+            consumed_tokens=consumed_tokens,
+            coalesce_metadata=metadata,
             coalesce_name=coalesce_name,
             outcomes_recorded=True,
         )
@@ -587,46 +602,19 @@ class CoalesceExecutor:
         # Validate select_branch is present for select merge strategy
         # (Bug 2ho fix: reject instead of silent fallback)
         if settings.merge == "select" and settings.select_branch not in pending.branches:
-            # select_branch not arrived - this is a failure, not a fallback
-            consumed_tokens = tuple(e.token for e in pending.branches.values())
-            error_msg = "select_branch_not_arrived"
-            error_hash = hashlib.sha256(error_msg.encode()).hexdigest()[:16]
-
-            select_error = CoalesceFailureReason(
+            return self._fail_pending(
+                settings,
+                key,
+                step,
                 failure_reason="select_branch_not_arrived",
-                expected_branches=tuple(settings.branches),
-                branches_arrived=tuple(pending.branches.keys()),
-                merge_policy=settings.merge,
                 select_branch=settings.select_branch,
-            )
-            for _branch_name, entry in pending.branches.items():
-                self._recorder.complete_node_state(
-                    state_id=entry.state_id,
-                    status=NodeStateStatus.FAILED,
-                    error=select_error,
-                    duration_ms=(now - entry.arrival_time) * 1000,
-                )
-                self._recorder.record_token_outcome(
-                    ref=TokenRef(token_id=entry.token.token_id, run_id=self._run_id),
-                    outcome=RowOutcome.FAILED,
-                    error_hash=error_hash,
-                )
-
-            del self._pending[key]
-            self._mark_completed(key)
-            return CoalesceOutcome(
-                held=False,
-                failure_reason="select_branch_not_arrived",
-                consumed_tokens=consumed_tokens,
-                coalesce_metadata=CoalesceMetadata.for_select_not_arrived(
+                metadata=CoalesceMetadata.for_select_not_arrived(
                     policy=CoalescePolicy(settings.policy),
                     merge_strategy=MergeStrategy(settings.merge),
                     # select_branch is validated non-None by CoalesceSettings for merge="select"
                     select_branch=settings.select_branch,  # type: ignore[arg-type]
                     branches_arrived=tuple(pending.branches.keys()),
                 ),
-                coalesce_name=coalesce_name,
-                outcomes_recorded=True,  # Bug 9z8 fix: token outcomes already recorded above
             )
 
         completed_state_ids: set[str] = set()
@@ -892,6 +880,87 @@ class CoalesceExecutor:
         else:
             raise RuntimeError(f"Unknown merge strategy: {settings.merge!r}")
 
+    def _resolve_pending(
+        self,
+        settings: CoalesceSettings,
+        node_id: NodeID,
+        pending: _PendingCoalesce,
+        step: int,
+        key: tuple[str, str],
+        coalesce_name: str,
+        *,
+        is_timeout: bool = False,
+    ) -> CoalesceOutcome:
+        """Resolve a pending coalesce by dispatching on policy.
+
+        Shared helper for check_timeouts() and flush_pending(). Decides whether
+        to merge (enough branches arrived) or fail (not enough) based on policy.
+
+        Args:
+            settings: Coalesce settings for this point
+            node_id: DAG node ID for audit recording
+            pending: The pending coalesce state
+            step: Resolved audit step index
+            key: (coalesce_name, row_id) tuple
+            coalesce_name: Name of the coalesce configuration
+            is_timeout: True when triggered by timeout (affects failure reasons
+                and is_timeout flag on _fail_pending)
+        """
+        if settings.policy == "best_effort":
+            if len(pending.branches) > 0:
+                return self._execute_merge(
+                    settings=settings,
+                    node_id=node_id,
+                    pending=pending,
+                    step=step,
+                    key=key,
+                    coalesce_name=coalesce_name,
+                )
+            return self._fail_pending(
+                settings,
+                key,
+                step,
+                failure_reason="best_effort_timeout_no_arrivals" if is_timeout else "all_branches_lost",
+                is_timeout=is_timeout,
+            )
+
+        elif settings.policy == "quorum":
+            if len(pending.branches) >= self._require_quorum_count(settings):
+                return self._execute_merge(
+                    settings=settings,
+                    node_id=node_id,
+                    pending=pending,
+                    step=step,
+                    key=key,
+                    coalesce_name=coalesce_name,
+                )
+            return self._fail_pending(
+                settings,
+                key,
+                step,
+                failure_reason="quorum_not_met_at_timeout" if is_timeout else "quorum_not_met",
+                is_timeout=is_timeout,
+            )
+
+        elif settings.policy == "require_all":
+            return self._fail_pending(
+                settings,
+                key,
+                step,
+                failure_reason="incomplete_branches",
+                is_timeout=is_timeout,
+            )
+
+        elif settings.policy == "first":
+            raise RuntimeError(
+                f"Invariant violation: 'first' policy should never have pending entries "
+                f"at coalesce '{coalesce_name}', row_id='{key[1]}'. "
+                f"'first' merges immediately on arrival — bug in accept()."
+            )
+
+        else:
+            raise RuntimeError(f"Unknown coalesce policy: {settings.policy!r}")
+
     def check_timeouts(
         self,
         coalesce_name: str,
@@ -935,86 +1004,17 @@ class CoalesceExecutor:
 
         # Process timed-out entries
         for key in keys_to_process:
-            pending = self._pending[key]
-
-            # For best_effort, merge on timeout if anything arrived, or fail if nothing arrived
-            if settings.policy == "best_effort":
-                if len(pending.branches) > 0:
-                    outcome = self._execute_merge(
-                        settings=settings,
-                        node_id=node_id,
-                        pending=pending,
-                        step=step,
-                        key=key,
-                        coalesce_name=coalesce_name,
-                    )
-                    results.append(outcome)
-                else:
-                    # All branches lost, no arrivals — fail the coalesce
-                    results.append(
-                        self._fail_pending(
-                            settings,
-                            key,
-                            step,
-                            failure_reason="best_effort_timeout_no_arrivals",
-                            is_timeout=True,
-                        )
-                    )
-
-            # For quorum, merge on timeout only if quorum met
-            elif settings.policy == "quorum":
-                if settings.quorum_count is None:
-                    raise RuntimeError(
-                        f"quorum_count is None for quorum policy at coalesce '{settings.name}'. This indicates a config validation bug."
-                    )
-                if len(pending.branches) >= settings.quorum_count:
-                    outcome = self._execute_merge(
-                        settings=settings,
-                        node_id=node_id,
-                        pending=pending,
-                        step=step,
-                        key=key,
-                        coalesce_name=coalesce_name,
-                    )
-                    results.append(outcome)
-                else:
-                    # Quorum not met at timeout - record failure
-                    results.append(
-                        self._fail_pending(
-                            settings,
-                            key,
-                            step,
-                            failure_reason="quorum_not_met_at_timeout",
-                            is_timeout=True,
-                        )
-                    )
-
-            # For require_all, timeout means incomplete - record failure
-            # (require_all was previously missing from check_timeouts)
-            elif settings.policy == "require_all":
-                # require_all never does partial merge - timeout is always a failure
-                results.append(
-                    self._fail_pending(
-                        settings,
-                        key,
-                        step,
-                        failure_reason="incomplete_branches",
-                        is_timeout=True,
-                    )
+            results.append(
+                self._resolve_pending(
+                    settings=settings,
+                    node_id=node_id,
+                    pending=self._pending[key],
+                    step=step,
+                    key=key,
+                    coalesce_name=coalesce_name,
+                    is_timeout=True,
                 )
-
-            elif settings.policy == "first":
-                # first policy should never reach timeout — it merges on first arrival.
-                # If we get here, it's an invariant violation (the token should have
-                # merged immediately in accept()).
-                raise RuntimeError(
-                    f"check_timeouts reached for 'first' policy at coalesce '{coalesce_name}', "
-                    f"row_id='{key[1]}'. 'first' policy merges immediately on arrival — "
-                    f"this indicates an invariant violation in accept()."
-                )
-
-            else:
-                raise RuntimeError(f"Unknown coalesce policy: {settings.policy!r}")
+            )
 
         return results
 
@@ -1042,79 +1042,26 @@ class CoalesceExecutor:
             pending = self._pending[key]
             step = self._step_resolver(node_id)
 
-            if settings.policy == "best_effort":
-                # Merge whatever arrived (or fail if nothing arrived)
-                if len(pending.branches) > 0:
-                    outcome = self._execute_merge(
-                        settings=settings,
-                        node_id=node_id,
-                        pending=pending,
-                        step=step,
-                        key=key,
-                        coalesce_name=coalesce_name,
-                    )
-                    results.append(outcome)
-                elif pending.lost_branches:
-                    # All branches lost — no data to merge
-                    results.append(
-                        self._fail_pending(
-                            settings,
-                            key,
-                            step,
-                            failure_reason="all_branches_lost",
-                        )
-                    )
-                else:
-                    raise OrchestrationInvariantError(
-                        f"Pending coalesce entry for {coalesce_name!r} (row {_row_id}) "
-                        f"has zero branches and zero lost branches — "
-                        f"this is a coalesce state invariant violation"
-                    )
-
-            elif settings.policy == "quorum":
-                if settings.quorum_count is None:
-                    raise RuntimeError(
-                        f"quorum_count is None for quorum policy at coalesce '{settings.name}'. This indicates a config validation bug."
-                    )
-                if len(pending.branches) >= settings.quorum_count:
-                    outcome = self._execute_merge(
-                        settings=settings,
-                        node_id=node_id,
-                        pending=pending,
-                        step=step,
-                        key=key,
-                        coalesce_name=coalesce_name,
-                    )
-                    results.append(outcome)
-                else:
-                    # Quorum not met - record failure
-                    results.append(
-                        self._fail_pending(
-                            settings,
-                            key,
-                            step,
-                            failure_reason="quorum_not_met",
-                        )
-                    )
-
-            elif settings.policy == "require_all":
-                # require_all never does partial merge
-                results.append(
-                    self._fail_pending(
-                        settings,
-                        key,
-                        step,
-                        failure_reason="incomplete_branches",
-                    )
+            # Flush-specific invariant: zero branches AND zero lost branches
+            # means the pending entry should never have been created.
+            # (Timeout path can't hit this because accept() creates the entry on arrival.)
+            if settings.policy == "best_effort" and len(pending.branches) == 0 and not pending.lost_branches:
+                raise OrchestrationInvariantError(
+                    f"Pending coalesce entry for {coalesce_name!r} (row {_row_id}) "
+                    f"has zero branches and zero lost branches — "
+                    f"this is a coalesce state invariant violation"
                 )
 
-            elif settings.policy == "first":
-                # first policy merges immediately on first arrival - pending entries indicate a bug
-                raise RuntimeError(
-                    f"Invariant violation: 'first' policy should never have pending entries. "
-                    f"Found pending coalesce for row_id='{key[1]}' at '{coalesce_name}' with "
-                    f"branches {list(pending.branches.keys())}. This indicates a bug in accept() logic."
+            results.append(
+                self._resolve_pending(
+                    settings=settings,
+                    node_id=node_id,
+                    pending=pending,
+                    step=step,
+                    key=key,
+                    coalesce_name=coalesce_name,
                 )
+            )
 
         # Clear completed keys to prevent unbounded memory growth
         # After flush, no more tokens will arrive (source ended), so late-arrival
@@ -1241,21 +1188,18 @@ class CoalesceExecutor:
             )
 
         elif settings.policy == "quorum":
-            if settings.quorum_count is None:
-                raise RuntimeError(
-                    f"quorum_count is None for quorum policy at coalesce '{settings.name}'. This indicates a config validation bug."
-                )
+            quorum = self._require_quorum_count(settings)
             # Check if quorum is now impossible
             max_possible = total_branches - lost_count
-            if max_possible < settings.quorum_count:
+            if max_possible < quorum:
                 return self._fail_pending(
                     settings,
                     key,
                     step,
-                    failure_reason=f"quorum_impossible:need={settings.quorum_count},max_possible={max_possible}",
+                    failure_reason=f"quorum_impossible:need={quorum},max_possible={max_possible}",
                 )
             # Check if arrived count already meets quorum
-            if arrived_count >= settings.quorum_count:
+            if arrived_count >= quorum:
                 node_id = self._node_ids[settings.name]
                 return self._execute_merge(settings, node_id, pending, step, key, settings.name)
             return None  # Still waiting

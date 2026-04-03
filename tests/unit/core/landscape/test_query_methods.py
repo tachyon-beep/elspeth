@@ -327,6 +327,102 @@ class TestGetRowData:
         assert result.data is None
 
 
+class TestGetRowDataReprFallback:
+    """Tests for get_row_data REPR_FALLBACK detection on read-back.
+
+    The write path stores {"_repr": repr(data)} for quarantined rows that
+    can't be canonically serialized. The read path must detect this sentinel
+    and return REPR_FALLBACK state instead of AVAILABLE.
+    """
+
+    def test_repr_fallback_detected_on_readback(self, tmp_path):
+        """Payload containing only the _repr sentinel returns REPR_FALLBACK."""
+        import json
+
+        from elspeth.core.payload_store import FilesystemPayloadStore
+
+        db = make_landscape_db()
+        store = FilesystemPayloadStore(tmp_path / "payloads")
+
+        # Store a repr-fallback payload directly
+        sentinel_payload = json.dumps({"_repr": "repr(some_unparseable_data)"}).encode("utf-8")
+        ref = store.store(sentinel_payload)
+
+        recorder = LandscapeRecorder(db, payload_store=store)
+        recorder.begin_run(config={}, canonical_version="v1", run_id="run-1")
+        register_test_node(recorder, "run-1", "source-0", node_type=NodeType.SOURCE, plugin_name="csv")
+
+        # Create the row, then patch the source_data_ref to point to our sentinel
+        recorder.create_row("run-1", "source-0", 0, {"x": 1}, row_id="row-1")
+
+        from sqlalchemy import update
+
+        from elspeth.core.landscape.schema import rows_table
+
+        with db.connection() as conn:
+            conn.execute(update(rows_table).where(rows_table.c.row_id == "row-1").values(source_data_ref=ref))
+
+        ops = DatabaseOps(db)
+        repo = QueryRepository(
+            ops,
+            row_loader=RowLoader(),
+            token_loader=TokenLoader(),
+            token_parent_loader=TokenParentLoader(),
+            node_state_loader=NodeStateLoader(),
+            routing_event_loader=RoutingEventLoader(),
+            call_loader=CallLoader(),
+            token_outcome_loader=TokenOutcomeLoader(),
+            payload_store=store,
+        )
+
+        result = repo.get_row_data("row-1")
+
+        assert result.state == RowDataState.REPR_FALLBACK
+        assert result.data is not None
+        assert result.data["_repr"] == "repr(some_unparseable_data)"
+
+    def test_dict_with_repr_plus_other_keys_is_available(self, tmp_path):
+        """A dict containing _repr along with other keys is not a sentinel — returns AVAILABLE."""
+        import json
+
+        from elspeth.core.payload_store import FilesystemPayloadStore
+
+        db = make_landscape_db()
+        store = FilesystemPayloadStore(tmp_path / "payloads")
+
+        not_sentinel = json.dumps({"_repr": "something", "other_key": "value"}).encode("utf-8")
+        ref = store.store(not_sentinel)
+
+        recorder = LandscapeRecorder(db, payload_store=store)
+        recorder.begin_run(config={}, canonical_version="v1", run_id="run-1")
+        register_test_node(recorder, "run-1", "source-0", node_type=NodeType.SOURCE, plugin_name="csv")
+        recorder.create_row("run-1", "source-0", 0, {"x": 1}, row_id="row-1")
+
+        from sqlalchemy import update
+
+        from elspeth.core.landscape.schema import rows_table
+
+        with db.connection() as conn:
+            conn.execute(update(rows_table).where(rows_table.c.row_id == "row-1").values(source_data_ref=ref))
+
+        ops = DatabaseOps(db)
+        repo = QueryRepository(
+            ops,
+            row_loader=RowLoader(),
+            token_loader=TokenLoader(),
+            token_parent_loader=TokenParentLoader(),
+            node_state_loader=NodeStateLoader(),
+            routing_event_loader=RoutingEventLoader(),
+            call_loader=CallLoader(),
+            token_outcome_loader=TokenOutcomeLoader(),
+            payload_store=store,
+        )
+
+        result = repo.get_row_data("row-1")
+
+        assert result.state == RowDataState.AVAILABLE
+
+
 class TestGetToken:
     """Tests for LandscapeRecorder.get_token -- retrieves a single token by ID."""
 
@@ -683,6 +779,48 @@ class TestGetAllTokensForRun:
         assert len(tokens_b) == 1
         assert tokens_b[0].token_id == "tok-b1"
 
+    def test_scoped_to_run_same_node_id(self):
+        """Cross-run isolation with SAME node_id reused across runs.
+
+        The existing test_scoped_to_run uses different node_ids per run,
+        which doesn't exercise the composite PK concern: same node_id +
+        different run_id must still isolate correctly.
+        """
+        db = make_landscape_db()
+        recorder = make_recorder(db)
+        recorder.begin_run(config={}, canonical_version="v1", run_id="run-a")
+        recorder.register_node(
+            run_id="run-a",
+            plugin_name="csv",
+            node_type=NodeType.SOURCE,
+            plugin_version="1.0",
+            config={},
+            node_id="shared-source",
+            schema_config=_DYNAMIC_SCHEMA,
+        )
+        recorder.begin_run(config={}, canonical_version="v1", run_id="run-b")
+        recorder.register_node(
+            run_id="run-b",
+            plugin_name="csv",
+            node_type=NodeType.SOURCE,
+            plugin_version="1.0",
+            config={},
+            node_id="shared-source",
+            schema_config=_DYNAMIC_SCHEMA,
+        )
+        recorder.create_row("run-a", "shared-source", 0, {"v": 1}, row_id="row-a1")
+        recorder.create_token("row-a1", token_id="tok-a1")
+        recorder.create_row("run-b", "shared-source", 0, {"v": 2}, row_id="row-b1")
+        recorder.create_token("row-b1", token_id="tok-b1")
+
+        tokens_a = recorder.get_all_tokens_for_run("run-a")
+        tokens_b = recorder.get_all_tokens_for_run("run-b")
+
+        assert len(tokens_a) == 1
+        assert tokens_a[0].token_id == "tok-a1"
+        assert len(tokens_b) == 1
+        assert tokens_b[0].token_id == "tok-b1"
+
 
 class TestGetAllNodeStatesForRun:
     """Tests for LandscapeRecorder.get_all_node_states_for_run -- uses denormalized run_id."""
@@ -756,6 +894,69 @@ class TestGetAllNodeStatesForRun:
         recorder.create_row("run-b", "src-b", 0, {"v": 2}, row_id="row-b1")
         recorder.create_token("row-b1", token_id="tok-b1")
         recorder.begin_node_state("tok-b1", "tx-b", "run-b", 0, {"v": 2}, state_id="state-b1")
+
+        states_a = recorder.get_all_node_states_for_run("run-a")
+        states_b = recorder.get_all_node_states_for_run("run-b")
+
+        assert len(states_a) == 1
+        assert states_a[0].state_id == "state-a1"
+        assert len(states_b) == 1
+        assert states_b[0].state_id == "state-b1"
+
+    def test_scoped_to_run_same_node_id(self):
+        """Cross-run isolation with SAME node_id reused across runs.
+
+        Exercises the composite PK (run_id, node_id) on node_states:
+        two runs sharing a node_id must isolate their states.
+        """
+        db = make_landscape_db()
+        recorder = make_recorder(db)
+
+        recorder.begin_run(config={}, canonical_version="v1", run_id="run-a")
+        recorder.register_node(
+            run_id="run-a",
+            plugin_name="csv",
+            node_type=NodeType.SOURCE,
+            plugin_version="1.0",
+            config={},
+            node_id="shared-source",
+            schema_config=_DYNAMIC_SCHEMA,
+        )
+        recorder.register_node(
+            run_id="run-a",
+            plugin_name="tx",
+            node_type=NodeType.TRANSFORM,
+            plugin_version="1.0",
+            config={},
+            node_id="shared-tx",
+            schema_config=_DYNAMIC_SCHEMA,
+        )
+        recorder.create_row("run-a", "shared-source", 0, {"v": 1}, row_id="row-a1")
+        recorder.create_token("row-a1", token_id="tok-a1")
+        recorder.begin_node_state("tok-a1", "shared-tx", "run-a", 0, {"v": 1}, state_id="state-a1")
+
+        recorder.begin_run(config={}, canonical_version="v1", run_id="run-b")
+        recorder.register_node(
+            run_id="run-b",
+            plugin_name="csv",
+            node_type=NodeType.SOURCE,
+            plugin_version="1.0",
+            config={},
+            node_id="shared-source",
+            schema_config=_DYNAMIC_SCHEMA,
+        )
+        recorder.register_node(
+            run_id="run-b",
+            plugin_name="tx",
+            node_type=NodeType.TRANSFORM,
+            plugin_version="1.0",
+            config={},
+            node_id="shared-tx",
+            schema_config=_DYNAMIC_SCHEMA,
+        )
+        recorder.create_row("run-b", "shared-source", 0, {"v": 2}, row_id="row-b1")
+        recorder.create_token("row-b1", token_id="tok-b1")
+        recorder.begin_node_state("tok-b1", "shared-tx", "run-b", 0, {"v": 2}, state_id="state-b1")
 
         states_a = recorder.get_all_node_states_for_run("run-a")
         states_b = recorder.get_all_node_states_for_run("run-b")

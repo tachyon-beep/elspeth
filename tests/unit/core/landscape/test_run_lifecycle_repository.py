@@ -236,6 +236,23 @@ class TestGetSourceFieldResolution:
             repo.get_source_field_resolution("run-1")
 
 
+class TestRecordSourceFieldResolutionNonexistentRun:
+    """record_source_field_resolution on a nonexistent run must crash."""
+
+    def test_nonexistent_run_raises_audit_integrity(self) -> None:
+        """Writing field resolution to a nonexistent run must raise AuditIntegrityError.
+
+        The error comes from execute_update() detecting zero affected rows.
+        """
+        _, repo = _make_repo()
+        with pytest.raises(AuditIntegrityError):
+            repo.record_source_field_resolution(
+                "ghost-run",
+                {"header": "field"},
+                "v1",
+            )
+
+
 # ---------------------------------------------------------------------------
 # get_run_contract — Tier 1 integrity checks
 # ---------------------------------------------------------------------------
@@ -395,6 +412,18 @@ class TestSetExportStatus:
         _, repo = _make_repo()
         with pytest.raises(AuditIntegrityError, match="only valid with FAILED"):
             repo.set_export_status("run-1", ExportStatus.PENDING, error="something")
+
+    def test_nonexistent_run_raises_audit_integrity(self) -> None:
+        """Setting export status on a nonexistent run must crash with context."""
+        _, repo = _make_repo()
+        with pytest.raises(AuditIntegrityError, match="not found"):
+            repo.set_export_status("ghost-run", ExportStatus.COMPLETED)
+
+    def test_nonexistent_run_error_includes_status(self) -> None:
+        """Error message includes the requested export status for debugging."""
+        _, repo = _make_repo()
+        with pytest.raises(AuditIntegrityError, match="failed"):
+            repo.set_export_status("ghost-run", ExportStatus.FAILED, error="oops")
 
 
 # ---------------------------------------------------------------------------

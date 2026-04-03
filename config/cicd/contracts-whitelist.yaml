@@ -122,10 +122,10 @@ allowed_dict_patterns:
   - "src/elspeth/plugins/infrastructure/manager.py:PluginManager.create_sink:config"
 
   # Plugin validation - config validation before plugin instantiation
-  - "src/elspeth/plugins/infrastructure/validation.py:PluginConfigValidator.validate_source_config:config"
-  - "src/elspeth/plugins/infrastructure/validation.py:PluginConfigValidator.validate_transform_config:config"
-  - "src/elspeth/plugins/infrastructure/validation.py:PluginConfigValidator.validate_sink_config:config"
-  - "src/elspeth/plugins/infrastructure/validation.py:PluginConfigValidator.validate_schema_config:schema_config"
+  - "src/elspeth/plugins/infrastructure/validation.py:validate_source_config:config"
+  - "src/elspeth/plugins/infrastructure/validation.py:validate_transform_config:config"
+  - "src/elspeth/plugins/infrastructure/validation.py:validate_sink_config:config"
+  - "src/elspeth/plugins/infrastructure/validation.py:validate_schema_config:schema_config"
 
   # CLI - plugin instantiation from configuration
   # NOTE: _build_resume_graphs, _orchestrator_context, _execute_pipeline_with_instances,
@@ -262,7 +262,7 @@ allowed_dict_patterns:
   - "src/elspeth/plugins/infrastructure/base.py:BaseSink._divert_row:row_data"
 
   # Plugin validation dispatcher — config is user YAML (Tier 3 boundary)
-  - "src/elspeth/plugins/infrastructure/validation.py:PluginConfigValidator.get_transform_config_model:config"
+  - "src/elspeth/plugins/infrastructure/validation.py:get_transform_config_model:config"
 
   # ═══════════════════════════════════════════════════════════════════════════
   # AZURE PLUGINS - External cloud service trust boundary

@@ -1,7 +1,7 @@
 """Integration tests for validation subsystem.
 
 These tests are written BEFORE implementation and will fail until
-PluginConfigValidator and PluginManager integration are complete.
+plugin validation and PluginManager integration are complete.
 
 They serve as completion criteria for the migration.
 """
@@ -9,15 +9,6 @@ They serve as completion criteria for the migration.
 import pytest
 
 from elspeth.plugins.infrastructure.manager import PluginManager
-
-
-def test_plugin_manager_has_validator():
-    """PluginManager has PluginConfigValidator instance."""
-    manager = PluginManager()
-    manager.register_builtin_plugins()
-
-    assert hasattr(manager, "_validator")
-    assert manager._validator is not None
 
 
 def test_manager_validates_source_config_before_creation():
@@ -111,30 +102,26 @@ class TestValidatorRecognisesMissingPluginTypes:
     """
 
     def test_source_dataverse_recognised(self) -> None:
-        from elspeth.plugins.infrastructure.validation import PluginConfigValidator
+        from elspeth.plugins.infrastructure.validation import get_source_config_model
 
-        validator = PluginConfigValidator()
-        model = validator.get_source_config_model("dataverse")
+        model = get_source_config_model("dataverse")
         assert model is not None
         assert model.__name__ == "DataverseSourceConfig"
 
     def test_transform_rag_retrieval_recognised(self) -> None:
-        from elspeth.plugins.infrastructure.validation import PluginConfigValidator
+        from elspeth.plugins.infrastructure.validation import get_transform_config_model
 
-        validator = PluginConfigValidator()
-        model = validator.get_transform_config_model("rag_retrieval")
+        model = get_transform_config_model("rag_retrieval")
         assert model.__name__ == "RAGRetrievalConfig"
 
     def test_sink_dataverse_recognised(self) -> None:
-        from elspeth.plugins.infrastructure.validation import PluginConfigValidator
+        from elspeth.plugins.infrastructure.validation import get_sink_config_model
 
-        validator = PluginConfigValidator()
-        model = validator.get_sink_config_model("dataverse")
+        model = get_sink_config_model("dataverse")
         assert model.__name__ == "DataverseSinkConfig"
 
     def test_sink_chroma_sink_recognised(self) -> None:
-        from elspeth.plugins.infrastructure.validation import PluginConfigValidator
+        from elspeth.plugins.infrastructure.validation import get_sink_config_model
 
-        validator = PluginConfigValidator()
-        model = validator.get_sink_config_model("chroma_sink")
+        model = get_sink_config_model("chroma_sink")
         assert model.__name__ == "ChromaSinkConfig"

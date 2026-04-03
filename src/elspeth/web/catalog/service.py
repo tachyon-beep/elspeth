@@ -7,7 +7,12 @@ from typing import Any
 from elspeth.plugins.infrastructure.config_base import PluginConfig
 from elspeth.plugins.infrastructure.discovery import get_plugin_description
 from elspeth.plugins.infrastructure.manager import PluginManager
-from elspeth.plugins.infrastructure.validation import PluginConfigValidator, UnknownPluginTypeError
+from elspeth.plugins.infrastructure.validation import (
+    UnknownPluginTypeError,
+    get_sink_config_model,
+    get_source_config_model,
+    get_transform_config_model,
+)
 from elspeth.web.catalog.schemas import (
     ConfigFieldSummary,
     PluginSchemaInfo,
@@ -31,8 +36,6 @@ class CatalogServiceImpl:
 
     def __init__(self, plugin_manager: PluginManager) -> None:
         self._pm = plugin_manager
-        self._validator = PluginConfigValidator()
-
         # Cache plugin classes once
         self._source_classes = plugin_manager.get_sources()
         self._transform_classes = plugin_manager.get_transforms()
@@ -63,7 +66,7 @@ class CatalogServiceImpl:
             available = self._available_names(plugin_type)
             raise ValueError(f"Unknown {plugin_type} plugin: {name}. Available: {available}") from exc
 
-        # Get config model via PluginConfigValidator
+        # Get config model via validation module
         json_schema = self._get_json_schema(plugin_type, name)
 
         # Full docstring for schema view (not just first line)
@@ -134,16 +137,16 @@ class CatalogServiceImpl:
         Returns None for plugins with no config model. This includes both
         intentionally config-less plugins (e.g., null source, where the
         validator returns None) and plugins whose config model is not yet
-        wired into PluginConfigValidator's mapping (e.g., dataverse).
+        wired into validation module's dispatch functions (e.g., dataverse).
         The validator raises UnknownPluginTypeError for the latter case.
         """
         try:
             if plugin_type == "source":
-                return self._validator.get_source_config_model(name)
+                return get_source_config_model(name)
             elif plugin_type == "transform":
-                return self._validator.get_transform_config_model(name)
+                return get_transform_config_model(name)
             elif plugin_type == "sink":
-                return self._validator.get_sink_config_model(name)
+                return get_sink_config_model(name)
             else:
                 raise ValueError(f"Bug: _resolve_config_model called with invalid plugin_type: {plugin_type!r}")
         except UnknownPluginTypeError:

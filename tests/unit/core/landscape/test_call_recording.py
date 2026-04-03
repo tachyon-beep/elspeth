@@ -1008,3 +1008,51 @@ class TestGetCallResponseData:
 
         with pytest.raises(AuditIntegrityError, match="Payload integrity check failed for call_id="):
             recorder.get_call_response_data(call.call_id)
+
+    def test_call_not_found_for_unknown_id(self):
+        """Querying a nonexistent call_id returns CALL_NOT_FOUND."""
+        _db, recorder, _state_id = _setup()
+
+        result = recorder.get_call_response_data("nonexistent-call")
+
+        assert isinstance(result, CallDataResult)
+        assert result.state == CallDataState.CALL_NOT_FOUND
+        assert result.data is None
+
+    def test_purged_when_payload_removed(self, tmp_path):
+        """When the payload store no longer has the file, state is PURGED."""
+        from elspeth.core.payload_store import FilesystemPayloadStore
+
+        db = make_landscape_db()
+        store = FilesystemPayloadStore(tmp_path / "payloads")
+        recorder = LandscapeRecorder(db, payload_store=store)
+        recorder.begin_run(config={}, canonical_version="v1", run_id="run-1")
+        register_test_node(recorder, "run-1", "source-0", node_type=NodeType.SOURCE, plugin_name="csv")
+        register_test_node(recorder, "run-1", "transform-1", plugin_name="transform")
+        recorder.create_row("run-1", "source-0", 0, {"name": "test"}, row_id="row-1")
+        recorder.create_token("row-1", token_id="tok-1")
+        state = recorder.begin_node_state("tok-1", "transform-1", "run-1", 0, {"name": "test"}, state_id="state-1")
+
+        idx = recorder.allocate_call_index(state.state_id)
+        call = recorder.record_call(
+            state.state_id,
+            idx,
+            CallType.LLM,
+            CallStatus.SUCCESS,
+            request_data=RawCallPayload({"prompt": "hello"}),
+            response_data=RawCallPayload({"text": "world"}),
+        )
+
+        # Verify it's AVAILABLE first
+        result = recorder.get_call_response_data(call.call_id)
+        assert result.state == CallDataState.AVAILABLE
+
+        # Simulate retention policy purge by deleting the payload file
+        import shutil
+
+        shutil.rmtree(tmp_path / "payloads")
+        (tmp_path / "payloads").mkdir()
+
+        result = recorder.get_call_response_data(call.call_id)
+        assert result.state == CallDataState.PURGED
+        assert result.data is None

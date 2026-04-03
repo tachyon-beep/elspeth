@@ -10,8 +10,9 @@ Design:
 - Does NOT instantiate plugins (just validates config)
 
 Usage:
-    validator = PluginConfigValidator()
-    errors = validator.validate_source_config("csv", config)
+    from elspeth.plugins.infrastructure.validation import validate_source_config
+
+    errors = validate_source_config("csv", config)
     if errors:
         raise ValueError(f"Invalid config: {errors}")
     source = CSVSource(config)  # Assumes config is valid
@@ -56,331 +57,325 @@ class ValidationError:
             raise ValueError("ValidationError.message must not be empty")
 
 
-class PluginConfigValidator:
-    """Validates plugin configurations before instantiation.
+def validate_source_config(
+    source_type: str,
+    config: dict[str, Any],
+) -> list[ValidationError]:
+    """Validate source plugin configuration.
 
-    Validates configs against Pydantic models (CSVSourceConfig, etc.)
-    without actually instantiating the plugin.
+    Args:
+        source_type: Plugin type name (e.g., "csv", "json")
+        config: Plugin configuration dict
+
+    Returns:
+        List of validation errors (empty if valid)
     """
+    # Get config model for source type
+    config_model = get_source_config_model(source_type)
 
-    def validate_source_config(
-        self,
-        source_type: str,
-        config: dict[str, Any],
-    ) -> list[ValidationError]:
-        """Validate source plugin configuration.
+    # Handle special case: null_source has no config class
+    if config_model is None:
+        return []  # No validation needed
 
-        Args:
-            source_type: Plugin type name (e.g., "csv", "json")
-            config: Plugin configuration dict
+    # Validate using Pydantic
+    try:
+        config_model.from_dict(config)
+        return []  # Valid
+    except PydanticValidationError as e:
+        return _extract_errors(e)
+    except PluginConfigError as e:
+        return _extract_wrapped_plugin_config_error(e, config)
 
-        Returns:
-            List of validation errors (empty if valid)
-        """
-        # Get config model for source type
-        config_model = self.get_source_config_model(source_type)
 
-        # Handle special case: null_source has no config class
-        if config_model is None:
-            return []  # No validation needed
+def get_source_config_model(source_type: str) -> type["PluginConfig"] | None:
+    """Get Pydantic config model for source type.
 
-        # Validate using Pydantic
-        try:
-            config_model.from_dict(config)
-            return []  # Valid
-        except PydanticValidationError as e:
-            return self._extract_errors(e)
-        except PluginConfigError as e:
-            return self._extract_wrapped_plugin_config_error(e, config)
+    Returns:
+        Config model class, or None for sources with no config (e.g., null_source)
+    """
+    # Import here to avoid circular dependencies
+    if source_type == "csv":
+        from elspeth.plugins.sources.csv_source import CSVSourceConfig
 
-    def get_source_config_model(self, source_type: str) -> type["PluginConfig"] | None:
-        """Get Pydantic config model for source type.
+        return CSVSourceConfig
+    elif source_type == "text":
+        from elspeth.plugins.sources.text_source import TextSourceConfig
 
-        Returns:
-            Config model class, or None for sources with no config (e.g., null_source)
-        """
-        # Import here to avoid circular dependencies
-        if source_type == "csv":
-            from elspeth.plugins.sources.csv_source import CSVSourceConfig
+        return TextSourceConfig
+    elif source_type == "json":
+        from elspeth.plugins.sources.json_source import JSONSourceConfig
 
-            return CSVSourceConfig
-        elif source_type == "text":
-            from elspeth.plugins.sources.text_source import TextSourceConfig
+        return JSONSourceConfig
+    elif source_type == "azure_blob":
+        from elspeth.plugins.sources.azure_blob_source import AzureBlobSourceConfig
 
-            return TextSourceConfig
-        elif source_type == "json":
-            from elspeth.plugins.sources.json_source import JSONSourceConfig
+        return AzureBlobSourceConfig
+    elif source_type == "dataverse":
+        from elspeth.plugins.sources.dataverse import DataverseSourceConfig
 
-            return JSONSourceConfig
-        elif source_type == "azure_blob":
-            from elspeth.plugins.sources.azure_blob_source import AzureBlobSourceConfig
+        return DataverseSourceConfig
+    elif source_type == "null":
+        # NullSource has no config class (resume-only source)
+        # Return None to signal "no validation needed"
+        return None
+    else:
+        raise UnknownPluginTypeError(f"Unknown source type: {source_type}")
 
-            return AzureBlobSourceConfig
-        elif source_type == "dataverse":
-            from elspeth.plugins.sources.dataverse import DataverseSourceConfig
 
-            return DataverseSourceConfig
-        elif source_type == "null":
-            # NullSource has no config class (resume-only source)
-            # Return None to signal "no validation needed"
-            return None
-        else:
-            raise UnknownPluginTypeError(f"Unknown source type: {source_type}")
+def validate_transform_config(
+    transform_type: str,
+    config: dict[str, Any],
+) -> list[ValidationError]:
+    """Validate transform plugin configuration.
 
-    def validate_transform_config(
-        self,
-        transform_type: str,
-        config: dict[str, Any],
-    ) -> list[ValidationError]:
-        """Validate transform plugin configuration.
+    Args:
+        transform_type: Plugin type name (e.g., "passthrough", "field_mapper")
+        config: Plugin configuration dict
 
-        Args:
-            transform_type: Plugin type name (e.g., "passthrough", "field_mapper")
-            config: Plugin configuration dict
+    Returns:
+        List of validation errors (empty if valid)
+    """
+    # Get config model for transform type (config needed for provider dispatch)
+    config_model = get_transform_config_model(transform_type, config)
 
-        Returns:
-            List of validation errors (empty if valid)
-        """
-        # Get config model for transform type (config needed for provider dispatch)
-        config_model = self.get_transform_config_model(transform_type, config)
+    # Validate using Pydantic
+    try:
+        config_model.from_dict(config)
+        return []  # Valid
+    except PydanticValidationError as e:
+        return _extract_errors(e)
+    except PluginConfigError as e:
+        return _extract_wrapped_plugin_config_error(e, config)
 
-        # Validate using Pydantic
-        try:
-            config_model.from_dict(config)
-            return []  # Valid
-        except PydanticValidationError as e:
-            return self._extract_errors(e)
-        except PluginConfigError as e:
-            return self._extract_wrapped_plugin_config_error(e, config)
 
-    def validate_sink_config(
-        self,
-        sink_type: str,
-        config: dict[str, Any],
-    ) -> list[ValidationError]:
-        """Validate sink plugin configuration.
+def validate_sink_config(
+    sink_type: str,
+    config: dict[str, Any],
+) -> list[ValidationError]:
+    """Validate sink plugin configuration.
 
-        Args:
-            sink_type: Plugin type name (e.g., "csv", "json")
-            config: Plugin configuration dict
+    Args:
+        sink_type: Plugin type name (e.g., "csv", "json")
+        config: Plugin configuration dict
 
-        Returns:
-            List of validation errors (empty if valid)
-        """
-        # Get config model for sink type
-        config_model = self.get_sink_config_model(sink_type)
+    Returns:
+        List of validation errors (empty if valid)
+    """
+    # Get config model for sink type
+    config_model = get_sink_config_model(sink_type)
 
-        # Validate using Pydantic
-        try:
-            config_model.from_dict(config)
-            return []  # Valid
-        except PydanticValidationError as e:
-            return self._extract_errors(e)
-        except PluginConfigError as e:
-            return self._extract_wrapped_plugin_config_error(e, config)
+    # Validate using Pydantic
+    try:
+        config_model.from_dict(config)
+        return []  # Valid
+    except PydanticValidationError as e:
+        return _extract_errors(e)
+    except PluginConfigError as e:
+        return _extract_wrapped_plugin_config_error(e, config)
 
-    def _extract_wrapped_plugin_config_error(
-        self,
-        error: PluginConfigError,
-        config: dict[str, object],
-    ) -> list[ValidationError]:
-        """Convert wrapped PluginConfigError causes into structured errors.
 
-        PluginConfig.from_dict() wraps:
-        - PydanticValidationError for model-level validation failures
-        - ValueError for schema parsing failures before model validation
-        """
-        cause = error.__cause__
+def _extract_wrapped_plugin_config_error(
+    error: PluginConfigError,
+    config: dict[str, object],
+) -> list[ValidationError]:
+    """Convert wrapped PluginConfigError causes into structured errors.
 
-        if cause is None:
-            return [ValidationError(field="config", message=str(error), value=config)]
+    PluginConfig.from_dict() wraps:
+    - PydanticValidationError for model-level validation failures
+    - ValueError for schema parsing failures before model validation
+    """
+    cause = error.__cause__
 
-        if type(cause) is PydanticValidationError:
-            return self._extract_errors(cause)
+    if cause is None:
+        return [ValidationError(field="config", message=str(error), value=config)]
 
-        if type(cause) is ValueError:
-            if "schema" in config:
-                return [ValidationError(field="schema", message=str(cause), value=config["schema"])]
-            return [ValidationError(field="config", message=str(cause), value=config)]
+    if type(cause) is PydanticValidationError:
+        return _extract_errors(cause)
 
-        raise error
+    if type(cause) is ValueError:
+        if "schema" in config:
+            return [ValidationError(field="schema", message=str(cause), value=config["schema"])]
+        return [ValidationError(field="config", message=str(cause), value=config)]
 
-    def validate_schema_config(
-        self,
-        schema_config: dict[str, Any],
-    ) -> list[ValidationError]:
-        """Validate schema configuration independently of plugin.
+    raise error
 
-        Args:
-            schema_config: Schema configuration dict (contents of 'schema' key)
 
-        Returns:
-            List of validation errors (empty if valid)
-        """
-        # Import here to avoid circular dependencies
-        from elspeth.contracts.schema import SchemaConfig
+def validate_schema_config(
+    schema_config: dict[str, Any],
+) -> list[ValidationError]:
+    """Validate schema configuration independently of plugin.
 
-        try:
-            SchemaConfig.from_dict(schema_config)
-            return []  # Valid
-        except ValueError as e:
-            # SchemaConfig.from_dict raises ValueError for invalid configs
-            # Convert to structured error
-            return [
-                ValidationError(
-                    field="schema",
-                    message=str(e),
-                    value=schema_config,
-                )
-            ]
-        # NOTE: No catch-all Exception handler here.
-        # SchemaConfig.from_dict() documents it raises ValueError for invalid config.
-        # Any other exception (TypeError, AttributeError, etc.) is a bug in our code
-        # that should crash immediately per CLAUDE.md - not be silently converted
-        # to a "validation error" that hides the real problem.
+    Args:
+        schema_config: Schema configuration dict (contents of 'schema' key)
 
-    def get_transform_config_model(
-        self,
-        transform_type: str,
-        config: dict[str, Any] | None = None,
-    ) -> type["PluginConfig"]:
-        """Get Pydantic config model for transform type.
+    Returns:
+        List of validation errors (empty if valid)
+    """
+    # Import here to avoid circular dependencies
+    from elspeth.contracts.schema import SchemaConfig
 
-        Args:
-            transform_type: Plugin type name
-            config: Plugin configuration dict (needed for provider dispatch on "llm")
-
-        Returns:
-            Config model class for the transform type
-        """
-        # Import here to avoid circular dependencies
-        if transform_type == "passthrough":
-            from elspeth.plugins.transforms.passthrough import PassThroughConfig
-
-            return PassThroughConfig
-        elif transform_type == "field_mapper":
-            from elspeth.plugins.transforms.field_mapper import FieldMapperConfig
-
-            return FieldMapperConfig
-        elif transform_type == "json_explode":
-            from elspeth.plugins.transforms.json_explode import JSONExplodeConfig
-
-            return JSONExplodeConfig
-        elif transform_type == "keyword_filter":
-            from elspeth.plugins.transforms.keyword_filter import KeywordFilterConfig
-
-            return KeywordFilterConfig
-        elif transform_type == "truncate":
-            from elspeth.plugins.transforms.truncate import TruncateConfig
-
-            return TruncateConfig
-        elif transform_type == "batch_replicate":
-            from elspeth.plugins.transforms.batch_replicate import BatchReplicateConfig
-
-            return BatchReplicateConfig
-        elif transform_type == "batch_stats":
-            from elspeth.plugins.transforms.batch_stats import BatchStatsConfig
-
-            return BatchStatsConfig
-        elif transform_type == "azure_content_safety":
-            from elspeth.plugins.transforms.azure.content_safety import AzureContentSafetyConfig
-
-            return AzureContentSafetyConfig
-        elif transform_type == "azure_prompt_shield":
-            from elspeth.plugins.transforms.azure.prompt_shield import AzurePromptShieldConfig
-
-            return AzurePromptShieldConfig
-        elif transform_type == "llm":
-            # Unified LLM plugin — dispatch to provider-specific config
-            from elspeth.plugins.transforms.llm.transform import _PROVIDERS
-
-            provider = config["provider"] if config is not None and "provider" in config else None
-            if provider in _PROVIDERS:
-                config_cls, _ = _PROVIDERS[provider]
-                return config_cls
-            elif provider is not None:
-                raise ValueError(f"Unknown LLM provider '{provider}'. Valid providers: {sorted(_PROVIDERS)}")
-            else:
-                # provider missing — let Pydantic catch it with Literal validation
-                from elspeth.plugins.transforms.llm.base import LLMConfig
-
-                return LLMConfig
-        elif transform_type == "azure_batch_llm":
-            from elspeth.plugins.transforms.llm.azure_batch import AzureBatchConfig
-
-            return AzureBatchConfig
-        elif transform_type == "openrouter_batch_llm":
-            from elspeth.plugins.transforms.llm.openrouter_batch import OpenRouterBatchConfig
-
-            return OpenRouterBatchConfig
-        elif transform_type == "web_scrape":
-            from elspeth.plugins.transforms.web_scrape import WebScrapeConfig
-
-            return WebScrapeConfig
-        elif transform_type == "rag_retrieval":
-            from elspeth.plugins.transforms.rag.config import RAGRetrievalConfig
-
-            return RAGRetrievalConfig
-        else:
-            raise UnknownPluginTypeError(f"Unknown transform type: {transform_type}")
-
-    def get_sink_config_model(self, sink_type: str) -> type["PluginConfig"]:
-        """Get Pydantic config model for sink type.
-
-        Returns:
-            Config model class for the sink type
-        """
-        # Import here to avoid circular dependencies
-        if sink_type == "csv":
-            from elspeth.plugins.sinks.csv_sink import CSVSinkConfig
-
-            return CSVSinkConfig
-        elif sink_type == "json":
-            from elspeth.plugins.sinks.json_sink import JSONSinkConfig
-
-            return JSONSinkConfig
-        elif sink_type == "database":
-            from elspeth.plugins.sinks.database_sink import DatabaseSinkConfig
-
-            return DatabaseSinkConfig
-        elif sink_type == "azure_blob":
-            from elspeth.plugins.sinks.azure_blob_sink import AzureBlobSinkConfig
-
-            return AzureBlobSinkConfig
-        elif sink_type == "dataverse":
-            from elspeth.plugins.sinks.dataverse import DataverseSinkConfig
-
-            return DataverseSinkConfig
-        elif sink_type == "chroma_sink":
-            from elspeth.plugins.sinks.chroma_sink import ChromaSinkConfig
-
-            return ChromaSinkConfig
-        else:
-            raise UnknownPluginTypeError(f"Unknown sink type: {sink_type}")
-
-    def _extract_errors(
-        self,
-        pydantic_error: PydanticValidationError,
-    ) -> list[ValidationError]:
-        """Convert Pydantic errors to structured ValidationError list."""
-        errors: list[ValidationError] = []
-
-        for err in pydantic_error.errors():
-            # Pydantic error dict has: loc, msg, type, ctx
-            # Model-level validators (@model_validator) produce loc=() — empty tuple.
-            # Use "__model__" sentinel so the field is never empty.
-            field_path = ".".join(str(loc) for loc in err["loc"]) or "__model__"
-            message = err["msg"]
-
-            # Pydantic error dict includes failing input value.
-            value = err["input"]
-
-            errors.append(
-                ValidationError(
-                    field=field_path,
-                    message=message,
-                    value=value,
-                )
+    try:
+        SchemaConfig.from_dict(schema_config)
+        return []  # Valid
+    except ValueError as e:
+        # SchemaConfig.from_dict raises ValueError for invalid configs
+        # Convert to structured error
+        return [
+            ValidationError(
+                field="schema",
+                message=str(e),
+                value=schema_config,
             )
+        ]
+    # NOTE: No catch-all Exception handler here.
+    # SchemaConfig.from_dict() documents it raises ValueError for invalid config.
+    # Any other exception (TypeError, AttributeError, etc.) is a bug in our code
+    # that should crash immediately per CLAUDE.md - not be silently converted
+    # to a "validation error" that hides the real problem.
 
-        return errors
+
+def get_transform_config_model(
+    transform_type: str,
+    config: dict[str, Any] | None = None,
+) -> type["PluginConfig"]:
+    """Get Pydantic config model for transform type.
+
+    Args:
+        transform_type: Plugin type name
+        config: Plugin configuration dict (needed for provider dispatch on "llm")
+
+    Returns:
+        Config model class for the transform type
+    """
+    # Import here to avoid circular dependencies
+    if transform_type == "passthrough":
+        from elspeth.plugins.transforms.passthrough import PassThroughConfig
+
+        return PassThroughConfig
+    elif transform_type == "field_mapper":
+        from elspeth.plugins.transforms.field_mapper import FieldMapperConfig
+
+        return FieldMapperConfig
+    elif transform_type == "json_explode":
+        from elspeth.plugins.transforms.json_explode import JSONExplodeConfig
+
+        return JSONExplodeConfig
+    elif transform_type == "keyword_filter":
+        from elspeth.plugins.transforms.keyword_filter import KeywordFilterConfig
+
+        return KeywordFilterConfig
+    elif transform_type == "truncate":
+        from elspeth.plugins.transforms.truncate import TruncateConfig
+
+        return TruncateConfig
+    elif transform_type == "batch_replicate":
+        from elspeth.plugins.transforms.batch_replicate import BatchReplicateConfig
+
+        return BatchReplicateConfig
+    elif transform_type == "batch_stats":
+        from elspeth.plugins.transforms.batch_stats import BatchStatsConfig
+
+        return BatchStatsConfig
+    elif transform_type == "azure_content_safety":
+        from elspeth.plugins.transforms.azure.content_safety import AzureContentSafetyConfig
+
+        return AzureContentSafetyConfig
+    elif transform_type == "azure_prompt_shield":
+        from elspeth.plugins.transforms.azure.prompt_shield import AzurePromptShieldConfig
+
+        return AzurePromptShieldConfig
+    elif transform_type == "llm":
+        # Unified LLM plugin — dispatch to provider-specific config
+        from elspeth.plugins.transforms.llm.transform import _PROVIDERS
+
+        provider = config["provider"] if config is not None and "provider" in config else None
+        if provider in _PROVIDERS:
+            config_cls, _ = _PROVIDERS[provider]
+            return config_cls
+        elif provider is not None:
+            raise ValueError(f"Unknown LLM provider '{provider}'. Valid providers: {sorted(_PROVIDERS)}")
+        else:
+            # provider missing — let Pydantic catch it with Literal validation
+            from elspeth.plugins.transforms.llm.base import LLMConfig
+
+            return LLMConfig
+    elif transform_type == "azure_batch_llm":
+        from elspeth.plugins.transforms.llm.azure_batch import AzureBatchConfig
+
+        return AzureBatchConfig
+    elif transform_type == "openrouter_batch_llm":
+        from elspeth.plugins.transforms.llm.openrouter_batch import OpenRouterBatchConfig
+
+        return OpenRouterBatchConfig
+    elif transform_type == "web_scrape":
+        from elspeth.plugins.transforms.web_scrape import WebScrapeConfig
+
+        return WebScrapeConfig
+    elif transform_type == "rag_retrieval":
+        from elspeth.plugins.transforms.rag.config import RAGRetrievalConfig
+
+        return RAGRetrievalConfig
+    else:
+        raise UnknownPluginTypeError(f"Unknown transform type: {transform_type}")
+
+
+def get_sink_config_model(sink_type: str) -> type["PluginConfig"]:
+    """Get Pydantic config model for sink type.
+
+    Returns:
+        Config model class for the sink type
+    """
+    # Import here to avoid circular dependencies
+    if sink_type == "csv":
+        from elspeth.plugins.sinks.csv_sink import CSVSinkConfig
+
+        return CSVSinkConfig
+    elif sink_type == "json":
+        from elspeth.plugins.sinks.json_sink import JSONSinkConfig
+
+        return JSONSinkConfig
+    elif sink_type == "database":
+        from elspeth.plugins.sinks.database_sink import DatabaseSinkConfig
+
+        return DatabaseSinkConfig
+    elif sink_type == "azure_blob":
+        from elspeth.plugins.sinks.azure_blob_sink import AzureBlobSinkConfig
+
+        return AzureBlobSinkConfig
+    elif sink_type == "dataverse":
+        from elspeth.plugins.sinks.dataverse import DataverseSinkConfig
+
+        return DataverseSinkConfig
+    elif sink_type == "chroma_sink":
+        from elspeth.plugins.sinks.chroma_sink import ChromaSinkConfig
+
+        return ChromaSinkConfig
+    else:
+        raise UnknownPluginTypeError(f"Unknown sink type: {sink_type}")
+
+
+def _extract_errors(
+    pydantic_error: PydanticValidationError,
+) -> list[ValidationError]:
+    """Convert Pydantic errors to structured ValidationError list."""
+    errors: list[ValidationError] = []
+
+    for err in pydantic_error.errors():
+        # Pydantic error dict has: loc, msg, type, ctx
+        # Model-level validators (@model_validator) produce loc=() — empty tuple.
+        # Use "__model__" sentinel so the field is never empty.
+        field_path = ".".join(str(loc) for loc in err["loc"]) or "__model__"
+        message = err["msg"]
+
+        # Pydantic error dict includes failing input value.
+        value = err["input"]
+
+        errors.append(
+            ValidationError(
+                field=field_path,
+                message=message,
+                value=value,
+            )
+        )
+
+    return errors

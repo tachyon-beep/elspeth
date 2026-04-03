@@ -19,7 +19,12 @@ from elspeth.plugins.infrastructure.hookspecs import (
     ElspethSourceSpec,
     ElspethTransformSpec,
 )
-from elspeth.plugins.infrastructure.validation import PluginConfigValidator, ValidationError
+from elspeth.plugins.infrastructure.validation import (
+    ValidationError,
+    validate_sink_config,
+    validate_source_config,
+    validate_transform_config,
+)
 
 _logger = structlog.get_logger(__name__)
 
@@ -54,9 +59,6 @@ class PluginManager:
         self._sources: dict[str, type[SourceProtocol]] = {}
         self._transforms: dict[str, type[TransformProtocol]] = {}
         self._sinks: dict[str, type[SinkProtocol]] = {}
-
-        # Config validator
-        self._validator = PluginConfigValidator()
 
     def register_builtin_plugins(self) -> None:
         """Discover and register all built-in plugins.
@@ -225,7 +227,7 @@ class PluginManager:
             ValueError: If config is invalid or plugin type not found
         """
         # Validate config first
-        errors = self._validator.validate_source_config(source_type, config)
+        errors = validate_source_config(source_type, config)
         _raise_if_invalid(errors, "source", source_type)
 
         # Get plugin class
@@ -248,7 +250,7 @@ class PluginManager:
             ValueError: If config is invalid or plugin type not found
         """
         # Validate config first
-        errors = self._validator.validate_transform_config(transform_type, config)
+        errors = validate_transform_config(transform_type, config)
         _raise_if_invalid(errors, "transform", transform_type)
 
         # Get plugin class
@@ -271,7 +273,7 @@ class PluginManager:
             ValueError: If config is invalid or plugin type not found
         """
         # Validate config first
-        errors = self._validator.validate_sink_config(sink_type, config)
+        errors = validate_sink_config(sink_type, config)
         _raise_if_invalid(errors, "sink", sink_type)
 
         # Get plugin class
