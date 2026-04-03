@@ -33,6 +33,24 @@ from elspeth.contracts.enums import (
 )
 
 
+@dataclass(frozen=True, slots=True)
+class TokenRef:
+    """Bundled reference to a token within a specific run.
+
+    A token_id is meaningless without its run_id — they always travel
+    together semantically. This type enforces that coupling at the
+    type level, preventing parameter-order bugs and mismatched pairs.
+
+    Construction:
+    - Write path: Create via verify_token_ref() in data_flow_repository
+      (validates coherence against audit DB before returning)
+    - Read path / tests: Construct directly (Tier 1 data is trusted)
+    """
+
+    token_id: str
+    run_id: str
+
+
 def _validate_enum(value: object, enum_type: type, field_name: str) -> None:
     """Validate that value is an instance of the expected enum type.
 
