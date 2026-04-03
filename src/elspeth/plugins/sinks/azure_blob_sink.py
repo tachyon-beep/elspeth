@@ -547,6 +547,9 @@ class AzureBlobSink(BaseSink):
             ValueError: If overwrite=False and blob exists.
             azure.core.exceptions.*: On Azure SDK errors.
         """
+        resolve_contract_from_context_if_needed(self, ctx)
+        resolve_display_headers_if_needed(self, ctx)
+
         if not rows:
             # Still render the path for consistent audit trail
             rendered_path = self._get_or_init_blob_path(ctx)
@@ -558,9 +561,6 @@ class AzureBlobSink(BaseSink):
                     size_bytes=0,
                 )
             )
-
-        resolve_contract_from_context_if_needed(self, ctx)
-        resolve_display_headers_if_needed(self, ctx)
 
         output_rows = rows
         if self._format in {"json", "jsonl"}:

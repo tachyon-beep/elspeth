@@ -141,6 +141,15 @@ class JSONSource(BaseSource):
             fmt = "jsonl" if self._path.suffix == ".jsonl" else "json"
         self._format = fmt
 
+        # The Pydantic validator _reject_data_key_with_jsonl only fires when
+        # format is explicitly "jsonl".  When format was None (auto-detected),
+        # data_key slips through unchecked.  Enforce the same constraint here.
+        if self._format == "jsonl" and self._data_key is not None:
+            raise ValueError(
+                "data_key is not supported with JSONL format (auto-detected from .jsonl extension) "
+                "— JSONL reads line-by-line, data_key extracts from a JSON object root"
+            )
+
         # Store schema config for audit trail
         # SourceDataConfig (via DataPluginConfig) ensures schema_config is not None
         self._schema_config = cfg.schema_config

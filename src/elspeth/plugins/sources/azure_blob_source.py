@@ -442,7 +442,7 @@ class AzureBlobSource(BaseSource):
         except ImportError:
             # Re-raise ImportError as-is for clear dependency messaging
             raise
-        except (TypeError, AttributeError, KeyError, NameError):
+        except (TypeError, AttributeError, KeyError, NameError, ValueError):
             raise  # Programming errors in our auth/client code — crash to surface the bug
         except Exception as e:
             latency_ms = (time.perf_counter() - start_time) * 1000

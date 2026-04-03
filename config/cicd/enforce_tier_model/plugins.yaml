@@ -370,17 +370,27 @@ allow_hits:
   reason: Azure AI Search API Tier 3 — item.get("id") in skipped item record for empty content
   safety: Captured in skipped_items as "empty_content" for audit; no data corruption
   expires: null
-- key: plugins/infrastructure/clients/retrieval/azure_search.py:R1:AzureSearchProvider:_parse_response:fp=f7881d1c4dc9faa2
+- key: plugins/infrastructure/clients/retrieval/azure_search.py:R5:AzureSearchProvider:_parse_response:fp=e784ab12021208ce
+  owner: bugfix
+  reason: Tier 3 boundary type validation — rejects non-string content before passing to RetrievalChunk(content=str)
+  safety: Invalid content type causes item to be skipped and recorded in skipped_items as "invalid_content_type"
+  expires: null
+- key: plugins/infrastructure/clients/retrieval/azure_search.py:R1:AzureSearchProvider:_parse_response:fp=53b6749cb5bfa7dc
+  owner: bugfix
+  reason: Azure AI Search API Tier 3 — item.get("id") in skipped item record for invalid content type
+  safety: Captured in skipped_items for audit; no data corruption
+  expires: null
+- key: plugins/infrastructure/clients/retrieval/azure_search.py:R1:AzureSearchProvider:_parse_response:fp=50fffdb10597e8bd
   owner: feature
   reason: Azure AI Search API Tier 3 — source ID lookup chain (id then @search.documentId); items without any ID are skipped
   safety: No fabricated IDs; items without source_id skipped and recorded
   expires: null
-- key: plugins/infrastructure/clients/retrieval/azure_search.py:R1:AzureSearchProvider:_parse_response:fp=967d6e093032a8b3
+- key: plugins/infrastructure/clients/retrieval/azure_search.py:R1:AzureSearchProvider:_parse_response:fp=96292fa7624738cd
   owner: feature
   reason: Azure AI Search API Tier 3 — @search.documentId fallback in source ID chain
   safety: No fabricated IDs; items without source_id skipped and recorded
   expires: null
-- key: plugins/infrastructure/clients/retrieval/azure_search.py:R5:AzureSearchProvider:_parse_response:fp=941107c6c42aeaaf
+- key: plugins/infrastructure/clients/retrieval/azure_search.py:R5:AzureSearchProvider:_parse_response:fp=ec1478562d7855e1
   owner: feature
   reason: Azure AI Search API response metadata coercion at Tier 3 boundary — isinstance check converts non-primitive types to str for JSON serializability
   safety: Non-serializable types coerced to str; RetrievalChunk validates metadata JSON-serializability at construction

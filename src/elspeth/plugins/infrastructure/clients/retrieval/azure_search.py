@@ -275,6 +275,9 @@ class AzureSearchProvider:
             if content is None:
                 skipped_items.append({"reason": "missing_content", "id": item.get("id")})
                 continue
+            if not isinstance(content, str):
+                skipped_items.append({"reason": "invalid_content_type", "id": item.get("id"), "type": type(content).__name__})
+                continue
             if not content:
                 skipped_items.append({"reason": "empty_content", "id": item.get("id")})
                 continue

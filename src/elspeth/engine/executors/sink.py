@@ -316,7 +316,12 @@ class SinkExecutor:
                     # Reset diversion log and call sink.write()
                     sink._reset_diversion_log()
                     start = time.perf_counter()
-                    write_result: SinkWriteResult = sink.write(rows, ctx)
+                    write_result = sink.write(rows, ctx)
+                    if not isinstance(write_result, SinkWriteResult):
+                        raise PluginContractViolation(
+                            f"Sink '{sink.name}' returned {type(write_result).__name__}, "
+                            f"expected SinkWriteResult. This is a sink plugin bug."
+                        )
                     artifact_info = write_result.artifact
                     if not isinstance(artifact_info, ArtifactDescriptor):
                         raise PluginContractViolation(
