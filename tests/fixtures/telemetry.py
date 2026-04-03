@@ -144,7 +144,7 @@ class FailingExporter:
         self.export_attempts += 1
         if self._fail_count is None or self._failures < self._fail_count:
             self._failures += 1
-            raise RuntimeError(f"Simulated export failure in {self._name}")
+            raise ConnectionError(f"Simulated export failure in {self._name}")
 
     def flush(self) -> None:
         pass

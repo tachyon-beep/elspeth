@@ -43,7 +43,7 @@ class TestAccumulateDiverted:
         pending = _make_pending()
         results = [_make_result(RowOutcome.DIVERTED, sink_name="sink1")]
         with pytest.raises(OrchestrationInvariantError, match="DIVERTED outcome should not appear"):
-            accumulate_row_outcomes(results, counters, {"sink1": Mock()}, pending)
+            accumulate_row_outcomes(results, counters, pending)
 
     def test_diverted_after_completed_still_raises(self) -> None:
         """Even mixed with valid outcomes, DIVERTED crashes."""
@@ -54,4 +54,4 @@ class TestAccumulateDiverted:
             _make_result(RowOutcome.DIVERTED, sink_name="sink1"),
         ]
         with pytest.raises(OrchestrationInvariantError, match="DIVERTED outcome should not appear"):
-            accumulate_row_outcomes(results, counters, {"sink1": Mock(), "sink2": Mock()}, pending)
+            accumulate_row_outcomes(results, counters, pending)

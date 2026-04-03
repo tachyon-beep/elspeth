@@ -226,7 +226,7 @@ class _TrackingExporter:
 
     def export(self, event: TelemetryEvent) -> None:
         if self.should_fail:
-            raise RuntimeError("Exporter failure")
+            raise ConnectionError("Exporter transport failure")
         self.exported.append(event)
 
     def flush(self) -> None:

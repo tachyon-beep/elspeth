@@ -23,6 +23,15 @@ from elspeth.telemetry.exporters.datadog import DatadogExporter
 from elspeth.telemetry.exporters.otlp import OTLPExporter
 from elspeth.telemetry.hookspecs import hookimpl
 
+# Exceptions that represent transport/IO failures — safe to swallow during telemetry export.
+# Everything else is a programming error that must crash.
+# Individual exporters may extend this with SDK-specific transport exceptions.
+TELEMETRY_TRANSPORT_ERRORS: tuple[type[BaseException], ...] = (
+    ConnectionError,
+    TimeoutError,
+    OSError,  # covers socket.error, BrokenPipeError, ConnectionResetError, etc.
+)
+
 
 class BuiltinExportersPlugin:
     """Plugin that registers built-in telemetry exporters."""

@@ -919,7 +919,7 @@ class TestFlush:
         try:
             # Make flush raise
             def bad_flush():
-                raise RuntimeError("flush error")
+                raise ConnectionError("flush transport error")
 
             object.__setattr__(exporter, "flush", bad_flush)
             # Should not raise
@@ -984,7 +984,7 @@ class TestClose:
         exporter = TelemetryTestExporter()
 
         def bad_close():
-            raise RuntimeError("close error")
+            raise ConnectionError("close transport error")
 
         object.__setattr__(exporter, "close", bad_close)
         manager = TelemetryManager(config, exporters=[exporter])

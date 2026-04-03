@@ -735,7 +735,7 @@ def test_get_unprocessed_row_data_errors_on_missing_source_data_ref(
         _insert_row(conn, "run-meta", "row-1", row_index=1, source_data_ref=None)
 
     monkeypatch.setattr(recovery_manager, "get_unprocessed_rows", lambda _run_id: ["row-1"])
-    with pytest.raises(AuditIntegrityError, match="has no source_data_ref"):
+    with pytest.raises(ValueError, match="has no source_data_ref"):
         recovery_manager.get_unprocessed_row_data("run-meta", payload_store, source_schema_class=_SimpleSchema)
 
 

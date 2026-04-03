@@ -15,8 +15,8 @@ from typing import TYPE_CHECKING, Any
 
 import structlog
 
-from elspeth.contracts.errors import AuditIntegrityError, FrameworkBugError
 from elspeth.telemetry.errors import TelemetryExporterError
+from elspeth.telemetry.exporters import TELEMETRY_TRANSPORT_ERRORS
 from elspeth.telemetry.exporters.otlp import (
     _derive_trace_id,
     _generate_span_id,
@@ -234,10 +234,8 @@ class AzureMonitorExporter:
             if len(self._buffer) >= self._batch_size:
                 self._flush_batch()
         except Exception as e:
-            if isinstance(e, (FrameworkBugError, AuditIntegrityError)):
-                raise
-            if isinstance(e, (TypeError, AttributeError, KeyError, NameError)):
-                raise  # Programming errors must crash
+            if not isinstance(e, TELEMETRY_TRANSPORT_ERRORS):
+                raise  # Programming error — must crash
             # Export MUST NOT raise - log and continue
             logger.warning(
                 "Failed to buffer telemetry event",
@@ -272,10 +270,8 @@ class AzureMonitorExporter:
                 span_count=len(spans),
             )
         except Exception as e:
-            if isinstance(e, (FrameworkBugError, AuditIntegrityError)):
-                raise
-            if isinstance(e, (TypeError, AttributeError, KeyError, NameError)):
-                raise  # Programming errors must crash
+            if not isinstance(e, TELEMETRY_TRANSPORT_ERRORS):
+                raise  # Programming error — must crash
             logger.warning(
                 "Failed to export Azure Monitor batch",
                 exporter=self._name,
@@ -352,10 +348,8 @@ class AzureMonitorExporter:
         try:
             self._flush_batch()
         except Exception as e:
-            if isinstance(e, (FrameworkBugError, AuditIntegrityError)):
-                raise
-            if isinstance(e, (TypeError, AttributeError, KeyError, NameError)):
-                raise  # Programming errors must crash
+            if not isinstance(e, TELEMETRY_TRANSPORT_ERRORS):
+                raise  # Programming error — must crash
             logger.warning(
                 "Failed to flush Azure Monitor exporter",
                 exporter=self._name,
@@ -374,10 +368,8 @@ class AzureMonitorExporter:
             try:
                 self._azure_exporter.shutdown()
             except Exception as e:
-                if isinstance(e, (FrameworkBugError, AuditIntegrityError)):
-                    raise
-                if isinstance(e, (TypeError, AttributeError, KeyError, NameError)):
-                    raise  # Programming errors must crash
+                if not isinstance(e, TELEMETRY_TRANSPORT_ERRORS):
+                    raise  # Programming error — must crash
                 logger.warning(
                     "Failed to shutdown Azure Monitor exporter",
                     exporter=self._name,

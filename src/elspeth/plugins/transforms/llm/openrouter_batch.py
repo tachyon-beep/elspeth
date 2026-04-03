@@ -72,6 +72,7 @@ class _RowSuccess:
     """Successful single-row result in OpenRouter batch."""
 
     row: dict[str, Any]
+    finish_reason: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -422,6 +423,7 @@ class OpenRouterBatchLLMTransform(BaseTransform):
         # Assemble output rows in original order
         # Every row gets an output (success or with error markers) - no rows are dropped
         output_rows: list[dict[str, Any]] = []
+        finish_reason_counts: dict[str, int] = {}
 
         for idx in range(len(rows)):
             if idx not in results:
@@ -466,6 +468,8 @@ class OpenRouterBatchLLMTransform(BaseTransform):
 
             elif isinstance(result, _RowSuccess):
                 output_rows.append(result.row)
+                fr_key = result.finish_reason or "absent"
+                finish_reason_counts[fr_key] = finish_reason_counts.get(fr_key, 0) + 1
 
             else:
                 raise RuntimeError(f"Unexpected result type: {type(result).__name__}")
@@ -508,6 +512,7 @@ class OpenRouterBatchLLMTransform(BaseTransform):
                 "fields_added": [self._response_field],
                 "metadata": {
                     "batch_size": len(output_rows),
+                    "finish_reason_summary": finish_reason_counts,
                     **batch_audit,
                 },
             },
@@ -782,7 +787,7 @@ class OpenRouterBatchLLMTransform(BaseTransform):
             model=response_model,
         )
 
-        return _RowSuccess(row=output)
+        return _RowSuccess(row=output, finish_reason=raw_finish_reason)
 
     def close(self) -> None:
         """Release resources and flush tracing."""

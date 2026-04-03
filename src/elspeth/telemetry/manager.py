@@ -34,6 +34,7 @@ from elspeth.contracts.config.defaults import INTERNAL_DEFAULTS
 from elspeth.contracts.enums import BackpressureMode
 from elspeth.contracts.events import TelemetryEvent
 from elspeth.telemetry.errors import TelemetryExporterError
+from elspeth.telemetry.exporters import TELEMETRY_TRANSPORT_ERRORS
 from elspeth.telemetry.filtering import should_emit
 from elspeth.telemetry.protocols import ExporterProtocol
 
@@ -164,17 +165,13 @@ class TelemetryManager:
                 logger.error("Export loop failed unexpectedly", error=str(e))
                 self._stored_exception = e
             except Exception as e:
-                from elspeth.contracts import FrameworkBugError
-                from elspeth.contracts.errors import AuditIntegrityError
-
-                # System-level exceptions must not be silently swallowed.
-                # Background thread can't raise to main thread directly —
-                # store for re-raise on flush()/close().
-                if isinstance(e, (FrameworkBugError, AuditIntegrityError)):
+                if not isinstance(e, TELEMETRY_TRANSPORT_ERRORS):
+                    # Programming error — store for re-raise on flush()/close().
+                    # Background thread can't raise to main thread directly.
                     self._stored_exception = e
                     break  # Stop processing — system integrity compromised
 
-                # CRITICAL: Log but don't crash - telemetry must not kill pipeline
+                # Transport failure — log but don't crash
                 logger.error("Export loop failed unexpectedly", error=str(e))
             finally:
                 # ALWAYS call task_done() to prevent join() hangs
@@ -196,12 +193,8 @@ class TelemetryManager:
             try:
                 exporter.export(event)
             except Exception as e:
-                from elspeth.contracts import FrameworkBugError
-                from elspeth.contracts.errors import AuditIntegrityError
-
-                # System-level exceptions must not be suppressed by telemetry
-                if isinstance(e, (FrameworkBugError, AuditIntegrityError)):
-                    raise
+                if not isinstance(e, TELEMETRY_TRANSPORT_ERRORS):
+                    raise  # Programming error — must crash
 
                 failures += 1
                 self._exporter_failures[exporter.name] = self._exporter_failures.get(exporter.name, 0) + 1
@@ -462,11 +455,8 @@ class TelemetryManager:
             try:
                 exporter.flush()
             except Exception as e:
-                from elspeth.contracts import FrameworkBugError
-                from elspeth.contracts.errors import AuditIntegrityError
-
-                if isinstance(e, (FrameworkBugError, AuditIntegrityError)):
-                    raise
+                if not isinstance(e, TELEMETRY_TRANSPORT_ERRORS):
+                    raise  # Programming error — must crash
                 logger.warning(
                     "Exporter flush failed",
                     exporter=exporter.name,
@@ -535,11 +525,8 @@ class TelemetryManager:
             try:
                 exporter.close()
             except Exception as e:
-                from elspeth.contracts import FrameworkBugError
-                from elspeth.contracts.errors import AuditIntegrityError
-
-                if isinstance(e, (FrameworkBugError, AuditIntegrityError)):
-                    raise
+                if not isinstance(e, TELEMETRY_TRANSPORT_ERRORS):
+                    raise  # Programming error — must crash
                 logger.warning(
                     "Exporter close failed",
                     exporter=exporter.name,

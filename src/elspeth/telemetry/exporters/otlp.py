@@ -19,8 +19,8 @@ from typing import TYPE_CHECKING, Any
 import structlog
 
 from elspeth import __version__ as _elspeth_version
-from elspeth.contracts.errors import AuditIntegrityError, FrameworkBugError
 from elspeth.telemetry.errors import TelemetryExporterError
+from elspeth.telemetry.exporters import TELEMETRY_TRANSPORT_ERRORS
 
 if TYPE_CHECKING:
     from opentelemetry.exporter.otlp.proto.grpc.trace_exporter import OTLPSpanExporter
@@ -252,10 +252,8 @@ class OTLPExporter:
             if len(self._buffer) >= self._batch_size:
                 self._flush_batch()
         except Exception as e:
-            if isinstance(e, (FrameworkBugError, AuditIntegrityError)):
-                raise
-            if isinstance(e, (TypeError, AttributeError, KeyError, NameError)):
-                raise  # Programming errors must crash
+            if not isinstance(e, TELEMETRY_TRANSPORT_ERRORS):
+                raise  # Programming error — must crash
             # Export MUST NOT raise - log and continue
             logger.warning(
                 "Failed to buffer telemetry event",
@@ -290,10 +288,8 @@ class OTLPExporter:
                 span_count=len(spans),
             )
         except Exception as e:
-            if isinstance(e, (FrameworkBugError, AuditIntegrityError)):
-                raise
-            if isinstance(e, (TypeError, AttributeError, KeyError, NameError)):
-                raise  # Programming errors must crash
+            if not isinstance(e, TELEMETRY_TRANSPORT_ERRORS):
+                raise  # Programming error — must crash
             logger.warning(
                 "Failed to export OTLP batch",
                 exporter=self._name,
@@ -374,10 +370,8 @@ class OTLPExporter:
         try:
             self._flush_batch()
         except Exception as e:
-            if isinstance(e, (FrameworkBugError, AuditIntegrityError)):
-                raise
-            if isinstance(e, (TypeError, AttributeError, KeyError, NameError)):
-                raise  # Programming errors must crash
+            if not isinstance(e, TELEMETRY_TRANSPORT_ERRORS):
+                raise  # Programming error — must crash
             logger.warning(
                 "Failed to flush OTLP exporter",
                 exporter=self._name,
@@ -395,10 +389,8 @@ class OTLPExporter:
             try:
                 self._span_exporter.shutdown()
             except Exception as e:
-                if isinstance(e, (FrameworkBugError, AuditIntegrityError)):
-                    raise
-                if isinstance(e, (TypeError, AttributeError, KeyError, NameError)):
-                    raise  # Programming errors must crash
+                if not isinstance(e, TELEMETRY_TRANSPORT_ERRORS):
+                    raise  # Programming error — must crash
                 logger.warning(
                     "Failed to shutdown OTLP exporter",
                     exporter=self._name,

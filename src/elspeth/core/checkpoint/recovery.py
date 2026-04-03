@@ -255,7 +255,11 @@ class RecoveryManager:
             row_index, source_data_ref = row_metadata[row_id]
 
             if source_data_ref is None:
-                raise AuditIntegrityError(f"Row {row_id} has no source_data_ref — cannot resume without payload (Tier 1 violation)")
+                raise ValueError(
+                    f"Row {row_id} has no source_data_ref — row was recorded without "
+                    f"payload storage, so recovery cannot reconstruct its data. "
+                    f"Re-run the pipeline from scratch instead of resuming."
+                )
 
             # Retrieve from payload store
             try:

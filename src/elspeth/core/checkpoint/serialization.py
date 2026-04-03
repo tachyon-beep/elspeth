@@ -32,6 +32,8 @@ import math
 from datetime import UTC, datetime
 from typing import Any
 
+from elspeth.contracts.errors import AuditIntegrityError
+
 # Reserved key used for type envelopes. User dicts containing this key
 # are escaped via _escape_reserved_keys() before encoding.
 _ENVELOPE_TYPE_KEY = "__elspeth_type__"
@@ -199,6 +201,16 @@ def _restore_types(obj: Any) -> Any:
 
             if envelope_type == "tuple" and isinstance(envelope_value, list):
                 return tuple(_restore_types(v) for v in envelope_value)
+
+            # Envelope shape detected — all known types handled above.
+            _KNOWN_ENVELOPE_TYPES = {"datetime", "escaped_dict", "tuple"}
+            if envelope_type in _KNOWN_ENVELOPE_TYPES:
+                # Known type but value failed isinstance check above — wrong Python type
+                raise AuditIntegrityError(
+                    f"Checkpoint envelope type {envelope_type!r} has invalid value type "
+                    f"{type(envelope_value).__name__!r} — data may be corrupted"
+                )
+            raise AuditIntegrityError(f"Unknown checkpoint envelope type {envelope_type!r} — data may be corrupted or tampered")
 
         # Recurse into dict values
         return {k: _restore_types(v) for k, v in obj.items()}

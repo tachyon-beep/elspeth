@@ -99,17 +99,17 @@ class MockExporter:
 
     def export(self, event: TelemetryEvent) -> None:
         if self._fail_export:
-            raise RuntimeError(f"Simulated export failure in {self._name}")
+            raise ConnectionError(f"Simulated export failure in {self._name}")
         self.exports.append(event)
 
     def flush(self) -> None:
         if self._fail_flush:
-            raise RuntimeError(f"Simulated flush failure in {self._name}")
+            raise ConnectionError(f"Simulated flush failure in {self._name}")
         self.flush_count += 1
 
     def close(self) -> None:
         if self._fail_close:
-            raise RuntimeError(f"Simulated close failure in {self._name}")
+            raise ConnectionError(f"Simulated close failure in {self._name}")
         self.close_count += 1
 
 
@@ -122,7 +122,7 @@ class ToggleableExporter(MockExporter):
 
     def export(self, event: TelemetryEvent) -> None:
         if self._fail_export:
-            raise RuntimeError(f"Simulated failure in {self._name}")
+            raise ConnectionError(f"Simulated failure in {self._name}")
         self.exports.append(event)
 
 

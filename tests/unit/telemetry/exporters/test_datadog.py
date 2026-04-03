@@ -686,7 +686,7 @@ class TestDatadogExporterLifecycle:
     def test_export_failure_does_not_raise(self) -> None:
         """Export failures are logged but don't raise exceptions."""
         exporter, mock_tracer, _ = self._create_configured_exporter()
-        mock_tracer.start_span.side_effect = Exception("Tracer error")
+        mock_tracer.start_span.side_effect = ConnectionError("Tracer transport error")
 
         event = RunStarted(
             timestamp=datetime.now(UTC),
@@ -701,7 +701,7 @@ class TestDatadogExporterLifecycle:
     def test_flush_failure_does_not_raise(self) -> None:
         """flush() failures are logged but don't raise exceptions."""
         exporter, mock_tracer, _ = self._create_configured_exporter()
-        mock_tracer.flush.side_effect = Exception("Flush error")
+        mock_tracer.flush.side_effect = ConnectionError("Flush error")
 
         # Should not raise
         exporter.flush()
@@ -709,10 +709,25 @@ class TestDatadogExporterLifecycle:
     def test_close_failure_does_not_raise(self) -> None:
         """close() shutdown failures are logged but don't raise."""
         exporter, mock_tracer, _ = self._create_configured_exporter()
-        mock_tracer.shutdown.side_effect = Exception("Shutdown error")
+        mock_tracer.shutdown.side_effect = ConnectionError("Shutdown error")
 
         # Should not raise
         exporter.close()
+
+    def test_programming_error_in_export_crashes(self) -> None:
+        """Programming errors (non-transport) must crash — not be swallowed."""
+        exporter, mock_tracer, _ = self._create_configured_exporter()
+        mock_tracer.start_span.side_effect = ValueError("Bad payload construction")
+
+        event = RunStarted(
+            timestamp=datetime.now(UTC),
+            run_id="run-123",
+            config_hash="abc",
+            source_plugin="csv",
+        )
+
+        with pytest.raises(ValueError, match="Bad payload construction"):
+            exporter.export(event)
 
 
 class TestDatadogExporterRegistration:

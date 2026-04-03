@@ -521,7 +521,7 @@ class TestOTLPExporterLifecycle:
     def test_export_failure_does_not_raise(self) -> None:
         """Export failures are logged but don't raise exceptions."""
         exporter, mock_sdk = self._create_configured_exporter()
-        mock_sdk.export.side_effect = Exception("Network error")
+        mock_sdk.export.side_effect = ConnectionError("Network error")
 
         event = RunStarted(
             timestamp=datetime.now(UTC),
@@ -539,7 +539,7 @@ class TestOTLPExporterLifecycle:
     def test_flush_failure_does_not_raise(self) -> None:
         """flush() failures are logged but don't raise exceptions."""
         exporter, mock_sdk = self._create_configured_exporter()
-        mock_sdk.export.side_effect = Exception("Network error")
+        mock_sdk.export.side_effect = ConnectionError("Network error")
 
         event = RunStarted(
             timestamp=datetime.now(UTC),
@@ -555,10 +555,26 @@ class TestOTLPExporterLifecycle:
     def test_close_failure_does_not_raise(self) -> None:
         """close() shutdown failures are logged but don't raise."""
         exporter, mock_sdk = self._create_configured_exporter()
-        mock_sdk.shutdown.side_effect = Exception("Shutdown error")
+        mock_sdk.shutdown.side_effect = ConnectionError("Shutdown error")
 
         # Should not raise
         exporter.close()
+
+    def test_programming_error_in_export_crashes(self) -> None:
+        """Programming errors (non-transport) must crash — not be swallowed."""
+        exporter, mock_sdk = self._create_configured_exporter()
+        mock_sdk.export.side_effect = ValueError("Bad payload construction")
+
+        event = RunStarted(
+            timestamp=datetime.now(UTC),
+            run_id="run-123",
+            config_hash="abc",
+            source_plugin="csv",
+        )
+        exporter._buffer.append(event)
+
+        with pytest.raises(ValueError, match="Bad payload construction"):
+            exporter._flush_batch()
 
 
 class TestOTLPExporterRegistration:

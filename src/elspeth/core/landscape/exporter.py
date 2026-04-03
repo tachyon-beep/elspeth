@@ -555,7 +555,6 @@ class LandscapeExporter:
                             "request_hash": call.request_hash,
                             "response_hash": call.response_hash,
                             "latency_ms": call.latency_ms,
-                            # BUG #9: Add payload references, error, and timestamp
                             "request_ref": call.request_ref,
                             "response_ref": call.response_ref,
                             "error_json": call.error_json,

@@ -6,6 +6,7 @@ from datetime import UTC, datetime
 
 import pytest
 
+from elspeth.contracts.errors import AuditIntegrityError
 from elspeth.core.checkpoint.serialization import checkpoint_dumps, checkpoint_loads
 
 
@@ -194,3 +195,33 @@ def test_checkpoint_new_envelope_used_in_dumps_output() -> None:
     assert "__elspeth_type__" in raw["ts"]
     assert raw["ts"]["__elspeth_type__"] == "datetime"
     assert "__elspeth_value__" in raw["ts"]
+
+
+# ── Envelope corruption guards ──────────────────────────────────────────────
+
+
+def test_unknown_envelope_type_raises() -> None:
+    """Unknown envelope types must crash — Tier 1 corruption guard."""
+    import json
+
+    tampered = json.dumps({"data": {"__elspeth_type__": "evil", "__elspeth_value__": "payload"}})
+    with pytest.raises(AuditIntegrityError, match="Unknown checkpoint envelope type 'evil'"):
+        checkpoint_loads(tampered)
+
+
+def test_known_envelope_wrong_value_type_datetime_raises() -> None:
+    """datetime envelope with non-string value must crash — type corruption."""
+    import json
+
+    corrupted = json.dumps({"data": {"__elspeth_type__": "datetime", "__elspeth_value__": 42}})
+    with pytest.raises(AuditIntegrityError, match="invalid value type"):
+        checkpoint_loads(corrupted)
+
+
+def test_known_envelope_wrong_value_type_tuple_raises() -> None:
+    """tuple envelope with non-list value must crash — type corruption."""
+    import json
+
+    corrupted = json.dumps({"data": {"__elspeth_type__": "tuple", "__elspeth_value__": "not a list"}})
+    with pytest.raises(AuditIntegrityError, match="invalid value type"):
+        checkpoint_loads(corrupted)

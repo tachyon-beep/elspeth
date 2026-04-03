@@ -493,7 +493,7 @@ class TestAccumulateRowOutcomesProperties:
         if sink_names is None:
             sink_names = {"default": object(), "alerts": object()}
         pending_tokens: dict[str, list[tuple[TokenInfo, PendingOutcome | None]]] = {name: [] for name in sink_names}
-        accumulate_row_outcomes(outcomes, counters, sink_names, pending_tokens)
+        accumulate_row_outcomes(outcomes, counters, pending_tokens)
         return counters, pending_tokens
 
     def test_completed_increments_succeeded(self) -> None:

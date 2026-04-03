@@ -1268,6 +1268,7 @@ class AzureBatchLLMTransform(BaseTransform):
         # Assemble output rows in original order
         output_rows: list[dict[str, Any]] = []
         row_errors: list[RowErrorEntry] = []
+        finish_reason_counts: dict[str, int] = {}
 
         # Track which rows had template errors (excluded from batch)
         template_error_indices = {idx for idx, _ in template_errors}
@@ -1420,11 +1421,17 @@ class AzureBatchLLMTransform(BaseTransform):
                     row_errors.append({"row_index": idx, "reason": "content_filtered"})
                     continue
 
+                # Extract finish_reason for audit trail (Tier 3 boundary)
+                raw_finish_reason = first_choice.get("finish_reason")
+
                 # Usage is optional in Azure API — from_dict handles None gracefully
                 usage = TokenUsage.from_dict(body.get("usage"))
 
                 # Field collision check already done in _submit_batch() before
                 # submitting the batch — no need to re-check here.
+
+                fr_key = raw_finish_reason or "absent"
+                finish_reason_counts[fr_key] = finish_reason_counts.get(fr_key, 0) + 1
 
                 output_row = row.to_dict()
                 output_row[self._response_field] = content
@@ -1541,6 +1548,7 @@ class AzureBatchLLMTransform(BaseTransform):
             "fields_added": [self._response_field],
             "metadata": {
                 "batch_size": len(output_rows),
+                "finish_reason_summary": finish_reason_counts,
                 **batch_audit,
             },
         }

@@ -113,7 +113,7 @@ class RunLifecycleRepository:
                 config_hash=run.config_hash,
                 settings_json=run.settings_json,
                 canonical_version=run.canonical_version,
-                status=run.status,
+                status=run.status.value,
                 reproducibility_grade=run.reproducibility_grade,
                 source_schema_json=source_schema_json,
                 schema_contract_json=schema_contract_json,
@@ -682,7 +682,7 @@ class RunLifecycleRepository:
         query = select(runs_table).order_by(runs_table.c.started_at.desc())
 
         if status is not None:
-            query = query.where(runs_table.c.status == status)
+            query = query.where(runs_table.c.status == status.value)
 
         rows = self._ops.execute_fetchall(query)
         return [self._run_loader.load(row) for row in rows]

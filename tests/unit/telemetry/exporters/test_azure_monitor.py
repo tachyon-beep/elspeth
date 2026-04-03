@@ -334,7 +334,7 @@ class TestAzureMonitorExporterErrorHandling:
 
     def test_sdk_export_failure_does_not_raise(self, configured_exporter, mock_azure_exporter) -> None:
         """SDK export failure is logged but doesn't raise."""
-        mock_azure_exporter["instance"].export.side_effect = Exception("SDK error")
+        mock_azure_exporter["instance"].export.side_effect = ConnectionError("SDK transport error")
 
         event = make_run_started()
         configured_exporter._buffer.append(event)
@@ -347,10 +347,20 @@ class TestAzureMonitorExporterErrorHandling:
 
     def test_sdk_shutdown_failure_does_not_raise(self, configured_exporter, mock_azure_exporter) -> None:
         """SDK shutdown failure is logged but doesn't raise."""
-        mock_azure_exporter["instance"].shutdown.side_effect = Exception("Shutdown error")
+        mock_azure_exporter["instance"].shutdown.side_effect = ConnectionError("Shutdown transport error")
 
         # Should not raise
         configured_exporter.close()
+
+    def test_programming_error_in_export_crashes(self, configured_exporter, mock_azure_exporter) -> None:
+        """Programming errors (non-transport) must crash — not be swallowed."""
+        mock_azure_exporter["instance"].export.side_effect = ValueError("Bad payload construction")
+
+        event = make_run_started()
+        configured_exporter._buffer.append(event)
+
+        with pytest.raises(ValueError, match="Bad payload construction"):
+            configured_exporter._flush_batch()
 
 
 class TestAzureMonitorExporterTokenCompleted:
