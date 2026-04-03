@@ -418,16 +418,13 @@ class TestGateSchemaConfigInheritance:
     instead of walking upstream to find computed guarantees from output_schema_config.
     """
 
-    def test_gate_inherits_output_schema_config_from_upstream(self) -> None:
-        """Gate should inherit computed output_schema_config guarantees from upstream.
+    def test_gate_uses_full_propagated_schema_from_upstream(self) -> None:
+        """Gate uses full computed schema propagated by builder from upstream.
 
-        Scenario:
-        - Transform has output_schema_config with computed guaranteed_fields
-          (e.g., LLM transforms with ["result", "result_usage", "result_model"])
-        - Transform's raw config["schema"] only has a SUBSET of these fields
-          (e.g., ["result"]) because others are computed dynamically
-        - Gate copies raw config["schema"] from transform (only gets ["result"])
-        - Gate should still inherit ALL guarantees from upstream's output_schema_config
+        In production, the builder calls _best_schema_dict() which prefers
+        output_schema_config over raw config["schema"]. This means gates get
+        the FULL computed guarantees (including dynamically added fields like
+        LLM usage/model fields), not just the raw config subset.
         """
         graph = ExecutionGraph()
 
@@ -440,7 +437,6 @@ class TestGateSchemaConfigInheritance:
         )
 
         # Transform with COMPUTED output_schema_config
-        # Raw config only declares "result", but computed schema adds more
         transform_computed_schema = SchemaConfig(
             mode="observed",
             fields=None,
@@ -455,14 +451,12 @@ class TestGateSchemaConfigInheritance:
             output_schema_config=transform_computed_schema,
         )
 
-        # Gate that would copy raw schema from transform (simulates from_plugin_instances)
-        # The gate gets raw schema: {"mode": "observed", "guaranteed_fields": ["result"]}
+        # Gate with full computed schema (as the builder would propagate via _best_schema_dict)
         graph.add_node(
             "gate",
             node_type=NodeType.GATE,
             plugin_name="config_gate",
-            config={"schema": {"mode": "observed", "guaranteed_fields": ["result"]}},
-            # NO output_schema_config - gate doesn't compute schema
+            config={"schema": {"mode": "observed", "guaranteed_fields": ["result", "result_usage", "result_model"]}},
         )
 
         graph.add_edge("source", "llm_transform", label="continue")
@@ -472,14 +466,18 @@ class TestGateSchemaConfigInheritance:
         transform_guarantees = graph.get_effective_guaranteed_fields("llm_transform")
         assert "result_usage" in transform_guarantees
 
-        # Gate should inherit computed guarantees from upstream
+        # Gate has the full propagated schema
         gate_guarantees = graph.get_effective_guaranteed_fields("gate")
-        assert "result_usage" in gate_guarantees, f"Gate should inherit result_usage from upstream transform, has: {gate_guarantees}"
+        assert "result_usage" in gate_guarantees
         assert "result_model" in gate_guarantees
         assert "result" in gate_guarantees
 
-    def test_chained_gates_inherit_through_all(self) -> None:
-        """Multiple chained gates should all inherit from original transform."""
+    def test_chained_gates_use_propagated_schema(self) -> None:
+        """Multiple chained gates each use their propagated schema.
+
+        In production, the builder propagates the full computed schema to
+        each gate via _best_schema_dict(). Both gates get the same schema.
+        """
         graph = ExecutionGraph()
 
         graph.add_node(
@@ -503,25 +501,25 @@ class TestGateSchemaConfigInheritance:
             output_schema_config=transform_schema,
         )
 
-        # Two gates in sequence
+        # Two gates in sequence — builder propagates computed schema to each
         graph.add_node(
             "gate1",
             node_type=NodeType.GATE,
             plugin_name="config_gate",
-            config={"schema": {"mode": "observed"}},
+            config={"schema": {"mode": "observed", "guaranteed_fields": ["computed_a", "computed_b"]}},
         )
         graph.add_node(
             "gate2",
             node_type=NodeType.GATE,
             plugin_name="config_gate",
-            config={"schema": {"mode": "observed"}},
+            config={"schema": {"mode": "observed", "guaranteed_fields": ["computed_a", "computed_b"]}},
         )
 
         graph.add_edge("source", "transform", label="continue")
         graph.add_edge("transform", "gate1", label="continue")
         graph.add_edge("gate1", "gate2", label="continue")
 
-        # Both gates should inherit computed guarantees
+        # Both gates have computed guarantees from propagation
         gate1_guarantees = graph.get_effective_guaranteed_fields("gate1")
         gate2_guarantees = graph.get_effective_guaranteed_fields("gate2")
 

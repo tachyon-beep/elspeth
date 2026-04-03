@@ -150,8 +150,13 @@ class TestEffectiveGuaranteedFields:
         result = graph.get_effective_guaranteed_fields("source_1")
         assert result == frozenset({"a", "b"})
 
-    def test_gate_inherits_from_upstream(self) -> None:
-        """Gate node inherits guarantees from upstream."""
+    def test_gate_uses_propagated_schema(self) -> None:
+        """Gate node uses its own schema (propagated by builder from upstream).
+
+        In production, the builder copies the upstream schema to gates.
+        This test simulates that propagation — the gate's config already
+        contains the upstream's guaranteed_fields.
+        """
         graph = ExecutionGraph()
         graph.add_node(
             "source_1",
@@ -163,7 +168,7 @@ class TestEffectiveGuaranteedFields:
             "gate_1",
             node_type=NodeType.GATE,
             plugin_name="config_gate",
-            config={"schema": {"mode": "observed"}},
+            config={"schema": {"mode": "observed", "guaranteed_fields": ["x", "y"]}},
         )
         graph.add_edge("source_1", "gate_1", label="continue")
 
@@ -579,7 +584,11 @@ class TestGatePassthrough:
     """Tests for gates preserving upstream guarantees."""
 
     def test_gate_passes_through_guarantees(self) -> None:
-        """Gate node passes upstream guarantees to downstream consumer."""
+        """Gate node passes upstream guarantees to downstream consumer.
+
+        In production, the builder propagates the upstream schema to the gate.
+        This test simulates that propagation.
+        """
         graph = ExecutionGraph()
 
         # Source with guarantees
@@ -590,12 +599,12 @@ class TestGatePassthrough:
             config={"schema": {"mode": "observed", "guaranteed_fields": ["field_a"]}},
         )
 
-        # Gate (passthrough)
+        # Gate (passthrough — builder would copy source schema here)
         graph.add_node(
             "gate_1",
             node_type=NodeType.GATE,
             plugin_name="config_gate",
-            config={"schema": {"mode": "observed"}},
+            config={"schema": {"mode": "observed", "guaranteed_fields": ["field_a"]}},
         )
 
         # Sink requires field_a
@@ -630,12 +639,12 @@ class TestForkCoalesceContracts:
             config={"schema": {"mode": "observed", "guaranteed_fields": ["id", "raw_data"]}},
         )
 
-        # Fork gate (passes through source guarantees to both branches)
+        # Fork gate (builder would propagate source schema here)
         graph.add_node(
             "fork_gate",
             node_type=NodeType.GATE,
             plugin_name="fork_gate",
-            config={"schema": {"mode": "observed"}},
+            config={"schema": {"mode": "observed", "guaranteed_fields": ["id", "raw_data"]}},
         )
 
         # Branch A: adds 'classification' field

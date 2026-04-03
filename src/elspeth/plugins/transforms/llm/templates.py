@@ -99,8 +99,9 @@ class PromptTemplate:
         # Lookup data for two-dimensional lookups
         # Note: We distinguish None (no lookup configured) from {} (empty lookup).
         # Both are valid, but they're semantically different for audit purposes.
+        # Preserve None through — collapse to {} only at the template rendering site.
         lookup_snapshot = deepcopy(lookup_data) if lookup_data is not None else None
-        self._lookup_data = lookup_snapshot if lookup_snapshot is not None else {}
+        self._lookup_data = lookup_snapshot
         self._lookup_source = lookup_source
         self._lookup_hash = _sha256(canonical_json(lookup_snapshot)) if lookup_snapshot is not None else None
 
@@ -165,7 +166,7 @@ class PromptTemplate:
         # Build context with namespaced data
         context: dict[str, Any] = {
             "row": row_context,
-            "lookup": self._lookup_data,
+            "lookup": self._lookup_data if self._lookup_data is not None else {},
         }
 
         try:

@@ -269,8 +269,11 @@ class GateExecutor:
             elif isinstance(eval_result, str):
                 route_label = eval_result
             else:
-                # Unexpected result type - convert to string
-                route_label = str(eval_result)
+                raise TypeError(
+                    f"Gate '{gate_config.name}' expression returned {type(eval_result).__name__} "
+                    f"({eval_result!r}), expected bool or str. "
+                    f"Expression: {gate_config.condition}"
+                )
 
             # Look up destination in routes config
             if route_label not in gate_config.routes:

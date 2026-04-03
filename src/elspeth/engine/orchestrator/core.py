@@ -461,10 +461,10 @@ class Orchestrator:
             checkpoint_agg_state = aggregation_state
         elif coalesce_state is not None and coalesce_state.pending:
             pending_entry = coalesce_state.pending[-1]
+            node_id = str(loop_ctx.coalesce_node_map[CoalesceName(pending_entry.coalesce_name)])
             if pending_entry.branches:
                 last_branch = list(pending_entry.branches.values())[-1]
                 token_id = last_branch.token_id
-                node_id = str(loop_ctx.coalesce_node_map[CoalesceName(pending_entry.coalesce_name)])
         else:
             for sink_name, token_outcome_pairs in loop_ctx.pending_tokens.items():
                 if not token_outcome_pairs:
@@ -475,7 +475,8 @@ class Orchestrator:
 
         if token_id is None and loop_ctx.last_token_id is not None:
             token_id = loop_ctx.last_token_id
-            node_id = str(source_id)
+            if node_id is None:
+                node_id = str(source_id)
 
         if token_id is None or node_id is None:
             slog.warning(

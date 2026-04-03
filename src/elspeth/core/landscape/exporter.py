@@ -287,8 +287,11 @@ class LandscapeExporter:
         all_op_calls = self._recorder.get_all_operation_calls_for_run(run_id)
         op_calls_by_operation: dict[str, list[Call]] = defaultdict(list)
         for call in all_op_calls:
-            if call.operation_id:
-                op_calls_by_operation[call.operation_id].append(call)
+            if not call.operation_id:
+                raise AuditIntegrityError(
+                    f"Operation-parented call '{call.call_id}' has no operation_id. Run: {run_id}. This violates the Call XOR constraint."
+                )
+            op_calls_by_operation[call.operation_id].append(call)
 
         for operation in all_operations:
             operation_record: OperationExportRecord = {
@@ -362,8 +365,11 @@ class LandscapeExporter:
         all_calls = self._recorder.get_all_calls_for_run(run_id)
         calls_by_state: dict[str, list[Call]] = defaultdict(list)
         for call in all_calls:
-            if call.state_id:  # Should always be true for state-parented calls
-                calls_by_state[call.state_id].append(call)
+            if not call.state_id:
+                raise AuditIntegrityError(
+                    f"State-parented call '{call.call_id}' has no state_id. Run: {run_id}. This violates the Call XOR constraint."
+                )
+            calls_by_state[call.state_id].append(call)
 
         # Batch query 6: All token outcomes for this run
         all_token_outcomes = self._recorder.get_all_token_outcomes_for_run(run_id)

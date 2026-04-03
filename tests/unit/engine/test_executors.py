@@ -1393,13 +1393,8 @@ class TestGateExecutor:
 
     # --- Error routing edge cases (exd audit) ---
 
-    def test_config_gate_none_result_records_failed_with_route_label(self) -> None:
-        """Expression returning None is stringified to 'None' and fails route lookup.
-
-        The gate converts non-string/non-bool results via str(), so None
-        becomes 'None'. Since 'None' isn't in routes, this records FAILED
-        state and raises ValueError with the stringified label.
-        """
+    def test_config_gate_none_result_raises_type_error(self) -> None:
+        """Expression returning None raises TypeError — only bool/str are valid."""
         recorder = _make_recorder()
         executor = GateExecutor(recorder, _make_span_factory(), _make_step_resolver())
         config = GateSettings(
@@ -1412,22 +1407,13 @@ class TestGateExecutor:
         token = _make_token(contract=contract)
         ctx = make_context()
 
-        with pytest.raises(ValueError, match="None"):
+        with pytest.raises(TypeError, match="NoneType"):
             executor.execute_config_gate(config, "cg_1", token, ctx)
 
-        last_call = recorder.complete_node_state.call_args_list[-1]
-        assert last_call[1]["status"] == NodeStateStatus.FAILED
-        assert "None" in last_call[1]["error"].exception
-
-    def test_config_gate_int_result_stringified_for_route_lookup(self) -> None:
-        """Expression returning int is stringified for route label matching.
-
-        Arithmetic expressions return int. The gate converts it via str()
-        (e.g., 42 → '42'). If '42' isn't in routes, it records FAILED.
-        """
+    def test_config_gate_int_result_raises_type_error(self) -> None:
+        """Expression returning int raises TypeError — only bool/str are valid."""
         recorder = _make_recorder()
         executor = GateExecutor(recorder, _make_span_factory(), _make_step_resolver())
-        # '40 + 2' returns 42 → str(42) = '42' → not in routes
         config = GateSettings(
             name="my_gate",
             input="in_conn",
@@ -1438,11 +1424,8 @@ class TestGateExecutor:
         token = _make_token(contract=contract)
         ctx = make_context()
 
-        with pytest.raises(ValueError, match="'42'"):
+        with pytest.raises(TypeError, match="int"):
             executor.execute_config_gate(config, "cg_1", token, ctx)
-
-        last_call = recorder.complete_node_state.call_args_list[-1]
-        assert last_call[1]["status"] == NodeStateStatus.FAILED
 
     # --- context_after wiring ---
 
@@ -4236,15 +4219,15 @@ class TestGateExecutorExecutionErrorFieldRename:
         config = GateSettings(
             name="my_gate",
             input="in_conn",
-            condition="None",  # Evaluates to None, str(None) = "None"
+            condition="'unknown_route'",  # Evaluates to str not in routes
             routes={"true": "next_conn", "false": "error_sink"},
         )
         contract = _make_contract()
         token = _make_token(contract=contract)
         ctx = make_context()
 
-        # "None" is not in routes, so this raises ValueError
-        with pytest.raises(ValueError, match="None"):
+        # "unknown_route" is not in routes, so this raises ValueError
+        with pytest.raises(ValueError, match="unknown_route"):
             executor.execute_config_gate(config, "cg_1", token, ctx)
 
         failed_calls = [call for call in recorder.complete_node_state.call_args_list if call.kwargs.get("status") == NodeStateStatus.FAILED]

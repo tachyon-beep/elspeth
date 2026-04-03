@@ -1560,16 +1560,6 @@ class ExecutionGraph:
         """
         node_info = self.get_node_info(node_id)
 
-        # Gates ALWAYS inherit from upstream - they don't compute schemas.
-        # Their raw config["schema"] may miss computed guarantees from upstream's
-        # output_schema_config (e.g., LLM *_usage fields).
-        if node_info.node_type == NodeType.GATE:
-            incoming = list(self._graph.in_edges(node_id, data=True))
-            if not incoming:
-                return frozenset()
-            # Gates pass through - inherit from single upstream
-            return self.get_effective_guaranteed_fields(incoming[0][0])
-
         # Coalesce nodes: strategy-aware guaranteed fields
         if node_info.node_type == NodeType.COALESCE:
             merge_strategy = node_info.config["merge"]

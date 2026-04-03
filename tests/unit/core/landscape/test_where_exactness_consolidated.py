@@ -20,6 +20,7 @@ data is returned.  Both variants are kept for:
 from __future__ import annotations
 
 import time
+from typing import TYPE_CHECKING
 
 from elspeth.contracts import (
     CallStatus,
@@ -31,7 +32,9 @@ from elspeth.contracts import (
 from elspeth.contracts.audit import TokenRef
 from elspeth.contracts.call_data import RawCallPayload
 from elspeth.contracts.schema_contract import FieldContract, SchemaContract
-from tests.fixtures.multi_run import MultiRunFixture
+
+if TYPE_CHECKING:
+    from tests.fixtures.multi_run import MultiRunFixture
 
 pytest_plugins = ["tests.fixtures.multi_run"]
 

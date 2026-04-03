@@ -355,12 +355,16 @@ class RowProcessor:
         )
         self._telemetry_manager = telemetry_manager
 
-        # Restore aggregation state if provided (crash recovery / resume)
+        # Restore aggregation state if provided (crash recovery / resume).
+        # Multiple node_id keys may map to the same state — deduplicate by
+        # content equality (not id()) to handle both shared references and
+        # independently deserialized copies.
         if restored_aggregation_state:
-            restored_states: dict[int, AggregationCheckpointState] = {}
+            unique_states: list[AggregationCheckpointState] = []
             for state in restored_aggregation_state.values():
-                restored_states.setdefault(id(state), state)
-            for state in restored_states.values():
+                if state not in unique_states:
+                    unique_states.append(state)
+            for state in unique_states:
                 self._aggregation_executor.restore_from_checkpoint(state)
 
     @property

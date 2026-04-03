@@ -254,6 +254,15 @@ class CoalesceExecutor:
                 f"Incompatible coalesce checkpoint version: {state.version!r}. Expected: {COALESCE_CHECKPOINT_VERSION!r}."
             )
 
+        # Validate ALL entries before clearing state — if validation fails,
+        # the executor's in-memory state must remain intact for error recovery.
+        for pending_entry in state.pending:
+            if pending_entry.coalesce_name not in self._settings:
+                raise AuditIntegrityError(
+                    f"Checkpoint references unknown coalesce '{pending_entry.coalesce_name}'. "
+                    f"Configured coalesces: {sorted(self._settings)}"
+                )
+
         now = self._clock.monotonic()
         self._pending.clear()
         self._completed_keys.clear()
@@ -263,11 +272,6 @@ class CoalesceExecutor:
             self._completed_keys[key] = None
 
         for pending_entry in state.pending:
-            if pending_entry.coalesce_name not in self._settings:
-                raise AuditIntegrityError(
-                    f"Checkpoint references unknown coalesce '{pending_entry.coalesce_name}'. "
-                    f"Configured coalesces: {sorted(self._settings)}"
-                )
             first_arrival = now - pending_entry.elapsed_age_seconds
             branches: dict[str, _BranchEntry] = {}
             for branch_name, token_checkpoint in pending_entry.branches.items():

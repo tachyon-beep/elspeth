@@ -714,6 +714,7 @@ class AlwaysFailingOutputPort:
         raise RuntimeError("Port is completely broken")
 
 
+@pytest.mark.filterwarnings("ignore::pytest.PytestUnhandledThreadExceptionWarning")
 class TestReleaseLoopCrashesOnBrokenPort:
     """Regression tests for elspeth-dc2fff46fe: release loop must not silently
     continue when the output port is completely broken.
@@ -759,6 +760,7 @@ class TestReleaseLoopCrashesOnBrokenPort:
         transform._batch_buffer.shutdown()
 
 
+@pytest.mark.filterwarnings("ignore::pytest.PytestUnhandledThreadExceptionWarning")
 class TestShutdownRaisesOnThreadTimeout:
     """Regression test for elspeth-da9918e43a: shutdown_batch_processing must
     raise when the release thread fails to stop, not just warn.

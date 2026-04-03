@@ -657,10 +657,11 @@ class TestGuaranteedFieldsProperties:
     @given(guaranteed=field_sets.filter(lambda s: len(s) > 0))
     @settings(max_examples=50)
     def test_gate_passthrough_inheritance(self, guaranteed: frozenset[str]) -> None:
-        """Property: Gates inherit guarantees from upstream (pass-through).
+        """Property: Gates use schema propagated by builder from upstream.
 
-        Gates don't transform data - they only route. The effective
-        guarantees after a gate should equal the upstream guarantees.
+        Gates don't transform data - they only route. In production, the
+        builder copies the upstream schema to the gate. The effective
+        guarantees after a gate should equal the propagated guarantees.
         """
         graph = ExecutionGraph()
 
@@ -672,8 +673,13 @@ class TestGuaranteedFieldsProperties:
             config={"schema": {"mode": "observed", "guaranteed_fields": list(guaranteed)}},
         )
 
-        # Gate (pass-through)
-        graph.add_node("gate", node_type=NodeType.GATE, plugin_name="test_gate")
+        # Gate (builder would propagate source schema here)
+        graph.add_node(
+            "gate",
+            node_type=NodeType.GATE,
+            plugin_name="test_gate",
+            config={"schema": {"mode": "observed", "guaranteed_fields": list(guaranteed)}},
+        )
 
         # Sink
         graph.add_node("sink", node_type=NodeType.SINK, plugin_name="test_sink")
