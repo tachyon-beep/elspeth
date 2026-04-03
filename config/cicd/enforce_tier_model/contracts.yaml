@@ -193,11 +193,11 @@ allow_hits:
   owner: bugfix
   reason: Type annotation objects (e.g. list[str]) may not have __name__ attribute - getattr is needed for safe error messages
   safety: Falls back to str(a) for display purposes only; used in error message, not logic
-- key: contracts/plugin_context.py:R1:PluginContext:record_call:fp=794c860e09016912
+- key: contracts/plugin_context.py:R1:PluginContext:record_call:fp=dedef251cf6eca32
   owner: architecture
   reason: Tier 3 boundary — .get() on serialized LLM response dict to extract optional usage data
   safety: Missing key returns None; no fabrication
-- key: contracts/plugin_context.py:R6:PluginContext:record_validation_error:fp=77aec82106b1d3da
+- key: contracts/plugin_context.py:R6:PluginContext:record_validation_error:fp=fe1071ba3983bc8b
   owner: architecture
   reason: Tier 3 boundary — ValueError/TypeError from stable_hash on non-canonical data falls back to repr_hash
   safety: Warning logged; row_id still generated via repr_hash for audit trail continuity

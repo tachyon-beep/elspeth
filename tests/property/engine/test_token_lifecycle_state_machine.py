@@ -42,6 +42,7 @@ from elspeth.contracts import (
     NodeType,
     RowOutcome,
 )
+from elspeth.contracts.audit import TokenRef
 from elspeth.contracts.schema import SchemaConfig
 from elspeth.core.landscape import LandscapeDB
 from tests.fixtures.landscape import make_landscape_db, make_recorder
@@ -304,10 +305,9 @@ class TokenLifecycleStateMachine(RuleBasedStateMachine):
 
         # Fork in database (this also records FORKED outcome for parent)
         children, fork_group_id = self.recorder.fork_token(
-            parent_token_id=token_id,
+            parent_ref=TokenRef(token_id=token_id, run_id=self.run.run_id),
             row_id=model.row_id,
             branches=branches,
-            run_id=self.run.run_id,
             step_in_pipeline=self.step_counter,
         )
 
@@ -385,8 +385,7 @@ class TokenLifecycleStateMachine(RuleBasedStateMachine):
         # Record COALESCED outcome for each sibling (requires join_group_id per contract)
         for sib_id in sibling_ids:
             self.recorder.record_token_outcome(
-                run_id=self.run.run_id,
-                token_id=sib_id,
+                ref=TokenRef(token_id=sib_id, run_id=self.run.run_id),
                 outcome=RowOutcome.COALESCED,
                 join_group_id=merged.join_group_id,
             )
@@ -417,8 +416,7 @@ class TokenLifecycleStateMachine(RuleBasedStateMachine):
 
         # Record outcome in database
         self.recorder.record_token_outcome(
-            run_id=self.run.run_id,
-            token_id=token_id,
+            ref=TokenRef(token_id=token_id, run_id=self.run.run_id),
             outcome=RowOutcome.COMPLETED,
             sink_name="default",
         )
@@ -437,8 +435,7 @@ class TokenLifecycleStateMachine(RuleBasedStateMachine):
 
         # Record outcome in database
         self.recorder.record_token_outcome(
-            run_id=self.run.run_id,
-            token_id=token_id,
+            ref=TokenRef(token_id=token_id, run_id=self.run.run_id),
             outcome=RowOutcome.QUARANTINED,
             error_hash="test_error_hash",
         )
@@ -652,10 +649,9 @@ class TestTokenLifecycleInvariants:
 
             # Fork should record parent outcome atomically
             children, _fork_group_id = recorder.fork_token(
-                parent_token_id=token.token_id,
+                parent_ref=TokenRef(token_id=token.token_id, run_id=run.run_id),
                 row_id=row.row_id,
                 branches=branches,
-                run_id=run.run_id,
                 step_in_pipeline=1,
             )
 
@@ -707,8 +703,7 @@ class TestTokenLifecycleInvariants:
 
             # Record COMPLETED outcome
             recorder.record_token_outcome(
-                run_id=run.run_id,
-                token_id=token.token_id,
+                ref=TokenRef(token_id=token.token_id, run_id=run.run_id),
                 outcome=RowOutcome.COMPLETED,
                 sink_name="default",
             )
@@ -716,8 +711,7 @@ class TestTokenLifecycleInvariants:
             # Second terminal outcome should violate unique constraint
             with pytest.raises(IntegrityError):
                 recorder.record_token_outcome(
-                    run_id=run.run_id,
-                    token_id=token.token_id,
+                    ref=TokenRef(token_id=token.token_id, run_id=run.run_id),
                     outcome=RowOutcome.QUARANTINED,
                     error_hash="test_error_hash",
                 )
@@ -764,10 +758,9 @@ class TestTokenLifecycleInvariants:
 
             # Fork token
             children, _ = recorder.fork_token(
-                parent_token_id=token.token_id,
+                parent_ref=TokenRef(token_id=token.token_id, run_id=run.run_id),
                 row_id=row.row_id,
                 branches=["a", "b"],
-                run_id=run.run_id,
                 step_in_pipeline=1,
             )
 
@@ -813,10 +806,9 @@ class TestTokenLifecycleInvariants:
             branches = [chr(ord("a") + i) for i in range(parent_count)]
             parent = recorder.create_token(row_id=row.row_id)
             children, _ = recorder.fork_token(
-                parent_token_id=parent.token_id,
+                parent_ref=TokenRef(token_id=parent.token_id, run_id=run.run_id),
                 row_id=row.row_id,
                 branches=branches,
-                run_id=run.run_id,
                 step_in_pipeline=1,
             )
 

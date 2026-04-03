@@ -26,6 +26,7 @@ from elspeth.contracts import (
     Run,
     RunStatus,
 )
+from elspeth.contracts.audit import TokenRef
 from elspeth.contracts.schema import SchemaConfig
 from elspeth.core.canonical import CANONICAL_VERSION, canonical_json, stable_hash
 from elspeth.core.landscape.database import LandscapeDB
@@ -136,8 +137,7 @@ class TestRecorderCrashesOnInvalidEnums:
 
         with pytest.raises((AttributeError, TypeError, ValueError)):
             recorder.record_token_outcome(
-                run_id=run.run_id,
-                token_id=token.token_id,
+                ref=TokenRef(token_id=token.token_id, run_id=run.run_id),
                 outcome="bogus_terminal",  # type: ignore[arg-type]
                 sink_name="output",
             )

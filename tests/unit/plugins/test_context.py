@@ -531,8 +531,8 @@ class TestTransformErrorRecording:
         # Should have called landscape
         mock_landscape.record_transform_error.assert_called_once()
         call_kwargs = mock_landscape.record_transform_error.call_args[1]
-        assert call_kwargs["run_id"] == "test-run"
-        assert call_kwargs["token_id"] == "tok_456"
+        assert call_kwargs["ref"].run_id == "test-run"
+        assert call_kwargs["ref"].token_id == "tok_456"
         assert call_kwargs["transform_id"] == "field_mapper"
         assert call_kwargs["row_data"] == {"id": 42, "value": "bad"}
         assert call_kwargs["error_details"] == {"reason": "validation_failed", "error": "Division by zero"}

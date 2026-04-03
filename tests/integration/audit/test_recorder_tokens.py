@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import pytest
 
+from elspeth.contracts.audit import TokenRef
 from elspeth.contracts.enums import Determinism, NodeType
 from elspeth.contracts.schema import SchemaConfig
 from elspeth.core.canonical import stable_hash
@@ -119,10 +120,9 @@ class TestLandscapeRecorderTokens:
 
         # Fork to two branches
         child_tokens, _fork_group_id = recorder.fork_token(
-            parent_token_id=parent_token.token_id,
+            parent_ref=TokenRef(token_id=parent_token.token_id, run_id=run.run_id),
             row_id=row.row_id,
             branches=["stats", "classifier"],
-            run_id=run.run_id,
         )
 
         assert len(child_tokens) == 2
@@ -160,10 +160,9 @@ class TestLandscapeRecorderTokens:
 
         # Fork to two branches
         child_tokens, _fork_group_id = recorder.fork_token(
-            parent_token_id=parent_token.token_id,
+            parent_ref=TokenRef(token_id=parent_token.token_id, run_id=run.run_id),
             row_id=row.row_id,
             branches=["stats", "classifier"],
-            run_id=run.run_id,
         )
 
         # P1: Verify token_parents entries for each child
@@ -197,10 +196,9 @@ class TestLandscapeRecorderTokens:
         )
         parent = recorder.create_token(row_id=row.row_id)
         children, _fork_group_id = recorder.fork_token(
-            parent_token_id=parent.token_id,
+            parent_ref=TokenRef(token_id=parent.token_id, run_id=run.run_id),
             row_id=row.row_id,
             branches=["a", "b"],
-            run_id=run.run_id,
         )
 
         # Coalesce back together
@@ -235,10 +233,9 @@ class TestLandscapeRecorderTokens:
 
         # Fork with step_in_pipeline
         child_tokens, _fork_group_id = recorder.fork_token(
-            parent_token_id=parent_token.token_id,
+            parent_ref=TokenRef(token_id=parent_token.token_id, run_id=run.run_id),
             row_id=row.row_id,
             branches=["stats", "classifier"],
-            run_id=run.run_id,
             step_in_pipeline=2,
         )
 
@@ -281,10 +278,9 @@ class TestLandscapeRecorderTokens:
         # Empty branches should be rejected
         with pytest.raises(ValueError, match="at least one branch"):
             recorder.fork_token(
-                parent_token_id=parent_token.token_id,
+                parent_ref=TokenRef(token_id=parent_token.token_id, run_id=run.run_id),
                 row_id=row.row_id,
                 branches=[],  # Empty!
-                run_id=run.run_id,
             )
 
     def test_coalesce_tokens_with_step_in_pipeline(self) -> None:
@@ -308,10 +304,9 @@ class TestLandscapeRecorderTokens:
         )
         parent = recorder.create_token(row_id=row.row_id)
         children, _fork_group_id = recorder.fork_token(
-            parent_token_id=parent.token_id,
+            parent_ref=TokenRef(token_id=parent.token_id, run_id=run.run_id),
             row_id=row.row_id,
             branches=["a", "b"],
-            run_id=run.run_id,
             step_in_pipeline=1,
         )
 
@@ -360,10 +355,9 @@ class TestExpandToken:
 
         # Act: expand parent into 3 children
         children, _expand_group_id = recorder.expand_token(
-            parent_token_id=parent_token.token_id,
+            parent_ref=TokenRef(token_id=parent_token.token_id, run_id=run.run_id),
             row_id=row.row_id,
             count=3,
-            run_id=run.run_id,
             step_in_pipeline=2,
         )
 
@@ -412,10 +406,9 @@ class TestExpandToken:
 
         with pytest.raises(ValueError, match="at least 1"):
             recorder.expand_token(
-                parent_token_id=token.token_id,
+                parent_ref=TokenRef(token_id=token.token_id, run_id=run.run_id),
                 row_id=row.row_id,
                 count=0,
-                run_id=run.run_id,
                 step_in_pipeline=1,
             )
 
@@ -443,10 +436,9 @@ class TestExpandToken:
         parent = recorder.create_token(row_id=row.row_id)
 
         children, _expand_group_id = recorder.expand_token(
-            parent_token_id=parent.token_id,
+            parent_ref=TokenRef(token_id=parent.token_id, run_id=run.run_id),
             row_id=row.row_id,
             count=2,
-            run_id=run.run_id,
             step_in_pipeline=5,
         )
 
@@ -482,10 +474,9 @@ class TestExpandToken:
         parent = recorder.create_token(row_id=row.row_id)
 
         children, expand_group_id = recorder.expand_token(
-            parent_token_id=parent.token_id,
+            parent_ref=TokenRef(token_id=parent.token_id, run_id=run.run_id),
             row_id=row.row_id,
             count=1,
-            run_id=run.run_id,
             step_in_pipeline=1,
         )
 
@@ -522,10 +513,9 @@ class TestExpandToken:
         parent = recorder.create_token(row_id=row.row_id)
 
         children, _expand_group_id = recorder.expand_token(
-            parent_token_id=parent.token_id,
+            parent_ref=TokenRef(token_id=parent.token_id, run_id=run.run_id),
             row_id=row.row_id,
             count=2,
-            run_id=run.run_id,
             step_in_pipeline=3,
         )
 
@@ -573,10 +563,9 @@ class TestAtomicTokenOperations:
 
         # Fork to two branches
         _children, fork_group_id = recorder.fork_token(
-            parent_token_id=parent_token.token_id,
+            parent_ref=TokenRef(token_id=parent_token.token_id, run_id=run.run_id),
             row_id=row.row_id,
             branches=["stats", "classifier"],
-            run_id=run.run_id,
         )
 
         # Verify parent has FORKED outcome recorded atomically
@@ -611,10 +600,9 @@ class TestAtomicTokenOperations:
 
         # Fork to three branches
         recorder.fork_token(
-            parent_token_id=parent_token.token_id,
+            parent_ref=TokenRef(token_id=parent_token.token_id, run_id=run.run_id),
             row_id=row.row_id,
             branches=["alpha", "beta", "gamma"],
-            run_id=run.run_id,
         )
 
         # Verify expected_branches_json is stored correctly
@@ -655,10 +643,9 @@ class TestAtomicTokenOperations:
 
         # Expand to 3 children (default: record_parent_outcome=True)
         _children, expand_group_id = recorder.expand_token(
-            parent_token_id=parent_token.token_id,
+            parent_ref=TokenRef(token_id=parent_token.token_id, run_id=run.run_id),
             row_id=row.row_id,
             count=3,
-            run_id=run.run_id,
             step_in_pipeline=2,
         )
 
@@ -695,10 +682,9 @@ class TestAtomicTokenOperations:
 
         # Expand to 5 children
         recorder.expand_token(
-            parent_token_id=parent_token.token_id,
+            parent_ref=TokenRef(token_id=parent_token.token_id, run_id=run.run_id),
             row_id=row.row_id,
             count=5,
-            run_id=run.run_id,
             step_in_pipeline=2,
         )
 
@@ -737,10 +723,9 @@ class TestAtomicTokenOperations:
         )
         parent = recorder.create_token(row_id=row.row_id)
         children, _fork_group_id = recorder.fork_token(
-            parent_token_id=parent.token_id,
+            parent_ref=TokenRef(token_id=parent.token_id, run_id=run.run_id),
             row_id=row.row_id,
             branches=["a", "b"],
-            run_id=run.run_id,
         )
 
         # Coalesce the two fork children
@@ -787,10 +772,9 @@ class TestAtomicTokenOperations:
         )
         parent = recorder.create_token(row_id=row.row_id)
         children, _fork_group_id = recorder.fork_token(
-            parent_token_id=parent.token_id,
+            parent_ref=TokenRef(token_id=parent.token_id, run_id=run.run_id),
             row_id=row.row_id,
             branches=["a", "b"],
-            run_id=run.run_id,
         )
 
         # Step 1: Coalesce creates merged token + parent links
@@ -802,8 +786,7 @@ class TestAtomicTokenOperations:
         # Step 2: Record COALESCED outcomes on each parent (as CoalesceExecutor does)
         for child in children:
             recorder.record_token_outcome(
-                run_id=run.run_id,
-                token_id=child.token_id,
+                ref=TokenRef(token_id=child.token_id, run_id=run.run_id),
                 outcome=RowOutcome.COALESCED,
                 join_group_id=merged.join_group_id,
             )
@@ -841,10 +824,9 @@ class TestAtomicTokenOperations:
         )
         parent = recorder.create_token(row_id=row.row_id)
         children, _fork_group_id = recorder.fork_token(
-            parent_token_id=parent.token_id,
+            parent_ref=TokenRef(token_id=parent.token_id, run_id=run.run_id),
             row_id=row.row_id,
             branches=["x", "y", "z"],
-            run_id=run.run_id,
         )
 
         # Coalesce all three fork children
@@ -886,10 +868,9 @@ class TestAtomicTokenOperations:
         )
         parent = recorder.create_token(row_id=row.row_id)
         children, _fork_group_id = recorder.fork_token(
-            parent_token_id=parent.token_id,
+            parent_ref=TokenRef(token_id=parent.token_id, run_id=run.run_id),
             row_id=row.row_id,
             branches=["a", "b"],
-            run_id=run.run_id,
         )
 
         merged = recorder.coalesce_tokens(
@@ -933,10 +914,9 @@ class TestAtomicTokenOperations:
 
         # Expand with record_parent_outcome=False (batch aggregation pattern)
         children, _expand_group_id = recorder.expand_token(
-            parent_token_id=parent_token.token_id,
+            parent_ref=TokenRef(token_id=parent_token.token_id, run_id=run.run_id),
             row_id=row.row_id,
             count=2,
-            run_id=run.run_id,
             step_in_pipeline=2,
             record_parent_outcome=False,  # Don't record EXPANDED
         )

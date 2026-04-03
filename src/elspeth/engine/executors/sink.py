@@ -17,6 +17,7 @@ from elspeth.contracts import (
     SinkProtocol,
     TokenInfo,
 )
+from elspeth.contracts.audit import TokenRef
 from elspeth.contracts.diversion import SinkWriteResult
 from elspeth.contracts.enums import NodeStateStatus, RoutingMode
 from elspeth.contracts.errors import (
@@ -400,8 +401,7 @@ class SinkExecutor:
             # Record COMPLETED outcomes for primary tokens
             for token, _ in primary_states:
                 self._recorder.record_token_outcome(
-                    run_id=self._run_id,
-                    token_id=token.token_id,
+                    ref=TokenRef(token_id=token.token_id, run_id=self._run_id),
                     outcome=pending_outcome.outcome,
                     error_hash=pending_outcome.error_hash,
                     sink_name=sink_name,
@@ -643,8 +643,7 @@ class SinkExecutor:
                     diversion = diversion_by_index[idx]
                     error_hash = hashlib.sha256(diversion.reason.encode()).hexdigest()[:16]
                     self._recorder.record_token_outcome(
-                        run_id=self._run_id,
-                        token_id=token.token_id,
+                        ref=TokenRef(token_id=token.token_id, run_id=self._run_id),
                         outcome=RowOutcome.DIVERTED,
                         error_hash=error_hash,
                         sink_name=failsink_name,
@@ -690,8 +689,7 @@ class SinkExecutor:
 
                     error_hash = hashlib.sha256(diversion.reason.encode()).hexdigest()[:16]
                     self._recorder.record_token_outcome(
-                        run_id=self._run_id,
-                        token_id=token.token_id,
+                        ref=TokenRef(token_id=token.token_id, run_id=self._run_id),
                         outcome=RowOutcome.DIVERTED,
                         error_hash=error_hash,
                         sink_name="__discard__",

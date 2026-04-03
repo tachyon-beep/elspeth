@@ -10,6 +10,7 @@ from unittest.mock import Mock
 import pytest
 
 from elspeth.contracts import FrameworkBugError
+from elspeth.contracts.audit import TokenRef
 from elspeth.contracts.plugin_context import (
     PluginContext,
     TransformErrorToken,
@@ -144,8 +145,7 @@ class TestRecordTransformErrorHappyPath:
         assert token.destination == "error_sink"
         assert token.error_id == "terr_abc123"
         mock_landscape.record_transform_error.assert_called_once_with(
-            run_id="run-1",
-            token_id="tok-1",
+            ref=TokenRef(token_id="tok-1", run_id="run-1"),
             transform_id="transform-1",
             row_data={"data": "test"},
             error_details={"action": "quarantine", "reason": "API returned 500"},

@@ -88,8 +88,8 @@ def test_partition_completeness(batch_size: int, diverted_indices_raw: list[int]
     )
 
     outcome_calls = recorder.record_token_outcome.call_args_list
-    completed_ids = {c.kwargs["token_id"] for c in outcome_calls if c.kwargs["outcome"] == RowOutcome.COMPLETED}
-    diverted_ids = {c.kwargs["token_id"] for c in outcome_calls if c.kwargs["outcome"] == RowOutcome.DIVERTED}
+    completed_ids = {c.kwargs["ref"].token_id for c in outcome_calls if c.kwargs["outcome"] == RowOutcome.COMPLETED}
+    diverted_ids = {c.kwargs["ref"].token_id for c in outcome_calls if c.kwargs["outcome"] == RowOutcome.DIVERTED}
 
     # Partition completeness: every token accounted for
     assert len(completed_ids) + len(diverted_ids) == batch_size
@@ -121,7 +121,7 @@ def test_exactly_once_terminal_state(batch_size: int, diverted_indices_raw: list
     )
 
     outcome_calls = recorder.record_token_outcome.call_args_list
-    recorded_token_ids = [c.kwargs["token_id"] for c in outcome_calls]
+    recorded_token_ids = [c.kwargs["ref"].token_id for c in outcome_calls]
     # No duplicates
     assert len(recorded_token_ids) == len(set(recorded_token_ids))
     # All input tokens present
@@ -178,8 +178,8 @@ def test_failsink_partition_completeness(batch_size: int, diverted_indices_raw: 
     )
 
     outcome_calls = recorder.record_token_outcome.call_args_list
-    completed_ids = {c.kwargs["token_id"] for c in outcome_calls if c.kwargs["outcome"] == RowOutcome.COMPLETED}
-    diverted_ids = {c.kwargs["token_id"] for c in outcome_calls if c.kwargs["outcome"] == RowOutcome.DIVERTED}
+    completed_ids = {c.kwargs["ref"].token_id for c in outcome_calls if c.kwargs["outcome"] == RowOutcome.COMPLETED}
+    diverted_ids = {c.kwargs["ref"].token_id for c in outcome_calls if c.kwargs["outcome"] == RowOutcome.DIVERTED}
 
     assert len(completed_ids) + len(diverted_ids) == batch_size
     assert completed_ids & diverted_ids == set()
@@ -210,6 +210,6 @@ def test_failsink_exactly_once_terminal_state(batch_size: int, diverted_indices_
     )
 
     outcome_calls = recorder.record_token_outcome.call_args_list
-    recorded_token_ids = [c.kwargs["token_id"] for c in outcome_calls]
+    recorded_token_ids = [c.kwargs["ref"].token_id for c in outcome_calls]
     assert len(recorded_token_ids) == len(set(recorded_token_ids))
     assert set(recorded_token_ids) == {t.token_id for t in tokens}

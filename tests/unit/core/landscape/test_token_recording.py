@@ -3,6 +3,7 @@ from __future__ import annotations
 import pytest
 
 from elspeth.contracts import NodeType, RowOutcome
+from elspeth.contracts.audit import TokenRef
 from elspeth.contracts.errors import AuditIntegrityError
 from elspeth.contracts.schema import SchemaConfig
 from elspeth.core.landscape import LandscapeDB, LandscapeRecorder
@@ -242,10 +243,9 @@ class TestForkToken:
         _db, recorder = _setup()
         row, token = _make_row(recorder)
         children, _fork_group_id = recorder.fork_token(
-            parent_token_id=token.token_id,
+            parent_ref=TokenRef(token_id=token.token_id, run_id="run-1"),
             row_id=row.row_id,
             branches=["path-a", "path-b", "path-c"],
-            run_id="run-1",
         )
         assert len(children) == 3
         branch_names = [c.branch_name for c in children]
@@ -257,10 +257,9 @@ class TestForkToken:
         _db, recorder = _setup()
         row, token = _make_row(recorder)
         children, fork_group_id = recorder.fork_token(
-            parent_token_id=token.token_id,
+            parent_ref=TokenRef(token_id=token.token_id, run_id="run-1"),
             row_id=row.row_id,
             branches=["path-a", "path-b"],
-            run_id="run-1",
         )
         assert fork_group_id is not None
         assert all(c.fork_group_id == fork_group_id for c in children)
@@ -269,10 +268,9 @@ class TestForkToken:
         _db, recorder = _setup()
         row, token = _make_row(recorder)
         children, _fg = recorder.fork_token(
-            parent_token_id=token.token_id,
+            parent_ref=TokenRef(token_id=token.token_id, run_id="run-1"),
             row_id=row.row_id,
             branches=["path-a", "path-b"],
-            run_id="run-1",
         )
         assert all(c.row_id == row.row_id for c in children)
 
@@ -280,10 +278,9 @@ class TestForkToken:
         _db, recorder = _setup()
         row, token = _make_row(recorder)
         _children, fork_group_id = recorder.fork_token(
-            parent_token_id=token.token_id,
+            parent_ref=TokenRef(token_id=token.token_id, run_id="run-1"),
             row_id=row.row_id,
             branches=["path-a", "path-b"],
-            run_id="run-1",
         )
         outcome = recorder.get_token_outcome(token.token_id)
         assert outcome is not None
@@ -296,20 +293,18 @@ class TestForkToken:
         row, token = _make_row(recorder)
         with pytest.raises(ValueError):
             recorder.fork_token(
-                parent_token_id=token.token_id,
+                parent_ref=TokenRef(token_id=token.token_id, run_id="run-1"),
                 row_id=row.row_id,
                 branches=[],
-                run_id="run-1",
             )
 
     def test_children_have_unique_token_ids(self):
         _db, recorder = _setup()
         row, token = _make_row(recorder)
         children, _fg = recorder.fork_token(
-            parent_token_id=token.token_id,
+            parent_ref=TokenRef(token_id=token.token_id, run_id="run-1"),
             row_id=row.row_id,
             branches=["path-a", "path-b", "path-c"],
-            run_id="run-1",
         )
         token_ids = [c.token_id for c in children]
         assert len(set(token_ids)) == 3
@@ -318,10 +313,9 @@ class TestForkToken:
         _db, recorder = _setup()
         row, token = _make_row(recorder)
         children, _fg = recorder.fork_token(
-            parent_token_id=token.token_id,
+            parent_ref=TokenRef(token_id=token.token_id, run_id="run-1"),
             row_id=row.row_id,
             branches=["path-a", "path-b"],
-            run_id="run-1",
             step_in_pipeline=3,
         )
         assert all(c.step_in_pipeline == 3 for c in children)
@@ -386,10 +380,9 @@ class TestExpandToken:
         _db, recorder = _setup()
         row, token = _make_row(recorder)
         children, expand_group_id = recorder.expand_token(
-            parent_token_id=token.token_id,
+            parent_ref=TokenRef(token_id=token.token_id, run_id="run-1"),
             row_id=row.row_id,
             count=4,
-            run_id="run-1",
         )
         assert len(children) == 4
         assert expand_group_id is not None
@@ -398,10 +391,9 @@ class TestExpandToken:
         _db, recorder = _setup()
         row, token = _make_row(recorder)
         children, expand_group_id = recorder.expand_token(
-            parent_token_id=token.token_id,
+            parent_ref=TokenRef(token_id=token.token_id, run_id="run-1"),
             row_id=row.row_id,
             count=3,
-            run_id="run-1",
         )
         assert all(c.expand_group_id == expand_group_id for c in children)
 
@@ -409,10 +401,9 @@ class TestExpandToken:
         _db, recorder = _setup()
         row, token = _make_row(recorder)
         children, _eg = recorder.expand_token(
-            parent_token_id=token.token_id,
+            parent_ref=TokenRef(token_id=token.token_id, run_id="run-1"),
             row_id=row.row_id,
             count=2,
-            run_id="run-1",
         )
         assert all(c.row_id == row.row_id for c in children)
 
@@ -420,10 +411,9 @@ class TestExpandToken:
         _db, recorder = _setup()
         row, token = _make_row(recorder)
         _children, expand_group_id = recorder.expand_token(
-            parent_token_id=token.token_id,
+            parent_ref=TokenRef(token_id=token.token_id, run_id="run-1"),
             row_id=row.row_id,
             count=3,
-            run_id="run-1",
         )
         outcome = recorder.get_token_outcome(token.token_id)
         assert outcome is not None
@@ -436,10 +426,9 @@ class TestExpandToken:
         row, token = _make_row(recorder)
         with pytest.raises(ValueError):
             recorder.expand_token(
-                parent_token_id=token.token_id,
+                parent_ref=TokenRef(token_id=token.token_id, run_id="run-1"),
                 row_id=row.row_id,
                 count=0,
-                run_id="run-1",
             )
 
     def test_count_negative_raises_value_error(self):
@@ -447,20 +436,18 @@ class TestExpandToken:
         row, token = _make_row(recorder)
         with pytest.raises(ValueError):
             recorder.expand_token(
-                parent_token_id=token.token_id,
+                parent_ref=TokenRef(token_id=token.token_id, run_id="run-1"),
                 row_id=row.row_id,
                 count=-1,
-                run_id="run-1",
             )
 
     def test_record_parent_outcome_false_skips_outcome(self):
         _db, recorder = _setup()
         row, token = _make_row(recorder)
         _children, _eg = recorder.expand_token(
-            parent_token_id=token.token_id,
+            parent_ref=TokenRef(token_id=token.token_id, run_id="run-1"),
             row_id=row.row_id,
             count=2,
-            run_id="run-1",
             record_parent_outcome=False,
         )
         outcome = recorder.get_token_outcome(token.token_id)
@@ -470,10 +457,9 @@ class TestExpandToken:
         _db, recorder = _setup()
         row, token = _make_row(recorder)
         children, _eg = recorder.expand_token(
-            parent_token_id=token.token_id,
+            parent_ref=TokenRef(token_id=token.token_id, run_id="run-1"),
             row_id=row.row_id,
             count=5,
-            run_id="run-1",
         )
         token_ids = [c.token_id for c in children]
         assert len(set(token_ids)) == 5
@@ -482,10 +468,9 @@ class TestExpandToken:
         _db, recorder = _setup()
         row, token = _make_row(recorder)
         children, _eg = recorder.expand_token(
-            parent_token_id=token.token_id,
+            parent_ref=TokenRef(token_id=token.token_id, run_id="run-1"),
             row_id=row.row_id,
             count=2,
-            run_id="run-1",
             step_in_pipeline=7,
         )
         assert all(c.step_in_pipeline == 7 for c in children)
@@ -494,10 +479,9 @@ class TestExpandToken:
         _db, recorder = _setup()
         row, token = _make_row(recorder)
         children, expand_group_id = recorder.expand_token(
-            parent_token_id=token.token_id,
+            parent_ref=TokenRef(token_id=token.token_id, run_id="run-1"),
             row_id=row.row_id,
             count=1,
-            run_id="run-1",
         )
         assert len(children) == 1
         assert expand_group_id is not None
@@ -517,8 +501,7 @@ class TestValidateOutcomeFields:
         _row, token = _make_row(recorder)
         with pytest.raises(ValueError, match="sink_name"):
             recorder.record_token_outcome(
-                run_id="run-1",
-                token_id=token.token_id,
+                ref=TokenRef(token_id=token.token_id, run_id="run-1"),
                 outcome=RowOutcome.COMPLETED,
             )
 
@@ -526,8 +509,7 @@ class TestValidateOutcomeFields:
         _db, recorder = _setup()
         _row, token = _make_row(recorder)
         outcome_id = recorder.record_token_outcome(
-            run_id="run-1",
-            token_id=token.token_id,
+            ref=TokenRef(token_id=token.token_id, run_id="run-1"),
             outcome=RowOutcome.COMPLETED,
             sink_name="output",
         )
@@ -538,8 +520,7 @@ class TestValidateOutcomeFields:
         _row, token = _make_row(recorder)
         with pytest.raises(ValueError, match="sink_name"):
             recorder.record_token_outcome(
-                run_id="run-1",
-                token_id=token.token_id,
+                ref=TokenRef(token_id=token.token_id, run_id="run-1"),
                 outcome=RowOutcome.ROUTED,
             )
 
@@ -547,8 +528,7 @@ class TestValidateOutcomeFields:
         _db, recorder = _setup()
         _row, token = _make_row(recorder)
         outcome_id = recorder.record_token_outcome(
-            run_id="run-1",
-            token_id=token.token_id,
+            ref=TokenRef(token_id=token.token_id, run_id="run-1"),
             outcome=RowOutcome.ROUTED,
             sink_name="reject-sink",
         )
@@ -559,8 +539,7 @@ class TestValidateOutcomeFields:
         _row, token = _make_row(recorder)
         with pytest.raises(ValueError, match="fork_group_id"):
             recorder.record_token_outcome(
-                run_id="run-1",
-                token_id=token.token_id,
+                ref=TokenRef(token_id=token.token_id, run_id="run-1"),
                 outcome=RowOutcome.FORKED,
             )
 
@@ -568,8 +547,7 @@ class TestValidateOutcomeFields:
         _db, recorder = _setup()
         _row, token = _make_row(recorder)
         outcome_id = recorder.record_token_outcome(
-            run_id="run-1",
-            token_id=token.token_id,
+            ref=TokenRef(token_id=token.token_id, run_id="run-1"),
             outcome=RowOutcome.FORKED,
             fork_group_id="fg-1",
         )
@@ -580,8 +558,7 @@ class TestValidateOutcomeFields:
         _row, token = _make_row(recorder)
         with pytest.raises(ValueError, match="error_hash"):
             recorder.record_token_outcome(
-                run_id="run-1",
-                token_id=token.token_id,
+                ref=TokenRef(token_id=token.token_id, run_id="run-1"),
                 outcome=RowOutcome.FAILED,
             )
 
@@ -589,8 +566,7 @@ class TestValidateOutcomeFields:
         _db, recorder = _setup()
         _row, token = _make_row(recorder)
         outcome_id = recorder.record_token_outcome(
-            run_id="run-1",
-            token_id=token.token_id,
+            ref=TokenRef(token_id=token.token_id, run_id="run-1"),
             outcome=RowOutcome.FAILED,
             error_hash="abc123",
         )
@@ -601,8 +577,7 @@ class TestValidateOutcomeFields:
         _row, token = _make_row(recorder)
         with pytest.raises(ValueError, match="error_hash"):
             recorder.record_token_outcome(
-                run_id="run-1",
-                token_id=token.token_id,
+                ref=TokenRef(token_id=token.token_id, run_id="run-1"),
                 outcome=RowOutcome.QUARANTINED,
             )
 
@@ -610,8 +585,7 @@ class TestValidateOutcomeFields:
         _db, recorder = _setup()
         _row, token = _make_row(recorder)
         outcome_id = recorder.record_token_outcome(
-            run_id="run-1",
-            token_id=token.token_id,
+            ref=TokenRef(token_id=token.token_id, run_id="run-1"),
             outcome=RowOutcome.QUARANTINED,
             error_hash="abc123",
         )
@@ -622,8 +596,7 @@ class TestValidateOutcomeFields:
         _row, token = _make_row(recorder)
         with pytest.raises(ValueError, match="batch_id"):
             recorder.record_token_outcome(
-                run_id="run-1",
-                token_id=token.token_id,
+                ref=TokenRef(token_id=token.token_id, run_id="run-1"),
                 outcome=RowOutcome.CONSUMED_IN_BATCH,
             )
 
@@ -632,8 +605,7 @@ class TestValidateOutcomeFields:
         batch_id = _make_batch(recorder)
         _row, token = _make_row(recorder)
         outcome_id = recorder.record_token_outcome(
-            run_id="run-1",
-            token_id=token.token_id,
+            ref=TokenRef(token_id=token.token_id, run_id="run-1"),
             outcome=RowOutcome.CONSUMED_IN_BATCH,
             batch_id=batch_id,
         )
@@ -644,8 +616,7 @@ class TestValidateOutcomeFields:
         _row, token = _make_row(recorder)
         with pytest.raises(ValueError, match="join_group_id"):
             recorder.record_token_outcome(
-                run_id="run-1",
-                token_id=token.token_id,
+                ref=TokenRef(token_id=token.token_id, run_id="run-1"),
                 outcome=RowOutcome.COALESCED,
             )
 
@@ -653,8 +624,7 @@ class TestValidateOutcomeFields:
         _db, recorder = _setup()
         _row, token = _make_row(recorder)
         outcome_id = recorder.record_token_outcome(
-            run_id="run-1",
-            token_id=token.token_id,
+            ref=TokenRef(token_id=token.token_id, run_id="run-1"),
             outcome=RowOutcome.COALESCED,
             join_group_id="jg-1",
         )
@@ -665,8 +635,7 @@ class TestValidateOutcomeFields:
         _row, token = _make_row(recorder)
         with pytest.raises(ValueError, match="expand_group_id"):
             recorder.record_token_outcome(
-                run_id="run-1",
-                token_id=token.token_id,
+                ref=TokenRef(token_id=token.token_id, run_id="run-1"),
                 outcome=RowOutcome.EXPANDED,
             )
 
@@ -674,8 +643,7 @@ class TestValidateOutcomeFields:
         _db, recorder = _setup()
         _row, token = _make_row(recorder)
         outcome_id = recorder.record_token_outcome(
-            run_id="run-1",
-            token_id=token.token_id,
+            ref=TokenRef(token_id=token.token_id, run_id="run-1"),
             outcome=RowOutcome.EXPANDED,
             expand_group_id="eg-1",
         )
@@ -686,8 +654,7 @@ class TestValidateOutcomeFields:
         _row, token = _make_row(recorder)
         with pytest.raises(ValueError, match="batch_id"):
             recorder.record_token_outcome(
-                run_id="run-1",
-                token_id=token.token_id,
+                ref=TokenRef(token_id=token.token_id, run_id="run-1"),
                 outcome=RowOutcome.BUFFERED,
             )
 
@@ -696,8 +663,7 @@ class TestValidateOutcomeFields:
         batch_id = _make_batch(recorder)
         _row, token = _make_row(recorder)
         outcome_id = recorder.record_token_outcome(
-            run_id="run-1",
-            token_id=token.token_id,
+            ref=TokenRef(token_id=token.token_id, run_id="run-1"),
             outcome=RowOutcome.BUFFERED,
             batch_id=batch_id,
         )
@@ -711,8 +677,7 @@ class TestRecordTokenOutcome:
         _db, recorder = _setup()
         _row, token = _make_row(recorder)
         outcome_id = recorder.record_token_outcome(
-            run_id="run-1",
-            token_id=token.token_id,
+            ref=TokenRef(token_id=token.token_id, run_id="run-1"),
             outcome=RowOutcome.COMPLETED,
             sink_name="output",
         )
@@ -722,8 +687,7 @@ class TestRecordTokenOutcome:
         _db, recorder = _setup()
         _row, token = _make_row(recorder)
         outcome_id = recorder.record_token_outcome(
-            run_id="run-1",
-            token_id=token.token_id,
+            ref=TokenRef(token_id=token.token_id, run_id="run-1"),
             outcome=RowOutcome.COMPLETED,
             sink_name="output",
         )
@@ -734,8 +698,7 @@ class TestRecordTokenOutcome:
         _db, recorder = _setup()
         _row, token = _make_row(recorder)
         outcome_id = recorder.record_token_outcome(
-            run_id="run-1",
-            token_id=token.token_id,
+            ref=TokenRef(token_id=token.token_id, run_id="run-1"),
             outcome=RowOutcome.COMPLETED,
             sink_name="output",
         )
@@ -751,8 +714,7 @@ class TestRecordTokenOutcome:
         _db, recorder = _setup()
         _row, token = _make_row(recorder)
         recorder.record_token_outcome(
-            run_id="run-1",
-            token_id=token.token_id,
+            ref=TokenRef(token_id=token.token_id, run_id="run-1"),
             outcome=RowOutcome.FAILED,
             error_hash="err-hash-abc",
         )
@@ -766,8 +728,7 @@ class TestRecordTokenOutcome:
         _db, recorder = _setup()
         _row, token = _make_row(recorder)
         recorder.record_token_outcome(
-            run_id="run-1",
-            token_id=token.token_id,
+            ref=TokenRef(token_id=token.token_id, run_id="run-1"),
             outcome=RowOutcome.QUARANTINED,
             error_hash="quarantine-hash",
         )
@@ -780,8 +741,7 @@ class TestRecordTokenOutcome:
         _db, recorder = _setup()
         _row, token = _make_row(recorder)
         recorder.record_token_outcome(
-            run_id="run-1",
-            token_id=token.token_id,
+            ref=TokenRef(token_id=token.token_id, run_id="run-1"),
             outcome=RowOutcome.ROUTED,
             sink_name="reject",
         )
@@ -795,8 +755,7 @@ class TestRecordTokenOutcome:
         batch_id = _make_batch(recorder, batch_id="batch-42")
         _row, token = _make_row(recorder)
         recorder.record_token_outcome(
-            run_id="run-1",
-            token_id=token.token_id,
+            ref=TokenRef(token_id=token.token_id, run_id="run-1"),
             outcome=RowOutcome.CONSUMED_IN_BATCH,
             batch_id=batch_id,
         )
@@ -810,8 +769,7 @@ class TestRecordTokenOutcome:
         batch_id = _make_batch(recorder, batch_id="batch-pending")
         _row, token = _make_row(recorder)
         recorder.record_token_outcome(
-            run_id="run-1",
-            token_id=token.token_id,
+            ref=TokenRef(token_id=token.token_id, run_id="run-1"),
             outcome=RowOutcome.BUFFERED,
             batch_id=batch_id,
         )
@@ -824,8 +782,7 @@ class TestRecordTokenOutcome:
         _db, recorder = _setup()
         _row, token = _make_row(recorder)
         recorder.record_token_outcome(
-            run_id="run-1",
-            token_id=token.token_id,
+            ref=TokenRef(token_id=token.token_id, run_id="run-1"),
             outcome=RowOutcome.COMPLETED,
             sink_name="output",
             context={"reason": "all good"},
@@ -838,8 +795,7 @@ class TestRecordTokenOutcome:
         _db, recorder = _setup()
         _row, token = _make_row(recorder)
         recorder.record_token_outcome(
-            run_id="run-1",
-            token_id=token.token_id,
+            ref=TokenRef(token_id=token.token_id, run_id="run-1"),
             outcome=RowOutcome.COMPLETED,
             sink_name="output",
         )
@@ -862,15 +818,13 @@ class TestGetTokenOutcome:
         _row, token = _make_row(recorder)
         # Record non-terminal first
         recorder.record_token_outcome(
-            run_id="run-1",
-            token_id=token.token_id,
+            ref=TokenRef(token_id=token.token_id, run_id="run-1"),
             outcome=RowOutcome.BUFFERED,
             batch_id=batch_id,
         )
         # Then record terminal
         recorder.record_token_outcome(
-            run_id="run-1",
-            token_id=token.token_id,
+            ref=TokenRef(token_id=token.token_id, run_id="run-1"),
             outcome=RowOutcome.COMPLETED,
             sink_name="output",
         )
@@ -884,8 +838,7 @@ class TestGetTokenOutcome:
         batch_id = _make_batch(recorder)
         _row, token = _make_row(recorder)
         recorder.record_token_outcome(
-            run_id="run-1",
-            token_id=token.token_id,
+            ref=TokenRef(token_id=token.token_id, run_id="run-1"),
             outcome=RowOutcome.BUFFERED,
             batch_id=batch_id,
         )
@@ -900,15 +853,13 @@ class TestGetTokenOutcome:
         _row, token = _make_row(recorder)
         # Record terminal first
         recorder.record_token_outcome(
-            run_id="run-1",
-            token_id=token.token_id,
+            ref=TokenRef(token_id=token.token_id, run_id="run-1"),
             outcome=RowOutcome.COMPLETED,
             sink_name="output",
         )
         # Then record non-terminal
         recorder.record_token_outcome(
-            run_id="run-1",
-            token_id=token.token_id,
+            ref=TokenRef(token_id=token.token_id, run_id="run-1"),
             outcome=RowOutcome.BUFFERED,
             batch_id=batch_id,
         )
@@ -932,14 +883,12 @@ class TestGetTokenOutcomesForRow:
         row, token_a = _make_row(recorder, row_index=0)
         token_b = recorder.create_token(row.row_id)
         recorder.record_token_outcome(
-            run_id="run-1",
-            token_id=token_a.token_id,
+            ref=TokenRef(token_id=token_a.token_id, run_id="run-1"),
             outcome=RowOutcome.COMPLETED,
             sink_name="output",
         )
         recorder.record_token_outcome(
-            run_id="run-1",
-            token_id=token_b.token_id,
+            ref=TokenRef(token_id=token_b.token_id, run_id="run-1"),
             outcome=RowOutcome.ROUTED,
             sink_name="reject",
         )
@@ -954,14 +903,12 @@ class TestGetTokenOutcomesForRow:
         row_a, token_a = _make_row(recorder, row_index=0)
         _row_b, token_b = _make_row(recorder, row_index=1)
         recorder.record_token_outcome(
-            run_id="run-1",
-            token_id=token_a.token_id,
+            ref=TokenRef(token_id=token_a.token_id, run_id="run-1"),
             outcome=RowOutcome.COMPLETED,
             sink_name="output",
         )
         recorder.record_token_outcome(
-            run_id="run-1",
-            token_id=token_b.token_id,
+            ref=TokenRef(token_id=token_b.token_id, run_id="run-1"),
             outcome=RowOutcome.FAILED,
             error_hash="err-hash",
         )
@@ -979,14 +926,12 @@ class TestGetTokenOutcomesForRow:
         batch_id = _make_batch(recorder)
         row, token = _make_row(recorder, row_index=0)
         recorder.record_token_outcome(
-            run_id="run-1",
-            token_id=token.token_id,
+            ref=TokenRef(token_id=token.token_id, run_id="run-1"),
             outcome=RowOutcome.BUFFERED,
             batch_id=batch_id,
         )
         recorder.record_token_outcome(
-            run_id="run-1",
-            token_id=token.token_id,
+            ref=TokenRef(token_id=token.token_id, run_id="run-1"),
             outcome=RowOutcome.COMPLETED,
             sink_name="output",
         )
@@ -997,8 +942,7 @@ class TestGetTokenOutcomesForRow:
         _db_a, recorder_a = _setup(run_id="run-A")
         row_a, token_a = _make_row(recorder_a, run_id="run-A", row_index=0)
         recorder_a.record_token_outcome(
-            run_id="run-A",
-            token_id=token_a.token_id,
+            ref=TokenRef(token_id=token_a.token_id, run_id="run-A"),
             outcome=RowOutcome.COMPLETED,
             sink_name="output",
         )
@@ -1086,8 +1030,7 @@ class TestCrossRunContaminationPrevention:
         # Attempt to record outcome under run-B -- must crash
         with pytest.raises(AuditIntegrityError, match="Cross-run contamination"):
             recorder.record_token_outcome(
-                run_id="run-B",
-                token_id=token_a.token_id,
+                ref=TokenRef(token_id=token_a.token_id, run_id="run-B"),
                 outcome=RowOutcome.COMPLETED,
                 sink_name="output",
             )
@@ -1106,8 +1049,7 @@ class TestCrossRunContaminationPrevention:
 
         # Recording with the correct run_id should succeed
         outcome_id = recorder.record_token_outcome(
-            run_id="run-A",
-            token_id=token_a.token_id,
+            ref=TokenRef(token_id=token_a.token_id, run_id="run-A"),
             outcome=RowOutcome.COMPLETED,
             sink_name="output",
         )
@@ -1127,10 +1069,9 @@ class TestCrossRunContaminationPrevention:
 
         with pytest.raises(AuditIntegrityError, match="Cross-run contamination"):
             recorder.fork_token(
-                parent_token_id=token_a.token_id,
+                parent_ref=TokenRef(token_id=token_a.token_id, run_id="run-B"),
                 row_id=row_a.row_id,
                 branches=["path-a", "path-b"],
-                run_id="run-B",
             )
 
     def test_fork_token_rejects_wrong_row_id(self):
@@ -1153,10 +1094,9 @@ class TestCrossRunContaminationPrevention:
 
         with pytest.raises(AuditIntegrityError, match="Cross-row lineage"):
             recorder.fork_token(
-                parent_token_id=token_a.token_id,
+                parent_ref=TokenRef(token_id=token_a.token_id, run_id="run-A"),
                 row_id=row_b.row_id,
                 branches=["path-a"],
-                run_id="run-A",
             )
 
     def test_fork_token_accepts_correct_ownership(self):
@@ -1172,10 +1112,9 @@ class TestCrossRunContaminationPrevention:
         token_a = recorder.create_token(row_a.row_id)
 
         children, fg = recorder.fork_token(
-            parent_token_id=token_a.token_id,
+            parent_ref=TokenRef(token_id=token_a.token_id, run_id="run-A"),
             row_id=row_a.row_id,
             branches=["path-a", "path-b"],
-            run_id="run-A",
         )
         assert len(children) == 2
         assert fg is not None
@@ -1194,10 +1133,9 @@ class TestCrossRunContaminationPrevention:
 
         with pytest.raises(AuditIntegrityError, match="Cross-run contamination"):
             recorder.expand_token(
-                parent_token_id=token_a.token_id,
+                parent_ref=TokenRef(token_id=token_a.token_id, run_id="run-B"),
                 row_id=row_a.row_id,
                 count=3,
-                run_id="run-B",
             )
 
     def test_expand_token_rejects_wrong_row_id(self):
@@ -1220,10 +1158,9 @@ class TestCrossRunContaminationPrevention:
 
         with pytest.raises(AuditIntegrityError, match="Cross-row lineage"):
             recorder.expand_token(
-                parent_token_id=token_a.token_id,
+                parent_ref=TokenRef(token_id=token_a.token_id, run_id="run-A"),
                 row_id=row_b.row_id,
                 count=2,
-                run_id="run-A",
             )
 
     def test_expand_token_accepts_correct_ownership(self):
@@ -1239,10 +1176,9 @@ class TestCrossRunContaminationPrevention:
         token_a = recorder.create_token(row_a.row_id)
 
         children, eg = recorder.expand_token(
-            parent_token_id=token_a.token_id,
+            parent_ref=TokenRef(token_id=token_a.token_id, run_id="run-A"),
             row_id=row_a.row_id,
             count=3,
-            run_id="run-A",
         )
         assert len(children) == 3
         assert eg is not None
@@ -1352,10 +1288,9 @@ class TestTokenRunIdConsistency:
         _db, recorder = _setup(run_id="run-1")
         row, token = _make_row(recorder)
         children, _fg = recorder.fork_token(
-            parent_token_id=token.token_id,
+            parent_ref=TokenRef(token_id=token.token_id, run_id="run-1"),
             row_id=row.row_id,
             branches=["path-a", "path-b"],
-            run_id="run-1",
         )
         assert all(c.run_id == "run-1" for c in children)
 
@@ -1364,10 +1299,9 @@ class TestTokenRunIdConsistency:
         _db, recorder = _setup(run_id="run-1")
         row, token = _make_row(recorder)
         children, _eg = recorder.expand_token(
-            parent_token_id=token.token_id,
+            parent_ref=TokenRef(token_id=token.token_id, run_id="run-1"),
             row_id=row.row_id,
             count=3,
-            run_id="run-1",
         )
         assert all(c.run_id == "run-1" for c in children)
 

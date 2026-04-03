@@ -24,6 +24,7 @@ from collections.abc import Mapping
 from typing import TYPE_CHECKING, Any, Literal, overload
 
 from elspeth.contracts import CallType, Determinism, RunStatus
+from elspeth.contracts.audit import TokenRef
 from elspeth.contracts.errors import FrameworkBugError
 from elspeth.core.dependency_config import PreflightResult
 
@@ -789,19 +790,17 @@ class LandscapeRecorder:
 
     def fork_token(
         self,
-        parent_token_id: str,
+        parent_ref: TokenRef,
         row_id: str,
         branches: list[str],
         *,
-        run_id: str,
         step_in_pipeline: int | None = None,
     ) -> tuple[list[Token], str]:
         """Fork a token to multiple branches. Delegates to DataFlowRepository."""
         return self._data_flow.fork_token(
-            parent_token_id,
+            parent_ref,
             row_id,
             branches,
-            run_id=run_id,
             step_in_pipeline=step_in_pipeline,
         )
 
@@ -821,28 +820,25 @@ class LandscapeRecorder:
 
     def expand_token(
         self,
-        parent_token_id: str,
+        parent_ref: TokenRef,
         row_id: str,
         count: int,
         *,
-        run_id: str,
         step_in_pipeline: int | None = None,
         record_parent_outcome: bool = True,
     ) -> tuple[list[Token], str]:
         """Expand a token into multiple children. Delegates to DataFlowRepository."""
         return self._data_flow.expand_token(
-            parent_token_id,
+            parent_ref,
             row_id,
             count,
-            run_id=run_id,
             step_in_pipeline=step_in_pipeline,
             record_parent_outcome=record_parent_outcome,
         )
 
     def record_token_outcome(
         self,
-        run_id: str,
-        token_id: str,
+        ref: TokenRef,
         outcome: RowOutcome,
         *,
         sink_name: str | None = None,
@@ -855,8 +851,7 @@ class LandscapeRecorder:
     ) -> str:
         """Record a token outcome. Delegates to DataFlowRepository."""
         return self._data_flow.record_token_outcome(
-            run_id,
-            token_id,
+            ref,
             outcome,
             sink_name=sink_name,
             batch_id=batch_id,
@@ -990,8 +985,7 @@ class LandscapeRecorder:
 
     def record_transform_error(
         self,
-        run_id: str,
-        token_id: str,
+        ref: TokenRef,
         transform_id: str,
         row_data: Mapping[str, object] | PipelineRow,
         error_details: TransformErrorReason,
@@ -999,8 +993,7 @@ class LandscapeRecorder:
     ) -> str:
         """Record a transform error. Delegates to DataFlowRepository."""
         return self._data_flow.record_transform_error(
-            run_id,
-            token_id,
+            ref,
             transform_id,
             row_data,
             error_details,

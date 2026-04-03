@@ -21,6 +21,7 @@ import pytest
 from sqlalchemy import select
 
 from elspeth.contracts import Determinism, NodeType, RoutingMode, RowOutcome, RunStatus
+from elspeth.contracts.audit import TokenRef
 from elspeth.contracts.errors import AuditIntegrityError
 from elspeth.contracts.types import NodeID, SinkName
 from elspeth.core.dag import ExecutionGraph
@@ -267,8 +268,7 @@ class TestResumeComprehensive:
         recorder = make_recorder(db)
         for i in range(3):
             recorder.record_token_outcome(
-                run_id=run_id,
-                token_id=f"t{i}",
+                ref=TokenRef(token_id=f"t{i}", run_id=run_id),
                 outcome=RowOutcome.COMPLETED,
                 sink_name="sink",
             )
@@ -375,8 +375,7 @@ class TestResumeComprehensive:
         recorder = make_recorder(db)
         for i in range(3):
             recorder.record_token_outcome(
-                run_id=run_id,
-                token_id=f"t{i}",
+                ref=TokenRef(token_id=f"t{i}", run_id=run_id),
                 outcome=RowOutcome.COMPLETED,
                 sink_name="sink",
             )
@@ -584,8 +583,7 @@ class TestResumeComprehensive:
         # Mark first row as completed (checkpoint will be at row 0)
         recorder = make_recorder(db)
         recorder.record_token_outcome(
-            run_id=run_id,
-            token_id="t0",
+            ref=TokenRef(token_id="t0", run_id=run_id),
             outcome=RowOutcome.COMPLETED,
             sink_name="sink",
         )
@@ -790,8 +788,7 @@ class TestResumeComprehensive:
         # Mark first row as completed (checkpoint will be at row 0)
         recorder = make_recorder(db)
         recorder.record_token_outcome(
-            run_id=run_id,
-            token_id="t0",
+            ref=TokenRef(token_id="t0", run_id=run_id),
             outcome=RowOutcome.COMPLETED,
             sink_name="sink",
         )
@@ -991,8 +988,7 @@ class TestResumeComprehensive:
         # Mark first row as completed (checkpoint will be at row 0)
         recorder = make_recorder(db)
         recorder.record_token_outcome(
-            run_id=run_id,
-            token_id="t0",
+            ref=TokenRef(token_id="t0", run_id=run_id),
             outcome=RowOutcome.COMPLETED,
             sink_name="sink",
         )
@@ -1192,8 +1188,7 @@ class TestResumeComprehensive:
         # Mark first row as completed (checkpoint will be at row 0)
         recorder = make_recorder(db)
         recorder.record_token_outcome(
-            run_id=run_id,
-            token_id="t0",
+            ref=TokenRef(token_id="t0", run_id=run_id),
             outcome=RowOutcome.COMPLETED,
             sink_name="sink",
         )

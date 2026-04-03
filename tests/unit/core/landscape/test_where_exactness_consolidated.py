@@ -28,6 +28,7 @@ from elspeth.contracts import (
     RunStatus,
     SecretResolutionInput,
 )
+from elspeth.contracts.audit import TokenRef
 from elspeth.contracts.call_data import RawCallPayload
 from elspeth.contracts.schema_contract import FieldContract, SchemaContract
 from tests.fixtures.multi_run import MultiRunFixture
@@ -439,8 +440,7 @@ class TestTransformErrorsWhereExactness:
             run = fix.run(suffix)
             tok = run.tokens[0]
             fix.recorder.record_transform_error(
-                run_id=run.run_id,
-                token_id=tok.token_id,
+                ref=TokenRef(token_id=tok.token_id, run_id=run.run_id),
                 transform_id=run.transform_node_id,
                 row_data={"val": f"err-{suffix}"},
                 error_details={"reason": "test_error"},

@@ -32,6 +32,7 @@ from elspeth.contracts import (
     RowOutcome,
     RunStatus,
 )
+from elspeth.contracts.audit import TokenRef
 from elspeth.contracts.schema import SchemaConfig
 from elspeth.core.canonical import stable_hash
 from elspeth.core.landscape import LandscapeDB
@@ -529,8 +530,7 @@ class TestTokenOutcomeProperties:
 
         # Record COMPLETED outcome (requires sink_name)
         outcome_id = recorder.record_token_outcome(
-            run_id=run.run_id,
-            token_id=token.token_id,
+            ref=TokenRef(token_id=token.token_id, run_id=run.run_id),
             outcome=RowOutcome.COMPLETED,
             sink_name="default",
         )
@@ -572,8 +572,7 @@ class TestTokenOutcomeProperties:
         # Record QUARANTINED outcome (requires error_hash)
         error_hash = stable_hash({"reason": "validation_failed"})
         outcome_id = recorder.record_token_outcome(
-            run_id=run.run_id,
-            token_id=token.token_id,
+            ref=TokenRef(token_id=token.token_id, run_id=run.run_id),
             outcome=RowOutcome.QUARANTINED,
             error_hash=error_hash,
         )
@@ -613,8 +612,7 @@ class TestTokenOutcomeProperties:
             )
             token = recorder.create_token(row_id=row.row_id)
             recorder.record_token_outcome(
-                run_id=run.run_id,
-                token_id=token.token_id,
+                ref=TokenRef(token_id=token.token_id, run_id=run.run_id),
                 outcome=RowOutcome.COMPLETED,
                 sink_name="default",
             )
@@ -666,8 +664,7 @@ class TestTokenOutcomeProperties:
 
         with pytest.raises(ValueError, match=required_field):
             recorder.record_token_outcome(
-                run_id=run.run_id,
-                token_id=token.token_id,
+                ref=TokenRef(token_id=token.token_id, run_id=run.run_id),
                 outcome=outcome,
                 **kwargs,
             )
@@ -725,8 +722,7 @@ class TestTokenOutcomeProperties:
             )
 
         outcome_id = recorder.record_token_outcome(
-            run_id=run.run_id,
-            token_id=token.token_id,
+            ref=TokenRef(token_id=token.token_id, run_id=run.run_id),
             outcome=outcome,
             **kwargs,
         )
@@ -964,8 +960,7 @@ class TestForeignKeyIntegrity:
             )
             token = recorder.create_token(row_id=row.row_id)
             recorder.record_token_outcome(
-                run_id=run.run_id,
-                token_id=token.token_id,
+                ref=TokenRef(token_id=token.token_id, run_id=run.run_id),
                 outcome=RowOutcome.COMPLETED,
                 sink_name="default",
             )

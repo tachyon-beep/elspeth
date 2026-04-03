@@ -12,6 +12,7 @@ from typing import TYPE_CHECKING, Any
 import structlog
 
 from elspeth.contracts import TokenInfo
+from elspeth.contracts.audit import TokenRef
 from elspeth.contracts.coalesce_checkpoint import (
     CoalesceCheckpointState,
     CoalescePendingCheckpoint,
@@ -390,8 +391,7 @@ class CoalesceExecutor:
                 duration_ms=0,
             )
             self._recorder.record_token_outcome(
-                run_id=self._run_id,
-                token_id=token.token_id,
+                ref=TokenRef(token_id=token.token_id, run_id=self._run_id),
                 outcome=RowOutcome.FAILED,
                 error_hash=error_hash,
             )
@@ -535,8 +535,7 @@ class CoalesceExecutor:
                 duration_ms=(now - entry.arrival_time) * 1000,
             )
             self._recorder.record_token_outcome(
-                run_id=self._run_id,
-                token_id=entry.token.token_id,
+                ref=TokenRef(token_id=entry.token.token_id, run_id=self._run_id),
                 outcome=RowOutcome.FAILED,
                 error_hash=error_hash,
             )
@@ -608,8 +607,7 @@ class CoalesceExecutor:
                     duration_ms=(now - entry.arrival_time) * 1000,
                 )
                 self._recorder.record_token_outcome(
-                    run_id=self._run_id,
-                    token_id=entry.token.token_id,
+                    ref=TokenRef(token_id=entry.token.token_id, run_id=self._run_id),
                     outcome=RowOutcome.FAILED,
                     error_hash=error_hash,
                 )
@@ -778,8 +776,7 @@ class CoalesceExecutor:
 
                 # Record terminal token outcome (COALESCED)
                 self._recorder.record_token_outcome(
-                    run_id=self._run_id,
-                    token_id=entry.token.token_id,
+                    ref=TokenRef(token_id=entry.token.token_id, run_id=self._run_id),
                     outcome=RowOutcome.COALESCED,
                     join_group_id=merged_token.join_group_id,
                 )

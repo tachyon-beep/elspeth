@@ -3,6 +3,7 @@
 
 import pytest
 
+from elspeth.contracts.audit import TokenRef
 from elspeth.core.landscape import LandscapeDB, LandscapeRecorder
 from tests.fixtures.landscape import make_landscape_db, make_recorder
 
@@ -258,8 +259,7 @@ class TestRecordTokenOutcome:
         run, token = run_with_token
 
         outcome_id = recorder.record_token_outcome(
-            run_id=run.run_id,
-            token_id=token.token_id,
+            ref=TokenRef(token_id=token.token_id, run_id=run.run_id),
             outcome=RowOutcome.COMPLETED,
             sink_name="output",
         )
@@ -273,8 +273,7 @@ class TestRecordTokenOutcome:
         run, token = run_with_token
 
         outcome_id = recorder.record_token_outcome(
-            run_id=run.run_id,
-            token_id=token.token_id,
+            ref=TokenRef(token_id=token.token_id, run_id=run.run_id),
             outcome=RowOutcome.ROUTED,
             sink_name="errors",
         )
@@ -308,16 +307,14 @@ class TestRecordTokenOutcome:
 
         # First record BUFFERED (non-terminal) with required batch_id
         recorder.record_token_outcome(
-            run_id=run.run_id,
-            token_id=token.token_id,
+            ref=TokenRef(token_id=token.token_id, run_id=run.run_id),
             outcome=RowOutcome.BUFFERED,
             batch_id=batch.batch_id,
         )
 
         # Then record terminal outcome with same batch_id
         outcome_id = recorder.record_token_outcome(
-            run_id=run.run_id,
-            token_id=token.token_id,
+            ref=TokenRef(token_id=token.token_id, run_id=run.run_id),
             outcome=RowOutcome.CONSUMED_IN_BATCH,
             batch_id=batch.batch_id,
         )
@@ -334,8 +331,7 @@ class TestRecordTokenOutcome:
 
         # First terminal outcome
         recorder.record_token_outcome(
-            run_id=run.run_id,
-            token_id=token.token_id,
+            ref=TokenRef(token_id=token.token_id, run_id=run.run_id),
             outcome=RowOutcome.COMPLETED,
             sink_name="output",
         )
@@ -343,8 +339,7 @@ class TestRecordTokenOutcome:
         # Second terminal outcome should fail
         with pytest.raises(IntegrityError):
             recorder.record_token_outcome(
-                run_id=run.run_id,
-                token_id=token.token_id,
+                ref=TokenRef(token_id=token.token_id, run_id=run.run_id),
                 outcome=RowOutcome.ROUTED,
                 sink_name="errors",
             )
@@ -385,8 +380,7 @@ class TestOutcomeContractValidation:
 
         with pytest.raises(ValueError, match="COMPLETED outcome requires sink_name"):
             recorder.record_token_outcome(
-                run_id=run.run_id,
-                token_id=token.token_id,
+                ref=TokenRef(token_id=token.token_id, run_id=run.run_id),
                 outcome=RowOutcome.COMPLETED,
             )
 
@@ -398,8 +392,7 @@ class TestOutcomeContractValidation:
 
         with pytest.raises(ValueError, match="ROUTED outcome requires sink_name"):
             recorder.record_token_outcome(
-                run_id=run.run_id,
-                token_id=token.token_id,
+                ref=TokenRef(token_id=token.token_id, run_id=run.run_id),
                 outcome=RowOutcome.ROUTED,
             )
 
@@ -411,8 +404,7 @@ class TestOutcomeContractValidation:
 
         with pytest.raises(ValueError, match="FORKED outcome requires fork_group_id"):
             recorder.record_token_outcome(
-                run_id=run.run_id,
-                token_id=token.token_id,
+                ref=TokenRef(token_id=token.token_id, run_id=run.run_id),
                 outcome=RowOutcome.FORKED,
             )
 
@@ -424,8 +416,7 @@ class TestOutcomeContractValidation:
 
         with pytest.raises(ValueError, match="FAILED outcome requires error_hash"):
             recorder.record_token_outcome(
-                run_id=run.run_id,
-                token_id=token.token_id,
+                ref=TokenRef(token_id=token.token_id, run_id=run.run_id),
                 outcome=RowOutcome.FAILED,
             )
 
@@ -437,8 +428,7 @@ class TestOutcomeContractValidation:
 
         with pytest.raises(ValueError, match="QUARANTINED outcome requires error_hash"):
             recorder.record_token_outcome(
-                run_id=run.run_id,
-                token_id=token.token_id,
+                ref=TokenRef(token_id=token.token_id, run_id=run.run_id),
                 outcome=RowOutcome.QUARANTINED,
             )
 
@@ -450,8 +440,7 @@ class TestOutcomeContractValidation:
 
         with pytest.raises(ValueError, match="COALESCED outcome requires join_group_id"):
             recorder.record_token_outcome(
-                run_id=run.run_id,
-                token_id=token.token_id,
+                ref=TokenRef(token_id=token.token_id, run_id=run.run_id),
                 outcome=RowOutcome.COALESCED,
             )
 
@@ -463,8 +452,7 @@ class TestOutcomeContractValidation:
 
         with pytest.raises(ValueError, match="EXPANDED outcome requires expand_group_id"):
             recorder.record_token_outcome(
-                run_id=run.run_id,
-                token_id=token.token_id,
+                ref=TokenRef(token_id=token.token_id, run_id=run.run_id),
                 outcome=RowOutcome.EXPANDED,
             )
 
@@ -476,8 +464,7 @@ class TestOutcomeContractValidation:
 
         with pytest.raises(ValueError, match="BUFFERED outcome requires batch_id"):
             recorder.record_token_outcome(
-                run_id=run.run_id,
-                token_id=token.token_id,
+                ref=TokenRef(token_id=token.token_id, run_id=run.run_id),
                 outcome=RowOutcome.BUFFERED,
             )
 
@@ -489,8 +476,7 @@ class TestOutcomeContractValidation:
 
         with pytest.raises(ValueError, match="CONSUMED_IN_BATCH outcome requires batch_id"):
             recorder.record_token_outcome(
-                run_id=run.run_id,
-                token_id=token.token_id,
+                ref=TokenRef(token_id=token.token_id, run_id=run.run_id),
                 outcome=RowOutcome.CONSUMED_IN_BATCH,
             )
 
@@ -517,7 +503,9 @@ class TestGetTokenOutcome:
         )
         row = recorder.create_row(run.run_id, "src", 0, {"x": 1})
         token = recorder.create_token(row.row_id)
-        outcome_id = recorder.record_token_outcome(run.run_id, token.token_id, RowOutcome.COMPLETED, sink_name="out")
+        outcome_id = recorder.record_token_outcome(
+            ref=TokenRef(token_id=token.token_id, run_id=run.run_id), outcome=RowOutcome.COMPLETED, sink_name="out"
+        )
         return run, token, outcome_id
 
     def test_get_token_outcome_returns_dataclass(self, recorder, run_with_outcome) -> None:
@@ -563,7 +551,9 @@ class TestExplainIncludesOutcome:
         )
         row = recorder.create_row(run.run_id, "src", 0, {"x": 1})
         token = recorder.create_token(row.row_id)
-        recorder.record_token_outcome(run.run_id, token.token_id, RowOutcome.COMPLETED, sink_name="out")
+        recorder.record_token_outcome(
+            ref=TokenRef(token_id=token.token_id, run_id=run.run_id), outcome=RowOutcome.COMPLETED, sink_name="out"
+        )
 
         result = explain(recorder, run.run_id, token_id=token.token_id)
 

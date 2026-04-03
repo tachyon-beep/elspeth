@@ -10,6 +10,7 @@ from __future__ import annotations
 import pytest
 
 from elspeth.contracts import NodeType, RowOutcome
+from elspeth.contracts.audit import TokenRef
 from elspeth.contracts.schema import SchemaConfig
 from elspeth.core.canonical import CANONICAL_VERSION
 from elspeth.core.landscape.database import LandscapeDB
@@ -218,8 +219,7 @@ def test_record_outcome_throughput() -> None:
     with benchmark_timer() as timing:
         for i in range(iterations):
             recorder.record_token_outcome(
-                run_id=run_id,
-                token_id=token_ids[i],
+                ref=TokenRef(token_id=token_ids[i], run_id=run_id),
                 outcome=RowOutcome.COMPLETED,
                 sink_name="default",
             )

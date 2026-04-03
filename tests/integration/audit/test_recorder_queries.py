@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from elspeth.contracts import NodeType, RoutingMode
+from elspeth.contracts.audit import TokenRef
 from elspeth.contracts.schema import SchemaConfig
 
 # Dynamic schema for tests that don't care about specific fields
@@ -113,10 +114,9 @@ class TestLandscapeRecorderQueryMethods:
         # Create parent token and fork
         parent = recorder.create_token(row_id=row.row_id)
         children, _fork_group_id = recorder.fork_token(
-            parent_token_id=parent.token_id,
+            parent_ref=TokenRef(token_id=parent.token_id, run_id=run.run_id),
             row_id=row.row_id,
             branches=["a", "b"],
-            run_id=run.run_id,
         )
 
         # Coalesce the children

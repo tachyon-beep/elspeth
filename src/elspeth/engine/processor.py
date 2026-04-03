@@ -18,6 +18,7 @@ from types import MappingProxyType
 from typing import TYPE_CHECKING, Any, cast
 
 from elspeth.contracts import RouteDestination, RowOutcome, RowResult, SourceRow, TokenInfo, TransformResult
+from elspeth.contracts.audit import TokenRef
 from elspeth.contracts.freeze import deep_freeze
 from elspeth.contracts.schema_contract import PipelineRow
 from elspeth.contracts.types import BranchName, CoalesceName, NodeID, SinkName, StepResolver
@@ -630,8 +631,7 @@ class RowProcessor:
 
         for token in fctx.buffered_tokens:
             self._recorder.record_token_outcome(
-                run_id=self._run_id,
-                token_id=token.token_id,
+                ref=TokenRef(token_id=token.token_id, run_id=self._run_id),
                 outcome=RowOutcome.FAILED,
                 error_hash=error_hash,
             )
@@ -770,16 +770,14 @@ class RowProcessor:
                 if i in quarantined_index_set:
                     error_hash = hashlib.sha256(f"quarantined_in_batch:{fctx.batch_id}:{i}".encode()).hexdigest()[:16]
                     self._recorder.record_token_outcome(
-                        run_id=self._run_id,
-                        token_id=token.token_id,
+                        ref=TokenRef(token_id=token.token_id, run_id=self._run_id),
                         outcome=RowOutcome.QUARANTINED,
                         error_hash=error_hash,
                     )
                     self._emit_token_completed(token, RowOutcome.QUARANTINED)
                 else:
                     self._recorder.record_token_outcome(
-                        run_id=self._run_id,
-                        token_id=token.token_id,
+                        ref=TokenRef(token_id=token.token_id, run_id=self._run_id),
                         outcome=RowOutcome.CONSUMED_IN_BATCH,
                         batch_id=fctx.batch_id,
                     )
@@ -961,8 +959,7 @@ class RowProcessor:
         if buf_batch_id is None:
             raise OrchestrationInvariantError(f"batch_id is None after buffer_row() for node {node_id}")
         self._recorder.record_token_outcome(
-            run_id=self._run_id,
-            token_id=current_token.token_id,
+            ref=TokenRef(token_id=current_token.token_id, run_id=self._run_id),
             outcome=RowOutcome.BUFFERED,
             batch_id=buf_batch_id,
         )
@@ -1374,8 +1371,7 @@ class RowProcessor:
             # Bug 9z8 fix: Only record if CoalesceExecutor didn't already record
             if not coalesce_outcome.outcomes_recorded:
                 self._recorder.record_token_outcome(
-                    run_id=self._run_id,
-                    token_id=current_token.token_id,
+                    ref=TokenRef(token_id=current_token.token_id, run_id=self._run_id),
                     outcome=RowOutcome.FAILED,
                     error_hash=error_hash,
                 )
@@ -1579,8 +1575,7 @@ class RowProcessor:
             # All retries exhausted - return FAILED outcome
             error_hash = hashlib.sha256(str(e).encode()).hexdigest()[:16]
             self._recorder.record_token_outcome(
-                run_id=self._run_id,
-                token_id=current_token.token_id,
+                ref=TokenRef(token_id=current_token.token_id, run_id=self._run_id),
                 outcome=RowOutcome.FAILED,
                 error_hash=error_hash,
             )
@@ -1697,8 +1692,7 @@ class RowProcessor:
             # Intentionally discarded - QUARANTINED
             quarantine_error_hash = hashlib.sha256(error_detail.encode()).hexdigest()[:16]
             self._recorder.record_token_outcome(
-                run_id=self._run_id,
-                token_id=current_token.token_id,
+                ref=TokenRef(token_id=current_token.token_id, run_id=self._run_id),
                 outcome=RowOutcome.QUARANTINED,
                 error_hash=quarantine_error_hash,
             )
