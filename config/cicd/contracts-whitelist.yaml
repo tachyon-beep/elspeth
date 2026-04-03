@@ -154,11 +154,12 @@ allowed_dict_patterns:
   # Canonical representation - deterministic JSON for hashing
   - "src/elspeth/core/canonical.py:_edge_to_canonical_dict:return"
 
+  # Result type serialization - to_dict() thaws MappingProxyType for JSON export
+  - "src/elspeth/contracts/run_result.py:RunResult.to_dict:return"
+  - "src/elspeth/engine/orchestrator/types.py:AggregationFlushResult.to_dict:return"
+
   # JSON parsing - object_pairs_hook must return dict (json.loads contract)
   - "src/elspeth/plugins/infrastructure/clients/json_utils.py:_reject_duplicate_keys:return"
-
-  # DAG builder - schema dict extraction from node info
-  - "src/elspeth/core/dag/builder.py:_best_schema_dict:return"
 
   # Catalog service - Pydantic model_json_schema() output (standard JSON Schema dict)
   - "src/elspeth/web/catalog/service.py:CatalogServiceImpl._get_json_schema:return"

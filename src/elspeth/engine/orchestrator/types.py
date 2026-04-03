@@ -25,7 +25,7 @@ from dataclasses import dataclass, field
 from types import MappingProxyType
 from typing import TYPE_CHECKING, Any
 
-from elspeth.contracts.freeze import freeze_fields
+from elspeth.contracts.freeze import deep_thaw, freeze_fields
 from elspeth.contracts.run_result import RunResult as RunResult  # re-exported
 
 if TYPE_CHECKING:
@@ -121,6 +121,25 @@ class AggregationFlushResult:
 
     def __post_init__(self) -> None:
         freeze_fields(self, "routed_destinations")
+
+    def to_dict(self) -> dict[str, Any]:
+        """Serialize to a plain dict for JSON export.
+
+        Replaces ``dataclasses.asdict()`` which cannot deep-copy
+        ``MappingProxyType`` fields.
+        """
+        return {
+            "rows_succeeded": self.rows_succeeded,
+            "rows_failed": self.rows_failed,
+            "rows_routed": self.rows_routed,
+            "rows_quarantined": self.rows_quarantined,
+            "rows_coalesced": self.rows_coalesced,
+            "rows_forked": self.rows_forked,
+            "rows_expanded": self.rows_expanded,
+            "rows_buffered": self.rows_buffered,
+            "rows_diverted": self.rows_diverted,
+            "routed_destinations": deep_thaw(self.routed_destinations),
+        }
 
     def __add__(self, other: AggregationFlushResult) -> AggregationFlushResult:
         """Combine two results by summing all counters."""

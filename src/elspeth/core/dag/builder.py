@@ -9,7 +9,6 @@ Dependency: models.py (leaf) — no import of graph.py at module level.
 
 from __future__ import annotations
 
-import copy
 import hashlib
 from collections import Counter, defaultdict
 from collections.abc import Mapping, Sequence
@@ -22,6 +21,7 @@ from elspeth.contracts import RouteDestination, RoutingMode, error_edge_label
 from elspeth.contracts.enums import NodeType
 from elspeth.contracts.errors import FrameworkBugError
 from elspeth.contracts.freeze import deep_freeze
+from elspeth.contracts.schema import FieldDefinition, SchemaConfig
 from elspeth.contracts.types import (
     AggregationName,
     BranchName,
@@ -49,49 +49,6 @@ if TYPE_CHECKING:
     )
     from elspeth.core.dag.graph import ExecutionGraph
     from elspeth.core.dag.models import NodeConfig, WiredTransform
-
-
-def _field_name_type(field_spec: Any) -> tuple[str, str]:
-    """Extract (field_name, field_type) from a field spec in any format.
-
-    Handles:
-    - String: ``"name: str"`` or ``"name: str?"``
-    - to_dict() dict: ``{"name": "x", "type": "str", "required": true}``
-    - YAML dict: ``{"id": "int"}``
-    """
-    if isinstance(field_spec, str):
-        name, _, type_part = field_spec.partition(":")
-        return name.strip(), type_part.strip().rstrip("?")
-    if isinstance(field_spec, dict):
-        if "name" in field_spec and "type" in field_spec:
-            return field_spec["name"], field_spec["type"]
-        if len(field_spec) == 1:
-            name, ftype = next(iter(field_spec.items()))
-            return str(name), str(ftype).rstrip("?")
-    msg = f"Cannot parse field spec: {field_spec!r}"
-    raise ValueError(msg)
-
-
-def _field_required(field_spec: Any) -> bool:
-    """Extract required status from a field spec.
-
-    - String ending with ``?``: optional (``False``)
-    - Dict with ``"required"`` key: use that value
-    - YAML dict ``{"id": "int?"}`` ending with ``?``: optional
-    - Otherwise: required (``True``)
-    """
-    if isinstance(field_spec, str):
-        return not field_spec.strip().endswith("?")
-    if isinstance(field_spec, dict):
-        if "required" in field_spec:
-            value = field_spec["required"]
-            if type(value) is not bool:
-                raise GraphValidationError(f"Field spec 'required' must be exactly bool, got {type(value).__name__}: {value!r}")
-            return value
-        if len(field_spec) == 1:
-            ftype = str(next(iter(field_spec.values())))
-            return not ftype.strip().endswith("?")
-    return True
 
 
 def _validate_output_schema_contract(transform: Any) -> None:
@@ -167,25 +124,30 @@ def build_execution_graph(
 
         return NodeID(generated)
 
-    def _best_schema_dict(nid: NodeID) -> dict[str, Any]:
-        """Get best available schema dict from a node.
+    def _best_schema_config(nid: NodeID) -> SchemaConfig:
+        """Get best available SchemaConfig from a node.
 
         Prefers computed output_schema_config (includes guaranteed_fields,
         audit_fields from e.g., LLM transforms) over raw config["schema"].
         Pass-through nodes (gates, coalesce) should inherit the computed
         schema so audit records reflect actual data contracts.
-
-        Returns a deep copy to prevent aliasing — mutations to the returned
-        dict must not affect the source node's schema or other nodes that
-        received the same schema.
         """
         info = graph.get_node_info(nid)
         if info.output_schema_config is not None:
-            return copy.deepcopy(info.output_schema_config.to_dict())
-        # config["schema"] is Any from NodeConfig (dict[str, Any] value access).
-        # It's always a dict at runtime — ensured by DataPluginConfig validation.
-        schema: dict[str, Any] = info.config["schema"]
-        return copy.deepcopy(schema)
+            return info.output_schema_config  # frozen, safe to share
+        schema_dict: dict[str, Any] = info.config["schema"]
+        return SchemaConfig.from_dict(schema_dict)
+
+    def _assign_schema(target_nid: NodeID, schema: SchemaConfig) -> None:
+        """Set both config["schema"] and output_schema_config on a pass-through node.
+
+        Maintains backward compatibility (config["schema"] for audit logging)
+        while also setting the typed output_schema_config so downstream consumers
+        get SchemaConfig directly via get_schema_config_from_node().
+        """
+        target_info = graph.get_node_info(target_nid)
+        target_info.config["schema"] = schema.to_dict()
+        object.__setattr__(target_info, "output_schema_config", schema)
 
     def _sink_name_set() -> set[str]:
         return {str(name) for name in sink_ids}
@@ -601,7 +563,7 @@ def build_execution_graph(
         producer_id, _producer_label = producers[input_connection]
         upstream_info = graph.get_node_info(producer_id)
         if upstream_info.output_schema_config is not None or "schema" in upstream_info.config:
-            graph.get_node_info(gate_id).config["schema"] = _best_schema_dict(producer_id)
+            _assign_schema(gate_id, _best_schema_config(producer_id))
         else:
             deferred_config_gate_schemas.append((gate_id, gate_name, input_connection))
 
@@ -837,12 +799,12 @@ def build_execution_graph(
         # Identity branches have COPY edges labelled with branch_name.
         # Transform branches have MOVE edges from the last transform — we
         # correlate via the coalesce config's branch_input → branch_name mapping.
-        branch_to_schema: dict[str, dict[str, Any]] = {}
+        branch_to_schema: dict[str, SchemaConfig] = {}
 
         for from_id, _to_id, _key, data in incoming_edges_with_data:
             edge_label = data["label"]
             edge_mode = data["mode"]
-            schema = _best_schema_dict(NodeID(from_id))
+            schema = _best_schema_config(NodeID(from_id))
 
             if edge_mode == RoutingMode.COPY and edge_label in coal_config.branches:
                 # Identity branch: COPY edge labelled with branch name
@@ -859,76 +821,76 @@ def build_execution_graph(
                         branch_to_schema[branch_name] = schema
                         break
 
+        # Collect contract fields from ALL branches for propagation.
+        #   guaranteed_fields = intersection (guaranteed by ALL branches)
+        #   audit_fields = union (any audit field from any branch)
+        #
+        # Every branch participates — absent guaranteed_fields means "I
+        # guarantee nothing", not "I abstain from the vote".  An undeclared
+        # branch collapses the intersection to ∅, which is correct: we
+        # can't promise downstream what an undeclared branch provides.
+        guaranteed_sets: list[set[str]] = []
+        audit_sets: list[set[str]] = []
+        for schema_cfg in branch_to_schema.values():
+            gf = schema_cfg.guaranteed_fields
+            guaranteed_sets.append(set(gf) if gf is not None else set())
+            af = schema_cfg.audit_fields
+            if af is not None:
+                audit_sets.append(set(af))
+        merged_guaranteed = set.intersection(*guaranteed_sets) if guaranteed_sets else set()
+        merged_audit = set.union(*audit_sets) if audit_sets else set()
+        merged_guaranteed_tuple = tuple(sorted(merged_guaranteed)) if merged_guaranteed else None
+        merged_audit_tuple = tuple(sorted(merged_audit)) if merged_audit else None
+
         if coal_config.merge == "union":
             # Union merge: require compatible types on ALL pairwise overlapping fields.
-            # Parse each branch's SchemaConfig dict to extract field definitions.
             # Tracks (type, required, first_branch) to preserve optionality markers.
             seen_types: dict[str, tuple[str, bool, str]] = {}  # field → (type, required, first_branch)
             all_observed = False
-            for branch_name, schema_dict in branch_to_schema.items():
-                if schema_dict["mode"] == "observed":
+            for branch_name, schema_cfg in branch_to_schema.items():
+                if schema_cfg.is_observed:
                     all_observed = True
                     break
-                # Non-observed schemas must have "fields" — to_dict() always emits
-                # it, and from_dict() rejects explicit schemas without it.  Absence
-                # here is a bug in the upstream schema provider (_best_schema_dict).
-                # See: elspeth-ba100104c2 (coalesce merge should use SchemaConfig).
-                fields_list = schema_dict["fields"]
-                if not fields_list:
+                if schema_cfg.fields is None:
                     continue
-                for field_spec in fields_list:
-                    fname, ftype = _field_name_type(field_spec)
-                    freq = _field_required(field_spec)
-                    if fname in seen_types:
-                        prior_type, _prior_req, prior_branch = seen_types[fname]
-                        if prior_type != ftype:
+                for fd in schema_cfg.fields:
+                    if fd.name in seen_types:
+                        prior_type, _prior_req, prior_branch = seen_types[fd.name]
+                        if prior_type != fd.field_type:
                             raise GraphValidationError(
                                 f"Coalesce node '{coalesce_id}' receives incompatible "
-                                f"types for field '{fname}' in union merge: "
+                                f"types for field '{fd.name}' in union merge: "
                                 f"branch '{prior_branch}' has {prior_type!r}, "
-                                f"branch '{branch_name}' has {ftype!r}. "
+                                f"branch '{branch_name}' has {fd.field_type!r}. "
                                 "Union merge requires compatible types on shared fields."
                             )
                         # If optional in ANY branch, optional in the merged output.
-                        if not freq:
-                            seen_types[fname] = (prior_type, False, prior_branch)
+                        if not fd.required:
+                            seen_types[fd.name] = (prior_type, False, prior_branch)
                     else:
-                        seen_types[fname] = (ftype, freq, branch_name)
-            # Build merged schema preserving contract fields.
+                        seen_types[fd.name] = (fd.field_type, fd.required, branch_name)
+
             if all_observed or not seen_types:
-                merged: dict[str, Any] = {"mode": "observed"}
+                merged_schema = SchemaConfig(
+                    mode="observed",
+                    fields=None,
+                    guaranteed_fields=merged_guaranteed_tuple,
+                    audit_fields=merged_audit_tuple,
+                )
             else:
-                merged = {
-                    "mode": "flexible",
-                    "fields": [f"{name}: {ftype}{'?' if not req else ''}" for name, (ftype, req, _) in seen_types.items()],
-                }
-            # Propagate contract fields from branches:
-            #   guaranteed_fields = intersection (guaranteed by ALL branches)
-            #   audit_fields = union (any audit field from any branch)
-            #
-            # Every branch participates — absent guaranteed_fields means "I
-            # guarantee nothing", not "I abstain from the vote".  An undeclared
-            # branch collapses the intersection to ∅, which is correct: we
-            # can't promise downstream what an undeclared branch provides.
-            # (Upstream should provide SchemaConfig objects, not dicts that
-            # may or may not carry optional keys — see bug ticket below.)
-            guaranteed_sets: list[set[str]] = []
-            audit_sets: list[set[str]] = []
-            for schema_dict in branch_to_schema.values():
-                gf = schema_dict.get("guaranteed_fields")
-                guaranteed_sets.append(set(gf) if gf is not None else set())
-                af = schema_dict.get("audit_fields")
-                if af is not None:
-                    audit_sets.append(set(af))
-            merged_guaranteed = set.intersection(*guaranteed_sets) if guaranteed_sets else set()
-            if merged_guaranteed:
-                merged["guaranteed_fields"] = sorted(merged_guaranteed)
-            if audit_sets:
-                merged["audit_fields"] = sorted(set.union(*audit_sets))
-            graph.get_node_info(coalesce_id).config["schema"] = merged
+                merged_fields = tuple(
+                    FieldDefinition(name=name, field_type=ftype, required=req)  # type: ignore[arg-type]  # ftype is Literal at runtime (from FieldDefinition.field_type)
+                    for name, (ftype, req, _) in seen_types.items()
+                )
+                merged_schema = SchemaConfig(
+                    mode="flexible",
+                    fields=merged_fields,
+                    guaranteed_fields=merged_guaranteed_tuple,
+                    audit_fields=merged_audit_tuple,
+                )
+            _assign_schema(coalesce_id, merged_schema)
         elif coal_config.merge == "select":
             # Select merge: use selected branch's schema directly.
-            # _best_schema_dict() returns a SchemaConfig-compatible dict.
             select_branch = coal_config.select_branch
             assert select_branch is not None  # Guaranteed by validate_merge_requirements
             if select_branch not in branch_to_schema:
@@ -938,7 +900,7 @@ def build_execution_graph(
                     f"{sorted(branch_to_schema.keys())}. "
                     "This indicates a graph construction bug."
                 )
-            graph.get_node_info(coalesce_id).config["schema"] = branch_to_schema[select_branch]
+            _assign_schema(coalesce_id, branch_to_schema[select_branch])
         else:
             # Nested merge: output has branch names as top-level fields, each
             # containing the branch's row data as a nested dict.  Since the type
@@ -946,17 +908,18 @@ def build_execution_graph(
             # For partial-arrival policies, branch fields are optional since not
             # all branches may arrive at runtime.
             optional = coal_config.policy != "require_all"
-            suffix = "?" if optional else ""
-            graph.get_node_info(coalesce_id).config["schema"] = {
-                "mode": "flexible",
-                "fields": [f"{branch}: any{suffix}" for branch in branch_to_schema],
-            }
+            nested_fields = tuple(FieldDefinition(name=branch, field_type="any", required=not optional) for branch in branch_to_schema)
+            nested_schema = SchemaConfig(
+                mode="flexible",
+                fields=nested_fields,
+            )
+            _assign_schema(coalesce_id, nested_schema)
 
     # Config gate schema resolution (pass 2): resolve gates that were deferred
     # because their upstream producer (e.g., coalesce) didn't have schema yet.
     for gate_id, _gate_name, input_connection in deferred_config_gate_schemas:
         producer_id, _producer_label = producers[input_connection]
-        graph.get_node_info(gate_id).config["schema"] = _best_schema_dict(producer_id)
+        _assign_schema(gate_id, _best_schema_config(producer_id))
 
     # PHASE 2 VALIDATION: Validate schema compatibility AFTER graph is built
     graph.validate_edge_compatibility()

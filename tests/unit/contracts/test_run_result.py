@@ -133,6 +133,34 @@ class TestRunResultImmutability:
             result.routed_destinations["sink_b"] = 10  # type: ignore[index]
 
 
+class TestRunResultSerialization:
+    """to_dict() must produce JSON-serializable output."""
+
+    def test_to_dict_returns_plain_dict(self) -> None:
+        result = make_run_result(routed_destinations={"sink_a": 5, "sink_b": 3})
+        d = result.to_dict()
+        assert isinstance(d, dict)
+        assert isinstance(d["routed_destinations"], dict)
+        assert d["routed_destinations"] == {"sink_a": 5, "sink_b": 3}
+
+    def test_to_dict_status_is_string(self) -> None:
+        result = make_run_result()
+        d = result.to_dict()
+        assert isinstance(d["status"], str)
+        assert d["status"] == "completed"
+
+    def test_to_dict_is_json_serializable(self) -> None:
+        import json
+
+        result = make_run_result(routed_destinations={"sink_a": 5})
+        json.dumps(result.to_dict())  # must not raise
+
+    def test_to_dict_empty_routed_destinations(self) -> None:
+        result = make_run_result()
+        d = result.to_dict()
+        assert d["routed_destinations"] == {}
+
+
 class TestRunResultFactory:
     """Tests for the make_run_result factory (ensures factory is usable)."""
 

@@ -10,9 +10,10 @@ from __future__ import annotations
 from collections.abc import Mapping
 from dataclasses import dataclass, field
 from types import MappingProxyType
+from typing import Any
 
 from elspeth.contracts.enums import RunStatus
-from elspeth.contracts.freeze import freeze_fields, require_int
+from elspeth.contracts.freeze import deep_thaw, freeze_fields, require_int
 
 
 @dataclass(frozen=True, slots=True)
@@ -49,3 +50,27 @@ class RunResult:
         require_int(self.rows_buffered, "rows_buffered", min_value=0)
         require_int(self.rows_diverted, "rows_diverted", min_value=0)
         freeze_fields(self, "routed_destinations")
+
+    def to_dict(self) -> dict[str, Any]:
+        """Serialize to a plain dict for JSON export.
+
+        Replaces ``dataclasses.asdict()`` which cannot deep-copy
+        ``MappingProxyType`` fields (raises ``TypeError: cannot pickle
+        'mappingproxy' object``).
+        """
+        return {
+            "run_id": self.run_id,
+            "status": self.status.value,
+            "rows_processed": self.rows_processed,
+            "rows_succeeded": self.rows_succeeded,
+            "rows_failed": self.rows_failed,
+            "rows_routed": self.rows_routed,
+            "rows_quarantined": self.rows_quarantined,
+            "rows_forked": self.rows_forked,
+            "rows_coalesced": self.rows_coalesced,
+            "rows_coalesce_failed": self.rows_coalesce_failed,
+            "rows_expanded": self.rows_expanded,
+            "rows_buffered": self.rows_buffered,
+            "rows_diverted": self.rows_diverted,
+            "routed_destinations": deep_thaw(self.routed_destinations),
+        }

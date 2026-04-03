@@ -52,12 +52,6 @@ per_file_rules:
   reason: Config format discrimination (str vs dict field specs)
   expires: null
   max_hits: 5
-- pattern: core/dag/builder.py
-  rules:
-  - R1
-  reason: Coalesce merge reads optional guaranteed_fields/audit_fields from schema dicts — upstream provides dicts not SchemaConfig (see elspeth-ba100104c2)
-  expires: '2026-06-14'
-  max_hits: 2
 - pattern: core/dag/graph.py
   rules:
   - R5

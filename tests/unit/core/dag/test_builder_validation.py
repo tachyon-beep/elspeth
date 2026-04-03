@@ -1,9 +1,9 @@
 """Tests for DAG builder validation guards — rejection paths.
 
 The builder constructs execution graphs from plugin instances and validates
-graph topology. These tests exercise the REJECTION paths: invalid field specs,
-ambiguous continue fallthrough, coalesce routing errors, and observed-mode
-short-circuits in union merge.
+graph topology. These tests exercise the REJECTION paths: ambiguous continue
+fallthrough, coalesce routing errors, and observed-mode short-circuits in
+union merge.
 """
 
 from __future__ import annotations
@@ -12,51 +12,8 @@ from typing import Any
 
 import pytest
 
-from elspeth.core.dag.builder import _field_name_type, _field_required
+from elspeth.contracts.schema import FieldDefinition, SchemaConfig
 from elspeth.core.dag.models import GraphValidationError
-
-
-class TestFieldNameTypeRejectsUnparseable:
-    """_field_name_type must raise ValueError for inputs that aren't str or single-key dict."""
-
-    def test_list_input_raises(self) -> None:
-        """List is not a valid field spec format."""
-        with pytest.raises(ValueError, match="Cannot parse field spec"):
-            _field_name_type([1, 2])
-
-    def test_integer_input_raises(self) -> None:
-        """Bare integer is not a valid field spec format."""
-        with pytest.raises(ValueError, match="Cannot parse field spec"):
-            _field_name_type(42)
-
-    def test_multi_key_dict_raises(self) -> None:
-        """Dict with 2+ keys but no name/type pair is unparseable."""
-        with pytest.raises(ValueError, match="Cannot parse field spec"):
-            _field_name_type({"id": "int", "score": "float"})
-
-    def test_empty_dict_raises(self) -> None:
-        """Empty dict has no keys to extract a field spec from."""
-        with pytest.raises(ValueError, match="Cannot parse field spec"):
-            _field_name_type({})
-
-    def test_none_input_raises(self) -> None:
-        """None is not a valid field spec format."""
-        with pytest.raises(ValueError, match="Cannot parse field spec"):
-            _field_name_type(None)
-
-
-class TestFieldRequiredRejectsNonBool:
-    """_field_required must crash when 'required' is truthy-but-not-bool."""
-
-    def test_integer_required_raises(self) -> None:
-        """Integer 1 is truthy but not bool — must raise GraphValidationError."""
-        with pytest.raises(GraphValidationError, match="must be exactly bool"):
-            _field_required({"name": "score", "type": "float", "required": 1})
-
-    def test_string_required_raises(self) -> None:
-        """String 'yes' is truthy but not bool — must raise GraphValidationError."""
-        with pytest.raises(GraphValidationError, match="must be exactly bool"):
-            _field_required({"name": "score", "type": "float", "required": "yes"})
 
 
 class TestCoalesceUnionMergeObservedShortCircuit:
@@ -69,70 +26,59 @@ class TestCoalesceUnionMergeObservedShortCircuit:
 
     def _build_coalesce_with_schemas(
         self,
-        branch_schemas: dict[str, dict[str, Any]],
-    ) -> dict[str, Any]:
-        """Build a fork graph and run the builder's union merge logic.
-
-        Constructs the graph manually and re-runs the merge inline,
-        following the pattern from test_dag_coalesce_optionality.py.
-        """
-        from elspeth.core.dag.builder import _field_name_type, _field_required
-
+        branch_schemas: dict[str, SchemaConfig],
+    ) -> SchemaConfig:
+        """Simulate the builder's union merge logic with SchemaConfig objects."""
         seen_types: dict[str, tuple[str, bool, str]] = {}
         all_observed = False
-        for branch_name, schema_dict in branch_schemas.items():
-            if schema_dict["mode"] == "observed":
+        for branch_name, schema_cfg in branch_schemas.items():
+            if schema_cfg.is_observed:
                 all_observed = True
                 break
-            fields_list = schema_dict.get("fields")
-            if not fields_list:
+            if schema_cfg.fields is None:
                 continue
-            for field_spec in fields_list:
-                fname, ftype = _field_name_type(field_spec)
-                freq = _field_required(field_spec)
-                if fname in seen_types:
-                    prior_type, _prior_req, prior_branch = seen_types[fname]
-                    if prior_type != ftype:
-                        raise GraphValidationError(f"Type mismatch for {fname}")
-                    if not freq:
-                        seen_types[fname] = (prior_type, False, prior_branch)
+            for fd in schema_cfg.fields:
+                if fd.name in seen_types:
+                    prior_type, _prior_req, prior_branch = seen_types[fd.name]
+                    if prior_type != fd.field_type:
+                        raise GraphValidationError(f"Type mismatch for {fd.name}")
+                    if not fd.required:
+                        seen_types[fd.name] = (prior_type, False, prior_branch)
                 else:
-                    seen_types[fname] = (ftype, freq, branch_name)
+                    seen_types[fd.name] = (fd.field_type, fd.required, branch_name)
 
         if all_observed or not seen_types:
-            return {"mode": "observed"}
-        return {
-            "mode": "flexible",
-            "fields": [f"{name}: {ftype}{'?' if not req else ''}" for name, (ftype, req, _) in seen_types.items()],
-        }
+            return SchemaConfig(mode="observed", fields=None)
+        merged_fields = tuple(FieldDefinition(name=name, field_type=ftype, required=req) for name, (ftype, req, _) in seen_types.items())
+        return SchemaConfig(mode="flexible", fields=merged_fields)
 
     def test_observed_branch_collapses_union_to_observed(self) -> None:
         """One declared + one observed branch → entire merge is observed."""
         result = self._build_coalesce_with_schemas(
             {
-                "branch_a": {
-                    "mode": "flexible",
-                    "fields": ["id: int", "score: float"],
-                },
-                "branch_b": {"mode": "observed"},
+                "branch_a": SchemaConfig(
+                    mode="flexible",
+                    fields=(FieldDefinition("id", "int"), FieldDefinition("score", "float")),
+                ),
+                "branch_b": SchemaConfig(mode="observed", fields=None),
             }
         )
-        assert result["mode"] == "observed"
-        assert "fields" not in result
+        assert result.is_observed
+        assert result.fields is None
 
     def test_observed_first_branch_collapses_union_to_observed(self) -> None:
         """Observed branch FIRST still collapses — order should not matter."""
         result = self._build_coalesce_with_schemas(
             {
-                "branch_a": {"mode": "observed"},
-                "branch_b": {
-                    "mode": "flexible",
-                    "fields": ["id: int", "label: str"],
-                },
+                "branch_a": SchemaConfig(mode="observed", fields=None),
+                "branch_b": SchemaConfig(
+                    mode="flexible",
+                    fields=(FieldDefinition("id", "int"), FieldDefinition("label", "str")),
+                ),
             }
         )
-        assert result["mode"] == "observed"
-        assert "fields" not in result
+        assert result.is_observed
+        assert result.fields is None
 
 
 class TestAmbiguousContinueFallthrough:

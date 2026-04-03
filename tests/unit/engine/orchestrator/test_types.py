@@ -156,6 +156,19 @@ class TestAggregationFlushResult:
         assert result + zero == result
         assert zero + result == result
 
+    def test_to_dict_returns_plain_dict(self) -> None:
+        result = AggregationFlushResult(rows_succeeded=5, rows_routed=2, routed_destinations={"sink_a": 2})
+        d = result.to_dict()
+        assert isinstance(d, dict)
+        assert isinstance(d["routed_destinations"], dict)
+        assert d["routed_destinations"] == {"sink_a": 2}
+
+    def test_to_dict_is_json_serializable(self) -> None:
+        import json
+
+        result = AggregationFlushResult(routed_destinations={"sink_a": 3})
+        json.dumps(result.to_dict())  # must not raise
+
 
 # ---------------------------------------------------------------------------
 # T18: New type tests
