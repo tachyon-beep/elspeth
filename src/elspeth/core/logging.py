@@ -11,12 +11,34 @@ Architecture:
     the same output format as modules using structlog.get_logger().
 """
 
+import io
 import logging
 import sys
 from typing import Any
 
 import structlog
 from structlog.stdlib import ProcessorFormatter
+
+
+class _LazyStdoutStream(io.TextIOBase):
+    """Stream wrapper that delegates to the current sys.stdout at write time.
+
+    StreamHandler(sys.stdout) captures a reference to stdout at construction.
+    Under pytest (or any tool that swaps stdout), the captured reference goes
+    stale after the swap's scope ends. This wrapper resolves sys.stdout lazily
+    on every write, so it always targets the live stdout.
+    """
+
+    def write(self, s: str) -> int:
+        return sys.stdout.write(s)
+
+    def flush(self) -> None:
+        sys.stdout.flush()
+
+    @property
+    def closed(self) -> bool:
+        return sys.stdout.closed
+
 
 # Third-party loggers that are excessively verbose at DEBUG level.
 # These emit HTTP connection details, credential operations, etc. that
@@ -121,7 +143,7 @@ def configure_logging(
 
     # Configure stdlib logging with ProcessorFormatter
     # This ensures stdlib loggers go through structlog's processor chain
-    handler = logging.StreamHandler(sys.stdout)
+    handler = logging.StreamHandler(_LazyStdoutStream())
     handler.setFormatter(
         ProcessorFormatter(
             processors=final_processors,

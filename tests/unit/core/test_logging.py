@@ -10,6 +10,26 @@ import pytest
 class TestLoggingConfig:
     """Tests for logging configuration."""
 
+    @pytest.fixture(autouse=True)
+    def _restore_root_logger(self) -> None:
+        """Save/restore root logger handlers so configure_logging() doesn't leak.
+
+        configure_logging() adds a StreamHandler(sys.stdout) to the root logger.
+        Under pytest, sys.stdout is a capture wrapper that gets closed after each
+        test. Without cleanup, subsequent tests hit the dead stream (221 times).
+        """
+        from elspeth.core.logging import _elspeth_handler_ids
+
+        root = logging.getLogger()
+        saved_handlers = list(root.handlers)
+        saved_level = root.level
+        saved_ids = set(_elspeth_handler_ids)
+        yield
+        root.handlers = saved_handlers
+        root.level = saved_level
+        _elspeth_handler_ids.clear()
+        _elspeth_handler_ids.update(saved_ids)
+
     def test_logger_outputs_structured(self, capsys: pytest.CaptureFixture[str]) -> None:
         """Logger outputs structured JSON."""
         from elspeth.core.logging import configure_logging, get_logger
