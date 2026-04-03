@@ -9,6 +9,7 @@ from __future__ import annotations
 import csv
 import io
 import json
+import keyword
 from typing import Any
 from unittest.mock import MagicMock, patch
 
@@ -34,7 +35,7 @@ PATCH_AUTH = "elspeth.plugins.infrastructure.azure_auth.AzureAuthConfig.create_b
 
 # Safe column names: valid ASCII identifiers starting with a letter.
 # Avoids normalization surprises (digit-prefix, keyword suffixing).
-safe_column_name = st.from_regex(r"[a-z][a-z0-9]{0,9}", fullmatch=True)
+safe_column_name = st.from_regex(r"[a-z][a-z0-9]{0,9}", fullmatch=True).filter(lambda s: not keyword.iskeyword(s))
 
 # Safe text for CSV values: ASCII letters/digits/spaces,
 # no commas, newlines, or quotes.
