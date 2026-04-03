@@ -83,3 +83,11 @@ def test_all_plugin_errors_share_retryable_interface():
     for err in errors:
         assert isinstance(err, PluginRetryableError)
         assert err.retryable is True
+
+
+def test_web_scrape_error_requires_retryable_keyword():
+    """WebScrapeError must not have a default for retryable — matches PluginRetryableError contract."""
+    import pytest
+
+    with pytest.raises(TypeError):
+        WebScrapeError("missing retryable keyword")

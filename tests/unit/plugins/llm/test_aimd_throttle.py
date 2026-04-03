@@ -185,3 +185,26 @@ class TestAIMDThrottleStats:
         assert stats["successes"] == 0
         # current_delay is NOT reset - only counters
         assert stats["current_delay_ms"] == 0  # Was recovered to 0
+
+
+class TestThrottleConfigValidation:
+    """Test ThrottleConfig __post_init__ guards."""
+
+    def test_zero_recovery_and_zero_min_delay_rejected(self) -> None:
+        """Both zero = AIMD can never recover from capacity errors."""
+        import pytest
+
+        with pytest.raises(ValueError, match="cannot both be 0"):
+            ThrottleConfig(recovery_step_ms=0, min_dispatch_delay_ms=0)
+
+    def test_zero_recovery_with_nonzero_min_delay_allowed(self) -> None:
+        """recovery_step_ms=0 is fine if min_dispatch_delay_ms provides a floor."""
+        config = ThrottleConfig(recovery_step_ms=0, min_dispatch_delay_ms=10)
+        assert config.recovery_step_ms == 0
+        assert config.min_dispatch_delay_ms == 10
+
+    def test_zero_min_delay_with_nonzero_recovery_allowed(self) -> None:
+        """min_dispatch_delay_ms=0 is fine if recovery_step_ms provides bootstrap."""
+        config = ThrottleConfig(recovery_step_ms=50, min_dispatch_delay_ms=0)
+        assert config.recovery_step_ms == 50
+        assert config.min_dispatch_delay_ms == 0

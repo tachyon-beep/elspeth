@@ -1007,7 +1007,7 @@ async def send_message(
     body: MessageRequest,
     session_service: SessionService = Depends(get_session_service),
     composer_service: ComposerService = Depends(get_composer_service),
-    current_user: User = Depends(get_current_user),
+    current_user: UserIdentity = Depends(get_current_user),
 ) -> MessageResponse:
     """Handle a user message — trigger the LLM composer.
 
@@ -1099,7 +1099,7 @@ Add to `src/elspeth/web/sessions/routes.py`:
 async def get_session_yaml(
     session_id: str,
     session_service: SessionService = Depends(get_session_service),
-    current_user: User = Depends(get_current_user),
+    current_user: UserIdentity = Depends(get_current_user),
 ) -> dict[str, str]:
     """Return the generated YAML for the session's current composition state.
 

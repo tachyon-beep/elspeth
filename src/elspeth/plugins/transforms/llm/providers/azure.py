@@ -167,7 +167,7 @@ class AzureLLMProvider:
 
             # Extract finish_reason from raw_response.
             # raw_response is the Azure SDK's deserialized API response (Tier 3
-            # external boundary — validate structure once, then direct access).
+            # external boundary — validate structure, then safe access on optional keys).
             finish_reason = None
             if response.raw_response is not None:
                 if "choices" not in response.raw_response:

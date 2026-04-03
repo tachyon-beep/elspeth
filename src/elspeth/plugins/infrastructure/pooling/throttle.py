@@ -45,6 +45,11 @@ class ThrottleConfig:
             raise ValueError(f"ThrottleConfig.backoff_multiplier must be > 1.0 and finite, got {self.backoff_multiplier}")
         if self.recovery_step_ms < 0:
             raise ValueError(f"ThrottleConfig.recovery_step_ms must be non-negative, got {self.recovery_step_ms}")
+        if self.recovery_step_ms == 0 and self.min_dispatch_delay_ms == 0:
+            raise ValueError(
+                "ThrottleConfig.recovery_step_ms and min_dispatch_delay_ms cannot both be 0 "
+                "— AIMD backoff would never recover from capacity errors"
+            )
 
 
 class AIMDThrottle:
