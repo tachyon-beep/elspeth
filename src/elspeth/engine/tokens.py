@@ -12,6 +12,7 @@ import copy
 from typing import Any
 
 from elspeth.contracts import SourceRow, TokenInfo
+from elspeth.contracts.audit import TokenRef
 from elspeth.contracts.errors import OrchestrationInvariantError
 from elspeth.contracts.schema_contract import PipelineRow, SchemaContract
 from elspeth.contracts.types import NodeID, StepResolver
@@ -240,10 +241,9 @@ class TokenManager:
         step = self._step_resolver(node_id)
 
         children, fork_group_id = self._recorder.fork_token(
-            parent_token_id=parent_token.token_id,
+            parent_ref=TokenRef(token_id=parent_token.token_id, run_id=run_id),
             row_id=parent_token.row_id,
             branches=branches,
-            run_id=run_id,
             step_in_pipeline=step,
         )
 
@@ -351,10 +351,9 @@ class TokenManager:
         # Delegate to recorder which handles DB operations and parent linking
         step = self._step_resolver(node_id)
         db_children, expand_group_id = self._recorder.expand_token(
-            parent_token_id=parent_token.token_id,
+            parent_ref=TokenRef(token_id=parent_token.token_id, run_id=run_id),
             row_id=parent_token.row_id,
             count=len(expanded_rows),
-            run_id=run_id,
             step_in_pipeline=step,
             record_parent_outcome=record_parent_outcome,
         )

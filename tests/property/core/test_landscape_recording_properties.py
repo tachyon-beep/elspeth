@@ -31,6 +31,7 @@ from elspeth.contracts import (
     RowOutcome,
     RunStatus,
 )
+from elspeth.contracts.audit import TokenRef
 from elspeth.contracts.schema import SchemaConfig
 from elspeth.contracts.schema_contract import FieldContract, SchemaContract
 from elspeth.core.landscape import LandscapeDB, LandscapeRecorder
@@ -225,7 +226,7 @@ class TestTokenOutcomeContractProperties:
         """Property: COMPLETED without sink_name raises ValueError."""
         db, recorder, run_id, token_id = self._setup()
         with pytest.raises(ValueError, match="COMPLETED outcome requires sink_name"):
-            recorder.record_token_outcome(run_id=run_id, token_id=token_id, outcome=RowOutcome.COMPLETED)
+            recorder.record_token_outcome(ref=TokenRef(token_id=token_id, run_id=run_id), outcome=RowOutcome.COMPLETED)
         db.close()
 
     @given(sink=sink_names)
@@ -233,7 +234,9 @@ class TestTokenOutcomeContractProperties:
     def test_completed_with_sink_name_succeeds(self, sink: str) -> None:
         """Property: COMPLETED with valid sink_name succeeds."""
         db, recorder, run_id, token_id = self._setup()
-        outcome_id = recorder.record_token_outcome(run_id=run_id, token_id=token_id, outcome=RowOutcome.COMPLETED, sink_name=sink)
+        outcome_id = recorder.record_token_outcome(
+            ref=TokenRef(token_id=token_id, run_id=run_id), outcome=RowOutcome.COMPLETED, sink_name=sink
+        )
         assert outcome_id is not None
         db.close()
 
@@ -241,56 +244,56 @@ class TestTokenOutcomeContractProperties:
         """Property: ROUTED without sink_name raises ValueError."""
         db, recorder, run_id, token_id = self._setup()
         with pytest.raises(ValueError, match="ROUTED outcome requires sink_name"):
-            recorder.record_token_outcome(run_id=run_id, token_id=token_id, outcome=RowOutcome.ROUTED)
+            recorder.record_token_outcome(ref=TokenRef(token_id=token_id, run_id=run_id), outcome=RowOutcome.ROUTED)
         db.close()
 
     def test_forked_requires_fork_group_id(self) -> None:
         """Property: FORKED without fork_group_id raises ValueError."""
         db, recorder, run_id, token_id = self._setup()
         with pytest.raises(ValueError, match="FORKED outcome requires fork_group_id"):
-            recorder.record_token_outcome(run_id=run_id, token_id=token_id, outcome=RowOutcome.FORKED)
+            recorder.record_token_outcome(ref=TokenRef(token_id=token_id, run_id=run_id), outcome=RowOutcome.FORKED)
         db.close()
 
     def test_failed_requires_error_hash(self) -> None:
         """Property: FAILED without error_hash raises ValueError."""
         db, recorder, run_id, token_id = self._setup()
         with pytest.raises(ValueError, match="FAILED outcome requires error_hash"):
-            recorder.record_token_outcome(run_id=run_id, token_id=token_id, outcome=RowOutcome.FAILED)
+            recorder.record_token_outcome(ref=TokenRef(token_id=token_id, run_id=run_id), outcome=RowOutcome.FAILED)
         db.close()
 
     def test_quarantined_requires_error_hash(self) -> None:
         """Property: QUARANTINED without error_hash raises ValueError."""
         db, recorder, run_id, token_id = self._setup()
         with pytest.raises(ValueError, match="QUARANTINED outcome requires error_hash"):
-            recorder.record_token_outcome(run_id=run_id, token_id=token_id, outcome=RowOutcome.QUARANTINED)
+            recorder.record_token_outcome(ref=TokenRef(token_id=token_id, run_id=run_id), outcome=RowOutcome.QUARANTINED)
         db.close()
 
     def test_consumed_in_batch_requires_batch_id(self) -> None:
         """Property: CONSUMED_IN_BATCH without batch_id raises ValueError."""
         db, recorder, run_id, token_id = self._setup()
         with pytest.raises(ValueError, match="CONSUMED_IN_BATCH outcome requires batch_id"):
-            recorder.record_token_outcome(run_id=run_id, token_id=token_id, outcome=RowOutcome.CONSUMED_IN_BATCH)
+            recorder.record_token_outcome(ref=TokenRef(token_id=token_id, run_id=run_id), outcome=RowOutcome.CONSUMED_IN_BATCH)
         db.close()
 
     def test_coalesced_requires_join_group_id(self) -> None:
         """Property: COALESCED without join_group_id raises ValueError."""
         db, recorder, run_id, token_id = self._setup()
         with pytest.raises(ValueError, match="COALESCED outcome requires join_group_id"):
-            recorder.record_token_outcome(run_id=run_id, token_id=token_id, outcome=RowOutcome.COALESCED)
+            recorder.record_token_outcome(ref=TokenRef(token_id=token_id, run_id=run_id), outcome=RowOutcome.COALESCED)
         db.close()
 
     def test_expanded_requires_expand_group_id(self) -> None:
         """Property: EXPANDED without expand_group_id raises ValueError."""
         db, recorder, run_id, token_id = self._setup()
         with pytest.raises(ValueError, match="EXPANDED outcome requires expand_group_id"):
-            recorder.record_token_outcome(run_id=run_id, token_id=token_id, outcome=RowOutcome.EXPANDED)
+            recorder.record_token_outcome(ref=TokenRef(token_id=token_id, run_id=run_id), outcome=RowOutcome.EXPANDED)
         db.close()
 
     def test_buffered_requires_batch_id(self) -> None:
         """Property: BUFFERED without batch_id raises ValueError."""
         db, recorder, run_id, token_id = self._setup()
         with pytest.raises(ValueError, match="BUFFERED outcome requires batch_id"):
-            recorder.record_token_outcome(run_id=run_id, token_id=token_id, outcome=RowOutcome.BUFFERED)
+            recorder.record_token_outcome(ref=TokenRef(token_id=token_id, run_id=run_id), outcome=RowOutcome.BUFFERED)
         db.close()
 
 
@@ -503,10 +506,9 @@ class TestReferentialIntegrityProperties:
 
             branches = [f"b_{i}" for i in range(branch_count)]
             children, _fork_group_id = recorder.fork_token(
-                parent_token_id=parent.token_id,
+                parent_ref=TokenRef(token_id=parent.token_id, run_id=run.run_id),
                 row_id=row.row_id,
                 branches=branches,
-                run_id=run.run_id,
             )
 
             assert len(children) == branch_count
@@ -539,10 +541,9 @@ class TestReferentialIntegrityProperties:
 
             with pytest.raises(ValueError, match="at least one branch"):
                 recorder.fork_token(
-                    parent_token_id=parent.token_id,
+                    parent_ref=TokenRef(token_id=parent.token_id, run_id=run.run_id),
                     row_id=row.row_id,
                     branches=[],
-                    run_id=run.run_id,
                 )
 
     @given(count=st.integers(min_value=1, max_value=5))
@@ -572,10 +573,9 @@ class TestReferentialIntegrityProperties:
             parent = recorder.create_token(row_id=row.row_id)
 
             children, expand_group_id = recorder.expand_token(
-                parent_token_id=parent.token_id,
+                parent_ref=TokenRef(token_id=parent.token_id, run_id=run.run_id),
                 row_id=row.row_id,
                 count=count,
-                run_id=run.run_id,
             )
 
             assert len(children) == count

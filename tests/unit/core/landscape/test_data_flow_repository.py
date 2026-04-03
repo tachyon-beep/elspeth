@@ -30,6 +30,7 @@ from elspeth.contracts import (
     RoutingMode,
     RowOutcome,
 )
+from elspeth.contracts.audit import TokenRef
 from elspeth.contracts.errors import AuditIntegrityError
 from elspeth.contracts.hashing import repr_hash
 from elspeth.contracts.schema import SchemaConfig
@@ -177,9 +178,8 @@ class TestRecordTokenOutcomeDirect:
     def test_records_completed_outcome(self) -> None:
         _db, repo, _rec, _row, tok = _make_repo_with_token()
         outcome_id = repo.record_token_outcome(
-            "run-1",
-            tok,
-            RowOutcome.COMPLETED,
+            ref=TokenRef(token_id=tok, run_id="run-1"),
+            outcome=RowOutcome.COMPLETED,
             sink_name="sink-0",
         )
         assert outcome_id.startswith("out_")
@@ -187,9 +187,8 @@ class TestRecordTokenOutcomeDirect:
     def test_roundtrip_via_get_token_outcome(self) -> None:
         _db, repo, _rec, _row, tok = _make_repo_with_token()
         repo.record_token_outcome(
-            "run-1",
-            tok,
-            RowOutcome.COMPLETED,
+            ref=TokenRef(token_id=tok, run_id="run-1"),
+            outcome=RowOutcome.COMPLETED,
             sink_name="sink-0",
         )
         fetched = repo.get_token_outcome(tok)
@@ -204,9 +203,8 @@ class TestRecordTokenOutcomeDirect:
         rec.begin_run(config={}, canonical_version="v1", run_id="run-2")
         with pytest.raises(AuditIntegrityError, match="Cross-run contamination"):
             repo.record_token_outcome(
-                "run-2",
-                tok,
-                RowOutcome.COMPLETED,
+                ref=TokenRef(token_id=tok, run_id="run-2"),
+                outcome=RowOutcome.COMPLETED,
                 sink_name="sink-0",
             )
 
@@ -355,8 +353,7 @@ class TestRecordTransformErrorDirect:
     def test_returns_terr_prefixed_id(self) -> None:
         _db, repo, _rec, _row, tok = _make_repo_with_token()
         error_id = repo.record_transform_error(
-            run_id="run-1",
-            token_id=tok,
+            ref=TokenRef(token_id=tok, run_id="run-1"),
             transform_id="transform-1",
             row_data={"name": "test"},
             error_details={"reason": "test_error", "field": "amount", "error": "ZeroDivisionError"},
@@ -374,8 +371,7 @@ class TestRecordTransformErrorDirect:
         _db, repo, _rec, _row, tok = _make_repo_with_token()
         with pytest.raises(AuditIntegrityError, match="Invalid TransformErrorCategory"):
             repo.record_transform_error(
-                run_id="run-1",
-                token_id=tok,
+                ref=TokenRef(token_id=tok, run_id="run-1"),
                 transform_id="transform-1",
                 row_data={"name": "test"},
                 error_details={"reason": "banana_error", "error": "this is not a real category"},  # type: ignore[typeddict-item]  # intentionally invalid reason
@@ -386,8 +382,7 @@ class TestRecordTransformErrorDirect:
         """Valid TransformErrorCategory is accepted at the Tier 1 boundary."""
         _db, repo, _rec, _row, tok = _make_repo_with_token()
         error_id = repo.record_transform_error(
-            run_id="run-1",
-            token_id=tok,
+            ref=TokenRef(token_id=tok, run_id="run-1"),
             transform_id="transform-1",
             row_data={"name": "test"},
             error_details={"reason": "api_error", "error": "timeout"},
@@ -411,8 +406,7 @@ class TestRecordTransformErrorDirect:
 
         with pytest.raises(AuditIntegrityError, match="Cross-run contamination"):
             repo.record_transform_error(
-                run_id="run-2",
-                token_id=tok,
+                ref=TokenRef(token_id=tok, run_id="run-2"),
                 transform_id="transform-1",
                 row_data={"name": "test"},
                 error_details={"reason": "test_error", "field": "f", "error": "E"},
@@ -558,10 +552,9 @@ class TestForkTokenAtomicity:
 
         with pytest.raises(RuntimeError, match="Injected failure"):
             repo.fork_token(
-                parent_token_id=tok_id,
+                parent_ref=TokenRef(token_id=tok_id, run_id="run-1"),
                 row_id=row_id,
                 branches=["a", "b"],
-                run_id="run-1",
             )
 
         # Verify: zero partial state — all counts unchanged
@@ -579,10 +572,9 @@ class TestCoalesceTokensAtomicity:
 
         # Fork first to get two child tokens to coalesce
         children, _fg = repo.fork_token(
-            parent_token_id=tok_id,
+            parent_ref=TokenRef(token_id=tok_id, run_id="run-1"),
             row_id=row_id,
             branches=["a", "b"],
-            run_id="run-1",
         )
         child_ids = [c.token_id for c in children]
 
@@ -661,10 +653,9 @@ class TestExpandTokenAtomicity:
 
         with pytest.raises(RuntimeError, match="Injected failure"):
             repo.expand_token(
-                parent_token_id=tok_id,
+                parent_ref=TokenRef(token_id=tok_id, run_id="run-1"),
                 row_id=row_id,
                 count=3,
-                run_id="run-1",
                 step_in_pipeline=2,
             )
 
@@ -709,10 +700,9 @@ class TestForkTokenRowcountValidation:
 
         with pytest.raises(AuditIntegrityError, match="zero rows"):
             repo.fork_token(
-                parent_token_id=tok_id,
+                parent_ref=TokenRef(token_id=tok_id, run_id="run-1"),
                 row_id=row_id,
                 branches=["a"],
-                run_id="run-1",
             )
 
 
@@ -725,10 +715,9 @@ class TestCoalesceTokensRowcountValidation:
 
         # Fork first to get children to coalesce
         children, _fg = repo.fork_token(
-            parent_token_id=tok_id,
+            parent_ref=TokenRef(token_id=tok_id, run_id="run-1"),
             row_id=row_id,
             branches=["a", "b"],
-            run_id="run-1",
         )
         child_ids = [c.token_id for c in children]
 
@@ -796,10 +785,9 @@ class TestExpandTokenRowcountValidation:
 
         with pytest.raises(AuditIntegrityError, match="zero rows"):
             repo.expand_token(
-                parent_token_id=tok_id,
+                parent_ref=TokenRef(token_id=tok_id, run_id="run-1"),
                 row_id=row_id,
                 count=2,
-                run_id="run-1",
             )
 
 
@@ -868,3 +856,38 @@ class TestCreateRowQuarantined:
         parsed = json.loads(stored_bytes.decode("utf-8"))
         assert parsed == {"v": 42}
         assert "_repr" not in parsed
+
+
+# ===========================================================================
+# H1: TokenRef validation — _validate_token_run_ownership with bundled refs
+# ===========================================================================
+
+
+class TestValidateTokenRunOwnership:
+    """Tests for _validate_token_run_ownership accepting TokenRef.
+
+    These test the validation at the point where TokenRef is first verified
+    against the audit database. They ensure the cross-run contamination
+    check works correctly with the bundled type.
+    """
+
+    def test_valid_ref_passes(self) -> None:
+        """A TokenRef where token belongs to the specified run should pass."""
+        _db, repo, _rec, _row, tok = _make_repo_with_token(run_id="run-1")
+        ref = TokenRef(token_id=tok, run_id="run-1")
+        # Should not raise
+        repo._validate_token_run_ownership(ref)
+
+    def test_mismatched_run_raises_audit_integrity_error(self) -> None:
+        """A TokenRef with wrong run_id should raise AuditIntegrityError."""
+        _db, repo, _rec, _row, tok = _make_repo_with_token(run_id="run-1")
+        ref = TokenRef(token_id=tok, run_id="wrong-run-id")
+        with pytest.raises(AuditIntegrityError, match="Cross-run contamination"):
+            repo._validate_token_run_ownership(ref)
+
+    def test_nonexistent_token_raises(self) -> None:
+        """A TokenRef with a token_id not in the DB should raise."""
+        _db, repo, _rec = _make_repo()
+        ref = TokenRef(token_id="nonexistent-token", run_id="run-1")
+        with pytest.raises(AuditIntegrityError):
+            repo._validate_token_run_ownership(ref)

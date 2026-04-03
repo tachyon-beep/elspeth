@@ -33,6 +33,7 @@ from elspeth.contracts.aggregation_checkpoint import (
     AggregationNodeCheckpoint,
     AggregationTokenCheckpoint,
 )
+from elspeth.contracts.audit import TokenRef
 from elspeth.contracts.config.runtime import RuntimeCheckpointConfig
 from elspeth.contracts.contract_records import ContractAuditRecord
 from elspeth.contracts.diversion import SinkWriteResult
@@ -433,8 +434,7 @@ class TestResumeIdempotence:
         # Record terminal outcomes for first 3 rows
         for i in range(3):
             recorder.record_token_outcome(
-                token_id=token_ids[i],
-                run_id=run_id,
+                ref=TokenRef(token_id=token_ids[i], run_id=run_id),
                 outcome=RowOutcome.COMPLETED,
                 sink_name="default",
             )

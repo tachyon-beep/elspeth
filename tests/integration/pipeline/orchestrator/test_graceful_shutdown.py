@@ -15,6 +15,7 @@ from typing import TYPE_CHECKING, Any
 import pytest
 
 from elspeth.contracts import PipelineRow, RunStatus
+from elspeth.contracts.audit import TokenRef
 from elspeth.contracts.errors import GracefulShutdownError
 from elspeth.contracts.results import SourceRow
 from elspeth.contracts.schema_contract import FieldContract, SchemaContract
@@ -893,8 +894,7 @@ class TestInterruptAndResume:
         recorder = make_recorder(db)
         for i in range(processed_count):
             recorder.record_token_outcome(
-                run_id=run_id,
-                token_id=f"t{i}",
+                ref=TokenRef(token_id=f"t{i}", run_id=run_id),
                 outcome=RowOutcome.COMPLETED,
                 sink_name="default",
             )

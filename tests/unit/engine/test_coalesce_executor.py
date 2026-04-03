@@ -523,7 +523,7 @@ class TestLateArrival:
         # Should record a terminal FAILED token outcome immediately
         recorder.record_token_outcome.assert_called_once()
         outcome_call = recorder.record_token_outcome.call_args
-        assert outcome_call.kwargs["token_id"] == "t_late"
+        assert outcome_call.kwargs["ref"].token_id == "t_late"
         assert outcome_call.kwargs["outcome"] == RowOutcome.FAILED
         assert isinstance(outcome_call.kwargs["error_hash"], str)
         assert len(outcome_call.kwargs["error_hash"]) == 16
@@ -1277,7 +1277,7 @@ class TestAuditTrailDetails:
         executor.register_coalesce(_settings(), "node_1")
         executor.accept(_make_token(branch_name="a", token_id="t1"), "merge")
         executor.accept(_make_token(branch_name="b", token_id="t2"), "merge")
-        token_ids = {c.kwargs["token_id"] for c in recorder.record_token_outcome.call_args_list}
+        token_ids = {c.kwargs["ref"].token_id for c in recorder.record_token_outcome.call_args_list}
         assert token_ids == {"t1", "t2"}
 
     def test_merge_metadata_arrival_order(self):

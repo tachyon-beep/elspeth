@@ -156,7 +156,7 @@ class TestDiscardMode:
         outcome_calls = recorder.record_token_outcome.call_args_list
         assert len(outcome_calls) == 2
         # Build a lookup by token_id for order-independence
-        outcomes_by_token = {c.kwargs["token_id"]: c.kwargs for c in outcome_calls}
+        outcomes_by_token = {c.kwargs["ref"].token_id: c.kwargs for c in outcome_calls}
         # t0 (index 0) → COMPLETED
         assert outcomes_by_token["t0"]["outcome"] == RowOutcome.COMPLETED
         assert outcomes_by_token["t0"]["sink_name"] == "primary"
@@ -539,7 +539,7 @@ class TestNonContiguousDiversions:
             pending_outcome=PendingOutcome(RowOutcome.COMPLETED),
         )
         outcome_calls = recorder.record_token_outcome.call_args_list
-        outcomes_by_token = {c.kwargs["token_id"]: c.kwargs["outcome"] for c in outcome_calls}
+        outcomes_by_token = {c.kwargs["ref"].token_id: c.kwargs["outcome"] for c in outcome_calls}
         assert outcomes_by_token["t0"] == RowOutcome.DIVERTED
         assert outcomes_by_token["t1"] == RowOutcome.COMPLETED
         assert outcomes_by_token["t2"] == RowOutcome.DIVERTED

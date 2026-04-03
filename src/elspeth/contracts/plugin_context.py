@@ -15,6 +15,7 @@ from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any
 
+from elspeth.contracts.audit import TokenRef
 from elspeth.contracts.call_data import RawCallPayload
 from elspeth.contracts.freeze import deep_freeze
 
@@ -508,8 +509,7 @@ class PluginContext:
             )
 
         error_id = self.landscape.record_transform_error(
-            run_id=self.run_id,
-            token_id=token_id,
+            ref=TokenRef(token_id=token_id, run_id=self.run_id),
             transform_id=transform_id,
             row_data=row,
             error_details=error_details,

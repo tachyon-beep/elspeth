@@ -30,6 +30,7 @@ from elspeth.contracts import (
     RowOutcome,
     TriggerType,
 )
+from elspeth.contracts.audit import TokenRef
 from elspeth.contracts.call_data import RawCallPayload
 from elspeth.contracts.schema import SchemaConfig
 from elspeth.core.landscape.database import LandscapeDB
@@ -209,7 +210,7 @@ def _build_multi_run_landscape() -> MultiRunFixture:
                 re_id = re_obj.event_id
 
             # Record token outcome
-            recorder.record_token_outcome(run_id, tok_id, RowOutcome.COMPLETED, sink_name="output")
+            recorder.record_token_outcome(ref=TokenRef(token_id=tok_id, run_id=run_id), outcome=RowOutcome.COMPLETED, sink_name="output")
 
             row_ids.append(row_id)
             token_infos.append(TokenInfo(token_id=tok_id, row_id=row_id, state_id=state_id, call_id=call_id, routing_event_id=re_id))

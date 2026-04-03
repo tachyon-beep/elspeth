@@ -5,6 +5,7 @@ from __future__ import annotations
 from datetime import UTC
 from typing import TYPE_CHECKING
 
+from elspeth.contracts.audit import TokenRef
 from elspeth.contracts.schema import SchemaConfig
 
 if TYPE_CHECKING:
@@ -87,8 +88,7 @@ class TestTransformErrorRecording:
         self._create_token_with_dependencies(recorder, run.run_id, "tok_123", "field_mapper")
 
         error_id = recorder.record_transform_error(
-            run_id=run.run_id,
-            token_id="tok_123",
+            ref=TokenRef(token_id="tok_123", run_id=run.run_id),
             transform_id="field_mapper",
             row_data={"id": 42, "value": "bad"},
             error_details={"reason": "validation_failed", "error": "Division by zero"},
@@ -115,8 +115,7 @@ class TestTransformErrorRecording:
         self._create_token_with_dependencies(recorder, run.run_id, "tok_456", "field_mapper")
 
         error_id = recorder.record_transform_error(
-            run_id=run.run_id,
-            token_id="tok_456",
+            ref=TokenRef(token_id="tok_456", run_id=run.run_id),
             transform_id="field_mapper",
             row_data={"id": 42, "value": "bad"},
             error_details={"reason": "validation_failed", "error": "Division by zero", "field": "divisor"},
@@ -159,8 +158,7 @@ class TestTransformErrorRecording:
         expected_hash = stable_hash(row_data)
 
         error_id = recorder.record_transform_error(
-            run_id=run.run_id,
-            token_id="tok_789",
+            ref=TokenRef(token_id="tok_789", run_id=run.run_id),
             transform_id="processor",
             row_data=row_data,
             error_details={"reason": "validation_failed", "error": "Processing failed"},
@@ -191,8 +189,7 @@ class TestTransformErrorRecording:
         self._create_token_with_dependencies(recorder, run.run_id, "tok_999", "gate")
 
         error_id = recorder.record_transform_error(
-            run_id=run.run_id,
-            token_id="tok_999",
+            ref=TokenRef(token_id="tok_999", run_id=run.run_id),
             transform_id="gate",
             row_data={"id": 1},
             error_details={"reason": "validation_failed", "error": "Gate evaluation failed"},
@@ -232,8 +229,7 @@ class TestTransformErrorRecording:
         row_data = {"id": 42, "score": float("nan"), "label": "test"}
 
         error_id = recorder.record_transform_error(
-            run_id=run.run_id,
-            token_id="tok_nan",
+            ref=TokenRef(token_id="tok_nan", run_id=run.run_id),
             transform_id="processor",
             row_data=row_data,
             error_details={"reason": "float_overflow", "error": "Cannot divide by zero"},  # type: ignore[typeddict-item]  # intentionally invalid reason
@@ -274,8 +270,7 @@ class TestTransformErrorRecording:
         row_data = {"id": 1, "value": float("inf")}
 
         error_id = recorder.record_transform_error(
-            run_id=run.run_id,
-            token_id="tok_inf",
+            ref=TokenRef(token_id="tok_inf", run_id=run.run_id),
             transform_id="processor",
             row_data=row_data,
             error_details={"reason": "float_overflow", "error": "Value too large"},  # type: ignore[typeddict-item]  # intentionally invalid reason

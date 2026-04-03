@@ -33,6 +33,7 @@ from elspeth.contracts import (
     RowOutcome,
     RunStatus,
 )
+from elspeth.contracts.audit import TokenRef
 from elspeth.contracts.call_data import RawCallPayload
 from elspeth.contracts.errors import AuditIntegrityError, ExecutionError, TransformErrorReason
 from elspeth.core.landscape.lineage import explain
@@ -126,9 +127,8 @@ def _build_linear_pipeline(
     if complete_token:
         outcome = RowOutcome.FAILED if fail_transform else RowOutcome.COMPLETED
         recorder.record_token_outcome(
-            run_id,
-            token.token_id,
-            outcome,
+            ref=TokenRef(token_id=token.token_id, run_id=run_id),
+            outcome=outcome,
             sink_name=None if fail_transform else "csv_sink",
             error_hash="e" * 64 if fail_transform else None,
         )
@@ -250,8 +250,16 @@ class TestExplainTokenLineage:
         error_reason: TransformErrorReason = {"reason": "validation_failed", "message": "division by zero"}
         recorder.complete_node_state(ns.state_id, NodeStateStatus.FAILED, error=error_reason, duration_ms=5.0)
 
-        recorder.record_transform_error(run_id, token.token_id, "xform", {"x": 1}, error_reason, "quarantine")
-        recorder.record_token_outcome(run_id, token.token_id, RowOutcome.QUARANTINED, error_hash="b" * 64)
+        recorder.record_transform_error(
+            ref=TokenRef(token_id=token.token_id, run_id=run_id),
+            transform_id="xform",
+            row_data={"x": 1},
+            error_details=error_reason,
+            destination="quarantine",
+        )
+        recorder.record_token_outcome(
+            ref=TokenRef(token_id=token.token_id, run_id=run_id), outcome=RowOutcome.QUARANTINED, error_hash="b" * 64
+        )
         recorder.complete_run(run_id, RunStatus.FAILED)
 
         result = explain(recorder, run_id, token_id=token.token_id)
@@ -372,8 +380,16 @@ class TestGetFailureContext:
         error_reason: TransformErrorReason = {"reason": "llm_call_failed", "error": "timeout"}
         recorder.complete_node_state(ns.state_id, NodeStateStatus.FAILED, error=error_reason, duration_ms=5000.0)
 
-        recorder.record_transform_error("terr-run", token.token_id, "xform", {"text": "hello"}, error_reason, "quarantine")
-        recorder.record_token_outcome("terr-run", token.token_id, RowOutcome.QUARANTINED, error_hash="c" * 64)
+        recorder.record_transform_error(
+            ref=TokenRef(token_id=token.token_id, run_id="terr-run"),
+            transform_id="xform",
+            row_data={"text": "hello"},
+            error_details=error_reason,
+            destination="quarantine",
+        )
+        recorder.record_token_outcome(
+            ref=TokenRef(token_id=token.token_id, run_id="terr-run"), outcome=RowOutcome.QUARANTINED, error_hash="c" * 64
+        )
         recorder.complete_run("terr-run", RunStatus.FAILED)
 
         result = get_failure_context(db, recorder, "terr-run")
@@ -447,7 +463,9 @@ class TestGetFailureContext:
             error=ExecutionError(exception="test_failure", exception_type="TestFailure"),
         )
 
-        recorder.record_token_outcome("retry-run", token.token_id, RowOutcome.FAILED, error_hash="d" * 64)
+        recorder.record_token_outcome(
+            ref=TokenRef(token_id=token.token_id, run_id="retry-run"), outcome=RowOutcome.FAILED, error_hash="d" * 64
+        )
         recorder.complete_run("retry-run", RunStatus.FAILED)
 
         result = get_failure_context(db, recorder, "retry-run")
@@ -485,7 +503,9 @@ class TestGetFailureContext:
             error=ExecutionError(exception="test_failure", exception_type="TestFailure"),
         )
 
-        recorder.record_token_outcome("first-retry-run", token.token_id, RowOutcome.FAILED, error_hash="e" * 64)
+        recorder.record_token_outcome(
+            ref=TokenRef(token_id=token.token_id, run_id="first-retry-run"), outcome=RowOutcome.FAILED, error_hash="e" * 64
+        )
         recorder.complete_run("first-retry-run", RunStatus.FAILED)
 
         result = get_failure_context(db, recorder, "first-retry-run")
@@ -524,7 +544,9 @@ class TestGetFailureContext:
             duration_ms=10.0,
             error=ExecutionError(exception="test_failure", exception_type="TestFailure"),
         )
-        recorder.record_token_outcome("run-X", token_x.token_id, RowOutcome.FAILED, error_hash="e" * 64)
+        recorder.record_token_outcome(
+            ref=TokenRef(token_id=token_x.token_id, run_id="run-X"), outcome=RowOutcome.FAILED, error_hash="e" * 64
+        )
         recorder.complete_run("run-X", RunStatus.FAILED)
 
         # Run Y: same node_id "xform" but different plugin "field_mapper"
@@ -542,7 +564,9 @@ class TestGetFailureContext:
             duration_ms=20.0,
             error=ExecutionError(exception="test_failure", exception_type="TestFailure"),
         )
-        recorder.record_token_outcome("run-Y", token_y.token_id, RowOutcome.FAILED, error_hash="f" * 64)
+        recorder.record_token_outcome(
+            ref=TokenRef(token_id=token_y.token_id, run_id="run-Y"), outcome=RowOutcome.FAILED, error_hash="f" * 64
+        )
         recorder.complete_run("run-Y", RunStatus.FAILED)
 
         # Query run-X failure context
@@ -572,8 +596,16 @@ class TestGetFailureContext:
         row_p = recorder.create_row("run-P", "src", row_index=0, data={"p": 1})
         token_p = recorder.create_token(row_p.row_id)
         error_reason: TransformErrorReason = {"reason": "retry_timeout"}
-        recorder.record_transform_error("run-P", token_p.token_id, "xform", {"p": 1}, error_reason, "quarantine")
-        recorder.record_token_outcome("run-P", token_p.token_id, RowOutcome.QUARANTINED, error_hash="a" * 64)
+        recorder.record_transform_error(
+            ref=TokenRef(token_id=token_p.token_id, run_id="run-P"),
+            transform_id="xform",
+            row_data={"p": 1},
+            error_details=error_reason,
+            destination="quarantine",
+        )
+        recorder.record_token_outcome(
+            ref=TokenRef(token_id=token_p.token_id, run_id="run-P"), outcome=RowOutcome.QUARANTINED, error_hash="a" * 64
+        )
         recorder.complete_run("run-P", RunStatus.FAILED)
 
         # Run Q: same node_id "xform" but "fast_transform"
@@ -583,8 +615,16 @@ class TestGetFailureContext:
         row_q = recorder.create_row("run-Q", "src", row_index=0, data={"q": 2})
         token_q = recorder.create_token(row_q.row_id)
         error_reason_q: TransformErrorReason = {"reason": "invalid_input"}
-        recorder.record_transform_error("run-Q", token_q.token_id, "xform", {"q": 2}, error_reason_q, "quarantine")
-        recorder.record_token_outcome("run-Q", token_q.token_id, RowOutcome.QUARANTINED, error_hash="b" * 64)
+        recorder.record_transform_error(
+            ref=TokenRef(token_id=token_q.token_id, run_id="run-Q"),
+            transform_id="xform",
+            row_data={"q": 2},
+            error_details=error_reason_q,
+            destination="quarantine",
+        )
+        recorder.record_token_outcome(
+            ref=TokenRef(token_id=token_q.token_id, run_id="run-Q"), outcome=RowOutcome.QUARANTINED, error_hash="b" * 64
+        )
         recorder.complete_run("run-Q", RunStatus.FAILED)
 
         result_p = get_failure_context(db, recorder, "run-P")
@@ -613,7 +653,9 @@ class TestGetFailureContext:
                 duration_ms=10.0,
                 error=ExecutionError(exception="test_failure", exception_type="TestFailure"),
             )
-            recorder.record_token_outcome("limit-run", token.token_id, RowOutcome.FAILED, error_hash="a" * 64)
+            recorder.record_token_outcome(
+                ref=TokenRef(token_id=token.token_id, run_id="limit-run"), outcome=RowOutcome.FAILED, error_hash="a" * 64
+            )
 
         recorder.complete_run("limit-run", RunStatus.FAILED)
 
@@ -641,7 +683,9 @@ class TestGetFailureContext:
             duration_ms=10.0,
             error=ExecutionError(exception="test_failure", exception_type="TestFailure"),
         )
-        recorder.record_token_outcome("pattern-run", token0.token_id, RowOutcome.FAILED, error_hash="a" * 64)
+        recorder.record_token_outcome(
+            ref=TokenRef(token_id=token0.token_id, run_id="pattern-run"), outcome=RowOutcome.FAILED, error_hash="a" * 64
+        )
 
         # Fail in xform-b
         row1 = recorder.create_row("pattern-run", "src", row_index=1, data={"i": 1})
@@ -653,7 +697,9 @@ class TestGetFailureContext:
             duration_ms=10.0,
             error=ExecutionError(exception="test_failure", exception_type="TestFailure"),
         )
-        recorder.record_token_outcome("pattern-run", token1.token_id, RowOutcome.FAILED, error_hash="b" * 64)
+        recorder.record_token_outcome(
+            ref=TokenRef(token_id=token1.token_id, run_id="pattern-run"), outcome=RowOutcome.FAILED, error_hash="b" * 64
+        )
 
         recorder.complete_run("pattern-run", RunStatus.FAILED)
 
@@ -711,8 +757,16 @@ class TestGetRunSummary:
         row = recorder.create_row("err-run", "src", row_index=0, data={"x": 1})
         token = recorder.create_token(row.row_id)
         error_reason: TransformErrorReason = {"reason": "api_error"}
-        recorder.record_transform_error("err-run", token.token_id, "xform", {"x": 1}, error_reason, "quarantine")
-        recorder.record_token_outcome("err-run", token.token_id, RowOutcome.QUARANTINED, error_hash="a" * 64)
+        recorder.record_transform_error(
+            ref=TokenRef(token_id=token.token_id, run_id="err-run"),
+            transform_id="xform",
+            row_data={"x": 1},
+            error_details=error_reason,
+            destination="quarantine",
+        )
+        recorder.record_token_outcome(
+            ref=TokenRef(token_id=token.token_id, run_id="err-run"), outcome=RowOutcome.QUARANTINED, error_hash="a" * 64
+        )
         recorder.complete_run("err-run", RunStatus.COMPLETED)
 
         result = get_run_summary(db, recorder, "err-run")
@@ -733,17 +787,23 @@ class TestGetRunSummary:
         # Row 0: completed
         row0 = recorder.create_row("dist-run", "src", row_index=0, data={"i": 0})
         token0 = recorder.create_token(row0.row_id)
-        recorder.record_token_outcome("dist-run", token0.token_id, RowOutcome.COMPLETED, sink_name="csv_sink")
+        recorder.record_token_outcome(
+            ref=TokenRef(token_id=token0.token_id, run_id="dist-run"), outcome=RowOutcome.COMPLETED, sink_name="csv_sink"
+        )
 
         # Row 1: quarantined
         row1 = recorder.create_row("dist-run", "src", row_index=1, data={"i": 1})
         token1 = recorder.create_token(row1.row_id)
-        recorder.record_token_outcome("dist-run", token1.token_id, RowOutcome.QUARANTINED, error_hash="b" * 64)
+        recorder.record_token_outcome(
+            ref=TokenRef(token_id=token1.token_id, run_id="dist-run"), outcome=RowOutcome.QUARANTINED, error_hash="b" * 64
+        )
 
         # Row 2: completed
         row2 = recorder.create_row("dist-run", "src", row_index=2, data={"i": 2})
         token2 = recorder.create_token(row2.row_id)
-        recorder.record_token_outcome("dist-run", token2.token_id, RowOutcome.COMPLETED, sink_name="csv_sink")
+        recorder.record_token_outcome(
+            ref=TokenRef(token_id=token2.token_id, run_id="dist-run"), outcome=RowOutcome.COMPLETED, sink_name="csv_sink"
+        )
 
         recorder.complete_run("dist-run", RunStatus.COMPLETED)
 
@@ -851,8 +911,16 @@ class TestFailureContextCorruptionGuards:
         row = recorder.create_row("corrupt-te", "src", row_index=0, data={"x": 1})
         token = recorder.create_token(row.row_id)
         error_reason: TransformErrorReason = {"reason": "test_error"}
-        recorder.record_transform_error("corrupt-te", token.token_id, "xform", {"x": 1}, error_reason, "quarantine")
-        recorder.record_token_outcome("corrupt-te", token.token_id, RowOutcome.QUARANTINED, error_hash="a" * 64)
+        recorder.record_transform_error(
+            ref=TokenRef(token_id=token.token_id, run_id="corrupt-te"),
+            transform_id="xform",
+            row_data={"x": 1},
+            error_details=error_reason,
+            destination="quarantine",
+        )
+        recorder.record_token_outcome(
+            ref=TokenRef(token_id=token.token_id, run_id="corrupt-te"), outcome=RowOutcome.QUARANTINED, error_hash="a" * 64
+        )
         recorder.complete_run("corrupt-te", RunStatus.FAILED)
 
         _delete_node(db, "corrupt-te", "xform")
@@ -899,8 +967,16 @@ class TestErrorAnalysisCorruptionGuard:
         row = recorder.create_row("corrupt-ea", "src", row_index=0, data={"x": 1})
         token = recorder.create_token(row.row_id)
         error_reason: TransformErrorReason = {"reason": "test_error"}
-        recorder.record_transform_error("corrupt-ea", token.token_id, "xform", {"x": 1}, error_reason, "quarantine")
-        recorder.record_token_outcome("corrupt-ea", token.token_id, RowOutcome.QUARANTINED, error_hash="a" * 64)
+        recorder.record_transform_error(
+            ref=TokenRef(token_id=token.token_id, run_id="corrupt-ea"),
+            transform_id="xform",
+            row_data={"x": 1},
+            error_details=error_reason,
+            destination="quarantine",
+        )
+        recorder.record_token_outcome(
+            ref=TokenRef(token_id=token.token_id, run_id="corrupt-ea"), outcome=RowOutcome.QUARANTINED, error_hash="a" * 64
+        )
         recorder.complete_run("corrupt-ea", RunStatus.FAILED)
 
         _delete_node(db, "corrupt-ea", "xform")
@@ -918,8 +994,16 @@ class TestErrorAnalysisCorruptionGuard:
         row = recorder.create_row("clean-ea", "src", row_index=0, data={"x": 1})
         token = recorder.create_token(row.row_id)
         error_reason: TransformErrorReason = {"reason": "test_error"}
-        recorder.record_transform_error("clean-ea", token.token_id, "xform", {"x": 1}, error_reason, "quarantine")
-        recorder.record_token_outcome("clean-ea", token.token_id, RowOutcome.QUARANTINED, error_hash="a" * 64)
+        recorder.record_transform_error(
+            ref=TokenRef(token_id=token.token_id, run_id="clean-ea"),
+            transform_id="xform",
+            row_data={"x": 1},
+            error_details=error_reason,
+            destination="quarantine",
+        )
+        recorder.record_token_outcome(
+            ref=TokenRef(token_id=token.token_id, run_id="clean-ea"), outcome=RowOutcome.QUARANTINED, error_hash="a" * 64
+        )
         recorder.complete_run("clean-ea", RunStatus.FAILED)
 
         result = get_error_analysis(db, recorder, "clean-ea")
@@ -963,8 +1047,12 @@ class TestExplainTokenErrorHandling:
         row = recorder.create_row("et-ambig", "src", row_index=0, data={"x": 1})
         token_a = recorder.create_token(row.row_id)
         token_b = recorder.create_token(row.row_id)
-        recorder.record_token_outcome("et-ambig", token_a.token_id, RowOutcome.COMPLETED, sink_name="sink_a")
-        recorder.record_token_outcome("et-ambig", token_b.token_id, RowOutcome.COMPLETED, sink_name="sink_b")
+        recorder.record_token_outcome(
+            ref=TokenRef(token_id=token_a.token_id, run_id="et-ambig"), outcome=RowOutcome.COMPLETED, sink_name="sink_a"
+        )
+        recorder.record_token_outcome(
+            ref=TokenRef(token_id=token_b.token_id, run_id="et-ambig"), outcome=RowOutcome.COMPLETED, sink_name="sink_b"
+        )
         recorder.complete_run("et-ambig", RunStatus.COMPLETED)
 
         analyzer = LandscapeAnalyzer.__new__(LandscapeAnalyzer)

@@ -5,6 +5,7 @@ import json
 import pytest
 
 from elspeth.contracts import NodeType
+from elspeth.contracts.audit import TokenRef
 from elspeth.contracts.errors import AuditIntegrityError
 from elspeth.contracts.schema import SchemaConfig
 from elspeth.core.canonical import stable_hash
@@ -299,8 +300,7 @@ class TestRecordTransformError:
     def test_returns_error_id_with_terr_prefix(self):
         _db, recorder = _setup_with_token()
         error_id = recorder.record_transform_error(
-            run_id="run-1",
-            token_id="tok-1",
+            ref=TokenRef(token_id="tok-1", run_id="run-1"),
             transform_id="transform-1",
             row_data={"name": "test"},
             error_details={"reason": "validation_failed", "field": "amount", "error": "ZeroDivisionError"},
@@ -317,8 +317,7 @@ class TestRecordTransformError:
             "error": "ZeroDivisionError: division by zero",
         }
         error_id = recorder.record_transform_error(
-            run_id="run-1",
-            token_id="tok-1",
+            ref=TokenRef(token_id="tok-1", run_id="run-1"),
             transform_id="transform-1",
             row_data=row_data,
             error_details=error_details,
@@ -341,8 +340,7 @@ class TestRecordTransformError:
         _db, recorder = _setup_with_token()
         row_data = {"name": "test"}
         recorder.record_transform_error(
-            run_id="run-1",
-            token_id="tok-1",
+            ref=TokenRef(token_id="tok-1", run_id="run-1"),
             transform_id="transform-1",
             row_data=row_data,
             error_details={"reason": "invalid_input", "field": "date", "error": "ValueError"},
@@ -357,8 +355,7 @@ class TestRecordTransformError:
         _db, recorder = _setup_with_token()
         row_data = {"name": "test", "value": 42}
         recorder.record_transform_error(
-            run_id="run-1",
-            token_id="tok-1",
+            ref=TokenRef(token_id="tok-1", run_id="run-1"),
             transform_id="transform-1",
             row_data=row_data,
             error_details={"reason": "type_mismatch", "field": "value", "error": "OverflowError"},
@@ -373,16 +370,14 @@ class TestRecordTransformError:
     def test_multiple_errors_for_same_token(self):
         _db, recorder = _setup_with_token()
         recorder.record_transform_error(
-            run_id="run-1",
-            token_id="tok-1",
+            ref=TokenRef(token_id="tok-1", run_id="run-1"),
             transform_id="transform-1",
             row_data={"name": "test"},
             error_details={"reason": "api_error", "field": "f1", "error": "Error A"},
             destination="quarantine",
         )
         recorder.record_transform_error(
-            run_id="run-1",
-            token_id="tok-1",
+            ref=TokenRef(token_id="tok-1", run_id="run-1"),
             transform_id="transform-1",
             row_data={"name": "test"},
             error_details={"reason": "network_error", "field": "f2", "error": "Error B"},
@@ -396,16 +391,14 @@ class TestRecordTransformError:
     def test_unique_error_ids_per_call(self):
         _db, recorder = _setup_with_token()
         id1 = recorder.record_transform_error(
-            run_id="run-1",
-            token_id="tok-1",
+            ref=TokenRef(token_id="tok-1", run_id="run-1"),
             transform_id="transform-1",
             row_data={"name": "test"},
             error_details={"reason": "missing_field", "field": "x", "error": "A"},
             destination="quarantine",
         )
         id2 = recorder.record_transform_error(
-            run_id="run-1",
-            token_id="tok-1",
+            ref=TokenRef(token_id="tok-1", run_id="run-1"),
             transform_id="transform-1",
             row_data={"name": "test"},
             error_details={"reason": "permanent_error", "field": "y", "error": "B"},
@@ -612,8 +605,7 @@ class TestGetTransformErrorsForToken:
     def test_returns_errors_for_token(self):
         _db, recorder = _setup_with_token()
         recorder.record_transform_error(
-            run_id="run-1",
-            token_id="tok-1",
+            ref=TokenRef(token_id="tok-1", run_id="run-1"),
             transform_id="transform-1",
             row_data={"name": "test"},
             error_details={"reason": "invalid_input", "field": "date", "error": "ValueError"},
@@ -626,8 +618,7 @@ class TestGetTransformErrorsForToken:
     def test_empty_for_unknown_token(self):
         _db, recorder = _setup_with_token()
         recorder.record_transform_error(
-            run_id="run-1",
-            token_id="tok-1",
+            ref=TokenRef(token_id="tok-1", run_id="run-1"),
             transform_id="transform-1",
             row_data={"name": "test"},
             error_details={"reason": "test_error", "field": "f", "error": "E"},
@@ -642,16 +633,14 @@ class TestGetTransformErrorsForToken:
         recorder.create_row("run-1", "source-0", 1, {"name": "other"}, row_id="row-2")
         recorder.create_token("row-2", token_id="tok-2")
         recorder.record_transform_error(
-            run_id="run-1",
-            token_id="tok-1",
+            ref=TokenRef(token_id="tok-1", run_id="run-1"),
             transform_id="transform-1",
             row_data={"name": "test"},
             error_details={"reason": "api_call_failed", "field": "f", "error": "E1"},
             destination="quarantine",
         )
         recorder.record_transform_error(
-            run_id="run-1",
-            token_id="tok-2",
+            ref=TokenRef(token_id="tok-2", run_id="run-1"),
             transform_id="transform-1",
             row_data={"name": "other"},
             error_details={"reason": "llm_call_failed", "field": "f", "error": "E2"},
@@ -678,16 +667,14 @@ class TestGetTransformErrorsForRun:
         recorder.create_row("run-1", "source-0", 1, {"name": "other"}, row_id="row-2")
         recorder.create_token("row-2", token_id="tok-2")
         recorder.record_transform_error(
-            run_id="run-1",
-            token_id="tok-1",
+            ref=TokenRef(token_id="tok-1", run_id="run-1"),
             transform_id="transform-1",
             row_data={"name": "test"},
             error_details={"reason": "api_error", "field": "f1", "error": "A"},
             destination="quarantine",
         )
         recorder.record_transform_error(
-            run_id="run-1",
-            token_id="tok-2",
+            ref=TokenRef(token_id="tok-2", run_id="run-1"),
             transform_id="transform-1",
             row_data={"name": "other"},
             error_details={"reason": "network_error", "field": "f2", "error": "B"},
@@ -735,16 +722,14 @@ class TestGetTransformErrorsForRun:
         recorder.create_row("run-2", "source-0", 0, {"n": "b"}, row_id="row-r2")
         recorder.create_token("row-r2", token_id="tok-r2")
         recorder.record_transform_error(
-            run_id="run-1",
-            token_id="tok-r1",
+            ref=TokenRef(token_id="tok-r1", run_id="run-1"),
             transform_id="transform-1",
             row_data={"n": "a"},
             error_details={"reason": "api_error", "field": "f", "error": "E"},
             destination="quarantine",
         )
         recorder.record_transform_error(
-            run_id="run-2",
-            token_id="tok-r2",
+            ref=TokenRef(token_id="tok-r2", run_id="run-2"),
             transform_id="transform-1",
             row_data={"n": "b"},
             error_details={"reason": "network_error", "field": "f", "error": "E"},
@@ -762,8 +747,7 @@ class TestGetTransformErrorsForRun:
         valid_reasons = ["api_error", "network_error", "missing_field", "type_mismatch", "validation_failed"]
         for i in range(5):
             recorder.record_transform_error(
-                run_id="run-1",
-                token_id="tok-1",
+                ref=TokenRef(token_id="tok-1", run_id="run-1"),
                 transform_id="transform-1",
                 row_data={"idx": i},
                 error_details={"reason": valid_reasons[i], "field": "f", "error": "E"},
@@ -787,8 +771,7 @@ class TestRecordTransformErrorNaNFallback:
         """error_details containing NaN should use repr-based fallback."""
         _db, recorder = _setup_with_token()
         error_id = recorder.record_transform_error(
-            run_id="run-1",
-            token_id="tok-1",
+            ref=TokenRef(token_id="tok-1", run_id="run-1"),
             transform_id="transform-1",
             row_data={"name": "test"},
             error_details={"reason": "validation_failed", "field": "ratio", "error": "nan_result", "value": float("nan")},
@@ -808,8 +791,7 @@ class TestRecordTransformErrorNaNFallback:
         """error_details containing Infinity should use repr-based fallback."""
         _db, recorder = _setup_with_token()
         error_id = recorder.record_transform_error(
-            run_id="run-1",
-            token_id="tok-1",
+            ref=TokenRef(token_id="tok-1", run_id="run-1"),
             transform_id="transform-1",
             row_data={"name": "test"},
             error_details={"reason": "type_mismatch", "field": "big", "error": "inf", "value": float("inf")},
@@ -821,8 +803,7 @@ class TestRecordTransformErrorNaNFallback:
         """Normal error_details should still use canonical JSON (no fallback)."""
         _db, recorder = _setup_with_token()
         recorder.record_transform_error(
-            run_id="run-1",
-            token_id="tok-1",
+            ref=TokenRef(token_id="tok-1", run_id="run-1"),
             transform_id="transform-1",
             row_data={"name": "test"},
             error_details={"reason": "invalid_input", "field": "date", "error": "invalid format"},
@@ -879,8 +860,7 @@ class TestRecordTransformErrorCrossRunPrevention:
         # Attempt to record error under run-B -- must crash
         with pytest.raises(AuditIntegrityError, match="Cross-run contamination"):
             recorder.record_transform_error(
-                run_id="run-B",
-                token_id="tok-A",
+                ref=TokenRef(token_id="tok-A", run_id="run-B"),
                 transform_id="transform-1",
                 row_data={"name": "test"},
                 error_details={"reason": "test_error", "field": "f", "error": "E"},
@@ -892,8 +872,7 @@ class TestRecordTransformErrorCrossRunPrevention:
         _db, recorder = _setup_with_token(run_id="run-1")
 
         error_id = recorder.record_transform_error(
-            run_id="run-1",
-            token_id="tok-1",
+            ref=TokenRef(token_id="tok-1", run_id="run-1"),
             transform_id="transform-1",
             row_data={"name": "test"},
             error_details={"reason": "test_error", "field": "f", "error": "E"},
@@ -907,8 +886,7 @@ class TestRecordTransformErrorCrossRunPrevention:
 
         with pytest.raises(AuditIntegrityError, match="does not exist"):
             recorder.record_transform_error(
-                run_id="run-1",
-                token_id="nonexistent-token",
+                ref=TokenRef(token_id="nonexistent-token", run_id="run-1"),
                 transform_id="transform-1",
                 row_data={"name": "test"},
                 error_details={"reason": "test_error", "field": "f", "error": "E"},

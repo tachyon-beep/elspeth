@@ -30,6 +30,7 @@ from elspeth.contracts import (
     ValidationErrorRecord,
     ValidationErrorWithContract,
 )
+from elspeth.contracts.audit import TokenRef
 from elspeth.contracts.errors import AuditIntegrityError
 from elspeth.contracts.hashing import repr_hash
 from elspeth.core.canonical import canonical_json, stable_hash
@@ -145,24 +146,23 @@ class DataFlowRepository:
             )
         return result.row_id, result.run_id
 
-    def _validate_token_run_ownership(self, token_id: str, run_id: str) -> None:
+    def _validate_token_run_ownership(self, ref: TokenRef) -> None:
         """Validate that a token belongs to the specified run.
 
         Per Tier 1 trust model: cross-run contamination of audit records is
         evidence tampering. Crash immediately if the invariant is violated.
 
         Args:
-            token_id: Token to validate
-            run_id: Expected run ID
+            ref: TokenRef to validate — token_id must belong to run_id
 
         Raises:
             AuditIntegrityError: If token does not belong to the specified run
         """
-        _row_id, actual_run_id = self._resolve_token_ownership(token_id)
-        if actual_run_id != run_id:
+        _row_id, actual_run_id = self._resolve_token_ownership(ref.token_id)
+        if actual_run_id != ref.run_id:
             raise AuditIntegrityError(
-                f"Cross-run contamination prevented: token {token_id!r} belongs to "
-                f"run {actual_run_id!r}, but caller supplied run_id={run_id!r}. "
+                f"Cross-run contamination prevented: token {ref.token_id!r} belongs to "
+                f"run {actual_run_id!r}, but caller supplied run_id={ref.run_id!r}. "
                 f"This would corrupt the audit trail by attributing records to the wrong run."
             )
 
@@ -441,11 +441,10 @@ class DataFlowRepository:
 
     def fork_token(
         self,
-        parent_token_id: str,
+        parent_ref: TokenRef,
         row_id: str,
         branches: list[str],
         *,
-        run_id: str,
         step_in_pipeline: int | None = None,
     ) -> tuple[list[Token], str]:
         """Fork a token to multiple branches.
@@ -453,15 +452,14 @@ class DataFlowRepository:
         ATOMIC: Creates children AND records parent FORKED outcome in single transaction.
         Stores branch contract for recovery validation.
 
-        Validates that parent_token_id belongs to the specified row_id and run_id
+        Validates that parent token belongs to the specified row_id and run_id
         before any writes. Cross-run/cross-row contamination crashes immediately
         per Tier 1 trust model.
 
         Args:
-            parent_token_id: Token being forked
+            parent_ref: TokenRef bundling parent token_id and run_id
             row_id: Row ID (same for all children)
             branches: List of branch names (must have at least one)
-            run_id: Run ID (required for outcome recording)
             step_in_pipeline: Step in the DAG where the fork occurs
 
         Returns:
@@ -478,8 +476,8 @@ class DataFlowRepository:
             raise ValueError("fork_token requires at least one branch")
 
         # Validate parent token ownership before any writes (Tier 1 invariant)
-        self._validate_token_run_ownership(parent_token_id, run_id)
-        self._validate_token_row_ownership(parent_token_id, row_id)
+        self._validate_token_run_ownership(parent_ref)
+        self._validate_token_row_ownership(parent_ref.token_id, row_id)
 
         fork_group_id = generate_id()
         children = []
@@ -495,7 +493,7 @@ class DataFlowRepository:
                     tokens_table.insert().values(
                         token_id=child_id,
                         row_id=row_id,
-                        run_id=run_id,
+                        run_id=parent_ref.run_id,
                         fork_group_id=fork_group_id,
                         branch_name=branch_name,
                         step_in_pipeline=step_in_pipeline,
@@ -511,13 +509,13 @@ class DataFlowRepository:
                 result = conn.execute(
                     token_parents_table.insert().values(
                         token_id=child_id,
-                        parent_token_id=parent_token_id,
+                        parent_token_id=parent_ref.token_id,
                         ordinal=ordinal,
                     )
                 )
                 if result.rowcount == 0:
                     raise AuditIntegrityError(
-                        f"fork_token: token_parent INSERT affected zero rows (child={child_id}, parent={parent_token_id})"
+                        f"fork_token: token_parent INSERT affected zero rows (child={child_id}, parent={parent_ref.token_id})"
                     )
 
                 children.append(
@@ -528,7 +526,7 @@ class DataFlowRepository:
                         branch_name=branch_name,
                         step_in_pipeline=step_in_pipeline,
                         created_at=timestamp,
-                        run_id=run_id,
+                        run_id=parent_ref.run_id,
                     )
                 )
 
@@ -537,8 +535,8 @@ class DataFlowRepository:
             result = conn.execute(
                 token_outcomes_table.insert().values(
                     outcome_id=outcome_id,
-                    run_id=run_id,
-                    token_id=parent_token_id,
+                    run_id=parent_ref.run_id,
+                    token_id=parent_ref.token_id,
                     outcome=RowOutcome.FORKED,
                     is_terminal=1,
                     recorded_at=now(),
@@ -548,7 +546,7 @@ class DataFlowRepository:
             )
             if result.rowcount == 0:
                 raise AuditIntegrityError(
-                    f"fork_token: FORKED outcome INSERT affected zero rows (parent={parent_token_id}, outcome_id={outcome_id})"
+                    f"fork_token: FORKED outcome INSERT affected zero rows (parent={parent_ref.token_id}, outcome_id={outcome_id})"
                 )
 
         return children, fork_group_id
@@ -648,11 +646,10 @@ class DataFlowRepository:
 
     def expand_token(
         self,
-        parent_token_id: str,
+        parent_ref: TokenRef,
         row_id: str,
         count: int,
         *,
-        run_id: str,
         step_in_pipeline: int | None = None,
         record_parent_outcome: bool = True,
     ) -> tuple[list[Token], str]:
@@ -661,7 +658,7 @@ class DataFlowRepository:
         ATOMIC: Creates children AND optionally records parent EXPANDED outcome
         in single transaction.
 
-        Validates that parent_token_id belongs to the specified row_id and run_id
+        Validates that parent token belongs to the specified row_id and run_id
         before any writes. Cross-run/cross-row contamination crashes immediately
         per Tier 1 trust model.
 
@@ -673,10 +670,9 @@ class DataFlowRepository:
         creates sequential children for deaggregation transforms.
 
         Args:
-            parent_token_id: Token being expanded
+            parent_ref: TokenRef bundling parent token_id and run_id
             row_id: Row ID (same for all children)
             count: Number of child tokens to create (must be >= 1)
-            run_id: Run ID (required for atomic outcome recording)
             step_in_pipeline: Step where expansion occurs (optional)
             record_parent_outcome: If True (default), record EXPANDED outcome for parent.
                 Set to False for batch aggregation where parent gets CONSUMED_IN_BATCH.
@@ -692,8 +688,8 @@ class DataFlowRepository:
             raise ValueError("expand_token requires at least 1 child")
 
         # Validate parent token ownership before any writes (Tier 1 invariant)
-        self._validate_token_run_ownership(parent_token_id, run_id)
-        self._validate_token_row_ownership(parent_token_id, row_id)
+        self._validate_token_run_ownership(parent_ref)
+        self._validate_token_row_ownership(parent_ref.token_id, row_id)
 
         expand_group_id = generate_id()
         children = []
@@ -708,7 +704,7 @@ class DataFlowRepository:
                     tokens_table.insert().values(
                         token_id=child_id,
                         row_id=row_id,
-                        run_id=run_id,
+                        run_id=parent_ref.run_id,
                         expand_group_id=expand_group_id,
                         step_in_pipeline=step_in_pipeline,
                         created_at=timestamp,
@@ -723,13 +719,13 @@ class DataFlowRepository:
                 result = conn.execute(
                     token_parents_table.insert().values(
                         token_id=child_id,
-                        parent_token_id=parent_token_id,
+                        parent_token_id=parent_ref.token_id,
                         ordinal=ordinal,
                     )
                 )
                 if result.rowcount == 0:
                     raise AuditIntegrityError(
-                        f"expand_token: token_parent INSERT affected zero rows (child={child_id}, parent={parent_token_id})"
+                        f"expand_token: token_parent INSERT affected zero rows (child={child_id}, parent={parent_ref.token_id})"
                     )
 
                 children.append(
@@ -739,7 +735,7 @@ class DataFlowRepository:
                         expand_group_id=expand_group_id,
                         step_in_pipeline=step_in_pipeline,
                         created_at=timestamp,
-                        run_id=run_id,
+                        run_id=parent_ref.run_id,
                     )
                 )
 
@@ -754,8 +750,8 @@ class DataFlowRepository:
                 result = conn.execute(
                     token_outcomes_table.insert().values(
                         outcome_id=outcome_id,
-                        run_id=run_id,
-                        token_id=parent_token_id,
+                        run_id=parent_ref.run_id,
+                        token_id=parent_ref.token_id,
                         outcome=RowOutcome.EXPANDED,
                         is_terminal=1,
                         recorded_at=now(),
@@ -766,15 +762,14 @@ class DataFlowRepository:
                 )
                 if result.rowcount == 0:
                     raise AuditIntegrityError(
-                        f"expand_token: EXPANDED outcome INSERT affected zero rows (parent={parent_token_id}, outcome_id={outcome_id})"
+                        f"expand_token: EXPANDED outcome INSERT affected zero rows (parent={parent_ref.token_id}, outcome_id={outcome_id})"
                     )
 
         return children, expand_group_id
 
     def record_token_outcome(
         self,
-        run_id: str,
-        token_id: str,
+        ref: TokenRef,
         outcome: RowOutcome,
         *,
         sink_name: str | None = None,
@@ -795,8 +790,7 @@ class DataFlowRepository:
         Cross-run contamination crashes immediately per Tier 1 trust model.
 
         Args:
-            run_id: Current run ID
-            token_id: Token that reached this outcome
+            ref: TokenRef bundling token_id and run_id
             outcome: The RowOutcome enum value
             sink_name: For ROUTED/COMPLETED - which sink (REQUIRED)
             batch_id: For CONSUMED_IN_BATCH/BUFFERED - which batch (REQUIRED)
@@ -827,7 +821,7 @@ class DataFlowRepository:
         )
 
         # Validate token belongs to the specified run (Tier 1 invariant)
-        self._validate_token_run_ownership(token_id, run_id)
+        self._validate_token_run_ownership(ref)
 
         outcome_id = f"out_{generate_id()[:12]}"
         is_terminal = outcome.is_terminal
@@ -836,8 +830,8 @@ class DataFlowRepository:
         self._ops.execute_insert(
             token_outcomes_table.insert().values(
                 outcome_id=outcome_id,
-                run_id=run_id,
-                token_id=token_id,
+                run_id=ref.run_id,
+                token_id=ref.token_id,
                 outcome=outcome,
                 is_terminal=1 if is_terminal else 0,
                 recorded_at=now(),
@@ -1360,8 +1354,7 @@ class DataFlowRepository:
 
     def record_transform_error(
         self,
-        run_id: str,
-        token_id: str,
+        ref: TokenRef,
         transform_id: str,
         row_data: Mapping[str, object] | PipelineRow,
         error_details: TransformErrorReason,
@@ -1376,8 +1369,7 @@ class DataFlowRepository:
         Cross-run contamination crashes immediately per Tier 1 trust model.
 
         Args:
-            run_id: Current run ID
-            token_id: Token ID for the row
+            ref: TokenRef bundling token_id and run_id
             transform_id: Transform that returned the error
             row_data: The row that could not be processed
             error_details: Error details from TransformResult (TransformErrorReason TypedDict)
@@ -1390,7 +1382,7 @@ class DataFlowRepository:
             AuditIntegrityError: If token does not belong to the specified run
         """
         # Validate token belongs to the specified run (Tier 1 invariant)
-        self._validate_token_run_ownership(token_id, run_id)
+        self._validate_token_run_ownership(ref)
 
         # Validate reason is a known TransformErrorCategory (Tier 1 write guard).
         # TypedDict has zero runtime enforcement — the Literal annotation only
@@ -1449,8 +1441,8 @@ class DataFlowRepository:
         self._ops.execute_insert(
             transform_errors_table.insert().values(
                 error_id=error_id,
-                run_id=run_id,
-                token_id=token_id,
+                run_id=ref.run_id,
+                token_id=ref.token_id,
                 transform_id=transform_id,
                 row_hash=row_hash,
                 row_data_json=row_data_json,

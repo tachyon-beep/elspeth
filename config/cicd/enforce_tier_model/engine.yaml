@@ -81,22 +81,22 @@ allow_hits:
   reason: 'Tier 3 validation: raw YAML from operator files — isinstance checks validate each entry is a mapping'
   safety: Raises ValueError with index and type info on malformed entry
   expires: null
-- key: engine/coalesce_executor.py:R5:CoalesceExecutor:_execute_merge:fp=a0fcfd67c7b57ee2
+- key: engine/coalesce_executor.py:R5:CoalesceExecutor:_execute_merge:fp=4a080fa65f70afc4
   owner: architecture
   reason: AuditIntegrityError check prevents writing FAILED records to a compromised database — leaving node states as pending is more honest than corrupting further
   safety: Re-raises immediately; no writes to the untrustworthy database
   expires: null
-- key: engine/coalesce_executor.py:R4:CoalesceExecutor:_execute_merge:fp=b79de52540ddd347
+- key: engine/coalesce_executor.py:R4:CoalesceExecutor:_execute_merge:fp=b4a8e6d9e367f3a4
   owner: architecture
   reason: Best-effort cleanup of OPEN branch node_states after merge failure — broad catch prevents cleanup failure from masking original merge exception
   safety: Logs error with state_id and cleanup exception details; always re-raises the original error
   expires: null
-- key: engine/executors/sink.py:R4:SinkExecutor:_best_effort_cleanup:fp=935d5478718731f5
+- key: engine/executors/sink.py:R4:SinkExecutor:_best_effort_cleanup:fp=639f0566eb89d6f5
   owner: architecture
   reason: Best-effort cleanup of OPEN node_states before system error crash — broad catch prevents cleanup failure from masking original FrameworkBugError/AuditIntegrityError
   safety: Logs warning with cleanup exception details; always re-raises the original system error
   expires: null
-- key: engine/executors/sink.py:R4:SinkExecutor:write:fp=1b7c9c6c2ea107bb
+- key: engine/executors/sink.py:R4:SinkExecutor:write:fp=fd825ce303db5d19
   owner: architecture
   reason: Cleanup of OPEN pre-phase states after begin_node_state failure must not mask original error
   safety: Logs warning with cleanup exception details; always re-raises the original error
@@ -121,11 +121,11 @@ allow_hits:
   reason: Cleanup/pop with default - entry may not exist due to race between timeout and emit
   safety: Documented TOCTOU race pattern - pop(None) is intentional cleanup of possibly-absent entry
   expires: '2026-05-02'
-- key: engine/processor.py:R8:RowProcessor:__init__:fp=25cdbba00a78d397
+- key: engine/processor.py:R8:RowProcessor:__init__:fp=33c69ffef1dee922
   owner: architecture
   reason: Local dedup dict — setdefault on locally-constructed dict for deduplication by identity, not hiding missing keys
   safety: Dict is created locally at line 335, default is the value itself — no silent fallback
-- key: engine/processor.py:R1:RowProcessor:_notify_coalesce_of_lost_branch:fp=793b382e4d1bfd45
+- key: engine/processor.py:R1:RowProcessor:_notify_coalesce_of_lost_branch:fp=2c87707b5464ab57
   owner: architecture
   reason: dict.get() correct - not all branch names have coalesce point mapping
   safety: Crashes on type mismatch - no silent fallback

@@ -14,6 +14,7 @@ from elspeth.contracts import (
     RoutingMode,
     RowOutcome,
 )
+from elspeth.contracts.audit import TokenRef
 from elspeth.contracts.call_data import RawCallPayload
 from elspeth.contracts.errors import AuditIntegrityError
 from elspeth.contracts.payload_store import IntegrityError as PayloadIntegrityError
@@ -364,10 +365,9 @@ class TestGetTokenParents:
         _, recorder = _setup_full()
         # fork_token creates children with parent relationships
         children, _fork_group_id = recorder.fork_token(
-            parent_token_id="tok-1",
+            parent_ref=TokenRef(token_id="tok-1", run_id="run-1"),
             row_id="row-1",
             branches=["path-a", "path-b"],
-            run_id="run-1",
         )
 
         # Each child should have tok-1 as parent
@@ -860,10 +860,9 @@ class TestGetAllTokenParentsForRun:
     def test_returns_all_parent_relationships_from_fork(self):
         _, recorder = _setup_full()
         children, _ = recorder.fork_token(
-            parent_token_id="tok-1",
+            parent_ref=TokenRef(token_id="tok-1", run_id="run-1"),
             row_id="row-1",
             branches=["path-a", "path-b"],
-            run_id="run-1",
         )
 
         parents = recorder.get_all_token_parents_for_run("run-1")
@@ -1599,8 +1598,8 @@ class TestGetAllTokenOutcomesForRun:
         recorder.create_row("run-1", "source-0", 1, {"b": 2}, row_id="row-2")
         recorder.create_token("row-1", token_id="tok-1")
         recorder.create_token("row-2", token_id="tok-2")
-        recorder.record_token_outcome("run-1", "tok-1", RowOutcome.COMPLETED, sink_name="output")
-        recorder.record_token_outcome("run-1", "tok-2", RowOutcome.QUARANTINED, error_hash="abc123")
+        recorder.record_token_outcome(ref=TokenRef(token_id="tok-1", run_id="run-1"), outcome=RowOutcome.COMPLETED, sink_name="output")
+        recorder.record_token_outcome(ref=TokenRef(token_id="tok-2", run_id="run-1"), outcome=RowOutcome.QUARANTINED, error_hash="abc123")
 
         outcomes = recorder.get_all_token_outcomes_for_run("run-1")
 
@@ -1626,7 +1625,7 @@ class TestGetAllTokenOutcomesForRun:
         )
         recorder.create_row("run-a", "src-a", 0, {"v": 1}, row_id="row-a1")
         recorder.create_token("row-a1", token_id="tok-a1")
-        recorder.record_token_outcome("run-a", "tok-a1", RowOutcome.COMPLETED, sink_name="output")
+        recorder.record_token_outcome(ref=TokenRef(token_id="tok-a1", run_id="run-a"), outcome=RowOutcome.COMPLETED, sink_name="output")
 
         recorder.begin_run(config={}, canonical_version="v1", run_id="run-b")
         recorder.register_node(
@@ -1640,7 +1639,7 @@ class TestGetAllTokenOutcomesForRun:
         )
         recorder.create_row("run-b", "src-b", 0, {"v": 2}, row_id="row-b1")
         recorder.create_token("row-b1", token_id="tok-b1")
-        recorder.record_token_outcome("run-b", "tok-b1", RowOutcome.FAILED, error_hash="err-hash-1")
+        recorder.record_token_outcome(ref=TokenRef(token_id="tok-b1", run_id="run-b"), outcome=RowOutcome.FAILED, error_hash="err-hash-1")
 
         outcomes_a = recorder.get_all_token_outcomes_for_run("run-a")
         outcomes_b = recorder.get_all_token_outcomes_for_run("run-b")
@@ -1664,8 +1663,8 @@ class TestGetAllTokenOutcomesForRun:
         # Create tokens with IDs that sort in known order
         recorder.create_token("row-1", token_id="tok-aaa")
         recorder.create_token("row-1", token_id="tok-zzz")
-        recorder.record_token_outcome("run-1", "tok-zzz", RowOutcome.COMPLETED, sink_name="output")
-        recorder.record_token_outcome("run-1", "tok-aaa", RowOutcome.COMPLETED, sink_name="output")
+        recorder.record_token_outcome(ref=TokenRef(token_id="tok-zzz", run_id="run-1"), outcome=RowOutcome.COMPLETED, sink_name="output")
+        recorder.record_token_outcome(ref=TokenRef(token_id="tok-aaa", run_id="run-1"), outcome=RowOutcome.COMPLETED, sink_name="output")
 
         outcomes = recorder.get_all_token_outcomes_for_run("run-1")
 
@@ -1677,7 +1676,7 @@ class TestGetAllTokenOutcomesForRun:
         """A token can have multiple outcomes (e.g., fork then complete children)."""
         _, recorder = _setup_full()
         # First outcome: FORKED
-        recorder.record_token_outcome("run-1", "tok-1", RowOutcome.FORKED, fork_group_id="fg-1")
+        recorder.record_token_outcome(ref=TokenRef(token_id="tok-1", run_id="run-1"), outcome=RowOutcome.FORKED, fork_group_id="fg-1")
 
         outcomes = recorder.get_all_token_outcomes_for_run("run-1")
 
