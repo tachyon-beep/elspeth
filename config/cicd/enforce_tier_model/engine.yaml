@@ -91,15 +91,25 @@ allow_hits:
   reason: Best-effort cleanup of OPEN branch node_states after merge failure — broad catch prevents cleanup failure from masking original merge exception
   safety: Logs error with state_id and cleanup exception details; always re-raises the original error
   expires: null
-- key: engine/executors/sink.py:R4:SinkExecutor:_best_effort_cleanup:fp=639f0566eb89d6f5
+- key: engine/executors/sink.py:R4:SinkExecutor:_best_effort_cleanup:fp=6ee9da121577f431
   owner: architecture
   reason: Best-effort cleanup of OPEN node_states before system error crash — broad catch prevents cleanup failure from masking original FrameworkBugError/AuditIntegrityError
   safety: Logs warning with cleanup exception details; always re-raises the original system error
   expires: null
-- key: engine/executors/sink.py:R4:SinkExecutor:write:fp=fd825ce303db5d19
+- key: engine/executors/sink.py:R4:SinkExecutor:write:fp=814497cd97c66093
   owner: architecture
   reason: Cleanup of OPEN pre-phase states after begin_node_state failure must not mask original error
   safety: Logs warning with cleanup exception details; always re-raises the original error
+  expires: null
+- key: engine/executors/sink.py:R5:SinkExecutor:write:fp=1053ea789cbfb722
+  owner: bugfix
+  reason: Offensive isinstance — validates plugin return type to crash with PluginContractViolation instead of opaque AttributeError
+  safety: Crashes immediately with clear error identifying the buggy sink plugin
+  expires: null
+- key: engine/executors/sink.py:R5:SinkExecutor:write:fp=35d9e6520a51eb15
+  owner: bugfix
+  reason: Offensive isinstance — validates failsink return type to crash with PluginContractViolation instead of opaque AttributeError
+  safety: Crashes immediately with clear error identifying the buggy failsink plugin
   expires: null
 - key: engine/processor.py:TC:_module_:fp=873d5f90adf363e0
   owner: architecture

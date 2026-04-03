@@ -1199,7 +1199,7 @@ class ExecutionGraph:
                     )
                 select_branch = node_info.config["select_branch"]
                 # Identity branch: COPY edge from gate to coalesce with label == select_branch
-                for from_id, _, edge_data in self._graph.in_edges(node_id, data=True):
+                for from_id, _, _key, edge_data in self._graph.in_edges(node_id, keys=True, data=True):
                     if edge_data["mode"] == RoutingMode.COPY and edge_data["label"] == select_branch:
                         result = self.get_effective_producer_schema(from_id, _cache)
                         _cache[node_id] = result
@@ -1225,7 +1225,7 @@ class ExecutionGraph:
 
         # Gates are true pass-throughs — inherit schema from upstream producers
         if node_info.node_type == NodeType.GATE:
-            incoming = list(self._graph.in_edges(node_id, data=True))
+            incoming = list(self._graph.in_edges(node_id, keys=True, data=True))
 
             if not incoming:
                 # Pass-through node with no inputs is a graph construction bug - CRASH
@@ -1236,7 +1236,7 @@ class ExecutionGraph:
 
             # Gather all input schemas for validation
             all_schemas: list[tuple[str, type[PluginSchema] | None]] = []
-            for from_id, _, _ in incoming:
+            for from_id, _, _key, _ in incoming:
                 schema = self.get_effective_producer_schema(from_id, _cache)
                 all_schemas.append((from_id, schema))
 
@@ -1372,7 +1372,7 @@ class ExecutionGraph:
         Raises:
             GraphValidationError: If branches have incompatible schemas
         """
-        incoming = list(self._graph.in_edges(coalesce_id, data=True))
+        incoming = list(self._graph.in_edges(coalesce_id, keys=True, data=True))
 
         if not incoming:
             raise GraphValidationError(f"Coalesce '{coalesce_id}' has no incoming edges — this is a graph construction bug")
@@ -1390,7 +1390,7 @@ class ExecutionGraph:
 
         # union strategy: gather all branch schemas and validate
         all_schemas: list[tuple[str, type[PluginSchema] | None]] = []
-        for from_id, _, _ in incoming:
+        for from_id, _, _key, _ in incoming:
             schema = self.get_effective_producer_schema(from_id, _cache=_schema_cache)
             all_schemas.append((from_id, schema))
 
@@ -1574,10 +1574,10 @@ class ExecutionGraph:
 
             # union: intersection of branch guarantees. Only fields present in
             # ALL branches are guaranteed in the flat merged output.
-            incoming = list(self._graph.in_edges(node_id, data=True))
+            incoming = list(self._graph.in_edges(node_id, keys=True, data=True))
             if not incoming:
                 return frozenset()
-            branch_guarantees = [self.get_effective_guaranteed_fields(from_id) for from_id, _, _ in incoming]
+            branch_guarantees = [self.get_effective_guaranteed_fields(from_id) for from_id, _, _key, _ in incoming]
             if not branch_guarantees:
                 return frozenset()
             result = branch_guarantees[0]

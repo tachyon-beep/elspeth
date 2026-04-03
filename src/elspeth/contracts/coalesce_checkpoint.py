@@ -9,7 +9,6 @@ from __future__ import annotations
 import math
 from collections.abc import Mapping
 from dataclasses import dataclass
-from types import MappingProxyType
 from typing import Any
 
 from elspeth.contracts.errors import AuditIntegrityError
@@ -41,10 +40,10 @@ class CoalesceTokenCheckpoint:
         ):
             if not isinstance(value, str) or not value:
                 raise ValueError(f"{field_name} must be a non-empty string, got {type(value).__name__}: {value!r}")
-        if not isinstance(self.row_data, (dict, MappingProxyType)):
-            raise TypeError(f"CoalesceTokenCheckpoint.row_data must be dict or MappingProxyType, got {type(self.row_data).__name__}")
-        if not isinstance(self.contract, (dict, MappingProxyType)):
-            raise TypeError(f"CoalesceTokenCheckpoint.contract must be dict or MappingProxyType, got {type(self.contract).__name__}")
+        if not isinstance(self.row_data, Mapping):
+            raise TypeError(f"CoalesceTokenCheckpoint.row_data must be a Mapping, got {type(self.row_data).__name__}")
+        if not isinstance(self.contract, Mapping):
+            raise TypeError(f"CoalesceTokenCheckpoint.contract must be a Mapping, got {type(self.contract).__name__}")
         freeze_fields(self, "row_data", "contract")
         if self.arrival_offset_seconds < 0 or not math.isfinite(self.arrival_offset_seconds):
             raise ValueError(f"arrival_offset_seconds must be non-negative and finite, got {self.arrival_offset_seconds!r}")

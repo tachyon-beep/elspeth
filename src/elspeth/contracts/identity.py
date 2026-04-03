@@ -44,6 +44,10 @@ class TokenInfo:
             raise ValueError("TokenInfo.row_id must not be empty")
         if not self.token_id:
             raise ValueError("TokenInfo.token_id must not be empty")
+        for _field_name in ("branch_name", "fork_group_id", "join_group_id", "expand_group_id"):
+            _value = getattr(self, _field_name)
+            if _value is not None and not _value:
+                raise ValueError(f"TokenInfo.{_field_name} must be None or non-empty string, got {_value!r}")
 
     def with_updated_data(self, new_data: PipelineRow) -> TokenInfo:
         """Return a new TokenInfo with updated row_data, preserving all lineage fields.

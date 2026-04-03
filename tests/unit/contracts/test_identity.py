@@ -2,6 +2,7 @@
 
 import pytest
 
+from elspeth.contracts.identity import TokenInfo
 from elspeth.contracts.schema_contract import PipelineRow, SchemaContract
 from elspeth.testing import make_field
 
@@ -131,3 +132,40 @@ class TestTokenInfo:
         assert updated.fork_group_id == "fork-123"
         assert updated.join_group_id == "join-456"
         assert updated.expand_group_id == "expand-789"
+
+
+class TestTokenInfoLineageFieldGuards:
+    """Empty-string lineage fields corrupt coalesce keys — must be rejected."""
+
+    @pytest.mark.parametrize("field", ["branch_name", "fork_group_id", "join_group_id", "expand_group_id"])
+    def test_rejects_empty_string_lineage_field(self, field: str) -> None:
+        kwargs = {
+            "row_id": "r1",
+            "token_id": "t1",
+            "row_data": PipelineRow({"x": 1}, contract=None),
+        }
+        kwargs[field] = ""
+        with pytest.raises(ValueError, match=f"TokenInfo.{field} must be None or non-empty string"):
+            TokenInfo(**kwargs)
+
+    @pytest.mark.parametrize("field", ["branch_name", "fork_group_id", "join_group_id", "expand_group_id"])
+    def test_accepts_none_lineage_field(self, field: str) -> None:
+        kwargs = {
+            "row_id": "r1",
+            "token_id": "t1",
+            "row_data": PipelineRow({"x": 1}, contract=None),
+        }
+        kwargs[field] = None
+        t = TokenInfo(**kwargs)
+        assert getattr(t, field) is None
+
+    @pytest.mark.parametrize("field", ["branch_name", "fork_group_id", "join_group_id", "expand_group_id"])
+    def test_accepts_non_empty_lineage_field(self, field: str) -> None:
+        kwargs = {
+            "row_id": "r1",
+            "token_id": "t1",
+            "row_data": PipelineRow({"x": 1}, contract=None),
+        }
+        kwargs[field] = "valid_value"
+        t = TokenInfo(**kwargs)
+        assert getattr(t, field) == "valid_value"

@@ -149,8 +149,13 @@ class TokenUsage:
 
         # bool is a subclass of int in Python, so isinstance(True, int) is True.
         # But True/False are not valid token counts — reject them as non-int.
-        prompt = raw_prompt if isinstance(raw_prompt, int) and not isinstance(raw_prompt, bool) else None
-        completion = raw_completion if isinstance(raw_completion, int) and not isinstance(raw_completion, bool) else None
-        total = raw_total if isinstance(raw_total, int) and not isinstance(raw_total, bool) else None
+        # Negative values are coerced to None (not passed through to crash
+        # in __post_init__) — this is a Tier 3 boundary, so invalid external
+        # data is coerced, not propagated.
+        prompt = raw_prompt if isinstance(raw_prompt, int) and not isinstance(raw_prompt, bool) and raw_prompt >= 0 else None
+        completion = (
+            raw_completion if isinstance(raw_completion, int) and not isinstance(raw_completion, bool) and raw_completion >= 0 else None
+        )
+        total = raw_total if isinstance(raw_total, int) and not isinstance(raw_total, bool) and raw_total >= 0 else None
 
         return cls(prompt_tokens=prompt, completion_tokens=completion, reported_total=total)

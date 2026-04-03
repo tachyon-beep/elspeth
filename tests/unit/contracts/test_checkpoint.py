@@ -308,7 +308,7 @@ def test_node_from_dict_multiple_missing_fields_reports_all() -> None:
 
 def test_aggregation_token_rejects_non_dict_row_data() -> None:
     """row_data type guard rejects non-dict values with clear error."""
-    with pytest.raises(TypeError, match="row_data must be dict or MappingProxyType"):
+    with pytest.raises(TypeError, match="row_data must be a Mapping"):
         AggregationTokenCheckpoint(
             token_id="tok-001",
             row_id="row-001",
@@ -324,7 +324,7 @@ def test_aggregation_token_rejects_non_dict_row_data() -> None:
 
 def test_aggregation_token_rejects_non_dict_contract() -> None:
     """contract type guard rejects non-dict values with clear error."""
-    with pytest.raises(TypeError, match="contract must be dict or MappingProxyType"):
+    with pytest.raises(TypeError, match="contract must be a Mapping"):
         AggregationTokenCheckpoint(
             token_id="tok-001",
             row_id="row-001",

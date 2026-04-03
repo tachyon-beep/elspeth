@@ -11,6 +11,7 @@ IMPORTANT:
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from dataclasses import dataclass, field
 from types import MappingProxyType
 from typing import TYPE_CHECKING, Any, Literal
@@ -220,7 +221,7 @@ class TransformResult:
     @classmethod
     def success_multi(
         cls,
-        rows: list[PipelineRow] | tuple[PipelineRow, ...],
+        rows: Sequence[PipelineRow],
         *,
         success_reason: TransformSuccessReason,
         context_after: NodeStateContext | None = None,

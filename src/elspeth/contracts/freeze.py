@@ -92,7 +92,16 @@ def freeze_fields(instance: object, *field_names: str) -> None:
 
             def __post_init__(self) -> None:
                 freeze_fields(self, "data", "items")
+
+    Raises:
+        AttributeError: If any field_name is not a declared dataclass field.
     """
+    import dataclasses
+
+    declared = {f.name for f in dataclasses.fields(instance)}  # type: ignore[arg-type]
+    unknown = set(field_names) - declared
+    if unknown:
+        raise AttributeError(f"freeze_fields: {sorted(unknown)} not declared on {type(instance).__name__}. Declared: {sorted(declared)}")
     for name in field_names:
         value = getattr(instance, name)
         frozen = deep_freeze(value)

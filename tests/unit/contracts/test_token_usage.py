@@ -200,6 +200,29 @@ class TestTokenUsageFromDict:
         assert usage.prompt_tokens is None
         assert usage.completion_tokens == 20
 
+    def test_from_dict_negative_prompt_coerced_to_none(self) -> None:
+        """Negative ints are invalid at Tier 3 boundary — coerce, don't crash."""
+        usage = TokenUsage.from_dict({"prompt_tokens": -5, "completion_tokens": 20})
+        assert usage.prompt_tokens is None
+        assert usage.completion_tokens == 20
+
+    def test_from_dict_negative_completion_coerced_to_none(self) -> None:
+        usage = TokenUsage.from_dict({"prompt_tokens": 10, "completion_tokens": -1})
+        assert usage.prompt_tokens == 10
+        assert usage.completion_tokens is None
+
+    def test_from_dict_negative_total_coerced_to_none(self) -> None:
+        usage = TokenUsage.from_dict({"prompt_tokens": 10, "completion_tokens": 20, "total_tokens": -100})
+        assert usage.prompt_tokens == 10
+        assert usage.completion_tokens == 20
+        assert usage.reported_total is None
+
+    def test_from_dict_all_negative_returns_unknown(self) -> None:
+        usage = TokenUsage.from_dict({"prompt_tokens": -1, "completion_tokens": -2, "total_tokens": -3})
+        assert usage.prompt_tokens is None
+        assert usage.completion_tokens is None
+        assert usage.reported_total is None
+
 
 class TestTokenUsageImmutability:
     """Tests for frozen dataclass invariants."""

@@ -28,6 +28,7 @@ from elspeth.contracts.errors import (
     SinkDiversionReason,
 )
 from elspeth.contracts.plugin_context import PluginContext
+from elspeth.contracts.results import ArtifactDescriptor
 from elspeth.core.landscape import LandscapeRecorder
 from elspeth.core.operations import track_operation
 from elspeth.engine.spans import SpanFactory
@@ -317,6 +318,12 @@ class SinkExecutor:
                     start = time.perf_counter()
                     write_result: SinkWriteResult = sink.write(rows, ctx)
                     artifact_info = write_result.artifact
+                    if not isinstance(artifact_info, ArtifactDescriptor):
+                        raise PluginContractViolation(
+                            f"Sink '{sink.name}' returned SinkWriteResult with artifact of type "
+                            f"{type(artifact_info).__name__}, expected ArtifactDescriptor. "
+                            f"This is a sink plugin bug."
+                        )
                     diversions = write_result.diversions
                     duration_ms = (time.perf_counter() - start) * 1000
 
@@ -495,6 +502,12 @@ class SinkExecutor:
                     )
 
                 failsink_artifact_info = failsink_write_result.artifact
+                if not isinstance(failsink_artifact_info, ArtifactDescriptor):
+                    raise PluginContractViolation(
+                        f"Failsink '{failsink_name}' returned SinkWriteResult with artifact of type "
+                        f"{type(failsink_artifact_info).__name__}, expected ArtifactDescriptor. "
+                        f"This is a sink plugin bug."
+                    )
 
                 # Open node_states at failsink node (destination).
                 # Use the enriched payload (what was actually written to the failsink),

@@ -452,3 +452,55 @@ class TestDeepFreezeMappingProxyDetachment:
         source["key"] = "mutated"
 
         assert holder.data["key"] == "original"
+
+
+class TestFreezeFieldsValidation:
+    """freeze_fields must reject unknown field names to prevent silent typo bugs."""
+
+    def test_rejects_unknown_field_name(self) -> None:
+        from dataclasses import dataclass
+
+        from elspeth.contracts.freeze import freeze_fields as _ff
+
+        @dataclass(frozen=True)
+        class Example:
+            data: Any
+
+            def __post_init__(self) -> None:
+                pass  # Don't call freeze_fields here — we test it explicitly
+
+        instance = Example(data={"key": "value"})
+        with pytest.raises(AttributeError, match="not declared on Example"):
+            _ff(instance, "nonexistent_field")
+
+    def test_rejects_multiple_unknown_fields(self) -> None:
+        from dataclasses import dataclass
+
+        from elspeth.contracts.freeze import freeze_fields as _ff
+
+        @dataclass(frozen=True)
+        class Example:
+            data: Any
+
+            def __post_init__(self) -> None:
+                pass
+
+        instance = Example(data={"key": "value"})
+        with pytest.raises(AttributeError, match="not declared on Example"):
+            _ff(instance, "data", "fake_field", "another_fake")
+
+    def test_accepts_valid_field_names(self) -> None:
+        from dataclasses import dataclass
+
+        from elspeth.contracts.freeze import freeze_fields as _ff
+
+        @dataclass(frozen=True)
+        class Example:
+            data: Any
+            items: Any
+
+            def __post_init__(self) -> None:
+                _ff(self, "data", "items")
+
+        instance = Example(data={"key": "value"}, items=[1, 2])
+        assert isinstance(instance.items, tuple)

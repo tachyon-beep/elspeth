@@ -20,7 +20,6 @@ from __future__ import annotations
 import math
 from collections.abc import Mapping
 from dataclasses import dataclass
-from types import MappingProxyType
 from typing import Any
 
 from elspeth.contracts.errors import AuditIntegrityError
@@ -60,10 +59,10 @@ class AggregationTokenCheckpoint:
             raise ValueError("AggregationTokenCheckpoint.row_id must not be empty")
         if not self.contract_version:
             raise ValueError("AggregationTokenCheckpoint.contract_version must not be empty")
-        if not isinstance(self.row_data, (dict, MappingProxyType)):
-            raise TypeError(f"AggregationTokenCheckpoint.row_data must be dict or MappingProxyType, got {type(self.row_data).__name__}")
-        if not isinstance(self.contract, (dict, MappingProxyType)):
-            raise TypeError(f"AggregationTokenCheckpoint.contract must be dict or MappingProxyType, got {type(self.contract).__name__}")
+        if not isinstance(self.row_data, Mapping):
+            raise TypeError(f"AggregationTokenCheckpoint.row_data must be a Mapping, got {type(self.row_data).__name__}")
+        if not isinstance(self.contract, Mapping):
+            raise TypeError(f"AggregationTokenCheckpoint.contract must be a Mapping, got {type(self.contract).__name__}")
         freeze_fields(self, "row_data", "contract")
 
     def to_dict(self) -> dict[str, Any]:
@@ -232,8 +231,8 @@ class AggregationCheckpointState:
     def __post_init__(self) -> None:
         if not self.version:
             raise ValueError("AggregationCheckpointState.version must not be empty")
-        if not isinstance(self.nodes, (dict, MappingProxyType)):
-            raise TypeError(f"AggregationCheckpointState.nodes must be dict or MappingProxyType, got {type(self.nodes).__name__}")
+        if not isinstance(self.nodes, Mapping):
+            raise TypeError(f"AggregationCheckpointState.nodes must be a Mapping, got {type(self.nodes).__name__}")
         freeze_fields(self, "nodes")
 
     def to_dict(self) -> dict[str, Any]:

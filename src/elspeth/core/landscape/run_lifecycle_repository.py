@@ -156,7 +156,7 @@ class RunLifecycleRepository:
         # Only include reproducibility_grade in UPDATE when explicitly provided.
         # Passing None would overwrite an existing grade with NULL (Bug 318f74).
         values: dict[str, Any] = {
-            "status": status,
+            "status": status.value,
             "completed_at": timestamp,
         }
         if reproducibility_grade is not None:
@@ -377,7 +377,7 @@ class RunLifecycleRepository:
             # When resuming to RUNNING, clear completed_at atomically.
             # A run cannot be simultaneously RUNNING and completed — that's
             # an impossible state that confuses operational tooling and auditors.
-            values: dict[str, Any] = {"status": status}
+            values: dict[str, Any] = {"status": status.value}
             if status == RunStatus.RUNNING:
                 values["completed_at"] = None
             result = conn.execute(

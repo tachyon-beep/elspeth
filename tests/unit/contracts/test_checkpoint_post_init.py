@@ -4,6 +4,8 @@ Covers: AggregationTokenCheckpoint, AggregationNodeCheckpoint,
 AggregationCheckpointState, RowMappingEntry, BatchCheckpointState.
 """
 
+from collections import OrderedDict
+
 import pytest
 
 from elspeth.contracts.aggregation_checkpoint import (
@@ -70,6 +72,35 @@ class TestAggregationTokenCheckpointPostInit:
             contract={},
         )
         assert t.token_id == "t1"
+
+    def test_accepts_ordered_dict_mapping(self) -> None:
+        """OrderedDict is a Mapping subtype — must be accepted (not just dict)."""
+        t = AggregationTokenCheckpoint(
+            token_id="t1",
+            row_id="r1",
+            branch_name=None,
+            fork_group_id=None,
+            join_group_id=None,
+            expand_group_id=None,
+            row_data=OrderedDict({"x": 1}),
+            contract_version="v1",
+            contract=OrderedDict({"mode": "observed"}),
+        )
+        assert t.row_data["x"] == 1
+
+    def test_rejects_non_mapping_row_data(self) -> None:
+        with pytest.raises(TypeError, match="must be a Mapping"):
+            AggregationTokenCheckpoint(
+                token_id="t1",
+                row_id="r1",
+                branch_name=None,
+                fork_group_id=None,
+                join_group_id=None,
+                expand_group_id=None,
+                row_data=[1, 2, 3],  # type: ignore[arg-type]
+                contract_version="v1",
+                contract={},
+            )
 
 
 class TestAggregationNodeCheckpointPostInit:
@@ -184,15 +215,15 @@ class TestAggregationCheckpointStatePostInit:
 
     def test_rejects_list_as_nodes(self) -> None:
         """Regression: non-mapping type must raise TypeError, not unhelpful MappingProxyType error."""
-        with pytest.raises(TypeError, match="nodes must be dict or MappingProxyType"):
+        with pytest.raises(TypeError, match="nodes must be a Mapping"):
             AggregationCheckpointState(version="4.0", nodes=[])  # type: ignore[arg-type]
 
     def test_rejects_string_as_nodes(self) -> None:
-        with pytest.raises(TypeError, match="nodes must be dict or MappingProxyType"):
+        with pytest.raises(TypeError, match="nodes must be a Mapping"):
             AggregationCheckpointState(version="4.0", nodes="not-a-dict")  # type: ignore[arg-type]
 
     def test_rejects_none_as_nodes(self) -> None:
-        with pytest.raises(TypeError, match="nodes must be dict or MappingProxyType"):
+        with pytest.raises(TypeError, match="nodes must be a Mapping"):
             AggregationCheckpointState(version="4.0", nodes=None)  # type: ignore[arg-type]
 
     def test_accepts_dict_and_wraps_to_mapping_proxy(self) -> None:
