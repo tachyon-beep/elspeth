@@ -16,18 +16,6 @@ from elspeth.core.landscape.recorder import LandscapeRecorder
 from tests.fixtures.landscape import make_recorder
 
 
-@pytest.fixture(autouse=True)
-def _inject_default_on_write_failure(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Ensure all BaseSink subclasses have _on_write_failure set.
-
-    Production code injects this via cli_helpers from SinkSettings.
-    E2E tests that construct sinks directly bypass that path.
-    """
-    from elspeth.plugins.infrastructure.base import BaseSink
-
-    monkeypatch.setattr(BaseSink, "_on_write_failure", "discard")
-
-
 @pytest.fixture
 def system_landscape_db(tmp_path: Path) -> LandscapeDB:
     """Function-scoped file-based LandscapeDB for E2E tests."""

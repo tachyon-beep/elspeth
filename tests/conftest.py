@@ -148,6 +148,29 @@ def _auto_close_telemetry_managers() -> Iterator[None]:
 
 
 @pytest.fixture(autouse=True)
+def _inject_default_on_write_failure() -> Iterator[None]:
+    """Ensure all BaseSink subclasses have _on_write_failure set.
+
+    Production code injects this via cli_helpers from SinkSettings.
+    Tests that construct sinks directly bypass that path. Patches
+    BaseSink.__init__ to set _on_write_failure="discard" on every
+    instance. Uses __init__ patching because _on_write_failure is
+    deliberately annotation-only (no class-level default).
+    """
+    from elspeth.plugins.infrastructure.base import BaseSink
+
+    _original_init = BaseSink.__init__
+
+    def _patched_init(self: BaseSink, config: Any) -> None:
+        _original_init(self, config)
+        self._on_write_failure = "discard"
+
+    BaseSink.__init__ = _patched_init  # type: ignore[method-assign]
+    yield
+    BaseSink.__init__ = _original_init  # type: ignore[method-assign]
+
+
+@pytest.fixture(autouse=True)
 def _allow_raw_secrets_in_tests(monkeypatch: pytest.MonkeyPatch) -> None:
     """Allow raw secrets in all tests — CI has no .env file.
 
