@@ -6,6 +6,8 @@ Covers __post_init__ invariant enforcement and from_dict error paths.
 
 from __future__ import annotations
 
+from collections import OrderedDict
+from types import MappingProxyType
 from typing import Any
 
 import pytest
@@ -82,6 +84,15 @@ class TestCoalesceTokenCheckpointPostInit:
         kwargs["arrival_offset_seconds"] = float("inf")
         with pytest.raises(ValueError, match="arrival_offset_seconds"):
             CoalesceTokenCheckpoint(**kwargs)
+
+    def test_accepts_ordered_dict_mapping(self) -> None:
+        """OrderedDict is a Mapping subtype — must be accepted (not just dict)."""
+        kwargs = _valid_token_kwargs()
+        kwargs["row_data"] = OrderedDict({"x": 1})
+        kwargs["contract"] = OrderedDict({"mode": "observed"})
+        token = CoalesceTokenCheckpoint(**kwargs)
+        assert isinstance(token.row_data, MappingProxyType)
+        assert token.row_data["x"] == 1
 
     def test_rejects_non_dict_row_data(self) -> None:
         """row_data must be a Mapping."""

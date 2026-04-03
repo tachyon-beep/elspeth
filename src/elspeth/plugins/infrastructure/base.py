@@ -176,7 +176,7 @@ class BaseTransform(ABC):
     # Transforms that add fields must set this via _build_output_schema_config()
     # so the DAG builder can validate downstream required_input_fields.
     # None = no output contract provided (acceptable for shape-preserving transforms).
-    _output_schema_config: SchemaConfig | None = None
+    _output_schema_config: SchemaConfig | None
 
     def __init__(self, config: dict[str, Any]) -> None:
         """Initialize with configuration.
@@ -185,10 +185,9 @@ class BaseTransform(ABC):
             config: Plugin configuration
         """
         self.config = config
-        # Lifecycle guard (centralized in TransformExecutor).
-        # Set to True by on_start(). The executor checks this before process().
-        # Per-instance, not per-class — class-level bool would be shared across instances.
+        # Per-instance, not per-class — class-level defaults would be shared across instances.
         self._on_start_called: bool = False
+        self._output_schema_config: SchemaConfig | None = None
 
     @staticmethod
     def _create_schemas(
@@ -408,7 +407,7 @@ class BaseSink(ABC):
 
     # Failsink infrastructure — set by orchestrator from SinkSettings.on_write_failure.
     # None until injected at pipeline startup; "discard" or sink name at runtime.
-    _on_write_failure: str | None = None
+    _on_write_failure: str | None
 
     def configure_for_resume(self) -> None:
         """Configure sink for resume mode (append instead of truncate).
@@ -486,6 +485,7 @@ class BaseSink(ABC):
             config: Plugin configuration
         """
         self.config = config
+        self._on_write_failure: str | None = None
         self._output_contract = None
         self._needs_resume_field_resolution = False
         self._diversion_log: list[RowDiversion] = []

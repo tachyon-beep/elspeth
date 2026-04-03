@@ -1,5 +1,7 @@
 """Tests for retrieval type dataclasses."""
 
+from types import MappingProxyType
+
 import pytest
 
 from elspeth.contracts.errors import PluginRetryableError
@@ -94,6 +96,39 @@ class TestRetrievalChunkMetadataValidation:
                 source_id="doc1",
                 metadata={"nested": {"value": bad_value}},
             )
+
+
+class TestRetrievalChunkMetadataImmutability:
+    """Regression tests: metadata must be deeply frozen after construction."""
+
+    def test_metadata_is_mapping_proxy(self):
+        chunk = RetrievalChunk(
+            content="text",
+            score=0.5,
+            source_id="doc1",
+            metadata={"page": 3},
+        )
+        assert isinstance(chunk.metadata, MappingProxyType)
+
+    def test_top_level_mutation_raises(self):
+        chunk = RetrievalChunk(
+            content="text",
+            score=0.5,
+            source_id="doc1",
+            metadata={"page": 3},
+        )
+        with pytest.raises(TypeError):
+            chunk.metadata["new_key"] = "value"
+
+    def test_nested_dict_mutation_raises(self):
+        chunk = RetrievalChunk(
+            content="text",
+            score=0.5,
+            source_id="doc1",
+            metadata={"nested": {"key": "value"}},
+        )
+        with pytest.raises(TypeError):
+            chunk.metadata["nested"]["key"] = "mutated"
 
 
 class TestRetrievalError:
