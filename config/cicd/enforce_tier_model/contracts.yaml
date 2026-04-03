@@ -22,6 +22,12 @@ per_file_rules:
   reason: Type normalization requires isinstance() for polymorphic serialization of numeric types — includes both strict (normalize_type_for_contract) and non-throwing (classify_runtime_type) variants
   expires: null
   max_hits: 14
+- pattern: contracts/identity.py
+  rules:
+  - R5
+  reason: Tier 1 __post_init__ type guards — validates row_id, token_id, and optional lineage fields are str
+  expires: null
+  max_hits: 3
 - pattern: contracts/aggregation_checkpoint.py
   rules:
   - R5

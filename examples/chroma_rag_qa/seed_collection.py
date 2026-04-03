@@ -9,9 +9,11 @@ Usage:
 
 from __future__ import annotations
 
+from pathlib import Path
+
 import chromadb
 
-PERSIST_DIR = "examples/chroma_rag_qa/chroma_data"
+PERSIST_DIR = str(Path(__file__).resolve().parent / "chroma_data")
 COLLECTION_NAME = "science-facts"
 
 DOCUMENTS = [

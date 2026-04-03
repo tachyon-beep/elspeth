@@ -163,7 +163,7 @@ class ConsoleExporter:
         data = event.to_dict()
         data["event_type"] = type(event).__name__
 
-        for key, value in data.items():
+        for key, value in list(data.items()):
             if isinstance(value, datetime):
                 data[key] = value.isoformat()
             elif isinstance(value, Enum):

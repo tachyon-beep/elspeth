@@ -3,7 +3,9 @@
 Converts numpy/pandas types to Python primitives for consistent
 contract storage and validation.
 
-Per CLAUDE.md: Uses isinstance() checks (not string matching on __name__).
+Fast path: Uses type() with frozenset membership for standard Python types (performance).
+Slow path: Uses isinstance() checks for numpy/pandas type hierarchies.
+Avoids string matching on __name__ per CLAUDE.md.
 """
 
 from __future__ import annotations

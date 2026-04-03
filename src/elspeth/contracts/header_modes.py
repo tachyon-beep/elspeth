@@ -108,7 +108,8 @@ def resolve_headers(
                 result[name] = name
 
         elif mode == HeaderMode.CUSTOM:
-            assert custom_mapping is not None  # Guaranteed by precondition check above
+            if custom_mapping is None:
+                raise ValueError("CUSTOM header mode: custom_mapping is None despite precondition check. This is an internal logic error.")
             if name not in custom_mapping:
                 raise ValueError(
                     f"CUSTOM header mode has no mapping for field '{name}'. "

@@ -64,7 +64,7 @@ class TestAccumulateRowOutcomesCompleted:
         pending = _make_pending()
         results = [_make_result(RowOutcome.COMPLETED, sink_name="output")]
 
-        accumulate_row_outcomes(results, counters, {"output": Mock()}, pending)
+        accumulate_row_outcomes(results, counters, pending)
 
         assert counters.rows_succeeded == 1
 
@@ -73,7 +73,7 @@ class TestAccumulateRowOutcomesCompleted:
         pending = _make_pending()
         results = [_make_result(RowOutcome.COMPLETED, sink_name="output")]
 
-        accumulate_row_outcomes(results, counters, {"output": Mock()}, pending)
+        accumulate_row_outcomes(results, counters, pending)
 
         assert len(pending["output"]) == 1
         pending_outcome = pending["output"][0][1]
@@ -87,7 +87,7 @@ class TestAccumulateRowOutcomesCompleted:
         token = TokenInfo(row_id="row-1", token_id="tok-1", row_data=make_row({}), branch_name="branch_a")
         results = [_make_result(RowOutcome.COMPLETED, token=token, sink_name="output")]
 
-        accumulate_row_outcomes(results, counters, {"output": Mock(), "branch_a": Mock()}, pending)
+        accumulate_row_outcomes(results, counters, pending)
 
         assert len(pending["branch_a"]) == 0
         assert len(pending["output"]) == 1
@@ -99,7 +99,7 @@ class TestAccumulateRowOutcomesCompleted:
         token = TokenInfo(row_id="row-1", token_id="tok-1", row_data=make_row({}), branch_name="nonexistent")
         results = [_make_result(RowOutcome.COMPLETED, token=token, sink_name="output")]
 
-        accumulate_row_outcomes(results, counters, {"output": Mock()}, pending)
+        accumulate_row_outcomes(results, counters, pending)
 
         assert len(pending["output"]) == 1
 
@@ -112,7 +112,7 @@ class TestAccumulateRowOutcomesRouted:
         pending: dict[str, list[tuple[TokenInfo, PendingOutcome | None]]] = {"output": [], "risk_sink": []}
         results = [_make_result(RowOutcome.ROUTED, sink_name="risk_sink")]
 
-        accumulate_row_outcomes(results, counters, {"output": Mock()}, pending)
+        accumulate_row_outcomes(results, counters, pending)
 
         assert counters.rows_routed == 1
 
@@ -121,7 +121,7 @@ class TestAccumulateRowOutcomesRouted:
         pending: dict[str, list[tuple[TokenInfo, PendingOutcome | None]]] = {"output": [], "risk_sink": []}
         results = [_make_result(RowOutcome.ROUTED, sink_name="risk_sink")]
 
-        accumulate_row_outcomes(results, counters, {"output": Mock()}, pending)
+        accumulate_row_outcomes(results, counters, pending)
 
         assert counters.routed_destinations["risk_sink"] == 1
 
@@ -130,7 +130,7 @@ class TestAccumulateRowOutcomesRouted:
         pending: dict[str, list[tuple[TokenInfo, PendingOutcome | None]]] = {"output": [], "risk_sink": []}
         results = [_make_result(RowOutcome.ROUTED, sink_name="risk_sink")]
 
-        accumulate_row_outcomes(results, counters, {"output": Mock()}, pending)
+        accumulate_row_outcomes(results, counters, pending)
 
         assert len(pending["risk_sink"]) == 1
         pending_outcome = pending["risk_sink"][0][1]
@@ -146,7 +146,7 @@ class TestAccumulateRowOutcomesRouted:
         results = [_make_result(RowOutcome.ROUTED, sink_name=None)]
 
         with pytest.raises(OrchestrationInvariantError, match="missing sink_name"):
-            accumulate_row_outcomes(results, counters, {"output": Mock()}, pending)
+            accumulate_row_outcomes(results, counters, pending)
 
 
 class TestAccumulateRowOutcomesTerminal:
@@ -157,7 +157,7 @@ class TestAccumulateRowOutcomesTerminal:
         pending = _make_pending()
         results = [_make_result(RowOutcome.FAILED)]
 
-        accumulate_row_outcomes(results, counters, {"output": Mock()}, pending)
+        accumulate_row_outcomes(results, counters, pending)
 
         assert counters.rows_failed == 1
         assert len(pending["output"]) == 0
@@ -167,7 +167,7 @@ class TestAccumulateRowOutcomesTerminal:
         pending = _make_pending()
         results = [_make_result(RowOutcome.QUARANTINED)]
 
-        accumulate_row_outcomes(results, counters, {"output": Mock()}, pending)
+        accumulate_row_outcomes(results, counters, pending)
 
         assert counters.rows_quarantined == 1
 
@@ -176,7 +176,7 @@ class TestAccumulateRowOutcomesTerminal:
         pending = _make_pending()
         results = [_make_result(RowOutcome.FORKED)]
 
-        accumulate_row_outcomes(results, counters, {"output": Mock()}, pending)
+        accumulate_row_outcomes(results, counters, pending)
 
         assert counters.rows_forked == 1
 
@@ -185,7 +185,7 @@ class TestAccumulateRowOutcomesTerminal:
         pending = _make_pending()
         results = [_make_result(RowOutcome.EXPANDED)]
 
-        accumulate_row_outcomes(results, counters, {"output": Mock()}, pending)
+        accumulate_row_outcomes(results, counters, pending)
 
         assert counters.rows_expanded == 1
 
@@ -194,7 +194,7 @@ class TestAccumulateRowOutcomesTerminal:
         pending = _make_pending()
         results = [_make_result(RowOutcome.BUFFERED)]
 
-        accumulate_row_outcomes(results, counters, {"output": Mock()}, pending)
+        accumulate_row_outcomes(results, counters, pending)
 
         assert counters.rows_buffered == 1
 
@@ -204,7 +204,7 @@ class TestAccumulateRowOutcomesTerminal:
         pending = _make_pending()
         results = [_make_result(RowOutcome.CONSUMED_IN_BATCH)]
 
-        accumulate_row_outcomes(results, counters, {"output": Mock()}, pending)
+        accumulate_row_outcomes(results, counters, pending)
 
         assert counters.rows_succeeded == 0
         assert counters.rows_failed == 0
@@ -219,7 +219,7 @@ class TestAccumulateRowOutcomesCoalesced:
         pending = _make_pending()
         results = [_make_result(RowOutcome.COALESCED, sink_name="output")]
 
-        accumulate_row_outcomes(results, counters, {"output": Mock()}, pending)
+        accumulate_row_outcomes(results, counters, pending)
 
         assert counters.rows_coalesced == 1
         assert counters.rows_succeeded == 1
@@ -229,7 +229,7 @@ class TestAccumulateRowOutcomesCoalesced:
         pending = _make_pending()
         results = [_make_result(RowOutcome.COALESCED, sink_name="output")]
 
-        accumulate_row_outcomes(results, counters, {"output": Mock()}, pending)
+        accumulate_row_outcomes(results, counters, pending)
 
         assert len(pending["output"]) == 1
         pending_outcome = pending["output"][0][1]
@@ -281,7 +281,6 @@ class TestAccumulateRowOutcomesExclusiveCounters:
         accumulate_row_outcomes(
             [_make_result(RowOutcome.COMPLETED, sink_name="output")],
             counters,
-            {"output": Mock()},
             pending,
         )
         self._assert_counters(counters, succeeded=1)
@@ -293,7 +292,6 @@ class TestAccumulateRowOutcomesExclusiveCounters:
         accumulate_row_outcomes(
             [_make_result(RowOutcome.ROUTED, sink_name="risk")],
             counters,
-            {"output": Mock()},
             pending,
         )
         self._assert_counters(counters, routed=1)
@@ -307,7 +305,6 @@ class TestAccumulateRowOutcomesExclusiveCounters:
         accumulate_row_outcomes(
             [_make_result(RowOutcome.FAILED)],
             counters,
-            {"output": Mock()},
             pending,
         )
         self._assert_counters(counters, failed=1)
@@ -319,7 +316,6 @@ class TestAccumulateRowOutcomesExclusiveCounters:
         accumulate_row_outcomes(
             [_make_result(RowOutcome.QUARANTINED)],
             counters,
-            {"output": Mock()},
             pending,
         )
         self._assert_counters(counters, quarantined=1)
@@ -331,7 +327,6 @@ class TestAccumulateRowOutcomesExclusiveCounters:
         accumulate_row_outcomes(
             [_make_result(RowOutcome.FORKED)],
             counters,
-            {"output": Mock()},
             pending,
         )
         self._assert_counters(counters, forked=1)
@@ -343,7 +338,6 @@ class TestAccumulateRowOutcomesExclusiveCounters:
         accumulate_row_outcomes(
             [_make_result(RowOutcome.CONSUMED_IN_BATCH)],
             counters,
-            {"output": Mock()},
             pending,
         )
         self._assert_counters(counters)  # all zeros
@@ -355,7 +349,6 @@ class TestAccumulateRowOutcomesExclusiveCounters:
         accumulate_row_outcomes(
             [_make_result(RowOutcome.COALESCED, sink_name="output")],
             counters,
-            {"output": Mock()},
             pending,
         )
         self._assert_counters(counters, coalesced=1, succeeded=1)
@@ -367,7 +360,6 @@ class TestAccumulateRowOutcomesExclusiveCounters:
         accumulate_row_outcomes(
             [_make_result(RowOutcome.EXPANDED)],
             counters,
-            {"output": Mock()},
             pending,
         )
         self._assert_counters(counters, expanded=1)
@@ -379,7 +371,6 @@ class TestAccumulateRowOutcomesExclusiveCounters:
         accumulate_row_outcomes(
             [_make_result(RowOutcome.BUFFERED)],
             counters,
-            {"output": Mock()},
             pending,
         )
         self._assert_counters(counters, buffered=1)
@@ -397,7 +388,6 @@ class TestAccumulateRowOutcomesExclusiveCounters:
         accumulate_row_outcomes(
             [_make_result(RowOutcome.CONSUMED_IN_BATCH)],
             counters,
-            {"output": Mock()},
             pending,
         )
         assert counters.rows_succeeded == 0
@@ -414,7 +404,6 @@ class TestAccumulateRowOutcomesExclusiveCounters:
         accumulate_row_outcomes(
             [_make_result(RowOutcome.FORKED)],
             counters,
-            {"output": Mock()},
             pending,
         )
         assert counters.rows_failed == 0
@@ -455,7 +444,6 @@ class TestCoalesceCountingOwnership:
             coalesce_executor=coalesce_executor,
             coalesce_node_map=node_map,
             processor=processor,
-            config_sinks={"output": Mock()},
             ctx=Mock(),
             counters=counters,
             pending_tokens=pending,
@@ -488,7 +476,6 @@ class TestCoalesceCountingOwnership:
             coalesce_executor=coalesce_executor,
             coalesce_node_map=node_map,
             processor=processor,
-            config_sinks={"output": Mock()},
             ctx=Mock(),
             counters=counters,
             pending_tokens=pending,
@@ -521,7 +508,6 @@ class TestCoalesceCountingOwnership:
             coalesce_executor=coalesce_executor,
             coalesce_node_map=node_map,
             processor=processor,
-            config_sinks={"output": Mock()},
             ctx=Mock(),
             counters=counters,
             pending_tokens=pending,
@@ -545,7 +531,7 @@ class TestAccumulateRowOutcomesMixed:
             _make_result(RowOutcome.QUARANTINED),
         ]
 
-        accumulate_row_outcomes(results, counters, {"output": Mock()}, pending)
+        accumulate_row_outcomes(results, counters, pending)
 
         assert counters.rows_succeeded == 2
         assert counters.rows_failed == 1
@@ -557,7 +543,7 @@ class TestAccumulateRowOutcomesMixed:
         counters = _make_counters()
         pending = _make_pending()
 
-        accumulate_row_outcomes([], counters, {"output": Mock()}, pending)
+        accumulate_row_outcomes([], counters, pending)
 
         assert counters.rows_succeeded == 0
         assert counters.rows_failed == 0
@@ -600,7 +586,6 @@ class TestHandleCoalesceTimeouts:
             coalesce_executor=executor,
             coalesce_node_map=node_map,
             processor=processor,
-            config_sinks={"output": Mock()},
             ctx=Mock(),
             counters=counters,
             pending_tokens=pending,
@@ -637,7 +622,6 @@ class TestHandleCoalesceTimeouts:
             coalesce_executor=executor,
             coalesce_node_map=node_map,
             processor=processor,
-            config_sinks={"output": Mock()},
             ctx=ctx,
             counters=counters,
             pending_tokens=pending,
@@ -675,7 +659,6 @@ class TestHandleCoalesceTimeouts:
             coalesce_executor=executor,
             coalesce_node_map=node_map,
             processor=processor,
-            config_sinks={"output": Mock()},
             ctx=ctx,
             counters=counters,
             pending_tokens=pending,
@@ -710,7 +693,6 @@ class TestHandleCoalesceTimeouts:
             coalesce_executor=executor,
             coalesce_node_map=node_map,
             processor=processor,
-            config_sinks={"output": Mock()},
             ctx=Mock(),
             counters=counters,
             pending_tokens=pending,
@@ -755,7 +737,6 @@ class TestFlushCoalescePending:
             coalesce_executor=coalesce_executor,
             coalesce_node_map=node_map,
             processor=processor,
-            config_sinks={"output": Mock()},
             ctx=ctx,
             counters=counters,
             pending_tokens=pending,
@@ -796,7 +777,6 @@ class TestFlushCoalescePending:
             coalesce_executor=coalesce_executor,
             coalesce_node_map=node_map,
             processor=processor,
-            config_sinks={"output": Mock()},
             ctx=ctx,
             counters=counters,
             pending_tokens=pending,
@@ -834,7 +814,6 @@ class TestFlushCoalescePending:
             coalesce_executor=coalesce_executor,
             coalesce_node_map={},
             processor=Mock(),
-            config_sinks={"output": Mock()},
             ctx=Mock(),
             counters=counters,
             pending_tokens=pending,
@@ -855,7 +834,6 @@ class TestFlushCoalescePending:
             coalesce_executor=coalesce_executor,
             coalesce_node_map={},
             processor=Mock(),
-            config_sinks={"output": Mock()},
             ctx=Mock(),
             counters=counters,
             pending_tokens=pending,
@@ -902,7 +880,6 @@ class TestCoalesceOutcomeValidation:
                 coalesce_executor=coalesce_executor,
                 coalesce_node_map=node_map,
                 processor=Mock(),
-                config_sinks={"output": Mock()},
                 ctx=Mock(),
                 counters=counters,
                 pending_tokens=pending,
@@ -929,7 +906,6 @@ class TestCoalesceOutcomeValidation:
                 coalesce_executor=coalesce_executor,
                 coalesce_node_map=node_map,
                 processor=Mock(),
-                config_sinks={"output": Mock()},
                 ctx=Mock(),
                 counters=counters,
                 pending_tokens=pending,
@@ -954,7 +930,6 @@ class TestCoalesceOutcomeValidation:
                 coalesce_executor=coalesce_executor,
                 coalesce_node_map={},
                 processor=Mock(),
-                config_sinks={"output": Mock()},
                 ctx=Mock(),
                 counters=counters,
                 pending_tokens=pending,
@@ -980,7 +955,6 @@ class TestCoalesceOutcomeValidation:
                 coalesce_executor=coalesce_executor,
                 coalesce_node_map={CoalesceName("merge_1"): NodeID("coalesce::merge_1")},
                 processor=Mock(),
-                config_sinks={"output": Mock()},
                 ctx=Mock(),
                 counters=counters,
                 pending_tokens=pending,
@@ -1006,7 +980,6 @@ class TestCoalesceOutcomeValidation:
                 coalesce_executor=coalesce_executor,
                 coalesce_node_map={},
                 processor=Mock(),
-                config_sinks={"output": Mock()},
                 ctx=Mock(),
                 counters=counters,
                 pending_tokens=pending,

@@ -830,7 +830,7 @@ class TestOpenRouterBatchTelemetryAttribution:
         transform, ctx = _create_transform_with_context({"pool_size": 1})
 
         # Set batch_token_ids as AggregationExecutor would
-        ctx.batch_token_ids = ["token-aaa", "token-bbb", "token-ccc"]
+        ctx.batch_token_ids = ("token-aaa", "token-bbb", "token-ccc")
 
         # Intercept telemetry emissions from the AuditedHTTPClient.
         # The transform's on_start() stores self._telemetry_emit from ctx,

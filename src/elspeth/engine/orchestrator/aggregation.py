@@ -28,7 +28,7 @@ from elspeth.engine.orchestrator.types import (
 )
 
 if TYPE_CHECKING:
-    from collections.abc import Mapping, Sequence
+    from collections.abc import Sequence
 
     from elspeth.contracts import TransformProtocol
     from elspeth.contracts.aggregation_checkpoint import AggregationCheckpointState
@@ -164,7 +164,6 @@ def _process_flush_results(
     processor: RowProcessor,
     ctx: PluginContext,
     counters: ExecutionCounters,
-    sinks: Mapping[str, object],
     pending_tokens: PendingTokenMap,
 ) -> None:
     """Accumulate completed results and route work items through remaining transforms.
@@ -172,7 +171,7 @@ def _process_flush_results(
     Extracted from check_aggregation_timeouts and flush_remaining_aggregation_buffers
     which had identical post-flush continuation loops.
     """
-    accumulate_row_outcomes(completed_results, counters, sinks, pending_tokens)
+    accumulate_row_outcomes(completed_results, counters, pending_tokens)
 
     for work_item in work_items:
         if work_item.current_node_id is None:
@@ -184,7 +183,7 @@ def _process_flush_results(
             coalesce_node_id=work_item.coalesce_node_id,
             coalesce_name=work_item.coalesce_name,
         )
-        accumulate_row_outcomes(downstream_results, counters, sinks, pending_tokens)
+        accumulate_row_outcomes(downstream_results, counters, pending_tokens)
 
 
 def check_aggregation_timeouts(
@@ -281,7 +280,6 @@ def check_aggregation_timeouts(
             processor,
             ctx,
             counters,
-            config.sinks,
             pending_tokens,
         )
 
@@ -352,7 +350,6 @@ def flush_remaining_aggregation_buffers(
             processor,
             ctx,
             counters,
-            config.sinks,
             pending_tokens,
         )
 

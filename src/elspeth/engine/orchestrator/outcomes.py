@@ -17,7 +17,7 @@ timeout continuations (lines 2124, 2139-2143 in the original).
 
 from __future__ import annotations
 
-from collections.abc import Iterable, Mapping
+from collections.abc import Iterable
 from typing import TYPE_CHECKING
 
 from elspeth.contracts import PendingOutcome, RowOutcome, TokenInfo
@@ -73,7 +73,6 @@ def _route_to_sink(
 def accumulate_row_outcomes(
     results: Iterable[RowResult],
     counters: ExecutionCounters,
-    config_sinks: Mapping[str, object],
     pending_tokens: PendingTokenMap,
 ) -> None:
     """Accumulate row processing outcomes into counters and pending_tokens.
@@ -92,7 +91,6 @@ def accumulate_row_outcomes(
     Args:
         results: Iterable of RowProcessingResult from processor.process_row/process_token
         counters: Mutable ExecutionCounters to update
-        config_sinks: Dict of sink_name -> sink plugin (for sink validation)
         pending_tokens: Dict of sink_name -> list of (token, pending_outcome) pairs
     """
     for result in results:
@@ -161,7 +159,6 @@ def _process_merged_coalesce_outcome(
     coalesce_name: CoalesceName,
     coalesce_node_map: dict[CoalesceName, NodeID],
     processor: RowProcessor,
-    config_sinks: Mapping[str, object],
     ctx: PluginContext,
     counters: ExecutionCounters,
     pending_tokens: PendingTokenMap,
@@ -193,7 +190,6 @@ def _process_merged_coalesce_outcome(
     accumulate_row_outcomes(
         continuation_results,
         counters,
-        config_sinks,
         pending_tokens,
     )
 
@@ -202,7 +198,6 @@ def handle_coalesce_timeouts(
     coalesce_executor: CoalesceExecutor,
     coalesce_node_map: dict[CoalesceName, NodeID],
     processor: RowProcessor,
-    config_sinks: Mapping[str, object],
     ctx: PluginContext,
     counters: ExecutionCounters,
     pending_tokens: PendingTokenMap,
@@ -220,7 +215,6 @@ def handle_coalesce_timeouts(
         coalesce_executor: CoalesceExecutor managing join barriers
         coalesce_node_map: Maps CoalesceName -> coalesce node ID in graph
         processor: RowProcessor for downstream processing
-        config_sinks: Dict of sink_name -> sink plugin (for sink validation)
         ctx: Plugin context for transform execution
         counters: Mutable ExecutionCounters to update
         pending_tokens: Dict of sink_name -> tokens to append results to
@@ -237,7 +231,6 @@ def handle_coalesce_timeouts(
                     coalesce_name,
                     coalesce_node_map,
                     processor,
-                    config_sinks,
                     ctx,
                     counters,
                     pending_tokens,
@@ -251,7 +244,6 @@ def flush_coalesce_pending(
     coalesce_executor: CoalesceExecutor,
     coalesce_node_map: dict[CoalesceName, NodeID],
     processor: RowProcessor,
-    config_sinks: Mapping[str, object],
     ctx: PluginContext,
     counters: ExecutionCounters,
     pending_tokens: PendingTokenMap,
@@ -267,7 +259,6 @@ def flush_coalesce_pending(
         coalesce_executor: CoalesceExecutor managing join barriers
         coalesce_node_map: Maps CoalesceName -> coalesce node ID in graph
         processor: RowProcessor for downstream processing
-        config_sinks: Dict of sink_name -> sink plugin (for sink validation)
         ctx: Plugin context for transform execution
         counters: Mutable ExecutionCounters to update
         pending_tokens: Dict of sink_name -> tokens to append results to
@@ -287,7 +278,6 @@ def flush_coalesce_pending(
                 coalesce_name,
                 coalesce_node_map,
                 processor,
-                config_sinks,
                 ctx,
                 counters,
                 pending_tokens,

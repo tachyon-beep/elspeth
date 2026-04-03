@@ -2091,7 +2091,6 @@ class Orchestrator:
                     coalesce_executor=coalesce_executor,
                     coalesce_node_map=coalesce_node_map,
                     processor=processor,
-                    config_sinks=config.sinks,
                     ctx=ctx,
                     counters=counters,
                     pending_tokens=pending_tokens,
@@ -2278,7 +2277,7 @@ class Orchestrator:
                     )
                     if results:
                         loop_ctx.last_token_id = results[-1].token.token_id
-                    accumulate_row_outcomes(results, counters, config.sinks, pending_tokens)
+                    accumulate_row_outcomes(results, counters, pending_tokens)
 
                     # Check coalesce timeouts after each row
                     if coalesce_executor is not None:
@@ -2286,7 +2285,6 @@ class Orchestrator:
                             coalesce_executor=coalesce_executor,
                             coalesce_node_map=coalesce_node_map,
                             processor=processor,
-                            config_sinks=config.sinks,
                             ctx=ctx,
                             counters=counters,
                             pending_tokens=pending_tokens,
@@ -2410,7 +2408,7 @@ class Orchestrator:
                 loop_ctx.last_token_id = results[-1].token.token_id
 
             # Handle all results from this row
-            accumulate_row_outcomes(results, counters, config.sinks, pending_tokens)
+            accumulate_row_outcomes(results, counters, pending_tokens)
 
             # ─────────────────────────────────────────────────────────────────
             # Check for timed-out coalesces after processing each row
@@ -2421,7 +2419,6 @@ class Orchestrator:
                     coalesce_executor=coalesce_executor,
                     coalesce_node_map=coalesce_node_map,
                     processor=processor,
-                    config_sinks=config.sinks,
                     ctx=ctx,
                     counters=counters,
                     pending_tokens=pending_tokens,
@@ -2455,7 +2452,6 @@ class Orchestrator:
                     coalesce_executor=coalesce_executor,
                     coalesce_node_map=coalesce_node_map,
                     processor=processor,
-                    config_sinks=config.sinks,
                     ctx=ctx,
                     counters=counters,
                     pending_tokens=pending_tokens,
