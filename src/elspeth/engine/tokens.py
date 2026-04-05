@@ -148,9 +148,13 @@ class TokenManager:
         if not source_row.is_quarantined:
             raise OrchestrationInvariantError("create_quarantine_token requires a quarantined SourceRow")
 
-        # For quarantine rows, row may not be a dict (could be malformed external data)
-        # Ensure we have a dict for the audit trail
-        row_data: dict[str, Any] = source_row.row if isinstance(source_row.row, dict) else {"_raw": source_row.row}
+        # For quarantine rows, row may not be a dict (could be malformed external data).
+        # PipelineRow requires exactly builtin dict (type(data) is dict), so normalize
+        # dict subclasses (OrderedDict, etc.) to plain dict for the audit trail.
+        if isinstance(source_row.row, dict):
+            row_data: dict[str, Any] = dict(source_row.row) if type(source_row.row) is not dict else source_row.row
+        else:
+            row_data = {"_raw": source_row.row}
 
         # Create minimal OBSERVED contract for audit consistency
         # Quarantine rows don't go through transforms, but audit trail needs a contract

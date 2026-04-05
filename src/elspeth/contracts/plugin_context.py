@@ -431,12 +431,12 @@ class PluginContext:
                 row_id = stable_hash(row)[:16]
             except (ValueError, TypeError) as e:
                 # Non-canonical data (NaN, Infinity, or other non-serializable types)
-                # Hash the repr() instead - not canonical, but preserves audit trail
-                row_preview = repr(row)[:200] + "..." if len(repr(row)) > 200 else repr(row)
+                # Hash the repr() instead - not canonical, but preserves audit trail.
+                # Log only the error type, not row content (logging policy: no row data outside Landscape).
                 logger.warning(
-                    "Row data not canonically serializable, using repr() hash: %s | Row preview: %s",
+                    "Row data not canonically serializable, using repr() hash: %s (%s)",
+                    type(e).__name__,
                     str(e),
-                    row_preview,
                 )
                 row_id = repr_hash(row)[:16]
 

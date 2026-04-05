@@ -263,6 +263,14 @@ class CoalesceExecutor:
                     f"Configured coalesces: {sorted(self._settings)}"
                 )
 
+        # Validate completed_keys reference known coalesce names
+        for coalesce_name, _row_id in state.completed_keys:
+            if coalesce_name not in self._settings:
+                raise AuditIntegrityError(
+                    f"Checkpoint completed_keys references unknown coalesce '{coalesce_name}'. "
+                    f"Configured coalesces: {sorted(self._settings)}"
+                )
+
         now = self._clock.monotonic()
         self._pending.clear()
         self._completed_keys.clear()

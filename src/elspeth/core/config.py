@@ -1048,10 +1048,31 @@ class LandscapeSettings(BaseModel):
         return v
 
     @model_validator(mode="after")
-    def validate_sqlcipher_backend(self) -> "LandscapeSettings":
-        """Validate that sqlcipher backend uses a SQLite-compatible URL."""
-        if self.backend == "sqlcipher" and not self.url.startswith("sqlite"):
-            raise ValueError("backend='sqlcipher' requires a SQLite URL (sqlcipher is wire-compatible with SQLite)")
+    def validate_backend_url_consistency(self) -> "LandscapeSettings":
+        """Enforce that backend and URL scheme agree.
+
+        Prevents split-brain configs where backend declares one database
+        type while the URL opens another. SQLCipher uses sqlite:// URLs
+        with a passphrase — the scheme is 'sqlite' for both backends.
+        """
+        from sqlalchemy.engine.url import make_url
+
+        # Valid URL scheme prefixes for each backend
+        backend_to_schemes: dict[str, tuple[str, ...]] = {
+            "sqlite": ("sqlite",),
+            "sqlcipher": ("sqlite",),  # same scheme, different runtime
+            "postgresql": ("postgresql",),
+        }
+        parsed = make_url(self.url)
+        # drivername can be "postgresql+psycopg2" etc. — check the base
+        base_scheme = parsed.drivername.split("+")[0]
+        allowed = backend_to_schemes[self.backend]
+        if base_scheme not in allowed:
+            raise ValueError(
+                f"backend={self.backend!r} requires URL scheme "
+                f"{' or '.join(repr(s) for s in allowed)}, "
+                f"got {parsed.drivername!r} from url={self.url!r}"
+            )
         return self
 
 

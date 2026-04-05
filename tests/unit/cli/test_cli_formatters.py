@@ -173,6 +173,8 @@ class TestJsonFormatters:
             "succeeded": 0,
             "failed": 1,
             "quarantined": 0,
+            "routed": 1,
+            "routed_destinations": {"error_sink": 1},
             "duration_seconds": 0.0,
             "exit_code": 2,
         }

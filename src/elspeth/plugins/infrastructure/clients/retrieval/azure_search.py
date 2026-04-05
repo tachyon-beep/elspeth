@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import json
 import math
 import re
 import urllib.parse
@@ -210,10 +209,15 @@ class AzureSearchProvider:
             if status_code >= 400:
                 raise RetrievalError(f"Azure AI Search client error: HTTP {status_code}", retryable=False, status_code=status_code)
 
-            try:
-                return cast(dict[str, Any], response.json())
-            except (json.JSONDecodeError, ValueError) as exc:
-                raise RetrievalError(f"Malformed JSON response from Azure AI Search: {exc}", retryable=False) from exc
+            from elspeth.plugins.infrastructure.clients.json_utils import parse_json_strict
+
+            parsed, error = parse_json_strict(response.text)
+            if error is not None:
+                raise RetrievalError(
+                    f"Malformed JSON response from Azure AI Search: {error}",
+                    retryable=False,
+                )
+            return cast(dict[str, Any], parsed)
         except RetrievalError:
             raise
         except (httpx.TimeoutException, httpx.ConnectError, httpx.NetworkError) as exc:

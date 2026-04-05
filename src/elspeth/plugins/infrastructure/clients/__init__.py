@@ -60,6 +60,7 @@ from elspeth.plugins.infrastructure.clients.replayer import (
     CallReplayer,
     ReplayedCall,
     ReplayMissError,
+    ReplayPayloadMissingError,
 )
 from elspeth.plugins.infrastructure.clients.verifier import (
     CallVerifier,
@@ -80,6 +81,7 @@ __all__ = [
     "NetworkError",
     "RateLimitError",
     "ReplayMissError",
+    "ReplayPayloadMissingError",
     "ReplayedCall",
     "ServerError",
     "VerificationReport",

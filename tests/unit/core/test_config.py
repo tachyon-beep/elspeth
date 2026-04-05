@@ -425,7 +425,7 @@ class TestLandscapeSettings:
         """backend='sqlcipher' with a PostgreSQL URL is rejected."""
         from elspeth.core.config import LandscapeSettings
 
-        with pytest.raises(ValidationError, match="requires a SQLite URL"):
+        with pytest.raises(ValidationError, match="requires URL scheme"):
             LandscapeSettings(backend="sqlcipher", url="postgresql://user:pass@host/db")
 
     def test_sqlcipher_backend_valid(self) -> None:

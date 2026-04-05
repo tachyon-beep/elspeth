@@ -12,7 +12,7 @@ from dataclasses import dataclass
 from datetime import datetime
 from enum import StrEnum
 from types import MappingProxyType
-from typing import Any
+from typing import Any, ClassVar
 
 from elspeth.contracts.call_data import CallPayload
 from elspeth.contracts.enums import (
@@ -407,6 +407,10 @@ class ExternalCallCompleted(TelemetryEvent):
                 f"Got state_id={self.state_id!r}, operation_id={self.operation_id!r}"
             )
 
+    # Fields that have their own to_dict() — skip in the generic recursive walk
+    # to avoid O(payload-size) double-serialization.
+    _DTO_FIELDS: ClassVar[frozenset[str]] = frozenset({"request_payload", "response_payload", "token_usage"})
+
     def to_dict(self) -> dict[str, Any]:
         """Serialize event, using DTO-aware serialization for payloads.
 
@@ -415,15 +419,17 @@ class ExternalCallCompleted(TelemetryEvent):
         that omit None fields or spread extra_kwargs). Calling .to_dict() on each
         payload produces the correct audit-stable dict representation.
 
-        Note: calls _event_field_to_serializable directly instead of super().to_dict()
-        because super() fails with slots=True dataclass inheritance (CPython bug —
-        __class__ cell not set correctly for dynamically created slot classes).
+        Excludes DTO fields from the initial recursive walk to avoid
+        double-serialization (O(payload-size) CPU/memory amplification).
         """
-        d: dict[str, Any] = _event_field_to_serializable(self)
-        if self.request_payload is not None:
-            d["request_payload"] = self.request_payload.to_dict()
-        if self.response_payload is not None:
-            d["response_payload"] = self.response_payload.to_dict()
-        if self.token_usage is not None:
-            d["token_usage"] = self.token_usage.to_dict()
+        d: dict[str, Any] = {}
+        for f in dataclasses.fields(self):
+            if f.name in self._DTO_FIELDS:
+                continue
+            d[f.name] = _event_field_to_serializable(getattr(self, f.name))
+        # Serialize DTO fields via their own to_dict() (correct shape),
+        # or None if not set. Always present in output for shape stability.
+        d["request_payload"] = self.request_payload.to_dict() if self.request_payload is not None else None
+        d["response_payload"] = self.response_payload.to_dict() if self.response_payload is not None else None
+        d["token_usage"] = self.token_usage.to_dict() if self.token_usage is not None else None
         return d

@@ -2692,6 +2692,35 @@ class Orchestrator:
             # All rows were processed - complete the run
             recorder.finalize_run(run_id, status=RunStatus.COMPLETED)
 
+            # Emit RunFinished telemetry (matching the normal completion path)
+            from elspeth.telemetry import RunFinished
+
+            self._emit_telemetry(
+                RunFinished(
+                    timestamp=datetime.now(UTC),
+                    run_id=run_id,
+                    status=RunStatus.COMPLETED,
+                    row_count=0,
+                    duration_ms=0.0,
+                )
+            )
+
+            # Emit RunSummary event
+            self._events.emit(
+                RunSummary(
+                    run_id=run_id,
+                    status=RunCompletionStatus.COMPLETED,
+                    total_rows=0,
+                    succeeded=0,
+                    failed=0,
+                    quarantined=0,
+                    duration_seconds=0.0,
+                    exit_code=0,
+                    routed=0,
+                    routed_destinations=(),
+                )
+            )
+
             # Delete checkpoints on successful completion
             self._delete_checkpoints(run_id)
 

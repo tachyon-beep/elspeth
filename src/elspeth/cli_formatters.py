@@ -138,6 +138,8 @@ def create_json_formatters() -> dict[type, Callable[..., None]]:
                     "succeeded": event.succeeded,
                     "failed": event.failed,
                     "quarantined": event.quarantined,
+                    "routed": event.routed,
+                    "routed_destinations": dict(event.routed_destinations),
                     "duration_seconds": event.duration_seconds,
                     "exit_code": event.exit_code,
                 }

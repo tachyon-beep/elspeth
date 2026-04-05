@@ -21,7 +21,7 @@ if TYPE_CHECKING:
     from elspeth.contracts.data import PluginSchema
     from elspeth.contracts.diversion import SinkWriteResult
     from elspeth.contracts.results import SourceRow, TransformResult
-    from elspeth.contracts.schema_contract import PipelineRow
+    from elspeth.contracts.schema_contract import PipelineRow, SchemaContract
     from elspeth.contracts.sink import OutputValidationResult
 
 
@@ -577,4 +577,4 @@ class DisplayHeaderHost(Protocol):
     _resolved_display_headers: dict[str, str] | None
     _display_headers_resolved: bool
     _needs_resume_field_resolution: bool
-    _output_contract: Any  # SchemaContract | None — Any to avoid circular import
+    _output_contract: "SchemaContract | None"

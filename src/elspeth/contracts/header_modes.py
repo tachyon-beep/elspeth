@@ -48,6 +48,12 @@ def parse_header_mode(
         return HeaderMode.NORMALIZED
 
     if isinstance(config, dict):
+        if not config:
+            raise ValueError(
+                "Empty dict is not valid for CUSTOM header mode. "
+                "All fields must be explicitly mapped — provide a complete "
+                "normalized_name → display_name mapping."
+            )
         return HeaderMode.CUSTOM
 
     if config == "normalized":

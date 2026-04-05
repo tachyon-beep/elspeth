@@ -87,6 +87,16 @@ class BatchCheckpointState:
             raise ValueError("BatchCheckpointState.input_file_id must not be empty")
         if not self.submitted_at:
             raise ValueError("BatchCheckpointState.submitted_at must not be empty")
+        # Validate ISO datetime format — catch corruption at Tier 1 boundary,
+        # not later when Azure batch status handling calls fromisoformat().
+        from datetime import datetime
+
+        try:
+            datetime.fromisoformat(self.submitted_at)
+        except (ValueError, TypeError) as exc:
+            raise ValueError(
+                f"BatchCheckpointState.submitted_at must be a valid ISO datetime string, got {self.submitted_at!r}: {exc}"
+            ) from exc
         freeze_fields(self, "row_mapping", "template_errors")
         for i, entry in enumerate(self.template_errors):
             if len(entry) != 2:

@@ -79,8 +79,8 @@ class PendingOutcome:
         trail needs to reference the error record. Other outcomes must NOT
         have one (an error_hash on COMPLETED would be nonsensical).
         """
-        if self.outcome in self._FAILURE_OUTCOMES and self.error_hash is None:
-            raise ValueError(f"PendingOutcome with {self.outcome.name} outcome must have error_hash")
+        if self.outcome in self._FAILURE_OUTCOMES and (self.error_hash is None or not self.error_hash.strip()):
+            raise ValueError(f"PendingOutcome with {self.outcome.name} outcome must have a non-empty error_hash")
         if self.outcome not in self._FAILURE_OUTCOMES and self.error_hash is not None:
             raise ValueError(f"PendingOutcome with {self.outcome.name} outcome must not have error_hash")
 

@@ -98,11 +98,11 @@ class TestPendingOutcomePostInit:
     """Tests for PendingOutcome __post_init__ validation."""
 
     def test_quarantined_requires_error_hash(self) -> None:
-        with pytest.raises(ValueError, match="QUARANTINED outcome must have error_hash"):
+        with pytest.raises(ValueError, match="QUARANTINED outcome must have a non-empty error_hash"):
             PendingOutcome(outcome=RowOutcome.QUARANTINED, error_hash=None)
 
     def test_failed_requires_error_hash(self) -> None:
-        with pytest.raises(ValueError, match="FAILED outcome must have error_hash"):
+        with pytest.raises(ValueError, match="FAILED outcome must have a non-empty error_hash"):
             PendingOutcome(outcome=RowOutcome.FAILED, error_hash=None)
 
     def test_completed_rejects_error_hash(self) -> None:

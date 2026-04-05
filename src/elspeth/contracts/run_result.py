@@ -38,6 +38,8 @@ class RunResult:
     def __post_init__(self) -> None:
         if not self.run_id:
             raise ValueError("run_id must not be empty")
+        if not isinstance(self.status, RunStatus):
+            raise TypeError(f"RunResult.status must be a RunStatus enum, got {type(self.status).__name__}: {self.status!r}")
         require_int(self.rows_processed, "rows_processed", min_value=0)
         require_int(self.rows_succeeded, "rows_succeeded", min_value=0)
         require_int(self.rows_failed, "rows_failed", min_value=0)

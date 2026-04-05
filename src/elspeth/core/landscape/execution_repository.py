@@ -726,6 +726,15 @@ class ExecutionRepository:
         Raises:
             FrameworkBugError: If operation doesn't exist or is already completed
         """
+        # Validate lifecycle invariants before persisting — matches Operation.__post_init__.
+        # These are Tier 1 guards: impossible states in the audit trail are framework bugs.
+        if status in {"completed", "failed", "pending"} and duration_ms is None:
+            raise FrameworkBugError(f"complete_operation({operation_id!r}): status={status!r} but duration_ms is None")
+        if status == "completed" and error is not None:
+            raise FrameworkBugError(f"complete_operation({operation_id!r}): status='completed' but error is set")
+        if status == "failed" and error is None:
+            raise FrameworkBugError(f"complete_operation({operation_id!r}): status='failed' but error is None")
+
         # Atomic check-and-update: WHERE constrains both identity and status
         # to eliminate the TOCTOU race between separate SELECT and UPDATE.
         # Payload storage is deferred until AFTER the status check succeeds

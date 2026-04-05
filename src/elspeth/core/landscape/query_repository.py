@@ -315,8 +315,9 @@ class QueryRepository:
             )
             all_db_rows.extend(self._ops.execute_fetchall(query))
 
-        # Sort all rows by the same ordering the original single-query version used
-        all_db_rows.sort(key=lambda r: (r.step_index, r.attempt, r.ordinal, r.event_id))
+        # Sort with total ordering: state_id breaks ties when multiple tokens
+        # share the same step_index/attempt (e.g., forked paths at the same step).
+        all_db_rows.sort(key=lambda r: (r.step_index, r.attempt, r.state_id, r.ordinal, r.event_id))
         return [self._routing_event_loader.load(r) for r in all_db_rows]
 
     def get_calls_for_states(self, state_ids: list[str]) -> list[Call]:
@@ -353,8 +354,9 @@ class QueryRepository:
             )
             all_db_rows.extend(self._ops.execute_fetchall(query))
 
-        # Sort all rows by the same ordering the original single-query version used
-        all_db_rows.sort(key=lambda r: (r.step_index, r.attempt, r.call_index))
+        # Sort with total ordering: state_id breaks ties when multiple tokens
+        # share the same step_index/attempt (e.g., forked paths at the same step).
+        all_db_rows.sort(key=lambda r: (r.step_index, r.attempt, r.state_id, r.call_index))
         return [self._call_loader.load(r) for r in all_db_rows]
 
     # === Batch Query Methods (Bug 76r: N+1 query fix for exporter) ===
@@ -421,6 +423,7 @@ class QueryRepository:
             .order_by(
                 node_states_table.c.step_index,
                 node_states_table.c.attempt,
+                node_states_table.c.state_id,
                 routing_events_table.c.ordinal,
                 routing_events_table.c.event_id,
             )
@@ -450,6 +453,7 @@ class QueryRepository:
             .order_by(
                 node_states_table.c.step_index,
                 node_states_table.c.attempt,
+                node_states_table.c.state_id,
                 calls_table.c.call_index,
             )
         )

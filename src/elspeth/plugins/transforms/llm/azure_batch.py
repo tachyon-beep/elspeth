@@ -1440,7 +1440,9 @@ class AzureBatchLLMTransform(BaseTransform):
                     output_row,
                     self._response_field,
                     usage=usage,
-                    model=body.get("model"),
+                    # Azure batch responses may omit 'model' — fall back to the
+                    # deployment name we sent in the request (known ground truth).
+                    model=body.get("model") or self._deployment_name,
                 )
 
                 output_rows.append(output_row)

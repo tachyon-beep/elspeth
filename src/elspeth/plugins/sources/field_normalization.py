@@ -249,6 +249,16 @@ def resolve_field_names(
             for h in effective_headers
         ]
 
+        # Validate mapping outputs are valid Python identifiers — field_mapping
+        # values bypass normalize_field_name(), so the source-boundary guarantee
+        # must be enforced here.
+        for mapped_name in field_mapping.values():
+            if not mapped_name.isidentifier():
+                raise ValueError(
+                    f"field_mapping value {mapped_name!r} is not a valid Python identifier. "
+                    f"All downstream field names must be valid identifiers after normalization."
+                )
+
         # Check for collisions after mapping
         check_mapping_collisions(effective_headers, final_headers, field_mapping)
     else:

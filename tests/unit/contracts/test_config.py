@@ -47,6 +47,7 @@ CONTRACTS_CONFIG_ITEMS = {
     "RuntimeRateLimitProtocol",
     "RuntimeRetryProtocol",
     "RuntimeTelemetryProtocol",
+    "ServiceRateLimitProtocol",
     # Runtime configuration dataclasses
     "ExporterConfig",
     "RuntimeCheckpointConfig",

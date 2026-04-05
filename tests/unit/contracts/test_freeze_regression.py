@@ -343,7 +343,7 @@ class TestPendingOutcomeClassVar:
         assert a._FAILURE_OUTCOMES is b._FAILURE_OUTCOMES
 
     def test_validation_still_works(self) -> None:
-        with pytest.raises(ValueError, match="QUARANTINED outcome must have error_hash"):
+        with pytest.raises(ValueError, match="QUARANTINED outcome must have a non-empty error_hash"):
             PendingOutcome(outcome=RowOutcome.QUARANTINED, error_hash=None)
         po = PendingOutcome(outcome=RowOutcome.QUARANTINED, error_hash="abc")
         assert po.error_hash == "abc"

@@ -171,6 +171,15 @@ class CoalescePendingCheckpoint:
                 f"Corrupted coalesce pending checkpoint: 'lost_branches' must be a dict, got {type(lost_branches).__name__}: {lost_branches!r}"
             )
 
+        # Validate each branch value is a dict before deserializing — non-dict
+        # nested entries would produce AttributeError instead of AuditIntegrityError.
+        for branch_key, branch_value in branches.items():
+            if not isinstance(branch_value, dict):
+                raise AuditIntegrityError(
+                    f"Corrupted coalesce pending checkpoint: branches[{branch_key!r}] "
+                    f"must be a dict, got {type(branch_value).__name__}: {branch_value!r}"
+                )
+
         return cls(
             coalesce_name=data["coalesce_name"],
             row_id=data["row_id"],

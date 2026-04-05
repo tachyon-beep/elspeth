@@ -291,6 +291,17 @@ def bootstrap_and_run(settings_path: Path) -> "RunResult":
 
     # Phase 4: Construct infrastructure and run
     passphrase = resolve_audit_passphrase(config.landscape)
+
+    # Warn if JSONL journal is enabled alongside SQLCipher — journal is plaintext.
+    # Mirrors the same guard in cli.py run command.
+    if passphrase is not None and config.landscape.dump_to_jsonl:
+        import structlog
+
+        structlog.get_logger().warning(
+            "JSONL journal is not encrypted",
+            hint="The JSONL change journal is written in plaintext even when the audit database is encrypted with SQLCipher.",
+        )
+
     db = LandscapeDB.from_url(
         config.landscape.url,
         passphrase=passphrase,

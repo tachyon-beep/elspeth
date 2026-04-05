@@ -170,7 +170,6 @@ class AuditedHTTPClient(AuditedClientBase):
                     extra={
                         "url": full_url,
                         "status_code": response.status_code,
-                        "body_preview": response.text[:200],
                         "error": error,
                     },
                 )
@@ -575,7 +574,6 @@ class AuditedHTTPClient(AuditedClientBase):
                         extra={
                             "url": request.original_url,
                             "status_code": response.status_code,
-                            "body_preview": response.text[:200],
                             "error": error,
                         },
                     )

@@ -447,8 +447,9 @@ class DatabaseSink(BaseSink):
     def write(self, rows: list[dict[str, Any]], ctx: SinkContext) -> SinkWriteResult:
         """Write a batch of rows to the database.
 
-        CRITICAL: Hashes the canonical JSON payload BEFORE insert.
-        This proves intent - the database may transform data (add timestamps,
+        CRITICAL: Hashes the canonical JSON payload of the ACTUAL SQL rows
+        (after any-field serialization) BEFORE insert. This proves what was
+        sent — the database may further transform data (add timestamps,
         auto-increment IDs, normalize strings, etc.).
 
         Args:
@@ -462,23 +463,16 @@ class DatabaseSink(BaseSink):
             ValidationError: If a row fails schema validation.
                 This indicates a bug in an upstream transform.
         """
-        # Compute canonical JSON payload ONCE before any database operation.
-        # Uses RFC 8785 canonical JSON for deterministic hashing:
-        # - Normalizes pandas/numpy types to JSON primitives
-        # - Rejects NaN/Infinity (invalid JSON per RFC 8785)
-        # - Deterministic unicode escaping
-        canonical_payload = canonical_json(rows).encode("utf-8")
-        content_hash = hashlib.sha256(canonical_payload).hexdigest()
-        payload_size = len(canonical_payload)
-
         if not rows:
-            # Empty batch - return descriptor without DB operations
+            # Empty batch - hash the empty list for consistent audit trail
+            canonical_payload = canonical_json(rows).encode("utf-8")
+            content_hash = hashlib.sha256(canonical_payload).hexdigest()
             return SinkWriteResult(
                 artifact=ArtifactDescriptor.for_database(
                     url=self._sanitized_url,
                     table=self._table_name,
                     content_hash=content_hash,
-                    payload_size=payload_size,
+                    payload_size=len(canonical_payload),
                     row_count=0,
                 )
             )
@@ -502,6 +496,15 @@ class DatabaseSink(BaseSink):
         # Serialize dict/list values in 'any'-typed fields to JSON strings
         # before INSERT. SQL TEXT columns cannot store Python dicts/lists.
         insert_rows = self._serialize_any_typed_fields(rows)
+
+        # Hash the ACTUAL SQL payload (post-serialization) using RFC 8785
+        # canonical JSON. This proves what was sent to the database, not
+        # the pre-transform Python objects. Critical for auditability when
+        # 'any'-typed or observed-mode fields contain dict/list values that
+        # get serialized to JSON strings before INSERT.
+        canonical_payload = canonical_json(insert_rows).encode("utf-8")
+        content_hash = hashlib.sha256(canonical_payload).hexdigest()
+        payload_size = len(canonical_payload)
 
         # Insert all rows in batch with call recording for audit trail
         # (ctx.operation_id is set by executor)
