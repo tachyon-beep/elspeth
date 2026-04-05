@@ -98,6 +98,12 @@ def resolve_preflight(
         probe_results = {}
         for probe in probes:
             result = probe.probe()
+            if result.collection in probe_results:
+                raise FrameworkBugError(
+                    f"Duplicate collection probe name '{result.collection}' — "
+                    f"earlier probe result would be silently overwritten. "
+                    f"Each probe must target a unique collection name."
+                )
             probe_results[result.collection] = {
                 "reachable": result.reachable,
                 "count": result.count,

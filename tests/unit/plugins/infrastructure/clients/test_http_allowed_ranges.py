@@ -65,6 +65,7 @@ class TestRedirectAllowedRangesThreading:
             port=80,
             path="/start",
             scheme="http",
+            bare_hostname="example.com",
         )
 
         # Build a redirect SSRFSafeRequest that validate_url_for_ssrf would return
@@ -75,6 +76,7 @@ class TestRedirectAllowedRangesThreading:
             port=80,
             path="/redirected",
             scheme="http",
+            bare_hostname="localhost",
         )
 
         client = AuditedHTTPClient(
@@ -146,6 +148,7 @@ class TestRedirectAllowedRangesThreading:
             port=80,
             path="/start",
             scheme="http",
+            bare_hostname="example.com",
         )
 
         redirect_safe_request = SSRFSafeRequest(
@@ -155,6 +158,7 @@ class TestRedirectAllowedRangesThreading:
             port=80,
             path="/page",
             scheme="http",
+            bare_hostname="other.example.com",
         )
 
         client = AuditedHTTPClient(
@@ -221,6 +225,7 @@ class TestRedirectAllowedRangesThreading:
             port=80,
             path="/page",
             scheme="http",
+            bare_hostname="example.com",
         )
 
         client = AuditedHTTPClient(

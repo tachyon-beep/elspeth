@@ -90,10 +90,11 @@ class FilesystemPayloadStore:
         content_hash = hashlib.sha256(content).hexdigest()
         path = self._path_for_hash(content_hash)
 
-        if path.exists():
-            # Verify existing file matches expected hash.
-            # Without this check, corrupted files (bit rot, tampering) would be
-            # silently accepted, violating Tier-1 audit integrity.
+        # Try to verify existing file first (EAFP, not LBYL).
+        # Using try/read_bytes instead of exists()+read_bytes avoids a TOCTOU
+        # race where a concurrent purge deletes the file between the check and
+        # the read. If the file disappears, we fall through to the write path.
+        try:
             existing_content = path.read_bytes()
             actual_hash = hashlib.sha256(existing_content).hexdigest()
 
@@ -102,35 +103,35 @@ class FilesystemPayloadStore:
                 raise payload_contracts.IntegrityError(
                     f"Payload integrity check failed on store: existing file has hash {actual_hash}, expected {content_hash}"
                 )
-        else:
-            # File doesn't exist — atomic write via temp file to prevent
-            # partial/corrupted files on crash (Tier 1 integrity requirement).
-            # Use NamedTemporaryFile with unique name to prevent race conditions
-            # when concurrent writes target the same hash (deterministic temp
-            # names like path.with_suffix(".tmp") would collide).
-            path.parent.mkdir(parents=True, exist_ok=True)
-            with tempfile.NamedTemporaryFile(delete=False, dir=path.parent, suffix=".tmp") as fd:
-                temp_path = Path(fd.name)
-                try:
-                    fd.write(content)
-                    fd.flush()
-                    os.fsync(fd.fileno())
-                except BaseException:
-                    if temp_path.exists():
-                        temp_path.unlink()
-                    raise
+            return content_hash
+        except FileNotFoundError:
+            pass  # File doesn't exist or was purged — fall through to write
+
+        # Atomic write via temp file to prevent partial/corrupted files on
+        # crash (Tier 1 integrity requirement).
+        path.parent.mkdir(parents=True, exist_ok=True)
+        with tempfile.NamedTemporaryFile(delete=False, dir=path.parent, suffix=".tmp") as fd:
+            temp_path = Path(fd.name)
             try:
-                os.replace(temp_path, path)
-                # Fsync parent directory to ensure rename survives power loss
-                dir_fd = os.open(str(path.parent), os.O_RDONLY)
-                try:
-                    os.fsync(dir_fd)
-                finally:
-                    os.close(dir_fd)
+                fd.write(content)
+                fd.flush()
+                os.fsync(fd.fileno())
             except BaseException:
                 if temp_path.exists():
                     temp_path.unlink()
                 raise
+        try:
+            os.replace(temp_path, path)
+            # Fsync parent directory to ensure rename survives power loss
+            dir_fd = os.open(str(path.parent), os.O_RDONLY)
+            try:
+                os.fsync(dir_fd)
+            finally:
+                os.close(dir_fd)
+        except BaseException:
+            if temp_path.exists():
+                temp_path.unlink()
+            raise
 
         return content_hash
 

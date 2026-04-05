@@ -67,6 +67,11 @@ class JSONExplodeConfig(DataPluginConfig):
     def _reject_field_collision(self) -> JSONExplodeConfig:
         if self.output_field == self.array_field:
             raise ValueError(f"output_field and array_field must differ, both are '{self.output_field}'")
+        if self.include_index and self.output_field == "item_index":
+            raise ValueError(
+                "output_field='item_index' conflicts with the auto-generated index field "
+                "when include_index=True — the index would overwrite the exploded item"
+            )
         return self
 
 

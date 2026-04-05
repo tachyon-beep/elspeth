@@ -32,8 +32,8 @@ def _get_providers() -> dict[str, _ProviderEntry]:
         )
 
         providers["azure_search"] = (AzureSearchProviderConfig, AzureSearchProvider)
-    except ImportError:
-        pass
+    except ModuleNotFoundError:
+        pass  # azure SDK not installed — azure_search provider unavailable
 
     try:
         from elspeth.plugins.infrastructure.clients.retrieval.chroma import (
@@ -52,7 +52,7 @@ def _get_providers() -> dict[str, _ProviderEntry]:
             return ChromaSearchProvider(config=config, recorder=recorder, run_id=run_id)
 
         providers["chroma"] = (ChromaSearchProviderConfig, _chroma_factory)
-    except ImportError:
+    except ModuleNotFoundError:
         pass  # chromadb not installed — chroma provider unavailable
 
     return providers

@@ -48,9 +48,13 @@ from elspeth.plugins.infrastructure.clients.base import AuditedClientBase
 from elspeth.plugins.infrastructure.clients.http import AuditedHTTPClient
 from elspeth.plugins.infrastructure.clients.llm import (
     AuditedLLMClient,
+    ContentPolicyError,
+    ContextLengthError,
     LLMClientError,
     LLMResponse,
+    NetworkError,
     RateLimitError,
+    ServerError,
 )
 from elspeth.plugins.infrastructure.clients.replayer import (
     CallReplayer,
@@ -69,11 +73,15 @@ __all__ = [
     "AuditedLLMClient",
     "CallReplayer",
     "CallVerifier",
+    "ContentPolicyError",
+    "ContextLengthError",
     "LLMClientError",
     "LLMResponse",
+    "NetworkError",
     "RateLimitError",
     "ReplayMissError",
     "ReplayedCall",
+    "ServerError",
     "VerificationReport",
     "VerificationResult",
 ]

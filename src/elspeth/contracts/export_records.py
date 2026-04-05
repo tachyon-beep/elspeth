@@ -110,6 +110,7 @@ class RowExportRecord(TypedDict):
     row_index: int
     source_node_id: str
     source_data_hash: str | None
+    source_data_ref: str | None
     created_at: str
 
 

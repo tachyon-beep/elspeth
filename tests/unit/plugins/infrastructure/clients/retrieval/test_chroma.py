@@ -33,6 +33,16 @@ def _mock_recorder() -> MagicMock:
     return MagicMock(spec=LandscapeRecorder)
 
 
+def _precreate_collection(name: str, distance_function: str = "cosine") -> None:
+    """Pre-create a Chroma collection so ChromaSearchProvider.__init__ finds it.
+
+    ChromaSearchProvider uses get_collection() (not get_or_create) to ensure
+    retrieval operates on existing corpora. Tests must create the collection first.
+    """
+    client = chromadb.Client()
+    client.get_or_create_collection(name=name, metadata={"hnsw:space": distance_function})
+
+
 class TestChromaSearchProviderConfig:
     def test_minimal_valid_config(self):
         config = ChromaSearchProviderConfig(collection="test-docs")
@@ -145,15 +155,17 @@ class TestChromaSearchProvider:
         # Use unique collection name: chromadb.Client() shares a global in-memory
         # backend, so reusing names across tests causes collection state to bleed.
         unique_name = f"tc-{uuid.uuid4().hex[:12]}"
-        config = ChromaSearchProviderConfig(
-            collection=unique_name,
-            mode="ephemeral",
-            distance_function=distance_function,
+
+        # Pre-create the collection BEFORE constructing the provider.
+        # ChromaSearchProvider uses get_collection() (not get_or_create) —
+        # retrieval requires an existing collection.
+        client = chromadb.Client()
+        collection = client.get_or_create_collection(
+            name=unique_name,
+            metadata={"hnsw:space": distance_function},
         )
-        provider = ChromaSearchProvider(config=config, recorder=_mock_recorder(), run_id="test-run")
 
         if documents:
-            collection = provider._collection
             # ChromaDB 1.x rejects empty metadata dicts — pass None when absent.
             metadatas = [d.get("metadata") or None for d in documents]
             collection.add(
@@ -162,7 +174,12 @@ class TestChromaSearchProvider:
                 metadatas=metadatas,  # type: ignore[arg-type]  # chromadb stubs expect Mapping but we pass list[str | None]
             )
 
-        return provider
+        config = ChromaSearchProviderConfig(
+            collection=unique_name,
+            mode="ephemeral",
+            distance_function=distance_function,
+        )
+        return ChromaSearchProvider(config=config, recorder=_mock_recorder(), run_id="test-run")
 
     def test_search_returns_retrieval_chunks(self):
         provider = self._make_provider(
@@ -275,15 +292,24 @@ class TestChromaSearchProvider:
 
     def test_distance_function_mismatch_raises(self, tmp_path):
         """Uses PersistentClient so both providers share the same backing store."""
+        # Pre-create collection with cosine distance via PersistentClient
+        client = chromadb.PersistentClient(path=str(tmp_path))
+        collection = client.get_or_create_collection(
+            name="mismatch-test",
+            metadata={"hnsw:space": "cosine"},
+        )
+        collection.add(documents=["test"], ids=["doc1"])
+
+        # Provider with matching distance function should succeed
         config_cosine = ChromaSearchProviderConfig(
             collection="mismatch-test",
             mode="persistent",
             persist_directory=str(tmp_path),
             distance_function="cosine",
         )
-        provider_cosine = ChromaSearchProvider(config=config_cosine, recorder=_mock_recorder(), run_id="test-run")
-        provider_cosine._collection.add(documents=["test"], ids=["doc1"])
+        ChromaSearchProvider(config=config_cosine, recorder=_mock_recorder(), run_id="test-run")
 
+        # Provider with mismatched distance function should fail
         config_l2 = ChromaSearchProviderConfig(
             collection="mismatch-test",
             mode="persistent",
@@ -323,6 +349,7 @@ class TestChromaSearchProvider:
         """Chroma search calls must be recorded in the audit trail."""
 
         unique_name = f"ta-{uuid.uuid4().hex[:12]}"
+        _precreate_collection(unique_name)
         config = ChromaSearchProviderConfig(
             collection=unique_name,
             mode="ephemeral",
@@ -349,6 +376,7 @@ class TestChromaScoreNormalization:
     def _make_provider(self, distance_function: str) -> ChromaSearchProvider:
         # Unique name per call — chromadb.Client() shares a global in-memory backend.
         unique_name = f"tsn-{uuid.uuid4().hex[:12]}"
+        _precreate_collection(unique_name, distance_function)
         config = ChromaSearchProviderConfig(
             collection=unique_name,
             mode="ephemeral",
@@ -406,6 +434,7 @@ class TestCallTypeCorrectness:
         from elspeth.contracts.enums import CallType
 
         unique_name = f"tct-{uuid.uuid4().hex[:12]}"
+        _precreate_collection(unique_name)
         config = ChromaSearchProviderConfig(
             collection=unique_name,
             mode="ephemeral",
@@ -437,6 +466,7 @@ class TestTier3ResultBoundary:
         from unittest.mock import patch
 
         unique_name = f"t3r-{uuid.uuid4().hex[:12]}"
+        _precreate_collection(unique_name)
         config = ChromaSearchProviderConfig(
             collection=unique_name,
             mode="ephemeral",
@@ -456,6 +486,7 @@ class TestTier3ResultBoundary:
         from unittest.mock import patch
 
         unique_name = f"t3n-{uuid.uuid4().hex[:12]}"
+        _precreate_collection(unique_name)
         config = ChromaSearchProviderConfig(
             collection=unique_name,
             mode="ephemeral",
@@ -478,6 +509,7 @@ class TestTier3ResultBoundary:
         from unittest.mock import patch
 
         unique_name = f"t3d-{uuid.uuid4().hex[:12]}"
+        _precreate_collection(unique_name)
         config = ChromaSearchProviderConfig(
             collection=unique_name,
             mode="ephemeral",
@@ -501,6 +533,7 @@ class TestNonFiniteDistanceHandling:
 
     def _make_provider(self) -> ChromaSearchProvider:
         unique_name = f"tnf-{uuid.uuid4().hex[:12]}"
+        _precreate_collection(unique_name)
         config = ChromaSearchProviderConfig(
             collection=unique_name,
             mode="ephemeral",
@@ -561,6 +594,7 @@ class TestDistanceTypeValidation:
         from unittest.mock import patch
 
         unique_name = f"tdt-{uuid.uuid4().hex[:12]}"
+        _precreate_collection(unique_name)
         config = ChromaSearchProviderConfig(
             collection=unique_name,
             mode="ephemeral",
@@ -592,6 +626,7 @@ class TestDocTypeValidation:
         from unittest.mock import patch
 
         unique_name = f"tdv-{uuid.uuid4().hex[:12]}"
+        _precreate_collection(unique_name)
         config = ChromaSearchProviderConfig(
             collection=unique_name,
             mode="ephemeral",
@@ -622,20 +657,26 @@ class TestChromaSearchProviderReadiness:
 
     def _make_provider(self, documents: list[dict[str, str]] | None = None) -> ChromaSearchProvider:
         unique_name = f"tcr-{uuid.uuid4().hex[:12]}"
+
+        # Pre-create the collection before constructing the provider.
+        client = chromadb.Client()
+        collection = client.get_or_create_collection(
+            name=unique_name,
+            metadata={"hnsw:space": "cosine"},
+        )
+
+        if documents:
+            collection.add(
+                documents=[d["content"] for d in documents],
+                ids=[d["id"] for d in documents],
+            )
+
         config = ChromaSearchProviderConfig(
             collection=unique_name,
             mode="ephemeral",
             distance_function="cosine",
         )
-        provider = ChromaSearchProvider(config=config, recorder=_mock_recorder(), run_id="test-run")
-
-        if documents:
-            provider._collection.add(
-                documents=[d["content"] for d in documents],
-                ids=[d["id"] for d in documents],
-            )
-
-        return provider
+        return ChromaSearchProvider(config=config, recorder=_mock_recorder(), run_id="test-run")
 
     def test_collection_with_documents_is_ready(self) -> None:
         """Collection exists and has documents."""

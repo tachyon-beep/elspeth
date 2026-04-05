@@ -79,6 +79,7 @@ def _make_ssrf_request(url: str, ip: str = "93.184.216.34") -> SSRFSafeRequest:
         port=port,
         path=path,
         scheme=parsed.scheme,
+        bare_hostname=parsed.host,
     )
 
 

@@ -331,14 +331,34 @@ class AzureSearchProvider:
         probe, not a row-level operation. There is no state_id or token_id
         available during on_start().
 
+        SSRF protection: validates the endpoint URL resolves to a public IP
+        before making the request, preventing DNS rebinding attacks where
+        a config-authored hostname resolves to an internal IP.
+
         Auth modes:
         - api_key: sends api-key header
         - use_managed_identity: acquires a Bearer token via DefaultAzureCredential
         """
+        from elspeth.core.security.web import NetworkError, SSRFBlockedError, validate_url_for_ssrf
+
         index_name = self._config.index
 
         try:
             count_url = f"{self._config.endpoint.rstrip('/')}/indexes/{index_name}/docs/$count?api-version={self._config.api_version}"
+
+            # SSRF validation: resolve DNS and reject internal IPs before
+            # making the request. We validate then use the original URL (not the
+            # IP-pinned URL) to preserve TLS certificate verification.
+            try:
+                validate_url_for_ssrf(count_url)
+            except (SSRFBlockedError, NetworkError) as exc:
+                return CollectionReadinessResult(
+                    collection=index_name,
+                    reachable=False,
+                    count=None,
+                    message=f"Index '{index_name}' endpoint blocked by SSRF validation: {exc}",
+                )
+
             headers: dict[str, str] = {}
             if self._config.api_key:
                 headers["api-key"] = self._config.api_key

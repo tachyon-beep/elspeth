@@ -150,10 +150,11 @@ def load_secrets_from_config(config: SecretsConfig) -> list[SecretResolutionInpu
     pending_env: list[tuple[str, str]] = []  # (env_var_name, secret_value)
 
     for env_var_name, keyvault_secret_name in ordered_mapping:
-        start_time = time.time()
+        timestamp = time.time()  # Wall-clock for audit record
+        start_perf = time.perf_counter()  # Monotonic for latency measurement
         try:
             secret_value, _ref = loader.get_secret(keyvault_secret_name)
-            latency_ms = (time.time() - start_time) * 1000
+            latency_ms = (time.perf_counter() - start_perf) * 1000
 
             # Stage the env var for atomic application later
             pending_env.append((env_var_name, str(secret_value)))
@@ -175,7 +176,7 @@ def load_secrets_from_config(config: SecretsConfig) -> list[SecretResolutionInpu
                     source="keyvault",
                     vault_url=config.vault_url,
                     secret_name=keyvault_secret_name,
-                    timestamp=start_time,
+                    timestamp=timestamp,
                     resolution_latency_ms=latency_ms,
                     fingerprint=fp,
                 )

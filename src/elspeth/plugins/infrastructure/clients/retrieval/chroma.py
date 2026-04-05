@@ -63,13 +63,6 @@ class ChromaSearchProviderConfig(BaseModel):
             )
         return v
 
-    @field_validator("persist_directory")
-    @classmethod
-    def validate_persist_directory(cls, v: str | None) -> str | None:
-        if v is not None and ".." in v.split("/"):
-            raise ValueError(f"persist_directory must not contain '..' path components, got {v!r}")
-        return v
-
     @model_validator(mode="after")
     def validate_mode_requirements(self) -> Self:
         if self.mode in ("persistent", "client"):
@@ -143,51 +136,41 @@ class ChromaSearchProvider:
                 ssl=config.ssl,
             )
 
-        # Detect whether the collection pre-existed before we get_or_create it.
-        # check_readiness() uses this to distinguish "empty because it already
-        # existed with no documents" from "empty because we just auto-created
-        # it (possible typo in collection name)".
+        # Retrieval providers must NOT create collections — that's a sink/indexing
+        # concern. Using get_collection() ensures a typo in the collection name
+        # fails fast at startup instead of silently creating an empty collection.
         try:
-            self._client.get_collection(name=config.collection)
-            self._collection_pre_existed = True
-        except Exception:
-            self._collection_pre_existed = False
-
-        try:
-            self._collection = self._client.get_or_create_collection(
+            self._collection = self._client.get_collection(
                 name=config.collection,
-                metadata={"hnsw:space": config.distance_function},
             )
-            # We just called get_or_create_collection with metadata={"hnsw:space": ...}.
-            # The key must be present — absence is a ChromaDB SDK contract violation,
-            # not a "maybe it's fine" scenario. If the key is missing, score
-            # normalization would silently use the wrong formula.
-            collection_metadata = self._collection.metadata or {}
-            if "hnsw:space" not in collection_metadata:
-                raise RetrievalError(
-                    f"Chroma collection {config.collection!r} has no 'hnsw:space' "
-                    f"in metadata after get_or_create_collection. This indicates a "
-                    f"ChromaDB SDK bug or metadata corruption — score normalization "
-                    f"cannot proceed without a known distance function.",
-                    retryable=False,
-                )
-            actual_space = collection_metadata["hnsw:space"]
-            if actual_space != config.distance_function:
-                raise RetrievalError(
-                    f"Chroma collection {config.collection!r} exists with "
-                    f"distance_function={actual_space!r}, but config specifies "
-                    f"{config.distance_function!r}. Score normalization would use "
-                    f"the wrong formula. Either change the config to match the "
-                    f"existing collection, or use a different collection name.",
-                    retryable=False,
-                )
-        except RetrievalError:
-            raise
         except Exception as exc:
             raise RetrievalError(
-                f"Failed to access Chroma collection {config.collection!r}: {exc}",
+                f"Chroma collection {config.collection!r} does not exist or is "
+                f"unreachable. Retrieval requires a pre-populated collection — "
+                f"check the collection name and ensure the corpus has been indexed. "
+                f"Error: {exc}",
                 retryable=False,
             ) from exc
+
+        # Validate distance function matches what the collection was created with.
+        collection_metadata = self._collection.metadata or {}
+        if "hnsw:space" not in collection_metadata:
+            raise RetrievalError(
+                f"Chroma collection {config.collection!r} has no 'hnsw:space' "
+                f"in metadata. Score normalization cannot proceed without a "
+                f"known distance function.",
+                retryable=False,
+            )
+        actual_space = collection_metadata["hnsw:space"]
+        if actual_space != config.distance_function:
+            raise RetrievalError(
+                f"Chroma collection {config.collection!r} exists with "
+                f"distance_function={actual_space!r}, but config specifies "
+                f"{config.distance_function!r}. Score normalization would use "
+                f"the wrong formula. Either change the config to match the "
+                f"existing collection, or use a different collection name.",
+                retryable=False,
+            )
 
     def search(
         self,
@@ -351,12 +334,12 @@ class ChromaSearchProvider:
         )
 
     def check_readiness(self) -> CollectionReadinessResult:
-        """Check that the ChromaDB collection exists and has documents.
+        """Check that the ChromaDB collection is reachable and has documents.
 
         Called during on_start() AFTER provider construction. self._collection
-        is always set by __init__ (which calls get_or_create_collection).
-        If __init__ fails, the provider doesn't exist and this method is
-        never called.
+        is always set by __init__ (which calls get_collection — fails fast
+        if collection doesn't exist). If __init__ fails, the provider doesn't
+        exist and this method is never called.
         """
         collection_name = self._config.collection
 
@@ -364,8 +347,6 @@ class ChromaSearchProvider:
             count = self._collection.count()
             if count > 0:
                 message = f"Collection '{collection_name}' has {count} documents"
-            elif not self._collection_pre_existed:
-                message = f"Collection '{collection_name}' was auto-created (empty) — verify the collection name is correct"
             else:
                 message = f"Collection '{collection_name}' is empty"
             return CollectionReadinessResult(

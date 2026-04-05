@@ -33,7 +33,7 @@ per_file_rules:
   - R5
   reason: Deep-freeze guards, from_dict validation, and Tier 1 __post_init__ type guards
   expires: null
-  max_hits: 4
+  max_hits: 7
 - pattern: contracts/audit.py
   rules:
   - R5

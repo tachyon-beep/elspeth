@@ -714,8 +714,7 @@ sinks:
       schema:
         mode: observed
 
-landscape:
-  enabled: false
+landscape: {}
 """)
 
         from elspeth.cli import _load_settings_with_secrets
@@ -765,8 +764,7 @@ sinks:
 
 
 # Use the secret in some config value
-landscape:
-  enabled: false
+landscape: {}
 """)
 
         from elspeth.cli import _load_settings_with_secrets
@@ -823,8 +821,7 @@ sinks:
       schema:
         mode: observed
 
-landscape:
-  enabled: false
+landscape: {}
 """)
 
         from elspeth.cli import _load_settings_with_secrets

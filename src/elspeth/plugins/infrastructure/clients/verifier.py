@@ -38,7 +38,8 @@ class VerificationResult:
         request_hash: Hash of the request data (for identification)
         live_response: The response from the live call
         recorded_response: The previously recorded response (None if missing or purged)
-        is_match: Whether live and recorded responses match
+        is_match: Whether live and recorded responses match. True = match,
+            False = definitive mismatch, None = indeterminate (cannot verify).
         differences: DeepDiff results as dict (empty if match)
         recorded_call_missing: True if no recorded call was found
         payload_missing: True if call exists but response payload is missing/purged
@@ -52,25 +53,27 @@ class VerificationResult:
     request_hash: str
     live_response: dict[str, Any]
     recorded_response: dict[str, Any] | None
-    is_match: bool
+    is_match: bool | None
     differences: dict[str, Any] = field(default_factory=dict)
     recorded_call_missing: bool = False
     payload_missing: bool = False
     no_response_recorded: bool = False
 
     def __post_init__(self) -> None:
-        if self.is_match and self.recorded_call_missing:
+        if self.is_match is True and self.recorded_call_missing:
             raise ValueError("Cannot be a match when recorded call is missing")
         if self.recorded_call_missing and self.payload_missing:
             raise ValueError("Cannot have both recorded_call_missing and payload_missing")
-        if self.is_match and self.differences:
+        if self.is_match is True and self.differences:
             raise ValueError("Cannot be a match with non-empty differences")
-        if self.no_response_recorded and self.is_match:
+        if self.no_response_recorded and self.is_match is True:
             raise ValueError("Cannot be a match when no response was recorded")
         if self.no_response_recorded and self.payload_missing:
             raise ValueError("Cannot have both no_response_recorded and payload_missing")
         if self.no_response_recorded and self.recorded_call_missing:
             raise ValueError("Cannot have both no_response_recorded and recorded_call_missing")
+        if self.is_match is None and not self.payload_missing:
+            raise ValueError("Indeterminate is_match (None) is only valid for missing payloads")
 
     # --- Factory classmethods ---
 
@@ -127,10 +130,16 @@ class VerificationResult:
         request_hash: str,
         live_response: dict[str, Any],
         *,
-        is_match: bool = False,
+        is_match: bool | None = None,
         differences: dict[str, Any] | None = None,
     ) -> VerificationResult:
-        """Call exists but response payload is missing or purged."""
+        """Call exists but response payload is missing or purged.
+
+        Args:
+            is_match: True = hash-verified match, False = hash-verified mismatch,
+                None (default) = indeterminate (cannot verify, e.g. payload purged
+                with ignore_paths/ignore_order configured).
+        """
         return cls(
             request_hash=request_hash,
             live_response=live_response,
@@ -160,13 +169,16 @@ class VerificationResult:
         """Check if there are meaningful differences.
 
         Returns True when there are actual differences between responses.
-        Missing recordings, missing payloads (without hash mismatch), and
-        calls that never had a response are NOT differences — there is
-        no baseline to compare against in these cases.
+        Missing recordings, missing payloads (without hash mismatch),
+        indeterminate results, and calls that never had a response are NOT
+        differences — there is no baseline to compare against in these cases.
         """
         if self.recorded_call_missing:
             return False
         if self.no_response_recorded:
+            return False
+        if self.is_match is None:
+            # Indeterminate — cannot assert differences without evidence.
             return False
         if self.payload_missing:
             # Hash-based comparison may have populated differences even
@@ -188,6 +200,9 @@ class VerificationReport:
         mismatches: Number of calls with differences from baseline
         missing_recordings: Number of calls with no recorded baseline
         missing_payloads: Number of calls where response payload is missing/purged
+            (includes both hash-verified and unverifiable cases)
+        unverifiable: Number of calls that could not be verified (payload purged
+            and comparison settings prevent hash-based verification)
         no_response_recorded: Number of calls where original call had no response (timeout/DNS)
         results: Individual verification results for inspection
     """
@@ -197,18 +212,22 @@ class VerificationReport:
     mismatches: int = 0
     missing_recordings: int = 0
     missing_payloads: int = 0
+    unverifiable: int = 0
     no_response_recorded: int = 0
     results: list[VerificationResult] = field(default_factory=list)
 
     @property
     def success_rate(self) -> float:
-        """Percentage of calls that matched recorded baseline.
+        """Percentage of verifiable calls that matched recorded baseline.
 
-        Returns 100.0 if no calls have been verified.
+        Excludes unverifiable calls from the denominator — unknown outcomes
+        cannot count for or against success.
+        Returns 100.0 if no verifiable calls have been verified.
         """
-        if self.total_calls == 0:
+        verifiable = self.total_calls - self.unverifiable
+        if verifiable == 0:
             return 100.0
-        return (self.matches / self.total_calls) * 100
+        return (self.matches / verifiable) * 100
 
 
 class CallVerifier:
@@ -364,15 +383,34 @@ class CallVerifier:
                         # Cannot perform meaningful verification: payload is gone and
                         # hash comparison would be stricter than the configured semantic
                         # comparison (ignore_paths/ignore_order not applicable to hashes).
+                        self._report.unverifiable += 1
                         result = VerificationResult.missing_payload(
                             request_hash=request_hash,
                             live_response=live_response,
+                            is_match=None,
+                            differences={
+                                "unverifiable": {
+                                    "reason": "Payload purged and comparison settings "
+                                    "(ignore_paths/ignore_order) prevent hash-based verification",
+                                    "response_hash_available": True,
+                                    "ignore_paths": self._ignore_paths,
+                                    "ignore_order": self._ignore_order,
+                                }
+                            },
                         )
                 else:
                     # No hash available — cannot verify, just mark as missing
+                    self._report.unverifiable += 1
                     result = VerificationResult.missing_payload(
                         request_hash=request_hash,
                         live_response=live_response,
+                        is_match=None,
+                        differences={
+                            "unverifiable": {
+                                "reason": "Payload purged and no response hash available",
+                                "response_hash_available": False,
+                            }
+                        },
                     )
 
                 self._report.results.append(result)

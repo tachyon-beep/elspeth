@@ -73,6 +73,7 @@ class TestGetSsrfSafeCallReturn:
             port=80,
             path="/",
             scheme="http",
+            bare_hostname="example.com",
         )
 
         with patch("httpx.Client") as mock_client_class:

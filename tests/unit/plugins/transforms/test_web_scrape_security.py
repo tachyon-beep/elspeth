@@ -399,6 +399,7 @@ class TestRedirectAllowedRangesBehavior:
             port=80,
             path="/start",
             scheme="http",
+            bare_hostname="example.com",
         )
         redirect_safe = SSRFSafeRequest(
             original_url="http://localhost/redirected",
@@ -407,6 +408,7 @@ class TestRedirectAllowedRangesBehavior:
             port=80,
             path="/redirected",
             scheme="http",
+            bare_hostname="localhost",
         )
 
         with (
@@ -453,6 +455,7 @@ class TestRedirectAllowedRangesBehavior:
             port=80,
             path="/start",
             scheme="http",
+            bare_hostname="example.com",
         )
 
         with (
@@ -492,6 +495,7 @@ class TestRedirectAllowedRangesBehavior:
             port=80,
             path="/start",
             scheme="http",
+            bare_hostname="example.com",
         )
 
         with (

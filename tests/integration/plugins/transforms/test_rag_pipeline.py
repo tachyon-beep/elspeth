@@ -199,9 +199,9 @@ class TestRAGPipelineWithChromaProvider:
         }
         config.update(config_overrides)
 
-        # Pre-populate the collection BEFORE on_start() so check_readiness()
-        # sees documents. Chroma ephemeral mode shares a global in-memory
-        # backend — get_or_create_collection in __init__ will find this data.
+        # Pre-populate the collection BEFORE on_start() so ChromaSearchProvider's
+        # __init__ finds it via get_collection(). Chroma ephemeral mode shares a
+        # global in-memory backend — the collection must exist before provider init.
         client = chromadb.Client()
         collection = client.get_or_create_collection(
             name=collection_name,

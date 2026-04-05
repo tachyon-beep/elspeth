@@ -214,20 +214,25 @@ allow_hits:
   reason: Broadcast treats an absent run entry as 'no subscribers' for that run
   safety: A missing subscriber set results in a no-op broadcast, which is the correct behavior
   expires: null
-- key: web/execution/progress.py:R6:ProgressBroadcaster:_safe_put:fp=fb0d3946bc2737fd
+- key: web/execution/progress.py:R6:ProgressBroadcaster:_safe_put:fp=a242edd0100e11b4
   owner: web-execution
-  reason: QueueFull caught to drain oldest event and retry — bounded queue backpressure
-  safety: Drops oldest event on full queue; no silent data loss (SSE is best-effort)
+  reason: QueueFull for terminal events — drains queue and retries (terminal events must never be dropped)
+  safety: Terminal events guaranteed delivered; progress events use drop-oldest backpressure
   expires: null
-- key: web/execution/progress.py:R7:ProgressBroadcaster:_safe_put:fp=c90317fa83d5ee3a
+- key: web/execution/progress.py:R7:ProgressBroadcaster:_safe_put:fp=bb1f85282ba3f763
   owner: web-execution
-  reason: QueueEmpty suppressed during drain — queue may have been consumed between full check and drain
+  reason: QueueEmpty suppressed during terminal event drain — queue may have been consumed concurrently
   safety: Race-safe no-op; no data loss
   expires: null
-- key: web/execution/progress.py:R6:ProgressBroadcaster:_safe_put:fp=3ecae08d22e46197
+- key: web/execution/progress.py:R7:ProgressBroadcaster:_safe_put:fp=b085fda7b77dd327
   owner: web-execution
-  reason: QueueFull after drain — event dropped rather than blocking pipeline thread
-  safety: Best-effort delivery; no silent data loss (SSE is operational visibility)
+  reason: QueueEmpty suppressed during progress event drop-oldest — queue may have been consumed between full check and drain
+  safety: Race-safe no-op; no data loss
+  expires: null
+- key: web/execution/progress.py:R6:ProgressBroadcaster:_safe_put:fp=e628c7c24fa8f80b
+  owner: web-execution
+  reason: QueueFull after drop-oldest retry for non-terminal events — event dropped rather than blocking pipeline thread
+  safety: Best-effort delivery for progress events; terminal events use separate drain path
   expires: null
 - key: web/execution/progress.py:R9:ProgressBroadcaster:cleanup_run:fp=7c47e683391777b0
   owner: web-execution

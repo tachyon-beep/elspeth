@@ -105,6 +105,13 @@ class QuerySpec:
             raise ValueError("name must be non-empty")
         if not self.input_fields:
             raise ValueError("input_fields must be non-empty")
+        if self.max_tokens is not None:
+            if isinstance(self.max_tokens, bool):
+                raise TypeError(f"max_tokens must be int, got bool ({self.max_tokens!r})")
+            if not isinstance(self.max_tokens, int):
+                raise TypeError(f"max_tokens must be int, got {type(self.max_tokens).__name__}")
+            if self.max_tokens <= 0:
+                raise ValueError(f"max_tokens must be > 0, got {self.max_tokens}")
         object.__setattr__(self, "input_fields", MappingProxyType(dict(self.input_fields)))
         if self.output_fields is not None:
             object.__setattr__(self, "output_fields", tuple(self.output_fields))

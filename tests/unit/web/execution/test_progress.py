@@ -207,15 +207,15 @@ class TestProgressBroadcasterBackpressure:
 
         assert queue.qsize() == 1
 
-    def test_safe_put_drops_oldest_when_full(self) -> None:
-        """When queue is full, oldest event is evicted and new event inserted."""
+    def test_safe_put_drops_oldest_when_full_progress(self) -> None:
+        """When queue is full, oldest progress event is evicted and new one inserted."""
         queue: asyncio.Queue[RunEvent] = asyncio.Queue(maxsize=3)
         events = [_make_event(event_type="progress") for _ in range(3)]
         for e in events:
             queue.put_nowait(e)
         assert queue.full()
 
-        new_event = _make_event(event_type="completed")
+        new_event = _make_event(event_type="progress")
         ProgressBroadcaster._safe_put(queue, new_event, "run-1")
 
         # Queue still at maxsize, oldest was evicted
@@ -227,6 +227,37 @@ class TestProgressBroadcasterBackpressure:
         _ = queue.get_nowait()  # events[2]
         last = queue.get_nowait()
         assert last is new_event
+
+    def test_terminal_event_drains_full_queue(self) -> None:
+        """Terminal events drain the queue to guarantee delivery.
+
+        Bug: elspeth-ca156c71b7 — terminal events (completed, failed, cancelled)
+        must never be silently dropped, or WS clients hang forever.
+        """
+        queue: asyncio.Queue[RunEvent] = asyncio.Queue(maxsize=3)
+        events = [_make_event(event_type="progress") for _ in range(3)]
+        for e in events:
+            queue.put_nowait(e)
+        assert queue.full()
+
+        terminal = _make_event(event_type="completed")
+        ProgressBroadcaster._safe_put(queue, terminal, "run-1")
+
+        # Queue was drained then terminal inserted — only terminal event remains
+        assert queue.qsize() == 1
+        assert queue.get_nowait() is terminal
+
+    def test_failed_event_drains_full_queue(self) -> None:
+        """Failed events also drain the queue (terminal)."""
+        queue: asyncio.Queue[RunEvent] = asyncio.Queue(maxsize=3)
+        for _ in range(3):
+            queue.put_nowait(_make_event(event_type="progress"))
+
+        failed = _make_event(event_type="failed")
+        ProgressBroadcaster._safe_put(queue, failed, "run-1")
+
+        assert queue.qsize() == 1
+        assert queue.get_nowait() is failed
 
 
 class TestProgressBroadcasterCleanup:

@@ -203,6 +203,8 @@ def validate_headers_value(v: str | dict[str, str] | None) -> str | dict[str, st
     if v is None:
         return v
     if isinstance(v, dict):
+        if not v:
+            raise ValueError("headers custom mapping must not be empty — use 'normalized' or 'original' for non-custom modes")
         targets = list(v.values())
         duplicates = [t for t in targets if targets.count(t) > 1]
         if duplicates:

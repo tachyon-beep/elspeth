@@ -12,10 +12,10 @@ import time
 import urllib.parse
 from datetime import UTC, datetime
 from types import MappingProxyType
-from typing import Any, Literal
+from typing import Any, Literal, Self
 
 import structlog
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
 
 from elspeth.contracts import CallStatus, CallType, Determinism, PluginSchema
 from elspeth.contracts.call_data import RawCallPayload
@@ -133,6 +133,47 @@ class DataverseSinkConfig(DataPluginConfig):
         if not v or not v.strip():
             raise ValueError("alternate_key cannot be empty")
         return v.strip()
+
+    @model_validator(mode="after")
+    def validate_no_outbound_key_collisions(self) -> Self:
+        """Reject configs where multiple source fields map to the same Dataverse key.
+
+        Checks three collision types:
+        1. Duplicate field_mapping values (two pipeline fields → same Dataverse column)
+        2. Duplicate lookup target_field values (two lookups → same navigation property)
+        3. Lookup bind key colliding with a field_mapping target
+        """
+        # 1. field_mapping value uniqueness
+        targets = list(self.field_mapping.values())
+        seen: dict[str, str] = {}
+        for pipeline_field, dv_column in self.field_mapping.items():
+            if dv_column in seen:
+                raise ValueError(
+                    f"field_mapping collision: pipeline fields '{seen[dv_column]}' and "
+                    f"'{pipeline_field}' both map to Dataverse column '{dv_column}'"
+                )
+            seen[dv_column] = pipeline_field
+
+        if self.lookups:
+            # 2. lookup target_field uniqueness
+            lookup_targets: dict[str, str] = {}
+            for pipeline_field, lookup in self.lookups.items():
+                bind_key = f"{lookup.target_field}@odata.bind"
+                if lookup.target_field in lookup_targets:
+                    raise ValueError(
+                        f"lookup collision: fields '{lookup_targets[lookup.target_field]}' and "
+                        f"'{pipeline_field}' both target navigation property '{lookup.target_field}'"
+                    )
+                lookup_targets[lookup.target_field] = pipeline_field
+
+                # 3. bind key vs field_mapping target collision
+                if bind_key in targets:
+                    raise ValueError(
+                        f"lookup/field_mapping collision: lookup for '{pipeline_field}' produces "
+                        f"bind key '{bind_key}' which collides with a field_mapping target"
+                    )
+
+        return self
 
 
 # Rebuild model to resolve forward references

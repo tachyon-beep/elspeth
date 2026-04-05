@@ -89,28 +89,44 @@ class ProgressBroadcaster:
 
     @staticmethod
     def _safe_put(queue: asyncio.Queue[RunEvent], event: RunEvent, run_id: str) -> None:
-        """Put an event on the queue, dropping the oldest on backpressure.
+        """Put an event on the queue, dropping oldest on backpressure.
 
         Called via call_soon_threadsafe — runs on the event loop thread.
-        If the queue is full (stalled client), discard the oldest event
-        and retry. If the retry also fails (another callback filled the
-        slot between get and put), the event is logged and dropped.
+
+        Terminal events (completed, failed, cancelled) must never be dropped —
+        a lost terminal event leaves WebSocket clients hanging forever. For
+        terminal events, drain the entire queue if necessary to make room.
         """
+        is_terminal = event.event_type in ("completed", "failed", "cancelled")
+
         try:
             queue.put_nowait(event)
         except asyncio.QueueFull:
-            with contextlib.suppress(asyncio.QueueEmpty):
-                queue.get_nowait()  # Drop oldest
-            try:
-                queue.put_nowait(event)
-            except asyncio.QueueFull:
-                slog.warning("subscriber_queue_drop", run_id=run_id)
+            if is_terminal:
+                # Terminal events MUST be delivered. Drain queue to make room.
+                drained = 0
+                while not queue.empty():
+                    with contextlib.suppress(asyncio.QueueEmpty):
+                        queue.get_nowait()
+                        drained += 1
+                if drained > 0:
+                    slog.info("subscriber_queue_drained_for_terminal", run_id=run_id, drained=drained)
+                queue.put_nowait(event)  # Queue is empty — this cannot fail
+            else:
+                with contextlib.suppress(asyncio.QueueEmpty):
+                    queue.get_nowait()  # Drop oldest
+                try:
+                    queue.put_nowait(event)
+                except asyncio.QueueFull:
+                    slog.warning("subscriber_queue_drop", run_id=run_id)
 
     def cleanup_run(self, run_id: str) -> None:
-        """Remove all subscribers for a completed/failed run.
+        """Remove subscriber mapping for a completed/failed/cancelled run.
 
-        Called after the terminal event has been broadcast and all
-        WebSocket handlers have disconnected.
+        Called from _run_pipeline's finally block after the terminal event
+        has been scheduled via broadcast(). Does NOT destroy existing queues —
+        events already queued will still be drained by connected WS handlers.
+        Only prevents new subscribers from being added for this run_id.
         """
         with self._lock:
             self._subscribers.pop(run_id, None)

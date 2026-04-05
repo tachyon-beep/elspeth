@@ -3,6 +3,7 @@
 Uses pluggy for hook-based plugin registration.
 """
 
+import threading
 from typing import Any
 
 import pluggy
@@ -286,6 +287,7 @@ class PluginManager:
 # --- Shared singleton ---
 
 _shared_instance: PluginManager | None = None
+_shared_lock = threading.Lock()
 
 
 def get_shared_plugin_manager() -> PluginManager:
@@ -295,12 +297,21 @@ def get_shared_plugin_manager() -> PluginManager:
     invocation.  Returns the same instance on all subsequent calls.
     Used by both CLI and web entry points.
 
+    Thread-safe: a lock ensures only one thread performs initialization.
     If registration fails, the global is NOT set — the next call will retry
     rather than returning a half-initialized manager.
     """
     global _shared_instance
-    if _shared_instance is None:
+    instance = _shared_instance
+    if instance is not None:
+        return instance
+    with _shared_lock:
+        # Double-checked locking: another thread may have initialized
+        # while we waited for the lock.
+        instance = _shared_instance
+        if instance is not None:
+            return instance
         manager = PluginManager()
         manager.register_builtin_plugins()
         _shared_instance = manager
-    return _shared_instance
+        return manager

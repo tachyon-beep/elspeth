@@ -137,6 +137,7 @@ def _make_ssrf_safe(url: str) -> SSRFSafeRequest:
         port=port,
         path=path,
         scheme=parsed.scheme,
+        bare_hostname=hostname,
     )
 
 

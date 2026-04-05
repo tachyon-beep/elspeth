@@ -105,6 +105,30 @@ class AggregationTokenCheckpoint:
             raise AuditIntegrityError(
                 f"Corrupted aggregation token checkpoint: missing required fields {missing}. Found: {set(data.keys())}"
             )
+
+        # Tier 1 type guards — crash on type corruption, not on downstream access.
+        # Scalars must be str (not int, bool, etc. from malformed JSON).
+        for field_name in ("token_id", "row_id", "contract_version"):
+            value = data[field_name]
+            if not isinstance(value, str):
+                raise AuditIntegrityError(
+                    f"Corrupted aggregation token checkpoint: '{field_name}' must be str, got {type(value).__name__}: {value!r}"
+                )
+        # Optional str fields — must be str or None
+        for field_name in ("branch_name", "fork_group_id", "join_group_id", "expand_group_id"):
+            value = data[field_name]
+            if value is not None and not isinstance(value, str):
+                raise AuditIntegrityError(
+                    f"Corrupted aggregation token checkpoint: '{field_name}' must be str or None, got {type(value).__name__}: {value!r}"
+                )
+        # Container fields — must be dict (JSON object)
+        for field_name in ("row_data", "contract"):
+            value = data[field_name]
+            if not isinstance(value, dict):
+                raise AuditIntegrityError(
+                    f"Corrupted aggregation token checkpoint: '{field_name}' must be a dict, got {type(value).__name__}"
+                )
+
         return cls(
             token_id=data["token_id"],
             row_id=data["row_id"],

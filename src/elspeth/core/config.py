@@ -976,7 +976,18 @@ class LandscapeSettings(BaseModel):
 
     model_config = {"frozen": True, "extra": "forbid"}
 
-    enabled: bool = Field(default=True, description="Enable audit trail recording")
+    enabled: bool = Field(default=True, description="Reserved — Landscape recording is always active (audit trail is mandatory)")
+
+    @field_validator("enabled")
+    @classmethod
+    def _reject_disabled(cls, v: bool) -> bool:
+        if not v:
+            raise ValueError(
+                "landscape.enabled=false is not supported — the audit trail is mandatory. "
+                "Disabling Landscape recording would violate the auditability standard."
+            )
+        return v
+
     backend: Literal["sqlite", "sqlcipher", "postgresql"] = Field(
         default="sqlite",
         description="Database backend type (sqlcipher requires the 'security' extra)",

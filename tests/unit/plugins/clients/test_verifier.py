@@ -117,6 +117,33 @@ class TestVerificationResult:
         # Missing payload is not considered a "difference"
         assert result.has_differences is False
 
+    def test_indeterminate_is_match_none(self) -> None:
+        """is_match=None represents indeterminate verification.
+
+        Bug: elspeth-d943c8f11a — previously, unverifiable calls used
+        is_match=False which is indistinguishable from definitive mismatch.
+        """
+        result = VerificationResult.missing_payload(
+            request_hash="abc123",
+            live_response={"content": "Hello"},
+            is_match=None,
+            differences={"unverifiable": {"reason": "test"}},
+        )
+
+        assert result.is_match is None
+        assert result.payload_missing is True
+        assert result.has_differences is False  # Indeterminate is not a difference
+
+    def test_indeterminate_invalid_without_payload_missing(self) -> None:
+        """is_match=None is forbidden outside of missing payload context."""
+        with pytest.raises(ValueError, match=r"Indeterminate.*only valid for missing payloads"):
+            VerificationResult(
+                request_hash="abc123",
+                live_response={"content": "Hello"},
+                recorded_response=None,
+                is_match=None,
+            )
+
 
 class TestVerificationReport:
     """Tests for VerificationReport dataclass."""
@@ -130,6 +157,7 @@ class TestVerificationReport:
         assert report.mismatches == 0
         assert report.missing_recordings == 0
         assert report.missing_payloads == 0
+        assert report.unverifiable == 0
         assert report.results == []
 
     def test_success_rate_no_calls(self) -> None:
@@ -165,6 +193,31 @@ class TestVerificationReport:
             mismatches=5,
         )
         assert report.success_rate == 0.0
+
+    def test_success_rate_excludes_unverifiable(self) -> None:
+        """success_rate denominator excludes unverifiable calls.
+
+        Unverifiable calls are unknown outcomes — they cannot count
+        for or against success. 7 matches out of 8 verifiable calls = 87.5%.
+        """
+        report = VerificationReport(
+            total_calls=10,
+            matches=7,
+            mismatches=1,
+            missing_payloads=2,
+            unverifiable=2,
+        )
+        # Denominator = 10 - 2 = 8 verifiable calls
+        assert report.success_rate == (7 / 8) * 100
+
+    def test_success_rate_all_unverifiable(self) -> None:
+        """success_rate returns 100% when all calls are unverifiable."""
+        report = VerificationReport(
+            total_calls=3,
+            missing_payloads=3,
+            unverifiable=3,
+        )
+        assert report.success_rate == 100.0
 
 
 class TestCallVerifier:
@@ -492,14 +545,17 @@ class TestCallVerifier:
             live_response={"content": "Hello"},
         )
 
-        # Should track as missing payload, not mismatch
-        assert result.is_match is False
+        # Should track as missing payload — indeterminate (cannot verify)
+        assert result.is_match is None
         assert result.recorded_response is None
         assert result.payload_missing is True
-        assert result.has_differences is False  # Not a real difference
-        assert verifier.get_report().missing_payloads == 1
-        # Should not increment mismatches
-        assert verifier.get_report().mismatches == 0
+        assert result.has_differences is False  # Indeterminate is not a difference
+        report = verifier.get_report()
+        assert report.missing_payloads == 1
+        assert report.unverifiable == 1
+        # Should not increment matches or mismatches
+        assert report.mismatches == 0
+        assert report.matches == 0
 
     def test_verify_error_call_without_response_not_missing_payload(self) -> None:
         """Error calls that never had a response should NOT be flagged as missing payload.
@@ -778,12 +834,14 @@ class TestCallVerifier:
             live_response={"content": "Hello", "latency": 999},  # Only ignored field differs
         )
 
-        # Should NOT attempt hash verification — result is "cannot verify"
+        # Should NOT attempt hash verification — result is indeterminate
         assert result.payload_missing is True
-        assert result.is_match is False  # Cannot confirm match without payload
+        assert result.is_match is None  # Indeterminate — cannot verify
+        assert "unverifiable" in result.differences
         report = verifier.get_report()
         assert report.matches == 0
         assert report.mismatches == 0  # No false alarm
+        assert report.unverifiable == 1
 
     def test_verify_hash_skipped_when_ignore_order_true(self) -> None:
         """Hash verification must be skipped when ignore_order=True (the default).
@@ -813,12 +871,14 @@ class TestCallVerifier:
             live_response={"items": ["c", "a", "b"]},  # Same items, different order
         )
 
-        # Should NOT attempt hash verification — cannot verify
+        # Should NOT attempt hash verification — indeterminate
         assert result.payload_missing is True
-        assert result.is_match is False
+        assert result.is_match is None  # Indeterminate — cannot verify
+        assert "unverifiable" in result.differences
         report = verifier.get_report()
         assert report.matches == 0
         assert report.mismatches == 0
+        assert report.unverifiable == 1
 
     def test_verify_hash_works_when_strict_comparison(self) -> None:
         """Hash verification proceeds when no ignore_paths and ignore_order=False."""
@@ -1300,11 +1360,11 @@ class TestCounterAccountingGap:
         )
 
     def test_purged_no_hash_increments_counter(self) -> None:
-        """PURGED state with no response_hash must still increment a counter.
+        """PURGED state with no response_hash must increment unverifiable counter.
 
         Previously, missing_payloads was incremented but neither matches nor
-        mismatches was — the result has is_match=False but the mismatch counter
-        doesn't reflect it.
+        mismatches was — the result had is_match=False but should be None
+        (indeterminate). Now properly tracked as unverifiable.
         """
         recorder = self._create_mock_recorder()
         request_data = {"model": "gpt-4", "messages": []}
@@ -1324,14 +1384,13 @@ class TestCounterAccountingGap:
         report = verifier.get_report()
         assert report.total_calls == 1
         assert report.missing_payloads == 1
-        # The call is unverifiable (no hash, payload purged). missing_payloads is
-        # the correct sole category — not double-counted in matches or mismatches.
-        # Verify the accounting invariant: every call is in exactly one bucket.
+        assert report.unverifiable == 1
+        # Accounting invariant: every call is in exactly one bucket.
         accounted = report.matches + report.mismatches + report.missing_recordings + report.missing_payloads + report.no_response_recorded
         assert accounted == report.total_calls, f"Counter accounting: {accounted} accounted != {report.total_calls} total"
         result = report.results[0]
         assert result.payload_missing is True
-        assert result.is_match is False
+        assert result.is_match is None  # Indeterminate, not False
 
 
 class TestHasDifferencesNoRecordedResponse:
