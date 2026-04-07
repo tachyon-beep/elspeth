@@ -77,9 +77,18 @@ def discover_plugins_in_directory(
             continue
 
         # Plugin code is SYSTEM-OWNED, not user-provided.
-        # Import/Syntax errors indicate bugs in our code - crash immediately.
-        # DO NOT catch exceptions here - let them propagate to surface the real bug.
-        plugins = _discover_in_file(py_file, base_class)
+        # Most import errors indicate bugs in our code — crash immediately.
+        # ImportError from a missing optional extra (e.g., chromadb for [rag])
+        # is expected when not all extras are installed — skip with a warning.
+        try:
+            plugins = _discover_in_file(py_file, base_class)
+        except (ImportError, ModuleNotFoundError) as exc:
+            logger.warning(
+                "Skipping plugin file %s: optional dependency not installed (%s)",
+                py_file.name,
+                exc,
+            )
+            continue
         discovered.extend(plugins)
 
     return discovered

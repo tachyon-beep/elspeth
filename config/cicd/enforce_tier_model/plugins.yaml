@@ -445,3 +445,8 @@ allow_hits:
   reason: Offensive isinstance assertion — detects Pydantic validator bug if allowed_hosts is not list[str] after validation
   safety: Crashes immediately with descriptive error; better than silently iterating string characters as ip_network calls
   expires: null
+- key: plugins/infrastructure/discovery.py:R6:discover_plugins_in_directory:fp=17b3c58c5cf147b9
+  owner: bugfix
+  reason: Optional extras (e.g. chromadb for [rag]) are external dependencies — ImportError is expected when not installed
+  safety: Only catches ImportError/ModuleNotFoundError; logs warning with file name and error; SyntaxError and other bugs still crash
+  expires: null

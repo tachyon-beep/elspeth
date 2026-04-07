@@ -231,12 +231,17 @@ export async function fetchMessages(sessionId: string): Promise<ChatMessage[]> {
 export async function sendMessage(
   sessionId: string,
   content: string,
+  stateId?: string,
   signal?: AbortSignal,
 ): Promise<{ message: ChatMessage; state: CompositionState | null }> {
+  const body: { content: string; state_id?: string } = { content };
+  if (stateId) {
+    body.state_id = stateId;
+  }
   const response = await fetch(`/api/sessions/${sessionId}/messages`, {
     method: "POST",
     headers: authHeaders("application/json"),
-    body: JSON.stringify({ content }),
+    body: JSON.stringify(body),
     signal,
   });
   return parseResponse<{ message: ChatMessage; state: CompositionState | null }>(

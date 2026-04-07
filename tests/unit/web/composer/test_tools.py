@@ -1214,6 +1214,30 @@ class TestBlobTools:
         assert result.updated_state.source is not None
         assert result.updated_state.source.plugin == "text"
 
+    def test_set_source_from_jsonl_blob_uses_json_plugin_with_format(self) -> None:
+        """Regression: JSONL MIME types must resolve to 'json' plugin with format='jsonl'."""
+        from elspeth.web.sessions.models import blobs_table
+
+        state = _empty_state()
+        catalog = _mock_catalog()
+
+        with self.engine.begin() as conn:
+            conn.execute(blobs_table.update().where(blobs_table.c.id == self.blob_id).values(mime_type="application/x-jsonlines"))
+
+        result = execute_tool(
+            "set_source_from_blob",
+            {"blob_id": self.blob_id, "on_success": "out"},
+            state,
+            catalog,
+            session_engine=self.engine,
+            session_id=self.session_id,
+        )
+
+        assert result.success is True
+        assert result.updated_state.source is not None
+        assert result.updated_state.source.plugin == "json"
+        assert result.updated_state.source.options["format"] == "jsonl"
+
 
 # ---------------------------------------------------------------------------
 # Secret tool tests — composer-level secret reference wiring

@@ -537,3 +537,24 @@ class TestCreateDynamicHookimpl:
 
         source = manager.get_source_by_name("test_dynamic")
         assert source is TestSource  # type: ignore[comparison-overlap]
+
+
+class TestDiscoveryOptionalDependency:
+    """Regression: missing optional extras should skip with warning, not crash."""
+
+    def test_import_error_skips_file(self, tmp_path: Path) -> None:
+        """A plugin file that fails with ImportError should be skipped."""
+        plugin_file = tmp_path / "bad_plugin.py"
+        plugin_file.write_text("import nonexistent_optional_package_xyz\n")
+
+        # Should not raise — skips the file with a warning
+        result = discover_plugins_in_directory(tmp_path, BaseSource)
+        assert result == []
+
+    def test_syntax_error_still_crashes(self, tmp_path: Path) -> None:
+        """Genuine code bugs (SyntaxError) must still crash."""
+        plugin_file = tmp_path / "broken_plugin.py"
+        plugin_file.write_text("def broken(\n")  # Invalid syntax
+
+        with pytest.raises(SyntaxError):
+            discover_plugins_in_directory(tmp_path, BaseSource)

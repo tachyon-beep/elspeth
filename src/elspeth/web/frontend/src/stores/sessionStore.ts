@@ -149,7 +149,8 @@ export const useSessionStore = create<SessionState>((set, get) => ({
     }));
 
     try {
-      const result = await api.sendMessage(activeSessionId, content, signal);
+      const stateId = get().compositionState?.id;
+      const result = await api.sendMessage(activeSessionId, content, stateId, signal);
       const { message, state } = result;
       set((s) => {
         const previousVersion = s.compositionState?.version ?? null;

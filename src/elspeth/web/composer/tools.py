@@ -711,13 +711,13 @@ def _validate_plugin_name(
 
 # --- Blob helpers (sync — called from worker thread via compose()) ---
 
-_MIME_TO_SOURCE_PLUGIN: dict[str, str] = {
-    "text/csv": "csv",
-    "application/json": "json",
-    "application/x-jsonlines": "jsonl",
-    "application/jsonl": "jsonl",
-    "text/jsonl": "jsonl",
-    "text/plain": "text",
+_MIME_TO_SOURCE: dict[str, tuple[str, dict[str, str]]] = {
+    "text/csv": ("csv", {}),
+    "application/json": ("json", {}),
+    "application/x-jsonlines": ("json", {"format": "jsonl"}),
+    "application/jsonl": ("json", {"format": "jsonl"}),
+    "text/jsonl": ("json", {"format": "jsonl"}),
+    "text/plain": ("text", {}),
 }
 
 
@@ -1076,13 +1076,19 @@ def _execute_set_source_from_blob(
     if blob["status"] != "ready":
         return _failure_result(state, f"Blob is not ready (status: {blob['status']}).")
 
-    # Determine source plugin
-    plugin = arguments.get("plugin") or _MIME_TO_SOURCE_PLUGIN.get(blob["mime_type"])
-    if plugin is None:
-        return _failure_result(
-            state,
-            f"Cannot infer source plugin for MIME type '{blob['mime_type']}'. Please specify the 'plugin' parameter explicitly.",
-        )
+    # Determine source plugin and any format-specific options
+    mime_extra: dict[str, str] = {}
+    explicit_plugin = arguments.get("plugin")
+    if explicit_plugin:
+        plugin = explicit_plugin
+    else:
+        mime_entry = _MIME_TO_SOURCE.get(blob["mime_type"])
+        if mime_entry is None:
+            return _failure_result(
+                state,
+                f"Cannot infer source plugin for MIME type '{blob['mime_type']}'. Please specify the 'plugin' parameter explicitly.",
+            )
+        plugin, mime_extra = mime_entry
 
     # Validate plugin exists
     try:
@@ -1093,7 +1099,7 @@ def _execute_set_source_from_blob(
     source = SourceSpec(
         plugin=plugin,
         on_success=arguments["on_success"],
-        options={"path": blob["storage_path"], "blob_ref": blob["id"]},
+        options={"path": blob["storage_path"], "blob_ref": blob["id"], **mime_extra},
         on_validation_failure=arguments.get("on_validation_failure", "quarantine"),
     )
     new_state = state.with_source(source)
