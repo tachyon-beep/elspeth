@@ -141,6 +141,41 @@ class SinkExecutor:
                 cleanup_exc,
             )
 
+    @staticmethod
+    def _validate_sink_input(
+        sink: SinkProtocol,
+        rows: list[dict[str, object]],
+        *,
+        skip_schema: bool = False,
+    ) -> None:
+        """Validate rows against a sink's input schema and required fields.
+
+        Args:
+            sink: Sink to validate against.
+            rows: Row dicts to validate.
+            skip_schema: If True, skip input_schema.model_validate() and only
+                check required fields. Used for failsink validation where the
+                executor injects enrichment fields (__diversion_*) that are
+                outside the failsink's declared schema.
+        """
+        if not skip_schema:
+            for row in rows:
+                try:
+                    sink.input_schema.model_validate(row)
+                except ValidationError as e:
+                    raise PluginContractViolation(
+                        f"Sink '{sink.name}' input validation failed: {e}. This indicates an upstream transform/source schema bug."
+                    ) from e
+
+        if sink.declared_required_fields:
+            for row_index, row in enumerate(rows):
+                missing = sorted(f for f in sink.declared_required_fields if f not in row)
+                if missing:
+                    raise PluginContractViolation(
+                        f"Sink '{sink.name}' row {row_index} is missing required fields "
+                        f"{missing}. This indicates an upstream transform/schema bug."
+                    )
+
     def write(
         self,
         sink: SinkProtocol,
@@ -296,22 +331,7 @@ class SinkExecutor:
                 ):
                     # Centralized input validation (before sink.write).
                     # Wrong types at a sink boundary are upstream plugin bugs (Tier 2).
-                    for row in rows:
-                        try:
-                            sink.input_schema.model_validate(row)
-                        except ValidationError as e:
-                            raise PluginContractViolation(
-                                f"Sink '{sink.name}' input validation failed: {e}. This indicates an upstream transform/source schema bug."
-                            ) from e
-
-                    if sink.declared_required_fields:
-                        for row_index, row in enumerate(rows):
-                            missing = sorted(f for f in sink.declared_required_fields if f not in row)
-                            if missing:
-                                raise PluginContractViolation(
-                                    f"Sink '{sink.name}' row {row_index} is missing required fields "
-                                    f"{missing}. This indicates an upstream transform/schema bug."
-                                )
+                    self._validate_sink_input(sink, rows)
 
                     # Reset diversion log and call sink.write()
                     sink._reset_diversion_log()
@@ -479,10 +499,18 @@ class SinkExecutor:
                     enriched_rows.append(enriched_row)
                     enriched_by_token[token.token_id] = enriched_row
 
-                # Write to failsink — if this fails, complete primary divert
-                # states as FAILED before re-raising (they're already open).
+                # Write to failsink — if validation or write fails, complete
+                # primary divert states as FAILED before re-raising (they're
+                # already open from the pre-phase).
                 failsink._reset_diversion_log()
                 try:
+                    # Validate enriched rows against failsink required fields.
+                    # skip_schema=True because the executor injects __diversion_*
+                    # fields that are outside the failsink's declared schema —
+                    # a fixed-schema failsink (extra="forbid") would reject them.
+                    # Required-field checking still catches missing upstream fields.
+                    # Inside the try block so failures close primary divert states.
+                    self._validate_sink_input(failsink, enriched_rows, skip_schema=True)
                     failsink_write_result = failsink.write(enriched_rows, ctx)
                     failsink.flush()
                 except (FrameworkBugError, AuditIntegrityError):

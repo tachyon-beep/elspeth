@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import queue
 import threading
-import time
+from collections.abc import Callable
 from datetime import UTC, datetime
 from types import MappingProxyType
 from unittest.mock import patch
@@ -91,6 +91,17 @@ def _external_call_event() -> ExternalCallCompleted:
 def _wait_for_processing(manager: TelemetryManager, timeout: float = 5.0) -> None:
     """Wait for all queued events to be processed by the export thread."""
     manager._queue.join()
+
+
+def _wait_until(condition: Callable[[], bool], *, timeout: float = 2.0, poll: float = 0.005) -> None:
+    """Poll until condition is True, or raise after timeout."""
+    import time
+
+    deadline = time.monotonic() + timeout
+    while not condition():
+        if time.monotonic() > deadline:
+            raise TimeoutError(f"Condition not met within {timeout}s")
+        time.sleep(poll)
 
 
 # =============================================================================
@@ -325,8 +336,7 @@ class TestShutdownGuards:
         try:
             manager._disabled = True
             manager.handle_event(_lifecycle_event())
-            # Give any potential processing time to complete
-            time.sleep(0.05)
+            # Disabled manager rejects synchronously — no wait needed
             assert len(exporter.events) == 0
         finally:
             manager.close()
@@ -348,7 +358,7 @@ class TestShutdownGuards:
         try:
             manager._shutdown_event.set()
             manager.handle_event(_lifecycle_event())
-            time.sleep(0.05)
+            # Shutdown event set — handle_event rejects synchronously
             assert len(exporter.events) == 0
         finally:
             manager.close()
@@ -393,7 +403,8 @@ class TestDropBackpressure:
                 e4 = RunStarted(timestamp=_NOW, run_id="run-4", config_hash="h", source_plugin="csv")
 
                 manager.handle_event(e1)
-                time.sleep(0.05)
+                # Wait for export thread to dequeue e1 (blocks in slow_dispatch)
+                _wait_until(lambda: manager._queue.empty(), timeout=2.0)
 
                 # Fill queue to capacity, then overflow
                 manager.handle_event(e2)
@@ -434,7 +445,8 @@ class TestDropBackpressure:
 
                 # First event occupies thread; queue fills with next two; fourth overflows
                 manager.handle_event(_lifecycle_event())
-                time.sleep(0.05)
+                # Wait for export thread to dequeue first event
+                _wait_until(lambda: manager._queue.empty(), timeout=2.0)
                 manager.handle_event(_lifecycle_event())
                 manager.handle_event(_lifecycle_event())
 
@@ -756,8 +768,7 @@ class TestTotalExporterFailure:
 
             dropped_before = manager.health_metrics["events_dropped"]
             manager.handle_event(_lifecycle_event())
-            time.sleep(0.05)
-            # events_dropped should not increase further since event is rejected early
+            # Disabled manager rejects synchronously — no wait needed
             assert manager.health_metrics["events_dropped"] == dropped_before
         finally:
             manager.close()

@@ -52,7 +52,6 @@ Invariant: Token outcomes only recorded after sink durability (crash recovery sa
 from __future__ import annotations
 
 from collections.abc import Mapping
-from contextlib import nullcontext
 from typing import Any
 from unittest.mock import MagicMock, Mock
 
@@ -87,6 +86,7 @@ from elspeth.contracts.routing import RouteDestination, RoutingAction
 from elspeth.contracts.schema_contract import PipelineRow, SchemaContract
 from elspeth.contracts.types import NodeID, SinkName
 from elspeth.core.config import AggregationSettings, GateSettings, TriggerConfig
+from elspeth.core.landscape import LandscapeRecorder
 from elspeth.engine.executors import (
     AGGREGATION_CHECKPOINT_VERSION,
     AggregationExecutor,
@@ -96,6 +96,7 @@ from elspeth.engine.executors import (
     SinkExecutor,
     TransformExecutor,
 )
+from elspeth.engine.spans import SpanFactory
 from elspeth.testing import make_field, make_row
 from tests.fixtures.factories import make_context
 from tests.unit.engine.conftest import make_test_step_resolver as _make_step_resolver
@@ -163,7 +164,7 @@ def _make_token(
 
 def _make_recorder() -> MagicMock:
     """Create a mock LandscapeRecorder with sensible defaults."""
-    recorder = MagicMock()
+    recorder = MagicMock(spec=LandscapeRecorder)
     state = Mock(state_id="state_001")
     recorder.begin_node_state.return_value = state
     recorder.register_artifact.return_value = Mock(artifact_id="art_001")
@@ -173,14 +174,9 @@ def _make_recorder() -> MagicMock:
     return recorder
 
 
-def _make_span_factory() -> MagicMock:
-    """Create a mock SpanFactory where all spans are no-op context managers."""
-    sf = MagicMock()
-    sf.transform_span.return_value = nullcontext()
-    sf.gate_span.return_value = nullcontext()
-    sf.aggregation_span.return_value = nullcontext()
-    sf.sink_span.return_value = nullcontext()
-    return sf
+def _make_span_factory() -> SpanFactory:
+    """Create a real SpanFactory with no tracer — all spans are no-ops."""
+    return SpanFactory()
 
 
 def _make_transform(

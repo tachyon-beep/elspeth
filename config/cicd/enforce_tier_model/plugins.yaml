@@ -285,12 +285,12 @@ allow_hits:
   reason: Pydantic field_validator wraps ipaddress.ip_network() on user-provided CIDR strings — Tier 3 config boundary
   safety: ValueError re-raised as Pydantic ValidationError; invalid config crashes at load time, not at runtime
   expires: null
-- key: plugins/transforms/rag/query.py:R5:QueryBuilder:_build_field_only:fp=2292b6dad24076f3
+- key: plugins/transforms/rag/query.py:R5:QueryBuilder:_build_field_only:fp=8690adb65aebc738
   owner: feature
   reason: Offensive isinstance(str) guard on Tier 2 pipeline data — crashes immediately with TypeError if upstream plugin sends non-string value to query_field
   safety: Raises TypeError (crash), does not suppress or coerce; message identifies the upstream plugin bug
   expires: null
-- key: plugins/transforms/rag/query.py:R5:QueryBuilder:_build_regex:fp=429959be16d46ec3
+- key: plugins/transforms/rag/query.py:R5:QueryBuilder:_build_regex:fp=6fa9771f101ecc99
   owner: feature
   reason: Offensive isinstance(str) guard on Tier 2 pipeline data — crashes immediately with TypeError if upstream plugin sends non-string value to query_field
   safety: Raises TypeError (crash), does not suppress or coerce; message identifies the upstream plugin bug

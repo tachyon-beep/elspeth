@@ -179,6 +179,22 @@ class LineageTextFormatter:
                 lines.append(f"  [{state.step_index}] {state.node_id}: {state.status.value}")
             lines.append("")
 
+        # Routing events
+        if result.routing_events:
+            lines.append("--- Routing Events ---")
+            for event in result.routing_events:
+                # Direct access to .value - Tier 1 trust (our audit data)
+                parts = [
+                    f"[{event.ordinal}]",
+                    event.mode.value,
+                    f"edge={event.edge_id}",
+                    f"group={event.routing_group_id}",
+                ]
+                if event.reason_hash is not None:
+                    parts.append(f"reason_hash={event.reason_hash}")
+                lines.append(f"  {' '.join(parts)}")
+            lines.append("")
+
         # Calls
         if result.calls:
             lines.append("--- External Calls ---")

@@ -36,6 +36,7 @@ from elspeth.contracts.types import NodeID
 from elspeth.core.config import CoalesceSettings
 from elspeth.engine.clock import MockClock
 from elspeth.engine.coalesce_executor import CoalesceExecutor
+from elspeth.engine.spans import SpanFactory
 from tests.strategies.json import row_data
 
 # =============================================================================
@@ -100,7 +101,7 @@ def make_mock_executor(clock: MockClock | None = None) -> CoalesceExecutor:
     mock_recorder.complete_node_state.return_value = None
     mock_recorder.record_token_outcome.return_value = None
 
-    mock_span_factory = MagicMock()
+    span_factory = SpanFactory()
     mock_token_manager = MagicMock()
 
     # Make coalesce_tokens return a merged token.
@@ -121,7 +122,7 @@ def make_mock_executor(clock: MockClock | None = None) -> CoalesceExecutor:
 
     return CoalesceExecutor(
         recorder=mock_recorder,
-        span_factory=mock_span_factory,
+        span_factory=span_factory,
         token_manager=mock_token_manager,
         run_id="test-run",
         step_resolver=step_resolver,

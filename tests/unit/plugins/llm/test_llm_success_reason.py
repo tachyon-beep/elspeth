@@ -18,7 +18,7 @@ from elspeth.contracts.engine import BufferEntry
 from elspeth.contracts.results import TransformResult
 from elspeth.contracts.token_usage import TokenUsage
 from elspeth.plugins.transforms.llm.multi_query import QuerySpec
-from elspeth.plugins.transforms.llm.provider import FinishReason, LLMQueryResult
+from elspeth.plugins.transforms.llm.provider import FinishReason, LLMProvider, LLMQueryResult
 from elspeth.plugins.transforms.llm.templates import PromptTemplate
 from elspeth.plugins.transforms.llm.transform import MultiQueryStrategy, SingleQueryStrategy
 from elspeth.testing import make_pipeline_row
@@ -46,7 +46,7 @@ def _make_mock_provider(responses: list[dict[str, Any]] | None = None) -> Mock:
     """
     import itertools
 
-    mock_provider = Mock()
+    mock_provider = Mock(spec=LLMProvider)
 
     if responses is None:
         responses = [{"score": 85, "rationale": "Good"}]
@@ -117,7 +117,7 @@ def single_query_result() -> TransformResult:
         response_field="llm_response",
     )
 
-    mock_provider = Mock()
+    mock_provider = Mock(spec=LLMProvider)
     mock_provider.execute_query.return_value = LLMQueryResult(
         content="The analysis is positive.",
         usage=TokenUsage.known(prompt_tokens=10, completion_tokens=5),

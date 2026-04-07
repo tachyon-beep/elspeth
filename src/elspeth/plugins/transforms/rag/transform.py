@@ -13,7 +13,7 @@ from __future__ import annotations
 import json
 import math
 from collections.abc import Callable
-from typing import TYPE_CHECKING, Any, cast
+from typing import TYPE_CHECKING, Any
 
 import structlog
 
@@ -179,7 +179,7 @@ class RAGRetrievalTransform(BaseTransform):
         if query_result.error is not None:
             self._quarantine_count += 1
             return TransformResult.error(
-                cast(TransformErrorReason, query_result.error),
+                query_result.error,
                 retryable=False,
             )
 

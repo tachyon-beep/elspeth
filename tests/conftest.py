@@ -12,7 +12,6 @@ from __future__ import annotations
 
 import os
 import queue as queue_module
-import warnings
 from collections.abc import Iterator
 from typing import Any
 
@@ -140,14 +139,10 @@ def _auto_close_telemetry_managers() -> Iterator[None]:
             preview = "\n".join(cleanup_errors[:5])
             if len(cleanup_errors) > 5:
                 preview += f"\n... and {len(cleanup_errors) - 5} more"
-            warnings.warn(
-                f"TelemetryManager cleanup encountered errors.\n{preview}",
-                RuntimeWarning,
-                stacklevel=1,
-            )
+            raise RuntimeError(f"TelemetryManager cleanup failed — {len(cleanup_errors)} error(s).\n{preview}")
 
 
-@pytest.fixture(autouse=True)
+@pytest.fixture(autouse=True, scope="session")
 def _inject_default_on_write_failure() -> Iterator[None]:
     """Ensure all BaseSink subclasses have _on_write_failure set.
 
@@ -156,6 +151,9 @@ def _inject_default_on_write_failure() -> Iterator[None]:
     BaseSink.__init__ to set _on_write_failure="discard" on every
     instance. Uses __init__ patching because _on_write_failure is
     deliberately annotation-only (no class-level default).
+
+    Session-scoped: the patch is idempotent and applies to all tests
+    uniformly. Tests that need a different value override it explicitly.
     """
     from elspeth.plugins.infrastructure.base import BaseSink
 

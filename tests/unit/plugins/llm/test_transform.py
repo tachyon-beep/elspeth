@@ -25,7 +25,7 @@ from elspeth.plugins.infrastructure.clients.llm import (
     RateLimitError,
     ServerError,
 )
-from elspeth.plugins.transforms.llm.provider import FinishReason, LLMQueryResult, UnrecognizedFinishReason
+from elspeth.plugins.transforms.llm.provider import FinishReason, LLMProvider, LLMQueryResult, UnrecognizedFinishReason
 from elspeth.testing import make_pipeline_row
 
 # ---------------------------------------------------------------------------
@@ -95,7 +95,7 @@ def _make_transform_with_mock_provider(
     from elspeth.plugins.transforms.llm.transform import LLMTransform
 
     transform = LLMTransform(config or _make_config())
-    mock_provider = Mock()
+    mock_provider = Mock(spec=LLMProvider)
     transform._provider = mock_provider
     return transform, mock_provider
 
@@ -259,7 +259,7 @@ class TestSingleQuerySuccess:
             },
         )
         transform = LLMTransform(config)
-        mock_provider = Mock()
+        mock_provider = Mock(spec=LLMProvider)
         mock_provider.execute_query.return_value = LLMQueryResult(
             content='{"result": "ok"}',
             usage=TokenUsage.known(10, 5),
@@ -403,7 +403,7 @@ class TestTruncationDetection:
                 finish_reason=FinishReason.STOP,
             )
 
-        mock_provider = Mock()
+        mock_provider = Mock(spec=LLMProvider)
         mock_provider.execute_query.side_effect = mock_execute_query
         transform._provider = mock_provider
 
@@ -544,7 +544,7 @@ class TestTemplateTierPolicy:
             },
         )
         transform = LLMTransform(config)
-        mock_provider = Mock()
+        mock_provider = Mock(spec=LLMProvider)
         mock_provider.execute_query.return_value = LLMQueryResult(
             content="result",
             usage=TokenUsage.known(10, 5),
@@ -607,7 +607,7 @@ class TestMultiQueryPartialFailure:
                 finish_reason=FinishReason.STOP,
             )
 
-        mock_provider = Mock()
+        mock_provider = Mock(spec=LLMProvider)
         mock_provider.execute_query.side_effect = mock_execute_query
         transform._provider = mock_provider
 
@@ -656,7 +656,7 @@ class TestMultiQueryPartialFailure:
                 finish_reason=FinishReason.STOP,
             )
 
-        mock_provider = Mock()
+        mock_provider = Mock(spec=LLMProvider)
         mock_provider.execute_query.side_effect = mock_execute_query
         transform._provider = mock_provider
 
@@ -693,7 +693,7 @@ class TestMultiQueryJSONExtraction:
             },
         )
         transform = LLMTransform(config)
-        mock_provider = Mock()
+        mock_provider = Mock(spec=LLMProvider)
         mock_provider.execute_query.return_value = LLMQueryResult(
             content="override result",
             usage=TokenUsage.known(10, 5),
@@ -725,7 +725,7 @@ class TestMultiQueryJSONExtraction:
             },
         )
         transform = LLMTransform(config)
-        mock_provider = Mock()
+        mock_provider = Mock(spec=LLMProvider)
         mock_provider.execute_query.return_value = LLMQueryResult(
             content="override result",
             usage=TokenUsage.known(10, 5),
@@ -760,7 +760,7 @@ class TestMultiQueryJSONExtraction:
             },
         )
         transform = LLMTransform(config)
-        mock_provider = Mock()
+        mock_provider = Mock(spec=LLMProvider)
         mock_provider.execute_query.return_value = LLMQueryResult(
             content='{"score": 85, "label": "high quality"}',
             usage=TokenUsage.known(10, 5),
@@ -796,7 +796,7 @@ class TestMultiQueryJSONExtraction:
             },
         )
         transform = LLMTransform(config)
-        mock_provider = Mock()
+        mock_provider = Mock(spec=LLMProvider)
         mock_provider.execute_query.return_value = LLMQueryResult(
             content='{"score": 42}',
             usage=TokenUsage.known(10, 5),
@@ -826,7 +826,7 @@ class TestMultiQueryJSONExtraction:
             },
         )
         transform = LLMTransform(config)
-        mock_provider = Mock()
+        mock_provider = Mock(spec=LLMProvider)
         mock_provider.execute_query.return_value = LLMQueryResult(
             content="not valid json at all",
             usage=TokenUsage.known(10, 5),
@@ -855,7 +855,7 @@ class TestMultiQueryJSONExtraction:
             },
         )
         transform = LLMTransform(config)
-        mock_provider = Mock()
+        mock_provider = Mock(spec=LLMProvider)
         mock_provider.execute_query.return_value = LLMQueryResult(
             content="[1, 2, 3]",
             usage=TokenUsage.known(10, 5),
@@ -882,7 +882,7 @@ class TestMultiQueryJSONExtraction:
             },
         )
         transform = LLMTransform(config)
-        mock_provider = Mock()
+        mock_provider = Mock(spec=LLMProvider)
         mock_provider.execute_query.return_value = LLMQueryResult(
             content="just plain text",
             usage=TokenUsage.known(10, 5),
@@ -929,7 +929,7 @@ class TestMultiQueryContextLength:
                 finish_reason=FinishReason.STOP,
             )
 
-        mock_provider = Mock()
+        mock_provider = Mock(spec=LLMProvider)
         mock_provider.execute_query.side_effect = mock_execute
         transform._provider = mock_provider
 
@@ -994,7 +994,7 @@ class TestMultiQueryNonFiniteRejection:
             },
         )
         transform = LLMTransform(config)
-        mock_provider = Mock()
+        mock_provider = Mock(spec=LLMProvider)
         transform._provider = mock_provider
         return transform, mock_provider
 
@@ -1446,7 +1446,7 @@ class TestResponseFormatPassthrough:
             },
         )
         transform = LLMTransform(config)
-        mock_provider = Mock()
+        mock_provider = Mock(spec=LLMProvider)
         mock_provider.execute_query.return_value = LLMQueryResult(
             content='{"score": 42}',
             usage=TokenUsage.known(10, 5),
@@ -1479,7 +1479,7 @@ class TestResponseFormatPassthrough:
             },
         )
         transform = LLMTransform(config)
-        mock_provider = Mock()
+        mock_provider = Mock(spec=LLMProvider)
         mock_provider.execute_query.return_value = LLMQueryResult(
             content='{"score": 42}',
             usage=TokenUsage.known(10, 5),
@@ -1505,7 +1505,7 @@ class TestResponseFormatPassthrough:
             },
         )
         transform = LLMTransform(config)
-        mock_provider = Mock()
+        mock_provider = Mock(spec=LLMProvider)
         mock_provider.execute_query.return_value = LLMQueryResult(
             content="just plain text",
             usage=TokenUsage.known(10, 5),
@@ -1548,7 +1548,7 @@ class TestMultiQueryFieldTypeValidation:
             },
         )
         transform = LLMTransform(config)
-        mock_provider = Mock()
+        mock_provider = Mock(spec=LLMProvider)
         transform._provider = mock_provider
         return transform, mock_provider
 
@@ -1692,7 +1692,7 @@ class TestMultiQueryFieldTypeValidation:
             },
         )
         transform = LLMTransform(config)
-        mock_provider = Mock()
+        mock_provider = Mock(spec=LLMProvider)
         call_count = [0]
 
         def mock_execute(messages, *, model, temperature, max_tokens, state_id, token_id, response_format=None):
@@ -1805,7 +1805,7 @@ class TestMultiQuerySequentialRetryBehavior:
                 finish_reason=FinishReason.STOP,
             )
 
-        mock_provider = Mock()
+        mock_provider = Mock(spec=LLMProvider)
         mock_provider.execute_query.side_effect = mock_execute
         transform._provider = mock_provider
 
@@ -1828,7 +1828,7 @@ class TestMultiQuerySequentialRetryBehavior:
             pool_size=1,
         )
         transform = LLMTransform(config)
-        mock_provider = Mock()
+        mock_provider = Mock(spec=LLMProvider)
         mock_provider.execute_query.side_effect = ContentPolicyError("Content blocked")
         transform._provider = mock_provider
 
@@ -1896,7 +1896,7 @@ class TestMultiQuerySequentialReasonImmutability:
                 finish_reason=FinishReason.STOP,
             )
 
-        mock_provider = Mock()
+        mock_provider = Mock(spec=LLMProvider)
         mock_provider.execute_query.side_effect = mock_execute
         transform._provider = mock_provider
 
@@ -1947,7 +1947,7 @@ class TestMultiQueryParallelExecution:
             pool_size=4,
         )
         transform = LLMTransform(config)
-        mock_provider = Mock()
+        mock_provider = Mock(spec=LLMProvider)
         mock_provider.execute_query.return_value = LLMQueryResult(
             content="response text",
             usage=TokenUsage.known(10, 5),
@@ -1995,7 +1995,7 @@ class TestMultiQueryParallelExecution:
                 finish_reason=FinishReason.STOP,
             )
 
-        mock_provider = Mock()
+        mock_provider = Mock(spec=LLMProvider)
         mock_provider.execute_query.side_effect = mock_execute
         transform._provider = mock_provider
 
@@ -2049,7 +2049,7 @@ class TestMultiQueryParallelExecution:
                 finish_reason=FinishReason.STOP,
             )
 
-        mock_provider = Mock()
+        mock_provider = Mock(spec=LLMProvider)
         mock_provider.execute_query.side_effect = mock_execute
         transform._provider = mock_provider
 
@@ -2093,7 +2093,7 @@ class TestMultiQueryParallelExecution:
                 finish_reason=FinishReason.STOP,
             )
 
-        mock_provider = Mock()
+        mock_provider = Mock(spec=LLMProvider)
         mock_provider.execute_query.side_effect = mock_execute
         transform._provider = mock_provider
 
@@ -2143,7 +2143,7 @@ class TestMultiQueryParallelExecution:
                 )
             raise ContentPolicyError(f"Blocked call {call_count[0]}")
 
-        mock_provider = Mock()
+        mock_provider = Mock(spec=LLMProvider)
         mock_provider.execute_query.side_effect = mock_execute
         transform._provider = mock_provider
 
@@ -2657,7 +2657,7 @@ class TestParallelAuditMetadataThreadSafety:
             executor=mock_executor,
         )
 
-        mock_provider = Mock()
+        mock_provider = Mock(spec=LLMProvider)
         mock_provider.execute_query.return_value = LLMQueryResult(
             content="result",
             usage=TokenUsage.known(10, 5),
@@ -2736,7 +2736,7 @@ class TestParallelAuditMetadataThreadSafety:
             executor=mock_executor,
         )
 
-        mock_provider = Mock()
+        mock_provider = Mock(spec=LLMProvider)
         mock_provider.execute_query.return_value = LLMQueryResult(
             content="result",
             usage=TokenUsage.known(10, 5),
@@ -2821,7 +2821,7 @@ class TestMultiQueryFinishReasonAudit:
             executor=None,  # Sequential mode
         )
 
-        mock_provider = Mock()
+        mock_provider = Mock(spec=LLMProvider)
         mock_provider.execute_query.return_value = LLMQueryResult(
             content="result",
             usage=TokenUsage.known(10, 5),
@@ -2865,7 +2865,7 @@ class TestMultiQueryFinishReasonAudit:
             executor=None,
         )
 
-        mock_provider = Mock()
+        mock_provider = Mock(spec=LLMProvider)
         mock_provider.execute_query.return_value = LLMQueryResult(
             content="result",
             usage=TokenUsage.known(10, 5),

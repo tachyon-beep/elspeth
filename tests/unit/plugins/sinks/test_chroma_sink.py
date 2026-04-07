@@ -9,6 +9,7 @@ import pytest
 
 from elspeth.contracts.enums import CallStatus
 from elspeth.contracts.errors import AuditIntegrityError, DuplicateDocumentError
+from elspeth.contracts.plugin_context import PluginContext
 from elspeth.plugins.sinks.chroma_sink import ChromaSink
 
 
@@ -43,7 +44,7 @@ def _make_sink_with_collection(mock_collection: MagicMock, **config_overrides: A
 class TestChromaSinkOnStart:
     def test_constructs_persistent_client(self) -> None:
         sink = ChromaSink(_make_config())
-        mock_ctx = MagicMock()
+        mock_ctx = MagicMock(spec=PluginContext)
         mock_ctx.run_id = "test-run"
         mock_ctx.telemetry_emit = MagicMock()
 
@@ -74,7 +75,7 @@ class TestChromaSinkOnStart:
             },
         }
         sink = ChromaSink(config)
-        mock_ctx = MagicMock()
+        mock_ctx = MagicMock(spec=PluginContext)
         mock_ctx.run_id = "test-run"
         mock_ctx.telemetry_emit = MagicMock()
 
@@ -94,7 +95,7 @@ class TestChromaSinkOnStart:
 
     def test_on_start_failure_raises(self) -> None:
         sink = ChromaSink(_make_config())
-        mock_ctx = MagicMock()
+        mock_ctx = MagicMock(spec=PluginContext)
         mock_ctx.run_id = "test-run"
 
         with patch("elspeth.plugins.sinks.chroma_sink.chromadb") as mock_chromadb:
@@ -109,7 +110,7 @@ class TestChromaSinkWriteOverwrite:
         mock_collection = MagicMock()
         sink = _make_sink_with_collection(mock_collection)
 
-        mock_ctx = MagicMock()
+        mock_ctx = MagicMock(spec=PluginContext)
         mock_ctx.run_id = "test-run"
 
         rows = [
@@ -133,7 +134,7 @@ class TestChromaSinkWriteOverwrite:
         mock_collection = MagicMock()
         sink = _make_sink_with_collection(mock_collection)
 
-        mock_ctx = MagicMock()
+        mock_ctx = MagicMock(spec=PluginContext)
         mock_ctx.run_id = "test-run"
 
         rows = [{"doc_id": "d1", "text": "Hello", "topic": "t"}]
@@ -147,7 +148,7 @@ class TestChromaSinkWriteOverwrite:
         mock_collection = MagicMock()
         sink = _make_sink_with_collection(mock_collection)
 
-        mock_ctx = MagicMock()
+        mock_ctx = MagicMock(spec=PluginContext)
         mock_ctx.run_id = "test-run"
 
         rows = [{"doc_id": "d1", "text": "Hello", "topic": "t"}]
@@ -160,7 +161,7 @@ class TestChromaSinkWriteOverwrite:
         mock_collection = MagicMock()
         sink = _make_sink_with_collection(mock_collection)
 
-        mock_ctx = MagicMock()
+        mock_ctx = MagicMock(spec=PluginContext)
         mock_ctx.run_id = "test-run"
 
         result = sink.write([], mock_ctx)
@@ -176,7 +177,7 @@ class TestChromaSinkWriteSkip:
         mock_collection.get.return_value = {"ids": ["d1"]}
         sink = _make_sink_with_collection(mock_collection, on_duplicate="skip")
 
-        mock_ctx = MagicMock()
+        mock_ctx = MagicMock(spec=PluginContext)
         mock_ctx.run_id = "test-run"
 
         rows = [
@@ -195,7 +196,7 @@ class TestChromaSinkWriteSkip:
         mock_collection.get.return_value = {"ids": ["d1", "d2"]}
         sink = _make_sink_with_collection(mock_collection, on_duplicate="skip")
 
-        mock_ctx = MagicMock()
+        mock_ctx = MagicMock(spec=PluginContext)
         mock_ctx.run_id = "test-run"
 
         rows = [
@@ -212,7 +213,7 @@ class TestChromaSinkWriteSkip:
         mock_collection.get.return_value = {"ids": ["d1"]}
         sink = _make_sink_with_collection(mock_collection, on_duplicate="skip")
 
-        mock_ctx = MagicMock()
+        mock_ctx = MagicMock(spec=PluginContext)
         mock_ctx.run_id = "test-run"
 
         rows = [
@@ -240,7 +241,7 @@ class TestChromaSinkWriteSkip:
         mock_collection.get.return_value = {"ids": ["d1"]}
         sink = _make_sink_with_collection(mock_collection, on_duplicate="skip")
 
-        mock_ctx = MagicMock()
+        mock_ctx = MagicMock(spec=PluginContext)
         rows = [
             {"doc_id": "d1", "text": "Existing", "topic": "t"},
             {"doc_id": "d2", "text": "New", "topic": "t"},
@@ -250,7 +251,7 @@ class TestChromaSinkWriteSkip:
         # Write only d2 in overwrite mode — should produce the same hash
         mock_collection2 = MagicMock()
         sink2 = _make_sink_with_collection(mock_collection2)
-        mock_ctx2 = MagicMock()
+        mock_ctx2 = MagicMock(spec=PluginContext)
         overwrite_artifact = sink2.write([{"doc_id": "d2", "text": "New", "topic": "t"}], mock_ctx2)
 
         assert skip_artifact.artifact.content_hash == overwrite_artifact.artifact.content_hash
@@ -262,7 +263,7 @@ class TestChromaSinkWriteError:
         mock_collection.get.return_value = {"ids": ["d1", "d3"]}
         sink = _make_sink_with_collection(mock_collection, on_duplicate="error")
 
-        mock_ctx = MagicMock()
+        mock_ctx = MagicMock(spec=PluginContext)
         mock_ctx.run_id = "test-run"
 
         rows = [
@@ -283,7 +284,7 @@ class TestChromaSinkWriteError:
         mock_collection.get.return_value = {"ids": []}
         sink = _make_sink_with_collection(mock_collection, on_duplicate="error")
 
-        mock_ctx = MagicMock()
+        mock_ctx = MagicMock(spec=PluginContext)
         mock_ctx.run_id = "test-run"
 
         rows = [{"doc_id": "d1", "text": "A", "topic": "t"}]
@@ -297,7 +298,7 @@ class TestChromaSinkWriteError:
         mock_collection.get.return_value = {"ids": ["d1"]}
         sink = _make_sink_with_collection(mock_collection, on_duplicate="error")
 
-        mock_ctx = MagicMock()
+        mock_ctx = MagicMock(spec=PluginContext)
         mock_ctx.run_id = "test-run"
 
         with pytest.raises(DuplicateDocumentError):
@@ -316,7 +317,7 @@ class TestChromaSinkWriteError:
         mock_collection.get.return_value = {"ids": ["d1"]}
         sink = _make_sink_with_collection(mock_collection, on_duplicate="error")
 
-        mock_ctx = MagicMock()
+        mock_ctx = MagicMock(spec=PluginContext)
         with pytest.raises(DuplicateDocumentError) as exc_info:
             sink.write([{"doc_id": "d1", "text": "A", "topic": "t"}], mock_ctx)
 
@@ -328,7 +329,7 @@ class TestChromaSinkAuditIntegrity:
         mock_collection = MagicMock()
         sink = _make_sink_with_collection(mock_collection)
 
-        mock_ctx = MagicMock()
+        mock_ctx = MagicMock(spec=PluginContext)
         mock_ctx.run_id = "test-run"
         mock_ctx.record_call.side_effect = RuntimeError("DB write failed")
 
@@ -356,7 +357,7 @@ class TestChromaSinkAuditIntegrity:
         mock_collection.upsert.side_effect = ValueError("Expected str, int, float or bool, got dict")
         sink = _make_sink_with_collection(mock_collection)
 
-        mock_ctx = MagicMock()
+        mock_ctx = MagicMock(spec=PluginContext)
         mock_ctx.run_id = "test-run"
 
         with pytest.raises(_ChromaPayloadRejection, match="Expected str"):
@@ -376,7 +377,7 @@ class TestChromaSinkAuditIntegrity:
         mock_collection.upsert.side_effect = chromadb.errors.ChromaError("write failed")  # type: ignore[abstract]
         sink = _make_sink_with_collection(mock_collection)
 
-        mock_ctx = MagicMock()
+        mock_ctx = MagicMock(spec=PluginContext)
         mock_ctx.record_call.side_effect = RuntimeError("audit also broken")
 
         with pytest.raises(AuditIntegrityError, match="audit") as exc_info:
@@ -428,7 +429,7 @@ class TestChromaSinkMetadataTypeValidation:
         sink = ChromaSink(config)
         sink._collection = mock_collection
 
-        mock_ctx = MagicMock()
+        mock_ctx = MagicMock(spec=PluginContext)
         rows = [{"doc_id": "d1", "text": "hi", "s": "val", "i": 42, "f": 3.14, "b": True}]
         sink.write(rows, mock_ctx)
 
@@ -439,7 +440,7 @@ class TestChromaSinkMetadataTypeValidation:
         mock_collection = MagicMock()
         sink = _make_sink_with_collection(mock_collection)
 
-        mock_ctx = MagicMock()
+        mock_ctx = MagicMock(spec=PluginContext)
         rows = [{"doc_id": "d1", "text": "hi", "topic": None}]
         sink.write(rows, mock_ctx)
 
@@ -451,7 +452,7 @@ class TestChromaSinkMetadataTypeValidation:
         sink = _make_sink_with_collection(mock_collection)
         sink._on_write_failure = "csv_failsink"
 
-        mock_ctx = MagicMock()
+        mock_ctx = MagicMock(spec=PluginContext)
         rows: list[dict[str, Any]] = [
             {"doc_id": "d1", "text": "good", "topic": "science"},
             {"doc_id": "d2", "text": "bad", "topic": {"nested": "dict"}},
@@ -476,7 +477,7 @@ class TestChromaSinkMetadataTypeValidation:
         sink = _make_sink_with_collection(mock_collection)
         sink._on_write_failure = "csv_failsink"
 
-        mock_ctx = MagicMock()
+        mock_ctx = MagicMock(spec=PluginContext)
         rows: list[dict[str, Any]] = [
             {"doc_id": "d1", "text": "bad", "topic": ["a", "list"]},
             {"doc_id": "d2", "text": "bad", "topic": {"nested": "dict"}},
@@ -510,7 +511,7 @@ class TestChromaSinkMetadataTypeValidation:
         sink = _make_sink_with_collection(mock_collection)
         sink._on_write_failure = "csv_failsink"
 
-        mock_ctx = MagicMock()
+        mock_ctx = MagicMock(spec=PluginContext)
         rows = [{"doc_id": "d1", "text": "hi", "topic": bad_value}]
         result = sink.write(rows, mock_ctx)
 
@@ -527,7 +528,7 @@ class TestChromaSinkMetadataTypeValidation:
         sink = ChromaSink(config)
         sink._collection = mock_collection
 
-        mock_ctx = MagicMock()
+        mock_ctx = MagicMock(spec=PluginContext)
         rows = [{"doc_id": "d1", "text": "hi"}]
         sink.write(rows, mock_ctx)
 
@@ -543,7 +544,7 @@ class TestChromaSinkDivertRow:
         sink = _make_sink_with_collection(mock_collection)
         sink._on_write_failure = "csv_failsink"
 
-        mock_ctx = MagicMock()
+        mock_ctx = MagicMock(spec=PluginContext)
         rows: list[dict[str, Any]] = [
             {"doc_id": "d1", "text": "good", "topic": "science"},
             {"doc_id": "d2", "text": "bad", "topic": {"nested": "dict"}},
@@ -569,7 +570,7 @@ class TestChromaSinkDivertRow:
         sink = _make_sink_with_collection(mock_collection)
         sink._on_write_failure = "csv_failsink"
 
-        mock_ctx = MagicMock()
+        mock_ctx = MagicMock(spec=PluginContext)
         rows = [
             {"doc_id": "d1", "text": "hello", "topic": "greeting"},
             {"doc_id": "d2", "text": "goodbye", "topic": "farewell"},
@@ -585,7 +586,7 @@ class TestChromaSinkDivertRow:
         sink = _make_sink_with_collection(mock_collection)
         sink._on_write_failure = "csv_failsink"
 
-        mock_ctx = MagicMock()
+        mock_ctx = MagicMock(spec=PluginContext)
         rows: list[dict[str, Any]] = [
             {"doc_id": "d1", "text": "bad1", "topic": {"nested": True}},
             {"doc_id": "d2", "text": "bad2", "topic": [1, 2]},
@@ -616,7 +617,7 @@ class TestChromaSinkNonFiniteMetadata:
         sink = _make_sink_with_collection(mock_collection)
         sink._on_write_failure = "csv_failsink"
 
-        mock_ctx = MagicMock()
+        mock_ctx = MagicMock(spec=PluginContext)
         rows: list[dict[str, Any]] = [
             {"doc_id": "d1", "text": "good", "topic": "science"},
             {"doc_id": "d2", "text": "bad", "topic": bad_value},
@@ -641,7 +642,7 @@ class TestChromaSinkNonFiniteMetadata:
         sink = _make_sink_with_collection(mock_collection)
         sink._on_write_failure = "csv_failsink"
 
-        mock_ctx = MagicMock()
+        mock_ctx = MagicMock(spec=PluginContext)
         rows: list[dict[str, Any]] = [
             {"doc_id": "d1", "text": "bad", "topic": bad_value},
         ]
@@ -669,7 +670,7 @@ class TestChromaSinkEmptyMetadata:
         sink = ChromaSink(config)
         sink._collection = mock_collection
 
-        mock_ctx = MagicMock()
+        mock_ctx = MagicMock(spec=PluginContext)
         # Row has id and document but none of the configured metadata fields
         rows = [{"doc_id": "d1", "text": "hello"}]
         result = sink.write(rows, mock_ctx)
@@ -699,7 +700,7 @@ class TestChromaSinkEmptyMetadata:
         sink = ChromaSink(config)
         sink._collection = mock_collection
 
-        mock_ctx = MagicMock()
+        mock_ctx = MagicMock(spec=PluginContext)
         rows = [
             {"doc_id": "d1", "text": "with meta", "topic": "science"},
             {"doc_id": "d2", "text": "no meta"},  # topic absent
@@ -739,7 +740,7 @@ class TestChromaSinkEmptyMetadata:
         sink = ChromaSink(config)
         sink._collection = mock_collection
 
-        mock_ctx = MagicMock()
+        mock_ctx = MagicMock(spec=PluginContext)
         rows = [{"doc_id": "d1", "text": "hello"}]
         result = sink.write(rows, mock_ctx)
 
@@ -766,7 +767,7 @@ class TestChromaSinkEmptyMetadata:
         sink = ChromaSink(config)
         sink._collection = mock_collection
 
-        mock_ctx = MagicMock()
+        mock_ctx = MagicMock(spec=PluginContext)
         rows = [{"doc_id": "d1", "text": "hello"}]
         result = sink.write(rows, mock_ctx)
 
@@ -790,7 +791,7 @@ class TestChromaSinkEmptyMetadata:
         sink = ChromaSink(config)
         sink._collection = mock_collection
 
-        mock_ctx = MagicMock()
+        mock_ctx = MagicMock(spec=PluginContext)
         # Row has topic but not category — meta is {"topic": "science"}, not empty
         rows = [{"doc_id": "d1", "text": "hello", "topic": "science"}]
         result = sink.write(rows, mock_ctx)

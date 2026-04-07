@@ -3,13 +3,13 @@
 Provides structured span creation for pipeline execution.
 Falls back to no-op mode when no tracer is configured.
 
-Span Hierarchy (span names are static; IDs are set as attributes):
+Span Hierarchy (span names are static; plugin identity is in attributes):
     run                          [run.id=<run_id>]
-    ├── source:<source_name>
+    ├── source                   [plugin.name=<name>]
     ├── row                      [row.id=<row_id>, token.id=<token_id>]
-    │   ├── transform:<name>
-    │   └── sink:<name>
-    └── aggregation:<name>
+    │   ├── transform            [plugin.name=<name>]
+    │   └── sink                 [plugin.name=<name>]
+    └── aggregation              [plugin.name=<name>]
 """
 
 from collections.abc import Iterator, Sequence
@@ -116,7 +116,7 @@ class SpanFactory:
         Yields:
             Span or NoOpSpan
         """
-        with self._make_span(f"source:{source_name}", {"plugin.name": source_name, "plugin.type": "source"}) as span:
+        with self._make_span("source", {"plugin.name": source_name, "plugin.type": "source"}) as span:
             yield span
 
     @contextmanager
@@ -177,7 +177,7 @@ class SpanFactory:
             attrs["token.ids"] = tuple(token_ids)
         elif token_id is not None:
             attrs["token.id"] = token_id
-        with self._make_span(f"transform:{transform_name}", attrs) as span:
+        with self._make_span("transform", attrs) as span:
             yield span
 
     @contextmanager
@@ -207,7 +207,7 @@ class SpanFactory:
             attrs["input.hash"] = input_hash
         if token_id is not None:
             attrs["token.id"] = token_id
-        with self._make_span(f"gate:{gate_name}", attrs) as span:
+        with self._make_span("gate", attrs) as span:
             yield span
 
     @contextmanager
@@ -245,7 +245,7 @@ class SpanFactory:
             attrs["batch.id"] = batch_id
         if token_ids is not None:
             attrs["token.ids"] = tuple(token_ids)
-        with self._make_span(f"aggregation:{aggregation_name}", attrs) as span:
+        with self._make_span("aggregation", attrs) as span:
             yield span
 
     @contextmanager
@@ -275,5 +275,5 @@ class SpanFactory:
             attrs["node.id"] = node_id
         if token_ids is not None:
             attrs["token.ids"] = tuple(token_ids)
-        with self._make_span(f"sink:{sink_name}", attrs) as span:
+        with self._make_span("sink", attrs) as span:
             yield span

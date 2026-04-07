@@ -8,6 +8,7 @@ import pytest
 from elspeth.contracts.schema_contract import PipelineRow, SchemaContract
 from elspeth.contracts.types import NodeID
 from elspeth.engine.processor import DAGTraversalContext
+from elspeth.engine.spans import SpanFactory
 from elspeth.testing import make_field, make_row, make_source_row
 from tests.fixtures.factories import make_context
 from tests.fixtures.landscape import make_landscape_db, make_recorder
@@ -38,13 +39,9 @@ def _make_mock_recorder() -> MagicMock:
     return recorder
 
 
-def _make_mock_span_factory() -> MagicMock:
-    """Create a mock SpanFactory."""
-    span_factory = MagicMock()
-    span_factory.row_span.return_value.__enter__ = Mock()
-    # Never suppress processor exceptions in tests.
-    span_factory.row_span.return_value.__exit__ = Mock(return_value=False)
-    return span_factory
+def _make_mock_span_factory() -> SpanFactory:
+    """Create a real SpanFactory with no tracer — all spans are no-ops."""
+    return SpanFactory()
 
 
 def _empty_traversal(source_node_id: str = "source_001") -> DAGTraversalContext:

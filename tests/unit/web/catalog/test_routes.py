@@ -12,13 +12,6 @@ from elspeth.web.catalog.service import CatalogServiceImpl
 
 
 @pytest.fixture
-def plugin_manager() -> PluginManager:
-    pm = PluginManager()
-    pm.register_builtin_plugins()
-    return pm
-
-
-@pytest.fixture
 def catalog(plugin_manager: PluginManager) -> CatalogServiceImpl:
     return CatalogServiceImpl(plugin_manager)
 

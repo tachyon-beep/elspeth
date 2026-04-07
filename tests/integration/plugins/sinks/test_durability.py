@@ -21,6 +21,7 @@ from elspeth.core.landscape.database import LandscapeDB
 from elspeth.core.payload_store import FilesystemPayloadStore
 from elspeth.engine.executors import SinkExecutor
 from elspeth.engine.spans import SpanFactory
+from elspeth.plugins.sinks.csv_sink import CSVSink
 from tests.fixtures.base_classes import create_observed_contract
 from tests.fixtures.factories import make_context
 from tests.fixtures.landscape import make_recorder
@@ -96,38 +97,27 @@ class TestSinkDurability:
         return graph
 
     @pytest.fixture
-    def mock_sink(self, tmp_path: Path) -> Mock:
-        """Create a mock sink that simulates writes."""
-        from elspeth.contracts import ArtifactDescriptor
-        from elspeth.contracts.diversion import SinkWriteResult
+    def real_sink(self, tmp_path: Path) -> CSVSink:
+        """Create a real CSVSink targeting a temp file.
 
-        sink = Mock()
-        sink.name = "csv"
+        Uses a real sink instead of a Mock — write() produces actual files
+        and artifacts. Tests that need flush failure patch sink.flush directly.
+        """
+        output_file = tmp_path / "output.csv"
+        sink = CSVSink(
+            {
+                "path": str(output_file),
+                "schema": {"mode": "observed"},
+            }
+        )
         sink.node_id = "sink"
-        sink.plugin_version = "1.0"
-        sink.determinism = Determinism.IO_WRITE
-        sink.declared_required_fields = frozenset()
-
-        # Mock write() to return SinkWriteResult wrapping artifact descriptor
-        def mock_write(rows, ctx):
-            artifact = ArtifactDescriptor.for_file(
-                path=str(tmp_path / "output.csv"),
-                content_hash="abc123",
-                size_bytes=100,
-            )
-            return SinkWriteResult(artifact=artifact)
-
-        sink.write = Mock(side_effect=mock_write)
-        sink.flush = Mock()  # Default: successful flush
-        sink.close = Mock()
-
         return sink
 
     def test_checkpoint_not_created_if_flush_fails(
         self,
         test_env: dict[str, Any],
         mock_graph: ExecutionGraph,
-        mock_sink: Mock,
+        real_sink: CSVSink,
     ) -> None:
         """Verify checkpoint not created if sink flush() fails.
 
@@ -192,14 +182,14 @@ class TestSinkDurability:
             )
             checkpoint_created = True
 
-        # Configure mock sink to fail on flush
-        mock_sink.flush.side_effect = OSError("Disk full - simulated crash")
+        # Patch real sink's flush to fail
+        real_sink.flush = Mock(side_effect=OSError("Disk full - simulated crash"))
 
         # Execute sink write - should fail on flush
         tokens = [token]
         with pytest.raises(IOError, match="Disk full"):
             sink_executor.write(
-                sink=mock_sink,
+                sink=real_sink,
                 tokens=tokens,
                 ctx=ctx,
                 step_in_pipeline=1,
@@ -213,15 +203,14 @@ class TestSinkDurability:
         checkpoint = checkpoint_mgr.get_latest_checkpoint(run.run_id)
         assert checkpoint is None
 
-        # Verify: write() was called but flush() crashed
-        mock_sink.write.assert_called_once()
-        mock_sink.flush.assert_called_once()
+        # Verify: flush() was patched and called (crashed as expected)
+        real_sink.flush.assert_called_once()
 
     def test_checkpoint_failure_raises_after_successful_flush(
         self,
         test_env: dict[str, Any],
         mock_graph: ExecutionGraph,
-        mock_sink: Mock,
+        real_sink: CSVSink,
     ) -> None:
         """Verify checkpoint failure after durable write raises AuditIntegrityError.
 
@@ -280,7 +269,7 @@ class TestSinkDurability:
 
         with pytest.raises(AuditIntegrityError, match="Checkpoint failed after durable sink write"):
             sink_executor.write(
-                sink=mock_sink,
+                sink=real_sink,
                 tokens=tokens,
                 ctx=ctx,
                 step_in_pipeline=1,
@@ -293,7 +282,7 @@ class TestSinkDurability:
         self,
         test_env: dict[str, Any],
         mock_graph: ExecutionGraph,
-        mock_sink: Mock,
+        real_sink: CSVSink,
     ) -> None:
         """Verify flush() is called BEFORE checkpoint callback.
 
@@ -356,12 +345,12 @@ class TestSinkDurability:
                 graph=mock_graph,
             )
 
-        mock_sink.flush = Mock(side_effect=tracking_flush)
+        real_sink.flush = Mock(side_effect=tracking_flush)
 
         # Execute sink write
         tokens = [token]
         sink_executor.write(
-            sink=mock_sink,
+            sink=real_sink,
             tokens=tokens,
             ctx=ctx,
             step_in_pipeline=1,

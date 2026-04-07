@@ -21,6 +21,7 @@ if TYPE_CHECKING:
 from jinja2 import TemplateSyntaxError, UndefinedError
 from jinja2.exceptions import SecurityError
 
+from elspeth.contracts.errors import TransformErrorReason
 from elspeth.plugins.infrastructure.templates import (
     TemplateError,
     create_sandboxed_environment,
@@ -52,7 +53,7 @@ class QueryResult:
     """Result of query construction."""
 
     query: str | None = None
-    error: dict[str, Any] | None = None
+    error: TransformErrorReason | None = None
 
 
 class QueryBuilder:
@@ -102,11 +103,11 @@ class QueryBuilder:
 
         if extracted is None:
             return QueryResult(
-                error={
-                    "reason": "invalid_input",
-                    "field": self._query_field,
-                    "cause": "null_value",
-                }
+                error=TransformErrorReason(
+                    reason="invalid_input",
+                    field=self._query_field,
+                    cause="null_value",
+                )
             )
 
         if self._compiled_template is not None:
@@ -130,11 +131,11 @@ class QueryBuilder:
             query = self._compiled_template.render(query=extracted, row=row_data)
         except (UndefinedError, SecurityError, OverflowError, ZeroDivisionError, ArithmeticError, TypeError, ValueError) as e:
             return QueryResult(
-                error={
-                    "reason": "template_rendering_failed",
-                    "error": str(e),
-                    "field": self._query_field,
-                }
+                error=TransformErrorReason(
+                    reason="template_rendering_failed",
+                    error=str(e),
+                    field=self._query_field,
+                )
             )
         return self._validate_non_empty(query)
 
@@ -166,11 +167,11 @@ class QueryBuilder:
                     proc.kill()
             self._regex_pool = ProcessPoolExecutor(max_workers=1, mp_context=mp.get_context("spawn"))
             return QueryResult(
-                error={
-                    "reason": "no_regex_match",
-                    "field": self._query_field,
-                    "cause": "regex_timeout",
-                }
+                error=TransformErrorReason(
+                    reason="no_regex_match",
+                    field=self._query_field,
+                    cause="regex_timeout",
+                )
             )
         except Exception as exc:
             # _regex_worker is system-owned code — a crash is a code bug, not a data issue.
@@ -183,22 +184,22 @@ class QueryBuilder:
 
         if not matched:
             return QueryResult(
-                error={
-                    "reason": "no_regex_match",
-                    "field": self._query_field,
-                    "pattern": self._compiled_pattern.pattern,
-                }
+                error=TransformErrorReason(
+                    reason="no_regex_match",
+                    field=self._query_field,
+                    pattern=self._compiled_pattern.pattern,
+                )
             )
 
         # Use group1 if the pattern has capture groups (may be None if non-participating)
         captured = group1 if self._compiled_pattern.groups else group0
         if captured is None:
             return QueryResult(
-                error={
-                    "reason": "no_regex_match",
-                    "field": self._query_field,
-                    "cause": "capture_group_empty",
-                }
+                error=TransformErrorReason(
+                    reason="no_regex_match",
+                    field=self._query_field,
+                    cause="capture_group_empty",
+                )
             )
 
         return self._validate_non_empty(captured)
@@ -206,11 +207,11 @@ class QueryBuilder:
     def _validate_non_empty(self, query: str) -> QueryResult:
         if not query.strip():
             return QueryResult(
-                error={
-                    "reason": "invalid_input",
-                    "field": self._query_field,
-                    "cause": "empty_query",
-                }
+                error=TransformErrorReason(
+                    reason="invalid_input",
+                    field=self._query_field,
+                    cause="empty_query",
+                )
             )
         return QueryResult(query=query)
 

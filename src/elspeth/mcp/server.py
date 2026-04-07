@@ -52,6 +52,7 @@ class _ArgSpec:
     optional_str: tuple[str, ...] = ()  # defaults to None
     optional_str_defaults: tuple[tuple[str, str], ...] = ()  # (name, default)
     optional_int: tuple[tuple[str, int], ...] = ()  # (name, default)
+    optional_int_min: tuple[tuple[str, int], ...] = ()  # (name, minimum) — semantic bounds
     optional_dict: tuple[str, ...] = ()  # defaults to None
 
 
@@ -78,6 +79,7 @@ _TOOLS: dict[str, _ToolDef] = {
         description="List pipeline runs with optional status filter",
         args=_ArgSpec(
             optional_int=(("limit", 50),),
+            optional_int_min=(("limit", 1),),
             optional_str=("status",),
         ),
         handler=lambda a, args: a.list_runs(
@@ -122,6 +124,7 @@ _TOOLS: dict[str, _ToolDef] = {
         args=_ArgSpec(
             required_str=("run_id",),
             optional_int=(("limit", 100), ("offset", 0)),
+            optional_int_min=(("limit", 1), ("offset", 0)),
         ),
         handler=lambda a, args: a.list_rows(
             run_id=args["run_id"],
@@ -140,6 +143,7 @@ _TOOLS: dict[str, _ToolDef] = {
             required_str=("run_id",),
             optional_str=("row_id",),
             optional_int=(("limit", 100),),
+            optional_int_min=(("limit", 1),),
         ),
         handler=lambda a, args: a.list_tokens(
             run_id=args["run_id"],
@@ -158,6 +162,7 @@ _TOOLS: dict[str, _ToolDef] = {
             required_str=("run_id",),
             optional_str=("operation_type", "status"),
             optional_int=(("limit", 100),),
+            optional_int_min=(("limit", 1),),
         ),
         handler=lambda a, args: a.list_operations(
             run_id=args["run_id"],
@@ -213,6 +218,7 @@ _TOOLS: dict[str, _ToolDef] = {
             required_str=("run_id",),
             optional_str_defaults=(("error_type", "all"),),
             optional_int=(("limit", 100),),
+            optional_int_min=(("limit", 1),),
         ),
         handler=lambda a, args: a.get_errors(
             run_id=args["run_id"],
@@ -236,6 +242,7 @@ _TOOLS: dict[str, _ToolDef] = {
             required_str=("run_id",),
             optional_str=("node_id", "status"),
             optional_int=(("limit", 100),),
+            optional_int_min=(("limit", 1),),
         ),
         handler=lambda a, args: a.get_node_states(
             run_id=args["run_id"],
@@ -334,6 +341,7 @@ _TOOLS: dict[str, _ToolDef] = {
         args=_ArgSpec(
             required_str=("run_id",),
             optional_int=(("limit", 10),),
+            optional_int_min=(("limit", 1),),
         ),
         handler=lambda a, args: a.get_failure_context(
             run_id=args["run_id"],
@@ -348,6 +356,7 @@ _TOOLS: dict[str, _ToolDef] = {
         description="\U0001f4ca Timeline: What happened recently? Shows runs in the last N minutes",
         args=_ArgSpec(
             optional_int=(("minutes", 60),),
+            optional_int_min=(("minutes", 1),),
         ),
         handler=lambda a, args: a.get_recent_activity(
             minutes=args["minutes"],
@@ -381,6 +390,7 @@ _TOOLS: dict[str, _ToolDef] = {
         args=_ArgSpec(
             required_str=("run_id",),
             optional_int=(("limit", 100),),
+            optional_int_min=(("limit", 1),),
         ),
         handler=lambda a, args: a.list_contract_violations(
             run_id=args["run_id"],
@@ -432,6 +442,7 @@ def _validate_tool_args(name: str, arguments: dict[str, Any]) -> dict[str, Any]:
             raise TypeError(f"'{name}': '{fname}' must be string, got {type(val).__name__}")
         validated[fname] = val
 
+    int_mins = dict(spec.optional_int_min)
     for fname, int_default in spec.optional_int:
         val = arguments.get(fname, int_default)
         # JSON has no int/float distinction — accept both, convert to int
@@ -439,6 +450,8 @@ def _validate_tool_args(name: str, arguments: dict[str, Any]) -> dict[str, Any]:
             val = int(val)
         if not isinstance(val, int) or isinstance(val, bool):
             raise TypeError(f"'{name}': '{fname}' must be integer, got {type(val).__name__}")
+        if fname in int_mins and val < int_mins[fname]:
+            raise ValueError(f"'{name}': '{fname}' must be >= {int_mins[fname]}, got {val}")
         validated[fname] = val
 
     for fname in spec.optional_dict:
