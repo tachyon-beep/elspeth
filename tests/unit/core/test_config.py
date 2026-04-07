@@ -2780,6 +2780,61 @@ sinks:
         assert fingerprint is None
         assert had_password is False
 
+    def test_dsn_query_param_password_scrubbed(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Query-param ?password=secret must be scrubbed from sanitized URL.
+
+        Regression test for elspeth-ef062449ca: _sanitize_dsn() only checked
+        parsed.password (userinfo), missing credentials in query parameters.
+        """
+        from elspeth.core.config import _sanitize_dsn
+
+        monkeypatch.setenv("ELSPETH_FINGERPRINT_KEY", "test-key")
+
+        url = "postgresql://user@host/db?password=secret&sslmode=require"
+        sanitized, _fingerprint, had_password = _sanitize_dsn(url)
+
+        assert "secret" not in sanitized
+        assert "sslmode=require" in sanitized
+        assert had_password is True
+
+    def test_dsn_query_param_pwd_scrubbed(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Query-param ?pwd=secret must also be scrubbed."""
+        from elspeth.core.config import _sanitize_dsn
+
+        monkeypatch.setenv("ELSPETH_FINGERPRINT_KEY", "test-key")
+
+        url = "postgresql://user@host/db?pwd=secret&sslmode=require"
+        sanitized, _fingerprint, had_password = _sanitize_dsn(url)
+
+        assert "secret" not in sanitized
+        assert had_password is True
+
+    def test_dsn_odbc_connect_pwd_scrubbed(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """ODBC connect string PWD= inside ?odbc_connect= must be scrubbed."""
+        from elspeth.core.config import _sanitize_dsn
+
+        monkeypatch.setenv("ELSPETH_FINGERPRINT_KEY", "test-key")
+
+        url = "mssql+pyodbc:///?odbc_connect=DRIVER%3D%7BSQL+Server%7D%3BPWD%3Dsecret123"
+        sanitized, _fingerprint, had_password = _sanitize_dsn(url)
+
+        assert "secret123" not in sanitized
+        assert had_password is True
+
+    def test_dsn_query_param_password_no_userinfo(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Query-param password without userinfo password still detected."""
+        from elspeth.core.config import _sanitize_dsn
+
+        monkeypatch.setenv("ELSPETH_FINGERPRINT_KEY", "test-key")
+
+        # No userinfo password — only query param
+        url = "postgresql://host/db?password=secret"
+        sanitized, fingerprint, had_password = _sanitize_dsn(url)
+
+        assert "secret" not in sanitized
+        assert had_password is True
+        assert fingerprint is not None
+
 
 class TestRunModeSettings:
     """Tests for run_mode configuration."""

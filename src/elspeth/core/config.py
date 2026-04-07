@@ -1669,8 +1669,43 @@ def _sanitize_dsn(
             ) from parse_err
         return url, None, False
 
-    if parsed.password is None:
-        # No password in URL
+    # Check for credentials in query parameters (case-insensitive).
+    # Database drivers accept passwords via ?password=, ?pwd=, ?passwd=,
+    # and ODBC embeds them in ?odbc_connect=...PWD=...
+    _SENSITIVE_KEYS = frozenset({"password", "pwd", "passwd", "pass"})
+    scrubbed_query: dict[str, str | tuple[str, ...]] = {}
+    query_had_password = False
+    query_password_value: str | None = None
+
+    for key, value in parsed.query.items():
+        if key.lower() in _SENSITIVE_KEYS:
+            query_had_password = True
+            if query_password_value is None:
+                query_password_value = value if isinstance(value, str) else value[0]
+        elif key.lower() == "odbc_connect" and isinstance(value, str):
+            import re
+            import urllib.parse
+
+            decoded = urllib.parse.unquote(value)
+            if re.search(r"(?i)(PWD|Password)\s*=", decoded):
+                query_had_password = True
+                # Extract the password value for fingerprinting
+                match = re.search(r"(?i)(?:PWD|Password)\s*=\s*([^;]*)", decoded)
+                if match and query_password_value is None:
+                    query_password_value = match.group(1)
+                # Scrub PWD/Password from the connect string
+                scrubbed_connect = re.sub(r"(?i)(?:PWD|Password)\s*=\s*[^;]*;?", "", decoded)
+                scrubbed_query[key] = urllib.parse.quote(scrubbed_connect, safe="")
+            else:
+                scrubbed_query[key] = value
+        else:
+            scrubbed_query[key] = value
+
+    has_password = parsed.password is not None or query_had_password
+    # Use userinfo password for fingerprinting if present, else query-param password
+    fingerprint_source = parsed.password if parsed.password is not None else query_password_value
+
+    if not has_password:
         return url, None, False
 
     # Check if we have a fingerprint key
@@ -1684,10 +1719,10 @@ def _sanitize_dsn(
 
     # Compute fingerprint if we have a key
     password_fingerprint = None
-    if have_key:
+    if have_key and fingerprint_source is not None:
         from elspeth.core.security import secret_fingerprint
 
-        password_fingerprint = secret_fingerprint(parsed.password)
+        password_fingerprint = secret_fingerprint(fingerprint_source)
     elif fail_if_no_key:
         raise SecretFingerprintError(
             "Database URL contains a password but ELSPETH_FINGERPRINT_KEY "
@@ -1706,7 +1741,7 @@ def _sanitize_dsn(
         host=parsed.host,
         port=parsed.port,
         database=parsed.database,
-        query=parsed.query,
+        query=scrubbed_query,
     )
 
     return str(sanitized), password_fingerprint, True
