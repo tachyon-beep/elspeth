@@ -1,10 +1,10 @@
-# tests/integration/checkpoint/test_version_validation.py
-"""Integration tests for Bug #12: No checkpoint state version validation.
+# tests/unit/core/checkpoint/test_version_validation.py
+"""Unit tests for Bug #12: No checkpoint state version validation.
 
 These tests verify that checkpoint state includes version information
 and that resume fails gracefully with incompatible versions.
 
-Migrated from tests/integration/test_checkpoint_version_validation.py.
+Pure logic tests — no DB, no I/O. Moved from integration/checkpoint/.
 """
 
 from typing import Any
