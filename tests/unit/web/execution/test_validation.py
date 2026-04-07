@@ -369,7 +369,9 @@ class TestValidatePipelinePluginFailure:
         mock_yaml_gen = MagicMock()
         mock_yaml_gen.generate_yaml.return_value = "source:\n  plugin: unknown"
         mock_load.return_value = MagicMock()
-        mock_instantiate.side_effect = ValueError("Unknown source plugin: 'unknown'")
+        from elspeth.plugins.infrastructure.manager import PluginNotFoundError
+
+        mock_instantiate.side_effect = PluginNotFoundError("Unknown source plugin: 'unknown'")
 
         state = FakeCompositionState()
         settings = FakeWebSettings()

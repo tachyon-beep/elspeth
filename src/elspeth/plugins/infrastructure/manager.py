@@ -30,6 +30,10 @@ from elspeth.plugins.infrastructure.validation import (
 _logger = structlog.get_logger(__name__)
 
 
+class PluginNotFoundError(ValueError):
+    """Raised when a plugin name is not found in the registry."""
+
+
 def _raise_if_invalid(errors: list[ValidationError], label: str, name: str) -> None:
     """Raise ValueError with formatted message if validation errors exist."""
     if errors:
@@ -174,7 +178,7 @@ class PluginManager:
             return self._sources[name]
 
         available = sorted(self._sources.keys())
-        raise ValueError(f"Unknown source plugin: {name}. Available source plugins: {available}")
+        raise PluginNotFoundError(f"Unknown source plugin: {name}. Available source plugins: {available}")
 
     def get_transform_by_name(self, name: str) -> type[TransformProtocol]:
         """Get transform plugin class by name.
@@ -192,7 +196,7 @@ class PluginManager:
             return self._transforms[name]
 
         available = sorted(self._transforms.keys())
-        raise ValueError(f"Unknown transform plugin: {name}. Available transform plugins: {available}")
+        raise PluginNotFoundError(f"Unknown transform plugin: {name}. Available transform plugins: {available}")
 
     def get_sink_by_name(self, name: str) -> type[SinkProtocol]:
         """Get sink plugin class by name.
@@ -210,7 +214,7 @@ class PluginManager:
             return self._sinks[name]
 
         available = sorted(self._sinks.keys())
-        raise ValueError(f"Unknown sink plugin: {name}. Available sink plugins: {available}")
+        raise PluginNotFoundError(f"Unknown sink plugin: {name}. Available sink plugins: {available}")
 
     # === Plugin creation with validation ===
 

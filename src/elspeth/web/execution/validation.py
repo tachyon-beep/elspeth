@@ -28,6 +28,7 @@ from elspeth.contracts.secrets import WebSecretResolver
 from elspeth.core.config import load_settings
 from elspeth.core.dag.graph import ExecutionGraph
 from elspeth.core.dag.models import GraphValidationError
+from elspeth.plugins.infrastructure.manager import PluginNotFoundError
 from elspeth.web.execution.schemas import (
     ValidationCheck,
     ValidationError,
@@ -324,7 +325,7 @@ def validate_pipeline(
                 detail="All plugins instantiated",
             )
         )
-    except ValueError as exc:
+    except PluginNotFoundError as exc:
         checks.append(
             ValidationCheck(
                 name=_CHECK_PLUGINS,

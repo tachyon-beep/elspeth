@@ -316,12 +316,12 @@ allow_hits:
   reason: list_models gracefully handles missing litellm — returns empty model list
   safety: ImportError/AttributeError returns empty list; no data fabrication
   expires: null
-- key: web/execution/validation.py:R1:validate_pipeline:fp=09b3580865b612d8
+- key: web/execution/validation.py:R1:validate_pipeline:fp=886a70cfc6748254
   owner: web-execution
   reason: Validation checks optional source path/file keys supplied by composition state
   safety: Absent keys are treated honestly as 'no path provided' and the check is recorded as skipped/passed
   expires: null
-- key: web/execution/validation.py:R1:validate_pipeline:fp=20f42a1d31c8f2ab
+- key: web/execution/validation.py:R1:validate_pipeline:fp=e727722440667e5d
   owner: web-execution
   reason: Validation checks optional output path/file keys supplied by composition state
   safety: Absent keys treated as 'no path provided'; check recorded as skipped/passed
@@ -356,17 +356,17 @@ allow_hits:
   reason: False positive — @router.get() is FastAPI HTTP route decorator, not dict.get()
   safety: No dict access involved
   expires: null
-- key: web/execution/validation.py:R5:_collect_secret_refs:fp=7955508cb148c972
+- key: web/execution/validation.py:R5:_collect_secret_refs:fp=bd529a5229f55b45
   owner: web-execution
   reason: Tree-walk — isinstance() dispatches dict/list/scalar branches in recursive config traversal
   safety: No contract masking; structural dispatch on deserialized YAML (Tier 3 data)
   expires: null
-- key: web/execution/validation.py:R5:_collect_secret_refs:fp=c7f127a19ae9acd8
+- key: web/execution/validation.py:R5:_collect_secret_refs:fp=51136358f34fc167
   owner: web-execution
   reason: Tree-walk — isinstance(ref, str) validates secret_ref marker value type
   safety: Non-string ref is silently skipped (malformed marker); no crash masking
   expires: null
-- key: web/execution/validation.py:R5:_collect_secret_refs:fp=9d372da2d9050ede
+- key: web/execution/validation.py:R5:_collect_secret_refs:fp=1f56da585599eee0
   owner: web-execution
   reason: Tree-walk — isinstance() dispatches list/tuple branch in recursive config traversal
   safety: No contract masking; structural dispatch on deserialized YAML (Tier 3 data)
@@ -426,87 +426,87 @@ allow_hits:
   reason: IntegrityError on duplicate active state is expected race condition
   safety: Upsert-or-skip
   expires: null
-- key: web/execution/service.py:R8:ExecutionServiceImpl:execute:fp=48cac8940225e59b
+- key: web/execution/service.py:R8:ExecutionServiceImpl:execute:fp=6614bfb1de71dac6
   owner: web-execution
   reason: Session lock map creates per-session lock lazily on first execution
   safety: Mutation is thread-safe; setdefault is atomic for dict
   expires: null
-- key: web/execution/service.py:R1:ExecutionServiceImpl:_execute_locked:fp=0e48d46549f4e772
+- key: web/execution/service.py:R1:ExecutionServiceImpl:_execute_locked:fp=14fd3f21644fdb4c
   owner: web-execution
   reason: Optional keys in user-authored config — source options key may be absent
   safety: Returns None; validation handles absence
   expires: null
-- key: web/execution/service.py:R1:ExecutionServiceImpl:_execute_locked:fp=1c3798d199105b17
+- key: web/execution/service.py:R1:ExecutionServiceImpl:_execute_locked:fp=2d80b6b1acdc2bbc
   owner: web-execution
   reason: Optional keys in user-authored config — output options key may be absent
   safety: Returns None; validation handles absence
   expires: null
-- key: web/execution/service.py:R1:ExecutionServiceImpl:_execute_locked:fp=a2468a34ab86e3e5
+- key: web/execution/service.py:R1:ExecutionServiceImpl:_execute_locked:fp=2cff252b1d7f3486
   owner: web-execution
   reason: Optional keys in user-authored config — blob_ref is optional in source options
   safety: Returns None; blob link skipped
   expires: null
-- key: web/execution/service.py:R9:ExecutionServiceImpl:_execute_locked:fp=d2bbb58bcaa19a1a
+- key: web/execution/service.py:R9:ExecutionServiceImpl:_execute_locked:fp=4f94383c54b37b26
   owner: web-execution
   reason: Idempotent shutdown-event cleanup on failure path
   safety: Pop is idempotent; except BaseException handler cleans up before re-raise
   expires: null
-- key: web/execution/service.py:R7:ExecutionServiceImpl:_execute_locked:fp=d6dddf09bdd31bcc
+- key: web/execution/service.py:R7:ExecutionServiceImpl:_execute_locked:fp=ef8b27cdcce0a253
   owner: web-execution
   reason: Best-effort run status cleanup on setup failure — must not mask original exception
   safety: Status update is best-effort; original exception always re-raised
   expires: null
-- key: web/execution/service.py:R1:ExecutionServiceImpl:cancel:fp=322f8b8dd49e6ec0
+- key: web/execution/service.py:R1:ExecutionServiceImpl:cancel:fp=6b2fd83431284736
   owner: web-execution
   reason: Check for live shutdown event before fallback handling
   safety: Returns None if absent; no silent default
   expires: null
-- key: web/execution/service.py:R5:ExecutionServiceImpl:_run_pipeline:fp=4e50bf35610fe209
+- key: web/execution/service.py:R5:ExecutionServiceImpl:_run_pipeline:fp=c5127d7a73a42bc0
   owner: web-execution
   reason: Tier 3 — config from YAML deserialization may be non-dict
   safety: Raises TypeError if not dict; no silent default
   expires: null
-- key: web/execution/service.py:R1:ExecutionServiceImpl:_run_pipeline:fp=fb52ae040917d3bb
+- key: web/execution/service.py:R1:ExecutionServiceImpl:_run_pipeline:fp=80c06e8dd955d5c7
   owner: web-execution
   reason: Scope-to-audit-source mapping — .get() on explicit mapping dict with crash-on-unknown guard
   safety: Unknown scope raises ValueError immediately; no silent default
   expires: null
-- key: web/execution/service.py:R4:ExecutionServiceImpl:_run_pipeline:_safe_broadcast:fp=19f0293eaebdc8dc
+- key: web/execution/service.py:R4:ExecutionServiceImpl:_run_pipeline:_safe_broadcast:fp=11f51d1ad723aa1a
   owner: web-execution
   reason: Progress broadcasting may fail with transport exceptions
   safety: Logged; pipeline continues
   expires: null
-- key: web/execution/service.py:R6:ExecutionServiceImpl:_run_pipeline:fp=92c44b489edba6f8
+- key: web/execution/service.py:R6:ExecutionServiceImpl:_run_pipeline:fp=e0e82d73ae663cfc
   owner: web-execution
   reason: GracefulShutdownError is an expected control-flow signal from orchestrator cancellation
   safety: Classified as cancelled; separated from BaseException failure path
   expires: null
-- key: web/execution/service.py:R5:ExecutionServiceImpl:_run_pipeline:fp=ce9571eb0ed099b1
+- key: web/execution/service.py:R5:ExecutionServiceImpl:_run_pipeline:fp=9b3ba7e7742cd1c6
   owner: web-execution
   reason: Error classification — SecretResolutionError triggers safe message
   safety: Secret names not leaked to client
   expires: null
-- key: web/execution/service.py:R5:ExecutionServiceImpl:_run_pipeline:fp=3300183fc55d0286
+- key: web/execution/service.py:R5:ExecutionServiceImpl:_run_pipeline:fp=3cb12744000c899a
   owner: web-execution
   reason: BaseException split for process-termination vs ordinary failures
   safety: Control flow distinction, not type masking
   expires: null
-- key: web/execution/service.py:R4:ExecutionServiceImpl:_run_pipeline:fp=fb27c5cfa1c6d809
+- key: web/execution/service.py:R4:ExecutionServiceImpl:_run_pipeline:fp=3d6295a7362ec748
   owner: web-execution
   reason: Status update after pipeline failure — must not mask original exception
   safety: Logged; original exception re-raised
   expires: null
-- key: web/execution/service.py:R9:ExecutionServiceImpl:_run_pipeline:fp=fe002a2a3dae193c
+- key: web/execution/service.py:R9:ExecutionServiceImpl:_run_pipeline:fp=f68573380a302ad4
   owner: web-execution
   reason: Final shutdown-event cleanup is intentionally idempotent
   safety: Pop is idempotent
   expires: null
-- key: web/execution/service.py:R4:ExecutionServiceImpl:_finalize_output_blobs:fp=a374659d845fa019
+- key: web/execution/service.py:R4:ExecutionServiceImpl:_finalize_output_blobs:fp=40aa168ee8a02bef
   owner: web-execution
   reason: Blob finalization after terminal status — failure must not mask run outcome
   safety: Logged; run status preserved
   expires: null
-- key: web/execution/service.py:R5:ExecutionServiceImpl:_on_pipeline_done:fp=dce0bbfe6a06a17c
+- key: web/execution/service.py:R5:ExecutionServiceImpl:_on_pipeline_done:fp=048f3f8ddb34424b
   owner: web-execution
   reason: Error classification for sanitized client messaging
   safety: SecretResolutionError triggers safe message

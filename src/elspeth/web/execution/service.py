@@ -39,6 +39,7 @@ from elspeth.core.payload_store import FilesystemPayloadStore
 from elspeth.core.secrets import SecretResolutionError
 from elspeth.engine.orchestrator.core import Orchestrator
 from elspeth.engine.orchestrator.types import PipelineConfig
+from elspeth.web.auth.models import UserIdentity
 from elspeth.web.execution.progress import ProgressBroadcaster
 from elspeth.web.execution.schemas import (
     RunEvent,
@@ -342,7 +343,7 @@ class ExecutionServiceImpl:
             ),
         )
 
-    async def verify_run_ownership(self, user: Any, run_id: str) -> bool:
+    async def verify_run_ownership(self, user: UserIdentity, run_id: str) -> bool:
         """Verify that a run belongs to the authenticated user's session.
 
         Used by the WebSocket handler for IDOR protection. Checks both
@@ -351,7 +352,7 @@ class ExecutionServiceImpl:
         """
         run = await self._session_service.get_run(UUID(run_id))
         session = await self._session_service.get_session(run.session_id)
-        return str(session.user_id) == str(user.user_id) and session.auth_provider_type == self._settings.auth_provider
+        return session.user_id == user.user_id and session.auth_provider_type == self._settings.auth_provider
 
     async def cancel(self, run_id: UUID) -> None:
         """Cancel a run via the shutdown Event.
