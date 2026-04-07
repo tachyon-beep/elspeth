@@ -310,7 +310,7 @@ class RecoveryManager:
         """Get row IDs that were not processed before the run failed.
 
         Uses token outcomes to determine which rows need processing:
-        - Rows with terminal outcomes (COMPLETED, ROUTED, QUARANTINED, FAILED) are done
+        - Rows with non-delegation terminal outcomes are done
         - Rows whose tokens lack terminal outcomes need reprocessing
         - Rows already buffered in checkpoint aggregation state are excluded
           (they will be restored from checkpoint, not reprocessed)
@@ -380,16 +380,11 @@ class RecoveryManager:
                 )
             ).scalar_subquery()
 
-            # Terminal outcomes that indicate row processing is complete
-            # (excludes FORKED and EXPANDED which are delegation markers)
-            terminal_outcome_values = [
-                RowOutcome.COMPLETED,
-                RowOutcome.ROUTED,
-                RowOutcome.QUARANTINED,
-                RowOutcome.FAILED,
-                RowOutcome.CONSUMED_IN_BATCH,
-                RowOutcome.COALESCED,
-            ]
+            # Terminal outcomes that indicate row processing is complete.
+            # Derived from RowOutcome.is_terminal, excluding delegation markers
+            # (FORKED/EXPANDED delegate completion to child tokens).
+            _delegation = {RowOutcome.FORKED, RowOutcome.EXPANDED}
+            terminal_outcome_values = [o for o in RowOutcome if o.is_terminal and o not in _delegation]
 
             # Subquery: Tokens with terminal outcomes
             terminal_tokens = (

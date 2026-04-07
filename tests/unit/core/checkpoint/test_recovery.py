@@ -1012,3 +1012,44 @@ def test_get_resume_point_reads_latest_checkpoint_after_can_resume(
 
     assert point is not None
     assert point.sequence_number == 99
+
+
+def test_get_unprocessed_rows_excludes_diverted_rows(
+    db: LandscapeDB,
+    checkpoint_manager: CheckpointManager,
+    recovery_manager: RecoveryManager,
+) -> None:
+    """DIVERTED rows are terminal — they must not be requeued on resume.
+
+    Regression test for elspeth-46b30e2917: the manual terminal_outcome_values
+    list omitted DIVERTED, causing diverted rows to appear as 'incomplete'
+    during recovery and get reprocessed (duplicate side effects).
+    """
+    run_id = "run-diverted-terminal"
+    graph = _create_graph(node_id="checkpoint-node")
+    with db.connection() as conn:
+        _insert_run(conn, run_id, status=RunStatus.FAILED, with_contract=True)
+        _insert_node(conn, run_id, "source-node", node_type=NodeType.SOURCE)
+        _insert_node(conn, run_id, "checkpoint-node")
+
+        # row-diverted: one token diverted to failsink -> terminal, exclude.
+        _insert_row(conn, run_id, "row-diverted", row_index=0, source_data_ref=None)
+        _insert_token(conn, run_id, "tok-diverted", "row-diverted")
+        _insert_terminal_outcome(conn, run_id, "tok-diverted", outcome=RowOutcome.DIVERTED)
+
+        # row-pending: no terminal outcome -> should be included.
+        _insert_row(conn, run_id, "row-pending", row_index=1, source_data_ref=None)
+        _insert_token(conn, run_id, "tok-pending", "row-pending")
+
+    checkpoint_manager.create_checkpoint(
+        run_id=run_id,
+        token_id="tok-diverted",
+        node_id="checkpoint-node",
+        sequence_number=1,
+        graph=graph,
+    )
+
+    unprocessed = recovery_manager.get_unprocessed_rows(run_id)
+
+    assert "row-diverted" not in unprocessed, "DIVERTED row should be excluded — it is terminal"
+    assert "row-pending" in unprocessed
