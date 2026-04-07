@@ -15,6 +15,7 @@ from hypothesis import given
 from hypothesis import strategies as st
 
 from elspeth.plugins.sinks.azure_blob_sink import AzureBlobSink
+from tests.fixtures.base_classes import inject_write_failure
 from tests.fixtures.factories import make_operation_context
 from tests.strategies.settings import SLOW_SETTINGS
 
@@ -117,7 +118,7 @@ class TestAzureBlobSinkHashProperties:
         rows: list[dict[str, object]],
     ) -> None:
         """Artifact hash == SHA-256 of captured upload bytes, size matches."""
-        sink = AzureBlobSink(_base_config())
+        sink = inject_write_failure(AzureBlobSink(_base_config()))
         ctx = _make_sink_ctx()
         mock_service, mock_blob = _mock_blob_upload()
         mock_create.return_value = mock_service
@@ -140,7 +141,7 @@ class TestAzureBlobSinkHashProperties:
         """Same rows written to two separate sink instances produce same hash."""
         hashes = []
         for _ in range(2):
-            sink = AzureBlobSink(_base_config())
+            sink = inject_write_failure(AzureBlobSink(_base_config()))
             ctx = _make_sink_ctx()
             mock_service, _mock_blob = _mock_blob_upload()
             mock_create.return_value = mock_service
@@ -168,7 +169,7 @@ class TestAzureBlobSinkJSONLRoundTrip:
         rows: list[dict[str, object]],
     ) -> None:
         """Write rows as JSONL, parse uploaded bytes back, verify values match."""
-        sink = AzureBlobSink(_base_config(format="jsonl"))
+        sink = inject_write_failure(AzureBlobSink(_base_config(format="jsonl")))
         ctx = _make_sink_ctx()
         mock_service, mock_blob = _mock_blob_upload()
         mock_create.return_value = mock_service
@@ -213,7 +214,7 @@ class TestAzureBlobSinkBufferingProperties:
     ) -> None:
         """write(A) then write(B) produces same blob as write(A+B)."""
         # Two-write path
-        sink_split = AzureBlobSink(_base_config())
+        sink_split = inject_write_failure(AzureBlobSink(_base_config()))
         ctx_split = _make_sink_ctx()
         mock_service_split, mock_blob_split = _mock_blob_upload()
         mock_create.return_value = mock_service_split
@@ -224,7 +225,7 @@ class TestAzureBlobSinkBufferingProperties:
         uploaded_split = _get_uploaded_bytes(mock_blob_split)
 
         # One-write path
-        sink_combined = AzureBlobSink(_base_config())
+        sink_combined = inject_write_failure(AzureBlobSink(_base_config()))
         ctx_combined = _make_sink_ctx()
         mock_service_combined, mock_blob_combined = _mock_blob_upload()
         mock_create.return_value = mock_service_combined

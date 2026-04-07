@@ -24,6 +24,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
+from tests.fixtures.base_classes import inject_write_failure
 from tests.fixtures.factories import make_context
 from tests.fixtures.landscape import make_recorder
 
@@ -170,12 +171,14 @@ class TestAssertToRaiseConversions:
 
         with tempfile.TemporaryDirectory() as tmpdir:
             output_path = Path(tmpdir) / "out.csv"
-            sink = CSVSink(
-                {
-                    "path": str(output_path),
-                    "schema": {"mode": "observed"},
-                    "mode": "append",
-                }
+            sink = inject_write_failure(
+                CSVSink(
+                    {
+                        "path": str(output_path),
+                        "schema": {"mode": "observed"},
+                        "mode": "append",
+                    }
+                )
             )
             recorder = make_recorder()
             ctx = make_context(run_id="test-run", landscape=recorder)
@@ -224,12 +227,14 @@ class TestAssertToRaiseConversions:
 
         with tempfile.TemporaryDirectory() as tmpdir:
             output_path = Path(tmpdir) / "out.csv"
-            sink = CSVSink(
-                {
-                    "path": str(output_path),
-                    "schema": {"mode": "observed"},
-                    "mode": "append",
-                }
+            sink = inject_write_failure(
+                CSVSink(
+                    {
+                        "path": str(output_path),
+                        "schema": {"mode": "observed"},
+                        "mode": "append",
+                    }
+                )
             )
             recorder = make_recorder()
             ctx = make_context(run_id="test-run", landscape=recorder)

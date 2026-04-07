@@ -7,6 +7,7 @@ import pytest
 from elspeth.contracts.plugin_context import PluginContext
 from elspeth.contracts.schema_contract import PipelineRow, SchemaContract
 from elspeth.testing import make_field, make_pipeline_row
+from tests.fixtures.base_classes import inject_write_failure
 from tests.fixtures.factories import make_context
 from tests.fixtures.landscape import make_recorder
 
@@ -539,12 +540,14 @@ class TestFieldMapperContractPropagation:
         assert isinstance(result.row, PipelineRow)
 
         output_path = tmp_path / "output.csv"
-        sink = CSVSink(
-            {
-                "path": str(output_path),
-                "schema": {"mode": "observed"},
-                "headers": "original",
-            }
+        sink = inject_write_failure(
+            CSVSink(
+                {
+                    "path": str(output_path),
+                    "schema": {"mode": "observed"},
+                    "headers": "original",
+                }
+            )
         )
         sink_recorder = make_recorder()
         sink_ctx = PluginContext(

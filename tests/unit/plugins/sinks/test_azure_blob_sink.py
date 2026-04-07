@@ -20,6 +20,7 @@ import pytest
 
 from elspeth.plugins.infrastructure.config_base import PluginConfigError
 from elspeth.plugins.sinks.azure_blob_sink import AzureBlobSink
+from tests.fixtures.base_classes import inject_write_failure
 
 # ---------------------------------------------------------------------------
 # Shared constants
@@ -75,15 +76,17 @@ class TestAzureBlobSinkConfig:
     """Config validation -- no Azure SDK calls needed."""
 
     def test_connection_string_auth_sets_name(self) -> None:
-        sink = AzureBlobSink(_base_config())
+        sink = inject_write_failure(AzureBlobSink(_base_config()))
         assert sink.name == "azure_blob"
 
     def test_sas_token_auth_sets_method(self) -> None:
-        sink = AzureBlobSink(
-            _base_config(
-                connection_string=None,
-                sas_token="sv=2021-06-08&ss=b&srt=sco&se=2099-01-01",
-                account_url="https://fake.blob.core.windows.net",
+        sink = inject_write_failure(
+            AzureBlobSink(
+                _base_config(
+                    connection_string=None,
+                    sas_token="sv=2021-06-08&ss=b&srt=sco&se=2099-01-01",
+                    account_url="https://fake.blob.core.windows.net",
+                )
             )
         )
         assert sink._auth_config.auth_method == "sas_token"
@@ -113,11 +116,11 @@ class TestAzureBlobSinkConfig:
             AzureBlobSink(_base_config(csv_options={"delimiter": ";;"}))
 
     def test_resume_not_supported_flag(self) -> None:
-        sink = AzureBlobSink(_base_config())
+        sink = inject_write_failure(AzureBlobSink(_base_config()))
         assert sink.supports_resume is False
 
     def test_configure_for_resume_raises(self) -> None:
-        sink = AzureBlobSink(_base_config())
+        sink = inject_write_failure(AzureBlobSink(_base_config()))
         with pytest.raises(NotImplementedError, match="does not support resume"):
             sink.configure_for_resume()
 
@@ -131,7 +134,7 @@ class TestAzureBlobSinkLifecycle:
     """Lifecycle -- close resets state, flush is noop."""
 
     def test_close_resets_all_state(self) -> None:
-        sink = AzureBlobSink(_base_config())
+        sink = inject_write_failure(AzureBlobSink(_base_config()))
         # Simulate some state
         mock_client = MagicMock()
         sink._container_client = mock_client
@@ -148,11 +151,11 @@ class TestAzureBlobSinkLifecycle:
         assert sink._has_uploaded is False
 
     def test_close_without_client_is_safe(self) -> None:
-        sink = AzureBlobSink(_base_config())
+        sink = inject_write_failure(AzureBlobSink(_base_config()))
         sink.close()  # Should not raise
 
     def test_flush_is_noop(self) -> None:
-        sink = AzureBlobSink(_base_config())
+        sink = inject_write_failure(AzureBlobSink(_base_config()))
         sink.flush()  # Should not raise, returns None
 
 
@@ -165,7 +168,7 @@ class TestAzureBlobSinkWrite:
     """Write flow -- serialization, upload, artifact descriptors."""
 
     def test_write_csv_uploads_correct_content(self) -> None:
-        sink = AzureBlobSink(_base_config(format="csv", schema=FIXED_SCHEMA))
+        sink = inject_write_failure(AzureBlobSink(_base_config(format="csv", schema=FIXED_SCHEMA)))
         ctx = _make_sink_ctx()
         mock_service, mock_blob = _mock_blob_upload()
 
@@ -180,7 +183,7 @@ class TestAzureBlobSinkWrite:
         assert rows[1]["name"] == "bob"
 
     def test_write_json_uploads_array(self) -> None:
-        sink = AzureBlobSink(_base_config(format="json"))
+        sink = inject_write_failure(AzureBlobSink(_base_config(format="json")))
         ctx = _make_sink_ctx()
         mock_service, mock_blob = _mock_blob_upload()
 
@@ -193,7 +196,7 @@ class TestAzureBlobSinkWrite:
         assert len(parsed) == 2
 
     def test_write_jsonl_uploads_lines(self) -> None:
-        sink = AzureBlobSink(_base_config(format="jsonl"))
+        sink = inject_write_failure(AzureBlobSink(_base_config(format="jsonl")))
         ctx = _make_sink_ctx()
         mock_service, mock_blob = _mock_blob_upload()
 
@@ -206,7 +209,7 @@ class TestAzureBlobSinkWrite:
         assert json.loads(lines[0]) == {"id": "1"}
 
     def test_write_returns_artifact_descriptor(self) -> None:
-        sink = AzureBlobSink(_base_config(format="csv", schema=FIXED_SCHEMA))
+        sink = inject_write_failure(AzureBlobSink(_base_config(format="csv", schema=FIXED_SCHEMA)))
         ctx = _make_sink_ctx()
         mock_service, _mock_blob = _mock_blob_upload()
 
@@ -220,7 +223,7 @@ class TestAzureBlobSinkWrite:
         assert artifact.size_bytes > 0
 
     def test_content_hash_is_sha256_of_uploaded_bytes(self) -> None:
-        sink = AzureBlobSink(_base_config(format="json"))
+        sink = inject_write_failure(AzureBlobSink(_base_config(format="json")))
         ctx = _make_sink_ctx()
         mock_service, mock_blob = _mock_blob_upload()
 
@@ -232,7 +235,7 @@ class TestAzureBlobSinkWrite:
         assert result.artifact.content_hash == expected_hash
 
     def test_empty_rows_no_upload(self) -> None:
-        sink = AzureBlobSink(_base_config(format="json"))
+        sink = inject_write_failure(AzureBlobSink(_base_config(format="json")))
         ctx = _make_sink_ctx()
 
         # No patching needed -- empty rows should not touch Azure at all
@@ -242,7 +245,7 @@ class TestAzureBlobSinkWrite:
         assert result.artifact.content_hash == hashlib.sha256(b"").hexdigest()
 
     def test_cumulative_buffering(self) -> None:
-        sink = AzureBlobSink(_base_config(format="json"))
+        sink = inject_write_failure(AzureBlobSink(_base_config(format="json")))
         ctx = _make_sink_ctx()
         mock_service, mock_blob = _mock_blob_upload()
 
@@ -258,7 +261,7 @@ class TestAzureBlobSinkWrite:
         assert parsed[1]["id"] == "2"
 
     def test_csv_custom_delimiter(self) -> None:
-        sink = AzureBlobSink(_base_config(format="csv", schema=FIXED_SCHEMA, csv_options={"delimiter": "|"}))
+        sink = inject_write_failure(AzureBlobSink(_base_config(format="csv", schema=FIXED_SCHEMA, csv_options={"delimiter": "|"})))
         ctx = _make_sink_ctx()
         mock_service, mock_blob = _mock_blob_upload()
 
@@ -269,11 +272,13 @@ class TestAzureBlobSinkWrite:
         assert "|" in uploaded
 
     def test_csv_no_header(self) -> None:
-        sink = AzureBlobSink(
-            _base_config(
-                format="csv",
-                schema=FIXED_SCHEMA,
-                csv_options={"include_header": False},
+        sink = inject_write_failure(
+            AzureBlobSink(
+                _base_config(
+                    format="csv",
+                    schema=FIXED_SCHEMA,
+                    csv_options={"include_header": False},
+                )
             )
         )
         ctx = _make_sink_ctx()
@@ -298,7 +303,7 @@ class TestAzureBlobSinkTemplateAndOverwrite:
     """Blob path templating and overwrite protection."""
 
     def test_template_renders_run_id(self) -> None:
-        sink = AzureBlobSink(_base_config(blob_path="results/{{ run_id }}/out.csv"))
+        sink = inject_write_failure(AzureBlobSink(_base_config(blob_path="results/{{ run_id }}/out.csv")))
         ctx = _make_sink_ctx()
         mock_service, _mock_blob = _mock_blob_upload()
 
@@ -308,7 +313,7 @@ class TestAzureBlobSinkTemplateAndOverwrite:
         assert ctx.run_id in result.artifact.path_or_uri
 
     def test_template_renders_timestamp(self) -> None:
-        sink = AzureBlobSink(_base_config(blob_path="results/{{ timestamp }}/out.csv"))
+        sink = inject_write_failure(AzureBlobSink(_base_config(blob_path="results/{{ timestamp }}/out.csv")))
         ctx = _make_sink_ctx()
         mock_service, _mock_blob = _mock_blob_upload()
 
@@ -319,7 +324,7 @@ class TestAzureBlobSinkTemplateAndOverwrite:
         assert "T" in result.artifact.path_or_uri
 
     def test_blob_path_frozen_after_first_write(self) -> None:
-        sink = AzureBlobSink(_base_config(blob_path="results/{{ run_id }}/out.csv"))
+        sink = inject_write_failure(AzureBlobSink(_base_config(blob_path="results/{{ run_id }}/out.csv")))
         ctx = _make_sink_ctx()
         mock_service, _mock_blob = _mock_blob_upload()
 
@@ -332,7 +337,7 @@ class TestAzureBlobSinkTemplateAndOverwrite:
     def test_undefined_template_var_raises(self) -> None:
         from jinja2 import UndefinedError
 
-        sink = AzureBlobSink(_base_config(blob_path="{{ nonexistent_var }}/out.csv"))
+        sink = inject_write_failure(AzureBlobSink(_base_config(blob_path="{{ nonexistent_var }}/out.csv")))
         ctx = _make_sink_ctx()
         mock_service, _mock_blob = _mock_blob_upload()
 
@@ -340,7 +345,7 @@ class TestAzureBlobSinkTemplateAndOverwrite:
             sink.write([{"x": 1}], ctx)
 
     def test_overwrite_true_passes_flag(self) -> None:
-        sink = AzureBlobSink(_base_config(overwrite=True))
+        sink = inject_write_failure(AzureBlobSink(_base_config(overwrite=True)))
         ctx = _make_sink_ctx()
         mock_service, mock_blob = _mock_blob_upload()
 
@@ -350,7 +355,7 @@ class TestAzureBlobSinkTemplateAndOverwrite:
         assert mock_blob.upload_blob.call_args.kwargs["overwrite"] is True
 
     def test_overwrite_false_first_write_sends_false(self) -> None:
-        sink = AzureBlobSink(_base_config(overwrite=False))
+        sink = inject_write_failure(AzureBlobSink(_base_config(overwrite=False)))
         ctx = _make_sink_ctx()
         mock_service, mock_blob = _mock_blob_upload()
 
@@ -361,7 +366,7 @@ class TestAzureBlobSinkTemplateAndOverwrite:
 
     def test_overwrite_false_second_write_sends_true(self) -> None:
         """In-run rewrite of the same blob is allowed (cumulative buffering)."""
-        sink = AzureBlobSink(_base_config(overwrite=False))
+        sink = inject_write_failure(AzureBlobSink(_base_config(overwrite=False)))
         ctx = _make_sink_ctx()
         mock_service, mock_blob = _mock_blob_upload()
 
@@ -378,7 +383,7 @@ class TestAzureBlobSinkTemplateAndOverwrite:
         class ResourceExistsError(Exception):
             pass
 
-        sink = AzureBlobSink(_base_config(overwrite=False))
+        sink = inject_write_failure(AzureBlobSink(_base_config(overwrite=False)))
         ctx = _make_sink_ctx()
         mock_service, mock_blob = _mock_blob_upload()
         mock_blob.upload_blob.side_effect = ResourceExistsError("blob exists")
@@ -396,7 +401,7 @@ class TestAzureBlobSinkAudit:
     """Audit trail recording and error propagation."""
 
     def test_upload_failure_raises_runtime_error(self) -> None:
-        sink = AzureBlobSink(_base_config())
+        sink = inject_write_failure(AzureBlobSink(_base_config()))
         ctx = _make_sink_ctx()
         mock_service, mock_blob = _mock_blob_upload()
         mock_blob.upload_blob.side_effect = ConnectionError("network down")
@@ -407,7 +412,7 @@ class TestAzureBlobSinkAudit:
     def test_audit_integrity_error_on_record_call_failure(self) -> None:
         from elspeth.contracts.errors import AuditIntegrityError
 
-        sink = AzureBlobSink(_base_config())
+        sink = inject_write_failure(AzureBlobSink(_base_config()))
         ctx = _make_sink_ctx()
         mock_service, _mock_blob = _mock_blob_upload()
 
@@ -421,7 +426,7 @@ class TestAzureBlobSinkAudit:
             sink.write([{"x": 1}], ctx)
 
     def test_programming_errors_crash_directly(self) -> None:
-        sink = AzureBlobSink(_base_config())
+        sink = inject_write_failure(AzureBlobSink(_base_config()))
         ctx = _make_sink_ctx()
         mock_service, mock_blob = _mock_blob_upload()
         mock_blob.upload_blob.side_effect = AttributeError("mock has no attr")
@@ -430,7 +435,7 @@ class TestAzureBlobSinkAudit:
             sink.write([{"x": 1}], ctx)
 
     def test_buffer_not_committed_on_upload_failure(self) -> None:
-        sink = AzureBlobSink(_base_config(format="json"))
+        sink = inject_write_failure(AzureBlobSink(_base_config(format="json")))
         ctx = _make_sink_ctx()
         mock_service, mock_blob = _mock_blob_upload()
 

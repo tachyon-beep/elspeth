@@ -14,15 +14,18 @@ class TestAzureBlobSinkNonFiniteRejection:
     def sink(self):
         """Create sink with minimal config, no Azure connection needed."""
         from elspeth.plugins.sinks.azure_blob_sink import AzureBlobSink
+        from tests.fixtures.base_classes import inject_write_failure
 
-        return AzureBlobSink(
-            {
-                "container": "test-container",
-                "blob_path": "test.json",
-                "format": "json",
-                "connection_string": "DefaultEndpointsProtocol=https;AccountName=fake;AccountKey=ZmFrZQ==;EndpointSuffix=core.windows.net",
-                "schema": {"mode": "observed"},
-            }
+        return inject_write_failure(
+            AzureBlobSink(
+                {
+                    "container": "test-container",
+                    "blob_path": "test.json",
+                    "format": "json",
+                    "connection_string": "DefaultEndpointsProtocol=https;AccountName=fake;AccountKey=ZmFrZQ==;EndpointSuffix=core.windows.net",
+                    "schema": {"mode": "observed"},
+                }
+            )
         )
 
     @pytest.mark.parametrize("bad_value", [float("nan"), float("inf"), float("-inf")], ids=["nan", "inf", "neg_inf"])
@@ -51,15 +54,18 @@ class TestAzureBlobSinkCloseResourceRelease:
         from unittest.mock import MagicMock
 
         from elspeth.plugins.sinks.azure_blob_sink import AzureBlobSink
+        from tests.fixtures.base_classes import inject_write_failure
 
-        sink = AzureBlobSink(
-            {
-                "container": "test-container",
-                "blob_path": "test.json",
-                "format": "json",
-                "connection_string": "DefaultEndpointsProtocol=https;AccountName=fake;AccountKey=ZmFrZQ==;EndpointSuffix=core.windows.net",
-                "schema": {"mode": "observed"},
-            }
+        sink = inject_write_failure(
+            AzureBlobSink(
+                {
+                    "container": "test-container",
+                    "blob_path": "test.json",
+                    "format": "json",
+                    "connection_string": "DefaultEndpointsProtocol=https;AccountName=fake;AccountKey=ZmFrZQ==;EndpointSuffix=core.windows.net",
+                    "schema": {"mode": "observed"},
+                }
+            )
         )
 
         mock_client = MagicMock()
@@ -72,15 +78,18 @@ class TestAzureBlobSinkCloseResourceRelease:
 
     def test_close_without_client_is_safe(self) -> None:
         from elspeth.plugins.sinks.azure_blob_sink import AzureBlobSink
+        from tests.fixtures.base_classes import inject_write_failure
 
-        sink = AzureBlobSink(
-            {
-                "container": "test-container",
-                "blob_path": "test.json",
-                "format": "json",
-                "connection_string": "DefaultEndpointsProtocol=https;AccountName=fake;AccountKey=ZmFrZQ==;EndpointSuffix=core.windows.net",
-                "schema": {"mode": "observed"},
-            }
+        sink = inject_write_failure(
+            AzureBlobSink(
+                {
+                    "container": "test-container",
+                    "blob_path": "test.json",
+                    "format": "json",
+                    "connection_string": "DefaultEndpointsProtocol=https;AccountName=fake;AccountKey=ZmFrZQ==;EndpointSuffix=core.windows.net",
+                    "schema": {"mode": "observed"},
+                }
+            )
         )
 
         sink.close()  # Should not raise when _container_client is None

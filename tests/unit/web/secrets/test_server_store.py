@@ -126,5 +126,5 @@ class TestListSecrets:
         """SecretInventoryItem has no value field — verify structurally."""
         monkeypatch.setenv("ALLOWED_KEY_A", "super-secret")
         items = store.list_secrets()
-        item = items[0]
+        assert items  # Ensure at least one secret is listed
         assert "value" not in SecretInventoryItem.__slots__

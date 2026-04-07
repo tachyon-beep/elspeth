@@ -11,6 +11,7 @@ from elspeth.contracts.enums import CallStatus
 from elspeth.contracts.errors import AuditIntegrityError, DuplicateDocumentError
 from elspeth.contracts.plugin_context import PluginContext
 from elspeth.plugins.sinks.chroma_sink import ChromaSink
+from tests.fixtures.base_classes import inject_write_failure
 
 
 def _make_config(**overrides: Any) -> dict[str, Any]:
@@ -36,14 +37,14 @@ def _make_config(**overrides: Any) -> dict[str, Any]:
 
 def _make_sink_with_collection(mock_collection: MagicMock, **config_overrides: Any) -> ChromaSink:
     """Create a ChromaSink with a pre-set mock collection (skips on_start)."""
-    sink = ChromaSink(_make_config(**config_overrides))
+    sink = inject_write_failure(ChromaSink(_make_config(**config_overrides)))
     sink._collection = mock_collection
     return sink
 
 
 class TestChromaSinkOnStart:
     def test_constructs_persistent_client(self) -> None:
-        sink = ChromaSink(_make_config())
+        sink = inject_write_failure(ChromaSink(_make_config()))
         mock_ctx = MagicMock(spec=PluginContext)
         mock_ctx.run_id = "test-run"
         mock_ctx.telemetry_emit = MagicMock()
@@ -74,7 +75,7 @@ class TestChromaSinkOnStart:
                 "fields": ["doc_id: str", "text: str"],
             },
         }
-        sink = ChromaSink(config)
+        sink = inject_write_failure(ChromaSink(config))
         mock_ctx = MagicMock(spec=PluginContext)
         mock_ctx.run_id = "test-run"
         mock_ctx.telemetry_emit = MagicMock()
@@ -94,7 +95,7 @@ class TestChromaSinkOnStart:
             mock_client.heartbeat.assert_called_once()
 
     def test_on_start_failure_raises(self) -> None:
-        sink = ChromaSink(_make_config())
+        sink = inject_write_failure(ChromaSink(_make_config()))
         mock_ctx = MagicMock(spec=PluginContext)
         mock_ctx.run_id = "test-run"
 
@@ -426,7 +427,7 @@ class TestChromaSinkMetadataTypeValidation:
             },
             schema={"mode": "flexible", "fields": ["doc_id: str", "text: str"]},
         )
-        sink = ChromaSink(config)
+        sink = inject_write_failure(ChromaSink(config))
         sink._collection = mock_collection
 
         mock_ctx = MagicMock(spec=PluginContext)
@@ -525,7 +526,7 @@ class TestChromaSinkMetadataTypeValidation:
         config = _make_config(
             field_mapping={"document_field": "text", "id_field": "doc_id", "metadata_fields": []},
         )
-        sink = ChromaSink(config)
+        sink = inject_write_failure(ChromaSink(config))
         sink._collection = mock_collection
 
         mock_ctx = MagicMock(spec=PluginContext)
@@ -667,7 +668,7 @@ class TestChromaSinkEmptyMetadata:
             },
             schema={"mode": "flexible", "fields": ["doc_id: str", "text: str"]},
         )
-        sink = ChromaSink(config)
+        sink = inject_write_failure(ChromaSink(config))
         sink._collection = mock_collection
 
         mock_ctx = MagicMock(spec=PluginContext)
@@ -697,7 +698,7 @@ class TestChromaSinkEmptyMetadata:
             },
             schema={"mode": "flexible", "fields": ["doc_id: str", "text: str"]},
         )
-        sink = ChromaSink(config)
+        sink = inject_write_failure(ChromaSink(config))
         sink._collection = mock_collection
 
         mock_ctx = MagicMock(spec=PluginContext)
@@ -737,7 +738,7 @@ class TestChromaSinkEmptyMetadata:
             on_duplicate="skip",
             schema={"mode": "flexible", "fields": ["doc_id: str", "text: str"]},
         )
-        sink = ChromaSink(config)
+        sink = inject_write_failure(ChromaSink(config))
         sink._collection = mock_collection
 
         mock_ctx = MagicMock(spec=PluginContext)
@@ -764,7 +765,7 @@ class TestChromaSinkEmptyMetadata:
             on_duplicate="error",
             schema={"mode": "flexible", "fields": ["doc_id: str", "text: str"]},
         )
-        sink = ChromaSink(config)
+        sink = inject_write_failure(ChromaSink(config))
         sink._collection = mock_collection
 
         mock_ctx = MagicMock(spec=PluginContext)
@@ -788,7 +789,7 @@ class TestChromaSinkEmptyMetadata:
             },
             schema={"mode": "flexible", "fields": ["doc_id: str", "text: str"]},
         )
-        sink = ChromaSink(config)
+        sink = inject_write_failure(ChromaSink(config))
         sink._collection = mock_collection
 
         mock_ctx = MagicMock(spec=PluginContext)

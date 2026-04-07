@@ -11,6 +11,7 @@ from hypothesis import given
 from hypothesis import strategies as st
 
 from elspeth.plugins.sinks.json_sink import JSONSink
+from tests.fixtures.base_classes import inject_write_failure
 from tests.fixtures.factories import make_context
 from tests.fixtures.landscape import make_landscape_db, make_recorder
 from tests.strategies.settings import SLOW_SETTINGS
@@ -57,12 +58,14 @@ class TestJSONSinkProperties:
             file_id = data.draw(st.uuids()).hex
             path = Path(tmp_dir) / f"{file_id}.jsonl"
 
-            sink = JSONSink(
-                {
-                    "path": str(path),
-                    "format": "jsonl",
-                    "schema": {"mode": "fixed", "fields": ["id: int", "name: str", "score: float?"]},
-                }
+            sink = inject_write_failure(
+                JSONSink(
+                    {
+                        "path": str(path),
+                        "format": "jsonl",
+                        "schema": {"mode": "fixed", "fields": ["id: int", "name: str", "score: float?"]},
+                    }
+                )
             )
             db = make_landscape_db()
             recorder = make_recorder(db)
@@ -81,12 +84,14 @@ class TestJSONSinkProperties:
             file_id = data.draw(st.uuids()).hex
             path = Path(tmp_dir) / f"{file_id}.json"
 
-            sink = JSONSink(
-                {
-                    "path": str(path),
-                    "format": "json",
-                    "schema": {"mode": "fixed", "fields": ["id: int", "name: str", "score: float?"]},
-                }
+            sink = inject_write_failure(
+                JSONSink(
+                    {
+                        "path": str(path),
+                        "format": "json",
+                        "schema": {"mode": "fixed", "fields": ["id: int", "name: str", "score: float?"]},
+                    }
+                )
             )
             db = make_landscape_db()
             recorder = make_recorder(db)

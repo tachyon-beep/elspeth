@@ -200,17 +200,28 @@ def as_batch_transform(transform: Any) -> BatchTransformProtocol:
     return cast("BatchTransformProtocol", transform)
 
 
+def inject_write_failure[S](sink: S, value: str = "discard") -> S:
+    """Inject _on_write_failure on a production sink instance.
+
+    Production code injects this via cli_helpers from SinkSettings.
+    Tests that construct sinks directly bypass that path. Call this
+    on any production sink (CSVSink, JSONSink, etc.) after construction.
+
+    Returns the same sink for call-chaining.
+    """
+    if sink._on_write_failure is None:  # type: ignore[union-attr]
+        sink._on_write_failure = value  # type: ignore[union-attr]
+    return sink
+
+
 def as_sink(sink: Any) -> SinkProtocol:
     """Cast a test sink to SinkProtocol.
 
     Also ensures _on_write_failure is set if not already — production code
     injects this via cli_helpers, but tests that construct sinks directly
-    bypass that path. Uses direct attribute access: BaseSink subclasses
-    always have _on_write_failure (class-level default None); test sinks
-    from _TestSinkBase have it set to "discard".
+    bypass that path.
     """
-    if sink._on_write_failure is None:
-        sink._on_write_failure = "discard"
+    inject_write_failure(sink)
     return cast("SinkProtocol", sink)
 
 

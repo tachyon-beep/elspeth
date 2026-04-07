@@ -16,6 +16,7 @@ from hypothesis import HealthCheck, given, settings
 from hypothesis import strategies as st
 
 from elspeth.plugins.sinks.csv_sink import CSVSink
+from tests.fixtures.base_classes import inject_write_failure
 from tests.fixtures.factories import make_context
 from tests.fixtures.landscape import make_landscape_db, make_recorder
 
@@ -35,11 +36,13 @@ class TestCSVSinkContract(SinkContractTestBase):
 
         def factory() -> SinkProtocol:
             counter[0] += 1
-            return CSVSink(
-                {
-                    "path": str(tmp_path / f"output_{counter[0]}.csv"),
-                    "schema": {"mode": "fixed", "fields": ["id: int", "name: str", "score: float"]},
-                }
+            return inject_write_failure(
+                CSVSink(
+                    {
+                        "path": str(tmp_path / f"output_{counter[0]}.csv"),
+                        "schema": {"mode": "fixed", "fields": ["id: int", "name: str", "score: float"]},
+                    }
+                )
             )
 
         return factory
@@ -64,11 +67,13 @@ class TestCSVSinkDeterminism(SinkDeterminismContractTestBase):
 
         def factory() -> SinkProtocol:
             counter[0] += 1
-            return CSVSink(
-                {
-                    "path": str(tmp_path / f"output_{counter[0]}.csv"),
-                    "schema": {"mode": "fixed", "fields": ["id: int", "name: str"]},
-                }
+            return inject_write_failure(
+                CSVSink(
+                    {
+                        "path": str(tmp_path / f"output_{counter[0]}.csv"),
+                        "schema": {"mode": "fixed", "fields": ["id: int", "name: str"]},
+                    }
+                )
             )
 
         return factory
@@ -93,7 +98,7 @@ class TestCSVSinkHashVerification:
         ctx = make_context(landscape=recorder)
 
         rows = [{"id": 1, "name": "Alice"}, {"id": 2, "name": "Bob"}]
-        sink = CSVSink({"path": str(csv_path), "schema": {"mode": "fixed", "fields": ["id: int", "name: str"]}})
+        sink = inject_write_failure(CSVSink({"path": str(csv_path), "schema": {"mode": "fixed", "fields": ["id: int", "name: str"]}}))
         result = sink.write(rows, ctx)
         sink.close()
 
@@ -110,7 +115,7 @@ class TestCSVSinkHashVerification:
         ctx = make_context(landscape=recorder)
 
         rows = [{"id": 1, "name": "Alice"}, {"id": 2, "name": "Bob"}]
-        sink = CSVSink({"path": str(csv_path), "schema": {"mode": "fixed", "fields": ["id: int", "name: str"]}})
+        sink = inject_write_failure(CSVSink({"path": str(csv_path), "schema": {"mode": "fixed", "fields": ["id: int", "name: str"]}}))
         result = sink.write(rows, ctx)
         sink.close()
 
@@ -130,22 +135,26 @@ class TestCSVSinkAppendMode:
         recorder = make_recorder(db)
         ctx = make_context(landscape=recorder)
 
-        sink1 = CSVSink(
-            {
-                "path": str(csv_path),
-                "schema": {"mode": "fixed", "fields": ["id: int", "name: str"]},
-                "mode": "write",
-            }
+        sink1 = inject_write_failure(
+            CSVSink(
+                {
+                    "path": str(csv_path),
+                    "schema": {"mode": "fixed", "fields": ["id: int", "name: str"]},
+                    "mode": "write",
+                }
+            )
         )
         sink1.write([{"id": 1, "name": "Alice"}], ctx)
         sink1.close()
 
-        sink2 = CSVSink(
-            {
-                "path": str(csv_path),
-                "schema": {"mode": "fixed", "fields": ["id: int", "name: str"]},
-                "mode": "append",
-            }
+        sink2 = inject_write_failure(
+            CSVSink(
+                {
+                    "path": str(csv_path),
+                    "schema": {"mode": "fixed", "fields": ["id: int", "name: str"]},
+                    "mode": "append",
+                }
+            )
         )
         sink2.write([{"id": 2, "name": "Bob"}], ctx)
         sink2.close()
@@ -166,12 +175,14 @@ class TestCSVSinkAppendMode:
 
         assert not csv_path.exists()
 
-        sink = CSVSink(
-            {
-                "path": str(csv_path),
-                "schema": {"mode": "fixed", "fields": ["id: int", "name: str"]},
-                "mode": "append",
-            }
+        sink = inject_write_failure(
+            CSVSink(
+                {
+                    "path": str(csv_path),
+                    "schema": {"mode": "fixed", "fields": ["id: int", "name: str"]},
+                    "mode": "append",
+                }
+            )
         )
         sink.write([{"id": 1, "name": "Alice"}], ctx)
         sink.close()
@@ -208,11 +219,13 @@ class TestCSVSinkPropertyBased:
 
         csv_path = tmp_path / f"test_{uuid.uuid4().hex[:8]}.csv"
 
-        sink = CSVSink(
-            {
-                "path": str(csv_path),
-                "schema": {"mode": "fixed", "fields": ["id: int", "name: str", "value: int"]},
-            }
+        sink = inject_write_failure(
+            CSVSink(
+                {
+                    "path": str(csv_path),
+                    "schema": {"mode": "fixed", "fields": ["id: int", "name: str", "value: int"]},
+                }
+            )
         )
         db = make_landscape_db()
         recorder = make_recorder(db)
@@ -249,11 +262,11 @@ class TestCSVSinkPropertyBased:
         path1 = tmp_path / f"test1_{uuid.uuid4().hex[:8]}.csv"
         path2 = tmp_path / f"test2_{uuid.uuid4().hex[:8]}.csv"
 
-        sink1 = CSVSink({"path": str(path1), "schema": {"mode": "fixed", "fields": ["id: int", "data: str"]}})
+        sink1 = inject_write_failure(CSVSink({"path": str(path1), "schema": {"mode": "fixed", "fields": ["id: int", "data: str"]}}))
         result1 = sink1.write(rows, ctx)
         sink1.close()
 
-        sink2 = CSVSink({"path": str(path2), "schema": {"mode": "fixed", "fields": ["id: int", "data: str"]}})
+        sink2 = inject_write_failure(CSVSink({"path": str(path2), "schema": {"mode": "fixed", "fields": ["id: int", "data: str"]}}))
         result2 = sink2.write(rows, ctx)
         sink2.close()
 
@@ -273,7 +286,7 @@ class TestCSVSinkQuotingCharacters:
         ctx = make_context(landscape=recorder)
 
         rows = [{"id": 1, "data": "value with, comma"}]
-        sink = CSVSink({"path": str(csv_path), "schema": {"mode": "fixed", "fields": ["id: int", "data: str"]}})
+        sink = inject_write_failure(CSVSink({"path": str(csv_path), "schema": {"mode": "fixed", "fields": ["id: int", "data: str"]}}))
         sink.write(rows, ctx)
         sink.close()
 
@@ -294,7 +307,7 @@ class TestCSVSinkQuotingCharacters:
         ctx = make_context(landscape=recorder)
 
         rows = [{"id": 1, "data": 'value with "quotes"'}]
-        sink = CSVSink({"path": str(csv_path), "schema": {"mode": "fixed", "fields": ["id: int", "data: str"]}})
+        sink = inject_write_failure(CSVSink({"path": str(csv_path), "schema": {"mode": "fixed", "fields": ["id: int", "data: str"]}}))
         sink.write(rows, ctx)
         sink.close()
 
@@ -315,7 +328,7 @@ class TestCSVSinkQuotingCharacters:
         ctx = make_context(landscape=recorder)
 
         rows = [{"id": 1, "data": "value with\nnewline"}]
-        sink = CSVSink({"path": str(csv_path), "schema": {"mode": "fixed", "fields": ["id: int", "data: str"]}})
+        sink = inject_write_failure(CSVSink({"path": str(csv_path), "schema": {"mode": "fixed", "fields": ["id: int", "data: str"]}}))
         sink.write(rows, ctx)
         sink.close()
 
@@ -336,7 +349,7 @@ class TestCSVSinkQuotingCharacters:
         ctx = make_context(landscape=recorder)
 
         rows = [{"id": 1, "data": 'value with "quotes" and, commas\nand newlines'}]
-        sink = CSVSink({"path": str(csv_path), "schema": {"mode": "fixed", "fields": ["id: int", "data: str"]}})
+        sink = inject_write_failure(CSVSink({"path": str(csv_path), "schema": {"mode": "fixed", "fields": ["id: int", "data: str"]}}))
         sink.write(rows, ctx)
         sink.close()
 
@@ -361,11 +374,11 @@ class TestCSVSinkQuotingCharacters:
         path1 = tmp_path / "roundtrip1.csv"
         path2 = tmp_path / "roundtrip2.csv"
 
-        sink1 = CSVSink({"path": str(path1), "schema": {"mode": "fixed", "fields": ["id: int", "data: str"]}})
+        sink1 = inject_write_failure(CSVSink({"path": str(path1), "schema": {"mode": "fixed", "fields": ["id: int", "data: str"]}}))
         result1 = sink1.write(rows, ctx)
         sink1.close()
 
-        sink2 = CSVSink({"path": str(path2), "schema": {"mode": "fixed", "fields": ["id: int", "data: str"]}})
+        sink2 = inject_write_failure(CSVSink({"path": str(path2), "schema": {"mode": "fixed", "fields": ["id: int", "data: str"]}}))
         result2 = sink2.write(rows, ctx)
         sink2.close()
 

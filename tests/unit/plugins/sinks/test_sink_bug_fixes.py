@@ -15,6 +15,7 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from elspeth.contracts.plugin_context import PluginContext
+from tests.fixtures.base_classes import inject_write_failure
 from tests.fixtures.factories import make_operation_context
 
 # === Shared fixtures and schemas ===
@@ -61,7 +62,7 @@ class TestCSVSinkAtomicBatchWrite:
         from elspeth.plugins.sinks.csv_sink import CSVSink
 
         output_file = tmp_path / "output.csv"
-        sink = CSVSink({"path": str(output_file), "schema": FIXED_SCHEMA})
+        sink = inject_write_failure(CSVSink({"path": str(output_file), "schema": FIXED_SCHEMA}))
 
         # First batch succeeds (establishes file)
         sink.write([{"id": 1, "name": "alice"}], ctx)
@@ -95,7 +96,7 @@ class TestCSVSinkAtomicBatchWrite:
         from elspeth.plugins.sinks.csv_sink import CSVSink
 
         output_file = tmp_path / "output.csv"
-        sink = CSVSink({"path": str(output_file), "schema": FIXED_SCHEMA})
+        sink = inject_write_failure(CSVSink({"path": str(output_file), "schema": FIXED_SCHEMA}))
 
         sink.write(
             [
@@ -121,7 +122,7 @@ class TestCSVSinkAtomicBatchWrite:
         from elspeth.plugins.sinks.csv_sink import CSVSink
 
         output_file = tmp_path / "output.csv"
-        sink = CSVSink({"path": str(output_file), "schema": FIXED_SCHEMA})
+        sink = inject_write_failure(CSVSink({"path": str(output_file), "schema": FIXED_SCHEMA}))
 
         artifact = sink.write([{"id": 1, "name": "alice"}, {"id": 2, "name": "bob"}], ctx)
         sink.flush()
@@ -153,7 +154,7 @@ class TestCSVSinkWriteModeRollback:
         from elspeth.plugins.sinks.csv_sink import CSVSink
 
         output_file = tmp_path / "output.csv"
-        sink = CSVSink({"path": str(output_file), "schema": FIXED_SCHEMA})
+        sink = inject_write_failure(CSVSink({"path": str(output_file), "schema": FIXED_SCHEMA}))
 
         # Row has an extra field that fixed schema rejects during staging
         with pytest.raises(ValueError, match="c"):
@@ -172,7 +173,7 @@ class TestCSVSinkWriteModeRollback:
         from elspeth.plugins.sinks.csv_sink import CSVSink
 
         output_file = tmp_path / "output.csv"
-        sink = CSVSink({"path": str(output_file), "schema": FIXED_SCHEMA})
+        sink = inject_write_failure(CSVSink({"path": str(output_file), "schema": FIXED_SCHEMA}))
 
         # Patch file.write to fail AFTER the file is opened (staging succeeds
         # because it uses a separate StringIO buffer, so we target the real file)
@@ -219,7 +220,7 @@ class TestCSVSinkWriteModeRollback:
         from elspeth.plugins.sinks.csv_sink import CSVSink
 
         output_file = tmp_path / "output.csv"
-        sink = CSVSink({"path": str(output_file), "schema": FIXED_SCHEMA, "mode": "append"})
+        sink = inject_write_failure(CSVSink({"path": str(output_file), "schema": FIXED_SCHEMA, "mode": "append"}))
 
         # First batch succeeds (establishes file)
         sink.write([{"id": 1, "name": "alice"}], ctx)
@@ -288,7 +289,7 @@ class TestDatabaseSinkSchemaEnforcement:
         """
         from elspeth.plugins.sinks.database_sink import DatabaseSink
 
-        sink = DatabaseSink({"url": db_url, "table": "output", "schema": FIXED_SCHEMA})
+        sink = inject_write_failure(DatabaseSink({"url": db_url, "table": "output", "schema": FIXED_SCHEMA}))
 
         # First write creates the table with columns [id, name]
         sink.write([{"id": 1, "name": "alice"}], ctx)
@@ -310,7 +311,7 @@ class TestDatabaseSinkSchemaEnforcement:
         from elspeth.plugins.sinks.database_sink import DatabaseSink
 
         required_schema = {"mode": "fixed", "fields": ["id: int", "name: str"]}
-        sink = DatabaseSink({"url": db_url, "table": "output", "schema": required_schema})
+        sink = inject_write_failure(DatabaseSink({"url": db_url, "table": "output", "schema": required_schema}))
 
         sink.write([{"id": 1, "name": "alice"}], ctx)
         sink.close()
@@ -333,7 +334,7 @@ class TestDatabaseSinkSchemaEnforcement:
         from elspeth.plugins.sinks.database_sink import DatabaseSink
 
         optional_schema = {"mode": "fixed", "fields": ["id: int", "name: str?"]}
-        sink = DatabaseSink({"url": db_url, "table": "output", "schema": optional_schema})
+        sink = inject_write_failure(DatabaseSink({"url": db_url, "table": "output", "schema": optional_schema}))
 
         sink.write([{"id": 1, "name": "alice"}], ctx)
         sink.close()
@@ -376,7 +377,7 @@ class TestDatabaseSinkAnyTypeSerialization:
         from elspeth.plugins.sinks.database_sink import DatabaseSink
 
         any_schema = {"mode": "fixed", "fields": ["id: int", "payload: any"]}
-        sink = DatabaseSink({"url": db_url, "table": "output", "schema": any_schema})
+        sink = inject_write_failure(DatabaseSink({"url": db_url, "table": "output", "schema": any_schema}))
 
         sink.write([{"id": 1, "payload": {"key": "value", "nested": [1, 2, 3]}}], ctx)
         sink.close()
@@ -402,7 +403,7 @@ class TestDatabaseSinkAnyTypeSerialization:
         from elspeth.plugins.sinks.database_sink import DatabaseSink
 
         any_schema = {"mode": "fixed", "fields": ["id: int", "items: any"]}
-        sink = DatabaseSink({"url": db_url, "table": "output", "schema": any_schema})
+        sink = inject_write_failure(DatabaseSink({"url": db_url, "table": "output", "schema": any_schema}))
 
         sink.write([{"id": 1, "items": [1, 2, 3]}], ctx)
         sink.close()
@@ -427,7 +428,7 @@ class TestDatabaseSinkAnyTypeSerialization:
 
         # Use optional 'any' field (with '?') so None is allowed as NULL
         any_schema = {"mode": "fixed", "fields": ["id: int", "data: any?"]}
-        sink = DatabaseSink({"url": db_url, "table": "output", "schema": any_schema})
+        sink = inject_write_failure(DatabaseSink({"url": db_url, "table": "output", "schema": any_schema}))
 
         sink.write(
             [
@@ -455,7 +456,7 @@ class TestDatabaseSinkAnyTypeSerialization:
 
         from elspeth.plugins.sinks.database_sink import DatabaseSink
 
-        sink = DatabaseSink({"url": db_url, "table": "output", "schema": OBSERVED_SCHEMA})
+        sink = inject_write_failure(DatabaseSink({"url": db_url, "table": "output", "schema": OBSERVED_SCHEMA}))
 
         sink.write([{"id": 1, "meta": {"source": "test"}}], ctx)
         sink.close()
@@ -498,13 +499,15 @@ class TestJSONSinkAppendSchemaValidation:
         output_file.write_text(json.dumps({"x": 1, "y": 2}) + "\n")
 
         # Try to append with a fixed schema that requires id and name
-        sink = JSONSink(
-            {
-                "path": str(output_file),
-                "format": "jsonl",
-                "mode": "append",
-                "schema": FIXED_SCHEMA,
-            }
+        sink = inject_write_failure(
+            JSONSink(
+                {
+                    "path": str(output_file),
+                    "format": "jsonl",
+                    "mode": "append",
+                    "schema": FIXED_SCHEMA,
+                }
+            )
         )
 
         with pytest.raises(ValueError, match="JSONL schema mismatch"):
@@ -520,13 +523,15 @@ class TestJSONSinkAppendSchemaValidation:
         # Existing data has same fields
         output_file.write_text(json.dumps({"id": 1, "name": "alice"}) + "\n")
 
-        sink = JSONSink(
-            {
-                "path": str(output_file),
-                "format": "jsonl",
-                "mode": "append",
-                "schema": FIXED_SCHEMA,
-            }
+        sink = inject_write_failure(
+            JSONSink(
+                {
+                    "path": str(output_file),
+                    "format": "jsonl",
+                    "mode": "append",
+                    "schema": FIXED_SCHEMA,
+                }
+            )
         )
 
         # Should succeed -- schema matches
@@ -546,13 +551,15 @@ class TestJSONSinkAppendSchemaValidation:
         # Existing data is missing 'name' field required by flexible schema
         output_file.write_text(json.dumps({"id": 1}) + "\n")
 
-        sink = JSONSink(
-            {
-                "path": str(output_file),
-                "format": "jsonl",
-                "mode": "append",
-                "schema": FLEXIBLE_SCHEMA,
-            }
+        sink = inject_write_failure(
+            JSONSink(
+                {
+                    "path": str(output_file),
+                    "format": "jsonl",
+                    "mode": "append",
+                    "schema": FLEXIBLE_SCHEMA,
+                }
+            )
         )
 
         with pytest.raises(ValueError, match="JSONL schema mismatch"):
@@ -567,13 +574,15 @@ class TestJSONSinkAppendSchemaValidation:
         output_file = tmp_path / "output.jsonl"
         assert not output_file.exists()
 
-        sink = JSONSink(
-            {
-                "path": str(output_file),
-                "format": "jsonl",
-                "mode": "append",
-                "schema": FIXED_SCHEMA,
-            }
+        sink = inject_write_failure(
+            JSONSink(
+                {
+                    "path": str(output_file),
+                    "format": "jsonl",
+                    "mode": "append",
+                    "schema": FIXED_SCHEMA,
+                }
+            )
         )
 
         sink.write([{"id": 1, "name": "alice"}], ctx)
@@ -592,13 +601,15 @@ class TestJSONSinkAppendSchemaValidation:
         # Existing data has completely different fields
         output_file.write_text(json.dumps({"x": 1, "y": 2}) + "\n")
 
-        sink = JSONSink(
-            {
-                "path": str(output_file),
-                "format": "jsonl",
-                "mode": "append",
-                "schema": OBSERVED_SCHEMA,
-            }
+        sink = inject_write_failure(
+            JSONSink(
+                {
+                    "path": str(output_file),
+                    "format": "jsonl",
+                    "mode": "append",
+                    "schema": OBSERVED_SCHEMA,
+                }
+            )
         )
 
         # Should succeed -- observed mode doesn't validate
@@ -625,7 +636,7 @@ class TestJSONLAppendRollbackPreservesExistingContent:
         output_file = tmp_path / "output.jsonl"
 
         # Create pre-existing content via a first sink lifecycle
-        sink1 = JSONSink({"path": str(output_file), "format": "jsonl", "schema": OBSERVED_SCHEMA})
+        sink1 = inject_write_failure(JSONSink({"path": str(output_file), "format": "jsonl", "schema": OBSERVED_SCHEMA}))
         sink1.write([{"id": 1, "name": "alice"}, {"id": 2, "name": "bob"}], ctx)
         sink1.flush()
         sink1.close()
@@ -634,7 +645,7 @@ class TestJSONLAppendRollbackPreservesExistingContent:
         assert original_content.count("\n") == 2  # two lines
 
         # Second sink in append mode — force a failure after write
-        sink2 = JSONSink({"path": str(output_file), "format": "jsonl", "mode": "append", "schema": OBSERVED_SCHEMA})
+        sink2 = inject_write_failure(JSONSink({"path": str(output_file), "format": "jsonl", "mode": "append", "schema": OBSERVED_SCHEMA}))
 
         # Patch _compute_file_hash to fail AFTER content is written,
         # triggering the rollback path
@@ -679,14 +690,16 @@ class TestAzureBlobSinkFieldValidation:
         mock_container.get_blob_client.return_value = mock_blob_client
         mock_container_client.return_value = mock_container
 
-        sink = AzureBlobSink(
-            {
-                "connection_string": TEST_CONNECTION_STRING,
-                "container": TEST_CONTAINER,
-                "blob_path": TEST_BLOB_PATH,
-                "format": "csv",
-                "schema": FIXED_SCHEMA,
-            }
+        sink = inject_write_failure(
+            AzureBlobSink(
+                {
+                    "connection_string": TEST_CONNECTION_STRING,
+                    "container": TEST_CONTAINER,
+                    "blob_path": TEST_BLOB_PATH,
+                    "format": "csv",
+                    "schema": FIXED_SCHEMA,
+                }
+            )
         )
 
         with pytest.raises(ValueError, match="unexpected fields"):
@@ -710,14 +723,16 @@ class TestAzureBlobSinkFieldValidation:
         mock_container.get_blob_client.return_value = mock_blob_client
         mock_container_client.return_value = mock_container
 
-        sink = AzureBlobSink(
-            {
-                "connection_string": TEST_CONNECTION_STRING,
-                "container": TEST_CONTAINER,
-                "blob_path": TEST_BLOB_PATH,
-                "format": "csv",
-                "schema": FIXED_SCHEMA,
-            }
+        sink = inject_write_failure(
+            AzureBlobSink(
+                {
+                    "connection_string": TEST_CONNECTION_STRING,
+                    "container": TEST_CONTAINER,
+                    "blob_path": TEST_BLOB_PATH,
+                    "format": "csv",
+                    "schema": FIXED_SCHEMA,
+                }
+            )
         )
 
         sink.write([{"id": 1, "name": "alice"}, {"id": 2, "name": "bob"}], ctx)
@@ -728,14 +743,16 @@ class TestAzureBlobSinkFieldValidation:
         from elspeth.plugins.sinks.azure_blob_sink import AzureBlobSink
 
         with patch("elspeth.plugins.sinks.azure_blob_sink.AzureBlobSink._get_container_client"):
-            sink = AzureBlobSink(
-                {
-                    "connection_string": TEST_CONNECTION_STRING,
-                    "container": TEST_CONTAINER,
-                    "blob_path": TEST_BLOB_PATH,
-                    "format": "csv",
-                    "schema": FIXED_SCHEMA,
-                }
+            sink = inject_write_failure(
+                AzureBlobSink(
+                    {
+                        "connection_string": TEST_CONNECTION_STRING,
+                        "container": TEST_CONTAINER,
+                        "blob_path": TEST_BLOB_PATH,
+                        "format": "csv",
+                        "schema": FIXED_SCHEMA,
+                    }
+                )
             )
 
         assert sink.declared_required_fields == frozenset({"id", "name"})

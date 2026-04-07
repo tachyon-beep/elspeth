@@ -70,6 +70,7 @@ class TestPluginSystemIntegration:
         class MemorySink(BaseSink):
             name = "memory"
             input_schema = EnrichedSchema
+            _on_write_failure: str | None = "discard"
             collected: ClassVar[list[dict[str, Any]]] = []
 
             def write(self, rows: list[dict[str, Any]], ctx: SinkContext) -> SinkWriteResult:

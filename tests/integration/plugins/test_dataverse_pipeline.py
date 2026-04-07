@@ -28,6 +28,7 @@ from elspeth.plugins.infrastructure.clients.dataverse import (
 )
 from elspeth.plugins.sinks.dataverse import DataverseSink
 from elspeth.plugins.sources.dataverse import DataverseSource
+from tests.fixtures.base_classes import inject_write_failure
 
 # ---------------------------------------------------------------------------
 # Fixtures and helpers
@@ -423,7 +424,7 @@ class TestDataverseSinkUpsert:
 
     def test_single_row_upsert(self) -> None:
         """Upsert a single row via PATCH."""
-        sink = DataverseSink(_make_sink_config())
+        sink = inject_write_failure(DataverseSink(_make_sink_config()))
 
         mock_client = MagicMock(spec=DataverseClient)
         mock_client.upsert.return_value = DataversePageResponse(
@@ -470,7 +471,7 @@ class TestDataverseSinkUpsert:
 
     def test_multi_row_upsert_serial(self) -> None:
         """Multiple rows are upserted serially, each with its own audit record."""
-        sink = DataverseSink(_make_sink_config())
+        sink = inject_write_failure(DataverseSink(_make_sink_config()))
 
         mock_client = MagicMock(spec=DataverseClient)
         mock_client.upsert.return_value = DataversePageResponse(
@@ -508,7 +509,7 @@ class TestDataverseSinkUpsert:
 
     def test_upsert_failure_raises_and_records(self) -> None:
         """Failure on second row raises RuntimeError after recording audit entry."""
-        sink = DataverseSink(_make_sink_config())
+        sink = inject_write_failure(DataverseSink(_make_sink_config()))
 
         call_count = 0
 
@@ -578,7 +579,7 @@ class TestDataverseSinkLookupBindings:
                 },
             },
         )
-        sink = DataverseSink(config)
+        sink = inject_write_failure(DataverseSink(config))
 
         mock_client = MagicMock(spec=DataverseClient)
         captured_bodies: list[dict[str, Any]] = []
@@ -623,7 +624,7 @@ class TestDataverseSinkEmptyBatch:
     """Empty batch returns descriptor with empty hash."""
 
     def test_empty_rows_returns_descriptor(self) -> None:
-        sink = DataverseSink(_make_sink_config())
+        sink = inject_write_failure(DataverseSink(_make_sink_config()))
 
         mock_client = MagicMock(spec=DataverseClient)
         mock_client.get_auth_headers.return_value = {"Authorization": "Bearer fake"}

@@ -40,6 +40,7 @@ from elspeth.plugins.sinks.csv_sink import CSVSink
 from elspeth.plugins.sinks.json_sink import JSONSink
 from elspeth.plugins.sources.null_source import NullSource
 from elspeth.plugins.transforms.passthrough import PassThrough
+from tests.fixtures.base_classes import inject_write_failure
 from tests.fixtures.landscape import make_recorder
 
 
@@ -301,7 +302,7 @@ class TestResumeComprehensive:
         config = PipelineConfig(
             source=_null_source("default"),
             transforms=[passthrough],
-            sinks={"default": CSVSink({"path": str(output_path), "schema": strict_schema, "mode": "append"})},
+            sinks={"default": inject_write_failure(CSVSink({"path": str(output_path), "schema": strict_schema, "mode": "append"}))},
         )
 
         # Build graph manually
@@ -408,7 +409,7 @@ class TestResumeComprehensive:
         config = PipelineConfig(
             source=_null_source("default"),
             transforms=[passthrough],
-            sinks={"default": CSVSink({"path": str(output_path), "schema": strict_schema, "mode": "append"})},
+            sinks={"default": inject_write_failure(CSVSink({"path": str(output_path), "schema": strict_schema, "mode": "append"}))},
         )
 
         resume_graph = ExecutionGraph()
@@ -613,7 +614,7 @@ class TestResumeComprehensive:
         config = PipelineConfig(
             source=_null_source("default"),
             transforms=[passthrough],
-            sinks={"default": CSVSink({"path": str(output_path), "schema": resume_schema, "mode": "append"})},
+            sinks={"default": inject_write_failure(CSVSink({"path": str(output_path), "schema": resume_schema, "mode": "append"}))},
         )
 
         resume_graph = ExecutionGraph()
@@ -817,7 +818,7 @@ class TestResumeComprehensive:
         config = PipelineConfig(
             source=_null_source("default"),
             transforms=[passthrough],
-            sinks={"default": CSVSink({"path": str(output_path), "schema": resume_schema, "mode": "append"})},
+            sinks={"default": inject_write_failure(CSVSink({"path": str(output_path), "schema": resume_schema, "mode": "append"}))},
         )
 
         resume_graph = ExecutionGraph()
@@ -1015,8 +1016,10 @@ class TestResumeComprehensive:
             source=_null_source("default"),
             transforms=[passthrough],
             sinks={
-                "default": JSONSink(
-                    {"path": str(output_path.with_suffix(".json")), "schema": {"mode": "observed"}, "mode": "append", "format": "jsonl"}
+                "default": inject_write_failure(
+                    JSONSink(
+                        {"path": str(output_path.with_suffix(".json")), "schema": {"mode": "observed"}, "mode": "append", "format": "jsonl"}
+                    )
                 )
             },
         )
@@ -1215,8 +1218,10 @@ class TestResumeComprehensive:
             source=_null_source("default"),
             transforms=[passthrough],
             sinks={
-                "default": JSONSink(
-                    {"path": str(output_path.with_suffix(".json")), "schema": {"mode": "observed"}, "mode": "append", "format": "jsonl"}
+                "default": inject_write_failure(
+                    JSONSink(
+                        {"path": str(output_path.with_suffix(".json")), "schema": {"mode": "observed"}, "mode": "append", "format": "jsonl"}
+                    )
                 )
             },
         )
@@ -1395,7 +1400,11 @@ class TestResumeComprehensive:
         config = PipelineConfig(
             source=_null_source("default"),
             transforms=[passthrough],
-            sinks={"default": JSONSink({"path": "/tmp/dummy.json", "schema": {"mode": "observed"}, "mode": "write", "format": "jsonl"})},
+            sinks={
+                "default": inject_write_failure(
+                    JSONSink({"path": "/tmp/dummy.json", "schema": {"mode": "observed"}, "mode": "write", "format": "jsonl"})
+                )
+            },
         )
 
         resume_graph = ExecutionGraph()

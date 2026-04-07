@@ -172,6 +172,7 @@ class TestBaseSink:
             name = "memory"
             input_schema = InputSchema
             idempotent = True
+            _on_write_failure: str | None = "discard"
 
             def __init__(self, config: dict[str, Any]) -> None:
                 super().__init__(config)
@@ -229,6 +230,7 @@ class TestBaseSink:
             name = "batch_memory"
             input_schema = InputSchema
             idempotent = True
+            _on_write_failure: str | None = "discard"
 
             def __init__(self, config: dict[str, Any]) -> None:
                 super().__init__(config)

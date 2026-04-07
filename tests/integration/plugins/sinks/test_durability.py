@@ -22,7 +22,7 @@ from elspeth.core.payload_store import FilesystemPayloadStore
 from elspeth.engine.executors import SinkExecutor
 from elspeth.engine.spans import SpanFactory
 from elspeth.plugins.sinks.csv_sink import CSVSink
-from tests.fixtures.base_classes import create_observed_contract
+from tests.fixtures.base_classes import create_observed_contract, inject_write_failure
 from tests.fixtures.factories import make_context
 from tests.fixtures.landscape import make_recorder
 
@@ -104,11 +104,13 @@ class TestSinkDurability:
         and artifacts. Tests that need flush failure patch sink.flush directly.
         """
         output_file = tmp_path / "output.csv"
-        sink = CSVSink(
-            {
-                "path": str(output_file),
-                "schema": {"mode": "observed"},
-            }
+        sink = inject_write_failure(
+            CSVSink(
+                {
+                    "path": str(output_file),
+                    "schema": {"mode": "observed"},
+                }
+            )
         )
         sink.node_id = "sink"
         return sink
