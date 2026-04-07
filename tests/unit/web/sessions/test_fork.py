@@ -281,7 +281,13 @@ def _make_fork_app(
 
     app.state.session_service = session_service
     app.state.blob_service = blob_service
-    app.state.settings = WebSettings(data_dir=tmp_path)
+    app.state.settings = WebSettings(
+        data_dir=tmp_path,
+        composer_max_composition_turns=15,
+        composer_max_discovery_turns=10,
+        composer_timeout_seconds=85.0,
+        composer_rate_limit_per_minute=10,
+    )
     app.state.composer_service = None
 
     from elspeth.web.middleware.rate_limit import ComposerRateLimiter
@@ -495,7 +501,13 @@ class TestForkEndpoint:
         app.dependency_overrides[get_current_user] = mock_user
         app.state.session_service = session_service
         app.state.blob_service = blob_service
-        app.state.settings = WebSettings(data_dir=tmp_path)
+        app.state.settings = WebSettings(
+            data_dir=tmp_path,
+            composer_max_composition_turns=15,
+            composer_max_discovery_turns=10,
+            composer_timeout_seconds=85.0,
+            composer_rate_limit_per_minute=10,
+        )
         app.state.composer_service = None
 
         from elspeth.web.middleware.rate_limit import ComposerRateLimiter

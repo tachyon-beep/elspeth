@@ -58,6 +58,10 @@ def _make_app(
     settings = WebSettings(
         data_dir=tmp_path,
         max_upload_bytes=max_upload_bytes,
+        composer_max_composition_turns=15,
+        composer_max_discovery_turns=10,
+        composer_timeout_seconds=85.0,
+        composer_rate_limit_per_minute=10,
     )
     app.state.settings = settings
     app.state.session_service = session_service
@@ -273,7 +277,13 @@ class TestIDORProtection:
         session_service = SessionServiceImpl(engine)
         blob_service = BlobServiceImpl(engine, tmp_path)
 
-        settings = WebSettings(data_dir=tmp_path)
+        settings = WebSettings(
+            data_dir=tmp_path,
+            composer_max_composition_turns=15,
+            composer_max_discovery_turns=10,
+            composer_timeout_seconds=85.0,
+            composer_rate_limit_per_minute=10,
+        )
 
         def make_app_for_user(uid: str) -> FastAPI:
             app = FastAPI()

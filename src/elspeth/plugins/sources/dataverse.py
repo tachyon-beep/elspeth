@@ -712,14 +712,14 @@ class DataverseSource(BaseSource):
                     yield SourceRow.valid(validated_row, contract=contract)
 
         except DataverseClientError as e:
-            # Record the error in audit trail using the last URL we saw.
-            # For page 1 errors this is the initial query URL; for page N
-            # errors it's the last successfully-fetched page's URL (the
-            # closest available context for which page the client was
-            # attempting when it failed).
+            # Use the actual failing URL from the error when available
+            # (carried on DataverseClientError since the request metadata fix).
+            # Falls back to last_fetched_url for errors raised outside
+            # _execute_request (e.g. SSRF validation before the HTTP call).
+            error_url = e.request_url or last_fetched_url
             self._record_page_call(
                 ctx,
-                url=last_fetched_url,
+                url=error_url,
                 error=e,
                 error_reason=e.error_category,
             )

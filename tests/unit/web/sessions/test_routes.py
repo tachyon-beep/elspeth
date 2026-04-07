@@ -78,6 +78,10 @@ def _make_app(
     app.state.settings = WebSettings(
         data_dir=tmp_path,
         max_upload_bytes=max_upload_bytes,
+        composer_max_composition_turns=15,
+        composer_max_discovery_turns=10,
+        composer_timeout_seconds=85.0,
+        composer_rate_limit_per_minute=10,
     )
     # composer_service is set to None here; tests that POST messages
     # must replace it with a mock before sending requests.
@@ -240,7 +244,13 @@ class TestIDORProtection:
 
             app.dependency_overrides[get_current_user] = mock_user
             app.state.session_service = service
-            app.state.settings = WebSettings(data_dir=tmp_path)
+            app.state.settings = WebSettings(
+                data_dir=tmp_path,
+                composer_max_composition_turns=15,
+                composer_max_discovery_turns=10,
+                composer_timeout_seconds=85.0,
+                composer_rate_limit_per_minute=10,
+            )
             app.state.catalog_service = None
 
             from elspeth.web.middleware.rate_limit import ComposerRateLimiter
@@ -548,7 +558,13 @@ class TestRevertEndpoint:
 
             app.dependency_overrides[get_current_user] = mock_user
             app.state.session_service = service
-            app.state.settings = WebSettings(data_dir=tmp_path)
+            app.state.settings = WebSettings(
+                data_dir=tmp_path,
+                composer_max_composition_turns=15,
+                composer_max_discovery_turns=10,
+                composer_timeout_seconds=85.0,
+                composer_rate_limit_per_minute=10,
+            )
 
             from elspeth.web.middleware.rate_limit import ComposerRateLimiter
 

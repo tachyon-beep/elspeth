@@ -536,3 +536,70 @@ class TestResolveQueries:
                     },
                 }
             )
+
+
+class TestMultiQueryInputFieldsValidation:
+    """Regression: _validate_required_input_fields_declared must check multi-query input_fields."""
+
+    def test_multi_query_dict_form_requires_declaration(self) -> None:
+        """Multi-query with input_fields must require required_input_fields declaration."""
+        with pytest.raises(ValidationError, match="required_input_fields"):
+            LLMConfig(
+                provider="openrouter",
+                model="test-model",
+                template="Static template",
+                schema_config=_OBSERVED_SCHEMA,
+                queries={
+                    "q1": {
+                        "input_fields": {"text": "customer_text"},
+                    },
+                },
+            )
+
+    def test_multi_query_list_form_requires_declaration(self) -> None:
+        """Multi-query list form also triggers required_input_fields check."""
+        with pytest.raises(ValidationError, match="required_input_fields"):
+            LLMConfig(
+                provider="openrouter",
+                model="test-model",
+                template="Static template",
+                schema_config=_OBSERVED_SCHEMA,
+                queries=[
+                    {
+                        "name": "q1",
+                        "input_fields": {"text": "customer_text"},
+                    },
+                ],
+            )
+
+    def test_multi_query_with_explicit_fields_passes(self) -> None:
+        """Multi-query with required_input_fields declared passes validation."""
+        config = LLMConfig(
+            provider="openrouter",
+            model="test-model",
+            template="Static template",
+            schema_config=_OBSERVED_SCHEMA,
+            queries={
+                "q1": {
+                    "input_fields": {"text": "customer_text"},
+                },
+            },
+            required_input_fields=["customer_text"],
+        )
+        assert config.required_input_fields == ["customer_text"]
+
+    def test_multi_query_opt_out_passes(self) -> None:
+        """Multi-query with empty required_input_fields (opt-out) passes."""
+        config = LLMConfig(
+            provider="openrouter",
+            model="test-model",
+            template="Static template",
+            schema_config=_OBSERVED_SCHEMA,
+            queries={
+                "q1": {
+                    "input_fields": {"text": "customer_text"},
+                },
+            },
+            required_input_fields=[],
+        )
+        assert config.required_input_fields == []

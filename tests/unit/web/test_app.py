@@ -16,7 +16,13 @@ from elspeth.web.dependencies import get_settings
 
 def _settings(tmp_path: Path, **overrides) -> WebSettings:
     """Create WebSettings with data_dir pointed at a temp directory."""
-    defaults = {"data_dir": tmp_path}
+    defaults = {
+        "data_dir": tmp_path,
+        "composer_max_composition_turns": 15,
+        "composer_max_discovery_turns": 10,
+        "composer_timeout_seconds": 85.0,
+        "composer_rate_limit_per_minute": 10,
+    }
     defaults.update(overrides)
     return WebSettings(**defaults)
 
@@ -193,6 +199,14 @@ class TestExecutionWiring:
 class TestSettingsFromEnv:
     """Tests for _settings_from_env() environment variable parsing."""
 
+    @pytest.fixture(autouse=True)
+    def _set_composer_env(self, monkeypatch) -> None:
+        """Provide required composer fields via env vars for _settings_from_env()."""
+        monkeypatch.setenv("ELSPETH_WEB__COMPOSER_MAX_COMPOSITION_TURNS", "15")
+        monkeypatch.setenv("ELSPETH_WEB__COMPOSER_MAX_DISCOVERY_TURNS", "10")
+        monkeypatch.setenv("ELSPETH_WEB__COMPOSER_TIMEOUT_SECONDS", "85.0")
+        monkeypatch.setenv("ELSPETH_WEB__COMPOSER_RATE_LIMIT_PER_MINUTE", "10")
+
     def test_parses_json_tuple_values(self, monkeypatch) -> None:
         """JSON-encoded lists are converted to tuples for tuple-typed fields."""
         monkeypatch.setenv("ELSPETH_WEB__CORS_ORIGINS", '["https://app.example.com"]')
@@ -229,7 +243,13 @@ class TestDataDirCreation:
 
     def test_create_app_creates_nonexistent_data_dir(self, tmp_path) -> None:
         fresh_dir = tmp_path / "nonexistent" / "nested"
-        settings = WebSettings(data_dir=fresh_dir)
+        settings = WebSettings(
+            data_dir=fresh_dir,
+            composer_max_composition_turns=15,
+            composer_max_discovery_turns=10,
+            composer_timeout_seconds=85.0,
+            composer_rate_limit_per_minute=10,
+        )
         create_app(settings)
         assert fresh_dir.exists()
         assert fresh_dir.is_dir()

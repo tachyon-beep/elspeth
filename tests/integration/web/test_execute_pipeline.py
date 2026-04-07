@@ -73,6 +73,10 @@ class TestEndToEndPipelineExecution:
             data_dir=work_dir,
             landscape_url=f"sqlite:///{work_dir}/runs/audit.db",
             payload_store_path=work_dir / "payloads",
+            composer_max_composition_turns=15,
+            composer_max_discovery_turns=10,
+            composer_timeout_seconds=85.0,
+            composer_rate_limit_per_minute=10,
         )
         app = create_app(settings=settings)
 

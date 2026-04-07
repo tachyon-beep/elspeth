@@ -908,6 +908,22 @@ class TestConnectionErrors:
         assert exc_info.value.retryable is True
         assert "timed out" in str(exc_info.value)
 
+    def test_timeout_carries_request_url(self, client: DataverseClient) -> None:
+        """Regression: errors must carry the actual failing URL for audit trail."""
+
+        class TimeoutTransport(httpx.BaseTransport):
+            def handle_request(self, request: httpx.Request) -> httpx.Response:
+                raise httpx.TimeoutException("timed out")
+
+        client._client.close()
+        client._client = httpx.Client(transport=TimeoutTransport(), timeout=30.0)
+
+        url = f"{ENV_URL}/api/data/v9.2/accounts?$top=100"
+        with pytest.raises(DataverseClientError) as exc_info:
+            client.get_page(url)
+        assert exc_info.value.request_url == url
+        assert exc_info.value.request_headers is not None
+
     def test_connect_error_is_retryable(self, client: DataverseClient) -> None:
         class ConnectErrorTransport(httpx.BaseTransport):
             def handle_request(self, request: httpx.Request) -> httpx.Response:

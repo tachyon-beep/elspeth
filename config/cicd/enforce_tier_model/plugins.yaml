@@ -34,7 +34,7 @@ per_file_rules:
   - R5
   reason: Type discrimination for LLM response validation and provider dispatch
   expires: null
-  max_hits: 66
+  max_hits: 70
 - pattern: plugins/transforms/azure/*
   rules:
   - R1

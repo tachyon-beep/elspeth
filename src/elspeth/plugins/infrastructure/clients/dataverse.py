@@ -92,12 +92,16 @@ class DataverseClientError(Exception):
         status_code: int | None = None,
         latency_ms: float | None = None,
         error_category: str = "protocol_error",
+        request_url: str | None = None,
+        request_headers: dict[str, str] | None = None,
     ) -> None:
         super().__init__(message)
         self.retryable = retryable
         self.status_code = status_code
         self.latency_ms = latency_ms
         self.error_category = error_category
+        self.request_url = request_url
+        self.request_headers = request_headers
 
 
 @dataclass(frozen=True, slots=True)
@@ -347,7 +351,15 @@ class DataverseClient:
                 error_category="ssrf_rejected",
             ) from exc
 
-    def _classify_error(self, status_code: int, headers: dict[str, str], latency_ms: float) -> DataverseClientError:
+    def _classify_error(
+        self,
+        status_code: int,
+        headers: dict[str, str],
+        latency_ms: float,
+        *,
+        request_url: str | None = None,
+        request_headers: dict[str, str] | None = None,
+    ) -> DataverseClientError:
         """Classify HTTP error by status code.
 
         Returns a DataverseClientError with retryable flag set appropriately.
@@ -372,12 +384,16 @@ class DataverseClient:
                     retryable=False,
                     status_code=status_code,
                     latency_ms=latency_ms,
+                    request_url=request_url,
+                    request_headers=request_headers,
                 )
             return DataverseClientError(
                 f"Rate limited (429) with Retry-After {effective}s",
                 retryable=True,
                 status_code=status_code,
                 latency_ms=latency_ms,
+                request_url=request_url,
+                request_headers=request_headers,
             )
 
         # 401: Auth failure — retryable once via credential reconstruction
@@ -388,6 +404,8 @@ class DataverseClient:
                 status_code=status_code,
                 latency_ms=latency_ms,
                 error_category="auth_failure",
+                request_url=request_url,
+                request_headers=request_headers,
             )
 
         # Non-retryable client errors
@@ -404,6 +422,8 @@ class DataverseClient:
                 retryable=False,
                 status_code=status_code,
                 latency_ms=latency_ms,
+                request_url=request_url,
+                request_headers=request_headers,
             )
 
         # 5xx: Retryable server errors
@@ -413,6 +433,8 @@ class DataverseClient:
                 retryable=True,
                 status_code=status_code,
                 latency_ms=latency_ms,
+                request_url=request_url,
+                request_headers=request_headers,
             )
 
         # Any other error status
@@ -421,6 +443,8 @@ class DataverseClient:
             retryable=False,
             status_code=status_code,
             latency_ms=latency_ms,
+            request_url=request_url,
+            request_headers=request_headers,
         )
 
     def _execute_request(
@@ -460,6 +484,9 @@ class DataverseClient:
 
         auth_headers = self.get_auth_headers()
         headers = {**auth_headers, **(extra_headers or {})}
+        # Fingerprint auth headers early so every error path can carry
+        # request metadata for accurate audit trail recording.
+        fingerprinted = fingerprint_headers(auth_headers)
 
         # IP-pinning SSRF validation on every outbound request.
         # When ssrf_safe is pre-validated (e.g., from paginate_odata nextLink
@@ -495,6 +522,8 @@ class DataverseClient:
                 f"Request timed out: {exc}",
                 retryable=True,
                 latency_ms=latency_ms,
+                request_url=url,
+                request_headers=fingerprinted,
             ) from exc
         except httpx.ConnectError as exc:
             latency_ms = (time.perf_counter() - start) * 1000
@@ -502,6 +531,8 @@ class DataverseClient:
                 f"Connection failed: {exc}",
                 retryable=True,
                 latency_ms=latency_ms,
+                request_url=url,
+                request_headers=fingerprinted,
             ) from exc
         except httpx.HTTPError as exc:
             latency_ms = (time.perf_counter() - start) * 1000
@@ -509,6 +540,8 @@ class DataverseClient:
                 f"HTTP error: {exc}",
                 retryable=True,
                 latency_ms=latency_ms,
+                request_url=url,
+                request_headers=fingerprinted,
             ) from exc
 
         latency_ms = (time.perf_counter() - start) * 1000
@@ -525,15 +558,19 @@ class DataverseClient:
                 retryable=False,
                 status_code=response.status_code,
                 latency_ms=latency_ms,
+                request_url=url,
+                request_headers=fingerprinted,
             )
 
         # Non-success status → classify error
         if response.status_code < 200 or response.status_code >= 300:
-            raise self._classify_error(response.status_code, resp_headers, latency_ms)
-
-        # Fingerprint auth headers at DTO boundary — raw bearer token must
-        # never persist in the DataversePageResponse.
-        fingerprinted = fingerprint_headers(auth_headers)
+            raise self._classify_error(
+                response.status_code,
+                resp_headers,
+                latency_ms,
+                request_url=url,
+                request_headers=fingerprinted,
+            )
 
         # For PATCH responses that return 204 No Content
         if response.status_code == 204 or not response.text:
@@ -557,6 +594,8 @@ class DataverseClient:
                 retryable=False,
                 status_code=response.status_code,
                 latency_ms=latency_ms,
+                request_url=url,
+                request_headers=fingerprinted,
             )
 
         # Validate response structure
@@ -566,6 +605,8 @@ class DataverseClient:
                 retryable=False,
                 status_code=response.status_code,
                 latency_ms=latency_ms,
+                request_url=url,
+                request_headers=fingerprinted,
             )
 
         # Extract rows from "value" array (queries) or treat as single-item
@@ -578,6 +619,8 @@ class DataverseClient:
                     retryable=False,
                     status_code=response.status_code,
                     latency_ms=latency_ms,
+                    request_url=url,
+                    request_headers=fingerprinted,
                 )
             # Tier 3 boundary: validate each item is a dict. Non-dict elements
             # (strings, ints, nulls) in the value array are malformed responses
@@ -589,6 +632,8 @@ class DataverseClient:
                         retryable=False,
                         status_code=response.status_code,
                         latency_ms=latency_ms,
+                        request_url=url,
+                        request_headers=fingerprinted,
                     )
             rows = value
         else:

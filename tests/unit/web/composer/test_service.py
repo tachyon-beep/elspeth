@@ -138,7 +138,13 @@ def _make_settings(**overrides: Any) -> WebSettings:
     data_dir defaults to /data (absolute) so test paths like
     /data/uploads/file.csv pass S2 path validation.
     """
-    defaults: dict[str, Any] = {"data_dir": Path("/data")}
+    defaults: dict[str, Any] = {
+        "data_dir": Path("/data"),
+        "composer_max_composition_turns": 15,
+        "composer_max_discovery_turns": 10,
+        "composer_timeout_seconds": 85.0,
+        "composer_rate_limit_per_minute": 10,
+    }
     defaults.update(overrides)
     return WebSettings(**defaults)
 

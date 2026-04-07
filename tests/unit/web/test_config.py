@@ -15,93 +15,205 @@ class TestWebSettingsValidation:
 
     def test_invalid_auth_provider_rejected(self) -> None:
         with pytest.raises(ValueError):
-            WebSettings(auth_provider="invalid")
+            WebSettings(
+                auth_provider="invalid",
+                composer_max_composition_turns=15,
+                composer_max_discovery_turns=10,
+                composer_timeout_seconds=85.0,
+                composer_rate_limit_per_minute=10,
+            )
 
     def test_invalid_auth_provider_kerberos_rejected(self) -> None:
         with pytest.raises(ValueError):
-            WebSettings(auth_provider="kerberos")
+            WebSettings(
+                auth_provider="kerberos",
+                composer_max_composition_turns=15,
+                composer_max_discovery_turns=10,
+                composer_timeout_seconds=85.0,
+                composer_rate_limit_per_minute=10,
+            )
 
     def test_port_zero_rejected(self) -> None:
         with pytest.raises(ValueError):
-            WebSettings(port=0)
+            WebSettings(
+                port=0,
+                composer_max_composition_turns=15,
+                composer_max_discovery_turns=10,
+                composer_timeout_seconds=85.0,
+                composer_rate_limit_per_minute=10,
+            )
 
     def test_port_negative_rejected(self) -> None:
         with pytest.raises(ValueError):
-            WebSettings(port=-1)
+            WebSettings(
+                port=-1,
+                composer_max_composition_turns=15,
+                composer_max_discovery_turns=10,
+                composer_timeout_seconds=85.0,
+                composer_rate_limit_per_minute=10,
+            )
 
     def test_port_above_65535_rejected(self) -> None:
         with pytest.raises(ValueError):
-            WebSettings(port=65536)
+            WebSettings(
+                port=65536,
+                composer_max_composition_turns=15,
+                composer_max_discovery_turns=10,
+                composer_timeout_seconds=85.0,
+                composer_rate_limit_per_minute=10,
+            )
 
     def test_composer_max_composition_turns_zero_rejected(self) -> None:
         with pytest.raises(ValueError):
-            WebSettings(composer_max_composition_turns=0)
+            WebSettings(
+                composer_max_composition_turns=0,
+                composer_max_discovery_turns=10,
+                composer_timeout_seconds=85.0,
+                composer_rate_limit_per_minute=10,
+            )
 
     def test_composer_max_discovery_turns_zero_rejected(self) -> None:
         with pytest.raises(ValueError):
-            WebSettings(composer_max_discovery_turns=0)
+            WebSettings(
+                composer_max_composition_turns=15,
+                composer_max_discovery_turns=0,
+                composer_timeout_seconds=85.0,
+                composer_rate_limit_per_minute=10,
+            )
 
     def test_composer_timeout_zero_rejected(self) -> None:
         with pytest.raises(ValueError):
-            WebSettings(composer_timeout_seconds=0)
+            WebSettings(
+                composer_max_composition_turns=15,
+                composer_max_discovery_turns=10,
+                composer_timeout_seconds=0,
+                composer_rate_limit_per_minute=10,
+            )
 
     def test_composer_rate_limit_zero_rejected(self) -> None:
         with pytest.raises(ValueError):
-            WebSettings(composer_rate_limit_per_minute=0)
+            WebSettings(
+                composer_max_composition_turns=15,
+                composer_max_discovery_turns=10,
+                composer_timeout_seconds=85.0,
+                composer_rate_limit_per_minute=0,
+            )
+
+    def test_composer_fields_required_no_defaults(self) -> None:
+        """Regression: composer fields must be explicitly configured — no silent defaults."""
+        with pytest.raises(ValidationError):
+            WebSettings()  # No composer fields provided → validation error
 
     def test_max_upload_bytes_zero_rejected(self) -> None:
         with pytest.raises(ValueError):
-            WebSettings(max_upload_bytes=0)
+            WebSettings(
+                max_upload_bytes=0,
+                composer_max_composition_turns=15,
+                composer_max_discovery_turns=10,
+                composer_timeout_seconds=85.0,
+                composer_rate_limit_per_minute=10,
+            )
 
 
 class TestWebSettingsDerivedAccessors:
     """Tests for get_landscape_url() and get_payload_store_path()."""
 
     def test_get_landscape_url_default_derives_from_data_dir(self) -> None:
-        settings = WebSettings(data_dir=Path("/app/data"))
+        settings = WebSettings(
+            data_dir=Path("/app/data"),
+            composer_max_composition_turns=15,
+            composer_max_discovery_turns=10,
+            composer_timeout_seconds=85.0,
+            composer_rate_limit_per_minute=10,
+        )
         url = settings.get_landscape_url()
         assert url == "sqlite:////app/data/runs/audit.db"
 
     def test_get_landscape_url_explicit_value_returned(self) -> None:
-        settings = WebSettings(landscape_url="postgresql://db/audit")
+        settings = WebSettings(
+            landscape_url="postgresql://db/audit",
+            composer_max_composition_turns=15,
+            composer_max_discovery_turns=10,
+            composer_timeout_seconds=85.0,
+            composer_rate_limit_per_minute=10,
+        )
         url = settings.get_landscape_url()
         assert url == "postgresql://db/audit"
 
     def test_get_payload_store_path_default_derives_from_data_dir(self) -> None:
-        settings = WebSettings(data_dir=Path("/app/data"))
+        settings = WebSettings(
+            data_dir=Path("/app/data"),
+            composer_max_composition_turns=15,
+            composer_max_discovery_turns=10,
+            composer_timeout_seconds=85.0,
+            composer_rate_limit_per_minute=10,
+        )
         path = settings.get_payload_store_path()
         assert path == Path("/app/data/payloads")
 
     def test_get_payload_store_path_explicit_value_returned(self) -> None:
-        settings = WebSettings(payload_store_path=Path("/mnt/payloads"))
+        settings = WebSettings(
+            payload_store_path=Path("/mnt/payloads"),
+            composer_max_composition_turns=15,
+            composer_max_discovery_turns=10,
+            composer_timeout_seconds=85.0,
+            composer_rate_limit_per_minute=10,
+        )
         path = settings.get_payload_store_path()
         assert path == Path("/mnt/payloads")
 
     def test_default_data_dir_landscape_url(self) -> None:
         """Default data_dir='data' produces a relative sqlite path."""
-        settings = WebSettings()
+        settings = WebSettings(
+            composer_max_composition_turns=15,
+            composer_max_discovery_turns=10,
+            composer_timeout_seconds=85.0,
+            composer_rate_limit_per_minute=10,
+        )
         url = settings.get_landscape_url()
         assert url == f"sqlite:///{Path('data') / 'runs' / 'audit.db'}"
 
     def test_default_data_dir_payload_store_path(self) -> None:
         """Default data_dir='data' produces a relative payload path."""
-        settings = WebSettings()
+        settings = WebSettings(
+            composer_max_composition_turns=15,
+            composer_max_discovery_turns=10,
+            composer_timeout_seconds=85.0,
+            composer_rate_limit_per_minute=10,
+        )
         path = settings.get_payload_store_path()
         assert path == Path("data") / "payloads"
 
     def test_get_session_db_url_default_derives_from_data_dir(self) -> None:
-        settings = WebSettings(data_dir=Path("/app/data"))
+        settings = WebSettings(
+            data_dir=Path("/app/data"),
+            composer_max_composition_turns=15,
+            composer_max_discovery_turns=10,
+            composer_timeout_seconds=85.0,
+            composer_rate_limit_per_minute=10,
+        )
         url = settings.get_session_db_url()
         assert url == "sqlite:////app/data/sessions.db"
 
     def test_get_session_db_url_explicit_value_returned(self) -> None:
-        settings = WebSettings(session_db_url="postgresql://db/sessions")
+        settings = WebSettings(
+            session_db_url="postgresql://db/sessions",
+            composer_max_composition_turns=15,
+            composer_max_discovery_turns=10,
+            composer_timeout_seconds=85.0,
+            composer_rate_limit_per_minute=10,
+        )
         url = settings.get_session_db_url()
         assert url == "postgresql://db/sessions"
 
     def test_default_data_dir_session_db_url(self) -> None:
         """Default data_dir='data' produces a relative sqlite path."""
-        settings = WebSettings()
+        settings = WebSettings(
+            composer_max_composition_turns=15,
+            composer_max_discovery_turns=10,
+            composer_timeout_seconds=85.0,
+            composer_rate_limit_per_minute=10,
+        )
         url = settings.get_session_db_url()
         assert url == f"sqlite:///{Path('data') / 'sessions.db'}"
 
@@ -111,23 +223,54 @@ class TestSecretKeyGuard:
 
     def test_default_secret_key_rejected_on_non_local_host(self) -> None:
         with pytest.raises(ValidationError, match="secret_key must be set"):
-            WebSettings(host="0.0.0.0")
+            WebSettings(
+                host="0.0.0.0",
+                composer_max_composition_turns=15,
+                composer_max_discovery_turns=10,
+                composer_timeout_seconds=85.0,
+                composer_rate_limit_per_minute=10,
+            )
 
     def test_default_secret_key_allowed_on_localhost(self) -> None:
         # Should not raise
-        settings = WebSettings(host="127.0.0.1")
+        settings = WebSettings(
+            host="127.0.0.1",
+            composer_max_composition_turns=15,
+            composer_max_discovery_turns=10,
+            composer_timeout_seconds=85.0,
+            composer_rate_limit_per_minute=10,
+        )
         assert settings.secret_key == "change-me-in-production"
 
     def test_default_secret_key_allowed_on_localhost_name(self) -> None:
-        settings = WebSettings(host="localhost")
+        settings = WebSettings(
+            host="localhost",
+            composer_max_composition_turns=15,
+            composer_max_discovery_turns=10,
+            composer_timeout_seconds=85.0,
+            composer_rate_limit_per_minute=10,
+        )
         assert settings.secret_key == "change-me-in-production"
 
     def test_default_secret_key_allowed_on_ipv6_loopback(self) -> None:
-        settings = WebSettings(host="::1")
+        settings = WebSettings(
+            host="::1",
+            composer_max_composition_turns=15,
+            composer_max_discovery_turns=10,
+            composer_timeout_seconds=85.0,
+            composer_rate_limit_per_minute=10,
+        )
         assert settings.secret_key == "change-me-in-production"
 
     def test_custom_secret_key_allowed_on_any_host(self) -> None:
-        settings = WebSettings(host="0.0.0.0", secret_key="my-real-secret")
+        settings = WebSettings(
+            host="0.0.0.0",
+            secret_key="my-real-secret",
+            composer_max_composition_turns=15,
+            composer_max_discovery_turns=10,
+            composer_timeout_seconds=85.0,
+            composer_rate_limit_per_minute=10,
+        )
         assert settings.secret_key == "my-real-secret"
 
 
@@ -136,13 +279,25 @@ class TestAuthFieldValidation:
 
     def test_local_provider_no_oidc_fields_required(self) -> None:
         """Local auth (default) should work without any OIDC fields."""
-        settings = WebSettings(auth_provider="local")
+        settings = WebSettings(
+            auth_provider="local",
+            composer_max_composition_turns=15,
+            composer_max_discovery_turns=10,
+            composer_timeout_seconds=85.0,
+            composer_rate_limit_per_minute=10,
+        )
         assert settings.auth_provider == "local"
 
     def test_oidc_provider_missing_fields_raises(self) -> None:
         """OIDC provider without required fields should raise."""
         with pytest.raises(ValidationError, match="OIDC auth requires"):
-            WebSettings(auth_provider="oidc")
+            WebSettings(
+                auth_provider="oidc",
+                composer_max_composition_turns=15,
+                composer_max_discovery_turns=10,
+                composer_timeout_seconds=85.0,
+                composer_rate_limit_per_minute=10,
+            )
 
     def test_oidc_provider_with_all_fields_valid(self) -> None:
         """OIDC provider with all required fields should succeed."""
@@ -151,6 +306,10 @@ class TestAuthFieldValidation:
             oidc_issuer="https://issuer.example.com",
             oidc_audience="my-audience",
             oidc_client_id="my-client-id",
+            composer_max_composition_turns=15,
+            composer_max_discovery_turns=10,
+            composer_timeout_seconds=85.0,
+            composer_rate_limit_per_minute=10,
         )
         assert settings.auth_provider == "oidc"
         assert settings.oidc_issuer == "https://issuer.example.com"
@@ -161,12 +320,22 @@ class TestAuthFieldValidation:
             WebSettings(
                 auth_provider="oidc",
                 oidc_issuer="https://issuer.example.com",
+                composer_max_composition_turns=15,
+                composer_max_discovery_turns=10,
+                composer_timeout_seconds=85.0,
+                composer_rate_limit_per_minute=10,
             )
 
     def test_entra_provider_missing_fields_raises(self) -> None:
         """Entra provider without required fields should raise."""
         with pytest.raises(ValidationError, match="Entra auth requires"):
-            WebSettings(auth_provider="entra")
+            WebSettings(
+                auth_provider="entra",
+                composer_max_composition_turns=15,
+                composer_max_discovery_turns=10,
+                composer_timeout_seconds=85.0,
+                composer_rate_limit_per_minute=10,
+            )
 
     def test_entra_provider_missing_tenant_id_raises(self) -> None:
         """Entra with OIDC fields but no tenant_id should raise."""
@@ -176,6 +345,10 @@ class TestAuthFieldValidation:
                 oidc_issuer="https://login.microsoftonline.com/t/v2.0",
                 oidc_audience="my-audience",
                 oidc_client_id="my-client-id",
+                composer_max_composition_turns=15,
+                composer_max_discovery_turns=10,
+                composer_timeout_seconds=85.0,
+                composer_rate_limit_per_minute=10,
             )
 
     def test_entra_provider_with_all_fields_valid(self) -> None:
@@ -186,6 +359,10 @@ class TestAuthFieldValidation:
             oidc_audience="my-audience",
             oidc_client_id="my-client-id",
             entra_tenant_id="my-tenant-id",
+            composer_max_composition_turns=15,
+            composer_max_discovery_turns=10,
+            composer_timeout_seconds=85.0,
+            composer_rate_limit_per_minute=10,
         )
         assert settings.auth_provider == "entra"
         assert settings.entra_tenant_id == "my-tenant-id"
