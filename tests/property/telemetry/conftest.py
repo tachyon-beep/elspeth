@@ -1,16 +1,13 @@
-# tests/unit/contracts/conftest.py
-"""Contract test configuration.
+# tests/property/telemetry/conftest.py
+"""Telemetry property test configuration.
 
-Provides payload_store fixture (MockPayloadStore) needed by
-orchestrator wiring tests in test_telemetry_contracts.py,
-and autouse telemetry cleanup for TelemetryManager thread leaks.
+Provides autouse cleanup for TelemetryManager thread leaks.
 """
 
 from collections.abc import Iterator
 
 import pytest
 
-from tests.fixtures.stores import payload_store  # noqa: F401
 from tests.fixtures.telemetry import telemetry_manager_cleanup
 
 

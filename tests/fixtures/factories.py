@@ -97,14 +97,14 @@ def make_context(
         token = make_token_info()
 
     if landscape is None:
-        landscape = Mock()
-        landscape.record_external_call = Mock()
-        landscape.record_call = Mock()
+        from elspeth.core.landscape.recorder import LandscapeRecorder
+
+        landscape = Mock(spec=LandscapeRecorder)
         # Configure get_node_state() to return a mock with matching token_id
         # so that PluginContext.record_call() token consistency checks pass.
         node_state_mock = Mock()
         node_state_mock.token_id = token.token_id
-        landscape.get_node_state = Mock(return_value=node_state_mock)
+        landscape.get_node_state.return_value = node_state_mock
 
     return PluginContext(
         run_id=run_id,

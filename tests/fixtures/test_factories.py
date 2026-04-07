@@ -54,15 +54,21 @@ class TestMakeContext:
         ctx = make_context(config={"key": "value"})
         assert ctx.config == {"key": "value"}
 
-    def test_mock_landscape_has_record_methods(self) -> None:
-        """Default mock landscape must have record_external_call and record_call."""
+    def test_mock_landscape_is_specced(self) -> None:
+        """Default mock landscape must be specced to LandscapeRecorder."""
+        from unittest.mock import Mock
+
+        from elspeth.core.landscape.recorder import LandscapeRecorder
         from tests.fixtures.factories import make_context
 
         ctx = make_context()
-        # These must be callable without raising (landscape is a MagicMock)
         assert ctx.landscape is not None
-        ctx.landscape.record_external_call()  # type: ignore[attr-defined]  # MagicMock
-        ctx.landscape.record_call()  # type: ignore[call-arg]  # MagicMock accepts any args
+        assert isinstance(ctx.landscape, Mock)
+        # spec= ensures only real LandscapeRecorder methods are accessible
+        assert isinstance(ctx.landscape, LandscapeRecorder)
+        # get_node_state must return a mock with token_id matching the token
+        node_state = ctx.landscape.get_node_state("any-state-id")
+        assert node_state.token_id == ctx.token.token_id
 
     def test_explicit_landscape_replaces_mock(self) -> None:
         from unittest.mock import Mock

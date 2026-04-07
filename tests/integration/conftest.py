@@ -1,7 +1,12 @@
 # tests/integration/conftest.py
 """Integration test configuration.
 
-Function-scoped databases for full isolation per test.
+Integration tests verify multi-subsystem wiring with real databases
+and real orchestrator paths. Function-scoped databases for full
+isolation per test.
+
+Classification rule: if a test mocks more than half the subsystems
+it claims to integrate, it probably belongs in tests/unit/ instead.
 """
 
 from __future__ import annotations

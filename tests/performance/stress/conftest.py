@@ -425,6 +425,15 @@ def _run_uvicorn_server(
     asyncio.run(serve())
 
 
+@pytest.fixture(autouse=True)
+def _auto_close_telemetry_managers():
+    """Cleanup TelemetryManager instances after each test."""
+    from tests.fixtures.telemetry import telemetry_manager_cleanup
+
+    with telemetry_manager_cleanup():
+        yield
+
+
 @pytest.fixture
 def chaosllm_http_server(
     request: pytest.FixtureRequest,
