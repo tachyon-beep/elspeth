@@ -39,7 +39,7 @@ per_file_rules:
   - R5
   reason: Type dispatch for numpy/pandas normalization and NaN rejection
   expires: null
-  max_hits: 19
+  max_hits: 20
 - pattern: core/checkpoint/serialization.py
   rules:
   - R5

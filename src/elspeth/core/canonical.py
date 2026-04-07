@@ -285,6 +285,8 @@ def sanitize_for_canonical(obj: Any) -> Any:
     """
     if isinstance(obj, dict):
         return {k: sanitize_for_canonical(v) for k, v in obj.items()}
+    if isinstance(obj, np.ndarray):
+        return sanitize_for_canonical(obj.tolist())
     if isinstance(obj, (list, tuple)):
         return [sanitize_for_canonical(v) for v in obj]
     if isinstance(obj, float) and (math.isnan(obj) or math.isinf(obj)):

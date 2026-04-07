@@ -559,6 +559,45 @@ class TestSanitizeForCanonical:
         assert np.isfinite(result["x"])
 
 
+class TestSanitizeNumpyArrays:
+    """Regression tests for elspeth-4122ad82e0: np.ndarray was missing from
+    sanitize_for_canonical(), causing quarantine hashing to fail on arrays
+    containing NaN/Inf.
+    """
+
+    def test_sanitize_ndarray_with_nan(self) -> None:
+        """np.ndarray containing NaN is converted to list with None."""
+        from elspeth.core.canonical import sanitize_for_canonical
+
+        arr = np.array([1.0, float("nan"), 3.0])
+        result = sanitize_for_canonical({"x": arr})
+        assert result == {"x": [1.0, None, 3.0]}
+
+    def test_sanitize_ndarray_with_inf(self) -> None:
+        """np.ndarray containing Inf is converted to list with None."""
+        from elspeth.core.canonical import sanitize_for_canonical
+
+        arr = np.array([float("inf"), 2.0, float("-inf")])
+        result = sanitize_for_canonical({"x": arr})
+        assert result == {"x": [None, 2.0, None]}
+
+    def test_sanitize_ndarray_finite_unchanged(self) -> None:
+        """np.ndarray with all-finite values is converted to list, values preserved."""
+        from elspeth.core.canonical import sanitize_for_canonical
+
+        arr = np.array([1.0, 2.0, 3.0])
+        result = sanitize_for_canonical({"x": arr})
+        assert result == {"x": [1.0, 2.0, 3.0]}
+
+    def test_sanitize_ndarray_2d(self) -> None:
+        """Multi-dimensional np.ndarray is recursively sanitized."""
+        from elspeth.core.canonical import sanitize_for_canonical
+
+        arr = np.array([[1.0, float("nan")], [float("inf"), 4.0]])
+        result = sanitize_for_canonical({"x": arr})
+        assert result == {"x": [[1.0, None], [None, 4.0]]}
+
+
 class TestNumpyLongdoubleCanonicalOverflow:
     """np.longdouble values that are finite but overflow IEEE 754 double.
 
