@@ -285,8 +285,12 @@ class AggregationCheckpointState:
 
         nodes: dict[str, AggregationNodeCheckpoint] = {}
         for key, value in data.items():
-            if key.startswith("_"):
+            if key == "_version":
                 continue
+            if key.startswith("_"):
+                raise AuditIntegrityError(
+                    f"Corrupted aggregation checkpoint: unexpected reserved key {key!r}. Only '_version' is a valid metadata key."
+                )
             nodes[key] = AggregationNodeCheckpoint.from_dict(key, value)
 
         return cls(version=version, nodes=nodes)

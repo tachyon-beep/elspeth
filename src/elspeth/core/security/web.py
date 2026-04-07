@@ -123,8 +123,14 @@ def _resolve_hostname(hostname: str) -> list[str]:
         # results[i] = (family, type, proto, canonname, sockaddr)
         # sockaddr = (ip, port) for IPv4 or (ip, port, flow, scope) for IPv6
         # sockaddr[0] is always the IP address string for both AF_INET and AF_INET6
-        ips: set[str] = {str(r[4][0]) for r in results}
-        return list(ips)
+        seen: set[str] = set()
+        ips: list[str] = []
+        for r in results:
+            ip = str(r[4][0])
+            if ip not in seen:
+                seen.add(ip)
+                ips.append(ip)
+        return ips
     except socket.gaierror as e:
         raise NetworkError(f"DNS resolution failed: {hostname}: {e}") from e
 

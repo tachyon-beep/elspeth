@@ -253,7 +253,8 @@ class LandscapeJournal:
 
     def _enrich_with_payloads(self, record: JournalRecord, statement: str, parameters: Any, executemany: bool) -> None:
         table, columns = self._parse_insert_statement(statement)
-        if table != "calls" or columns is None or self._payload_store is None:
+        base_table = table.split(".")[-1] if table else table
+        if base_table != "calls" or columns is None or self._payload_store is None:
             return
 
         if executemany:

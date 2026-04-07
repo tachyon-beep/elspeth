@@ -67,10 +67,12 @@ def _validate_int_field(field_name: str, value: Any) -> int:
     if isinstance(value, int) and not isinstance(value, bool):
         return value
 
-    # Float - convert to int (reject non-finite values first)
+    # Float - convert to int (reject non-finite and non-integral values)
     if isinstance(value, float):
         if not math.isfinite(value):
             raise ValueError(f"Invalid retry policy: {field_name} must be finite, got {value}")
+        if not value.is_integer():
+            raise ValueError(f"Invalid retry policy: {field_name} must be an integer, got {value}")
         return int(value)
 
     # String - attempt numeric coercion

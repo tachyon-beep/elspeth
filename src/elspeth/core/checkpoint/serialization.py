@@ -193,7 +193,13 @@ def _restore_types(obj: Any) -> Any:
             envelope_value = obj[_ENVELOPE_VALUE_KEY]
 
             if envelope_type == "datetime" and isinstance(envelope_value, str):
-                return datetime.fromisoformat(envelope_value)
+                dt = datetime.fromisoformat(envelope_value)
+                if dt.tzinfo is None:
+                    raise AuditIntegrityError(
+                        f"Corrupted checkpoint: datetime envelope contains naive datetime "
+                        f"{envelope_value!r} — timezone-aware datetimes are required"
+                    )
+                return dt
 
             if envelope_type == "escaped_dict" and isinstance(envelope_value, dict):
                 # Unwrap the escaped dict and recurse into its values

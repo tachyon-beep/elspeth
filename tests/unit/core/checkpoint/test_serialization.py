@@ -225,3 +225,21 @@ def test_known_envelope_wrong_value_type_tuple_raises() -> None:
     corrupted = json.dumps({"data": {"__elspeth_type__": "tuple", "__elspeth_value__": "not a list"}})
     with pytest.raises(AuditIntegrityError, match="invalid value type"):
         checkpoint_loads(corrupted)
+
+
+def test_naive_datetime_in_envelope_raises() -> None:
+    """Regression: naive datetime strings in checkpoint envelopes must crash (Tier 1)."""
+    import json
+
+    corrupted = json.dumps({"ts": {"__elspeth_type__": "datetime", "__elspeth_value__": "2026-03-15T10:00:00"}})
+    with pytest.raises(AuditIntegrityError, match="naive datetime"):
+        checkpoint_loads(corrupted)
+
+
+def test_aware_datetime_in_envelope_accepted() -> None:
+    """Aware datetime strings must round-trip correctly."""
+    import json
+
+    data = json.dumps({"ts": {"__elspeth_type__": "datetime", "__elspeth_value__": "2026-03-15T10:00:00+00:00"}})
+    result = checkpoint_loads(data)
+    assert result["ts"].tzinfo is not None

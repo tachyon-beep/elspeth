@@ -713,6 +713,26 @@ class TestEnrichWithPayloads:
         assert "request_ref" not in record
         assert "payloads" not in record
 
+    def test_schema_qualified_calls_table_enriched(self, tmp_path: Path) -> None:
+        """Regression: schema-qualified table names like public.calls must match."""
+        journal = _make_journal(
+            tmp_path,
+            include_payloads=True,
+            payload_base_path=str(tmp_path / "payloads"),
+        )
+        journal._payload_store = Mock()
+        journal._payload_store.retrieve.return_value = b"payload content"
+
+        record = cast(JournalRecord, {"timestamp": "t", "statement": "INSERT", "parameters": {}, "executemany": False})
+        journal._enrich_with_payloads(
+            record,
+            "INSERT INTO public.calls (call_id, request_ref, response_ref) VALUES (?, ?, ?)",
+            {"call_id": "c1", "request_ref": "req-ref", "response_ref": "resp-ref"},
+            executemany=False,
+        )
+        assert record["request_ref"] == "req-ref"
+        assert record["request_payload"] == "payload content"
+
     def test_single_call_enriched(self, tmp_path: Path) -> None:
         journal = _make_journal(
             tmp_path,

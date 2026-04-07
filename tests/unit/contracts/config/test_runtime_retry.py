@@ -432,3 +432,24 @@ class TestRuntimeRetryNonFiniteRejection:
         )
         assert config.base_delay == 1.0
         assert config.max_delay == 60.0
+
+
+class TestValidateIntFieldFractionalFloats:
+    """Regression: _validate_int_field must reject non-integral floats."""
+
+    def test_fractional_float_rejected(self) -> None:
+        from elspeth.contracts.config.runtime import _validate_int_field
+
+        with pytest.raises(ValueError, match="must be an integer"):
+            _validate_int_field("max_attempts", 2.9)
+
+    def test_integral_float_accepted(self) -> None:
+        from elspeth.contracts.config.runtime import _validate_int_field
+
+        assert _validate_int_field("max_attempts", 3.0) == 3
+
+    def test_fractional_float_in_from_policy_rejected(self) -> None:
+        from elspeth.contracts.config.runtime import RuntimeRetryConfig
+
+        with pytest.raises(ValueError, match="must be an integer"):
+            RuntimeRetryConfig.from_policy({"max_attempts": 2.7})

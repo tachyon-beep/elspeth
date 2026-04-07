@@ -422,3 +422,19 @@ def test_aggregation_checkpoint_json_round_trip_multiple_nodes_and_tokens() -> N
     node_b = restored.nodes["node-B"]
     assert isinstance(node_b.tokens, tuple)
     assert len(node_b.tokens) == 0
+
+
+def test_state_from_dict_rejects_unknown_underscore_key() -> None:
+    """Regression: only _version is a valid metadata key — others must crash."""
+    from elspeth.contracts.errors import AuditIntegrityError
+
+    data = {"_version": 1, "_unknown": "corrupt", "node-A": _valid_node_dict()}
+    with pytest.raises(AuditIntegrityError, match="unexpected reserved key '_unknown'"):
+        AggregationCheckpointState.from_dict(data)
+
+
+def test_state_from_dict_accepts_version_key() -> None:
+    """_version key is valid metadata and must not raise."""
+    data = {"_version": 1, "node-A": _valid_node_dict()}
+    state = AggregationCheckpointState.from_dict(data)
+    assert "node-A" in state.nodes
