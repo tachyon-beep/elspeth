@@ -122,7 +122,7 @@ def _make_transform_with_mock_provider(
 ) -> tuple[LLMTransform, Mock]:
     """Create an LLMTransform with a mocked provider already set."""
     transform = LLMTransform(config or make_config())
-    mock_provider = Mock()
+    mock_provider = Mock(spec=LLMProvider)
     transform._provider = mock_provider
     return transform, mock_provider
 

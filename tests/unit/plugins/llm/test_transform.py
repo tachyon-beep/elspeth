@@ -2175,7 +2175,7 @@ class TestMultiQueryParallelExecution:
         assert transform._query_executor is not None
 
         # Mock provider to avoid on_start dependency
-        transform._provider = Mock()
+        transform._provider = Mock(spec=LLMProvider)
         transform.close()
         # After close, executor should be shut down (no error = success)
 

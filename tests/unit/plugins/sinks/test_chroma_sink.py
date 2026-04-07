@@ -7,11 +7,11 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from elspeth.contracts.enums import CallStatus
+from elspeth.contracts.enums import CallStatus, CallType
 from elspeth.contracts.errors import AuditIntegrityError, DuplicateDocumentError
-from elspeth.contracts.plugin_context import PluginContext
 from elspeth.plugins.sinks.chroma_sink import ChromaSink
 from tests.fixtures.base_classes import inject_write_failure
+from tests.fixtures.factories import make_context, make_operation_context
 
 
 def _make_config(**overrides: Any) -> dict[str, Any]:
@@ -42,19 +42,37 @@ def _make_sink_with_collection(mock_collection: MagicMock, **config_overrides: A
     return sink
 
 
+def _make_lifecycle_ctx() -> Any:
+    """Build a context suitable for on_start() / on_complete() lifecycle hooks."""
+    return make_context()
+
+
+def _make_sink_ctx() -> Any:
+    """Build a PluginContext suitable for sink.write() calls with real audit trail."""
+    return make_operation_context(
+        operation_type="sink_write",
+        node_id="sink",
+        node_type="SINK",
+        plugin_name="chroma_sink",
+    )
+
+
+def _make_mock_audit_ctx() -> Any:
+    """Build a PluginContext with mock landscape for tests that inspect record_call args."""
+    return make_context()
+
+
 class TestChromaSinkOnStart:
     def test_constructs_persistent_client(self) -> None:
         sink = inject_write_failure(ChromaSink(_make_config()))
-        mock_ctx = MagicMock(spec=PluginContext)
-        mock_ctx.run_id = "test-run"
-        mock_ctx.telemetry_emit = MagicMock()
+        ctx = _make_lifecycle_ctx()
 
         with patch("elspeth.plugins.sinks.chroma_sink.chromadb") as mock_chromadb:
             mock_client = MagicMock()
             mock_chromadb.PersistentClient.return_value = mock_client
             mock_client.get_or_create_collection.return_value = MagicMock()
 
-            sink.on_start(mock_ctx)
+            sink.on_start(ctx)
 
             mock_chromadb.PersistentClient.assert_called_once()
 
@@ -76,16 +94,14 @@ class TestChromaSinkOnStart:
             },
         }
         sink = inject_write_failure(ChromaSink(config))
-        mock_ctx = MagicMock(spec=PluginContext)
-        mock_ctx.run_id = "test-run"
-        mock_ctx.telemetry_emit = MagicMock()
+        ctx = _make_lifecycle_ctx()
 
         with patch("elspeth.plugins.sinks.chroma_sink.chromadb") as mock_chromadb:
             mock_client = MagicMock()
             mock_chromadb.HttpClient.return_value = mock_client
             mock_client.get_or_create_collection.return_value = MagicMock()
 
-            sink.on_start(mock_ctx)
+            sink.on_start(ctx)
 
             mock_chromadb.HttpClient.assert_called_once_with(
                 host="localhost",
@@ -96,14 +112,13 @@ class TestChromaSinkOnStart:
 
     def test_on_start_failure_raises(self) -> None:
         sink = inject_write_failure(ChromaSink(_make_config()))
-        mock_ctx = MagicMock(spec=PluginContext)
-        mock_ctx.run_id = "test-run"
+        ctx = _make_lifecycle_ctx()
 
         with patch("elspeth.plugins.sinks.chroma_sink.chromadb") as mock_chromadb:
             mock_chromadb.PersistentClient.side_effect = RuntimeError("Connection refused")
 
             with pytest.raises(RuntimeError, match="Connection refused"):
-                sink.on_start(mock_ctx)
+                sink.on_start(ctx)
 
 
 class TestChromaSinkWriteOverwrite:
@@ -111,15 +126,14 @@ class TestChromaSinkWriteOverwrite:
         mock_collection = MagicMock()
         sink = _make_sink_with_collection(mock_collection)
 
-        mock_ctx = MagicMock(spec=PluginContext)
-        mock_ctx.run_id = "test-run"
+        ctx = _make_sink_ctx()
 
         rows = [
             {"doc_id": "d1", "text": "Hello world", "topic": "greeting"},
             {"doc_id": "d2", "text": "Goodbye", "topic": "farewell"},
         ]
 
-        result = sink.write(rows, mock_ctx)
+        result = sink.write(rows, ctx)
 
         mock_collection.upsert.assert_called_once()
         call_kwargs = mock_collection.upsert.call_args
@@ -135,25 +149,23 @@ class TestChromaSinkWriteOverwrite:
         mock_collection = MagicMock()
         sink = _make_sink_with_collection(mock_collection)
 
-        mock_ctx = MagicMock(spec=PluginContext)
-        mock_ctx.run_id = "test-run"
+        ctx = _make_mock_audit_ctx()
 
         rows = [{"doc_id": "d1", "text": "Hello", "topic": "t"}]
-        sink.write(rows, mock_ctx)
+        sink.write(rows, ctx)
 
-        mock_ctx.record_call.assert_called_once()
-        call_kwargs = mock_ctx.record_call.call_args.kwargs
-        assert call_kwargs["provider"] == "chromadb"
+        ctx.landscape.record_call.assert_called_once()
+        call_kwargs = ctx.landscape.record_call.call_args.kwargs
+        assert call_kwargs["call_type"] is CallType.VECTOR
 
     def test_returns_artifact_with_content_hash(self) -> None:
         mock_collection = MagicMock()
         sink = _make_sink_with_collection(mock_collection)
 
-        mock_ctx = MagicMock(spec=PluginContext)
-        mock_ctx.run_id = "test-run"
+        ctx = _make_sink_ctx()
 
         rows = [{"doc_id": "d1", "text": "Hello", "topic": "t"}]
-        result = sink.write(rows, mock_ctx)
+        result = sink.write(rows, ctx)
 
         assert result.artifact.content_hash is not None
         assert len(result.artifact.content_hash) == 64  # SHA-256 hex
@@ -162,10 +174,9 @@ class TestChromaSinkWriteOverwrite:
         mock_collection = MagicMock()
         sink = _make_sink_with_collection(mock_collection)
 
-        mock_ctx = MagicMock(spec=PluginContext)
-        mock_ctx.run_id = "test-run"
+        ctx = _make_sink_ctx()
 
-        result = sink.write([], mock_ctx)
+        result = sink.write([], ctx)
 
         assert result.artifact.metadata is not None
         assert result.artifact.metadata["row_count"] == 0
@@ -178,14 +189,13 @@ class TestChromaSinkWriteSkip:
         mock_collection.get.return_value = {"ids": ["d1"]}
         sink = _make_sink_with_collection(mock_collection, on_duplicate="skip")
 
-        mock_ctx = MagicMock(spec=PluginContext)
-        mock_ctx.run_id = "test-run"
+        ctx = _make_sink_ctx()
 
         rows = [
             {"doc_id": "d1", "text": "Existing", "topic": "t"},
             {"doc_id": "d2", "text": "New", "topic": "t"},
         ]
-        sink.write(rows, mock_ctx)
+        sink.write(rows, ctx)
 
         mock_collection.add.assert_called_once()
         add_kwargs = mock_collection.add.call_args.kwargs
@@ -197,14 +207,13 @@ class TestChromaSinkWriteSkip:
         mock_collection.get.return_value = {"ids": ["d1", "d2"]}
         sink = _make_sink_with_collection(mock_collection, on_duplicate="skip")
 
-        mock_ctx = MagicMock(spec=PluginContext)
-        mock_ctx.run_id = "test-run"
+        ctx = _make_sink_ctx()
 
         rows = [
             {"doc_id": "d1", "text": "A", "topic": "t"},
             {"doc_id": "d2", "text": "B", "topic": "t"},
         ]
-        sink.write(rows, mock_ctx)
+        sink.write(rows, ctx)
 
         mock_collection.add.assert_not_called()
 
@@ -214,27 +223,30 @@ class TestChromaSinkWriteSkip:
         mock_collection.get.return_value = {"ids": ["d1"]}
         sink = _make_sink_with_collection(mock_collection, on_duplicate="skip")
 
-        mock_ctx = MagicMock(spec=PluginContext)
-        mock_ctx.run_id = "test-run"
+        ctx = _make_mock_audit_ctx()
 
         rows = [
             {"doc_id": "d1", "text": "Existing", "topic": "t"},
             {"doc_id": "d2", "text": "New", "topic": "t"},
         ]
-        artifact = sink.write(rows, mock_ctx)
+        artifact = sink.write(rows, ctx)
 
         # Artifact must reflect actual write, not full batch
         assert artifact.artifact.metadata is not None
         assert artifact.artifact.metadata["row_count"] == 1
 
-        # Audit call must include skip info
-        call_kwargs = mock_ctx.record_call.call_args.kwargs
-        assert call_kwargs["request_data"]["row_count"] == 1  # Actual write, not full batch
-        assert call_kwargs["request_data"]["batch_size"] == 2  # Full batch size
-        assert call_kwargs["request_data"]["document_ids"] == ["d2"]  # Only written IDs
-        assert call_kwargs["response_data"]["rows_written"] == 1
-        assert call_kwargs["response_data"]["rows_skipped"] == 1
-        assert call_kwargs["response_data"]["skipped_ids"] == ["d1"]
+        # Audit call must include skip info — check request/response data
+        # passed through to landscape.record_call via RawCallPayload
+        ctx.landscape.record_call.assert_called_once()
+        call_kwargs = ctx.landscape.record_call.call_args.kwargs
+        request_data = call_kwargs["request_data"].to_dict()
+        response_data = call_kwargs["response_data"].to_dict()
+        assert request_data["row_count"] == 1  # Actual write, not full batch
+        assert request_data["batch_size"] == 2  # Full batch size
+        assert request_data["document_ids"] == ["d2"]  # Only written IDs
+        assert response_data["rows_written"] == 1
+        assert response_data["rows_skipped"] == 1
+        assert response_data["skipped_ids"] == ["d1"]
 
     def test_skip_content_hash_reflects_actual_payload(self) -> None:
         """Hash must be over the subset actually sent, not the full batch."""
@@ -242,18 +254,18 @@ class TestChromaSinkWriteSkip:
         mock_collection.get.return_value = {"ids": ["d1"]}
         sink = _make_sink_with_collection(mock_collection, on_duplicate="skip")
 
-        mock_ctx = MagicMock(spec=PluginContext)
+        ctx = _make_sink_ctx()
         rows = [
             {"doc_id": "d1", "text": "Existing", "topic": "t"},
             {"doc_id": "d2", "text": "New", "topic": "t"},
         ]
-        skip_artifact = sink.write(rows, mock_ctx)
+        skip_artifact = sink.write(rows, ctx)
 
         # Write only d2 in overwrite mode — should produce the same hash
         mock_collection2 = MagicMock()
         sink2 = _make_sink_with_collection(mock_collection2)
-        mock_ctx2 = MagicMock(spec=PluginContext)
-        overwrite_artifact = sink2.write([{"doc_id": "d2", "text": "New", "topic": "t"}], mock_ctx2)
+        ctx2 = _make_sink_ctx()
+        overwrite_artifact = sink2.write([{"doc_id": "d2", "text": "New", "topic": "t"}], ctx2)
 
         assert skip_artifact.artifact.content_hash == overwrite_artifact.artifact.content_hash
 
@@ -264,8 +276,7 @@ class TestChromaSinkWriteError:
         mock_collection.get.return_value = {"ids": ["d1", "d3"]}
         sink = _make_sink_with_collection(mock_collection, on_duplicate="error")
 
-        mock_ctx = MagicMock(spec=PluginContext)
-        mock_ctx.run_id = "test-run"
+        ctx = _make_sink_ctx()
 
         rows = [
             {"doc_id": "d1", "text": "A", "topic": "t"},
@@ -274,7 +285,7 @@ class TestChromaSinkWriteError:
         ]
 
         with pytest.raises(DuplicateDocumentError) as exc_info:
-            sink.write(rows, mock_ctx)
+            sink.write(rows, ctx)
 
         assert "d1" in exc_info.value.duplicate_ids
         assert "d3" in exc_info.value.duplicate_ids
@@ -285,11 +296,10 @@ class TestChromaSinkWriteError:
         mock_collection.get.return_value = {"ids": []}
         sink = _make_sink_with_collection(mock_collection, on_duplicate="error")
 
-        mock_ctx = MagicMock(spec=PluginContext)
-        mock_ctx.run_id = "test-run"
+        ctx = _make_sink_ctx()
 
         rows = [{"doc_id": "d1", "text": "A", "topic": "t"}]
-        result = sink.write(rows, mock_ctx)
+        result = sink.write(rows, ctx)
 
         mock_collection.add.assert_called_once()
         assert result is not None
@@ -299,18 +309,18 @@ class TestChromaSinkWriteError:
         mock_collection.get.return_value = {"ids": ["d1"]}
         sink = _make_sink_with_collection(mock_collection, on_duplicate="error")
 
-        mock_ctx = MagicMock(spec=PluginContext)
-        mock_ctx.run_id = "test-run"
+        ctx = _make_mock_audit_ctx()
 
         with pytest.raises(DuplicateDocumentError):
-            sink.write([{"doc_id": "d1", "text": "A", "topic": "t"}], mock_ctx)
+            sink.write([{"doc_id": "d1", "text": "A", "topic": "t"}], ctx)
 
-        mock_ctx.record_call.assert_called_once()
-        call_kwargs = mock_ctx.record_call.call_args.kwargs
+        ctx.landscape.record_call.assert_called_once()
+        call_kwargs = ctx.landscape.record_call.call_args.kwargs
         assert call_kwargs["status"] is CallStatus.ERROR
         # Error details must include exception info (#4)
-        assert call_kwargs["error"]["type"] == "DuplicateDocumentError"
-        assert "d1" in call_kwargs["error"]["message"]
+        error_data = call_kwargs["error"].to_dict()
+        assert error_data["type"] == "DuplicateDocumentError"
+        assert "d1" in error_data["message"]
 
     def test_duplicate_ids_stored_as_tuple(self) -> None:
         """DuplicateDocumentError.duplicate_ids must be immutable."""
@@ -318,9 +328,9 @@ class TestChromaSinkWriteError:
         mock_collection.get.return_value = {"ids": ["d1"]}
         sink = _make_sink_with_collection(mock_collection, on_duplicate="error")
 
-        mock_ctx = MagicMock(spec=PluginContext)
+        ctx = _make_sink_ctx()
         with pytest.raises(DuplicateDocumentError) as exc_info:
-            sink.write([{"doc_id": "d1", "text": "A", "topic": "t"}], mock_ctx)
+            sink.write([{"doc_id": "d1", "text": "A", "topic": "t"}], ctx)
 
         assert isinstance(exc_info.value.duplicate_ids, tuple)
 
@@ -330,14 +340,17 @@ class TestChromaSinkAuditIntegrity:
         mock_collection = MagicMock()
         sink = _make_sink_with_collection(mock_collection)
 
-        mock_ctx = MagicMock(spec=PluginContext)
-        mock_ctx.run_id = "test-run"
-        mock_ctx.record_call.side_effect = RuntimeError("DB write failed")
+        ctx = _make_sink_ctx()
+
+        def failing_record_call(**kwargs: Any) -> Any:
+            raise RuntimeError("DB write failed")
+
+        ctx.record_call = failing_record_call  # type: ignore[assignment]
 
         rows = [{"doc_id": "d1", "text": "Hello", "topic": "t"}]
 
         with pytest.raises(AuditIntegrityError, match="audit") as exc_info:
-            sink.write(rows, mock_ctx)
+            sink.write(rows, ctx)
 
         # The ChromaDB write still happened
         mock_collection.upsert.assert_called_once()
@@ -358,17 +371,17 @@ class TestChromaSinkAuditIntegrity:
         mock_collection.upsert.side_effect = ValueError("Expected str, int, float or bool, got dict")
         sink = _make_sink_with_collection(mock_collection)
 
-        mock_ctx = MagicMock(spec=PluginContext)
-        mock_ctx.run_id = "test-run"
+        ctx = _make_mock_audit_ctx()
 
         with pytest.raises(_ChromaPayloadRejection, match="Expected str"):
-            sink.write([{"doc_id": "d1", "text": "A", "topic": "t"}], mock_ctx)
+            sink.write([{"doc_id": "d1", "text": "A", "topic": "t"}], ctx)
 
         # Audit record must have been written before re-raising
-        mock_ctx.record_call.assert_called_once()
-        call_kwargs = mock_ctx.record_call.call_args.kwargs
+        ctx.landscape.record_call.assert_called_once()
+        call_kwargs = ctx.landscape.record_call.call_args.kwargs
         assert call_kwargs["status"] is CallStatus.ERROR
-        assert call_kwargs["error"]["type"] == "_ChromaPayloadRejection"
+        error_data = call_kwargs["error"].to_dict()
+        assert error_data["type"] == "_ChromaPayloadRejection"
 
     def test_error_path_audit_failure_raises_audit_integrity_error(self) -> None:
         """If error-path record_call also fails, AuditIntegrityError is raised."""
@@ -378,11 +391,15 @@ class TestChromaSinkAuditIntegrity:
         mock_collection.upsert.side_effect = chromadb.errors.ChromaError("write failed")  # type: ignore[abstract]
         sink = _make_sink_with_collection(mock_collection)
 
-        mock_ctx = MagicMock(spec=PluginContext)
-        mock_ctx.record_call.side_effect = RuntimeError("audit also broken")
+        ctx = _make_sink_ctx()
+
+        def failing_record_call(**kwargs: Any) -> Any:
+            raise RuntimeError("audit also broken")
+
+        ctx.record_call = failing_record_call  # type: ignore[assignment]
 
         with pytest.raises(AuditIntegrityError, match="audit") as exc_info:
-            sink.write([{"doc_id": "d1", "text": "A", "topic": "t"}], mock_ctx)
+            sink.write([{"doc_id": "d1", "text": "A", "topic": "t"}], ctx)
 
         # Exception chain preserved — audit_exc is the cause
         assert exc_info.value.__cause__ is not None
@@ -430,9 +447,9 @@ class TestChromaSinkMetadataTypeValidation:
         sink = inject_write_failure(ChromaSink(config))
         sink._collection = mock_collection
 
-        mock_ctx = MagicMock(spec=PluginContext)
+        ctx = _make_sink_ctx()
         rows = [{"doc_id": "d1", "text": "hi", "s": "val", "i": 42, "f": 3.14, "b": True}]
-        sink.write(rows, mock_ctx)
+        sink.write(rows, ctx)
 
         mock_collection.upsert.assert_called_once()
 
@@ -441,9 +458,9 @@ class TestChromaSinkMetadataTypeValidation:
         mock_collection = MagicMock()
         sink = _make_sink_with_collection(mock_collection)
 
-        mock_ctx = MagicMock(spec=PluginContext)
+        ctx = _make_sink_ctx()
         rows = [{"doc_id": "d1", "text": "hi", "topic": None}]
-        sink.write(rows, mock_ctx)
+        sink.write(rows, ctx)
 
         mock_collection.upsert.assert_called_once()
 
@@ -453,13 +470,13 @@ class TestChromaSinkMetadataTypeValidation:
         sink = _make_sink_with_collection(mock_collection)
         sink._on_write_failure = "csv_failsink"
 
-        mock_ctx = MagicMock(spec=PluginContext)
+        ctx = _make_sink_ctx()
         rows: list[dict[str, Any]] = [
             {"doc_id": "d1", "text": "good", "topic": "science"},
             {"doc_id": "d2", "text": "bad", "topic": {"nested": "dict"}},
             {"doc_id": "d3", "text": "good", "topic": "math"},
         ]
-        result = sink.write(rows, mock_ctx)
+        result = sink.write(rows, ctx)
 
         # Only valid rows sent to ChromaDB
         call_kwargs = mock_collection.upsert.call_args.kwargs
@@ -478,12 +495,12 @@ class TestChromaSinkMetadataTypeValidation:
         sink = _make_sink_with_collection(mock_collection)
         sink._on_write_failure = "csv_failsink"
 
-        mock_ctx = MagicMock(spec=PluginContext)
+        ctx = _make_sink_ctx()
         rows: list[dict[str, Any]] = [
             {"doc_id": "d1", "text": "bad", "topic": ["a", "list"]},
             {"doc_id": "d2", "text": "bad", "topic": {"nested": "dict"}},
         ]
-        result = sink.write(rows, mock_ctx)
+        result = sink.write(rows, ctx)
 
         # Nothing sent to ChromaDB
         mock_collection.upsert.assert_not_called()
@@ -512,9 +529,9 @@ class TestChromaSinkMetadataTypeValidation:
         sink = _make_sink_with_collection(mock_collection)
         sink._on_write_failure = "csv_failsink"
 
-        mock_ctx = MagicMock(spec=PluginContext)
+        ctx = _make_sink_ctx()
         rows = [{"doc_id": "d1", "text": "hi", "topic": bad_value}]
-        result = sink.write(rows, mock_ctx)
+        result = sink.write(rows, ctx)
 
         assert len(result.diversions) == 1
         assert expected_type_name in result.diversions[0].reason
@@ -529,9 +546,9 @@ class TestChromaSinkMetadataTypeValidation:
         sink = inject_write_failure(ChromaSink(config))
         sink._collection = mock_collection
 
-        mock_ctx = MagicMock(spec=PluginContext)
+        ctx = _make_sink_ctx()
         rows = [{"doc_id": "d1", "text": "hi"}]
-        sink.write(rows, mock_ctx)
+        sink.write(rows, ctx)
 
         mock_collection.upsert.assert_called_once()
 
@@ -545,13 +562,13 @@ class TestChromaSinkDivertRow:
         sink = _make_sink_with_collection(mock_collection)
         sink._on_write_failure = "csv_failsink"
 
-        mock_ctx = MagicMock(spec=PluginContext)
+        ctx = _make_sink_ctx()
         rows: list[dict[str, Any]] = [
             {"doc_id": "d1", "text": "good", "topic": "science"},
             {"doc_id": "d2", "text": "bad", "topic": {"nested": "dict"}},
             {"doc_id": "d3", "text": "also bad", "topic": [1, 2, 3]},
         ]
-        result = sink.write(rows, mock_ctx)
+        result = sink.write(rows, ctx)
 
         # Only the valid row is written
         call_kwargs = mock_collection.upsert.call_args.kwargs
@@ -571,12 +588,12 @@ class TestChromaSinkDivertRow:
         sink = _make_sink_with_collection(mock_collection)
         sink._on_write_failure = "csv_failsink"
 
-        mock_ctx = MagicMock(spec=PluginContext)
+        ctx = _make_sink_ctx()
         rows = [
             {"doc_id": "d1", "text": "hello", "topic": "greeting"},
             {"doc_id": "d2", "text": "goodbye", "topic": "farewell"},
         ]
-        result = sink.write(rows, mock_ctx)
+        result = sink.write(rows, ctx)
 
         assert len(result.diversions) == 0
         mock_collection.upsert.assert_called_once()
@@ -587,13 +604,13 @@ class TestChromaSinkDivertRow:
         sink = _make_sink_with_collection(mock_collection)
         sink._on_write_failure = "csv_failsink"
 
-        mock_ctx = MagicMock(spec=PluginContext)
+        ctx = _make_sink_ctx()
         rows: list[dict[str, Any]] = [
             {"doc_id": "d1", "text": "bad1", "topic": {"nested": True}},
             {"doc_id": "d2", "text": "bad2", "topic": [1, 2]},
             {"doc_id": "d3", "text": "bad3", "topic": (1, 2)},
         ]
-        result = sink.write(rows, mock_ctx)
+        result = sink.write(rows, ctx)
 
         # Nothing written to ChromaDB
         mock_collection.upsert.assert_not_called()
@@ -618,12 +635,12 @@ class TestChromaSinkNonFiniteMetadata:
         sink = _make_sink_with_collection(mock_collection)
         sink._on_write_failure = "csv_failsink"
 
-        mock_ctx = MagicMock(spec=PluginContext)
+        ctx = _make_sink_ctx()
         rows: list[dict[str, Any]] = [
             {"doc_id": "d1", "text": "good", "topic": "science"},
             {"doc_id": "d2", "text": "bad", "topic": bad_value},
         ]
-        result = sink.write(rows, mock_ctx)
+        result = sink.write(rows, ctx)
 
         # Only valid row sent to ChromaDB
         call_kwargs = mock_collection.upsert.call_args.kwargs
@@ -643,11 +660,11 @@ class TestChromaSinkNonFiniteMetadata:
         sink = _make_sink_with_collection(mock_collection)
         sink._on_write_failure = "csv_failsink"
 
-        mock_ctx = MagicMock(spec=PluginContext)
+        ctx = _make_sink_ctx()
         rows: list[dict[str, Any]] = [
             {"doc_id": "d1", "text": "bad", "topic": bad_value},
         ]
-        result = sink.write(rows, mock_ctx)
+        result = sink.write(rows, ctx)
 
         mock_collection.upsert.assert_not_called()
         assert len(result.diversions) == 1
@@ -671,10 +688,10 @@ class TestChromaSinkEmptyMetadata:
         sink = inject_write_failure(ChromaSink(config))
         sink._collection = mock_collection
 
-        mock_ctx = MagicMock(spec=PluginContext)
+        ctx = _make_sink_ctx()
         # Row has id and document but none of the configured metadata fields
         rows = [{"doc_id": "d1", "text": "hello"}]
-        result = sink.write(rows, mock_ctx)
+        result = sink.write(rows, ctx)
 
         # Row must be written (not diverted — missing metadata is not an error)
         mock_collection.upsert.assert_called_once()
@@ -701,12 +718,12 @@ class TestChromaSinkEmptyMetadata:
         sink = inject_write_failure(ChromaSink(config))
         sink._collection = mock_collection
 
-        mock_ctx = MagicMock(spec=PluginContext)
+        ctx = _make_sink_ctx()
         rows = [
             {"doc_id": "d1", "text": "with meta", "topic": "science"},
             {"doc_id": "d2", "text": "no meta"},  # topic absent
         ]
-        result = sink.write(rows, mock_ctx)
+        result = sink.write(rows, ctx)
 
         # Both rows must be written — two sub-batch calls
         assert mock_collection.upsert.call_count == 2
@@ -741,9 +758,9 @@ class TestChromaSinkEmptyMetadata:
         sink = inject_write_failure(ChromaSink(config))
         sink._collection = mock_collection
 
-        mock_ctx = MagicMock(spec=PluginContext)
+        ctx = _make_sink_ctx()
         rows = [{"doc_id": "d1", "text": "hello"}]
-        result = sink.write(rows, mock_ctx)
+        result = sink.write(rows, ctx)
 
         # Row is new (not in existing), so it's added
         mock_collection.add.assert_called_once()
@@ -768,9 +785,9 @@ class TestChromaSinkEmptyMetadata:
         sink = inject_write_failure(ChromaSink(config))
         sink._collection = mock_collection
 
-        mock_ctx = MagicMock(spec=PluginContext)
+        ctx = _make_sink_ctx()
         rows = [{"doc_id": "d1", "text": "hello"}]
-        result = sink.write(rows, mock_ctx)
+        result = sink.write(rows, ctx)
 
         mock_collection.add.assert_called_once()
         call_kwargs = mock_collection.add.call_args.kwargs
@@ -792,10 +809,10 @@ class TestChromaSinkEmptyMetadata:
         sink = inject_write_failure(ChromaSink(config))
         sink._collection = mock_collection
 
-        mock_ctx = MagicMock(spec=PluginContext)
+        ctx = _make_sink_ctx()
         # Row has topic but not category — meta is {"topic": "science"}, not empty
         rows = [{"doc_id": "d1", "text": "hello", "topic": "science"}]
-        result = sink.write(rows, mock_ctx)
+        result = sink.write(rows, ctx)
 
         mock_collection.upsert.assert_called_once()
         call_kwargs = mock_collection.upsert.call_args.kwargs
