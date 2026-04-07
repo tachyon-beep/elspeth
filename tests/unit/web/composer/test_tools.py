@@ -783,6 +783,42 @@ class TestSetSourcePathSecurity:
         )
         assert result.success is True
 
+    def test_relative_path_resolves_against_data_dir(self) -> None:
+        """uploads/input.csv should resolve under {data_dir}/uploads/."""
+        state = _empty_state()
+        catalog = _mock_catalog()
+        result = execute_tool(
+            "set_source",
+            {
+                "plugin": "csv",
+                "on_success": "t1",
+                "options": {"path": "uploads/input.csv"},
+                "on_validation_failure": "quarantine",
+            },
+            state,
+            catalog,
+            data_dir="/data",
+        )
+        assert result.success is True
+
+    def test_relative_traversal_still_blocked(self) -> None:
+        """../etc/passwd relative to data_dir must still be blocked."""
+        state = _empty_state()
+        catalog = _mock_catalog()
+        result = execute_tool(
+            "set_source",
+            {
+                "plugin": "csv",
+                "on_success": "t1",
+                "options": {"path": "../etc/passwd"},
+                "on_validation_failure": "quarantine",
+            },
+            state,
+            catalog,
+            data_dir="/data",
+        )
+        assert result.success is False
+
 
 class TestDiscoveryTools:
     def test_list_sources_delegates(self) -> None:

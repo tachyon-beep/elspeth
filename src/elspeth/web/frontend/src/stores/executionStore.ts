@@ -26,6 +26,7 @@ import type {
 import * as api from "@/api/client";
 import { connectToRun, type WebSocketConnection } from "@/api/websocket";
 import { useAuthStore } from "./authStore";
+import { useSessionStore } from "./sessionStore";
 
 const MAX_RECENT_ERRORS = 50;
 
@@ -135,6 +136,12 @@ export const useExecutionStore = create<ExecutionState>((set, get) => ({
     try {
       const result = await api.validatePipeline(sessionId);
       set({ validationResult: result, isValidating: false });
+
+      // Auto-send validation errors to the LLM so it can attempt fixes.
+      // The user still sees the banner — this adds a chat message too.
+      if (!result.is_valid && result.errors.length > 0) {
+        useSessionStore.getState().sendValidationFeedback(result);
+      }
     } catch (err) {
       const apiErr = err as ApiError;
       const message =

@@ -193,6 +193,66 @@ class TestValidatePipelineSinkPathAllowlist:
         assert path_check.passed is True
 
 
+class TestValidatePipelineRelativePaths:
+    """Relative paths must resolve against data_dir, not CWD."""
+
+    def test_relative_sink_path_resolves_against_data_dir(self) -> None:
+        """outputs/result.csv should resolve under {data_dir}/outputs/."""
+        state = FakeCompositionState(
+            source_options={},
+            outputs=(FakeOutputSpec(name="primary", options={"path": "outputs/result.csv"}),),
+        )
+        settings = FakeWebSettings(data_dir="/tmp/test_data")
+        mock_yaml_gen = MagicMock()
+        mock_yaml_gen.generate_yaml.return_value = "source:\n  plugin: csv_source"
+        with patch("elspeth.web.execution.validation.load_settings") as mock_load:
+            mock_load.side_effect = FileNotFoundError("no temp file")
+            result = validate_pipeline(state, settings, mock_yaml_gen)
+        path_check = next(c for c in result.checks if c.name == "source_path_allowlist")
+        assert path_check.passed is True
+
+    def test_relative_source_path_resolves_against_data_dir(self) -> None:
+        """uploads/data.csv should resolve under {data_dir}/uploads/."""
+        state = FakeCompositionState(
+            source_options={"path": "uploads/data.csv"},
+        )
+        settings = FakeWebSettings(data_dir="/tmp/test_data")
+        mock_yaml_gen = MagicMock()
+        mock_yaml_gen.generate_yaml.return_value = "source:\n  plugin: csv_source"
+        with patch("elspeth.web.execution.validation.load_settings") as mock_load:
+            mock_load.side_effect = FileNotFoundError("no temp file")
+            result = validate_pipeline(state, settings, mock_yaml_gen)
+        path_check = next(c for c in result.checks if c.name == "source_path_allowlist")
+        assert path_check.passed is True
+
+    def test_relative_traversal_still_blocked(self) -> None:
+        """../etc/passwd relative to data_dir must still be blocked."""
+        state = FakeCompositionState(
+            source_options={},
+            outputs=(FakeOutputSpec(name="evil", options={"path": "../etc/passwd"}),),
+        )
+        settings = FakeWebSettings(data_dir="/tmp/test_data")
+        mock_yaml_gen = MagicMock()
+        result = validate_pipeline(state, settings, mock_yaml_gen)
+        assert result.is_valid is False
+        assert any("Path traversal" in e.message for e in result.errors)
+
+    def test_relative_sink_path_under_blobs(self) -> None:
+        """blobs/out.json should resolve under {data_dir}/blobs/."""
+        state = FakeCompositionState(
+            source_options={},
+            outputs=(FakeOutputSpec(name="blob_out", options={"path": "blobs/out.json"}),),
+        )
+        settings = FakeWebSettings(data_dir="/tmp/test_data")
+        mock_yaml_gen = MagicMock()
+        mock_yaml_gen.generate_yaml.return_value = "source:\n  plugin: csv_source"
+        with patch("elspeth.web.execution.validation.load_settings") as mock_load:
+            mock_load.side_effect = FileNotFoundError("no temp file")
+            result = validate_pipeline(state, settings, mock_yaml_gen)
+        path_check = next(c for c in result.checks if c.name == "source_path_allowlist")
+        assert path_check.passed is True
+
+
 class TestValidatePipelineSuccess:
     @patch("elspeth.web.execution.validation.load_settings")
     @patch("elspeth.web.execution.validation.instantiate_plugins_from_config")

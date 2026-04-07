@@ -146,6 +146,7 @@ def validate_pipeline(
     # an allowed directory. Uses the shared helpers from AD-4.
     from elspeth.web.composer.tools import _allowed_sink_directories, _allowed_source_directories
 
+    data_dir_resolved = Path(settings.data_dir).resolve()
     allowed_source_dirs = _allowed_source_directories(str(settings.data_dir))
     allowed_sink_dirs = _allowed_sink_directories(str(settings.data_dir))
     # state is a CompositionState (typed domain object). state.source is a
@@ -156,7 +157,8 @@ def validate_pipeline(
         value = source_options.get(key)
         if value is not None:
             path_checked = True
-            resolved = Path(value).resolve()
+            raw = Path(value)
+            resolved = (data_dir_resolved / raw).resolve() if not raw.is_absolute() else raw.resolve()
             if not any(resolved.is_relative_to(d) for d in allowed_source_dirs):
                 return ValidationResult(
                     is_valid=False,
@@ -184,7 +186,8 @@ def validate_pipeline(
             value = output.options.get(key)
             if value is not None:
                 path_checked = True
-                resolved = Path(value).resolve()
+                raw = Path(value)
+                resolved = (data_dir_resolved / raw).resolve() if not raw.is_absolute() else raw.resolve()
                 if not any(resolved.is_relative_to(d) for d in allowed_sink_dirs):
                     return ValidationResult(
                         is_valid=False,

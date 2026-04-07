@@ -177,8 +177,9 @@ export function GraphView() {
     return layoutGraph(rfNodes, rfEdges);
   }, [compositionState]);
 
-  // Empty state
-  if (!compositionState || compositionState.nodes.length === 0) {
+  // Empty state — must match the hasContent check above so that a
+  // source-to-sink pipeline (zero transform nodes) still renders.
+  if (nodes.length === 0) {
     return (
       <div
         className="empty-state"
@@ -192,8 +193,8 @@ export function GraphView() {
     );
   }
 
-  const nodeCount = compositionState.nodes.length;
-  const ariaLabel = `Pipeline graph with ${nodeCount} component${nodeCount !== 1 ? "s" : ""}. Use the Spec tab for keyboard-accessible detail.`;
+  const nodeCount = nodes.length;
+  const ariaLabel = `Pipeline graph with ${nodeCount} component${nodeCount !== 1 ? "s" : ""} (source, transforms, sinks). Use the Spec tab for keyboard-accessible detail.`;
 
   return (
     <div

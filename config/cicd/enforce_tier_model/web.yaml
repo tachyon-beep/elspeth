@@ -316,12 +316,12 @@ allow_hits:
   reason: list_models gracefully handles missing litellm — returns empty model list
   safety: ImportError/AttributeError returns empty list; no data fabrication
   expires: null
-- key: web/execution/validation.py:R1:validate_pipeline:fp=367920a48603c655
+- key: web/execution/validation.py:R1:validate_pipeline:fp=09b3580865b612d8
   owner: web-execution
   reason: Validation checks optional source path/file keys supplied by composition state
   safety: Absent keys are treated honestly as 'no path provided' and the check is recorded as skipped/passed
   expires: null
-- key: web/execution/validation.py:R1:validate_pipeline:fp=ecae81e096193d96
+- key: web/execution/validation.py:R1:validate_pipeline:fp=20f42a1d31c8f2ab
   owner: web-execution
   reason: Validation checks optional output path/file keys supplied by composition state
   safety: Absent keys treated as 'no path provided'; check recorded as skipped/passed

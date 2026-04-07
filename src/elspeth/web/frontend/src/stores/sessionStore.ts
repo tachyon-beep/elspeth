@@ -6,6 +6,7 @@ import type {
   CompositionState,
   CompositionStateVersion,
   ApiError,
+  ValidationResult,
 } from "@/types/api";
 import * as api from "@/api/client";
 import { useExecutionStore } from "./executionStore";
@@ -28,6 +29,7 @@ interface SessionState {
   selectSession: (id: string) => Promise<void>;
   archiveSession: (id: string) => Promise<void>;
   sendMessage: (content: string, signal?: AbortSignal) => Promise<void>;
+  sendValidationFeedback: (result: ValidationResult) => Promise<void>;
   retryMessage: (messageId: string, signal?: AbortSignal) => Promise<void>;
   forkFromMessage: (messageId: string, newContent: string) => Promise<void>;
   loadStateVersions: () => Promise<void>;
@@ -203,6 +205,30 @@ export const useSessionStore = create<SessionState>((set, get) => ({
             : existing,
         ),
       }));
+    }
+  },
+
+  async sendValidationFeedback(result: ValidationResult) {
+    // Format validation errors into a message the LLM can act on.
+    const lines = ["Pipeline validation failed with the following errors:"];
+    for (const err of result.errors) {
+      lines.push(
+        `- [${err.component_type}] ${err.component_id}: ${err.message}`,
+      );
+      if (err.suggestion) {
+        lines.push(`  Suggestion: ${err.suggestion}`);
+      }
+    }
+    lines.push("", "Please fix these validation errors.");
+    const content = lines.join("\n");
+
+    // Use sendMessage with a 90-second timeout (same as manual sends).
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), 90_000);
+    try {
+      await get().sendMessage(content, controller.signal);
+    } finally {
+      clearTimeout(timer);
     }
   },
 

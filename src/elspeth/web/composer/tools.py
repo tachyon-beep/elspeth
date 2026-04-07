@@ -799,7 +799,8 @@ def _validate_source_path(
 
     for key in ("path", "file"):
         if key in options:
-            resolved = Path(options[key]).resolve()
+            raw = Path(options[key])
+            resolved = (Path(data_dir).resolve() / raw).resolve() if not raw.is_absolute() else raw.resolve()
             if not any(resolved.is_relative_to(d) for d in allowed):
                 return (
                     f"Path violation (S2): '{options[key]}' is outside the "

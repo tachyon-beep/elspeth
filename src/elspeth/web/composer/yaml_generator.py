@@ -139,4 +139,6 @@ def generate_yaml(state: CompositionState) -> str:
     # landscape key is intentionally omitted -- URL comes from
     # WebSettings.get_landscape_url() at execution time (security fix S1).
 
-    return yaml.dump(doc, default_flow_style=False, sort_keys=True)
+    # sort_keys=False preserves insertion order: source → transforms →
+    # gates → aggregations → coalesce → sinks (the natural pipeline flow).
+    return yaml.dump(doc, default_flow_style=False, sort_keys=False)
