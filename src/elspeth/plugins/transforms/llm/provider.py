@@ -22,11 +22,7 @@ from dataclasses import dataclass
 from enum import StrEnum
 from typing import Any, Protocol, runtime_checkable
 
-import structlog
-
 from elspeth.contracts.token_usage import TokenUsage
-
-logger = structlog.get_logger(__name__)
 
 
 class FinishReason(StrEnum):
@@ -80,13 +76,6 @@ def parse_finish_reason(raw: str | None) -> ParsedFinishReason:
     try:
         return FinishReason(raw)
     except ValueError:
-        logger.warning(
-            "Unknown LLM finish_reason — will be rejected by transform (fail-closed)",
-            finish_reason=raw,
-            known_values=[e.value for e in FinishReason],
-            action="Add to FinishReason enum if this is a known-good completion reason. "
-            "Unrecognized finish reasons are rejected as errors by LLMTransform.",
-        )
         return UnrecognizedFinishReason(raw)
 
 

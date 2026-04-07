@@ -115,6 +115,35 @@ class TestAIMDThrottleRecovery:
 
         assert throttle.current_delay_ms == 10
 
+    def test_error_after_recovery_bootstraps_from_recovery_step(self) -> None:
+        """After recovering to floor, next error should bootstrap, not multiply floor.
+
+        Bug: elspeth-c1b8e2de36. With min_dispatch_delay_ms > 0, recovery
+        floors delay at min (e.g. 10). A subsequent capacity error should
+        bootstrap to recovery_step_ms (50), not multiply the floor (10*2=20).
+        """
+        config = ThrottleConfig(
+            min_dispatch_delay_ms=10,
+            max_dispatch_delay_ms=5000,
+            backoff_multiplier=2.0,
+            recovery_step_ms=50,
+        )
+        throttle = AIMDThrottle(config)
+
+        # Initial congestion cycle
+        throttle.on_capacity_error()  # bootstrap: max(50, 10) = 50
+        throttle.on_capacity_error()  # 50 * 2 = 100
+        assert throttle.current_delay_ms == 100
+
+        # Recover fully to floor
+        for _ in range(10):
+            throttle.on_success()
+        assert throttle.current_delay_ms == 10  # floored at min
+
+        # New capacity error should bootstrap from recovery_step, not multiply floor
+        throttle.on_capacity_error()
+        assert throttle.current_delay_ms == 50  # max(50, 10) = 50, NOT 10*2=20
+
     def test_success_at_zero_stays_zero(self) -> None:
         """Success when already at zero should stay at zero."""
         throttle = AIMDThrottle()
