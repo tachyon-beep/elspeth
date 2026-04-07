@@ -373,6 +373,43 @@ class TestHTTPCallRequest:
         assert "params" in d
         assert d["params"] is None
 
+    def test_put_with_json_includes_payload(self) -> None:
+        """PUT with json body must include it in to_dict() — not silently drop.
+
+        Regression test for elspeth-c083584007: only POST got json serialized,
+        PUT/PATCH/DELETE payloads were silently dropped from audit records.
+        """
+        d = HTTPCallRequest(
+            method="PUT",
+            url="https://api.example.com/v1/resource/42",
+            headers={"Content-Type": "application/json"},
+            json={"name": "updated"},
+        ).to_dict()
+        assert "json" in d
+        assert d["json"] == {"name": "updated"}
+
+    def test_patch_with_json_includes_payload(self) -> None:
+        """PATCH with json body must include it in to_dict()."""
+        d = HTTPCallRequest(
+            method="PATCH",
+            url="https://api.example.com/v1/resource/42",
+            headers={"Content-Type": "application/json"},
+            json={"status": "active"},
+        ).to_dict()
+        assert "json" in d
+        assert d["json"] == {"status": "active"}
+
+    def test_delete_with_params_includes_payload(self) -> None:
+        """DELETE with query params must include them in to_dict()."""
+        d = HTTPCallRequest(
+            method="DELETE",
+            url="https://api.example.com/v1/resource/42",
+            headers={},
+            params={"force": "true"},
+        ).to_dict()
+        assert "params" in d
+        assert d["params"] == {"force": "true"}
+
     def test_ssrf_request_excludes_json_params(self) -> None:
         d = HTTPCallRequest(
             method="GET",
