@@ -37,8 +37,8 @@ sessions_table = Table(
     Column("user_id", String, nullable=False, index=True),
     Column("auth_provider_type", String, nullable=False, default="local"),
     Column("title", String, nullable=False),
-    Column("created_at", DateTime, nullable=False),
-    Column("updated_at", DateTime, nullable=False),
+    Column("created_at", DateTime(timezone=True), nullable=False),
+    Column("updated_at", DateTime(timezone=True), nullable=False),
     Column(
         "forked_from_session_id",
         String,
@@ -62,7 +62,7 @@ chat_messages_table = Table(
     Column("role", String, nullable=False),
     Column("content", Text, nullable=False),
     Column("tool_calls", JSON, nullable=True),
-    Column("created_at", DateTime, nullable=False),
+    Column("created_at", DateTime(timezone=True), nullable=False),
     Column(
         "composition_state_id",
         String,
@@ -94,7 +94,7 @@ composition_states_table = Table(
     Column("metadata_", JSON, nullable=True),
     Column("is_valid", Boolean, nullable=False, default=False),
     Column("validation_errors", JSON, nullable=True),
-    Column("created_at", DateTime, nullable=False),
+    Column("created_at", DateTime(timezone=True), nullable=False),
     Column(
         "derived_from_state_id",
         String,
@@ -122,8 +122,8 @@ runs_table = Table(
         nullable=False,
     ),
     Column("status", String, nullable=False),
-    Column("started_at", DateTime, nullable=False),
-    Column("finished_at", DateTime, nullable=True),
+    Column("started_at", DateTime(timezone=True), nullable=False),
+    Column("finished_at", DateTime(timezone=True), nullable=True),
     Column("rows_processed", Integer, nullable=False, default=0),
     Column("rows_failed", Integer, nullable=False, default=0),
     Column("error", Text, nullable=True),
@@ -161,7 +161,7 @@ blobs_table = Table(
     Column("size_bytes", Integer, nullable=False),
     Column("content_hash", String, nullable=True),
     Column("storage_path", String, nullable=False),
-    Column("created_at", DateTime, nullable=False),
+    Column("created_at", DateTime(timezone=True), nullable=False),
     Column("created_by", String, nullable=False),
     Column("source_description", String, nullable=True),
     Column("status", String, nullable=False, server_default="ready"),
@@ -211,7 +211,7 @@ run_events_table = Table(
         nullable=False,
         index=True,
     ),
-    Column("timestamp", DateTime, nullable=False),
+    Column("timestamp", DateTime(timezone=True), nullable=False),
     Column("event_type", String, nullable=False),
     Column("data", JSON, nullable=False),
     CheckConstraint(
@@ -228,8 +228,8 @@ user_secrets_table = Table(
     Column("user_id", String, nullable=False),
     Column("encrypted_value", LargeBinary, nullable=False),
     Column("salt", LargeBinary, nullable=False),
-    Column("created_at", DateTime, nullable=False),
-    Column("updated_at", DateTime, nullable=False),
+    Column("created_at", DateTime(timezone=True), nullable=False),
+    Column("updated_at", DateTime(timezone=True), nullable=False),
     UniqueConstraint("name", "user_id", name="uq_user_secret_name_user"),
 )
 Index("ix_user_secrets_user_id", user_secrets_table.c.user_id)
