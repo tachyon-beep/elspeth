@@ -14,9 +14,13 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from elspeth.contracts import RunStatus
+from elspeth.contracts.schema_contract import SchemaContract
 from elspeth.core.landscape.database import LandscapeDB
+from elspeth.core.landscape.recorder import LandscapeRecorder
 from elspeth.engine.orchestrator.core import Orchestrator
-from tests.fixtures.landscape import make_landscape_db
+from elspeth.engine.orchestrator.types import GraphArtifacts, ResumeState
+from elspeth.testing import make_field
+from tests.fixtures.landscape import make_landscape_db, make_recorder_with_run
 
 
 def _make_orchestrator(db: LandscapeDB | None = None) -> Orchestrator:
@@ -24,6 +28,23 @@ def _make_orchestrator(db: LandscapeDB | None = None) -> Orchestrator:
     if db is None:
         db = make_landscape_db()
     return Orchestrator(db)
+
+
+def _make_contract() -> SchemaContract:
+    """Create a simple test contract."""
+    return SchemaContract(
+        fields=(
+            make_field(
+                "value",
+                python_type=str,
+                original_name="value",
+                required=True,
+                source="declared",
+            ),
+        ),
+        mode="FLEXIBLE",
+        locked=True,
+    )
 
 
 class TestResumeFinalizesAsFailed:
@@ -37,43 +58,56 @@ class TestResumeFinalizesAsFailed:
     recorder.finalize_run(run_id, status=RunStatus.FAILED).
     """
 
-    def test_resume_failure_finalizes_run_as_failed(self) -> None:
-        """When _process_resumed_rows raises, run status becomes FAILED."""
-        db = make_landscape_db()
-        orch = _make_orchestrator(db)
+    def test_resume_failure_persists_failed_status_to_db(self) -> None:
+        """When _process_resumed_rows raises, FAILED status is persisted to the audit DB.
 
-        # Mock the checkpoint manager requirement
+        Uses a real LandscapeDB and LandscapeRecorder to verify the Tier 1
+        audit boundary: the FAILED state must actually be written to the
+        database, not just called on a mock.
+        """
+        # Set up real DB with a run in RUNNING state
+        setup = make_recorder_with_run(run_id="test-run-resume-fail")
+        db = setup.db
+        recorder = setup.recorder
+        run_id = setup.run_id
+
+        # Verify precondition: run is RUNNING
+        run_before = recorder.get_run(run_id)
+        assert run_before is not None
+        assert run_before.status == RunStatus.RUNNING
+
+        # Create orchestrator with the same DB
+        orch = _make_orchestrator(db)
         orch._checkpoint_manager = MagicMock()
 
-        # Create a mock resume_point
+        # Create resume_point mock
         resume_point = MagicMock()
-        resume_point.checkpoint.run_id = "test-run-123"
+        resume_point.checkpoint.run_id = run_id
         resume_point.aggregation_state = None
+        resume_point.coalesce_state = None
         resume_point.node_id = "node-1"
+        resume_point.sequence_number = 0
 
-        # Create mock config and graph
         config = MagicMock()
         graph = MagicMock()
         payload_store = MagicMock()
         settings = MagicMock()
 
-        # Mock recorder to capture finalize_run calls
-        mock_recorder = MagicMock()
-        mock_recorder.get_source_schema.return_value = '{"mode": "observed"}'
-        mock_recorder.get_run_contract.return_value = MagicMock()
+        # Build a ResumeState that uses the REAL recorder
+        resume_state = ResumeState(
+            recorder=recorder,
+            run_id=run_id,
+            restored_aggregation_state={},
+            restored_coalesce_state=None,
+            unprocessed_rows=[("row-1", 0, {"value": "test"})],
+            schema_contract=_make_contract(),
+        )
 
-        # Mock RecoveryManager
-        mock_recovery = MagicMock()
-        mock_recovery.get_unprocessed_row_data.return_value = [
-            ("row-1", 0, {"field": "value"}),
-        ]
-
-        # Make _process_resumed_rows raise a RuntimeError (non-shutdown)
+        # Mock _reconstruct_resume_state to return our real-recorder state,
+        # and _process_resumed_rows to raise.
         with (
+            patch.object(orch, "_reconstruct_resume_state", return_value=resume_state),
             patch.object(orch, "_process_resumed_rows", side_effect=RuntimeError("test failure")),
-            patch("elspeth.engine.orchestrator.core.LandscapeRecorder", return_value=mock_recorder),
-            patch("elspeth.engine.orchestrator.core.reconstruct_schema_from_json", return_value=MagicMock()),
-            patch("elspeth.core.checkpoint.RecoveryManager", return_value=mock_recovery),
             patch.object(orch, "_emit_telemetry"),
             pytest.raises(RuntimeError, match="test failure"),
         ):
@@ -85,18 +119,12 @@ class TestResumeFinalizesAsFailed:
                 settings=settings,
             )
 
-        # Verify finalize_run was called with FAILED status
-        # finalize_run(run_id, status) — status can be positional or keyword
-        finalize_calls = mock_recorder.finalize_run.call_args_list
-        found_failed = False
-        for call in finalize_calls:
-            args, kwargs = call
-            status = kwargs.get("status", args[1] if len(args) > 1 else None)
-            if status == RunStatus.FAILED:
-                found_failed = True
-                break
-        assert found_failed, (
-            f"Run should be finalized as FAILED when resume fails with non-shutdown exception. finalize_run calls: {finalize_calls}"
+        # Verify: FAILED status is persisted in the actual database
+        run_after = recorder.get_run(run_id)
+        assert run_after is not None
+        assert run_after.status == RunStatus.FAILED, (
+            f"Run should be finalized as FAILED in the database when resume fails "
+            f"with a non-shutdown exception. Actual status: {run_after.status}"
         )
 
 
@@ -112,11 +140,65 @@ class TestBuildProcessorCallsCleanupOnFailure:
     """
 
     def test_build_processor_failure_triggers_cleanup(self) -> None:
-        """When _build_processor raises, _cleanup_plugins is called before propagation.
+        """When _build_processor raises in _initialize_run_context, _cleanup_plugins is called.
 
-        Verifies that _cleanup_plugins cleans up all plugin types:
-        transforms get on_complete + close, sinks get close, source gets close.
+        Behavioral test: mocks _build_processor to raise, calls
+        _initialize_run_context, and verifies _cleanup_plugins is called
+        before the exception propagates.
         """
+        db = make_landscape_db()
+        orch = _make_orchestrator(db)
+
+        # Create minimal config with mock plugins
+        config = MagicMock()
+        config.source = MagicMock()
+        config.source.name = "test_source"
+        config.transforms = []
+        config.sinks = {}
+        config.config = {}
+        config.aggregation_settings = None
+
+        # Create minimal graph
+        graph = MagicMock()
+        graph.get_route_resolution_map.return_value = None
+
+        # Create artifacts with the minimum required structure
+        artifacts = GraphArtifacts(
+            edge_map={},
+            source_id="source_1",
+            sink_id_map={},
+            transform_id_map={},
+            config_gate_id_map={},
+            coalesce_id_map={},
+        )
+
+        recorder = MagicMock(spec=LandscapeRecorder)
+        payload_store = MagicMock()
+
+        with (
+            patch.object(orch, "_build_processor", side_effect=RuntimeError("processor build failed")),
+            patch.object(orch, "_cleanup_plugins") as mock_cleanup,
+            patch.object(orch, "_assign_plugin_node_ids"),
+            pytest.raises(RuntimeError, match="processor build failed"),
+        ):
+            orch._initialize_run_context(
+                recorder,
+                "test-run",
+                config,
+                graph,
+                None,  # settings
+                artifacts,
+                None,  # batch_checkpoints
+                payload_store,
+            )
+
+        # Verify _cleanup_plugins was called with the config
+        mock_cleanup.assert_called_once()
+        call_args = mock_cleanup.call_args
+        assert call_args[0][0] is config  # first positional arg is config
+
+    def test_cleanup_plugins_runs_full_lifecycle(self) -> None:
+        """Verify _cleanup_plugins runs on_complete + close for all plugin types."""
         from elspeth.contracts.plugin_context import PluginContext
 
         db = make_landscape_db()
