@@ -102,7 +102,7 @@ class SanitizedDatabaseUrl:
     def __post_init__(self) -> None:
         """Enforce invariant: sanitized_url must not contain credentials."""
         parsed = urlparse(self.sanitized_url)
-        if parsed.password:
+        if parsed.password is not None:
             raise ValueError(
                 "SanitizedDatabaseUrl cannot contain a password in the URL. Use SanitizedDatabaseUrl.from_raw_url() to sanitize first."
             )

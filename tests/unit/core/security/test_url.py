@@ -199,6 +199,35 @@ class TestSanitizedDatabaseUrl:
         with pytest.raises(AttributeError):
             result.sanitized_url = "hacked"  # type: ignore[misc]
 
+    def test_direct_construction_rejects_empty_password(self) -> None:
+        """Direct construction with user:@host (empty password) is rejected.
+
+        Bug: elspeth-ec29cad8c2. urlparse().password returns "" for user:@host,
+        which is falsy. The old `if parsed.password:` guard missed it, allowing
+        credential-bearing URLs to bypass the sanitization invariant.
+        """
+        with pytest.raises(ValueError, match="cannot contain a password"):
+            SanitizedDatabaseUrl(
+                sanitized_url="postgresql://user:@host/db",
+                fingerprint=None,
+            )
+
+    def test_direct_construction_rejects_full_password(self) -> None:
+        """Direct construction with user:pass@host is rejected."""
+        with pytest.raises(ValueError, match="cannot contain a password"):
+            SanitizedDatabaseUrl(
+                sanitized_url="postgresql://user:secret@host/db",
+                fingerprint=None,
+            )
+
+    def test_direct_construction_accepts_no_password(self) -> None:
+        """Direct construction without password is accepted."""
+        result = SanitizedDatabaseUrl(
+            sanitized_url="postgresql://user@host/db",
+            fingerprint=None,
+        )
+        assert result.sanitized_url == "postgresql://user@host/db"
+
 
 class TestSanitizedWebhookUrl:
     """Tests for SanitizedWebhookUrl."""

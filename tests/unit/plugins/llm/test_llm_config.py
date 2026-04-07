@@ -87,6 +87,59 @@ class TestLLMConfigBase:
         assert config.queries is None
 
 
+class TestLLMConfigResponseFieldValidation:
+    """Verify LLMConfig rejects invalid response_field names.
+
+    Bug: elspeth-23d1bcff6b. LLMConfig accepts invalid response_field names
+    even though downstream schema builders require a non-empty Python identifier.
+    Bad config survives model validation and only explodes later.
+    """
+
+    def test_empty_response_field_rejected(self) -> None:
+        """Empty string response_field is rejected."""
+        with pytest.raises(ValidationError, match="response_field"):
+            LLMConfig(
+                provider="azure",
+                template="hello",
+                schema_config=_OBSERVED_SCHEMA,
+                required_input_fields=[],
+                response_field="",
+            )
+
+    def test_whitespace_response_field_rejected(self) -> None:
+        """Whitespace-only response_field is rejected."""
+        with pytest.raises(ValidationError, match="response_field"):
+            LLMConfig(
+                provider="azure",
+                template="hello",
+                schema_config=_OBSERVED_SCHEMA,
+                required_input_fields=[],
+                response_field="   ",
+            )
+
+    def test_non_identifier_response_field_rejected(self) -> None:
+        """Non-Python-identifier response_field is rejected (e.g., 'my-field')."""
+        with pytest.raises(ValidationError, match="response_field"):
+            LLMConfig(
+                provider="azure",
+                template="hello",
+                schema_config=_OBSERVED_SCHEMA,
+                required_input_fields=[],
+                response_field="my-field",
+            )
+
+    def test_valid_identifier_response_field_accepted(self) -> None:
+        """Valid Python identifier response_field is accepted."""
+        config = LLMConfig(
+            provider="azure",
+            template="hello",
+            schema_config=_OBSERVED_SCHEMA,
+            required_input_fields=[],
+            response_field="llm_output",
+        )
+        assert config.response_field == "llm_output"
+
+
 # ---------------------------------------------------------------------------
 # Provider-specific configs
 # ---------------------------------------------------------------------------

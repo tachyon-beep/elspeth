@@ -114,6 +114,13 @@ class LLMQueryResult:
             raise ValueError("LLMQueryResult.content must be non-empty (whitespace-only rejected)")
         if not self.model or not self.model.strip():
             raise ValueError("LLMQueryResult.model must be non-empty")
+        if not isinstance(self.usage, TokenUsage):
+            raise TypeError(f"LLMQueryResult.usage must be a TokenUsage instance, got {type(self.usage).__name__}")
+        if self.finish_reason is not None and not isinstance(self.finish_reason, (FinishReason, UnrecognizedFinishReason)):
+            raise TypeError(
+                f"LLMQueryResult.finish_reason must be FinishReason, UnrecognizedFinishReason, or None, "
+                f"got {type(self.finish_reason).__name__}: {self.finish_reason!r}"
+            )
 
 
 @runtime_checkable

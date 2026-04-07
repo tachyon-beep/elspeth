@@ -106,6 +106,16 @@ class LLMConfig(TransformDataConfig):
             max_capacity_retry_seconds=self.max_capacity_retry_seconds,
         )
 
+    @field_validator("response_field")
+    @classmethod
+    def validate_response_field(cls, v: str) -> str:
+        """Validate response_field is a valid Python identifier."""
+        if not v or not v.strip():
+            raise ValueError("response_field must be non-empty")
+        if not v.isidentifier():
+            raise ValueError(f"response_field must be a valid Python identifier, got {v!r}")
+        return v
+
     @field_validator("template")
     @classmethod
     def validate_template(cls, v: str) -> str:

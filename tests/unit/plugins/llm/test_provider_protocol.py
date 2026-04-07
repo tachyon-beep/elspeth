@@ -84,6 +84,43 @@ class TestLLMQueryResult:
         )
         assert result.finish_reason is None
 
+    def test_post_init_rejects_wrong_usage_type(self) -> None:
+        """usage must be a TokenUsage instance, not a dict or other type.
+
+        Bug: elspeth-42cb31ce6f. Without runtime validation, a caller
+        passing a dict or None for usage succeeds at construction and
+        explodes later when the transform accesses .prompt_tokens.
+        """
+        with pytest.raises(TypeError, match="usage"):
+            LLMQueryResult(
+                content="hello",
+                usage={"prompt_tokens": 10, "completion_tokens": 5},  # type: ignore[arg-type]
+                model="gpt-4o",
+            )
+
+    def test_post_init_rejects_none_usage(self) -> None:
+        """usage=None must be rejected — TokenUsage.unknown() exists for that."""
+        with pytest.raises(TypeError, match="usage"):
+            LLMQueryResult(
+                content="hello",
+                usage=None,  # type: ignore[arg-type]
+                model="gpt-4o",
+            )
+
+    def test_post_init_rejects_wrong_finish_reason_type(self) -> None:
+        """finish_reason must be ParsedFinishReason, not a raw string.
+
+        Bug: elspeth-42cb31ce6f. A raw string like "stop" bypasses the
+        FinishReason enum and UnrecognizedFinishReason sentinel.
+        """
+        with pytest.raises(TypeError, match="finish_reason"):
+            LLMQueryResult(
+                content="hello",
+                usage=TokenUsage.unknown(),
+                model="gpt-4o",
+                finish_reason="stop",  # type: ignore[arg-type] — must use FinishReason.STOP
+            )
+
 
 class TestFinishReason:
     """Tests for FinishReason StrEnum."""
