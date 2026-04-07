@@ -92,6 +92,8 @@ export function BlobManager({ onUseAsInput }: BlobManagerProps) {
             fontSize: 12,
             padding: "2px 8px",
             cursor: "pointer",
+            minHeight: 36,
+            minWidth: 44,
           }}
           aria-label="Upload file"
         >

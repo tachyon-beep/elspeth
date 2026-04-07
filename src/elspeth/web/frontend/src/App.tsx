@@ -106,34 +106,8 @@ function App() {
           <Layout
             sidebar={<SessionSidebar />}
             chat={<ChatPanel />}
-            inspector={<InspectorPanel />}
+            inspector={<InspectorPanel onOpenSecrets={openSecrets} />}
           />
-          {/* Settings gear — always visible in the top-right corner */}
-          <button
-            onClick={openSecrets}
-            aria-label="Open secrets settings"
-            title="API Keys & Secrets"
-            style={{
-              position: "absolute",
-              top: 8,
-              right: 8,
-              zIndex: 50,
-              background: "var(--color-surface-raised, var(--color-surface))",
-              border: "1px solid var(--color-border)",
-              borderRadius: 6,
-              cursor: "pointer",
-              color: "var(--color-text-muted)",
-              fontSize: 16,
-              width: 44,
-              height: 44,
-              display: "flex",
-              alignItems: "center",
-              justifyContent: "center",
-              boxShadow: "0 1px 3px rgba(0,0,0,0.08)",
-            }}
-          >
-            ⚙
-          </button>
         </div>
 
         {showSecrets && <SecretsPanel onClose={closeSecrets} />}

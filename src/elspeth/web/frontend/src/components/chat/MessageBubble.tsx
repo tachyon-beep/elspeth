@@ -175,8 +175,8 @@ export function MessageBubble({ message, isComposing, onRetry, onFork }: Message
                 disabled={!editContent.trim()}
                 style={{
                   border: "none",
-                  backgroundColor: "var(--color-primary)",
-                  color: "var(--color-on-primary, #fff)",
+                  backgroundColor: "var(--color-accent)",
+                  color: "var(--color-text-inverse)",
                   borderRadius: 4,
                   cursor: editContent.trim() ? "pointer" : "not-allowed",
                   fontSize: 12,

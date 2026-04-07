@@ -20,7 +20,7 @@
   /* ── Text ────────────────────────────────────────────────────────────────── */
   --color-text:              #dff0ee;
   --color-text-secondary:    #8db8b8;
-  --color-text-muted:        #79a8a8;
+  --color-text-muted:        #89b8b8;
   --color-text-inverse:      #ffffff;
 
   /* ── Borders — teal-tinted ───────────────────────────────────────────────── */
@@ -31,7 +31,7 @@
   --color-bubble-user:           rgba(40, 130, 100, 0.14);
   --color-bubble-user-border:    rgba(40, 130, 100, 0.35);
   --color-bubble-assistant:      rgba(255, 255, 255, 0.05);
-  --color-bubble-assistant-border: rgba(255, 255, 255, 0.10);
+  --color-bubble-assistant-border: rgba(255, 255, 255, 0.18);
   --color-bubble-system:         rgba(255, 255, 255, 0.03);
 
   /* ── Component type badges — functional colour coding ────────────────────── */
@@ -78,7 +78,7 @@
   --opacity-dimmed: 0.35;
 
   /* ── Scrollbar — teal-tinted ─────────────────────────────────────────────── */
-  --color-scrollbar-track:       transparent;
+  --color-scrollbar-track:       var(--color-bg);
   --color-scrollbar-thumb:       rgba(143, 200, 200, 0.15);
   --color-scrollbar-thumb-hover: rgba(143, 200, 200, 0.28);
 
@@ -336,6 +336,26 @@ summary:focus-visible {
   transition: background-color var(--transition-normal);
 }
 
+/* Pulse dot for active-run indicator in session sidebar. */
+@keyframes pulse-dot {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.3;
+  }
+}
+
+.run-indicator-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background-color: var(--color-status-running);
+  flex-shrink: 0;
+  animation: pulse-dot 1.5s ease-in-out infinite;
+}
+
 /* Spinner for button loading states (Validate, etc.) */
 @keyframes spin {
   from {
@@ -375,9 +395,15 @@ summary:focus-visible {
     opacity: 0.6;
   }
 
+  .run-indicator-dot {
+    animation: none;
+    opacity: 1;
+  }
+
   .progress-bar-complete {
     transition: none;
   }
+
 }
 
 /* ---------------------------------------------------------------------------
@@ -459,25 +485,40 @@ summary:focus-visible {
   background-color: rgba(122, 154, 154, 0.15);
   color: var(--color-status-pending);
 }
+.status-badge-pending::before {
+  content: "\25CB "; /* ○ hollow circle */
+}
 
 .status-badge-running {
   background-color: rgba(97, 218, 255, 0.15);
   color: var(--color-status-running);
+}
+.status-badge-running::before {
+  content: "\21BB "; /* ↻ clockwise arrow */
 }
 
 .status-badge-completed {
   background-color: rgba(20, 176, 174, 0.15);
   color: var(--color-status-completed);
 }
+.status-badge-completed::before {
+  content: "\2713 "; /* ✓ checkmark */
+}
 
 .status-badge-failed {
   background-color: rgba(232, 86, 83, 0.15);
   color: var(--color-status-failed);
 }
+.status-badge-failed::before {
+  content: "\2717 "; /* ✗ cross */
+}
 
 .status-badge-cancelled {
   background-color: rgba(227, 132, 68, 0.15);
   color: var(--color-status-cancelled);
+}
+.status-badge-cancelled::before {
+  content: "\2014 "; /* — em dash */
 }
 
 /* ---------------------------------------------------------------------------
@@ -732,6 +773,12 @@ summary:focus-visible {
   background-color: var(--color-focus-ring);
   opacity: 0.5;
   transition: background-color var(--transition-normal);
+}
+
+.resize-handle:focus-visible {
+  background-color: var(--color-focus-ring);
+  opacity: 0.6;
+  outline: none; /* the bar itself IS the indicator */
 }
 
 /* ---------------------------------------------------------------------------

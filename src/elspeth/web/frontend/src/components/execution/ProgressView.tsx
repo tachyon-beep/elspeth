@@ -10,12 +10,15 @@
 // - WebSocket disconnect banner with reconnect status
 // ============================================================================
 
+import { useState } from "react";
 import { useExecutionStore } from "@/stores/executionStore";
 import { useWebSocket } from "@/hooks/useWebSocket";
+import { ConfirmDialog } from "@/components/common/ConfirmDialog";
 
 export function ProgressView() {
   const { progress, wsDisconnected, activeRunId } = useWebSocket();
   const cancel = useExecutionStore((s) => s.cancel);
+  const [showCancelConfirm, setShowCancelConfirm] = useState(false);
 
   if (!progress || !activeRunId) return null;
 
@@ -63,11 +66,7 @@ export function ProgressView() {
         </span>
         {!isTerminal && (
           <button
-            onClick={() => {
-              if (window.confirm("Cancel the running pipeline? This cannot be undone.")) {
-                cancel(activeRunId);
-              }
-            }}
+            onClick={() => setShowCancelConfirm(true)}
             aria-label="Cancel pipeline execution"
             className="btn btn-danger"
             style={{
@@ -79,6 +78,20 @@ export function ProgressView() {
           </button>
         )}
       </div>
+
+      {showCancelConfirm && (
+        <ConfirmDialog
+          title="Cancel pipeline"
+          message="Cancel the running pipeline? This cannot be undone."
+          confirmLabel="Cancel pipeline"
+          variant="danger"
+          onConfirm={() => {
+            cancel(activeRunId);
+            setShowCancelConfirm(false);
+          }}
+          onCancel={() => setShowCancelConfirm(false)}
+        />
+      )}
 
       {/* Progress bar -- indeterminate mode (no percentage, animated stripe) */}
       <div

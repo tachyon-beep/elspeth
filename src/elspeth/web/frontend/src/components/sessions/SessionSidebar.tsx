@@ -5,6 +5,7 @@
 import { useState, useCallback } from "react";
 import { useSession } from "@/hooks/useSession";
 import { useAuth } from "@/hooks/useAuth";
+import { useExecutionStore } from "@/stores/executionStore";
 import { ConfirmDialog } from "@/components/common/ConfirmDialog";
 import type { Session } from "@/types/index";
 
@@ -29,8 +30,17 @@ export function SessionSidebar() {
   const { sessions, activeSessionId, createSession, selectSession, archiveSession } =
     useSession();
   const { user, logout } = useAuth();
+  const activeRunId = useExecutionStore((s) => s.activeRunId);
+  const progress = useExecutionStore((s) => s.progress);
+  const hasActiveRun =
+    !!activeRunId &&
+    !!progress &&
+    progress.status !== "completed" &&
+    progress.status !== "cancelled" &&
+    progress.status !== "failed";
   const [isCreating, setIsCreating] = useState(false);
   const [archiveTarget, setArchiveTarget] = useState<Session | null>(null);
+  const [filter, setFilter] = useState("");
 
   const handleCreateSession = useCallback(async () => {
     if (isCreating) return;
@@ -74,6 +84,29 @@ export function SessionSidebar() {
         </span>
       </div>
 
+      {/* Session filter — visible when there are enough sessions to warrant it */}
+      {sessions.length > 3 && (
+        <div style={{ padding: "6px 8px", borderBottom: "1px solid var(--color-border)" }}>
+          <input
+            type="text"
+            value={filter}
+            onChange={(e) => setFilter(e.target.value)}
+            placeholder="Filter sessions..."
+            aria-label="Filter sessions"
+            style={{
+              width: "100%",
+              padding: "4px 8px",
+              fontSize: 12,
+              border: "1px solid var(--color-border)",
+              borderRadius: 4,
+              backgroundColor: "var(--color-surface-elevated)",
+              color: "var(--color-text)",
+              boxSizing: "border-box",
+            }}
+          />
+        </div>
+      )}
+
       {/* Session list */}
       <nav
         style={{ flex: 1, overflowY: "auto" }}
@@ -92,7 +125,11 @@ export function SessionSidebar() {
           </div>
         ) : (
           <ul style={{ listStyle: "none", margin: 0, padding: 0 }}>
-            {sessions.map((session) => {
+            {sessions
+              .filter((s) =>
+                !filter || s.title.toLowerCase().includes(filter.toLowerCase()),
+              )
+              .map((session) => {
               const isActive = session.id === activeSessionId;
               return (
                 <li
@@ -151,6 +188,13 @@ export function SessionSidebar() {
                       <span style={{ overflow: "hidden", textOverflow: "ellipsis" }}>
                         {session.title}
                       </span>
+                      {isActive && hasActiveRun && (
+                        <span
+                          className="run-indicator-dot"
+                          title="Pipeline running"
+                          aria-label="Pipeline running"
+                        />
+                      )}
                     </div>
                     <div
                       style={{
@@ -261,6 +305,11 @@ export function SessionSidebar() {
               borderRadius: 4,
               whiteSpace: "nowrap",
               flexShrink: 0,
+              minHeight: 36,
+              minWidth: 44,
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
             }}
           >
             Sign out

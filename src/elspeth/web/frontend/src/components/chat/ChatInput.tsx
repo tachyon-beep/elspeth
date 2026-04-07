@@ -190,6 +190,8 @@ export function ChatInput({ onSend, disabled, inputRef, onToggleBlobManager, sho
             borderRadius: 6,
             cursor: canSend ? "pointer" : "not-allowed",
             fontSize: 14,
+            minWidth: 44,
+            minHeight: 44,
           }}
         >
           Send

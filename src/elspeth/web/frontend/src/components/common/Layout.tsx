@@ -90,6 +90,28 @@ export function Layout({ sidebar, chat, inspector }: LayoutProps) {
     document.body.style.userSelect = "none";
   }, []);
 
+  const handleTouchStart = useCallback((_e: React.TouchEvent) => {
+    isResizing.current = true;
+
+    function handleTouchMove(ev: TouchEvent) {
+      if (!isResizing.current) return;
+      const touch = ev.touches[0];
+      if (!touch) return;
+      const newWidth = window.innerWidth - touch.clientX;
+      const maxWidth = window.innerWidth * 0.5;
+      setInspectorWidth(Math.max(MIN_INSPECTOR_WIDTH, Math.min(newWidth, maxWidth)));
+    }
+
+    function handleTouchEnd() {
+      isResizing.current = false;
+      document.removeEventListener("touchmove", handleTouchMove);
+      document.removeEventListener("touchend", handleTouchEnd);
+    }
+
+    document.addEventListener("touchmove", handleTouchMove, { passive: true });
+    document.addEventListener("touchend", handleTouchEnd);
+  }, []);
+
   const sidebarWidth = sidebarCollapsed
     ? SIDEBAR_COLLAPSED_WIDTH
     : SIDEBAR_EXPANDED_WIDTH;
@@ -191,6 +213,7 @@ export function Layout({ sidebar, chat, inspector }: LayoutProps) {
         <div
           className="resize-handle"
           onMouseDown={handleMouseDown}
+          onTouchStart={handleTouchStart}
           role="separator"
           aria-orientation="vertical"
           aria-label="Resize inspector panel"
