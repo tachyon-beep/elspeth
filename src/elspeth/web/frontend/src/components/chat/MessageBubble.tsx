@@ -106,8 +106,8 @@ export function MessageBubble({ message, isComposing, onRetry, onFork }: Message
             className="bubble-copy-btn"
             style={{
               position: "absolute",
-              top: 4,
-              right: 4,
+              top: 0,
+              right: 0,
               background: "none",
               border: "none",
               cursor: "pointer",
@@ -115,6 +115,11 @@ export function MessageBubble({ message, isComposing, onRetry, onFork }: Message
               color: "var(--color-text-muted)",
               padding: "2px 6px",
               borderRadius: 4,
+              minWidth: 44,
+              minHeight: 44,
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
               opacity: copied ? 1 : undefined,
             }}
           >
@@ -195,8 +200,8 @@ export function MessageBubble({ message, isComposing, onRetry, onFork }: Message
             className="bubble-edit-btn"
             style={{
               position: "absolute",
-              top: 4,
-              right: 28,
+              top: 0,
+              right: 44,
               background: "none",
               border: "none",
               cursor: "pointer",
@@ -204,6 +209,11 @@ export function MessageBubble({ message, isComposing, onRetry, onFork }: Message
               color: "var(--color-text-muted)",
               padding: "2px 6px",
               borderRadius: 4,
+              minWidth: 44,
+              minHeight: 44,
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
             }}
           >
             &#9998;
@@ -275,7 +285,10 @@ export function MessageBubble({ message, isComposing, onRetry, onFork }: Message
                 cursor: "pointer",
                 fontSize: 12,
                 color: "var(--color-text-muted)",
-                padding: 0,
+                padding: "4px 8px",
+                minHeight: 44,
+                display: "inline-flex",
+                alignItems: "center",
               }}
             >
               {toolsExpanded ? "\u25BC" : "\u25B6"} Tool calls (

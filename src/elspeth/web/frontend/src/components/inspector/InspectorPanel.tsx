@@ -12,6 +12,7 @@
 // ============================================================================
 
 import { useState, useCallback, useEffect, useRef } from "react";
+import { ConfirmDialog } from "@/components/common/ConfirmDialog";
 import { useSessionStore } from "@/stores/sessionStore";
 import { useExecutionStore } from "@/stores/executionStore";
 import { SpecView } from "./SpecView";
@@ -65,6 +66,7 @@ function VersionSelector({
 }: VersionSelectorProps) {
   const [isOpen, setIsOpen] = useState(false);
   const [focusedIndex, setFocusedIndex] = useState(-1);
+  const [revertTarget, setRevertTarget] = useState<CompositionStateVersion | null>(null);
   const containerRef = useRef<HTMLDivElement>(null);
   const triggerRef = useRef<HTMLButtonElement>(null);
   const listRef = useRef<HTMLUListElement>(null);
@@ -173,12 +175,13 @@ function VersionSelector({
   }
 
   function handleRevert(entry: CompositionStateVersion) {
-    if (
-      window.confirm(
-        `Revert pipeline to version ${entry.version}? This will replace the current composition.`,
-      )
-    ) {
-      onRevert(entry.id, entry.version);
+    setRevertTarget(entry);
+  }
+
+  function confirmRevert() {
+    if (revertTarget) {
+      onRevert(revertTarget.id, revertTarget.version);
+      setRevertTarget(null);
       close();
     }
   }
@@ -318,6 +321,16 @@ function VersionSelector({
           </ul>
         </div>
       )}
+      {revertTarget && (
+        <ConfirmDialog
+          title="Revert pipeline"
+          message={`Revert pipeline to version ${revertTarget.version}? This will replace the current composition.`}
+          confirmLabel="Revert"
+          variant="danger"
+          onConfirm={confirmRevert}
+          onCancel={() => setRevertTarget(null)}
+        />
+      )}
     </div>
   );
 }
@@ -448,7 +461,7 @@ export function InspectorPanel() {
               />
             )}
 
-            {/* Validation status dot */}
+            {/* Validation status indicator — shape + color for accessibility */}
             {hasCompositionContent && (
               <span
                 aria-label={
@@ -466,19 +479,28 @@ export function InspectorPanel() {
                       : "Validation failed"
                 }
                 style={{
-                  display: "inline-block",
-                  width: 8,
-                  height: 8,
-                  borderRadius: "50%",
-                  backgroundColor:
+                  display: "inline-flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  width: 16,
+                  height: 16,
+                  fontSize: 12,
+                  lineHeight: 1,
+                  flexShrink: 0,
+                  color:
                     validationResult === null
                       ? "var(--color-warning)"
                       : validationResult.is_valid
                         ? "var(--color-success)"
                         : "var(--color-error)",
-                  flexShrink: 0,
                 }}
-              />
+              >
+                {validationResult === null
+                  ? "\u25CB"   /* ○ hollow circle — not validated */
+                  : validationResult.is_valid
+                    ? "\u2713" /* ✓ checkmark — passed */
+                    : "\u26A0" /* ⚠ warning — failed */}
+              </span>
             )}
           </div>
 

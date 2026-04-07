@@ -181,7 +181,7 @@ export function CatalogDrawer({ isOpen, onClose }: CatalogDrawerProps) {
             onClick={onClose}
             aria-label="Close plugin catalog"
             className="btn"
-            style={{ padding: "4px 8px", fontSize: 14, lineHeight: 1 }}
+            style={{ padding: "4px 8px", fontSize: 14, lineHeight: 1, minWidth: 44, minHeight: 44 }}
           >
             ×
           </button>

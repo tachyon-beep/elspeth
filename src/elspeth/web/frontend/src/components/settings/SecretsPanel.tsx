@@ -1,5 +1,5 @@
 // src/components/settings/SecretsPanel.tsx
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import { useSecretsStore } from "@/stores/secretsStore";
 import type { SecretInventoryItem } from "@/types/api";
 
@@ -71,6 +71,7 @@ export function SecretsPanel({ onClose }: SecretsPanelProps) {
   const [name, setName] = useState("");
   const [value, setValue] = useState("");
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const modalRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     loadSecrets();
@@ -84,6 +85,37 @@ export function SecretsPanel({ onClose }: SecretsPanelProps) {
     document.addEventListener("keydown", handleKeyDown);
     return () => document.removeEventListener("keydown", handleKeyDown);
   }, [onClose]);
+
+  // Focus trap: constrain Tab within the modal
+  useEffect(() => {
+    const modal = modalRef.current;
+    if (!modal) return;
+
+    // Focus the first input on mount
+    const firstInput = modal.querySelector<HTMLElement>("input, button");
+    firstInput?.focus();
+
+    function handleTab(e: KeyboardEvent) {
+      if (e.key !== "Tab" || !modal) return;
+      const focusable = modal.querySelectorAll<HTMLElement>(
+        'button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])',
+      );
+      if (focusable.length === 0) return;
+
+      const first = focusable[0];
+      const last = focusable[focusable.length - 1];
+
+      if (e.shiftKey && document.activeElement === first) {
+        e.preventDefault();
+        last.focus();
+      } else if (!e.shiftKey && document.activeElement === last) {
+        e.preventDefault();
+        first.focus();
+      }
+    }
+    document.addEventListener("keydown", handleTab);
+    return () => document.removeEventListener("keydown", handleTab);
+  }, []);
 
   const handleSubmit = useCallback(
     async (e: React.FormEvent) => {
@@ -123,6 +155,7 @@ export function SecretsPanel({ onClose }: SecretsPanelProps) {
 
       {/* Modal */}
       <div
+        ref={modalRef}
         role="dialog"
         aria-modal="true"
         aria-label="Secrets settings"
@@ -171,6 +204,11 @@ export function SecretsPanel({ onClose }: SecretsPanelProps) {
               lineHeight: 1,
               padding: "2px 6px",
               borderRadius: 4,
+              minWidth: 44,
+              minHeight: 44,
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
             }}
           >
             ×
@@ -390,6 +428,11 @@ export function SecretsPanel({ onClose }: SecretsPanelProps) {
                           lineHeight: 1,
                           borderRadius: 3,
                           flexShrink: 0,
+                          minWidth: 44,
+                          minHeight: 44,
+                          display: "flex",
+                          alignItems: "center",
+                          justifyContent: "center",
                         }}
                       >
                         ×

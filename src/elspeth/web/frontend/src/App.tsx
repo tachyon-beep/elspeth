@@ -62,6 +62,7 @@ function App() {
           height: "100%",
         }}
       >
+        <h1 className="sr-only">ELSPETH Pipeline Composer</h1>
         {systemStatus && !systemStatus.composer_available && (
           <div
             role="alert"
@@ -123,8 +124,8 @@ function App() {
               cursor: "pointer",
               color: "var(--color-text-muted)",
               fontSize: 16,
-              width: 32,
-              height: 32,
+              width: 44,
+              height: 44,
               display: "flex",
               alignItems: "center",
               justifyContent: "center",

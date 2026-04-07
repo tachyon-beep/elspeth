@@ -20,7 +20,7 @@
   /* ── Text ────────────────────────────────────────────────────────────────── */
   --color-text:              #dff0ee;
   --color-text-secondary:    #8db8b8;
-  --color-text-muted:        #6a9898;
+  --color-text-muted:        #79a8a8;
   --color-text-inverse:      #ffffff;
 
   /* ── Borders — teal-tinted ───────────────────────────────────────────────── */
@@ -59,13 +59,13 @@
   --color-info-border:       rgba(97, 218, 255, 0.25);
 
   /* ── Interactive / accent ────────────────────────────────────────────────── */
-  --color-accent:            #29b480;
+  --color-accent:            #1a7a52;
   --color-focus-ring:        #c390f9;
-  --color-btn-primary-bg:    #1c7c58;
-  --color-btn-primary-bg-hover: #206850;
+  --color-btn-primary-bg:    #16664a;
+  --color-btn-primary-bg-hover: #1a5840;
   --color-link:              #61daff;
-  --color-highlight:         rgba(41, 180, 128, 0.10);
-  --color-selected-ring:     rgba(41, 180, 128, 0.50);
+  --color-highlight:         rgba(26, 122, 82, 0.14);
+  --color-selected-ring:     rgba(26, 122, 82, 0.55);
 
   /* ── Status badges ───────────────────────────────────────────────────────── */
   --color-status-pending:    #7a9a9a;
@@ -639,17 +639,21 @@ summary:focus-visible {
   font-size: var(--font-size-sm);
 }
 
-/* Copy button on message bubbles — hidden until hover, always visible on touch */
-.bubble-copy-btn {
+/* Action buttons on message bubbles — hidden until hover, always visible on touch */
+.bubble-copy-btn,
+.bubble-edit-btn {
   opacity: 0;
   transition: opacity 0.15s ease;
 }
 .bubble:hover .bubble-copy-btn,
-.bubble-copy-btn:focus-visible {
+.bubble:hover .bubble-edit-btn,
+.bubble-copy-btn:focus-visible,
+.bubble-edit-btn:focus-visible {
   opacity: 1;
 }
 @media (hover: none) {
-  .bubble-copy-btn {
+  .bubble-copy-btn,
+  .bubble-edit-btn {
     opacity: 0.6;
   }
 }
@@ -672,6 +676,11 @@ summary:focus-visible {
   cursor: pointer;
   font-size: 12px;
   padding: 2px 6px;
+  min-width: 44px;
+  min-height: 44px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
   color: var(--color-text-muted);
 }
 .blob-action-btn:hover {
@@ -731,4 +740,74 @@ summary:focus-visible {
 .no-select {
   user-select: none;
   -webkit-user-select: none;
+}
+
+/* ---------------------------------------------------------------------------
+   Confirm Dialog (replacement for window.confirm)
+   --------------------------------------------------------------------------- */
+.confirm-dialog-backdrop {
+  position: fixed;
+  inset: 0;
+  background-color: rgba(0, 0, 0, 0.45);
+  z-index: 200;
+}
+
+.confirm-dialog {
+  position: fixed;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  z-index: 201;
+  width: 400px;
+  max-width: calc(100vw - 32px);
+  background-color: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-lg);
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.25);
+  padding: var(--space-xl);
+}
+
+.confirm-dialog-title {
+  margin: 0 0 var(--space-sm);
+  font-size: var(--font-size-lg);
+  font-weight: 600;
+  color: var(--color-text);
+}
+
+.confirm-dialog-message {
+  margin: 0 0 var(--space-xl);
+  font-size: var(--font-size-base);
+  color: var(--color-text-secondary);
+  line-height: var(--line-height-normal);
+}
+
+.confirm-dialog-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: var(--space-sm);
+}
+
+/* ---------------------------------------------------------------------------
+   High Contrast — respect OS-level contrast preferences
+   --------------------------------------------------------------------------- */
+@media (prefers-contrast: more) {
+  :root {
+    --color-text:           #ffffff;
+    --color-text-secondary: #b0d8d8;
+    --color-text-muted:     #96c0c0;
+    --color-border:         rgba(143, 200, 200, 0.30);
+    --color-border-strong:  rgba(143, 200, 200, 0.50);
+  }
+
+  .type-badge {
+    border-width: 2px;
+  }
+
+  .component-card {
+    border-width: 2px;
+  }
+
+  :focus-visible {
+    outline-width: 3px;
+  }
 }

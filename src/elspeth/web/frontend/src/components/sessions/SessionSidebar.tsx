@@ -5,6 +5,8 @@
 import { useState, useCallback } from "react";
 import { useSession } from "@/hooks/useSession";
 import { useAuth } from "@/hooks/useAuth";
+import { ConfirmDialog } from "@/components/common/ConfirmDialog";
+import type { Session } from "@/types/index";
 
 /** Format a date string as a relative time ("2 min ago", "yesterday"). */
 function relativeTime(dateStr: string): string {
@@ -28,6 +30,7 @@ export function SessionSidebar() {
     useSession();
   const { user, logout } = useAuth();
   const [isCreating, setIsCreating] = useState(false);
+  const [archiveTarget, setArchiveTarget] = useState<Session | null>(null);
 
   const handleCreateSession = useCallback(async () => {
     if (isCreating) return;
@@ -101,7 +104,7 @@ export function SessionSidebar() {
                 >
                   <button
                     onClick={() => selectSession(session.id)}
-                    aria-current={isActive ? "true" : undefined}
+                    aria-current={isActive ? "page" : undefined}
                     aria-label={`Session: ${session.title}, ${relativeTime(session.updated_at)}`}
                     style={{
                       display: "block",
@@ -160,18 +163,15 @@ export function SessionSidebar() {
                     </div>
                   </button>
                   <button
-                    onClick={() => {
-                      if (window.confirm(`Archive session "${session.title}"?`)) {
-                        archiveSession(session.id);
-                      }
-                    }}
+                    onClick={() => setArchiveTarget(session)}
                     aria-label={`Archive session: ${session.title}`}
                     title="Archive session"
                     style={{
                       display: "flex",
                       alignItems: "center",
                       justifyContent: "center",
-                      width: 32,
+                      width: 44,
+                      minHeight: 44,
                       border: "none",
                       backgroundColor: "transparent",
                       color: "var(--color-text-muted)",
@@ -266,6 +266,19 @@ export function SessionSidebar() {
             Sign out
           </button>
         </div>
+      )}
+      {archiveTarget && (
+        <ConfirmDialog
+          title="Archive session"
+          message={`Archive session "${archiveTarget.title}"? You can restore it later.`}
+          confirmLabel="Archive"
+          variant="danger"
+          onConfirm={() => {
+            archiveSession(archiveTarget.id);
+            setArchiveTarget(null);
+          }}
+          onCancel={() => setArchiveTarget(null)}
+        />
       )}
     </aside>
   );

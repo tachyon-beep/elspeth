@@ -17,8 +17,11 @@ import type { BlobMetadata } from "@/types/api";
 export function ChatPanel() {
   const messages = useSessionStore((s) => s.messages);
   const activeSessionId = useSessionStore((s) => s.activeSessionId);
+  const sessions = useSessionStore((s) => s.sessions);
   const clearError = useSessionStore((s) => s.clearError);
   const forkFromMessage = useSessionStore((s) => s.forkFromMessage);
+
+  const activeSessionTitle = sessions.find((s) => s.id === activeSessionId)?.title;
   const { sendMessage, retryMessage, isComposing, error } = useComposer();
 
   const messagesEndRef = useRef<HTMLDivElement>(null);
@@ -125,6 +128,27 @@ export function ChatPanel() {
       role="main"
       aria-label="Chat panel"
     >
+      {/* Session title header */}
+      {activeSessionTitle && (
+        <div
+          style={{
+            padding: "8px 16px",
+            borderBottom: "1px solid var(--color-border)",
+            fontSize: 13,
+            fontWeight: 600,
+            color: "var(--color-text)",
+            overflow: "hidden",
+            textOverflow: "ellipsis",
+            whiteSpace: "nowrap",
+            flexShrink: 0,
+          }}
+        >
+          <h2 style={{ margin: 0, fontSize: "inherit", fontWeight: "inherit" }}>
+            {activeSessionTitle}
+          </h2>
+        </div>
+      )}
+
       {/* Error banner */}
       {error && (
         <div

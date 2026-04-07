@@ -2,6 +2,7 @@
 import {
   useState,
   useCallback,
+  useRef,
   type KeyboardEvent,
   type ChangeEvent,
 } from "react";
@@ -19,6 +20,7 @@ interface ChatInputProps {
 export function ChatInput({ onSend, disabled, inputRef, onToggleBlobManager, showBlobManager }: ChatInputProps) {
   const [text, setText] = useState("");
   const [uploadStatus, setUploadStatus] = useState<string | null>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
   const activeSessionId = useSessionStore((s) => s.activeSessionId);
   const uploadBlob = useBlobStore((s) => s.uploadBlob);
 
@@ -126,14 +128,22 @@ export function ChatInput({ onSend, disabled, inputRef, onToggleBlobManager, sho
               cursor: "pointer",
               fontSize: 16,
               color: "var(--color-text)",
+              minWidth: 44,
+              minHeight: 44,
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
             }}
           >
             <span aria-hidden="true">{"\uD83D\uDCC1"}</span>
           </button>
         )}
 
-        {/* File upload button */}
-        <label
+        {/* File upload button — using a visible button that clicks a hidden input */}
+        <button
+          type="button"
+          onClick={() => fileInputRef.current?.click()}
+          disabled={!activeSessionId}
           style={{
             padding: "8px 10px",
             backgroundColor: "transparent",
@@ -144,20 +154,24 @@ export function ChatInput({ onSend, disabled, inputRef, onToggleBlobManager, sho
             color: "var(--color-text)",
             display: "flex",
             alignItems: "center",
+            justifyContent: "center",
+            minWidth: 44,
+            minHeight: 44,
           }}
           title="Upload file"
           aria-label="Upload file"
         >
           <span aria-hidden="true">{"\uD83D\uDCCE"}</span>
-          <input
-            type="file"
-            onChange={handleFileSelect}
-            disabled={!activeSessionId}
-            style={{ display: "none" }}
-            aria-hidden="true"
-            tabIndex={-1}
-          />
-        </label>
+        </button>
+        <input
+          ref={fileInputRef}
+          type="file"
+          onChange={handleFileSelect}
+          disabled={!activeSessionId}
+          style={{ display: "none" }}
+          aria-hidden="true"
+          tabIndex={-1}
+        />
 
         {/* Send button */}
         <button
