@@ -14,6 +14,7 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from elspeth.contracts import RunStatus
+from elspeth.core.landscape import LandscapeRecorder
 from elspeth.core.landscape.database import LandscapeDB
 from elspeth.engine.orchestrator.core import Orchestrator
 from tests.fixtures.landscape import make_landscape_db
@@ -58,7 +59,7 @@ class TestResumeFinalizesAsFailed:
         settings = MagicMock()
 
         # Mock recorder to capture finalize_run calls
-        mock_recorder = MagicMock()
+        mock_recorder = MagicMock(spec=LandscapeRecorder)
         mock_recorder.get_source_schema.return_value = '{"mode": "observed"}'
         mock_recorder.get_run_contract.return_value = MagicMock()
 
