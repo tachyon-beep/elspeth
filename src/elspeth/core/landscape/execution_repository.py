@@ -1217,11 +1217,14 @@ class ExecutionRepository:
 
         timestamp = now()
 
-        # Single transaction: UPDATE + SELECT-back for atomicity.
+        # Atomic conditional UPDATE: guard against already-terminal status in the
+        # WHERE clause (same TOCTOU-safe pattern as update_batch_status).
+        terminal_values = [s.value for s in _TERMINAL_BATCH_STATUSES]
         with self._db.connection() as conn:
             update_result = conn.execute(
                 batches_table.update()
                 .where(batches_table.c.batch_id == batch_id)
+                .where(batches_table.c.status.notin_(terminal_values))
                 .values(
                     status=status,
                     trigger_type=trigger_type,
@@ -1231,6 +1234,13 @@ class ExecutionRepository:
                 )
             )
             if update_result.rowcount == 0:
+                # Distinguish "not found" from "already terminal".
+                existing = conn.execute(select(batches_table.c.status).where(batches_table.c.batch_id == batch_id)).fetchone()
+                if existing is not None:
+                    raise AuditIntegrityError(
+                        f"Cannot complete batch {batch_id}: current status {existing.status!r} is already terminal. "
+                        f"Terminal batches are immutable."
+                    )
                 raise AuditIntegrityError(
                     f"complete_batch: zero rows affected for batch_id={batch_id} — target row does not exist (audit data corruption)"
                 )

@@ -1176,6 +1176,21 @@ class TestBatchLifecycleExtended:
         with pytest.raises(AuditIntegrityError, match="zero rows affected"):
             repo.complete_batch("nonexistent-batch", BatchStatus.COMPLETED)
 
+    def test_complete_batch_already_terminal_raises(self) -> None:
+        """Cannot overwrite a terminal batch via complete_batch().
+
+        Regression test for elspeth-28e747cb1e: complete_batch() lacked the
+        terminal-state guard that update_batch_status() had, allowing a
+        completed batch to be silently rewritten (audit immutability violation).
+        """
+        _db, repo, _rec, tok = _make_repo_with_token()
+        batch = repo.create_batch("run-1", "agg-1")
+        repo.add_batch_member(batch.batch_id, tok, 0)
+        repo.complete_batch(batch.batch_id, BatchStatus.COMPLETED, trigger_type=TriggerType.COUNT, trigger_reason="c=1")
+
+        with pytest.raises(AuditIntegrityError, match="already terminal"):
+            repo.complete_batch(batch.batch_id, BatchStatus.FAILED, trigger_type=TriggerType.TIMEOUT, trigger_reason="t=5")
+
     def test_update_batch_status_basic(self) -> None:
         """update_batch_status transitions from DRAFT to EXECUTING."""
         _db, repo, _rec, tok = _make_repo_with_token()
