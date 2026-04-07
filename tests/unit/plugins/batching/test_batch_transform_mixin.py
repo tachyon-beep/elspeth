@@ -10,7 +10,8 @@ These tests verify:
 from __future__ import annotations
 
 import threading
-from collections.abc import Generator
+import time
+from collections.abc import Callable, Generator
 from typing import Any
 
 import pytest
@@ -27,6 +28,15 @@ from elspeth.plugins.infrastructure.batching.ports import CollectorOutputPort, O
 from elspeth.testing import make_pipeline_row
 from tests.fixtures.factories import make_context
 from tests.fixtures.landscape import make_recorder
+
+
+def _wait_for(condition: Callable[[], bool], *, timeout: float = 3.0, poll: float = 0.05, desc: str = "condition") -> None:
+    """Poll until condition is true or timeout expires."""
+    deadline = time.monotonic() + timeout
+    while not condition():
+        if time.monotonic() > deadline:
+            raise TimeoutError(f"Timed out after {timeout}s waiting for {desc}")
+        time.sleep(poll)
 
 
 def _make_recorder() -> LandscapeRecorder:
@@ -636,10 +646,8 @@ class TestReleaseLoopStaleTokenDetection:
             ctx = make_context(landscape=_make_recorder(), token=token, state_id="state-0")
             transform.accept({"data": "test"}, ctx)
 
-            # Wait for processing to complete and release loop to handle the failure
-            import time
-
-            time.sleep(1.0)
+            # Wait for release loop to process the failure and emit ExceptionResult
+            _wait_for(lambda: len(port.results) >= 1, timeout=3.0, desc="ExceptionResult emit")
 
             # The second emit (ExceptionResult fallback) should have succeeded.
             # The port's results list should have the ExceptionResult with the
@@ -680,9 +688,8 @@ class TestReleaseLoopStaleTokenDetection:
                 ctx = make_context(landscape=_make_recorder(), token=token, state_id=f"state-{i}")
                 transform.accept({"idx": i}, ctx)
 
-            import time
-
-            time.sleep(2.0)
+            # Wait for all 3 rows to be processed and emitted
+            _wait_for(lambda: len(port.results) >= 3, timeout=5.0, desc="all 3 row results")
 
             # Row 0 should have emitted successfully
             # Row 1 should have failed then emitted ExceptionResult
@@ -744,10 +751,8 @@ class TestReleaseLoopCrashesOnBrokenPort:
         ctx = make_context(landscape=_make_recorder(), token=token, state_id="state-0")
         transform.accept({"data": "test"}, ctx)
 
-        # Give the release thread time to process the result and crash
-        import time
-
-        time.sleep(2.0)
+        # Wait for release thread to crash from FrameworkBugError
+        transform._batch_release_thread.join(timeout=3.0)
 
         # Release thread should have died (FrameworkBugError), not silently continued
         assert not transform._batch_release_thread.is_alive(), (
@@ -793,9 +798,7 @@ class TestShutdownRaisesOnThreadTimeout:
         transform.accept({"data": "test"}, ctx)
 
         # Wait for release thread to crash from broken port
-        import time
-
-        time.sleep(2.0)
+        transform._batch_release_thread.join(timeout=3.0)
         assert not transform._batch_release_thread.is_alive()
 
         # Shutdown should complete without raising — thread is already dead
