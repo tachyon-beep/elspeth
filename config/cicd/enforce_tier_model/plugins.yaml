@@ -305,6 +305,11 @@ allow_hits:
   reason: Optional ChromaDB provider registration — ImportError means chromadb is not installed ([rag] extra absent); provider is silently omitted from registry
   safety: Unknown provider raises ValueError at config validation time with list of available providers; no silent data loss
   expires: null
+- key: plugins/infrastructure/clients/retrieval/chroma.py:R1:ChromaSearchProvider:__init__:fp=483f1ffed4043062
+  owner: architecture
+  reason: Tier 3 boundary — Chroma collection metadata is external/persisted data; .get("hnsw:space") safely detects distance function mismatch
+  safety: Missing key returns None (no mismatch check); mismatch raises RetrievalError immediately
+  expires: null
 - key: plugins/infrastructure/clients/retrieval/chroma.py:R5:ChromaSearchProvider:search:fp=9fbe7bf78a431c5d
   owner: bugfix
   reason: Tier 3 boundary type check — ChromaDB SDK may return non-string documents from corrupt index; isinstance guards pipeline from non-string content
