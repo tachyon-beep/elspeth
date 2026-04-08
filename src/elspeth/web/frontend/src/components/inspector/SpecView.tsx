@@ -29,7 +29,7 @@
 
 import { useState, useCallback } from "react";
 import { useSessionStore } from "@/stores/sessionStore";
-import type { NodeSpec, EdgeSpec, CompositionState } from "@/types/index";
+import type { NodeSpec, EdgeSpec, CompositionState, ValidationEntryDTO } from "@/types/index";
 
 // ── Type badge CSS class mapping ─────────────────────────────────────────────
 // Uses .type-badge + .type-badge-{type} classes from App.css
@@ -163,7 +163,7 @@ function ConnectionIndicator({
 
 // ── SuggestionBanner — collapsible info banner ──────────────────────────────
 
-function SuggestionBanner({ suggestions }: { suggestions: string[] }) {
+function SuggestionBanner({ suggestions }: { suggestions: ValidationEntryDTO[] }) {
   const [expanded, setExpanded] = useState(suggestions.length <= 2);
 
   return (
@@ -203,9 +203,9 @@ function SuggestionBanner({ suggestions }: { suggestions: string[] }) {
       </div>
       {expanded && (
         <ul style={{ margin: 0, paddingLeft: 16 }}>
-          {suggestions.map((msg, i) => (
+          {suggestions.map((entry, i) => (
             <li key={i} style={{ marginBottom: 2 }}>
-              {msg}
+              <strong>{entry.component}:</strong> {entry.message}
             </li>
           ))}
         </ul>
@@ -334,9 +334,9 @@ export function SpecView() {
           >
             <div style={{ fontWeight: 600, marginBottom: 4 }}>Warnings</div>
             <ul style={{ margin: 0, paddingLeft: 16 }}>
-              {compositionState.validation_warnings.map((msg, i) => (
+              {compositionState.validation_warnings.map((entry, i) => (
                 <li key={i} style={{ marginBottom: 2 }}>
-                  {msg}
+                  <strong>{entry.component}:</strong> {entry.message}
                 </li>
               ))}
             </ul>

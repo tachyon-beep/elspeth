@@ -59,6 +59,17 @@ class MessageWithStateResponse(BaseModel):
     state: CompositionStateResponse | None = None
 
 
+class ValidationEntryResponse(BaseModel):
+    """Structured validation entry preserving component attribution.
+
+    Mirrors ``ValidationEntry.to_dict()`` from the composer state module.
+    """
+
+    component: str
+    message: str
+    severity: str
+
+
 class CompositionStateResponse(BaseModel):
     """Response for composition state endpoints."""
 
@@ -72,8 +83,8 @@ class CompositionStateResponse(BaseModel):
     metadata: Any | None = None
     is_valid: bool
     validation_errors: list[str] | None = None
-    validation_warnings: list[str] | None = None
-    validation_suggestions: list[str] | None = None
+    validation_warnings: list[ValidationEntryResponse] | None = None
+    validation_suggestions: list[ValidationEntryResponse] | None = None
     derived_from_state_id: str | None = None
     created_at: datetime
 

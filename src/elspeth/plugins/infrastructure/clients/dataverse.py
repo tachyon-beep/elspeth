@@ -23,7 +23,7 @@ import structlog
 from pydantic import BaseModel, Field, model_validator
 
 from elspeth.contracts.freeze import freeze_fields
-from elspeth.core.security.web import SSRFSafeRequest, validate_url_for_ssrf
+from elspeth.core.security.web import NetworkError, SSRFBlockedError, SSRFSafeRequest, validate_url_for_ssrf
 from elspeth.plugins.infrastructure.clients.fingerprinting import (
     filter_response_headers,
     fingerprint_headers,
@@ -344,7 +344,7 @@ class DataverseClient:
         # Layer 2: IP-pinning validation (prevents DNS rebinding)
         try:
             return validate_url_for_ssrf(url)
-        except Exception as exc:
+        except (SSRFBlockedError, NetworkError) as exc:
             raise DataverseClientError(
                 f"URL {url!r} failed IP-pinning SSRF validation: {exc}",
                 retryable=False,

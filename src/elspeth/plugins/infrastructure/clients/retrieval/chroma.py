@@ -143,7 +143,7 @@ class ChromaSearchProvider:
             self._collection = self._client.get_collection(
                 name=config.collection,
             )
-        except Exception as exc:
+        except (chromadb.errors.ChromaError, ConnectionError, OSError) as exc:
             raise RetrievalError(
                 f"Chroma collection {config.collection!r} does not exist or is "
                 f"unreachable. Retrieval requires a pre-populated collection — "

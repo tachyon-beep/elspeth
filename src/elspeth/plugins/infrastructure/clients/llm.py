@@ -15,7 +15,7 @@ import structlog
 
 from elspeth.contracts import CallStatus, CallType
 from elspeth.contracts.call_data import LLMCallError, LLMCallRequest, LLMCallResponse
-from elspeth.contracts.errors import AuditIntegrityError, FrameworkBugError, PluginRetryableError
+from elspeth.contracts.errors import TIER_1_ERRORS, PluginRetryableError
 from elspeth.contracts.events import ExternalCallCompleted
 from elspeth.contracts.freeze import deep_freeze
 from elspeth.contracts.token_usage import TokenUsage
@@ -351,7 +351,7 @@ class AuditedLLMClient(AuditedClientBase):
                         token_usage=None,
                     )
                 )
-            except (FrameworkBugError, AuditIntegrityError):
+            except TIER_1_ERRORS:
                 raise  # System bugs and audit integrity violations must crash
             except Exception as tel_err:
                 if isinstance(tel_err, (TypeError, AttributeError, KeyError, NameError)):
@@ -506,7 +506,7 @@ class AuditedLLMClient(AuditedClientBase):
                 error_msg = "LLM returned null content (likely content-filtered by provider)"
                 try:
                     raw_response = response.model_dump()
-                except Exception as dump_exc:
+                except (TypeError, ValueError, RecursionError, AttributeError) as dump_exc:
                     # model_dump() failed — still record the call to prevent
                     # call-index gaps, then re-raise.
                     self._recorder.record_call(
@@ -576,7 +576,7 @@ class AuditedLLMClient(AuditedClientBase):
                             token_usage=usage if usage.has_data else None,
                         )
                     )
-                except (FrameworkBugError, AuditIntegrityError):
+                except TIER_1_ERRORS:
                     raise  # System bugs and audit integrity violations must crash
                 except Exception as tel_err:
                     if isinstance(tel_err, (TypeError, AttributeError, KeyError, NameError)):
@@ -632,7 +632,7 @@ class AuditedLLMClient(AuditedClientBase):
         # NOTE: model_dump() is guaranteed present - we require openai>=2.15 in pyproject.toml
         try:
             raw_response = response.model_dump()
-        except Exception as dump_exc:
+        except (TypeError, ValueError, RecursionError, AttributeError) as dump_exc:
             # The LLM call happened — record it before re-raising so the
             # audit trail reflects the consumed tokens even though we can't
             # fully serialize the response.
@@ -694,7 +694,7 @@ class AuditedLLMClient(AuditedClientBase):
                     token_usage=usage_snapshot,
                 )
             )
-        except (FrameworkBugError, AuditIntegrityError):
+        except TIER_1_ERRORS:
             raise  # System bugs and audit integrity violations must crash
         except Exception as tel_err:
             if isinstance(tel_err, (TypeError, AttributeError, KeyError, NameError)):

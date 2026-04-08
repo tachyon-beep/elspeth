@@ -105,6 +105,45 @@ export function GraphView() {
     return map;
   }, [validationResult]);
 
+  // Build a map of component_id → tooltip string with error/warning messages
+  const nodeMessageMap = useMemo(() => {
+    const map: Record<string, string> = {};
+    if (!validationResult) return map;
+
+    // Collect messages per component_id
+    const errors: Record<string, string[]> = {};
+    const warnings: Record<string, string[]> = {};
+
+    for (const err of validationResult.errors) {
+      if (err.component_id) {
+        (errors[err.component_id] ??= []).push(err.message);
+      }
+    }
+
+    if (validationResult.warnings) {
+      for (const warn of validationResult.warnings) {
+        if (warn.component_id) {
+          (warnings[warn.component_id] ??= []).push(warn.message);
+        }
+      }
+    }
+
+    // Merge into tooltip strings
+    const allIds = new Set([...Object.keys(errors), ...Object.keys(warnings)]);
+    for (const id of allIds) {
+      const parts: string[] = [];
+      if (errors[id]) {
+        parts.push(`Errors:\n${errors[id].map((m) => `- ${m}`).join("\n")}`);
+      }
+      if (warnings[id]) {
+        parts.push(`Warnings:\n${warnings[id].map((m) => `- ${m}`).join("\n")}`);
+      }
+      map[id] = parts.join("\n\n");
+    }
+
+    return map;
+  }, [validationResult]);
+
   const { nodes, edges } = useMemo(() => {
     const hasContent =
       compositionState &&
@@ -122,12 +161,16 @@ export function GraphView() {
       badgeBg: string,
       badgeColor: string,
       validationStatus?: "valid" | "warning" | "error",
+      validationTooltip?: string,
     ): Node {
       return {
         id,
         data: {
           label: (
-            <div style={{ display: "flex", flexDirection: "column", gap: 4, padding: "8px 12px" }}>
+            <div
+              style={{ display: "flex", flexDirection: "column", gap: 4, padding: "8px 12px" }}
+              title={validationTooltip ?? (validationStatus === "valid" ? "Valid" : undefined)}
+            >
               <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
                 <span style={{
                   fontSize: 10,
@@ -158,11 +201,13 @@ export function GraphView() {
                       flexShrink: 0,
                     }}
                     title={
-                      validationStatus === "error"
-                        ? "Has validation errors"
-                        : validationStatus === "warning"
-                          ? "Has warnings"
-                          : "Valid"
+                      validationTooltip
+                        ? validationTooltip
+                        : validationStatus === "error"
+                          ? "Has validation errors"
+                          : validationStatus === "warning"
+                            ? "Has warnings"
+                            : "Valid"
                     }
                   />
                 )}
@@ -205,6 +250,7 @@ export function GraphView() {
           "rgba(77, 184, 154, 0.15)",
           "#4db89a",
           nodeValidationMap["source"],
+          nodeMessageMap["source"],
         ),
       );
     }
@@ -219,6 +265,7 @@ export function GraphView() {
           BADGE_BACKGROUNDS[node.node_type],
           BADGE_COLORS[node.node_type],
           nodeValidationMap[node.id],
+          nodeMessageMap[node.id],
         ),
       );
     }
@@ -233,6 +280,7 @@ export function GraphView() {
           "rgba(224, 112, 64, 0.15)",
           "#e07040",
           nodeValidationMap[output.name],
+          nodeMessageMap[output.name],
         ),
       );
     }
@@ -251,7 +299,7 @@ export function GraphView() {
     }));
 
     return layoutGraph(rfNodes, rfEdges);
-  }, [compositionState, nodeValidationMap]);
+  }, [compositionState, nodeValidationMap, nodeMessageMap]);
 
   // Empty state — must match the hasContent check above so that a
   // source-to-sink pipeline (zero transform nodes) still renders.

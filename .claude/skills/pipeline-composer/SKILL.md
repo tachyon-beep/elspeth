@@ -128,6 +128,61 @@ Every mutation tool returns validation state:
 | `dataverse` | Upsert to Dataverse | yes | yes | `environment_url`, `entity`, `field_mapping`, `alternate_key` |
 | `chroma_sink` | Store in ChromaDB | depends | depends | `collection`, `mode`, `document_field`, `id_field` |
 
+## Plugin Quick Reference
+
+### Sources
+
+**csv** — Read delimited files (CSV, TSV) into rows.
+Minimal config: `{"path": "data.csv"}`
+Gotchas:
+- Headers are auto-normalized to identifiers (`"First Name"` becomes `first_name`) — use `field_mapping` if you need specific names.
+
+**json** — Read a JSON array of objects or a JSONL file.
+Minimal config: `{"path": "data.json"}`
+Gotchas:
+- If your JSON is wrapped (e.g., `{"results": [...]}`), you must set `data_key` to the array key — without it, the source sees one object, not many rows.
+
+**text** — Read a text file, one line per row.
+Minimal config: `{"path": "input.txt", "column": "line"}`
+Gotchas:
+- `column` is required — it names the single output field. Omitting it is a validation error.
+
+### Transforms
+
+**web_scrape** — Fetch and extract content from a URL in each row.
+Minimal config: `{"url_field": "url"}`
+Gotchas:
+- You must specify `url_field` — the name of the row field containing the URL to fetch. There is no default.
+
+**llm** — Send row data to an LLM using a Jinja2 template.
+Minimal config: `{"template": "Summarise: {{ row['text'] }}", "provider": "openrouter", "model": "anthropic/claude-3.5-sonnet"}`
+Gotchas:
+- The response is always a **string** in `llm_response` (or custom `response_field`), even if the model returns JSON. Use `json_explode` after this step to parse structured output.
+- Templates use `{{ row['field_name'] }}` syntax. List all referenced fields in `required_input_fields`.
+
+**keyword_filter** — Route rows based on keyword presence in a field.
+Minimal config: `{"field": "text", "keywords": ["urgent", "critical"]}`
+Gotchas:
+- Matching is **case-insensitive by default**. Set `case_sensitive: true` if you need exact case matching.
+
+**json_explode** — Expand a nested JSON string field into top-level row fields.
+Minimal config: `{"field": "llm_response"}`
+Gotchas:
+- The `field` must contain a valid JSON string. Typically used after an `llm` step — make sure the LLM template instructs the model to return JSON.
+
+**field_mapper** — Rename fields in each row.
+Minimal config: `{"mapping": {"old_name": "new_name"}}`
+
+### Sinks
+
+**csv** — Write rows to a CSV file.
+Minimal config: `{"path": "output.csv"}`
+
+**json** — Write rows to a JSON or JSONL file.
+Minimal config: `{"path": "output.json"}`
+Gotchas:
+- Default format is `json` (single array). Set `format: "jsonl"` for one record per line — important for large outputs or streaming consumers.
+
 ## Source Semantics
 
 **csv**: Headers normalized to identifiers. Use `columns` for headerless files, `field_mapping` for overrides.

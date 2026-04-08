@@ -141,6 +141,16 @@ export interface PipelineMetadata {
  * - Rendered by the frontend inspector panel
  * - Converted to YAML for execution
  */
+/**
+ * A structured validation entry with component attribution.
+ * Matches backend ValidationEntryResponse schema.
+ */
+export interface ValidationEntryDTO {
+  component: string;
+  message: string;
+  severity: string;
+}
+
 export interface CompositionState {
   id: string;
   version: number;
@@ -150,8 +160,8 @@ export interface CompositionState {
   outputs: OutputSpec[];
   metadata: PipelineMetadata;
   validation_errors?: string[];
-  validation_warnings?: string[];
-  validation_suggestions?: string[];
+  validation_warnings?: ValidationEntryDTO[];
+  validation_suggestions?: ValidationEntryDTO[];
 }
 
 /** A version history entry for CompositionState. */

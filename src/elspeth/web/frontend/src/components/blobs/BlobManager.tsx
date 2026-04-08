@@ -191,6 +191,7 @@ export function BlobManager({ onUseAsInput }: BlobManagerProps) {
                   <BlobRow
                     key={blob.id}
                     blob={blob}
+                    sessionId={activeSessionId}
                     onDownload={handleDownload}
                     onDelete={handleDelete}
                     onUseAsInput={onUseAsInput}

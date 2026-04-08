@@ -549,6 +549,21 @@ export async function downloadBlobContent(
   return { data, filename };
 }
 
+/** Fetch blob content as text for inline preview. */
+export async function previewBlobContent(
+  sessionId: string,
+  blobId: string,
+): Promise<string> {
+  const response = await fetch(
+    `/api/sessions/${sessionId}/blobs/${blobId}/content`,
+    { headers: authHeaders() },
+  );
+  if (!response.ok) {
+    await parseResponse<never>(response);
+  }
+  return response.text();
+}
+
 /** Delete a blob and its backing file. */
 export async function deleteBlob(
   sessionId: string,

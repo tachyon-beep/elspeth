@@ -50,7 +50,11 @@ describe("SpecView validation banners", () => {
     useSessionStore.setState({
       compositionState: makeState({
         validation_warnings: [
-          "Output 'orphan' has no incoming edge — it will never receive data.",
+          {
+            component: "output.orphan",
+            message: "Output 'orphan' has no incoming edge — it will never receive data.",
+            severity: "medium",
+          },
         ],
       }),
     });
@@ -67,7 +71,11 @@ describe("SpecView validation banners", () => {
     useSessionStore.setState({
       compositionState: makeState({
         validation_suggestions: [
-          "Consider adding error routing — rows that fail transforms currently have no explicit destination.",
+          {
+            component: "pipeline",
+            message: "Consider adding error routing — rows that fail transforms currently have no explicit destination.",
+            severity: "low",
+          },
         ],
       }),
     });

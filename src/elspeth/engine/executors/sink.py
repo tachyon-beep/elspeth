@@ -21,6 +21,7 @@ from elspeth.contracts.audit import TokenRef
 from elspeth.contracts.diversion import SinkWriteResult
 from elspeth.contracts.enums import NodeStateStatus, RoutingMode
 from elspeth.contracts.errors import (
+    TIER_1_ERRORS,
     AuditIntegrityError,
     FrameworkBugError,
     OrchestrationInvariantError,
@@ -130,6 +131,8 @@ class SinkExecutor:
                 duration_ms=0.0,
                 error=cleanup_error,
             )
+        except TIER_1_ERRORS:
+            raise  # Audit corruption during cleanup is higher priority than original error
         except Exception as cleanup_exc:
             logger.warning(
                 "Best-effort cleanup of %d OPEN states failed during %s crash — "
@@ -255,7 +258,7 @@ class SinkExecutor:
             batch_contract = tokens[0].row_data.contract
             for token in tokens[1:]:
                 batch_contract = batch_contract.merge(token.row_data.contract)
-        except (FrameworkBugError, AuditIntegrityError):
+        except TIER_1_ERRORS:
             raise
         except Exception as e:
             merge_duration_ms = (time.perf_counter() - contract_merge_start) * 1000
@@ -282,7 +285,7 @@ class SinkExecutor:
                     input_data=input_dict,
                 )
                 all_states.append((token, state))
-        except (FrameworkBugError, AuditIntegrityError) as e:
+        except TIER_1_ERRORS as e:
             if all_states:
                 self._best_effort_cleanup(all_states, e, "begin_node_state")
             raise
@@ -299,6 +302,8 @@ class SinkExecutor:
                         duration_ms=0.0,
                         error=begin_error,
                     )
+                except TIER_1_ERRORS:
+                    raise  # Audit corruption during cleanup is higher priority than original error
                 except Exception as cleanup_exc:
                     logger.warning(
                         "Cleanup of %d OPEN states also failed — original error preserved. Cleanup error: %s: %s",
@@ -372,7 +377,7 @@ class SinkExecutor:
                     "artifact_path": artifact_info.path_or_uri,
                     "content_hash": artifact_info.content_hash,
                 }
-        except (FrameworkBugError, AuditIntegrityError) as e:
+        except TIER_1_ERRORS as e:
             self._best_effort_cleanup(all_states, e, "sink_write")
             raise
         except Exception as e:
@@ -448,7 +453,7 @@ class SinkExecutor:
                 for token, _ in primary_tokens:
                     try:
                         on_token_written(token)
-                    except (FrameworkBugError, AuditIntegrityError):
+                    except TIER_1_ERRORS:
                         raise
                     except Exception as exc:
                         raise AuditIntegrityError(
@@ -513,7 +518,7 @@ class SinkExecutor:
                     self._validate_sink_input(failsink, enriched_rows, skip_schema=True)
                     failsink_write_result = failsink.write(enriched_rows, ctx)
                     failsink.flush()
-                except (FrameworkBugError, AuditIntegrityError):
+                except TIER_1_ERRORS:
                     raise
                 except Exception as e:
                     fs_write_error = ExecutionError(
@@ -557,7 +562,7 @@ class SinkExecutor:
                             input_data=input_dict,
                         )
                         failsink_states.append((token, state))
-                except (FrameworkBugError, AuditIntegrityError) as e:
+                except TIER_1_ERRORS as e:
                     # Best-effort: close partially-opened failsink states + primary divert states
                     all_open = failsink_states + [(t, s) for t, _, s in primary_divert_states]
                     if all_open:
@@ -641,7 +646,7 @@ class SinkExecutor:
                             duration_ms=0.0,
                         )
                         completed_failsink_indices.add(loop_idx)
-                except (FrameworkBugError, AuditIntegrityError) as e:
+                except TIER_1_ERRORS as e:
                     # Best-effort: close remaining OPEN states before crash.
                     remaining = [(t, s) for i, (t, _, s) in enumerate(primary_divert_states) if i not in completed_primary_indices] + [
                         (t, s) for i, (t, s) in enumerate(failsink_states) if i not in completed_failsink_indices
@@ -703,7 +708,7 @@ class SinkExecutor:
                     for token, _idx, _state in primary_divert_states:
                         try:
                             on_token_written(token)
-                        except (FrameworkBugError, AuditIntegrityError):
+                        except TIER_1_ERRORS:
                             raise
                         except Exception as exc:
                             raise AuditIntegrityError(
@@ -747,7 +752,7 @@ class SinkExecutor:
                     for token, _idx, _state in primary_divert_states:
                         try:
                             on_token_written(token)
-                        except (FrameworkBugError, AuditIntegrityError):
+                        except TIER_1_ERRORS:
                             raise
                         except Exception as exc:
                             raise AuditIntegrityError(

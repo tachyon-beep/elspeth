@@ -14,7 +14,7 @@ from elspeth.contracts.enums import (
     NodeStateStatus,
     RoutingMode,
 )
-from elspeth.contracts.errors import OrchestrationInvariantError, PluginContractViolation
+from elspeth.contracts.errors import TIER_1_ERRORS, OrchestrationInvariantError, PluginContractViolation
 from elspeth.contracts.plugin_context import PluginContext
 from elspeth.contracts.types import NodeID, StepResolver
 from elspeth.core.canonical import stable_hash
@@ -300,6 +300,8 @@ class TransformExecutor:
                         result = transform.process(token.row_data, ctx)
 
                     duration_ms = (time.perf_counter() - start) * 1000
+                except TIER_1_ERRORS:
+                    raise  # Tier 1 errors must crash — never record as row FAILED
                 except Exception as e:
                     duration_ms = (time.perf_counter() - start) * 1000
                     # Record failure

@@ -25,7 +25,7 @@ from unittest.mock import patch
 import httpx
 import pytest
 
-from elspeth.core.security.web import SSRFSafeRequest
+from elspeth.core.security.web import SSRFBlockedError, SSRFSafeRequest
 from elspeth.plugins.infrastructure.clients.dataverse import (
     DataverseAuthConfig,
     DataverseClient,
@@ -652,7 +652,7 @@ class TestPaginateOdata:
         with (
             patch(
                 "elspeth.plugins.infrastructure.clients.dataverse.validate_url_for_ssrf",
-                side_effect=ValueError("DNS rebinding detected"),
+                side_effect=SSRFBlockedError("DNS rebinding detected"),
             ),
             pytest.raises(DataverseClientError, match="IP-pinning SSRF validation"),
         ):

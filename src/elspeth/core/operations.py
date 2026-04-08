@@ -167,8 +167,7 @@ def track_operation(
                 duration_ms=duration_ms,
             )
         except Exception as db_error:
-            from elspeth.contracts import FrameworkBugError
-            from elspeth.contracts.errors import AuditIntegrityError
+            from elspeth.contracts.errors import TIER_1_ERRORS
 
             # Audit integrity: if we can't record the operation, the run must fail.
             # A successful operation with missing audit record violates Tier-1 trust.
@@ -182,11 +181,11 @@ def track_operation(
                     "original_error": error_msg,
                 },
             )
-            # FrameworkBugError and AuditIntegrityError indicate Tier 1 violations
-            # (corruption, bugs in our code). These must ALWAYS propagate regardless
-            # of whether there was an original exception — audit corruption is
-            # categorically worse than any operation-level error.
-            if isinstance(db_error, (FrameworkBugError, AuditIntegrityError)):
+            # Tier 1 errors (corruption, framework bugs, invariant violations)
+            # must ALWAYS propagate regardless of whether there was an original
+            # exception — audit corruption is categorically worse than any
+            # operation-level error.
+            if isinstance(db_error, TIER_1_ERRORS):
                 raise db_error from original_exception
             # If there was an original exception, let it propagate (DB error is logged).
             # If the operation succeeded but audit failed, we MUST raise the DB error.

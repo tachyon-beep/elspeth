@@ -152,6 +152,38 @@ class TestCleanupPluginsReRaisesSystemExceptions:
     system-level exceptions.
     """
 
+    def test_source_code_has_reraise_guard(self) -> None:
+        """Verify record_cleanup_error re-raises Tier 1 errors via TIER_1_ERRORS.
+
+        Structural test: inspect the source to confirm the isinstance check
+        with TIER_1_ERRORS exists inside record_cleanup_error.
+        """
+        import ast
+        import inspect
+        import textwrap
+
+        source = inspect.getsource(Orchestrator._cleanup_plugins)
+        # Dedent because getsource preserves indentation from the class
+        source = textwrap.dedent(source)
+        tree = ast.parse(source)
+
+        # Look for TIER_1_ERRORS usage in the function
+        assert "TIER_1_ERRORS" in source, "_cleanup_plugins must use TIER_1_ERRORS guard in record_cleanup_error"
+
+        # Find a Raise inside an If that checks isinstance with TIER_1_ERRORS
+        found_reraise = False
+        for node in ast.walk(tree):
+            if isinstance(node, ast.If):
+                if_source = ast.dump(node)
+                if "isinstance" in if_source and "TIER_1_ERRORS" in if_source:
+                    # Check that the if body contains a raise
+                    for child in ast.walk(node):
+                        if isinstance(child, ast.Raise):
+                            found_reraise = True
+                            break
+
+        assert found_reraise, "Expected isinstance(error, TIER_1_ERRORS) guard with raise inside record_cleanup_error"
+
     def test_framework_bug_error_propagates_through_cleanup(self) -> None:
         """FrameworkBugError from plugin.on_complete() must propagate, not be swallowed."""
         from elspeth.contracts import FrameworkBugError

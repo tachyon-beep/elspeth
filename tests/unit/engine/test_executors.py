@@ -4335,11 +4335,10 @@ class TestReRaiseGuardPattern:
                 if isinstance(node, ast.ExceptHandler) and _is_framework_audit_handler(node):
                     count += 1
 
-        # Current count: 15 guards across the codebase.
+        # Current count: ~41 TIER_1_ERRORS guards across the codebase.
         # If this drops, a guard was removed.  Update if legitimately adding more.
-        assert count >= 15, (
-            f"Expected at least 15 re-raise guards, found {count}. "
-            f"A FrameworkBugError/AuditIntegrityError re-raise guard may have been removed."
+        assert count >= 35, (
+            f"Expected at least 35 TIER_1_ERRORS re-raise guards, found {count}. A TIER_1_ERRORS guard may have been removed."
         )
 
 
@@ -4679,7 +4678,7 @@ class TestTransformExecutorBatchPath:
 
 
 def _is_framework_audit_handler(handler: object) -> bool:
-    """Check if an except handler catches (FrameworkBugError, AuditIntegrityError)."""
+    """Check if an except handler catches TIER_1_ERRORS."""
     import ast
 
     if not isinstance(handler, ast.ExceptHandler):
@@ -4688,14 +4687,5 @@ def _is_framework_audit_handler(handler: object) -> bool:
     if handler.type is None:
         return False
 
-    # Match: except (FrameworkBugError, AuditIntegrityError)
-    if isinstance(handler.type, ast.Tuple):
-        names = set()
-        for elt in handler.type.elts:
-            if isinstance(elt, ast.Name):
-                names.add(elt.id)
-            elif isinstance(elt, ast.Attribute):
-                names.add(elt.attr)
-        return names == {"FrameworkBugError", "AuditIntegrityError"}
-
-    return False
+    # Match: except TIER_1_ERRORS (fragile: won't match aliased imports like `as T1E`)
+    return isinstance(handler.type, ast.Name) and handler.type.id == "TIER_1_ERRORS"

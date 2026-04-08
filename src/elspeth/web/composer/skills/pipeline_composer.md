@@ -185,6 +185,63 @@ If the user's intent matches a known pattern, use its safe defaults and build im
 
 ---
 
+## Plugin Quick Reference
+
+### Sources
+
+**csv** — Read delimited files (CSV, TSV) into rows.
+Minimal config: `{"path": "data.csv"}`
+Gotchas:
+- Headers are auto-normalized to identifiers (`"First Name"` becomes `first_name`) — use `field_mapping` if you need specific names.
+
+**json** — Read a JSON array of objects or a JSONL file.
+Minimal config: `{"path": "data.json"}`
+Gotchas:
+- If your JSON is wrapped (e.g., `{"results": [...]}`), you must set `data_key` to the array key — without it, the source sees one object, not many rows.
+
+**text** — Read a text file, one line per row.
+Minimal config: `{"path": "input.txt", "column": "line"}`
+Gotchas:
+- `column` is required — it names the single output field. Omitting it is a validation error.
+
+### Transforms
+
+**web_scrape** — Fetch and extract content from a URL in each row.
+Minimal config: `{"url_field": "url"}`
+Gotchas:
+- You must specify `url_field` — the name of the row field containing the URL to fetch. There is no default.
+
+**llm** — Send row data to an LLM using a Jinja2 template.
+Minimal config: `{"template": "Summarise: {{ row['text'] }}", "provider": "openrouter", "model": "anthropic/claude-3.5-sonnet"}`
+Gotchas:
+- The response is always a **string** in `llm_response` (or custom `response_field`), even if the model returns JSON. Use `json_explode` after this step to parse structured output.
+- Templates use `{{ row['field_name'] }}` syntax. List all referenced fields in `required_input_fields`.
+
+**keyword_filter** — Route rows based on keyword presence in a field.
+Minimal config: `{"field": "text", "keywords": ["urgent", "critical"]}`
+Gotchas:
+- Matching is **case-insensitive by default**. Set `case_sensitive: true` if you need exact case matching.
+
+**json_explode** — Expand a nested JSON string field into top-level row fields.
+Minimal config: `{"field": "llm_response"}`
+Gotchas:
+- The `field` must contain a valid JSON string. Typically used after an `llm` step — make sure the LLM template instructs the model to return JSON.
+
+**field_mapper** — Rename fields in each row.
+Minimal config: `{"mapping": {"old_name": "new_name"}}`
+
+### Sinks
+
+**csv** — Write rows to a CSV file.
+Minimal config: `{"path": "output.csv"}`
+
+**json** — Write rows to a JSON or JSONL file.
+Minimal config: `{"path": "output.json"}`
+Gotchas:
+- Default format is `json` (single array). Set `format: "jsonl"` for one record per line — important for large outputs or streaming consumers.
+
+---
+
 ## Source Semantics Guide
 
 ### How each source maps input to rows
@@ -251,6 +308,7 @@ Schema field format: `"field_name: type"` where type is `str`, `int`, `float`, `
 **Structure:** `text` source → `web_scrape` transform → `llm` transform → `json` sink
 
 **Required inputs:** URL, what to extract (extraction prompt), output fields
+**Ask exactly:** "What URL should I fetch?", "What information should I extract?", "What fields/columns do you want in the output?"
 **Safe defaults:** schema mode `fixed` with `url: str`, LLM temperature `0.0`, json sink with indent 2
 **Caveats:** LLM returns a string — if you need structured JSON fields downstream, the template must instruct the model to return JSON and you may need `json_explode` after the LLM step.
 
@@ -261,6 +319,7 @@ Schema field format: `"field_name: type"` where type is `str`, `int`, `float`, `
 **Structure:** `json` source (search results) → `web_scrape` transform → `llm` transform → `csv` sink
 
 **Required inputs:** Search result data (or URLs), extraction prompt, desired output columns
+**Ask exactly:** "Do you have a file of URLs or search results, or should I expect you to upload one?", "What should I extract from each page?", "What columns do you want in the output?"
 **Safe defaults:** csv sink with headers, LLM temperature `0.0`
 
 ### 3. File → Classify → Route to Sinks
@@ -270,6 +329,7 @@ Schema field format: `"field_name: type"` where type is `str`, `int`, `float`, `
 **Structure:** `csv`/`json` source → `llm` transform (classification prompt) → `gate` (on LLM output) → multiple named sinks
 
 **Required inputs:** Input file, classification categories, what determines each category
+**Ask exactly:** "What file should I read?", "What categories should I sort into?", "How should each category be decided — is there a rule, or should the model decide?"
 **Safe defaults:** Gate with boolean or multi-valued routes, one sink per category
 **Caveats:** Gate condition operates on the `llm_response` field (or custom `response_field`). Ensure the LLM template returns a value the gate can match.
 
@@ -280,6 +340,7 @@ Schema field format: `"field_name: type"` where type is `str`, `int`, `float`, `
 **Structure:** `csv`/`json`/`text` source → `llm` transform (summarisation prompt) → `json` sink
 
 **Required inputs:** Input file, what kind of summary (per-row or aggregate)
+**Ask exactly:** "What file should I read?", "Should I summarise each row individually, or produce one summary of the whole file?"
 **Safe defaults:** LLM temperature `0.0`, json sink
 **Caveats:** For per-row summaries, the LLM processes each row independently. For aggregate summaries, use `batch_stats` or an aggregation node before the LLM step.
 
@@ -290,6 +351,7 @@ Schema field format: `"field_name: type"` where type is `str`, `int`, `float`, `
 **Structure:** `csv`/`json`/`text` source → `llm` transform (extraction template with field list) → `json`/`csv` sink
 
 **Required inputs:** Input file, fields to extract
+**Ask exactly:** "What file should I read?", "What fields do you want to extract from each row?"
 **Safe defaults:** LLM temperature `0.0`, response_field named after the extraction
 **Caveats:** If extracting multiple fields, instruct the LLM to return JSON. Follow with `json_explode` to promote nested fields to row-level columns.
 
@@ -300,6 +362,7 @@ Schema field format: `"field_name: type"` where type is `str`, `int`, `float`, `
 **Structure:** `csv`/`json` source → `azure_content_safety` transform → `gate` (on severity) → `approved` sink + `flagged` sink
 
 **Required inputs:** Input file with text field, severity threshold
+**Ask exactly:** "What file contains the content to check?", "Which field holds the text?", "What severity level should trigger flagging (low, medium, or high)?"
 **Safe defaults:** Gate routes on safety scores, separate sinks for approved/flagged content
 
 ### 7. Batch LLM Extraction Over Rows
@@ -309,6 +372,7 @@ Schema field format: `"field_name: type"` where type is `str`, `int`, `float`, `
 **Structure:** `csv`/`json` source → `llm` transform (row-level template) → `csv`/`json` sink
 
 **Required inputs:** Input file, prompt template referencing row fields, output format
+**Ask exactly:** "What file should I read?", "What should I ask the model to do with each row?", "Do you want the output as a spreadsheet (CSV) or structured data (JSON)?"
 **Safe defaults:** LLM temperature `0.0`, pool_size `1` (increase for throughput)
 **Caveats:** Template uses `{{ row['field_name'] }}` syntax. Ensure `required_input_fields` lists all referenced fields.
 
@@ -319,6 +383,7 @@ Schema field format: `"field_name: type"` where type is `str`, `int`, `float`, `
 **Structure:** `csv`/`json`/`text` source → `rag_retrieval` transform → `llm` transform → `json` sink
 
 **Required inputs:** Input queries, ChromaDB collection name, answer generation prompt
+**Ask exactly:** "What questions or queries should I answer?", "What is the ChromaDB collection name for your documents?", "How should answers be formatted?"
 **Safe defaults:** Retrieval results merged into row, LLM uses retrieved context in template
 
 ### 9. Transform Chain with Error Diversion
@@ -328,6 +393,7 @@ Schema field format: `"field_name: type"` where type is `str`, `int`, `float`, `
 **Structure:** `csv` source → transform A (on_error → `errors` sink) → transform B (on_error → `errors` sink) → `results` sink + `errors` sink
 
 **Required inputs:** Input file, transforms to apply
+**Ask exactly:** "What file should I read?", "What processing steps do you need?", "Should failed rows go to a separate error file?"
 **Safe defaults:** Each transform's on_error routes to a shared error sink
 **Caveats:** Error sink receives the original row plus error metadata. The main pipeline continues with successful rows only.
 
@@ -338,6 +404,7 @@ Schema field format: `"field_name: type"` where type is `str`, `int`, `float`, `
 **Structure:** `csv` source → fork gate → path A transform + path B transform → `coalesce` → `results` sink
 
 **Required inputs:** Input file, what each parallel path does
+**Ask exactly:** "What file should I read?", "What two things do you want done in parallel?", "How should the results be combined?"
 **Safe defaults:** Coalesce policy `merge` (combines fields from both paths)
 **Caveats:** Coalesce requires `branches` (min 2) and `policy`. Fork gate routes to two different connection points.
 

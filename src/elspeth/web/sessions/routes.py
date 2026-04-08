@@ -33,6 +33,7 @@ from elspeth.web.sessions.protocol import (
     SessionRecord,
     SessionServiceProtocol,
 )
+from elspeth.web.composer.tools import redact_source_storage_path
 from elspeth.web.sessions.schemas import (
     ChatMessageResponse,
     CompositionStateResponse,
@@ -45,6 +46,7 @@ from elspeth.web.sessions.schemas import (
     SendMessageRequest,
     SessionResponse,
     UploadResponse,
+    ValidationEntryResponse,
 )
 
 slog = structlog.get_logger()
@@ -89,19 +91,31 @@ def _state_response(
     transient warnings and suggestions are included in the response.
     Historical loads pass None, producing null for these fields.
     """
+    # B4: Redact internal storage paths from blob-backed sources
+    source_data = deep_thaw(state.source)
+    if source_data is not None:
+        redacted = redact_source_storage_path({"source": source_data})
+        source_data = redacted.get("source", source_data)
+
     return CompositionStateResponse(
         id=str(state.id),
         session_id=str(state.session_id),
         version=state.version,
-        source=deep_thaw(state.source),
+        source=source_data,
         nodes=deep_thaw(state.nodes),
         edges=deep_thaw(state.edges),
         outputs=deep_thaw(state.outputs),
         metadata=deep_thaw(state.metadata_),
         is_valid=state.is_valid,
         validation_errors=deep_thaw(state.validation_errors),
-        validation_warnings=[e.message for e in live_validation.warnings] if live_validation is not None else None,
-        validation_suggestions=[e.message for e in live_validation.suggestions] if live_validation is not None else None,
+        validation_warnings=[
+            ValidationEntryResponse(component=e.component, message=e.message, severity=e.severity)
+            for e in live_validation.warnings
+        ] if live_validation is not None else None,
+        validation_suggestions=[
+            ValidationEntryResponse(component=e.component, message=e.message, severity=e.severity)
+            for e in live_validation.suggestions
+        ] if live_validation is not None else None,
         derived_from_state_id=str(state.derived_from_state_id) if state.derived_from_state_id is not None else None,
         created_at=state.created_at,
     )

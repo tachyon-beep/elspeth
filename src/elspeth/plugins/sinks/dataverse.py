@@ -21,7 +21,7 @@ from elspeth.contracts import CallStatus, CallType, Determinism, PluginSchema
 from elspeth.contracts.call_data import RawCallPayload
 from elspeth.contracts.contexts import LifecycleContext, SinkContext
 from elspeth.contracts.diversion import SinkWriteResult
-from elspeth.contracts.errors import AuditIntegrityError, FrameworkBugError
+from elspeth.contracts.errors import TIER_1_ERRORS, AuditIntegrityError
 from elspeth.contracts.events import ExternalCallCompleted
 from elspeth.contracts.results import ArtifactDescriptor
 from elspeth.core.canonical import canonical_json, stable_hash
@@ -301,7 +301,7 @@ class DataverseSink(BaseSink):
                     response_payload=resp_payload,
                 )
             )
-        except (FrameworkBugError, AuditIntegrityError):
+        except TIER_1_ERRORS:
             raise
         except Exception as tel_err:
             logger.warning(

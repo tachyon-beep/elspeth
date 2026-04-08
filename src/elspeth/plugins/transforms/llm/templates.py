@@ -8,7 +8,7 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
 from jinja2 import TemplateSyntaxError, UndefinedError
-from jinja2.exceptions import SecurityError
+from jinja2.exceptions import SecurityError, TemplateRuntimeError
 
 from elspeth.contracts.schema_contract import PipelineRow
 from elspeth.core.canonical import canonical_json
@@ -175,7 +175,7 @@ class PromptTemplate:
             raise TemplateError(f"Undefined variable: {e}") from e
         except SecurityError as e:
             raise TemplateError(f"Sandbox violation: {e}") from e
-        except Exception as e:
+        except (TemplateSyntaxError, TemplateRuntimeError, TypeError, ValueError) as e:
             raise TemplateError(f"Template rendering failed: {e}") from e
 
     def render_with_metadata(
