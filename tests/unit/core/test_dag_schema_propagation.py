@@ -87,6 +87,18 @@ class MockSink:
         pass
 
 
+class MockSinkWithSchema:
+    """Mock sink plugin with schema config."""
+
+    name = "mock_sink_schema"
+    input_schema = None
+    config: ClassVar[dict[str, Any]] = {"schema": {"mode": "observed"}}
+    _on_write_failure: str = "discard"
+
+    def _reset_diversion_log(self) -> None:
+        pass
+
+
 class TestOutputSchemaConfigPropagation:
     """Tests for _output_schema_config propagation to NodeInfo."""
 
@@ -127,8 +139,9 @@ class TestOutputSchemaConfigPropagation:
         assert node_info.output_schema_config.audit_fields == ("field_c", "field_d")
         assert node_info.output_schema_config.is_observed is True
 
-    def test_transform_without_schema_config_has_none(self) -> None:
-        """Verify transforms without _output_schema_config have None in NodeInfo."""
+    def test_shape_preserving_transform_has_output_schema_config(self) -> None:
+        """Transforms without _output_schema_config should still get output_schema_config
+        populated from config['schema'] at construction time."""
         transform = MockTransformWithoutSchemaConfig()
         source = MockSource()
         wired = WiredTransform(
@@ -152,14 +165,14 @@ class TestOutputSchemaConfigPropagation:
             gates=[],
         )
 
-        # Find the transform node
         transform_nodes = [n for n in graph.get_nodes() if n.plugin_name == "mock_transform_no_schema"]
         assert len(transform_nodes) == 1
 
         node_info = transform_nodes[0]
-
-        # output_schema_config should be None since transform doesn't have the attribute
-        assert node_info.output_schema_config is None
+        # Previously None — now populated from config["schema"]
+        assert node_info.output_schema_config is not None
+        assert node_info.output_schema_config.mode == "observed"
+        assert node_info.output_schema_config.guaranteed_fields == ("config_field",)
 
     def test_source_node_has_output_schema_config(self) -> None:
         """Source nodes should have output_schema_config populated from config['schema']."""
@@ -181,6 +194,26 @@ class TestOutputSchemaConfigPropagation:
         assert node_info.output_schema_config is not None
         assert node_info.output_schema_config.mode == "observed"
         assert node_info.output_schema_config.guaranteed_fields == ("source_field",)
+
+    def test_sink_node_has_output_schema_config(self) -> None:
+        """Sink nodes should have output_schema_config populated from config['schema']."""
+        source = MockSource()
+
+        graph = ExecutionGraph.from_plugin_instances(
+            source=source,  # type: ignore[arg-type]
+            source_settings=SourceSettings(plugin=source.name, on_success="output", options={}),
+            transforms=[],
+            sinks={"output": MockSinkWithSchema()},  # type: ignore[dict-item]
+            aggregations={},
+            gates=[],
+        )
+
+        sink_nodes = [n for n in graph.get_nodes() if n.node_type == NodeType.SINK]
+        assert len(sink_nodes) == 1
+
+        node_info = sink_nodes[0]
+        assert node_info.output_schema_config is not None
+        assert node_info.output_schema_config.mode == "observed"
 
 
 class TestGetSchemaConfigFromNodePriority:

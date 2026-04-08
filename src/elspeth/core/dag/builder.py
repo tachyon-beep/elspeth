@@ -170,12 +170,16 @@ def build_execution_graph(
         sink_config = sink.config
         sid = node_id("sink", sink_name, sink_config)
         sink_ids[SinkName(sink_name)] = sid
+        sink_schema_config: SchemaConfig | None = None
+        if "schema" in sink_config:
+            sink_schema_config = SchemaConfig.from_dict(sink_config["schema"])
         graph.add_node(
             sid,
             node_type=NodeType.SINK,
             plugin_name=sink.name,
             config=sink_config,
             input_schema=sink.input_schema,  # SinkProtocol requires this
+            output_schema_config=sink_schema_config,
         )
 
     graph.set_sink_id_map(sink_ids)
@@ -200,6 +204,11 @@ def build_execution_graph(
         # fields but provides no DAG contract.
         _validate_output_schema_contract(transform)
         output_schema_config = transform._output_schema_config
+
+        # Shape-preserving transforms don't compute _output_schema_config.
+        # Parse from config["schema"] so every node has a typed schema.
+        if output_schema_config is None and "schema" in transform_config:
+            output_schema_config = SchemaConfig.from_dict(transform_config["schema"])
 
         graph.add_node(
             tid,
@@ -229,6 +238,10 @@ def build_execution_graph(
         # Same validation for aggregation transforms.
         _validate_output_schema_contract(transform)
         agg_output_schema_config = transform._output_schema_config
+
+        # Aggregation transforms without _output_schema_config: parse from config.
+        if agg_output_schema_config is None and "schema" in transform_config:
+            agg_output_schema_config = SchemaConfig.from_dict(transform_config["schema"])
 
         graph.add_node(
             aid,
