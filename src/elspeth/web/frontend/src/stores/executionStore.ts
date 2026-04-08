@@ -26,7 +26,7 @@ import type {
 import * as api from "@/api/client";
 import { connectToRun, type WebSocketConnection } from "@/api/websocket";
 import { useAuthStore } from "./authStore";
-import { useSessionStore } from "./sessionStore";
+
 
 const MAX_RECENT_ERRORS = 50;
 
@@ -136,25 +136,6 @@ export const useExecutionStore = create<ExecutionState>((set, get) => ({
     try {
       const result = await api.validatePipeline(sessionId);
       set({ validationResult: result, isValidating: false });
-
-      // Inject a visible system message into chat so the user can see
-      // that errors/warnings were routed to the agent (A3).
-      if (!result.is_valid && result.errors.length > 0) {
-        const lines = ["**Validation failed** — the following errors were sent to the agent:"];
-        for (const err of result.errors) {
-          lines.push(`- **[${err.component_type ?? "unknown"}] ${err.component_id ?? "unknown"}:** ${err.message}`);
-        }
-        useSessionStore.getState().injectSystemMessage(lines.join("\n"));
-
-        // Auto-send validation errors to the LLM so it can attempt fixes.
-        useSessionStore.getState().sendValidationFeedback(result);
-      } else if (result.is_valid && result.warnings && result.warnings.length > 0) {
-        const lines = ["**Validation passed with warnings:**"];
-        for (const warn of result.warnings) {
-          lines.push(`- **[${warn.component_type ?? "unknown"}] ${warn.component_id ?? "unknown"}:** ${warn.message}`);
-        }
-        useSessionStore.getState().injectSystemMessage(lines.join("\n"));
-      }
     } catch (err) {
       const apiErr = err as ApiError;
       const message =

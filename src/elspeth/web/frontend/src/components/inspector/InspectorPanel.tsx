@@ -349,6 +349,8 @@ export function InspectorPanel() {
   const isLoadingVersions = useSessionStore((s) => s.isLoadingVersions);
   const revertToVersion = useSessionStore((s) => s.revertToVersion);
   const loadStateVersions = useSessionStore((s) => s.loadStateVersions);
+  const injectSystemMessage = useSessionStore((s) => s.injectSystemMessage);
+  const sendValidationFeedback = useSessionStore((s) => s.sendValidationFeedback);
 
   const validationResult = useExecutionStore((s) => s.validationResult);
   const isValidating = useExecutionStore((s) => s.isValidating);
@@ -377,11 +379,44 @@ export function InspectorPanel() {
     !isValidating &&
     !isExecuting;
 
-  const handleValidate = useCallback(() => {
-    if (activeSessionId && canValidate) {
-      validate(activeSessionId);
+  const handleValidate = useCallback(async () => {
+    if (!activeSessionId || !canValidate) return;
+
+    // Store handles the API call and stores the result.
+    await validate(activeSessionId);
+
+    // Read the result and orchestrate side effects at the component level.
+    // This keeps the store focused on state and the component in control
+    // of cross-store interactions.
+    const result = useExecutionStore.getState().validationResult;
+    if (!result) return;
+
+    const VALIDATION_MSG_ID = "system-validation-current";
+
+    if (!result.is_valid && result.errors.length > 0) {
+      const lines = ["**Validation failed** — the following errors were sent to the agent:"];
+      for (const err of result.errors) {
+        lines.push(`- **[${err.component_type ?? "unknown"}] ${err.component_id ?? "unknown"}:** ${err.message}`);
+      }
+      injectSystemMessage(lines.join("\n"), VALIDATION_MSG_ID);
+
+      // Send to the LLM so it can attempt fixes.
+      // Await so errors are surfaced, not silently swallowed.
+      try {
+        await sendValidationFeedback(result);
+      } catch {
+        // Feedback send failed — user still sees the system message,
+        // but the agent didn't receive it. The error banner from
+        // sendMessage's catch block will surface this.
+      }
+    } else if (result.is_valid && result.warnings && result.warnings.length > 0) {
+      const lines = ["**Validation passed with warnings:**"];
+      for (const warn of result.warnings) {
+        lines.push(`- **[${warn.component_type ?? "unknown"}] ${warn.component_id ?? "unknown"}:** ${warn.message}`);
+      }
+      injectSystemMessage(lines.join("\n"), VALIDATION_MSG_ID);
     }
-  }, [activeSessionId, canValidate, validate]);
+  }, [activeSessionId, canValidate, validate, injectSystemMessage, sendValidationFeedback]);
 
   const handleExecute = useCallback(() => {
     if (activeSessionId && canExecute) {

@@ -1,5 +1,4 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { useSessionStore } from "./sessionStore";
 import { useExecutionStore } from "./executionStore";
 import type { ValidationResult } from "@/types/index";
 
@@ -15,20 +14,29 @@ vi.mock("@/api/websocket", () => ({
 
 describe("executionStore.validate", () => {
   beforeEach(() => {
-    useSessionStore.setState({
-      activeSessionId: "session-1",
-      messages: [],
-      compositionState: null,
-      isComposing: false,
-      stateVersions: [],
-      isLoadingVersions: false,
-      error: null,
-      sessions: [],
-    });
     useExecutionStore.getState().reset();
   });
 
-  it("injects a system message into chat when validation fails", async () => {
+  it("stores validation result on success", async () => {
+    const result: ValidationResult = {
+      is_valid: true,
+      summary: "All checks passed",
+      checks: [],
+      errors: [],
+      warnings: [],
+    };
+
+    const { validatePipeline } = await import("@/api/client");
+    (validatePipeline as ReturnType<typeof vi.fn>).mockResolvedValue(result);
+
+    await useExecutionStore.getState().validate("session-1");
+
+    const state = useExecutionStore.getState();
+    expect(state.validationResult).toEqual(result);
+    expect(state.isValidating).toBe(false);
+  });
+
+  it("stores validation result on failure without side effects", async () => {
     const failedResult: ValidationResult = {
       is_valid: false,
       summary: "Validation failed",
@@ -47,19 +55,28 @@ describe("executionStore.validate", () => {
     const { validatePipeline } = await import("@/api/client");
     (validatePipeline as ReturnType<typeof vi.fn>).mockResolvedValue(failedResult);
 
-    // Spy on sendValidationFeedback to confirm it's still called
-    const sendFeedback = vi.spyOn(useSessionStore.getState(), "sendValidationFeedback");
+    await useExecutionStore.getState().validate("session-1");
+
+    // validate() should only store the result — no cross-store side effects.
+    // Orchestration (system messages, LLM feedback) is handled by InspectorPanel.
+    const state = useExecutionStore.getState();
+    expect(state.validationResult).toEqual(failedResult);
+    expect(state.isValidating).toBe(false);
+    expect(state.error).toBeNull();
+  });
+
+  it("sets error state when API call fails", async () => {
+    const { validatePipeline } = await import("@/api/client");
+    (validatePipeline as ReturnType<typeof vi.fn>).mockRejectedValue({
+      status: 500,
+      detail: "Internal server error",
+    });
 
     await useExecutionStore.getState().validate("session-1");
 
-    // A system message should have been injected
-    const messages = useSessionStore.getState().messages;
-    const systemMessages = messages.filter((m) => m.role === "system");
-    expect(systemMessages.length).toBeGreaterThanOrEqual(1);
-    expect(systemMessages[0].content).toContain("Validation failed");
-    expect(systemMessages[0].content).toContain("llm_extract");
-
-    // sendValidationFeedback should still be called (sends to LLM)
-    expect(sendFeedback).toHaveBeenCalledWith(failedResult);
+    const state = useExecutionStore.getState();
+    expect(state.validationResult).toBeNull();
+    expect(state.isValidating).toBe(false);
+    expect(state.error).toContain("internal error");
   });
 });

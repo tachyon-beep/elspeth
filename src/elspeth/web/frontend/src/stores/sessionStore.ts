@@ -36,7 +36,7 @@ interface SessionState {
   isLoadingVersions: boolean;
   revertToVersion: (stateId: string) => Promise<void>;
   clearError: () => void;
-  injectSystemMessage: (content: string) => void;
+  injectSystemMessage: (content: string, stableId?: string) => void;
   reset: () => void;
 }
 
@@ -367,12 +367,14 @@ export const useSessionStore = create<SessionState>((set, get) => ({
     set({ error: null });
   },
 
-  injectSystemMessage(content: string) {
+  injectSystemMessage(content: string, stableId?: string) {
     const { activeSessionId } = get();
     if (!activeSessionId) return;
 
+    const messageId = stableId ?? `system-${crypto.randomUUID()}`;
+
     const systemMessage: ChatMessage = {
-      id: `system-${crypto.randomUUID()}`,
+      id: messageId,
       session_id: activeSessionId,
       role: "system",
       content,
@@ -380,9 +382,15 @@ export const useSessionStore = create<SessionState>((set, get) => ({
       created_at: new Date().toISOString(),
     };
 
-    set((state) => ({
-      messages: [...state.messages, systemMessage],
-    }));
+    set((state) => {
+      // If a stable ID was provided, replace any existing message with
+      // that ID instead of appending. This prevents noise accumulation
+      // from repeated validation cycles.
+      const filtered = stableId
+        ? state.messages.filter((m) => m.id !== stableId)
+        : state.messages;
+      return { messages: [...filtered, systemMessage] };
+    });
   },
 
   reset() {
