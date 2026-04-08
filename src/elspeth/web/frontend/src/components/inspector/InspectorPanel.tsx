@@ -461,47 +461,59 @@ export function InspectorPanel() {
               />
             )}
 
-            {/* Validation status indicator — shape + color for accessibility */}
-            {hasCompositionContent && (
-              <span
-                aria-label={
-                  validationResult === null
-                    ? "Not validated"
-                    : validationResult.is_valid
-                      ? "Validation passed"
-                      : "Validation failed"
-                }
-                title={
-                  validationResult === null
-                    ? "Not validated"
-                    : validationResult.is_valid
-                      ? "Validation passed"
-                      : "Validation failed"
-                }
-                style={{
-                  display: "inline-flex",
-                  alignItems: "center",
-                  justifyContent: "center",
-                  width: 16,
-                  height: 16,
-                  fontSize: 12,
-                  lineHeight: 1,
-                  flexShrink: 0,
-                  color:
-                    validationResult === null
-                      ? "var(--color-warning)"
-                      : validationResult.is_valid
-                        ? "var(--color-success)"
-                        : "var(--color-error)",
-                }}
-              >
-                {validationResult === null
-                  ? "\u25CB"   /* ○ hollow circle — not validated */
-                  : validationResult.is_valid
-                    ? "\u2713" /* ✓ checkmark — passed */
-                    : "\u26A0" /* ⚠ warning — failed */}
-              </span>
-            )}
+            {/* Validation status indicator — three-state (A7) */}
+            {hasCompositionContent && (() => {
+              const hasWarnings = validationResult?.warnings && validationResult.warnings.length > 0;
+              const status: string =
+                validationResult === null
+                  ? "unchecked"
+                  : !validationResult.is_valid
+                    ? "invalid"
+                    : hasWarnings
+                      ? "warning"
+                      : "valid";
+
+              const labels: Record<string, string> = {
+                unchecked: "Not validated",
+                valid: "Validation passed",
+                warning: "Validation passed with warnings",
+                invalid: "Validation failed",
+              };
+
+              const colors: Record<string, string> = {
+                unchecked: "var(--color-warning)",
+                valid: "var(--color-success)",
+                warning: "var(--color-warning)",
+                invalid: "var(--color-error)",
+              };
+
+              const symbols: Record<string, string> = {
+                unchecked: "\u25CB",  // ○ hollow circle
+                valid: "\u2713",      // ✓ checkmark
+                warning: "\u26A0",    // ⚠ warning triangle
+                invalid: "\u2717",    // ✗ cross mark
+              };
+
+              return (
+                <span
+                  aria-label={labels[status]}
+                  title={labels[status]}
+                  style={{
+                    display: "inline-flex",
+                    alignItems: "center",
+                    justifyContent: "center",
+                    width: 16,
+                    height: 16,
+                    fontSize: 12,
+                    lineHeight: 1,
+                    flexShrink: 0,
+                    color: colors[status],
+                  }}
+                >
+                  {symbols[status]}
+                </span>
+              );
+            })()}
           </div>
 
           {/* Right: Catalog + Validate + Execute */}

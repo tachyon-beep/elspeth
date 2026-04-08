@@ -13,6 +13,7 @@
 
 import type {
   ValidationResult as ValidationResultType,
+  ValidationWarning,
   NodeSpec,
 } from "@/types/index";
 
@@ -72,6 +73,42 @@ export function ValidationResultBanner({
               </li>
             ))}
           </ul>
+        )}
+        {result.warnings && result.warnings.length > 0 && (
+          <div style={{ marginTop: 6 }}>
+            <div style={{ fontWeight: 600, fontSize: 12, color: "var(--color-warning)" }}>
+              Warnings ({result.warnings.length}):
+            </div>
+            <ul
+              style={{
+                margin: "2px 0 0",
+                padding: "0 0 0 22px",
+                fontSize: 12,
+                color: "var(--color-warning)",
+              }}
+            >
+              {result.warnings.map((warn: ValidationWarning, i: number) => (
+                <li key={i} style={{ marginBottom: 2 }}>
+                  <strong>
+                    [{warn.component_type}]{" "}
+                    {resolveComponentName(warn.component_id, nodes)}:
+                  </strong>{" "}
+                  {warn.message}
+                  {warn.suggestion && (
+                    <div
+                      style={{
+                        color: "var(--color-text-muted)",
+                        fontSize: 12,
+                        marginTop: 2,
+                      }}
+                    >
+                      Suggestion: {warn.suggestion}
+                    </div>
+                  )}
+                </li>
+              ))}
+            </ul>
+          </div>
         )}
       </div>
     );
