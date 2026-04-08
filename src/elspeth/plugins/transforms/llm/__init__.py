@@ -299,6 +299,11 @@ def _build_multi_query_output_schema(
     from elspeth.contracts.schema import FieldDefinition
     from elspeth.contracts.schema import SchemaConfig as _SchemaConfig
 
+    if extracted_fields is not None:
+        unknown_queries = set(extracted_fields) - set(query_names)
+        if unknown_queries:
+            raise ValueError(f"extracted_fields references unknown query names: {unknown_queries}")
+
     base_fields = base_schema_config.fields or ()
     existing_names = {f.name for f in base_fields}
 
@@ -318,10 +323,11 @@ def _build_multi_query_output_schema(
                 existing_names.add(name)
 
         # Add structured output_fields with their declared types
-        for field_name, field_type in (extracted_fields or {}).get(query_name, ()):
-            if field_name not in existing_names:
-                extra_fields.append(FieldDefinition(name=field_name, field_type=field_type, required=False))
-                existing_names.add(field_name)
+        if extracted_fields is not None and query_name in extracted_fields:
+            for field_name, field_type in extracted_fields[query_name]:
+                if field_name not in existing_names:
+                    extra_fields.append(FieldDefinition(name=field_name, field_type=field_type, required=False))
+                    existing_names.add(field_name)
 
     augmented_config = _SchemaConfig(
         mode="flexible",

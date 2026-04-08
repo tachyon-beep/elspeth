@@ -176,11 +176,6 @@ allow_hits:
   reason: Tier-3 boundary — quarantined row data may contain NaN/Infinity that stable_hash rejects
   safety: Falls back to repr_hash with debug logging; audit trail uses separate hashing path
   expires: '2026-05-12'
-- key: engine/orchestrator/export.py:R1:_json_schema_to_python_type:fp=d5998b3c1fcca701
-  owner: bugfix
-  reason: Framework boundary - Pydantic JSON schema anyOf entries may be $ref (no "type" key) or typed (has "type" key); .get()
-    filters null vs non-null items
-  safety: Non-null items fed to recursive resolver which crashes on unrecognized schemas
 - key: engine/executors/gate.py:R1:GateExecutor:_record_routing:fp=38dabd7f2719bfd0
   owner: architecture
   reason: Optional edge_id lookup - edge map may not have all node combinations during routing

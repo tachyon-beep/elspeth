@@ -18,7 +18,7 @@ from __future__ import annotations
 import json
 import threading
 import time
-from collections.abc import Callable, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any, Protocol, cast
 
@@ -27,6 +27,7 @@ import structlog
 from elspeth.contracts import Determinism, TransformErrorReason, TransformResult, propagate_contract
 from elspeth.contracts.contexts import LifecycleContext, TransformContext
 from elspeth.contracts.errors import FrameworkBugError
+from elspeth.contracts.freeze import freeze_fields
 from elspeth.contracts.schema import SchemaConfig
 from elspeth.contracts.schema_contract import FieldContract, PipelineRow, SchemaContract
 from elspeth.plugins.infrastructure.base import BaseTransform
@@ -402,7 +403,7 @@ class MultiQueryStrategy:
     max_tokens: int | None
     response_field: str
     executor: PooledExecutor | None = None
-    _query_templates: dict[str, PromptTemplate] = field(init=False, default_factory=dict)
+    _query_templates: Mapping[str, PromptTemplate] = field(init=False, default_factory=dict)
 
     def __post_init__(self) -> None:
         if not isinstance(self.query_specs, tuple):
@@ -417,6 +418,7 @@ class MultiQueryStrategy:
             if spec.template is not None:
                 query_templates[spec.name] = self.template.with_template_override(spec.template)
         object.__setattr__(self, "_query_templates", query_templates)
+        freeze_fields(self, "_query_templates")
 
     def execute(
         self,
@@ -486,7 +488,10 @@ class MultiQueryStrategy:
 
         # Use pre-compiled per-query template (already structurally validated
         # in __post_init__), falling back to config-level template.
-        query_template = self._query_templates.get(spec.name, self.template)
+        if spec.template is not None:
+            query_template = self._query_templates[spec.name]
+        else:
+            query_template = self.template
 
         # Render template — use contract=None because template_ctx is a
         # synthetic dict (keys are template variable names from input_fields,

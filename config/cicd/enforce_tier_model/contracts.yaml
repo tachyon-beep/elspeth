@@ -176,11 +176,6 @@ allow_hits:
   reason: TYPE_CHECKING import of Settings models — Runtime*Config.from_settings() type annotations
   safety: No runtime coupling — annotation-only import behind TYPE_CHECKING guard
   expires: null
-- key: contracts/data.py:R1:validate_row:fp=0f6fa60e1ef14cec
-  owner: architecture
-  reason: Optional field access at trust boundary
-  safety: Code reviewed - legitimate pattern
-  expires: '2026-05-02'
 - key: contracts/data.py:R6:_get_allow_inf_nan:fp=a073efa3e28410f3
   owner: bugfix
   reason: vars(item) raises TypeError on non-object Pydantic metadata (plain strings, ints); skipping is correct since only object metadata can carry allow_inf_nan

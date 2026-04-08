@@ -16,6 +16,7 @@ Benefits:
 from __future__ import annotations
 
 import json
+from collections import Counter
 from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass
@@ -423,7 +424,7 @@ class OpenRouterBatchLLMTransform(BaseTransform):
         # Assemble output rows in original order
         # Every row gets an output (success or with error markers) - no rows are dropped
         output_rows: list[dict[str, Any]] = []
-        finish_reason_counts: dict[str, int] = {}
+        finish_reason_counts: Counter[str] = Counter()
 
         for idx in range(len(rows)):
             if idx not in results:
@@ -469,7 +470,7 @@ class OpenRouterBatchLLMTransform(BaseTransform):
             elif isinstance(result, _RowSuccess):
                 output_rows.append(result.row)
                 fr_key = result.finish_reason or "absent"
-                finish_reason_counts[fr_key] = finish_reason_counts.get(fr_key, 0) + 1
+                finish_reason_counts[fr_key] += 1
 
             else:
                 raise RuntimeError(f"Unexpected result type: {type(result).__name__}")

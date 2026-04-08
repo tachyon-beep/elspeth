@@ -162,9 +162,8 @@ class OpenRouterLLMProvider:
         """
         snapshot_state_id = state_id
 
+        http_client = self._get_http_client(snapshot_state_id, token_id=token_id)
         try:
-            http_client = self._get_http_client(snapshot_state_id, token_id=token_id)
-
             # Build request body
             request_body: dict[str, Any] = {
                 "model": model,

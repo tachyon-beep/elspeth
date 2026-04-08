@@ -97,7 +97,7 @@ def validate_row(
                 SchemaValidationError(
                     field=field,
                     message=error["msg"],
-                    value=error.get("input"),
+                    value=error["input"],
                 )
             )
         return errors

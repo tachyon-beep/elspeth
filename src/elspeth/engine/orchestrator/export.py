@@ -334,7 +334,7 @@ def _json_schema_to_python_type(
         any_of_items = cast(list[Mapping[str, object]], field_info["anyOf"])
         type_strs = {cast(str, item["type"]) for item in any_of_items if "type" in item}
         has_null = "null" in type_strs
-        non_null_items = [item for item in any_of_items if item.get("type") != "null"]
+        non_null_items = [item for item in any_of_items if "type" not in item or item["type"] != "null"]
         non_null_types = {cast(str, item["type"]) for item in non_null_items if "type" in item}
 
         # Pattern 1: Decimal or Optional[Decimal]

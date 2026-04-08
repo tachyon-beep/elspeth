@@ -19,6 +19,7 @@ import io
 import json
 import time
 import uuid
+from collections import Counter
 from datetime import UTC, datetime
 from threading import Lock
 from typing import Any
@@ -1268,7 +1269,7 @@ class AzureBatchLLMTransform(BaseTransform):
         # Assemble output rows in original order
         output_rows: list[dict[str, Any]] = []
         row_errors: list[RowErrorEntry] = []
-        finish_reason_counts: dict[str, int] = {}
+        finish_reason_counts: Counter[str] = Counter()
 
         # Track which rows had template errors (excluded from batch)
         template_error_indices = {idx for idx, _ in template_errors}
@@ -1431,7 +1432,7 @@ class AzureBatchLLMTransform(BaseTransform):
                 # submitting the batch — no need to re-check here.
 
                 fr_key = raw_finish_reason or "absent"
-                finish_reason_counts[fr_key] = finish_reason_counts.get(fr_key, 0) + 1
+                finish_reason_counts[fr_key] += 1
 
                 output_row = row.to_dict()
                 output_row[self._response_field] = content
