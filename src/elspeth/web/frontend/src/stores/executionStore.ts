@@ -26,6 +26,8 @@ import type {
 import * as api from "@/api/client";
 import { connectToRun, type WebSocketConnection } from "@/api/websocket";
 import { useAuthStore } from "./authStore";
+import { useBlobStore } from "./blobStore";
+import { useSessionStore } from "./sessionStore";
 
 
 const MAX_RECENT_ERRORS = 50;
@@ -199,12 +201,27 @@ export const useExecutionStore = create<ExecutionState>((set, get) => ({
       },
       onComplete(event: RunEvent, _data: RunEventCompleted) {
         set((state) => applyRunEvent(state, event));
+        // Refresh blob list — pipeline outputs are finalized on completion
+        const sessionId = useSessionStore.getState().activeSessionId;
+        if (sessionId) {
+          useBlobStore.getState().loadBlobs(sessionId);
+        }
       },
       onCancelled(event: RunEvent, _data: RunEventCancelled) {
         set((state) => applyRunEvent(state, event));
+        // Refresh blob list — partial outputs may exist after cancellation
+        const sessionId = useSessionStore.getState().activeSessionId;
+        if (sessionId) {
+          useBlobStore.getState().loadBlobs(sessionId);
+        }
       },
       onFailed(event: RunEvent, _data: RunEventFailed) {
         set((state) => applyRunEvent(state, event));
+        // Refresh blob list — partial outputs may exist after failure
+        const sessionId = useSessionStore.getState().activeSessionId;
+        if (sessionId) {
+          useBlobStore.getState().loadBlobs(sessionId);
+        }
       },
       onAuthFailure() {
         // Close code 4001 -- do not reconnect, trigger logout

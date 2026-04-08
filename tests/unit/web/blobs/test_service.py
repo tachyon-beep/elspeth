@@ -610,3 +610,145 @@ class TestCopyBlobsForForkRollback:
         # Verify: no blobs in target (pre-check prevented any copies)
         target_blobs = await blob_service.list_blobs(target_session_id)
         assert target_blobs == []
+
+
+# ---------------------------------------------------------------------------
+# finalize_run_output_blobs — run-level batch finalization
+# ---------------------------------------------------------------------------
+
+
+class TestFinalizeRunOutputBlobs:
+    """Batch finalization of pending output blobs when a run completes or fails."""
+
+    @pytest.fixture()
+    def run_env(self, blob_service, session_id, db_engine):
+        """Set up a composition state and run, return (run_id, session_id_str)."""
+        from elspeth.web.sessions.models import (
+            composition_states_table,
+            runs_table,
+        )
+
+        state_id = str(uuid4())
+        session_id_str = str(session_id)
+        run_id = str(uuid4())
+
+        with db_engine.begin() as conn:
+            conn.execute(
+                composition_states_table.insert().values(
+                    id=state_id,
+                    session_id=session_id_str,
+                    version=1,
+                    is_valid=True,
+                    created_at=datetime(2026, 1, 1, tzinfo=UTC),
+                )
+            )
+            conn.execute(
+                runs_table.insert().values(
+                    id=run_id,
+                    session_id=session_id_str,
+                    state_id=state_id,
+                    status="running",
+                    started_at=datetime(2026, 1, 1, tzinfo=UTC),
+                    rows_processed=0,
+                    rows_failed=0,
+                )
+            )
+        return UUID(run_id), session_id_str
+
+    @pytest.mark.asyncio
+    async def test_success_path_sets_ready_with_size_and_hash(self, blob_service, session_id, db_engine, run_env) -> None:
+        """Pending blob with file written -> ready with size_bytes and content_hash."""
+        from elspeth.web.sessions.models import blob_run_links_table
+
+        run_id, _ = run_env
+
+        pending = await blob_service.create_pending_blob(
+            session_id=session_id,
+            filename="output.csv",
+            mime_type="text/csv",
+            created_by="pipeline",
+        )
+        assert pending.status == "pending"
+
+        # Write content to the storage path (simulating sink output)
+        from pathlib import Path as _Path
+
+        file_content = b"col1,col2\na,b\nc,d"
+        _Path(pending.storage_path).write_bytes(file_content)
+
+        # Link blob to run as output
+        with db_engine.begin() as conn:
+            conn.execute(
+                blob_run_links_table.insert().values(
+                    blob_id=str(pending.id),
+                    run_id=str(run_id),
+                    direction="output",
+                )
+            )
+
+        finalized = await blob_service.finalize_run_output_blobs(run_id, success=True)
+        assert len(finalized) == 1
+        assert finalized[0].status == "ready"
+        assert finalized[0].size_bytes == len(file_content)
+        assert finalized[0].content_hash == content_hash(file_content)
+
+    @pytest.mark.asyncio
+    async def test_file_not_written_sets_error(self, blob_service, session_id, db_engine, run_env) -> None:
+        """Pending blob without file on disk -> error status on success=True."""
+        from elspeth.web.sessions.models import blob_run_links_table
+
+        run_id, _ = run_env
+
+        pending = await blob_service.create_pending_blob(
+            session_id=session_id,
+            filename="missing.csv",
+            mime_type="text/csv",
+            created_by="pipeline",
+        )
+
+        # Do NOT write any file — simulate sink that didn't produce output
+
+        with db_engine.begin() as conn:
+            conn.execute(
+                blob_run_links_table.insert().values(
+                    blob_id=str(pending.id),
+                    run_id=str(run_id),
+                    direction="output",
+                )
+            )
+
+        finalized = await blob_service.finalize_run_output_blobs(run_id, success=True)
+        assert len(finalized) == 1
+        assert finalized[0].status == "error"
+
+    @pytest.mark.asyncio
+    async def test_run_failed_sets_error(self, blob_service, session_id, db_engine, run_env) -> None:
+        """Pending blob with success=False -> error regardless of file state."""
+        from pathlib import Path as _Path
+
+        from elspeth.web.sessions.models import blob_run_links_table
+
+        run_id, _ = run_env
+
+        pending = await blob_service.create_pending_blob(
+            session_id=session_id,
+            filename="output.csv",
+            mime_type="text/csv",
+            created_by="pipeline",
+        )
+
+        # Write file — but the run failed, so it should still be marked error
+        _Path(pending.storage_path).write_bytes(b"partial-output")
+
+        with db_engine.begin() as conn:
+            conn.execute(
+                blob_run_links_table.insert().values(
+                    blob_id=str(pending.id),
+                    run_id=str(run_id),
+                    direction="output",
+                )
+            )
+
+        finalized = await blob_service.finalize_run_output_blobs(run_id, success=False)
+        assert len(finalized) == 1
+        assert finalized[0].status == "error"

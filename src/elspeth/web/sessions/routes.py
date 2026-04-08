@@ -6,12 +6,10 @@ Session-scoped endpoints verify ownership before any business logic.
 
 from __future__ import annotations
 
-import asyncio
-from pathlib import Path
-from uuid import UUID, uuid4
+from uuid import UUID
 
 import structlog
-from fastapi import APIRouter, Depends, File, HTTPException, Query, Request, UploadFile
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from litellm.exceptions import APIError as LiteLLMAPIError
 from litellm.exceptions import AuthenticationError as LiteLLMAuthError
 from sqlalchemy.exc import IntegrityError
@@ -45,7 +43,6 @@ from elspeth.web.sessions.schemas import (
     RunResponse,
     SendMessageRequest,
     SessionResponse,
-    UploadResponse,
     ValidationEntryResponse,
 )
 
@@ -739,22 +736,6 @@ def create_session_router() -> APIRouter:
                         options["blob_ref"] = str(blob_map[old_uuid].id)
                         options["path"] = blob_map[old_uuid].storage_path
                         rewritten = True
-                # Remap path for uploaded-file sources (path under old session dir)
-                if not rewritten and "path" in options:
-                    old_path = str(options["path"])
-                    old_session_str = str(session_id)
-                    new_session_str = str(new_session.id)
-                    if old_session_str in old_path:
-                        options["path"] = old_path.replace(old_session_str, new_session_str)
-                        rewritten = True
-                        # Copy the uploaded file to the new session directory
-                        old_file = Path(old_path)
-                        new_file = Path(options["path"])
-                        if old_file.exists() and not new_file.exists():
-                            new_file.parent.mkdir(parents=True, exist_ok=True)
-                            import shutil
-
-                            shutil.copy2(str(old_file), str(new_file))
 
                 if rewritten:
                     source_dict["options"] = options
@@ -795,73 +776,6 @@ def create_session_router() -> APIRouter:
             session=_session_response(new_session),
             messages=[_message_response(m) for m in new_messages],
             composition_state=_state_response(copied_state) if copied_state else None,
-        )
-
-    @router.post("/{session_id}/upload", response_model=UploadResponse)
-    async def upload_file(
-        session_id: UUID,
-        request: Request,
-        file: UploadFile = File(...),  # noqa: B008
-        user: UserIdentity = Depends(get_current_user),  # noqa: B008
-    ) -> UploadResponse:
-        """Upload a source file to the user's scratch directory.
-
-        Path traversal protection (B5): both user_id and filename are
-        sanitized via Path().name to strip directory components.
-        """
-        await _verify_session_ownership(session_id, user, request)
-        settings = request.app.state.settings
-
-        # B5: Sanitize user_id -- strip all directory components
-        sanitized_user_id = Path(user.user_id).name
-        if not sanitized_user_id or sanitized_user_id in (".", ".."):
-            raise HTTPException(
-                status_code=400,
-                detail="Invalid user ID for file upload",
-            )
-
-        # B5: Sanitize filename
-        original_filename = file.filename or "upload"
-        sanitized_filename = Path(original_filename).name
-        if not sanitized_filename or sanitized_filename in (".", ".."):
-            raise HTTPException(
-                status_code=400,
-                detail="Invalid filename",
-            )
-
-        # Read in chunks, abort if size exceeds limit
-        chunks: list[bytes] = []
-        total_size = 0
-        while chunk := await file.read(8192):
-            total_size += len(chunk)
-            if total_size > settings.max_upload_bytes:
-                raise HTTPException(
-                    status_code=413,
-                    detail=f"File exceeds maximum size of {settings.max_upload_bytes} bytes",
-                )
-            chunks.append(chunk)
-        content = b"".join(chunks)
-
-        # Create upload directory and save — include session_id to isolate
-        # files per session so uploads with the same filename in different
-        # sessions don't overwrite each other.  Prefix the stored filename
-        # with a short UUID to prevent overwrites when the same name is
-        # uploaded twice within a session (composition states reference the
-        # path, so overwriting silently breaks reproducibility).
-        upload_dir = Path(settings.data_dir) / "uploads" / sanitized_user_id / str(session_id)
-        upload_dir.mkdir(parents=True, exist_ok=True)
-        unique_filename = f"{uuid4().hex[:8]}_{sanitized_filename}"
-        file_path = upload_dir / unique_filename
-        await asyncio.to_thread(file_path.write_bytes, content)
-
-        # Return the absolute path so it passes source-path validation.
-        # The validators in composer/tools.py and execution/service.py
-        # resolve paths and check they're under data_dir/uploads/ — a
-        # relative path would resolve against CWD and fail.
-        return UploadResponse(
-            path=str(file_path),
-            filename=original_filename,
-            size_bytes=len(content),
         )
 
     return router

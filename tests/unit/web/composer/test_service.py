@@ -136,7 +136,7 @@ def _make_settings(**overrides: Any) -> WebSettings:
     Defaults come from the Pydantic model — no drift possible.
 
     data_dir defaults to /data (absolute) so test paths like
-    /data/uploads/file.csv pass S2 path validation.
+    /data/blobs/file.csv pass S2 path validation.
     """
     defaults: dict[str, Any] = {
         "data_dir": Path("/data"),
@@ -191,7 +191,7 @@ class TestComposerSingleToolCall:
                     "arguments": {
                         "plugin": "csv",
                         "on_success": "t1",
-                        "options": {"path": "/data/uploads/data.csv"},
+                        "options": {"path": "/data/blobs/data.csv"},
                         "on_validation_failure": "quarantine",
                     },
                 }

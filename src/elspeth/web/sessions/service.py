@@ -179,18 +179,10 @@ class SessionServiceImpl:
 
             # Clean up filesystem artifacts after DB rows are committed.
             # Blob files: data/blobs/{session_id}/
-            # Upload files: data/uploads/*/{session_id}/ (user-scoped subdirs)
             if self._data_dir is not None:
                 blob_dir = self._data_dir / "blobs" / sid
                 if blob_dir.is_dir():
                     shutil.rmtree(blob_dir)
-
-                uploads_dir = self._data_dir / "uploads"
-                if uploads_dir.is_dir():
-                    for user_dir in uploads_dir.iterdir():
-                        session_upload_dir = user_dir / sid
-                        if session_upload_dir.is_dir():
-                            shutil.rmtree(session_upload_dir)
 
         await self._run_sync(_sync)
 

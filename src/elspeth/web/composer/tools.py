@@ -976,14 +976,14 @@ def _allowed_source_directories(data_dir: str) -> tuple[Path, ...]:
     execution validation, and execution runtime guard.
     """
     base = Path(data_dir).resolve()
-    return (base / "uploads", base / "blobs")
+    return (base / "blobs",)
 
 
 def _allowed_sink_directories(data_dir: str) -> tuple[Path, ...]:
     """Return the set of directories to which sink paths may write.
 
     AD-4 extension: Mirrors _allowed_source_directories for output paths.
-    Sinks write to data_dir/outputs (not uploads, which is for ingestion).
+    Sinks write to data_dir/outputs (not blobs, which is for ingestion).
     """
     base = Path(data_dir).resolve()
     return (base / "outputs", base / "blobs")
@@ -1011,7 +1011,7 @@ def _validate_source_path(
                 return (
                     f"Path violation (S2): '{options[key]}' is outside the "
                     f"allowed directories. Source file paths "
-                    f"must be under {data_dir}/uploads/ or {data_dir}/blobs/."
+                    f"must be under {data_dir}/blobs/."
                 )
     return None
 
@@ -1415,7 +1415,7 @@ def _execute_create_blob(
                     storage_path=str(storage_path),
                     created_at=now,
                     created_by="assistant",
-                    source_description=arguments.get("description"),
+                    source_description=arguments.get("description", "created inline by assistant"),
                     status="ready",
                 )
             )
@@ -2025,7 +2025,7 @@ _VALIDATION_ERROR_PATTERNS: list[tuple[str, str, str]] = [
     (
         r"Path violation \(S2\)",
         "The source file path is outside the allowed directories.",
-        "Source paths must be under the uploads/ or blobs/ directory. Upload a file first or use set_source_from_blob.",
+        "Source paths must be under the blobs/ directory. Upload a file first or use set_source_from_blob.",
     ),
 ]
 
@@ -2279,7 +2279,7 @@ def execute_tool(
     Args:
         data_dir: Base data directory for S2 path allowlist enforcement.
             When provided, source options containing ``path`` or ``file``
-            keys are restricted to ``{data_dir}/uploads/`` or ``{data_dir}/blobs/``.
+            keys are restricted to ``{data_dir}/blobs/``.
         session_engine: SQLAlchemy engine for the session database.
             Required for blob tools to perform synchronous blob lookups.
         session_id: Current session ID. Required for blob tools.

@@ -195,6 +195,20 @@ Gotchas:
 
 **Schema modes**: `observed` (infer from data), `fixed` (exact fields, reject extras), `flexible` (known fields + extras OK). Fields: `"name: type"` where type is str/int/float/bool/any.
 
+### Inline data (no file upload needed)
+
+When the user provides data directly in conversation (a URL, a JSON snippet, a few CSV rows), create a blob and wire it as the source:
+
+1. `create_blob` with content and MIME type → returns `blob_id`
+2. `set_source_from_blob` with the `blob_id`
+
+No separate "inline source" plugin exists — the blob system handles it. Never ask the user to upload a file when the data is already in the conversation.
+
+**Examples:**
+- URL → `create_blob(filename="input.txt", mime_type="text/plain", content="https://example.com")` then `set_source_from_blob`
+- JSON → `create_blob(filename="data.json", mime_type="application/json", content='[{"id": 1}]')` then `set_source_from_blob`
+- CSV rows → `create_blob(filename="data.csv", mime_type="text/csv", content="name,age\nAlice,30")` then `set_source_from_blob`
+
 ## Common Patterns
 
 ### 1. URL → Scrape → Extract → JSON

@@ -140,7 +140,7 @@ class BlobServiceImpl:
                         select(func.coalesce(func.sum(blobs_table.c.size_bytes), 0)).where(blobs_table.c.session_id == session_id_str)
                     ).scalar()
                     # COALESCE guarantees an int; non-int = Tier 1 anomaly
-                    current_total = int(current_total)  # type: ignore[arg-type]
+                    assert isinstance(current_total, int), f"Tier 1: COALESCE(SUM) returned {type(current_total).__name__}, expected int"
                     if current_total + len(content) > self._max_storage_per_session:
                         raise BlobQuotaExceededError(session_id_str, current_total, self._max_storage_per_session)
 
@@ -159,7 +159,7 @@ class BlobServiceImpl:
                             status="ready",
                         )
                     )
-            except BaseException:
+            except Exception:
                 # Clean up file on quota exceeded or any DB failure
                 if storage.exists():
                     storage.unlink()
@@ -481,7 +481,8 @@ class BlobServiceImpl:
                 current = conn.execute(
                     select(func.coalesce(func.sum(blobs_table.c.size_bytes), 0)).where(blobs_table.c.session_id == target_session_id_str)
                 ).scalar()
-                return int(current)  # type: ignore[arg-type]
+                assert isinstance(current, int), f"Tier 1: COALESCE(SUM) returned {type(current).__name__}, expected int"
+                return current
 
         current_usage = await self._run_sync(_check_quota)
         if current_usage + total_source_bytes > self._max_storage_per_session:
@@ -504,7 +505,7 @@ class BlobServiceImpl:
                 )
                 copied.append(new_blob)
                 blob_map[blob.id] = new_blob
-        except BaseException:
+        except Exception:
             # Clean up both files AND database rows for any blobs already
             # committed. create_blob() commits each blob atomically, so
             # without this cleanup the forked session would have "ready"
@@ -552,7 +553,7 @@ class BlobServiceImpl:
                         blobs_table.c.id != blob_id_str,
                     )
                 ).scalar()
-                current_total = int(current_total)  # type: ignore[arg-type]
+                assert isinstance(current_total, int), f"Tier 1: COALESCE(SUM) returned {type(current_total).__name__}, expected int"
                 if current_total + size_bytes > self._max_storage_per_session:
                     raise BlobQuotaExceededError(session_id_str, current_total, self._max_storage_per_session)
 

@@ -176,7 +176,7 @@ def validate_pipeline(
                             component_id="source",
                             component_type="source",
                             message=f"Path traversal blocked: {key}='{value}' resolves outside allowed directories",
-                            suggestion="Use a file within the uploads or blobs directory.",
+                            suggestion="Use a file within the blobs directory.",
                         ),
                     ],
                 )

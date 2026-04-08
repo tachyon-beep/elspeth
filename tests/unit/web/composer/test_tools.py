@@ -682,9 +682,9 @@ class TestRemoveOutput:
 
 
 class TestSetSourcePathSecurity:
-    """S2: Source path allowlist — paths must be under {data_dir}/uploads/."""
+    """S2: Source path allowlist — paths must be under {data_dir}/blobs/."""
 
-    def test_path_under_uploads_succeeds(self) -> None:
+    def test_path_under_blobs_succeeds(self) -> None:
         state = _empty_state()
         catalog = _mock_catalog()
         result = execute_tool(
@@ -692,7 +692,7 @@ class TestSetSourcePathSecurity:
             {
                 "plugin": "csv",
                 "on_success": "t1",
-                "options": {"path": "/data/uploads/input.csv"},
+                "options": {"path": "/data/blobs/input.csv"},
                 "on_validation_failure": "quarantine",
             },
             state,
@@ -701,7 +701,7 @@ class TestSetSourcePathSecurity:
         )
         assert result.success is True
 
-    def test_path_outside_uploads_fails(self) -> None:
+    def test_path_outside_blobs_fails(self) -> None:
         state = _empty_state()
         catalog = _mock_catalog()
         result = execute_tool(
@@ -727,7 +727,7 @@ class TestSetSourcePathSecurity:
             {
                 "plugin": "csv",
                 "on_success": "t1",
-                "options": {"path": "/data/uploads/../../etc/passwd"},
+                "options": {"path": "/data/blobs/../../etc/passwd"},
                 "on_validation_failure": "quarantine",
             },
             state,
@@ -753,8 +753,8 @@ class TestSetSourcePathSecurity:
         )
         assert result.success is False
 
-    def test_file_key_traversal_via_uploads_prefix_fails(self) -> None:
-        """W-4B-2: file key traversal starting from uploads prefix."""
+    def test_file_key_traversal_via_blobs_prefix_fails(self) -> None:
+        """W-4B-2: file key traversal starting from blobs prefix."""
         state = _empty_state()
         catalog = _mock_catalog()
         result = execute_tool(
@@ -762,7 +762,7 @@ class TestSetSourcePathSecurity:
             {
                 "plugin": "csv",
                 "on_success": "t1",
-                "options": {"file": "/data/uploads/../../etc/passwd"},
+                "options": {"file": "/data/blobs/../../etc/passwd"},
                 "on_validation_failure": "quarantine",
             },
             state,
@@ -790,7 +790,7 @@ class TestSetSourcePathSecurity:
         assert result.success is True
 
     def test_relative_path_resolves_against_data_dir(self) -> None:
-        """uploads/input.csv should resolve under {data_dir}/uploads/."""
+        """blobs/input.csv should resolve under {data_dir}/blobs/."""
         state = _empty_state()
         catalog = _mock_catalog()
         result = execute_tool(
@@ -798,7 +798,7 @@ class TestSetSourcePathSecurity:
             {
                 "plugin": "csv",
                 "on_success": "t1",
-                "options": {"path": "uploads/input.csv"},
+                "options": {"path": "blobs/input.csv"},
                 "on_validation_failure": "quarantine",
             },
             state,

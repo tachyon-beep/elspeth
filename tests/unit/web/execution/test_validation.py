@@ -73,9 +73,9 @@ class FakeWebSettings:
 class TestValidatePipelinePathAllowlist:
     """C3/S2: Source path allowlist check — defense-in-depth."""
 
-    def test_path_within_uploads_passes(self) -> None:
+    def test_path_within_blobs_passes(self) -> None:
         state = FakeCompositionState(
-            source_options={"path": "/tmp/test_data/uploads/data.csv"},
+            source_options={"path": "/tmp/test_data/blobs/data.csv"},
         )
         settings = FakeWebSettings(data_dir="/tmp/test_data")
         mock_yaml_gen = MagicMock()
@@ -87,7 +87,7 @@ class TestValidatePipelinePathAllowlist:
         path_check = next(c for c in result.checks if c.name == "source_path_allowlist")
         assert path_check.passed is True
 
-    def test_path_outside_uploads_blocked(self) -> None:
+    def test_path_outside_blobs_blocked(self) -> None:
         state = FakeCompositionState(
             source_options={"path": "/etc/passwd"},
         )
@@ -101,7 +101,7 @@ class TestValidatePipelinePathAllowlist:
 
     def test_path_traversal_via_dotdot_blocked(self) -> None:
         state = FakeCompositionState(
-            source_options={"path": "/tmp/test_data/uploads/../../secret.csv"},
+            source_options={"path": "/tmp/test_data/blobs/../../secret.csv"},
         )
         settings = FakeWebSettings(data_dir="/tmp/test_data")
         mock_yaml_gen = MagicMock()
@@ -212,9 +212,9 @@ class TestValidatePipelineRelativePaths:
         assert path_check.passed is True
 
     def test_relative_source_path_resolves_against_data_dir(self) -> None:
-        """uploads/data.csv should resolve under {data_dir}/uploads/."""
+        """blobs/data.csv should resolve under {data_dir}/blobs/."""
         state = FakeCompositionState(
-            source_options={"path": "uploads/data.csv"},
+            source_options={"path": "blobs/data.csv"},
         )
         settings = FakeWebSettings(data_dir="/tmp/test_data")
         mock_yaml_gen = MagicMock()

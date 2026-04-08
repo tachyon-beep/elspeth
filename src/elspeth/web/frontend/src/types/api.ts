@@ -25,7 +25,6 @@ export type {
   RunEventCancelled,
   RunProgress,
   ApiError,
-  UploadResult,
   BlobMetadata,
   BlobCategory,
   SecretInventoryItem,

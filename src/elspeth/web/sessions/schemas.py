@@ -123,14 +123,6 @@ class RunResponse(BaseModel):
     composition_version: int
 
 
-class UploadResponse(BaseModel):
-    """Response for POST /api/sessions/{id}/upload."""
-
-    path: str
-    filename: str
-    size_bytes: int
-
-
 # Forward reference resolution
 MessageWithStateResponse.model_rebuild()
 ForkSessionResponse.model_rebuild()
