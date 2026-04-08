@@ -153,6 +153,7 @@ def build_execution_graph(
 
     # Add source
     source_config = source.config
+    source_schema_config = SchemaConfig.from_dict(source_config["schema"])
     source_id = node_id("source", source.name, source_config)
     graph.add_node(
         source_id,
@@ -160,6 +161,7 @@ def build_execution_graph(
         plugin_name=source.name,
         config=source_config,
         output_schema=source.output_schema,  # SourceProtocol requires this
+        output_schema_config=source_schema_config,
     )
 
     # Add sinks

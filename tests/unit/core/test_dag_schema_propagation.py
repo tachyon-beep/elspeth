@@ -161,6 +161,26 @@ class TestOutputSchemaConfigPropagation:
         # output_schema_config should be None since transform doesn't have the attribute
         assert node_info.output_schema_config is None
 
+    def test_source_node_has_output_schema_config(self) -> None:
+        """Source nodes should have output_schema_config populated from config['schema']."""
+        source = MockSource()
+
+        graph = ExecutionGraph.from_plugin_instances(
+            source=source,  # type: ignore[arg-type]
+            source_settings=SourceSettings(plugin=source.name, on_success="output", options={}),
+            transforms=[],
+            sinks={"output": MockSink()},  # type: ignore[dict-item]
+            aggregations={},
+            gates=[],
+        )
+
+        source_nodes = [n for n in graph.get_nodes() if n.node_type == NodeType.SOURCE]
+        assert len(source_nodes) == 1
+
+        node_info = source_nodes[0]
+        assert node_info.output_schema_config is not None
+        assert node_info.output_schema_config.mode == "observed"
+
 
 class TestGetSchemaConfigFromNodePriority:
     """Tests for get_schema_config_from_node() prioritization."""
