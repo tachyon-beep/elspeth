@@ -58,6 +58,12 @@
   --color-info-bg:           rgba(97, 218, 255, 0.10);
   --color-info-border:       rgba(97, 218, 255, 0.25);
 
+  /* Per-node validation indicator borders */
+  --color-node-valid: #14b0ae;
+  --color-node-warning: #e38444;
+  --color-node-invalid: #e85653;
+  --color-node-unchecked: var(--color-border-strong);
+
   /* ── Interactive / accent ────────────────────────────────────────────────── */
   --color-accent:            #1a7a52;
   --color-focus-ring:        #c390f9;

@@ -205,6 +205,17 @@ export interface ValidationError {
 }
 
 /**
+ * A single validation warning — same shape as ValidationError but non-blocking.
+ * Warnings indicate suboptimal configuration but do not prevent execution.
+ */
+export interface ValidationWarning {
+  component_id: string;
+  component_type: string;
+  message: string;
+  suggestion: string | null;
+}
+
+/**
  * Full validation result from POST /api/sessions/{id}/validate.
  * Stage 2 validation with per-component detail.
  */
@@ -213,7 +224,18 @@ export interface ValidationResult {
   summary: string;
   checks: ValidationCheck[];
   errors: ValidationError[];
+  warnings?: ValidationWarning[];
 }
+
+/**
+ * Derived three-state pipeline validation status.
+ *
+ * - "valid": no errors, no warnings — fully runnable
+ * - "valid-with-warnings": runnable but has non-blocking warnings (yellow)
+ * - "invalid": has blocking errors, cannot execute (red)
+ * - null: not yet validated
+ */
+export type PipelineStatus = "valid" | "valid-with-warnings" | "invalid";
 
 // ── Execution ───────────────────────────────────────────────────────────────
 
@@ -341,6 +363,12 @@ export interface BlobMetadata {
   source_description: string | null;
   status: "ready" | "pending" | "error";
 }
+
+/**
+ * User-facing file category for the blob manager folder view.
+ * Derived from the blob's mime_type and created_by fields.
+ */
+export type BlobCategory = "source" | "sink" | "other";
 
 // ── Secret References ───────────────────────────────────────────────────────
 

@@ -30,3 +30,19 @@ export const EDGE_COLORS = {
 } as const;
 
 export const EDGE_LABEL_COLOR = "#8db8b8"; // --color-text-secondary
+
+// ── Validation indicator colours ─────────────────────────────────────────────
+
+export const VALIDATION_COLORS = {
+  valid: "#14b0ae",           // matches --color-success
+  warning: "#e38444",         // matches --color-warning
+  invalid: "#e85653",         // matches --color-error
+  unchecked: "#7a9a9a",       // muted/neutral
+};
+
+export const VALIDATION_BACKGROUNDS = {
+  valid: "rgba(20, 176, 174, 0.15)",
+  warning: "rgba(227, 132, 68, 0.15)",
+  invalid: "rgba(232, 86, 83, 0.15)",
+  unchecked: "rgba(122, 154, 154, 0.1)",
+};
