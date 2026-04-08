@@ -117,7 +117,7 @@ def _make_state_record(
         outputs=d["outputs"],
         metadata_=d["metadata"],
         is_valid=state.validate().is_valid,
-        validation_errors=list(state.validate().errors) if state.validate().errors else None,
+        validation_errors=[e.message for e in state.validate().errors] if state.validate().errors else None,
         created_at=datetime.now(UTC),
         derived_from_state_id=None,
     )

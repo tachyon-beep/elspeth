@@ -195,20 +195,38 @@ class OutputSpec:
         )
 
 
+Severity = Literal["high", "medium", "low"]
+
+
+@dataclass(frozen=True, slots=True)
+class ValidationEntry:
+    """Structured validation message with component attribution.
+
+    All fields are scalars. frozen=True is sufficient.
+    """
+
+    component: str
+    message: str
+    severity: Severity
+
+    def to_dict(self) -> dict[str, str]:
+        """Serialize to a plain dict for JSON responses."""
+        return {"component": self.component, "message": self.message, "severity": self.severity}
+
+
 @dataclass(frozen=True, slots=True)
 class ValidationSummary:
     """Stage 1 validation result.
 
     errors block execution. warnings are advisory but actionable.
     suggestions are optional improvements. All are tuples of
-    human-readable strings. frozen=True is sufficient since tuples
-    of strings are immutable.
+    ValidationEntry for structured component attribution.
     """
 
     is_valid: bool
-    errors: tuple[str, ...]
-    warnings: tuple[str, ...] = ()
-    suggestions: tuple[str, ...] = ()
+    errors: tuple[ValidationEntry, ...]
+    warnings: tuple[ValidationEntry, ...] = ()
+    suggestions: tuple[ValidationEntry, ...] = ()
 
 
 @dataclass(frozen=True, slots=True)
@@ -421,15 +439,16 @@ class CompositionState:
         Pure function of the current state — no catalog or engine consultation.
         Returns ValidationSummary with is_valid and human-readable errors.
         """
-        errors: list[str] = []
+        errors: list[ValidationEntry] = []
+        _err = ValidationEntry  # local alias for brevity
 
         # 1. Source exists
         if self.source is None:
-            errors.append("No source configured.")
+            errors.append(_err("source", "No source configured.", "high"))
 
         # 2. At least one output
         if not self.outputs:
-            errors.append("No sinks configured.")
+            errors.append(_err("pipeline", "No sinks configured.", "high"))
 
         # 3. Edge references valid
         node_ids = {n.id for n in self.nodes}
@@ -438,51 +457,51 @@ class CompositionState:
         valid_to = node_ids | output_names
         for edge in self.edges:
             if edge.from_node not in valid_from:
-                errors.append(f"Edge '{edge.id}' references unknown node '{edge.from_node}' as from_node.")
+                errors.append(_err(f"edge:{edge.id}", f"Edge '{edge.id}' references unknown node '{edge.from_node}' as from_node.", "high"))
             if edge.to_node not in valid_to:
-                errors.append(f"Edge '{edge.id}' references unknown node '{edge.to_node}' as to_node.")
+                errors.append(_err(f"edge:{edge.id}", f"Edge '{edge.id}' references unknown node '{edge.to_node}' as to_node.", "high"))
 
         # 4. Node IDs unique
         seen_node_ids: set[str] = set()
         for node in self.nodes:
             if node.id in seen_node_ids:
-                errors.append(f"Duplicate node ID: '{node.id}'.")
+                errors.append(_err(f"node:{node.id}", f"Duplicate node ID: '{node.id}'.", "high"))
             seen_node_ids.add(node.id)
 
         # 5. Output names unique
         seen_output_names: set[str] = set()
         for output in self.outputs:
             if output.name in seen_output_names:
-                errors.append(f"Duplicate output name: '{output.name}'.")
+                errors.append(_err(f"output:{output.name}", f"Duplicate output name: '{output.name}'.", "high"))
             seen_output_names.add(output.name)
 
         # 6. Edge IDs unique
         seen_edge_ids: set[str] = set()
         for edge in self.edges:
             if edge.id in seen_edge_ids:
-                errors.append(f"Duplicate edge ID: '{edge.id}'.")
+                errors.append(_err(f"edge:{edge.id}", f"Duplicate edge ID: '{edge.id}'.", "high"))
             seen_edge_ids.add(edge.id)
 
         # 7. Node type field consistency
         for node in self.nodes:
             if node.node_type == "gate":
                 if node.condition is None:
-                    errors.append(f"Gate '{node.id}' is missing required field 'condition'.")
+                    errors.append(_err(f"node:{node.id}", f"Gate '{node.id}' is missing required field 'condition'.", "high"))
                 if node.routes is None:
-                    errors.append(f"Gate '{node.id}' is missing required field 'routes'.")
+                    errors.append(_err(f"node:{node.id}", f"Gate '{node.id}' is missing required field 'routes'.", "high"))
             elif node.node_type == "transform":
                 if node.condition is not None:
-                    errors.append(f"Transform '{node.id}' must not have 'condition' field.")
+                    errors.append(_err(f"node:{node.id}", f"Transform '{node.id}' must not have 'condition' field.", "high"))
                 if node.routes is not None:
-                    errors.append(f"Transform '{node.id}' must not have 'routes' field.")
+                    errors.append(_err(f"node:{node.id}", f"Transform '{node.id}' must not have 'routes' field.", "high"))
             elif node.node_type == "coalesce":
                 if node.branches is None:
-                    errors.append(f"Coalesce '{node.id}' is missing required field 'branches'.")
+                    errors.append(_err(f"node:{node.id}", f"Coalesce '{node.id}' is missing required field 'branches'.", "high"))
                 if node.policy is None:
-                    errors.append(f"Coalesce '{node.id}' is missing required field 'policy'.")
+                    errors.append(_err(f"node:{node.id}", f"Coalesce '{node.id}' is missing required field 'policy'.", "high"))
             elif node.node_type == "aggregation":
                 if node.plugin is None:
-                    errors.append(f"Aggregation '{node.id}' is missing required field 'plugin'.")
+                    errors.append(_err(f"node:{node.id}", f"Aggregation '{node.id}' is missing required field 'plugin'.", "high"))
 
         # 8. Connection completeness
         edge_destinations = {e.to_node for e in self.edges}
@@ -490,10 +509,17 @@ class CompositionState:
         for node in self.nodes:
             reachable = node.id in edge_destinations or node.input == source_on_success
             if not reachable:
-                errors.append(f"Node '{node.id}' input '{node.input}' is not reachable from any edge or the source on_success.")
+                errors.append(
+                    _err(
+                        f"node:{node.id}",
+                        f"Node '{node.id}' input '{node.input}' is not reachable from any edge or the source on_success.",
+                        "high",
+                    )
+                )
 
         # --- Warnings (advisory, non-blocking) ---
-        warnings: list[str] = []
+        warnings: list[ValidationEntry] = []
+        _warn = ValidationEntry
 
         # Build connection-field targets (wiring that doesn't require edges)
         connection_targets: set[str] = set()
@@ -514,14 +540,24 @@ class CompositionState:
         for output in self.outputs:
             if output.name not in connection_targets:
                 warnings.append(
-                    f"Output '{output.name}' is not referenced by any on_success, on_error, or route — it will never receive data."
+                    _warn(
+                        f"output:{output.name}",
+                        f"Output '{output.name}' is not referenced by any on_success, on_error, or route — it will never receive data.",
+                        "medium",
+                    )
                 )
 
         # W2: Source on_success target doesn't match any node input or output name
         if source_on_success is not None:
             node_inputs = {n.input for n in self.nodes if n.input is not None}
             if source_on_success not in node_inputs and source_on_success not in output_names:
-                warnings.append(f"Source on_success '{source_on_success}' does not match any node input or output — data may not flow.")
+                warnings.append(
+                    _warn(
+                        "source",
+                        f"Source on_success '{source_on_success}' does not match any node input or output — data may not flow.",
+                        "medium",
+                    )
+                )
 
         # W3: Node has no outgoing edges and no connection-field targets
         edge_sources = {e.from_node for e in self.edges}
@@ -531,7 +567,13 @@ class CompositionState:
                 node.on_success is not None or node.on_error is not None or (node.routes is not None and len(node.routes) > 0)
             )
             if not has_edge_out and not has_connection_out:
-                warnings.append(f"Node '{node.id}' has no outgoing edges — its output is not connected to any downstream node or sink.")
+                warnings.append(
+                    _warn(
+                        f"node:{node.id}",
+                        f"Node '{node.id}' has no outgoing edges — its output is not connected to any downstream node or sink.",
+                        "medium",
+                    )
+                )
 
         # W4: Sink plugin/filename extension mismatch
         _plugin_exts: dict[str, set[str]] = {
@@ -540,31 +582,42 @@ class CompositionState:
             "jsonl": {".jsonl"},
         }
         for output in self.outputs:
-            path_val = output.options.get("path") if output.options else None
+            path_val = output.options.get("path")
             if isinstance(path_val, str):
                 ext = PurePosixPath(path_val).suffix.lower()
                 accepted = _plugin_exts.get(output.plugin)
                 if ext and accepted is not None and ext not in accepted:
                     warnings.append(
-                        f"Output '{output.name}' uses plugin '{output.plugin}' but filename extension suggests a different format."
+                        _warn(
+                            f"output:{output.name}",
+                            f"Output '{output.name}' uses plugin '{output.plugin}' but filename extension suggests a different format.",
+                            "low",
+                        )
                     )
 
         # --- Suggestions (optional improvements) ---
-        suggestions: list[str] = []
+        suggestions: list[ValidationEntry] = []
+        _sug = ValidationEntry
 
         # S1: No error routing
         has_gate = any(n.node_type == "gate" for n in self.nodes)
         has_error_routing = any(e.edge_type == "on_error" for e in self.edges) or any(n.on_error is not None for n in self.nodes)
         if not has_gate and not has_error_routing and self.nodes:
-            suggestions.append("Consider adding error routing — rows that fail transforms currently have no explicit destination.")
+            suggestions.append(
+                _sug("pipeline", "Consider adding error routing — rows that fail transforms currently have no explicit destination.", "low")
+            )
 
         # S2: Single output
         if len(self.outputs) == 1:
-            suggestions.append("Single output pipeline. Consider adding a second output for rejected/quarantined rows.")
+            suggestions.append(
+                _sug("pipeline", "Single output pipeline. Consider adding a second output for rejected/quarantined rows.", "low")
+            )
 
         # S3: Source has no schema_config
         if self.source is not None and "schema_config" not in self.source.options:
-            suggestions.append("Source has no explicit schema. Downstream field references depend on runtime column names.")
+            suggestions.append(
+                _sug("source", "Source has no explicit schema. Downstream field references depend on runtime column names.", "low")
+            )
 
         return ValidationSummary(
             is_valid=len(errors) == 0,

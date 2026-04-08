@@ -29,6 +29,7 @@ from elspeth.web.composer.tools import (
     _MUTATION_TOOLS,
     execute_tool,
     get_tool_definitions,
+    redact_source_storage_path,
 )
 from elspeth.web.composer.yaml_generator import generate_yaml
 
@@ -144,6 +145,7 @@ def _dispatch_tool(
     state: CompositionState,
     catalog: CatalogService,
     scratch_dir: Path,
+    baseline: CompositionState | None = None,
 ) -> dict[str, Any]:
     """Dispatch a tool call and return a result dict.
 
@@ -152,12 +154,15 @@ def _dispatch_tool(
 
     The result dict always has ``success``, ``state`` (serialized
     CompositionState), and may include ``data``.
+
+    Args:
+        baseline: Optional baseline state for diff_pipeline comparisons.
     """
     if tool_name in _SESSION_TOOL_NAMES:
         return _dispatch_session_tool(tool_name, arguments, state, scratch_dir)
 
     if tool_name in _COMPOSER_TOOL_NAMES:
-        result = execute_tool(tool_name, arguments, state, catalog, data_dir=None)
+        result = execute_tool(tool_name, arguments, state, catalog, data_dir=None, baseline=baseline)
         response = result.to_dict()
         response["state"] = result.updated_state.to_dict()
         # Discovery tools return Pydantic models (PluginSummary, PluginSchemaInfo)
@@ -271,16 +276,17 @@ def create_server(
 
     # Mutable state container — list-of-one pattern allows the
     # inner closures to mutate without nonlocal.
-    state_ref: list[CompositionState] = [
-        CompositionState(
-            source=None,
-            nodes=(),
-            edges=(),
-            outputs=(),
-            metadata=PipelineMetadata(),
-            version=1,
-        )
-    ]
+    initial_state = CompositionState(
+        source=None,
+        nodes=(),
+        edges=(),
+        outputs=(),
+        metadata=PipelineMetadata(),
+        version=1,
+    )
+    state_ref: list[CompositionState] = [initial_state]
+    # B5: Baseline for diff_pipeline — captured at session create/load.
+    baseline_ref: list[CompositionState] = [initial_state]
 
     tool_defs = _build_tool_defs()
 
@@ -307,6 +313,7 @@ def create_server(
                 state_ref[0],
                 catalog,
                 scratch_dir,
+                baseline=baseline_ref[0],
             )
         except Exception as exc:
             return CallToolResult(
@@ -314,9 +321,16 @@ def create_server(
                 isError=True,
             )
 
-        # Update server-side state from the result.
+        # Update server-side state from the result (BEFORE redaction —
+        # the internal state needs storage paths for pipeline execution).
         if "state" in result:
-            state_ref[0] = CompositionState.from_dict(result["state"])
+            new_state = CompositionState.from_dict(result["state"])
+            state_ref[0] = new_state
+            # Capture baseline when session is created or loaded
+            if name in ("new_session", "load_session"):
+                baseline_ref[0] = new_state
+            # B4: Redact storage paths from the response sent to the agent.
+            result["state"] = redact_source_storage_path(result["state"])
 
         return [TextContent(type="text", text=json.dumps(result, indent=2))]
 

@@ -9,14 +9,18 @@ L3 (web/composer/state, web/catalog/protocol).
 
 from __future__ import annotations
 
+import re
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass, replace
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
+from uuid import uuid4
 
-from sqlalchemy import Engine, select
+from sqlalchemy import Engine, delete, func, select, update
 
 from elspeth.contracts.freeze import deep_thaw, freeze_fields
+from elspeth.web.blobs.service import content_hash, sanitize_filename
 from elspeth.web.catalog.protocol import CatalogService, PluginKind
 from elspeth.web.composer.state import (
     CompositionState,
@@ -28,8 +32,6 @@ from elspeth.web.composer.state import (
     ValidationSummary,
 )
 from elspeth.web.sessions.models import blobs_table
-
-CatalogServiceProtocol = CatalogService  # Re-export for local use
 
 
 @dataclass(frozen=True, slots=True)
@@ -56,14 +58,19 @@ class ToolResult:
             freeze_fields(self, "data")
 
     def to_dict(self) -> dict[str, Any]:
-        """Serialize to a dict suitable for LLM tool response."""
+        """Serialize to a dict suitable for LLM tool response.
+
+        Validation entries are serialized as structured dicts with
+        component, message, and severity fields (B2 requirement).
+        """
+
         result: dict[str, Any] = {
             "success": self.success,
             "validation": {
                 "is_valid": self.validation.is_valid,
-                "errors": list(self.validation.errors),
-                "warnings": list(self.validation.warnings),
-                "suggestions": list(self.validation.suggestions),
+                "errors": [e.to_dict() for e in self.validation.errors],
+                "warnings": [e.to_dict() for e in self.validation.warnings],
+                "suggestions": [e.to_dict() for e in self.validation.suggestions],
             },
             "affected_nodes": list(self.affected_nodes),
             "version": self.updated_state.version,
@@ -71,6 +78,116 @@ class ToolResult:
         if self.data is not None:
             result["data"] = deep_thaw(self.data)
         return result
+
+
+def diff_states(baseline: CompositionState, current: CompositionState) -> dict[str, Any]:
+    """Compare two composition states and return a structured change summary.
+
+    Reports added, removed, and modified nodes/edges/outputs, plus source
+    and metadata changes. Used by the diff_pipeline MCP tool (B5).
+    """
+    changes: dict[str, Any] = {
+        "from_version": baseline.version,
+        "to_version": current.version,
+        "source_changed": False,
+        "metadata_changed": False,
+        "nodes": {"added": [], "removed": [], "modified": []},
+        "edges": {"added": [], "removed": [], "modified": []},
+        "outputs": {"added": [], "removed": [], "modified": []},
+    }
+
+    # Source
+    if baseline.source != current.source:
+        changes["source_changed"] = True
+        if baseline.source is None:
+            changes["source_detail"] = "added"
+        elif current.source is None:
+            changes["source_detail"] = "removed"
+        else:
+            changes["source_detail"] = "modified"
+
+    # Metadata
+    if baseline.metadata != current.metadata:
+        changes["metadata_changed"] = True
+
+    # Nodes
+    baseline_nodes = {n.id: n for n in baseline.nodes}
+    current_nodes = {n.id: n for n in current.nodes}
+    for nid in current_nodes:
+        if nid not in baseline_nodes:
+            changes["nodes"]["added"].append(nid)
+        elif current_nodes[nid] != baseline_nodes[nid]:
+            changes["nodes"]["modified"].append(nid)
+    for nid in baseline_nodes:
+        if nid not in current_nodes:
+            changes["nodes"]["removed"].append(nid)
+
+    # Edges
+    baseline_edges = {e.id: e for e in baseline.edges}
+    current_edges = {e.id: e for e in current.edges}
+    for eid in current_edges:
+        if eid not in baseline_edges:
+            changes["edges"]["added"].append(eid)
+        elif current_edges[eid] != baseline_edges[eid]:
+            changes["edges"]["modified"].append(eid)
+    for eid in baseline_edges:
+        if eid not in current_edges:
+            changes["edges"]["removed"].append(eid)
+
+    # Outputs
+    baseline_outputs = {o.name: o for o in baseline.outputs}
+    current_outputs = {o.name: o for o in current.outputs}
+    for name in current_outputs:
+        if name not in baseline_outputs:
+            changes["outputs"]["added"].append(name)
+        elif current_outputs[name] != baseline_outputs[name]:
+            changes["outputs"]["modified"].append(name)
+    for name in baseline_outputs:
+        if name not in current_outputs:
+            changes["outputs"]["removed"].append(name)
+
+    # Validation delta
+    baseline_validation = baseline.validate()
+    current_validation = current.validate()
+    baseline_warnings = {e.message for e in baseline_validation.warnings}
+    current_warnings = {e.message for e in current_validation.warnings}
+    changes["warnings_introduced"] = sorted(current_warnings - baseline_warnings)
+    changes["warnings_resolved"] = sorted(baseline_warnings - current_warnings)
+
+    # Summary stats
+    total = sum(len(changes[k][action]) for k in ("nodes", "edges", "outputs") for action in ("added", "removed", "modified"))
+    total += int(changes["source_changed"]) + int(changes["metadata_changed"])
+    changes["total_changes"] = total
+
+    return changes
+
+
+def redact_source_storage_path(state_dict: dict[str, Any]) -> dict[str, Any]:
+    """Redact internal storage paths from a serialized state dict.
+
+    When source options contain a ``blob_ref``, the ``path`` key is an
+    internal storage detail that should not be exposed to agents or users.
+    This replaces raw paths with the blob ID reference (B4 requirement).
+
+    Returns a shallow copy with source options redacted. Does not mutate
+    the input dict.
+    """
+    source = state_dict.get("source")
+    if source is None:
+        return state_dict
+
+    options = source.get("options")
+    if options is None or "blob_ref" not in options:
+        return state_dict
+
+    # Shallow copy the chain to avoid mutating the original
+    redacted = dict(state_dict)
+    redacted_source = dict(source)
+    redacted_options = dict(options)
+    redacted_options.pop("path", None)
+    redacted_source["options"] = redacted_options
+    redacted["source"] = redacted_source
+    return redacted
 
 
 # --- Expression Grammar (static) ---
@@ -125,7 +242,7 @@ def get_expression_grammar() -> str:
 def get_tool_definitions() -> list[dict[str, Any]]:
     """Return JSON Schema tool definitions for the LLM.
 
-    Returns 27 tools: 8 discovery + 13 mutation + 3 blob tools + 3 secret tools.
+    Returns 32 tools: 9 discovery + 13 mutation + 7 blob tools + 3 secret tools.
     """
     return [
         # Discovery tools
@@ -437,6 +554,13 @@ def get_tool_definitions() -> list[dict[str, Any]]:
             "correctly before running.",
             "parameters": {"type": "object", "properties": {}, "required": []},
         },
+        {
+            "name": "diff_pipeline",
+            "description": "Show what changed since the session was loaded or created. "
+            "Returns added, removed, and modified nodes/edges/outputs, "
+            "plus warnings introduced or resolved.",
+            "parameters": {"type": "object", "properties": {}, "required": []},
+        },
         # Blob tools
         {
             "name": "list_blobs",
@@ -471,6 +595,88 @@ def get_tool_definitions() -> list[dict[str, Any]]:
                     },
                 },
                 "required": ["blob_id", "on_success"],
+            },
+        },
+        {
+            "name": "create_blob",
+            "description": "Create a new file (blob) from inline content. "
+            "Use this to create seed input files (URLs, JSON, CSV snippets) "
+            "mid-conversation without requiring manual upload.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "filename": {
+                        "type": "string",
+                        "description": "Filename for the blob (e.g. 'urls.csv', 'seed.json').",
+                    },
+                    "mime_type": {
+                        "type": "string",
+                        "enum": [
+                            "text/plain",
+                            "application/json",
+                            "text/csv",
+                            "application/x-jsonlines",
+                            "application/jsonl",
+                            "text/jsonl",
+                        ],
+                        "description": "MIME type of the content.",
+                    },
+                    "content": {
+                        "type": "string",
+                        "description": "The file content as a string.",
+                    },
+                    "description": {
+                        "type": "string",
+                        "description": "Optional description of the file's purpose.",
+                    },
+                },
+                "required": ["filename", "mime_type", "content"],
+            },
+        },
+        {
+            "name": "update_blob",
+            "description": "Update the content of an existing blob (file). Overwrites the file content while preserving metadata.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "blob_id": {
+                        "type": "string",
+                        "description": "ID of the blob to update.",
+                    },
+                    "content": {
+                        "type": "string",
+                        "description": "New file content.",
+                    },
+                },
+                "required": ["blob_id", "content"],
+            },
+        },
+        {
+            "name": "delete_blob",
+            "description": "Delete a blob (file) and its storage.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "blob_id": {
+                        "type": "string",
+                        "description": "ID of the blob to delete.",
+                    },
+                },
+                "required": ["blob_id"],
+            },
+        },
+        {
+            "name": "get_blob_content",
+            "description": "Retrieve the content of a blob (file) for inspection. Large files are truncated to 50,000 characters.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "blob_id": {
+                        "type": "string",
+                        "description": "ID of the blob to read.",
+                    },
+                },
+                "required": ["blob_id"],
             },
         },
         # Secret tools
@@ -516,7 +722,7 @@ def get_tool_definitions() -> list[dict[str, Any]]:
 # Unified handler signature: (arguments, state, catalog, data_dir) -> ToolResult.
 # Handlers that don't need all parameters ignore them.
 ToolHandler = Callable[
-    [dict[str, Any], CompositionState, CatalogServiceProtocol, str | None],
+    [dict[str, Any], CompositionState, CatalogService, str | None],
     ToolResult,
 ]
 
@@ -527,7 +733,7 @@ ToolHandler = Callable[
 def _handle_list_sources(
     arguments: dict[str, Any],
     state: CompositionState,
-    catalog: CatalogServiceProtocol,
+    catalog: CatalogService,
     data_dir: str | None = None,
 ) -> ToolResult:
     return _discovery_result(state, catalog.list_sources())
@@ -536,7 +742,7 @@ def _handle_list_sources(
 def _handle_list_transforms(
     arguments: dict[str, Any],
     state: CompositionState,
-    catalog: CatalogServiceProtocol,
+    catalog: CatalogService,
     data_dir: str | None = None,
 ) -> ToolResult:
     return _discovery_result(state, catalog.list_transforms())
@@ -545,7 +751,7 @@ def _handle_list_transforms(
 def _handle_list_sinks(
     arguments: dict[str, Any],
     state: CompositionState,
-    catalog: CatalogServiceProtocol,
+    catalog: CatalogService,
     data_dir: str | None = None,
 ) -> ToolResult:
     return _discovery_result(state, catalog.list_sinks())
@@ -554,7 +760,7 @@ def _handle_list_sinks(
 def _handle_get_plugin_schema(
     arguments: dict[str, Any],
     state: CompositionState,
-    catalog: CatalogServiceProtocol,
+    catalog: CatalogService,
     data_dir: str | None = None,
 ) -> ToolResult:
     try:
@@ -569,7 +775,7 @@ def _handle_get_plugin_schema(
 def _handle_get_expression_grammar(
     arguments: dict[str, Any],
     state: CompositionState,
-    catalog: CatalogServiceProtocol,
+    catalog: CatalogService,
     data_dir: str | None = None,
 ) -> ToolResult:
     return _discovery_result(state, get_expression_grammar())
@@ -581,7 +787,7 @@ def _handle_get_expression_grammar(
 def _handle_upsert_node(
     arguments: dict[str, Any],
     state: CompositionState,
-    catalog: CatalogServiceProtocol,
+    catalog: CatalogService,
     data_dir: str | None = None,
 ) -> ToolResult:
     return _execute_upsert_node(arguments, state, catalog)
@@ -590,7 +796,7 @@ def _handle_upsert_node(
 def _handle_upsert_edge(
     arguments: dict[str, Any],
     state: CompositionState,
-    catalog: CatalogServiceProtocol,
+    catalog: CatalogService,
     data_dir: str | None = None,
 ) -> ToolResult:
     return _execute_upsert_edge(arguments, state)
@@ -599,7 +805,7 @@ def _handle_upsert_edge(
 def _handle_remove_node(
     arguments: dict[str, Any],
     state: CompositionState,
-    catalog: CatalogServiceProtocol,
+    catalog: CatalogService,
     data_dir: str | None = None,
 ) -> ToolResult:
     return _execute_remove_node(arguments, state)
@@ -608,7 +814,7 @@ def _handle_remove_node(
 def _handle_remove_edge(
     arguments: dict[str, Any],
     state: CompositionState,
-    catalog: CatalogServiceProtocol,
+    catalog: CatalogService,
     data_dir: str | None = None,
 ) -> ToolResult:
     return _execute_remove_edge(arguments, state)
@@ -617,7 +823,7 @@ def _handle_remove_edge(
 def _handle_set_metadata(
     arguments: dict[str, Any],
     state: CompositionState,
-    catalog: CatalogServiceProtocol,
+    catalog: CatalogService,
     data_dir: str | None = None,
 ) -> ToolResult:
     return _execute_set_metadata(arguments, state)
@@ -626,7 +832,7 @@ def _handle_set_metadata(
 def _handle_set_output(
     arguments: dict[str, Any],
     state: CompositionState,
-    catalog: CatalogServiceProtocol,
+    catalog: CatalogService,
     data_dir: str | None = None,
 ) -> ToolResult:
     return _execute_set_output(arguments, state, catalog)
@@ -635,7 +841,7 @@ def _handle_set_output(
 def _handle_remove_output(
     arguments: dict[str, Any],
     state: CompositionState,
-    catalog: CatalogServiceProtocol,
+    catalog: CatalogService,
     data_dir: str | None = None,
 ) -> ToolResult:
     return _execute_remove_output(arguments, state)
@@ -697,7 +903,7 @@ def _apply_merge_patch(
 
 
 def _validate_plugin_name(
-    catalog: CatalogServiceProtocol,
+    catalog: CatalogService,
     plugin_type: PluginKind,
     name: str,
 ) -> str | None:
@@ -813,7 +1019,7 @@ def _validate_source_path(
 def _execute_set_source(
     args: dict[str, Any],
     state: CompositionState,
-    catalog: CatalogServiceProtocol,
+    catalog: CatalogService,
     data_dir: str | None = None,
 ) -> ToolResult:
     """Set or replace the pipeline source."""
@@ -842,7 +1048,7 @@ def _execute_set_source(
 def _execute_upsert_node(
     args: dict[str, Any],
     state: CompositionState,
-    catalog: CatalogServiceProtocol,
+    catalog: CatalogService,
 ) -> ToolResult:
     """Add or update a pipeline node."""
     node_type = args["node_type"]
@@ -990,7 +1196,7 @@ def _execute_set_metadata(
 def _execute_set_output(
     args: dict[str, Any],
     state: CompositionState,
-    catalog: CatalogServiceProtocol,
+    catalog: CatalogService,
 ) -> ToolResult:
     """Add or replace a pipeline output (sink)."""
     plugin = args["plugin"]
@@ -1027,7 +1233,7 @@ def _execute_remove_output(
 def _handle_list_blobs(
     arguments: dict[str, Any],
     state: CompositionState,
-    catalog: CatalogServiceProtocol,
+    catalog: CatalogService,
     data_dir: str | None = None,
     *,
     session_engine: Engine | None = None,
@@ -1042,7 +1248,7 @@ def _handle_list_blobs(
 def _handle_get_blob_metadata(
     arguments: dict[str, Any],
     state: CompositionState,
-    catalog: CatalogServiceProtocol,
+    catalog: CatalogService,
     data_dir: str | None = None,
     *,
     session_engine: Engine | None = None,
@@ -1061,7 +1267,7 @@ def _handle_get_blob_metadata(
 def _execute_set_source_from_blob(
     arguments: dict[str, Any],
     state: CompositionState,
-    catalog: CatalogServiceProtocol,
+    catalog: CatalogService,
     data_dir: str | None = None,
     *,
     session_engine: Engine | None = None,
@@ -1106,6 +1312,254 @@ def _execute_set_source_from_blob(
     return _mutation_result(new_state, ("source",))
 
 
+_ALLOWED_BLOB_MIME_TYPES: frozenset[str] = frozenset(
+    {
+        "text/plain",
+        "application/json",
+        "text/csv",
+        "application/x-jsonlines",
+        "application/jsonl",
+        "text/jsonl",
+    }
+)
+
+# Default per-session blob storage quota (matches BlobServiceImpl).
+_BLOB_QUOTA_BYTES: int = 500 * 1024 * 1024
+
+
+def _blob_storage_path(data_dir: str, session_id: str, blob_id: str, filename: str) -> Path:
+    """Compute blob storage path matching BlobServiceImpl layout.
+
+    Pattern: {data_dir}/blobs/{session_id}/{blob_id}_{filename}
+    """
+    return Path(data_dir).resolve() / "blobs" / session_id / f"{blob_id}_{filename}"
+
+
+def _check_blob_quota(conn: Any, session_id: str, additional_bytes: int) -> str | None:
+    """Check if adding bytes would exceed the session blob quota.
+
+    Returns an error message if quota exceeded, None if OK.
+    Runs inside an existing transaction for TOCTOU safety.
+    """
+    current_total = conn.execute(
+        select(func.coalesce(func.sum(blobs_table.c.size_bytes), 0)).where(blobs_table.c.session_id == session_id)
+    ).scalar()
+    current_total = int(current_total)
+    if current_total + additional_bytes > _BLOB_QUOTA_BYTES:
+        return f"Session blob quota exceeded: {current_total + additional_bytes} bytes would exceed {_BLOB_QUOTA_BYTES} byte limit."
+    return None
+
+
+def _execute_create_blob(
+    arguments: dict[str, Any],
+    state: CompositionState,
+    catalog: CatalogService,
+    data_dir: str | None = None,
+    *,
+    session_engine: Engine | None = None,
+    session_id: str | None = None,
+) -> ToolResult:
+    """Create a new blob (file) in the session from inline content.
+
+    Uses the same storage layout and safety functions as BlobServiceImpl:
+    sanitize_filename() for path traversal defence, content_hash() for
+    SHA-256, per-session subdirectory, and atomic quota enforcement.
+    """
+    if session_engine is None or session_id is None:
+        return _failure_result(state, "Blob tools require session context.")
+    if data_dir is None:
+        return _failure_result(state, "Blob tools require data_dir for storage.")
+
+    filename = arguments["filename"]
+    mime_type = arguments["mime_type"]
+    content = arguments["content"]
+
+    if mime_type not in _ALLOWED_BLOB_MIME_TYPES:
+        return _failure_result(
+            state,
+            f"Unsupported MIME type '{mime_type}'. Allowed: {', '.join(sorted(_ALLOWED_BLOB_MIME_TYPES))}",
+        )
+
+    # Sanitize filename — strips path components, rejects dots/empty
+    try:
+        safe_filename = sanitize_filename(filename)
+    except ValueError as exc:
+        return _failure_result(state, f"Invalid filename: {exc}")
+
+    content_bytes = content.encode("utf-8")
+    file_hash = content_hash(content_bytes)
+    blob_id = str(uuid4())
+
+    # Storage path matches BlobServiceImpl: blobs/{session_id}/{blob_id}_{filename}
+    storage_path = _blob_storage_path(data_dir, session_id, blob_id, safe_filename)
+    storage_path.parent.mkdir(parents=True, exist_ok=True)
+    storage_path.write_bytes(content_bytes)
+
+    # Atomic quota check + insert (same pattern as BlobServiceImpl)
+    now = datetime.now(UTC)
+    try:
+        with session_engine.begin() as conn:
+            quota_error = _check_blob_quota(conn, session_id, len(content_bytes))
+            if quota_error is not None:
+                storage_path.unlink(missing_ok=True)
+                return _failure_result(state, quota_error)
+
+            conn.execute(
+                blobs_table.insert().values(
+                    id=blob_id,
+                    session_id=session_id,
+                    filename=safe_filename,
+                    mime_type=mime_type,
+                    size_bytes=len(content_bytes),
+                    content_hash=file_hash,
+                    storage_path=str(storage_path),
+                    created_at=now,
+                    created_by="assistant",
+                    source_description=arguments.get("description"),
+                    status="ready",
+                )
+            )
+    except BaseException:
+        # Clean up file on any DB failure
+        storage_path.unlink(missing_ok=True)
+        raise
+
+    return _discovery_result(
+        state,
+        {
+            "blob_id": blob_id,
+            "filename": safe_filename,
+            "mime_type": mime_type,
+            "size_bytes": len(content_bytes),
+            "content_hash": file_hash,
+        },
+    )
+
+
+def _execute_update_blob(
+    arguments: dict[str, Any],
+    state: CompositionState,
+    catalog: CatalogService,
+    data_dir: str | None = None,
+    *,
+    session_engine: Engine | None = None,
+    session_id: str | None = None,
+) -> ToolResult:
+    """Update the content of an existing blob."""
+    if session_engine is None or session_id is None:
+        return _failure_result(state, "Blob tools require session context.")
+
+    blob_id = arguments["blob_id"]
+    content = arguments["content"]
+
+    blob = _sync_get_blob(session_engine, blob_id, session_id)
+    if blob is None:
+        return _failure_result(state, f"Blob '{blob_id}' not found.")
+
+    content_bytes = content.encode("utf-8")
+    file_hash = content_hash(content_bytes)
+
+    # Overwrite storage file
+    storage_path = Path(blob["storage_path"])
+    storage_path.write_bytes(content_bytes)
+
+    # Update record — include session_id filter for defence in depth
+    with session_engine.begin() as conn:
+        conn.execute(
+            update(blobs_table)
+            .where(blobs_table.c.id == blob_id, blobs_table.c.session_id == session_id)
+            .values(
+                size_bytes=len(content_bytes),
+                content_hash=file_hash,
+            )
+        )
+
+    return _discovery_result(
+        state,
+        {
+            "blob_id": blob_id,
+            "filename": blob["filename"],
+            "mime_type": blob["mime_type"],
+            "size_bytes": len(content_bytes),
+            "content_hash": file_hash,
+        },
+    )
+
+
+def _execute_delete_blob(
+    arguments: dict[str, Any],
+    state: CompositionState,
+    catalog: CatalogService,
+    data_dir: str | None = None,
+    *,
+    session_engine: Engine | None = None,
+    session_id: str | None = None,
+) -> ToolResult:
+    """Delete a blob and its storage file."""
+    if session_engine is None or session_id is None:
+        return _failure_result(state, "Blob tools require session context.")
+
+    blob_id = arguments["blob_id"]
+
+    blob = _sync_get_blob(session_engine, blob_id, session_id)
+    if blob is None:
+        return _failure_result(state, f"Blob '{blob_id}' not found.")
+
+    # Remove storage file
+    storage_path = Path(blob["storage_path"])
+    if storage_path.exists():
+        storage_path.unlink()
+
+    # Delete record — include session_id filter for defence in depth
+    with session_engine.begin() as conn:
+        conn.execute(delete(blobs_table).where(blobs_table.c.id == blob_id, blobs_table.c.session_id == session_id))
+
+    return _discovery_result(state, {"blob_id": blob_id, "deleted": True})
+
+
+def _execute_get_blob_content(
+    arguments: dict[str, Any],
+    state: CompositionState,
+    catalog: CatalogService,
+    data_dir: str | None = None,
+    *,
+    session_engine: Engine | None = None,
+    session_id: str | None = None,
+) -> ToolResult:
+    """Retrieve the content of a blob for inspection."""
+    if session_engine is None or session_id is None:
+        return _failure_result(state, "Blob tools require session context.")
+
+    blob_id = arguments["blob_id"]
+    blob = _sync_get_blob(session_engine, blob_id, session_id)
+    if blob is None:
+        return _failure_result(state, f"Blob '{blob_id}' not found.")
+
+    storage_path = Path(blob["storage_path"])
+    if not storage_path.exists():
+        return _failure_result(state, f"Blob storage file missing for '{blob_id}'.")
+
+    content = storage_path.read_text(encoding="utf-8")
+
+    # Truncate very large content to avoid overwhelming the LLM context
+    max_chars = 50_000
+    truncated = len(content) > max_chars
+    if truncated:
+        content = content[:max_chars]
+
+    return _discovery_result(
+        state,
+        {
+            "blob_id": blob_id,
+            "filename": blob["filename"],
+            "mime_type": blob["mime_type"],
+            "content": content,
+            "truncated": truncated,
+            "size_bytes": blob["size_bytes"],
+        },
+    )
+
+
 # Blob tool handler type — extended signature with session context
 BlobToolHandler = Callable[..., ToolResult]
 
@@ -1118,7 +1572,7 @@ SecretToolHandler = Callable[..., ToolResult]
 def _handle_list_secret_refs(
     arguments: dict[str, Any],
     state: CompositionState,
-    catalog: CatalogServiceProtocol,
+    catalog: CatalogService,
     data_dir: str | None = None,
     *,
     secret_service: Any | None = None,
@@ -1135,7 +1589,7 @@ def _handle_list_secret_refs(
 def _handle_validate_secret_ref(
     arguments: dict[str, Any],
     state: CompositionState,
-    catalog: CatalogServiceProtocol,
+    catalog: CatalogService,
     data_dir: str | None = None,
     *,
     secret_service: Any | None = None,
@@ -1151,7 +1605,7 @@ def _handle_validate_secret_ref(
 def _execute_wire_secret_ref(
     arguments: dict[str, Any],
     state: CompositionState,
-    catalog: CatalogServiceProtocol,
+    catalog: CatalogService,
     data_dir: str | None = None,
     *,
     secret_service: Any | None = None,
@@ -1238,7 +1692,7 @@ def _execute_wire_secret_ref(
 def _execute_set_pipeline(
     args: dict[str, Any],
     state: CompositionState,
-    catalog: CatalogServiceProtocol,
+    catalog: CatalogService,
     data_dir: str | None = None,
 ) -> ToolResult:
     """Atomically replace the entire pipeline composition state."""
@@ -1361,7 +1815,7 @@ def _execute_set_pipeline(
 def _handle_set_pipeline(
     arguments: dict[str, Any],
     state: CompositionState,
-    catalog: CatalogServiceProtocol,
+    catalog: CatalogService,
     data_dir: str | None = None,
 ) -> ToolResult:
     return _execute_set_pipeline(arguments, state, catalog, data_dir)
@@ -1400,7 +1854,7 @@ def _execute_patch_source_options(
 def _handle_patch_source_options(
     arguments: dict[str, Any],
     state: CompositionState,
-    catalog: CatalogServiceProtocol,
+    catalog: CatalogService,
     data_dir: str | None = None,
 ) -> ToolResult:
     return _execute_patch_source_options(arguments, state, data_dir)
@@ -1440,7 +1894,7 @@ def _execute_patch_node_options(
 def _handle_patch_node_options(
     arguments: dict[str, Any],
     state: CompositionState,
-    catalog: CatalogServiceProtocol,
+    catalog: CatalogService,
     data_dir: str | None = None,
 ) -> ToolResult:
     return _execute_patch_node_options(arguments, state)
@@ -1471,7 +1925,7 @@ def _execute_patch_output_options(
 def _handle_patch_output_options(
     arguments: dict[str, Any],
     state: CompositionState,
-    catalog: CatalogServiceProtocol,
+    catalog: CatalogService,
     data_dir: str | None = None,
 ) -> ToolResult:
     return _execute_patch_output_options(arguments, state)
@@ -1494,7 +1948,7 @@ def _execute_clear_source(
 def _handle_clear_source(
     arguments: dict[str, Any],
     state: CompositionState,
-    catalog: CatalogServiceProtocol,
+    catalog: CatalogService,
     data_dir: str | None = None,
 ) -> ToolResult:
     return _execute_clear_source(arguments, state)
@@ -1579,12 +2033,10 @@ _VALIDATION_ERROR_PATTERNS: list[tuple[str, str, str]] = [
 def _execute_explain_validation_error(
     args: dict[str, Any],
     state: CompositionState,
-    catalog: CatalogServiceProtocol,
+    catalog: CatalogService,
     data_dir: str | None = None,
 ) -> ToolResult:
     """Explain a validation error with human-readable diagnosis and fix."""
-    import re
-
     error_text = args["error_text"]
     for pattern, explanation, fix in _VALIDATION_ERROR_PATTERNS:
         if re.search(pattern, error_text):
@@ -1616,7 +2068,7 @@ def _execute_explain_validation_error(
 def _execute_list_models(
     args: dict[str, Any],
     state: CompositionState,
-    catalog: CatalogServiceProtocol,
+    catalog: CatalogService,
     data_dir: str | None = None,
 ) -> ToolResult:
     """List available LLM model identifiers."""
@@ -1645,7 +2097,7 @@ def _execute_list_models(
 def _execute_preview_pipeline(
     args: dict[str, Any],
     state: CompositionState,
-    catalog: CatalogServiceProtocol,
+    catalog: CatalogService,
     data_dir: str | None = None,
 ) -> ToolResult:
     """Preview pipeline configuration — dry-run validation with source summary.
@@ -1658,9 +2110,9 @@ def _execute_preview_pipeline(
 
     summary: dict[str, Any] = {
         "is_valid": validation.is_valid,
-        "errors": list(validation.errors),
-        "warnings": list(validation.warnings),
-        "suggestions": list(validation.suggestions),
+        "errors": [e.to_dict() for e in validation.errors],
+        "warnings": [e.to_dict() for e in validation.warnings],
+        "suggestions": [e.to_dict() for e in validation.suggestions],
         "source": None,
         "node_count": len(state.nodes),
         "output_count": len(state.outputs),
@@ -1684,6 +2136,32 @@ def _execute_preview_pipeline(
     )
 
 
+def _execute_diff_pipeline(
+    args: dict[str, Any],
+    state: CompositionState,
+    catalog: CatalogService,
+    data_dir: str | None = None,
+    *,
+    baseline: CompositionState | None = None,
+) -> ToolResult:
+    """Compute a diff/change summary against a baseline state.
+
+    The baseline is passed explicitly by the MCP server or web composer.
+    If no baseline is available, returns a notice instead.
+    """
+    if baseline is None:
+        return _discovery_result(
+            state,
+            {
+                "error": "No baseline available. Load or create a session first.",
+                "current_version": state.version,
+            },
+        )
+
+    changes = diff_states(baseline, state)
+    return _discovery_result(state, changes)
+
+
 # --- Registries ---
 # Must be after all handler definitions to avoid NameError.
 
@@ -1696,12 +2174,13 @@ _DISCOVERY_TOOLS: dict[str, ToolHandler] = {
     "explain_validation_error": _execute_explain_validation_error,
     "list_models": _execute_list_models,
     "preview_pipeline": _execute_preview_pipeline,
+    "diff_pipeline": _execute_diff_pipeline,
 }
 
 # All discovery tools are cacheable. If a non-cacheable discovery tool is
 # re-added in future (e.g. get_current_state which returns live mutable
 # state), add it to _DISCOVERY_TOOLS but NOT to this frozenset.
-_CACHEABLE_DISCOVERY_TOOLS: frozenset[str] = frozenset(_DISCOVERY_TOOLS.keys())
+_CACHEABLE_DISCOVERY_TOOLS: frozenset[str] = frozenset(_DISCOVERY_TOOLS.keys()) - {"diff_pipeline"}
 
 _MUTATION_TOOLS: dict[str, ToolHandler] = {
     "set_source": _execute_set_source,
@@ -1723,10 +2202,14 @@ _MUTATION_TOOLS: dict[str, ToolHandler] = {
 _BLOB_DISCOVERY_TOOLS: dict[str, BlobToolHandler] = {
     "list_blobs": _handle_list_blobs,
     "get_blob_metadata": _handle_get_blob_metadata,
+    "get_blob_content": _execute_get_blob_content,
 }
 
 _BLOB_MUTATION_TOOLS: dict[str, BlobToolHandler] = {
     "set_source_from_blob": _execute_set_source_from_blob,
+    "create_blob": _execute_create_blob,
+    "update_blob": _execute_update_blob,
+    "delete_blob": _execute_delete_blob,
 }
 
 # Secret tools use an extended handler signature with secret_service + user_id kwargs
@@ -1779,12 +2262,13 @@ def execute_tool(
     tool_name: str,
     arguments: dict[str, Any],
     state: CompositionState,
-    catalog: CatalogServiceProtocol,
+    catalog: CatalogService,
     data_dir: str | None = None,
     session_engine: Engine | None = None,
     session_id: str | None = None,
     secret_service: Any | None = None,
     user_id: str | None = None,
+    baseline: CompositionState | None = None,
 ) -> ToolResult:
     """Execute a composition tool by name.
 
@@ -1801,7 +2285,12 @@ def execute_tool(
         session_id: Current session ID. Required for blob tools.
         secret_service: WebSecretService instance. Required for secret tools.
         user_id: Current user ID. Required for secret tools.
+        baseline: Baseline state for diff_pipeline comparisons.
     """
+    # diff_pipeline has an extended signature with baseline kwarg
+    if tool_name == "diff_pipeline":
+        return _execute_diff_pipeline(arguments, state, catalog, data_dir, baseline=baseline)
+
     # Check standard tools first
     handler = _DISCOVERY_TOOLS.get(tool_name) or _MUTATION_TOOLS.get(tool_name)
     if handler is not None:

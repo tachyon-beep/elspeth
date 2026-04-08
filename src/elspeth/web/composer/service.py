@@ -23,6 +23,7 @@ import litellm
 from litellm.exceptions import BadRequestError as LiteLLMBadRequestError
 from sqlalchemy import Engine
 
+from elspeth.web.catalog.protocol import CatalogService
 from elspeth.web.composer.prompts import build_messages
 from elspeth.web.composer.protocol import (
     ComposerConvergenceError,
@@ -31,7 +32,6 @@ from elspeth.web.composer.protocol import (
 )
 from elspeth.web.composer.state import CompositionState
 from elspeth.web.composer.tools import (
-    CatalogServiceProtocol,
     execute_tool,
     get_tool_definitions,
     is_cacheable_discovery_tool,
@@ -72,7 +72,7 @@ class ComposerServiceImpl:
 
     def __init__(
         self,
-        catalog: CatalogServiceProtocol,
+        catalog: CatalogService,
         settings: ComposerSettings,
         session_engine: Engine | None = None,
         secret_service: Any | None = None,
