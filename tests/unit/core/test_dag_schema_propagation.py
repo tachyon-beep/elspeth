@@ -70,7 +70,7 @@ class MockSource:
 
     name = "mock_source"
     output_schema = None
-    config: ClassVar[dict[str, Any]] = {"schema": {"mode": "observed"}}
+    config: ClassVar[dict[str, Any]] = {"schema": {"mode": "observed", "guaranteed_fields": ["source_field"]}}
     _on_validation_failure = "discard"
     on_success = "output"
 
@@ -180,6 +180,7 @@ class TestOutputSchemaConfigPropagation:
         node_info = source_nodes[0]
         assert node_info.output_schema_config is not None
         assert node_info.output_schema_config.mode == "observed"
+        assert node_info.output_schema_config.guaranteed_fields == ("source_field",)
 
 
 class TestGetSchemaConfigFromNodePriority:
