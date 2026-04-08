@@ -85,27 +85,101 @@ Every mutation tool returns validation state:
 
 **Never present a pipeline as complete until `is_valid` is `true`.** If errors exist, fix them. Use `explain_validation_error` for unclear errors.
 
-## Available Plugins
+## Plugin Capabilities Registry
 
-**Sources:** `csv`, `json`, `text`, `azure_blob`, `dataverse`, `null`
+### Sources
 
-**Transforms:** `passthrough`, `field_mapper`, `truncate`, `keyword_filter`, `json_explode`, `batch_stats`, `batch_replicate`, `web_scrape`, `llm`, `azure_content_safety`, `azure_prompt_shield`, `azure_batch_llm`, `openrouter_batch_llm`, `rag_retrieval`
+| Plugin | Description | Input | Secrets | Network | Key Options |
+|--------|-------------|-------|---------|---------|-------------|
+| `csv` | Read CSV/TSV files | file path | no | no | `path`, `delimiter`, `encoding`, `skip_rows`, `columns`, `field_mapping` |
+| `json` | Read JSON array or JSONL files | file path | no | no | `path`, `format` (json/jsonl), `data_key`, `encoding`, `field_mapping` |
+| `text` | Read text file, one line per row | file path | no | no | `path`, `column` (output field name), `strip_whitespace`, `skip_blank_lines` |
+| `azure_blob` | Read from Azure Blob Storage | cloud blob | yes | yes | `container`, `blob_path`, `format`, auth config |
+| `dataverse` | Query Dataverse via OData or FetchXML | API query | yes | yes | `environment_url`, `entity`+`select`+`filter` OR `fetch_xml`, auth config |
+| `null` | Empty source for resume operations | none | no | no | (internal use) |
 
-**Sinks:** `csv`, `json`, `database`, `azure_blob`, `dataverse`, `chroma_sink`
+### Transforms
+
+| Plugin | Description | Stateful | Secrets | Network | Adds/Changes Fields |
+|--------|-------------|----------|---------|---------|---------------------|
+| `passthrough` | Identity — passes rows unchanged | no | no | no | (none) |
+| `field_mapper` | Rename fields | no | no | no | Renames specified fields |
+| `truncate` | Truncate text fields to max length | no | no | no | Truncates in-place |
+| `keyword_filter` | Filter rows by keyword presence | no | no | no | (routing only) |
+| `json_explode` | Expand nested JSON into row fields | no | no | no | Promotes nested fields |
+| `batch_stats` | Compute batch statistics | **yes** | no | no | Emits aggregate rows |
+| `batch_replicate` | Replicate rows for fan-out | no | no | no | Emits N copies per row |
+| `web_scrape` | Fetch content from URLs | no | no | yes | Adds `content` field |
+| `llm` | Send row data to LLM via template | no | yes | yes | Adds `llm_response` field |
+| `azure_content_safety` | Content moderation | no | yes | yes | Adds safety scores |
+| `azure_prompt_shield` | Jailbreak detection | no | yes | yes | Adds shield results |
+| `azure_batch_llm` | Azure batch LLM processing | no | yes | yes | Adds response field |
+| `openrouter_batch_llm` | OpenRouter batch processing | no | yes | yes | Adds response field |
+| `rag_retrieval` | Retrieve from vector store | no | yes | depends | Adds retrieval results |
+
+### Sinks
+
+| Plugin | Description | Secrets | Network | Key Options |
+|--------|-------------|---------|---------|-------------|
+| `csv` | Write CSV file | no | no | `path`, `delimiter`, `mode`, `headers` |
+| `json` | Write JSON/JSONL file | no | no | `path`, `format`, `indent`, `mode`, `headers` |
+| `database` | Write to SQL database | yes | depends | `url`, `table`, `if_exists` |
+| `azure_blob` | Upload to Azure Blob Storage | yes | yes | `container`, `blob_path`, `format`, auth config |
+| `dataverse` | Upsert to Dataverse | yes | yes | `environment_url`, `entity`, `field_mapping`, `alternate_key` |
+| `chroma_sink` | Store in ChromaDB | depends | depends | `collection`, `mode`, `document_field`, `id_field` |
+
+## Source Semantics
+
+**csv**: Headers normalized to identifiers. Use `columns` for headerless files, `field_mapping` for overrides.
+
+**json**: Array of objects or JSONL. Use `data_key` for wrapped arrays (e.g., `{"results": [...]}`). Format auto-detected from extension.
+
+**text**: One line per row, single field. `column` option required (the field name).
+
+**Blob wiring**: `set_source_from_blob` infers plugin from MIME: `text/csv`→csv, `application/json`→json, `text/plain`→text.
+
+**Schema modes**: `observed` (infer from data), `fixed` (exact fields, reject extras), `flexible` (known fields + extras OK). Fields: `"name: type"` where type is str/int/float/bool/any.
 
 ## Common Patterns
 
-### Simple routing (gate)
-Source → gate (condition) → sink A / sink B
+### 1. URL → Scrape → Extract → JSON
+`text` source → `web_scrape` → `llm` (extraction template) → `json` sink
 
-### Transform chain
-Source → transform 1 → transform 2 → sink
+### 2. File → Classify → Route
+`csv`/`json` source → `llm` (classification) → `gate` (on response) → multiple sinks
 
-### LLM classification
-Source → `llm` transform (with template) → gate on LLM output → sinks
+### 3. File → Summarise → Save
+`csv`/`json`/`text` source → `llm` (summarisation) → `json` sink
 
-### Fork/join (parallel analysis)
-Source → fork gate → path A transform + path B transform → coalesce → sink
+### 4. Batch LLM Over Rows
+`csv`/`json` source → `llm` (row template with `{{ row['field'] }}`) → `csv`/`json` sink
+
+### 5. Content Moderation
+`csv` source → `azure_content_safety` → `gate` (severity threshold) → approved/flagged sinks
+
+### 6. RAG Retrieval + Generation
+source → `rag_retrieval` → `llm` (uses retrieved context) → `json` sink
+
+### 7. Transform Chain with Error Diversion
+source → transform A (on_error → errors sink) → transform B → results sink + errors sink
+
+### 8. Fork/Join Enrichment
+source → fork gate → path A + path B → `coalesce` → sink
+
+## Execution Shape Reference
+
+Most transforms **add** fields — original row fields are preserved. Key exceptions:
+- `batch_stats`: **replaces** input rows with aggregate results
+- `gate`: routes unchanged row (no field changes)
+- LLM response is always a **string** — use `json_explode` after LLM to parse into structured fields
+- Sinks serialize the **full row** (all accumulated fields)
+
+## LLM Provider Configuration
+
+| Provider | Config | Secret | Model ID |
+|----------|--------|--------|----------|
+| Azure OpenAI | `provider: "azure"` | Credential-based | Uses `deployment_name` |
+| OpenRouter | `provider: "openrouter"` | `OPENROUTER_API_KEY` | `provider/model-name` |
 
 ## Session Management
 

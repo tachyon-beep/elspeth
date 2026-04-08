@@ -161,6 +161,9 @@ state/
 # Local web app data - keep only the placeholder directory marker
 data/*
 !data/.gitkeep
+!data/skills/
+!data/skills/.gitignore
+!data/skills/*.example
 
 # Real/production/example data - never commit
 real/

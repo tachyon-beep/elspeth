@@ -82,7 +82,7 @@ class ComposerServiceImpl:
         self._max_composition_turns = settings.composer_max_composition_turns
         self._max_discovery_turns = settings.composer_max_discovery_turns
         self._timeout_seconds = settings.composer_timeout_seconds
-        self._data_dir = str(settings.data_dir)
+        self._data_dir: str = str(settings.data_dir)
         self._session_engine = session_engine
         self._secret_service = secret_service
         self._availability = self._compute_availability()
@@ -349,6 +349,7 @@ class ComposerServiceImpl:
             state=state,
             user_message=user_message,
             catalog=self._catalog,
+            data_dir=self._data_dir,
         )
 
     def _get_litellm_tools(self) -> list[dict[str, Any]]:

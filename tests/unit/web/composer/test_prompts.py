@@ -11,11 +11,17 @@ Verifies:
 from __future__ import annotations
 
 import json
+from pathlib import Path
 from typing import Any
 
 from elspeth.web.catalog.protocol import CatalogService, PluginKind
 from elspeth.web.catalog.schemas import PluginSchemaInfo, PluginSummary
-from elspeth.web.composer.prompts import SYSTEM_PROMPT, build_context_string, build_messages
+from elspeth.web.composer.prompts import (
+    SYSTEM_PROMPT,
+    build_context_string,
+    build_messages,
+    build_system_prompt,
+)
 from elspeth.web.composer.state import CompositionState
 
 
@@ -181,3 +187,79 @@ class TestBuildContextString:
         parsed = json.loads(context.split("\n", 1)[1])
 
         assert parsed["current_state"]["metadata"]["name"] == "Test Pipeline"
+
+    def test_includes_warnings_and_suggestions(self) -> None:
+        """Validation context must include warnings and suggestions, not just errors."""
+        state = _empty_state()
+        catalog = _stub_catalog()
+
+        context = build_context_string(state, catalog)
+        parsed = json.loads(context.split("\n", 1)[1])
+
+        validation = parsed["current_state"]["validation"]
+        assert "warnings" in validation
+        assert "suggestions" in validation
+
+
+class TestBuildSystemPrompt:
+    """System prompt composition with optional deployment layer."""
+
+    def test_no_data_dir_returns_core_skill_only(self) -> None:
+        """Without data_dir, returns the core skill unchanged."""
+        result = build_system_prompt(None)
+        assert result == SYSTEM_PROMPT
+
+    def test_missing_deployment_skill_returns_core_only(self, tmp_path: Path) -> None:
+        """data_dir with no skills/ subdir returns core skill only."""
+        result = build_system_prompt(str(tmp_path))
+        assert result == SYSTEM_PROMPT
+
+    def test_deployment_skill_appended_after_separator(self, tmp_path: Path) -> None:
+        """Deployment skill content is appended after a separator, in correct order."""
+        deployment_content = "# Our Custom Providers\n\nUse ACME_API_KEY.\n"
+        skills_dir = tmp_path / "skills"
+        skills_dir.mkdir()
+        (skills_dir / "pipeline_composer.md").write_text(deployment_content)
+
+        result = build_system_prompt(str(tmp_path))
+
+        # Exact equality — verifies ordering, not just presence.
+        assert result == SYSTEM_PROMPT + "\n\n---\n\n" + deployment_content
+
+    def test_empty_string_data_dir_still_calls_loader(self, tmp_path: Path) -> None:
+        """Empty string data_dir is not None — build_system_prompt is called."""
+        # Empty string produces a relative path lookup that finds no skills/.
+        # The important thing is it goes through build_system_prompt, not the
+        # SYSTEM_PROMPT fast path.
+        result = build_system_prompt("")
+        assert result == SYSTEM_PROMPT
+
+
+class TestBuildMessagesWithDataDir:
+    """build_messages with deployment skill overlay."""
+
+    def test_data_dir_none_uses_core_prompt(self) -> None:
+        """Default (no data_dir) uses core SYSTEM_PROMPT via fast path."""
+        state = _empty_state()
+        catalog = _stub_catalog()
+
+        messages = build_messages([], state, "test", catalog, data_dir=None)
+        system_content = messages[0]["content"]
+
+        # System message is SYSTEM_PROMPT + context string.
+        assert system_content.startswith(SYSTEM_PROMPT)
+
+    def test_data_dir_with_deployment_skill_injects_it(self, tmp_path: Path) -> None:
+        """When data_dir has a deployment skill, it appears in the system message."""
+        skills_dir = tmp_path / "skills"
+        skills_dir.mkdir()
+        (skills_dir / "pipeline_composer.md").write_text("# Deployment: use ACME provider\n")
+
+        state = _empty_state()
+        catalog = _stub_catalog()
+
+        messages = build_messages([], state, "test", catalog, data_dir=str(tmp_path))
+        system_content = messages[0]["content"]
+
+        assert "# Deployment: use ACME provider" in system_content
+        assert SYSTEM_PROMPT in system_content

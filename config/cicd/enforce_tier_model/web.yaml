@@ -651,6 +651,13 @@ allow_hits:
   reason: Tier 3 boundary — persisted blob_ref may be non-UUID string; skip rewrite gracefully
   safety: Falls through to use original ref unchanged
   expires: null
+- key: web/composer/skills/__init__.py:R6:load_deployment_skill:fp=b40811887f05a95b
+  owner: web-composer
+  reason: Deployment skill is optional — OSError (FileNotFoundError, PermissionError, IsADirectoryError) is expected
+    when deployment skill is absent or inaccessible. Operator-controlled filesystem path (Tier 3-like boundary).
+  safety: Returns empty string, not a fabricated default. Core skill always loads (crash on missing). Only the
+    deployment overlay is optional. Size guard rejects oversized files with ValueError.
+  expires: null
 per_file_rules:
 - pattern: web/composer/tools.py
   rules:
