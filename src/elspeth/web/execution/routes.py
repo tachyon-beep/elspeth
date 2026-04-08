@@ -237,28 +237,25 @@ def create_execution_router() -> APIRouter:
             # Seed: if the run already reached a terminal state before the
             # client connected (short runs, page refresh), send the terminal
             # status immediately and close.
-            try:
-                current = await service.get_status(UUID(run_id))
-                if current.status in ("completed", "failed", "cancelled"):
-                    await websocket.send_json(
-                        {
-                            "run_id": run_id,
-                            "timestamp": current.finished_at.isoformat()
-                            if current.finished_at
-                            else current.started_at.isoformat()
-                            if current.started_at
-                            else "",
-                            "event_type": current.status,
-                            "data": {
-                                "rows_processed": current.rows_processed,
-                                "rows_failed": current.rows_failed,
-                            },
-                        }
-                    )
-                    await websocket.close(code=1000)
-                    return
-            except ValueError:
-                pass  # Run not found — proceed to live stream
+            current = await service.get_status(UUID(run_id))
+            if current.status in ("completed", "failed", "cancelled"):
+                await websocket.send_json(
+                    {
+                        "run_id": run_id,
+                        "timestamp": current.finished_at.isoformat()
+                        if current.finished_at
+                        else current.started_at.isoformat()
+                        if current.started_at
+                        else "",
+                        "event_type": current.status,
+                        "data": {
+                            "rows_processed": current.rows_processed,
+                            "rows_failed": current.rows_failed,
+                        },
+                    }
+                )
+                await websocket.close(code=1000)
+                return
             while True:
                 try:
                     event = await asyncio.wait_for(queue.get(), timeout=60.0)
@@ -266,7 +263,7 @@ def create_execution_router() -> APIRouter:
                     # Heartbeat timeout — pipeline may have crashed without terminal event.
                     try:
                         await websocket.send_json({"type": "heartbeat"})
-                    except Exception:
+                    except (WebSocketDisconnect, ConnectionError, OSError):
                         break  # Client disconnected
                     continue
                 await websocket.send_json(event.model_dump(mode="json"))
@@ -277,7 +274,7 @@ def create_execution_router() -> APIRouter:
                     break
         except WebSocketDisconnect:
             pass  # Client disconnected — fall through to finally
-        except Exception as exc:
+        except (ConnectionError, OSError) as exc:
             slog.error(
                 "websocket_handler_error",
                 run_id=run_id,
@@ -285,7 +282,7 @@ def create_execution_router() -> APIRouter:
             )
             try:
                 await websocket.close(code=1011, reason="Internal server error")
-            except Exception as close_err:
+            except (WebSocketDisconnect, ConnectionError, OSError) as close_err:
                 slog.error("websocket_close_failed", run_id=run_id, error=str(close_err))
         finally:
             broadcaster.unsubscribe(run_id, queue)

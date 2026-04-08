@@ -36,7 +36,7 @@ export interface UserIdentity {
 export interface UserProfile {
   user_id: string;
   username: string;
-  display_name: string;
+  display_name: string | null;
   email: string | null;
   groups: string[];
 }

@@ -159,7 +159,7 @@ class OIDCAuthProvider:
             # sub is OIDC-required (crash on absence); preferred_username is
             # optional (fall back to sub if absent)
             username=payload.get("preferred_username", payload["sub"]),
-            display_name=payload.get("name") or payload.get("preferred_username", "Unknown"),
+            display_name=payload.get("name") or payload.get("preferred_username") or None,
             email=payload.get("email"),
             groups=tuple(groups),
         )

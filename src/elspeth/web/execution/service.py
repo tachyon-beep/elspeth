@@ -15,7 +15,6 @@ schedule coroutines on the main event loop from the background thread.
 from __future__ import annotations
 
 import asyncio
-import contextlib
 import threading
 import time
 from collections.abc import Coroutine
@@ -26,6 +25,7 @@ from typing import Any, TypeVar, cast
 from uuid import UUID
 
 import structlog
+from sqlalchemy.exc import SQLAlchemyError
 
 from elspeth.cli_helpers import instantiate_plugins_from_config
 from elspeth.contracts.audit import SecretResolutionInput
@@ -269,8 +269,15 @@ class ExecutionServiceImpl:
                 self._shutdown_events.pop(str(run_id), None)
             # Transition run out of pending so the one-active-run constraint
             # doesn't permanently block this session.
-            with contextlib.suppress(Exception):
+            try:
                 await self._session_service.update_run_status(run_id, status="failed", error=f"Setup failed: {exc}")
+            except Exception as cleanup_err:
+                slog.error(
+                    "run_cleanup_status_update_failed",
+                    run_id=str(run_id),
+                    original_error=str(exc),
+                    cleanup_error=str(cleanup_err),
+                )
             raise
         # B7 Layer 2: safety net callback
         future.add_done_callback(self._on_pipeline_done)
@@ -697,7 +704,7 @@ class ExecutionServiceImpl:
                     success=success,
                 )
             )
-        except Exception as blob_err:
+        except (OSError, SQLAlchemyError) as blob_err:
             slog.error(
                 "blob_finalization_failed",
                 run_id=run_id,

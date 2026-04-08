@@ -109,10 +109,10 @@ allow_hits:
   reason: Tier 3 boundary — name claim is optional, falls back to preferred_username
   safety: Falls back to preferred_username or 'Unknown'; never to opaque sub UUID
   expires: null
-- key: web/auth/oidc.py:R1:OIDCAuthProvider:get_user_info:fp=64985ed62a0e03ec
+- key: web/auth/oidc.py:R1:OIDCAuthProvider:get_user_info:fp=f282dc24e18a46ae
   owner: web-auth
   reason: Tier 3 boundary — preferred_username fallback in display_name chain
-  safety: Part of name -> preferred_username -> 'Unknown' chain
+  safety: Falls back to None (honest absence) when IdP provides neither name nor preferred_username
   expires: null
 - key: web/auth/oidc.py:R1:OIDCAuthProvider:get_user_info:fp=f2a1b1758a966c9d
   owner: web-auth
@@ -159,10 +159,10 @@ allow_hits:
   reason: Tier 3 boundary — name claim is optional, falls back to preferred_username
   safety: Falls back to preferred_username or 'Unknown'; never to opaque sub UUID
   expires: null
-- key: web/auth/entra.py:R1:EntraAuthProvider:get_user_info:fp=a3dbe8d2b3f309d5
+- key: web/auth/entra.py:R1:EntraAuthProvider:get_user_info:fp=39816a1f66fe4e8e
   owner: web-auth
   reason: Tier 3 boundary — preferred_username fallback in display_name chain
-  safety: Part of name -> preferred_username -> 'Unknown' chain
+  safety: Falls back to None (honest absence) when IdP provides neither name nor preferred_username
   expires: null
 - key: web/auth/routes.py:R1:create_auth_router:me:fp=152bae4dff3f14f0
   owner: web-auth
@@ -451,10 +451,10 @@ allow_hits:
   reason: Idempotent shutdown-event cleanup on failure path
   safety: Pop is idempotent; except BaseException handler cleans up before re-raise
   expires: null
-- key: web/execution/service.py:R7:ExecutionServiceImpl:_execute_locked:fp=ef8b27cdcce0a253
+- key: web/execution/service.py:R4:ExecutionServiceImpl:_execute_locked:fp=696adaf615a95379
   owner: web-execution
   reason: Best-effort run status cleanup on setup failure — must not mask original exception
-  safety: Status update is best-effort; original exception always re-raised
+  safety: Logged with slog.error; original exception always re-raised
   expires: null
 - key: web/execution/service.py:R1:ExecutionServiceImpl:cancel:fp=6b2fd83431284736
   owner: web-execution
@@ -501,10 +501,10 @@ allow_hits:
   reason: Final shutdown-event cleanup is intentionally idempotent
   safety: Pop is idempotent
   expires: null
-- key: web/execution/service.py:R4:ExecutionServiceImpl:_finalize_output_blobs:fp=40aa168ee8a02bef
+- key: web/execution/service.py:R6:ExecutionServiceImpl:_finalize_output_blobs:fp=3b8acd195d884da2
   owner: web-execution
   reason: Blob finalization after terminal status — failure must not mask run outcome
-  safety: Logged; run status preserved
+  safety: Narrowed to (OSError, SQLAlchemyError); logged with slog.error; run status preserved
   expires: null
 - key: web/execution/service.py:R5:ExecutionServiceImpl:_on_pipeline_done:fp=048f3f8ddb34424b
   owner: web-execution
@@ -526,19 +526,19 @@ allow_hits:
   reason: Quota exceeded during finalization marks blob as error instead of crashing run
   safety: Over-quota file deleted; blob marked error; run still finalized
   expires: null
-- key: web/execution/routes.py:R1:create_execution_router:websocket_run_progress:fp=59475b47a61c42da
+- key: web/execution/routes.py:R1:create_execution_router:websocket_run_progress:fp=bc8a7694b3f292bb
   owner: web-execution
   reason: False positive — asyncio.Queue.get() is an async queue method, not dict.get()
   safety: No dict access involved
   expires: null
-- key: web/execution/routes.py:R6:create_execution_router:websocket_run_progress:fp=2474ab65ca06436b
+- key: web/execution/routes.py:R6:create_execution_router:websocket_run_progress:fp=4e9aaa61567318d2
   owner: web-execution
   reason: Heartbeat timeout is an expected idle path, not an error swallow
   safety: Sends heartbeat to keep connection alive
   expires: null
-- key: web/execution/routes.py:R4:create_execution_router:websocket_run_progress:fp=e1fde533c619942d
+- key: web/execution/routes.py:R6:create_execution_router:websocket_run_progress:fp=e074cd9da84a5900
   owner: web-execution
-  reason: WebSocket transport writes can fail with varied connection-state exceptions across ASGI servers
+  reason: Narrowed heartbeat disconnect catch to (WebSocketDisconnect, ConnectionError, OSError)
   safety: Breaks out of loop; falls through to unsubscribe
   expires: null
 - key: web/execution/routes.py:R6:create_execution_router:websocket_run_progress:fp=f70460a861072998
@@ -546,14 +546,14 @@ allow_hits:
   reason: WebSocketDisconnect is the expected disconnect control-flow path
   safety: Falls through to unsubscribe cleanup
   expires: null
-- key: web/execution/routes.py:R4:create_execution_router:websocket_run_progress:fp=8051d9a2c963899b
+- key: web/execution/routes.py:R6:create_execution_router:websocket_run_progress:fp=9204dc8517c09e56
   owner: web-execution
-  reason: Top-level WebSocket handler guard converts unexpected failures into clean 1011 close
-  safety: Logged; clean close sent to client
+  reason: Narrowed outer handler to (ConnectionError, OSError) — programming errors now propagate
+  safety: Logged with slog.error; clean 1011 close sent to client
   expires: null
-- key: web/execution/routes.py:R4:create_execution_router:websocket_run_progress:fp=3e188822ed707289
+- key: web/execution/routes.py:R6:create_execution_router:websocket_run_progress:fp=07ae007e90551cd1
   owner: web-execution
-  reason: Best-effort websocket.close() can raise transport-specific exceptions after primary failure
+  reason: Narrowed close catch to (WebSocketDisconnect, ConnectionError, OSError)
   safety: Logged; already in error path
   expires: null
 - key: web/execution/routes.py:R6:create_execution_router:websocket_run_progress:fp=0717a723027c2e78
@@ -565,11 +565,6 @@ allow_hits:
   owner: web-execution
   reason: Run-ownership IDOR gate — narrowed from except Exception to except ValueError
   safety: Only not-found errors return 4004; infrastructure errors propagate to outer handler
-  expires: null
-- key: web/execution/routes.py:R6:create_execution_router:websocket_run_progress:fp=5be1557e3cf02771
-  owner: web-execution
-  reason: Seed check — narrowed from except (ValueError, Exception) to except ValueError
-  safety: Only not-found falls through to live stream; infrastructure errors propagate
   expires: null
 - key: web/app.py:R1:lifespan:fp=f74df10b8a73da45
   owner: web-app

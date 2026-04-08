@@ -26,7 +26,7 @@ class UserProfile:
 
     user_id: str
     username: str
-    display_name: str
+    display_name: str | None = None
     email: str | None = None
     groups: tuple[str, ...] = ()
 
