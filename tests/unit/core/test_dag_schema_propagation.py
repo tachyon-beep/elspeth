@@ -912,3 +912,103 @@ class TestSchemaAliasingPrevention:
 
         # Both should have schemas but be independent objects
         assert gate1_schema is not gate2_schema, "Multiple gates must have independent schema copies to prevent aliasing corruption."
+
+
+class TestPassThroughNodesUseTypedSchema:
+    """After single-source-of-truth refactor, pass-through nodes (gates, coalesce)
+    should have output_schema_config populated but should NOT have config['schema'].
+    """
+
+    def test_gate_has_output_schema_config_not_dict(self) -> None:
+        """Gate should have output_schema_config but no config['schema']."""
+        transform = MockTransformWithSchemaConfig()
+        source = MockSource()
+        wired = WiredTransform(
+            plugin=transform,  # type: ignore[arg-type]
+            settings=TransformSettings(
+                name="llm_step",
+                plugin=transform.name,
+                input="source_out",
+                on_success="gate_in",
+                on_error="discard",
+                options={},
+            ),
+        )
+
+        gate = GateSettings(
+            name="quality_gate",
+            input="gate_in",
+            condition="True",
+            routes={"true": "output", "false": "output"},
+        )
+
+        graph = ExecutionGraph.from_plugin_instances(
+            source=source,  # type: ignore[arg-type]
+            source_settings=SourceSettings(plugin=source.name, on_success="source_out", options={}),
+            transforms=[wired],
+            sinks={"output": MockSink()},  # type: ignore[dict-item]
+            aggregations={},
+            gates=[gate],
+        )
+
+        gate_nodes = [n for n in graph.get_nodes() if n.node_type == NodeType.GATE]
+        assert len(gate_nodes) == 1
+
+        gate_info = gate_nodes[0]
+        # Typed schema is populated
+        assert gate_info.output_schema_config is not None
+        assert gate_info.output_schema_config.guaranteed_fields == ("field_a", "field_b")
+        assert gate_info.output_schema_config.audit_fields == ("field_c", "field_d")
+        # Dict form is NOT written to pass-through nodes
+        assert "schema" not in gate_info.config
+
+    def test_coalesce_has_output_schema_config_not_dict(self) -> None:
+        """Coalesce should have output_schema_config but no config['schema']."""
+        transform = MockTransformWithSchemaConfig()
+        source = MockSource()
+
+        wired = WiredTransform(
+            plugin=transform,  # type: ignore[arg-type]
+            settings=TransformSettings(
+                name="llm_step",
+                plugin=transform.name,
+                input="source_out",
+                on_success="fork_in",
+                on_error="discard",
+                options={},
+            ),
+        )
+
+        fork_gate = GateSettings(
+            name="splitter",
+            input="fork_in",
+            condition="True",
+            routes={"true": "fork", "false": "output"},
+            fork_to=["branch_a", "branch_b"],
+        )
+
+        coalesce = CoalesceSettings(
+            name="merger",
+            branches=["branch_a", "branch_b"],
+            policy="require_all",
+            merge="union",
+            on_success="output",
+        )
+
+        graph = ExecutionGraph.from_plugin_instances(
+            source=source,  # type: ignore[arg-type]
+            source_settings=SourceSettings(plugin=source.name, on_success="source_out", options={}),
+            transforms=[wired],
+            sinks={"output": MockSink()},  # type: ignore[dict-item]
+            aggregations={},
+            gates=[fork_gate],
+            coalesce_settings=[coalesce],
+        )
+
+        coalesce_nodes = [n for n in graph.get_nodes() if n.node_type == NodeType.COALESCE]
+        assert len(coalesce_nodes) == 1
+
+        coal_info = coalesce_nodes[0]
+        assert coal_info.output_schema_config is not None
+        assert coal_info.output_schema_config.guaranteed_fields == ("field_a", "field_b")
+        assert "schema" not in coal_info.config

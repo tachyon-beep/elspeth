@@ -138,14 +138,13 @@ def build_execution_graph(
         return SchemaConfig.from_dict(schema_dict)
 
     def _assign_schema(target_nid: NodeID, schema: SchemaConfig) -> None:
-        """Set both config["schema"] and output_schema_config on a pass-through node.
+        """Set output_schema_config on a pass-through node (gate or coalesce).
 
-        Keeps config["schema"] in sync (read by orchestrator and validation
-        code) while also setting the typed output_schema_config so downstream
-        consumers get SchemaConfig directly via get_schema_config_from_node().
+        Pass-through nodes don't have their own schema — they inherit from
+        upstream producers. This sets the typed SchemaConfig so all consumers
+        can read it directly without fallback chains.
         """
         target_info = graph.get_node_info(target_nid)
-        target_info.config["schema"] = schema.to_dict()
         object.__setattr__(target_info, "output_schema_config", schema)
 
     def _sink_name_set() -> set[str]:
