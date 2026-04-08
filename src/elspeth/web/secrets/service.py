@@ -38,7 +38,11 @@ class WebSecretService:
         return self._user_store.has_secret(name, user_id=user_id) or self._server_store.has_secret(name)
 
     def resolve(self, user_id: str, name: str) -> ResolvedSecret | None:
-        """Resolve a secret, trying user scope first then server."""
+        """Resolve a secret, trying user scope first then server.
+
+        Returns None for missing secrets — callers (resolve_secret_refs in
+        core/secrets.py) batch all missing refs and raise SecretResolutionError.
+        """
         # User scope first
         try:
             value, ref = self._user_store.get_secret(name, user_id=user_id)  # keyword-only

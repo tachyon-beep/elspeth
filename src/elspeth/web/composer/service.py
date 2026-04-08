@@ -387,6 +387,9 @@ class ComposerServiceImpl:
         try:
             _, provider, _, _ = litellm.get_llm_provider(model=self._model)
         except LiteLLMBadRequestError:
+            # Fallback: infer from "provider/model" prefix. Returns None for
+            # unprefixed names — ComposerAvailability.provider is str | None,
+            # and this is a boot-time diagnostic, not audit data.
             provider = _infer_provider_from_model_name(self._model)
 
         try:

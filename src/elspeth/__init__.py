@@ -10,5 +10,7 @@ from importlib.metadata import PackageNotFoundError, version
 try:
     __version__ = version("elspeth")
 except PackageNotFoundError:
-    # Development install without package metadata (e.g., editable install not yet run)
+    # Dev-only: editable install not yet run. Production installs always have
+    # metadata. "UNKNOWN-dev-uninstalled" in a dev audit trail is acceptable —
+    # it honestly represents the state rather than crashing.
     __version__ = "UNKNOWN-dev-uninstalled"
