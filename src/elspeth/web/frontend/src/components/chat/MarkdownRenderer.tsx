@@ -2,6 +2,7 @@ import { useEffect, useRef, useId, type ComponentPropsWithoutRef } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import mermaid from "mermaid";
+import DOMPurify from "dompurify";
 
 // Initialize mermaid once with dark theme matching ELSPETH's color palette
 mermaid.initialize({
@@ -94,7 +95,9 @@ function MermaidDiagram({ chart }: { chart: string }) {
       .render(`mermaid-${uniqueId}`, chart)
       .then(({ svg }) => {
         if (!cancelled && container) {
-          container.innerHTML = svg;
+          container.innerHTML = DOMPurify.sanitize(svg, {
+            USE_PROFILES: { svg: true, svgFilters: true },
+          });
         }
       })
       .catch(() => {
