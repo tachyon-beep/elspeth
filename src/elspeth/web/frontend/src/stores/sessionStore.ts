@@ -36,6 +36,7 @@ interface SessionState {
   isLoadingVersions: boolean;
   revertToVersion: (stateId: string) => Promise<void>;
   clearError: () => void;
+  injectSystemMessage: (content: string) => void;
   reset: () => void;
 }
 
@@ -364,6 +365,24 @@ export const useSessionStore = create<SessionState>((set, get) => ({
 
   clearError() {
     set({ error: null });
+  },
+
+  injectSystemMessage(content: string) {
+    const { activeSessionId } = get();
+    if (!activeSessionId) return;
+
+    const systemMessage: ChatMessage = {
+      id: `system-${crypto.randomUUID()}`,
+      session_id: activeSessionId,
+      role: "system",
+      content,
+      tool_calls: null,
+      created_at: new Date().toISOString(),
+    };
+
+    set((state) => ({
+      messages: [...state.messages, systemMessage],
+    }));
   },
 
   reset() {

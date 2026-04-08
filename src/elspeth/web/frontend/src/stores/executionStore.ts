@@ -137,10 +137,23 @@ export const useExecutionStore = create<ExecutionState>((set, get) => ({
       const result = await api.validatePipeline(sessionId);
       set({ validationResult: result, isValidating: false });
 
-      // Auto-send validation errors to the LLM so it can attempt fixes.
-      // The user still sees the banner — this adds a chat message too.
+      // Inject a visible system message into chat so the user can see
+      // that errors/warnings were routed to the agent (A3).
       if (!result.is_valid && result.errors.length > 0) {
+        const lines = ["**Validation failed** — the following errors were sent to the agent:"];
+        for (const err of result.errors) {
+          lines.push(`- **[${err.component_type}] ${err.component_id}:** ${err.message}`);
+        }
+        useSessionStore.getState().injectSystemMessage(lines.join("\n"));
+
+        // Auto-send validation errors to the LLM so it can attempt fixes.
         useSessionStore.getState().sendValidationFeedback(result);
+      } else if (result.is_valid && result.warnings && result.warnings.length > 0) {
+        const lines = ["**Validation passed with warnings:**"];
+        for (const warn of result.warnings) {
+          lines.push(`- **[${warn.component_type}] ${warn.component_id}:** ${warn.message}`);
+        }
+        useSessionStore.getState().injectSystemMessage(lines.join("\n"));
       }
     } catch (err) {
       const apiErr = err as ApiError;
