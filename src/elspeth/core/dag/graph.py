@@ -164,18 +164,22 @@ class ExecutionGraph:
             output_schema: Output schema Pydantic type (None for dynamic or N/A like sinks)
             input_schema_config: Input schema config for contract validation
             output_schema_config: Output schema config for contract validation.
-                Auto-parsed from config["schema"] if not provided and schema
-                is present in config.
+                Parsed from config["schema"] when not provided explicitly.
         """
         resolved_config = config or {}
 
-        # Auto-populate output_schema_config from config["schema"] if not
-        # explicitly provided.  The builder always passes it explicitly;
-        # this covers direct add_node() callers (tests, tooling).
-        if output_schema_config is None:
-            schema_dict = resolved_config.get("schema")
-            if schema_dict is not None and isinstance(schema_dict, Mapping):
-                output_schema_config = SchemaConfig.from_dict(schema_dict)
+        # Populate output_schema_config from config["schema"] when the
+        # caller doesn't provide it explicitly.  The builder always passes
+        # it; this ensures the invariant holds for any add_node() caller.
+        if output_schema_config is None and "schema" in resolved_config:
+            schema_dict = resolved_config["schema"]
+            if not isinstance(schema_dict, Mapping):
+                raise GraphValidationError(
+                    f"Node '{node_id}' has config['schema'] of type "
+                    f"{type(schema_dict).__name__}, expected Mapping. "
+                    f"This is a configuration or graph construction bug."
+                )
+            output_schema_config = SchemaConfig.from_dict(schema_dict)
 
         info = NodeInfo(
             node_id=NodeID(node_id),

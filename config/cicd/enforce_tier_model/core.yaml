@@ -145,11 +145,6 @@ allow_hits:
   reason: Optional field access at trust boundary
   safety: Code reviewed - legitimate pattern
   expires: '2026-05-02'
-- key: core/dag/graph.py:R1:ExecutionGraph:add_node:fp=82c5d5b87c85334b
-  owner: architecture
-  reason: Auto-parse config["schema"] when output_schema_config not explicitly provided — covers direct add_node callers (tests, tooling)
-  safety: None schema_dict yields None output_schema_config; isinstance guards against malformed values
-  expires: null
 - key: core/dag/graph.py:R1:ExecutionGraph:get_required_fields:fp=6eb8a00ef1358596
   owner: architecture
   reason: Optional required_input_fields key supports transforms with implicit/no required field contract

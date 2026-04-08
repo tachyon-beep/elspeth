@@ -69,10 +69,12 @@ _NODE_ID_MAX_LENGTH = NODE_ID_COLUMN_LENGTH
 
 # Config stored on graph nodes varies by node type:
 # - Source/Transform/Sink: raw plugin config dict (arbitrary keys per plugin)
-# - Gate: {schema, routes, condition, fork_to?}
+# - Gate: {routes, condition, fork_to?}
 # - Aggregation: {schema, trigger, output_mode, options}
 # - Coalesce: {branches, policy, merge, timeout_seconds?, quorum_count?, select_branch?}
-# Only "schema" is accessed cross-type. Other keys are opaque to the graph layer.
+# Schema data is accessed via output_schema_config on NodeInfo, not config["schema"].
+# config["schema"] exists on source/transform/sink/aggregation nodes for node ID
+# hashing but is not read at runtime for schema semantics.
 # dict[str, Any] is intentional: plugin configs are validated by each plugin's
 # Pydantic model, not by the graph. The graph only hashes them for node IDs.
 type NodeConfig = dict[str, Any]
@@ -107,10 +109,10 @@ class NodeInfo:
         if len(self.node_id) > _NODE_ID_MAX_LENGTH:
             msg = f"node_id exceeds {_NODE_ID_MAX_LENGTH} characters: '{self.node_id}' (length={len(self.node_id)})"
             raise GraphValidationError(msg)
-        # NOTE: config is NOT frozen here because the builder mutates it
-        # during multi-step schema resolution (e.g., gate/coalesce schema
-        # propagation). Deep freeze is applied by build_execution_graph()
-        # after all mutations are complete.
+        # NOTE: config is NOT frozen here because the builder mutates
+        # output_schema_config on pass-through nodes (gates, coalesce) via
+        # object.__setattr__ during schema propagation. Deep freeze is
+        # applied by build_execution_graph() after all mutations are complete.
 
 
 @dataclass(frozen=True, slots=True)
