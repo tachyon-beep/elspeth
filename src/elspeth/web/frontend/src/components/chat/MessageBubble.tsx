@@ -1,6 +1,7 @@
 // src/components/chat/MessageBubble.tsx
 import { useState, useCallback, useRef, useEffect } from "react";
 import type { ChatMessage } from "@/types/api";
+import { MarkdownRenderer } from "./MarkdownRenderer";
 
 interface MessageBubbleProps {
   message: ChatMessage;
@@ -93,7 +94,7 @@ export function MessageBubble({ message, isComposing, onRetry, onFork }: Message
           maxWidth: "80%",
           fontSize: 14,
           lineHeight: 1.5,
-          whiteSpace: "pre-wrap",
+          whiteSpace: isUser ? "pre-wrap" : undefined,
           wordBreak: "break-word",
           position: "relative",
         }}
@@ -188,8 +189,10 @@ export function MessageBubble({ message, isComposing, onRetry, onFork }: Message
               </button>
             </div>
           </div>
-        ) : (
+        ) : isUser ? (
           message.content
+        ) : (
+          <MarkdownRenderer content={message.content} />
         )}
 
         {/* Edit/fork button — user messages only, not pending/failed */}

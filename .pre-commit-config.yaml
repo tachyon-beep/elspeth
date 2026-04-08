@@ -40,7 +40,7 @@ repos:
 
       - id: enforce-tier-model
         name: Enforce Tier Model
-        entry: .venv/bin/python scripts/cicd/enforce_tier_model.py check --root src/elspeth --allowlist config/cicd/enforce_tier_model --exclude "**/__pycache__/*"
+        entry: .venv/bin/python scripts/cicd/enforce_tier_model.py check --root src/elspeth --allowlist config/cicd/enforce_tier_model --exclude "**/__pycache__/*" --exclude "web/frontend/node_modules"
         language: system
         types: [python]
         pass_filenames: false
