@@ -63,6 +63,7 @@ from elspeth.contracts.config import RuntimeRetryConfig
 from elspeth.contracts.enums import NodeStateStatus, RoutingMode
 from elspeth.contracts.errors import (
     ExecutionError,
+    FrameworkBugError,
     GracefulShutdownError,
     OrchestrationInvariantError,
     SourceQuarantineReason,
@@ -1293,7 +1294,6 @@ class Orchestrator:
             coalesce_node_ids: Set of coalesce node IDs (structural, no plugin).
         """
         from elspeth.contracts import Determinism
-        from elspeth.contracts.schema import SchemaConfig
 
         for node_id in execution_order:
             node_info = graph.get_node_info(node_id)
@@ -1321,14 +1321,15 @@ class Orchestrator:
                 plugin_version = plugin.plugin_version
                 determinism = plugin.determinism
 
-            # Get schema_config — prefer computed output_schema_config
-            # (includes guaranteed_fields, audit_fields from LLM transforms)
-            # over raw config["schema"] which may omit computed contract fields.
-            if node_info.output_schema_config is not None:
-                schema_config = node_info.output_schema_config
-            else:
-                schema_dict = node_info.config["schema"]
-                schema_config = SchemaConfig.from_dict(schema_dict)
+            # Schema config is always available via output_schema_config —
+            # populated at construction time for all node types.
+            schema_config = node_info.output_schema_config
+            if schema_config is None:
+                raise FrameworkBugError(
+                    f"Node '{node_id}' has no output_schema_config. "
+                    "All nodes in execution order must have schema config "
+                    "populated by the builder."
+                )
 
             # Get output_contract for source nodes
             # Sources have get_schema_contract() method that returns their output contract

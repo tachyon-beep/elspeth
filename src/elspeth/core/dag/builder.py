@@ -124,18 +124,20 @@ def build_execution_graph(
         return NodeID(generated)
 
     def _best_schema_config(nid: NodeID) -> SchemaConfig:
-        """Get best available SchemaConfig from a node.
+        """Get SchemaConfig from a node.
 
-        Prefers computed output_schema_config (includes guaranteed_fields,
-        audit_fields from e.g., LLM transforms) over raw config["schema"].
-        Pass-through nodes (gates, coalesce) should inherit the computed
-        schema so audit records reflect actual data contracts.
+        All nodes have output_schema_config populated at construction time
+        (sources, transforms, aggregations from config; gates and coalesce
+        from upstream inheritance via _assign_schema).
         """
         info = graph.get_node_info(nid)
-        if info.output_schema_config is not None:
-            return info.output_schema_config  # frozen, safe to share
-        schema_dict: dict[str, Any] = info.config["schema"]
-        return SchemaConfig.from_dict(schema_dict)
+        if info.output_schema_config is None:
+            raise FrameworkBugError(
+                f"Node '{nid}' has no output_schema_config. "
+                "All producer nodes must have output_schema_config populated "
+                "at construction time."
+            )
+        return info.output_schema_config
 
     def _assign_schema(target_nid: NodeID, schema: SchemaConfig) -> None:
         """Set output_schema_config on a pass-through node (gate or coalesce).
@@ -152,7 +154,9 @@ def build_execution_graph(
 
     # Add source
     source_config = source.config
-    source_schema_config = SchemaConfig.from_dict(source_config["schema"])
+    source_schema_config: SchemaConfig | None = None
+    if "schema" in source_config:
+        source_schema_config = SchemaConfig.from_dict(source_config["schema"])
     source_id = node_id("source", source.name, source_config)
     graph.add_node(
         source_id,
@@ -575,7 +579,7 @@ def build_execution_graph(
             )
         producer_id, _producer_label = producers[input_connection]
         upstream_info = graph.get_node_info(producer_id)
-        if upstream_info.output_schema_config is not None or "schema" in upstream_info.config:
+        if upstream_info.output_schema_config is not None:
             _assign_schema(gate_id, _best_schema_config(producer_id))
         else:
             deferred_config_gate_schemas.append((gate_id, gate_name, input_connection))

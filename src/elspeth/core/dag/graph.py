@@ -163,13 +163,25 @@ class ExecutionGraph:
             input_schema: Input schema Pydantic type (None for dynamic or N/A like sources)
             output_schema: Output schema Pydantic type (None for dynamic or N/A like sinks)
             input_schema_config: Input schema config for contract validation
-            output_schema_config: Output schema config for contract validation
+            output_schema_config: Output schema config for contract validation.
+                Auto-parsed from config["schema"] if not provided and schema
+                is present in config.
         """
+        resolved_config = config or {}
+
+        # Auto-populate output_schema_config from config["schema"] if not
+        # explicitly provided.  The builder always passes it explicitly;
+        # this covers direct add_node() callers (tests, tooling).
+        if output_schema_config is None:
+            schema_dict = resolved_config.get("schema")
+            if schema_dict is not None and isinstance(schema_dict, Mapping):
+                output_schema_config = SchemaConfig.from_dict(schema_dict)
+
         info = NodeInfo(
             node_id=NodeID(node_id),
             node_type=node_type,
             plugin_name=plugin_name,
-            config=config or {},
+            config=resolved_config,
             input_schema=input_schema,
             output_schema=output_schema,
             input_schema_config=input_schema_config,
@@ -1428,42 +1440,17 @@ class ExecutionGraph:
     def get_schema_config_from_node(self, node_id: str) -> SchemaConfig | None:
         """Extract SchemaConfig from node.
 
-        Priority:
-        1. output_schema_config from NodeInfo (computed by transform)
-        2. schema from config dict (raw config)
-
-        Transforms may compute their schema config dynamically (e.g., LLM transforms
-        determine guaranteed_fields and audit_fields from their configuration). When
-        this computed schema config is available in NodeInfo, it takes precedence
-        over the raw config dict.
+        Returns output_schema_config directly — all nodes with schemas have
+        this populated at construction time by the builder.
 
         Args:
             node_id: Node ID to get schema config from
 
         Returns:
-            SchemaConfig if available, None if schema not in config
+            SchemaConfig if available, None if node has no schema
         """
         node_info = self.get_node_info(node_id)
-
-        # First check if we have computed schema config in NodeInfo
-        # (populated by from_plugin_instances when transform has _output_schema_config)
-        if node_info.output_schema_config is not None:
-            return node_info.output_schema_config
-
-        # Fall back to parsing from raw config dict
-        schema_dict = node_info.config.get("schema")
-        if schema_dict is None:
-            return None
-
-        # Parse the schema dict into SchemaConfig
-        if not isinstance(schema_dict, Mapping):
-            raise GraphValidationError(
-                f"Node '{node_id}' has malformed schema config: "
-                f"expected Mapping, got {type(schema_dict).__name__}. "
-                f"This is a configuration or graph construction bug."
-            )
-
-        return SchemaConfig.from_dict(schema_dict)
+        return node_info.output_schema_config
 
     def get_guaranteed_fields(self, node_id: str) -> frozenset[str]:
         """Get fields that a node guarantees in its output.

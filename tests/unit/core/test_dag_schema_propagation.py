@@ -249,26 +249,28 @@ class TestGetSchemaConfigFromNodePriority:
         assert result.guaranteed_fields == ("from_nodeinfo",)
         assert result.audit_fields == ("audit_from_nodeinfo",)
 
-    def test_falls_back_to_config_dict_when_no_nodeinfo_schema(self) -> None:
-        """Falls back to config dict when NodeInfo.output_schema_config is None."""
+    def test_returns_output_schema_config_directly(self) -> None:
+        """get_schema_config_from_node returns output_schema_config without parsing config dict."""
         graph = ExecutionGraph()
 
-        # Add node with only config dict schema (no output_schema_config)
+        schema = SchemaConfig(
+            mode="observed",
+            fields=None,
+            guaranteed_fields=("field_a",),
+        )
+
         graph.add_node(
             "test_node",
             node_type=NodeType.TRANSFORM,
             plugin_name="test",
-            config={"schema": {"mode": "observed", "guaranteed_fields": ["from_config"]}},
-            # No output_schema_config - should fall back to config dict
+            config={"schema": {"mode": "observed", "guaranteed_fields": ["different_field"]}},
+            output_schema_config=schema,
         )
 
-        # Get schema config from node
         result = graph.get_schema_config_from_node("test_node")
-
-        # Should parse from config dict
-        assert result is not None
-        assert result.guaranteed_fields == ("from_config",)
-        assert result.audit_fields is None
+        # Returns the typed object, ignores config dict
+        assert result is schema
+        assert result.guaranteed_fields == ("field_a",)
 
     def test_returns_none_when_no_schema_anywhere(self) -> None:
         """Returns None when neither NodeInfo nor config dict has schema."""
@@ -350,11 +352,17 @@ class TestGuaranteedFieldsWithSchemaConfig:
         )
 
         # Sink requires result_usage (guaranteed by transform)
+        sink_schema = SchemaConfig(
+            mode="observed",
+            fields=None,
+            required_fields=("result_usage",),
+        )
         graph.add_node(
             "sink",
             node_type=NodeType.SINK,
             plugin_name="csv",
-            config={"schema": {"mode": "observed", "required_fields": ["result_usage"]}},
+            config={},
+            output_schema_config=sink_schema,
         )
 
         graph.add_edge("source", "transform", label="continue")
@@ -390,11 +398,17 @@ class TestGuaranteedFieldsWithSchemaConfig:
         )
 
         # Sink requires result_template_hash (audit field - NOT guaranteed)
+        sink_schema = SchemaConfig(
+            mode="observed",
+            fields=None,
+            required_fields=("result_template_hash",),
+        )
         graph.add_node(
             "sink",
             node_type=NodeType.SINK,
             plugin_name="csv",
-            config={"schema": {"mode": "observed", "required_fields": ["result_template_hash"]}},
+            config={},
+            output_schema_config=sink_schema,
         )
 
         graph.add_edge("source", "transform", label="continue")
@@ -505,12 +519,19 @@ class TestGateSchemaConfigInheritance:
             output_schema_config=transform_computed_schema,
         )
 
-        # Gate with full computed schema (as the builder would propagate via _best_schema_dict)
+        # Gate with full computed schema (as the builder would propagate via _assign_schema)
+        gate_schema = SchemaConfig(
+            mode="observed",
+            fields=None,
+            guaranteed_fields=("result", "result_usage", "result_model"),
+            audit_fields=None,
+        )
         graph.add_node(
             "gate",
             node_type=NodeType.GATE,
             plugin_name="config_gate",
-            config={"schema": {"mode": "observed", "guaranteed_fields": ["result", "result_usage", "result_model"]}},
+            config={},
+            output_schema_config=gate_schema,
         )
 
         graph.add_edge("source", "llm_transform", label="continue")
@@ -556,17 +577,25 @@ class TestGateSchemaConfigInheritance:
         )
 
         # Two gates in sequence — builder propagates computed schema to each
+        gate_schema = SchemaConfig(
+            mode="observed",
+            fields=None,
+            guaranteed_fields=("computed_a", "computed_b"),
+            audit_fields=None,
+        )
         graph.add_node(
             "gate1",
             node_type=NodeType.GATE,
             plugin_name="config_gate",
-            config={"schema": {"mode": "observed", "guaranteed_fields": ["computed_a", "computed_b"]}},
+            config={},
+            output_schema_config=gate_schema,
         )
         graph.add_node(
             "gate2",
             node_type=NodeType.GATE,
             plugin_name="config_gate",
-            config={"schema": {"mode": "observed", "guaranteed_fields": ["computed_a", "computed_b"]}},
+            config={},
+            output_schema_config=gate_schema,
         )
 
         graph.add_edge("source", "transform", label="continue")
@@ -589,9 +618,9 @@ class TestPassThroughNodesInheritComputedSchema:
     These tests exercise from_plugin_instances() — the production code path.
     """
 
-    def test_gate_config_schema_includes_computed_guaranteed_fields(self) -> None:
-        """Gate's config["schema"] should include guaranteed_fields from
-        upstream transform's computed output_schema_config.
+    def test_gate_inherits_computed_schema_config(self) -> None:
+        """Gate inherits output_schema_config with guaranteed_fields and
+        audit_fields from upstream transform's computed schema.
         """
         transform = MockTransformWithSchemaConfig()
         source = MockSource()
@@ -623,23 +652,17 @@ class TestPassThroughNodesInheritComputedSchema:
             gates=[gate],
         )
 
-        # Find gate node
         gate_nodes = [n for n in graph.get_nodes() if n.node_type == NodeType.GATE]
         assert len(gate_nodes) == 1
 
-        gate_schema_dict = gate_nodes[0].config["schema"]
+        gate_schema = gate_nodes[0].output_schema_config
+        assert gate_schema is not None
+        assert set(gate_schema.guaranteed_fields) == {"field_a", "field_b"}
+        assert set(gate_schema.audit_fields) == {"field_c", "field_d"}
 
-        # Gate's config["schema"] must include computed guaranteed_fields
-        assert "guaranteed_fields" in gate_schema_dict
-        assert set(gate_schema_dict["guaranteed_fields"]) == {"field_a", "field_b"}
-
-        # Gate's config["schema"] must include computed audit_fields
-        assert "audit_fields" in gate_schema_dict
-        assert set(gate_schema_dict["audit_fields"]) == {"field_c", "field_d"}
-
-    def test_gate_config_schema_falls_back_to_raw_when_no_computed(self) -> None:
-        """Gate should still use raw config["schema"] when upstream has no
-        output_schema_config.
+    def test_gate_inherits_raw_schema_when_no_computed(self) -> None:
+        """Gate inherits output_schema_config from upstream even when
+        upstream has no computed _output_schema_config (parsed from config).
         """
         transform = MockTransformWithoutSchemaConfig()
         source = MockSource()
@@ -674,20 +697,17 @@ class TestPassThroughNodesInheritComputedSchema:
         gate_nodes = [n for n in graph.get_nodes() if n.node_type == NodeType.GATE]
         assert len(gate_nodes) == 1
 
-        gate_schema_dict = gate_nodes[0].config["schema"]
+        gate_schema = gate_nodes[0].output_schema_config
+        assert gate_schema is not None
+        assert gate_schema.guaranteed_fields == ("config_field",)
 
-        # Should inherit raw schema with config_field.
-        # After graph build, config is deep-frozen: lists become tuples.
-        assert gate_schema_dict["guaranteed_fields"] == ("config_field",)
-
-    def test_coalesce_config_schema_includes_computed_fields(self) -> None:
-        """Coalesce node's config["schema"] should reflect computed
-        output_schema_config from upstream fork branches.
+    def test_coalesce_inherits_computed_schema_config(self) -> None:
+        """Coalesce node inherits output_schema_config with computed
+        guaranteed/audit fields from upstream fork branches.
         """
         transform = MockTransformWithSchemaConfig()
         source = MockSource()
 
-        # Transform feeds into a fork gate
         wired = WiredTransform(
             plugin=transform,  # type: ignore[arg-type]
             settings=TransformSettings(
@@ -726,19 +746,13 @@ class TestPassThroughNodesInheritComputedSchema:
             coalesce_settings=[coalesce],
         )
 
-        # Find coalesce node
         coalesce_nodes = [n for n in graph.get_nodes() if n.node_type == NodeType.COALESCE]
         assert len(coalesce_nodes) == 1
 
-        coalesce_schema_dict = coalesce_nodes[0].config["schema"]
-
-        # Coalesce must inherit computed guaranteed_fields from upstream
-        assert "guaranteed_fields" in coalesce_schema_dict
-        assert set(coalesce_schema_dict["guaranteed_fields"]) == {"field_a", "field_b"}
-
-        # Coalesce must inherit computed audit_fields from upstream
-        assert "audit_fields" in coalesce_schema_dict
-        assert set(coalesce_schema_dict["audit_fields"]) == {"field_c", "field_d"}
+        coal_schema = coalesce_nodes[0].output_schema_config
+        assert coal_schema is not None
+        assert set(coal_schema.guaranteed_fields) == {"field_a", "field_b"}
+        assert set(coal_schema.audit_fields) == {"field_c", "field_d"}
 
     def test_deferred_gate_after_coalesce_inherits_computed_schema(self) -> None:
         """A gate downstream of a coalesce node (deferred to pass 2 in builder)
@@ -796,122 +810,10 @@ class TestPassThroughNodesInheritComputedSchema:
         gate_nodes = [n for n in graph.get_nodes() if n.plugin_name == "config_gate:final_check"]
         assert len(gate_nodes) == 1
 
-        gate_schema_dict = gate_nodes[0].config["schema"]
-
-        # Must have computed fields propagated through coalesce from upstream
-        assert "guaranteed_fields" in gate_schema_dict
-        assert set(gate_schema_dict["guaranteed_fields"]) == {"field_a", "field_b"}
-        assert "audit_fields" in gate_schema_dict
-        assert set(gate_schema_dict["audit_fields"]) == {"field_c", "field_d"}
-
-
-class TestSchemaAliasingPrevention:
-    """Tests that schema dicts are deep-copied, not aliased across nodes.
-
-    BUG FIX: P1-2026-02-14 — _best_schema_dict() returned direct references
-    to schema dicts, so gate and coalesce nodes could share the same dict
-    object. Mutating one node's schema would silently corrupt another's.
-    """
-
-    def test_gate_schema_is_independent_of_upstream_transform(self) -> None:
-        """Gate's config['schema'] must not be the same object as upstream transform schema.
-
-        Before the fix, _best_schema_dict() returned the raw dict reference,
-        so gate.config['schema'] and transform.config['schema'] were the
-        same Python object. Deep-copy prevents this aliasing.
-        """
-        transform = MockTransformWithoutSchemaConfig()
-        source = MockSource()
-        wired = WiredTransform(
-            plugin=transform,  # type: ignore[arg-type]
-            settings=TransformSettings(
-                name="basic_step",
-                plugin=transform.name,
-                input="source_out",
-                on_success="gate_in",
-                on_error="discard",
-                options={},
-            ),
-        )
-
-        gate = GateSettings(
-            name="quality_gate",
-            input="gate_in",
-            condition="True",
-            routes={"true": "output", "false": "output"},
-        )
-
-        graph = ExecutionGraph.from_plugin_instances(
-            source=source,  # type: ignore[arg-type]
-            source_settings=SourceSettings(plugin=source.name, on_success="source_out", options={}),
-            transforms=[wired],
-            sinks={"output": MockSink()},  # type: ignore[dict-item]
-            aggregations={},
-            gates=[gate],
-        )
-
-        transform_nodes = [n for n in graph.get_nodes() if n.node_type == NodeType.TRANSFORM]
-        gate_nodes = [n for n in graph.get_nodes() if n.node_type == NodeType.GATE]
-        assert len(transform_nodes) == 1
-        assert len(gate_nodes) == 1
-
-        transform_schema = transform_nodes[0].config["schema"]
-        gate_schema = gate_nodes[0].config["schema"]
-
-        # Schemas must be structurally equal but NOT the same object
-        assert transform_schema["guaranteed_fields"] == gate_schema["guaranteed_fields"]
-        assert transform_schema is not gate_schema, (
-            "Gate schema must be a deep copy, not aliased to transform schema. "
-            "Aliasing means mutations to one node's schema silently corrupt another."
-        )
-
-    def test_multiple_gates_have_independent_schemas(self) -> None:
-        """Multiple gates consuming the same upstream must have independent schemas."""
-        transform = MockTransformWithoutSchemaConfig()
-        source = MockSource()
-        wired = WiredTransform(
-            plugin=transform,  # type: ignore[arg-type]
-            settings=TransformSettings(
-                name="basic_step",
-                plugin=transform.name,
-                input="source_out",
-                on_success="gate1_in",
-                on_error="discard",
-                options={},
-            ),
-        )
-
-        gate1 = GateSettings(
-            name="gate_1",
-            input="gate1_in",
-            condition="True",
-            routes={"true": "gate2_in", "false": "output"},
-        )
-
-        gate2 = GateSettings(
-            name="gate_2",
-            input="gate2_in",
-            condition="True",
-            routes={"true": "output", "false": "output"},
-        )
-
-        graph = ExecutionGraph.from_plugin_instances(
-            source=source,  # type: ignore[arg-type]
-            source_settings=SourceSettings(plugin=source.name, on_success="source_out", options={}),
-            transforms=[wired],
-            sinks={"output": MockSink()},  # type: ignore[dict-item]
-            aggregations={},
-            gates=[gate1, gate2],
-        )
-
-        gate_nodes = [n for n in graph.get_nodes() if n.node_type == NodeType.GATE]
-        assert len(gate_nodes) == 2
-
-        gate1_schema = gate_nodes[0].config["schema"]
-        gate2_schema = gate_nodes[1].config["schema"]
-
-        # Both should have schemas but be independent objects
-        assert gate1_schema is not gate2_schema, "Multiple gates must have independent schema copies to prevent aliasing corruption."
+        gate_schema = gate_nodes[0].output_schema_config
+        assert gate_schema is not None
+        assert set(gate_schema.guaranteed_fields) == {"field_a", "field_b"}
+        assert set(gate_schema.audit_fields) == {"field_c", "field_d"}
 
 
 class TestPassThroughNodesUseTypedSchema:
