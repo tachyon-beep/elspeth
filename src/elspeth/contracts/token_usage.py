@@ -94,7 +94,8 @@ class TokenUsage:
         """Convert to a plain dict, omitting unknown (``None``) fields.
 
         Returns ``{}`` for fully unknown, ``{"prompt_tokens": 10}`` for
-        partial, or the full dict when both fields are known.
+        partial, or all three fields when known (reported_total serialized
+        as ``total_tokens``).
         """
         result: dict[str, int] = {}
         if self.prompt_tokens is not None:

@@ -43,7 +43,7 @@ FiniteFloat = Annotated[float, Field(allow_inf_nan=False)]
 # Canonical mapping from schema field type strings to Python/Pydantic types.
 # Used by DAG graph validation (L1) and plugin schema factory (L3) to build
 # dynamic Pydantic models from config-driven schema definitions.
-FIELD_TYPE_MAP: dict[str, type] = {
+FIELD_TYPE_MAP: dict[str, Any] = {
     "str": str,
     "int": int,
     "float": FiniteFloat,

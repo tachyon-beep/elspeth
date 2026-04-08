@@ -5,9 +5,9 @@ CompositionStateData is the input DTO for saving new state versions.
 """
 
 # ID Convention: Record dataclasses use UUID for type safety. The database
-# stores IDs as String (TEXT). The SessionServiceImpl (Sub-2d) converts
-# between UUID and str at the query/record boundary. Callers work with
-# UUID exclusively; the storage representation is an implementation detail.
+# stores IDs as String (TEXT). SessionServiceImpl converts between UUID
+# and str at the query/record boundary. Callers work with UUID
+# exclusively; the storage representation is an implementation detail.
 
 from __future__ import annotations
 

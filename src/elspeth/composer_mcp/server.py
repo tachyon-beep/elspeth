@@ -154,9 +154,6 @@ def _dispatch_tool(
 
     The result dict always has ``success``, ``state`` (serialized
     CompositionState), and may include ``data``.
-
-    Args:
-        baseline: Optional baseline state for diff_pipeline comparisons.
     """
     if tool_name in _SESSION_TOOL_NAMES:
         return _dispatch_session_tool(tool_name, arguments, state, scratch_dir)

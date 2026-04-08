@@ -26,9 +26,8 @@ if TYPE_CHECKING:
 class PluginBundle:
     """Pre-instantiated plugin instances from configuration.
 
-    Frozen dataclass replacing the previous dict[str, Any] return from
-    instantiate_plugins_from_config().  Typed fields enable mypy checking
-    and IDE autocomplete on all access sites.
+    Typed fields enable mypy checking and IDE autocomplete on all
+    access sites.
     """
 
     source: "SourceProtocol"

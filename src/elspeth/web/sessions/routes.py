@@ -81,8 +81,8 @@ def _state_response(
 ) -> CompositionStateResponse:
     """Convert a CompositionStateRecord to a CompositionStateResponse.
 
-    Unfreezes container fields (MappingProxyType, tuple) so Pydantic
-    can serialize them to JSON.
+    Unfreezes container fields (MappingProxyType, tuple) into mutable
+    dicts/lists so redact_source_storage_path can mutate them in place.
 
     When live_validation is provided (from a just-computed validate() call),
     transient warnings and suggestions are included in the response.

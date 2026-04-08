@@ -41,10 +41,9 @@ class TokenRef:
     together semantically. This type enforces that coupling at the
     type level, preventing parameter-order bugs and mismatched pairs.
 
-    Construction:
-    - Write path: Create via verify_token_ref() in data_flow_repository
-      (validates coherence against audit DB before returning)
-    - Read path / tests: Construct directly (Tier 1 data is trusted)
+    Construction: Construct directly — all call sites (processor,
+    sink executor, plugin context) pair token_id with run_id at the
+    point of use. Tier 1 data is trusted at construction time.
     """
 
     token_id: str

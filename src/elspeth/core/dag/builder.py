@@ -140,9 +140,9 @@ def build_execution_graph(
     def _assign_schema(target_nid: NodeID, schema: SchemaConfig) -> None:
         """Set both config["schema"] and output_schema_config on a pass-through node.
 
-        Maintains backward compatibility (config["schema"] for audit logging)
-        while also setting the typed output_schema_config so downstream consumers
-        get SchemaConfig directly via get_schema_config_from_node().
+        Keeps config["schema"] in sync (read by orchestrator and validation
+        code) while also setting the typed output_schema_config so downstream
+        consumers get SchemaConfig directly via get_schema_config_from_node().
         """
         target_info = graph.get_node_info(target_nid)
         target_info.config["schema"] = schema.to_dict()
