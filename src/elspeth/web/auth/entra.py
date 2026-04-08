@@ -110,7 +110,7 @@ class EntraAuthProvider:
         return UserProfile(
             user_id=payload["sub"],
             username=payload.get("preferred_username", payload["sub"]),
-            display_name=payload.get("name") or payload.get("preferred_username") or None,
+            display_name=payload.get("name") or payload.get("preferred_username"),
             email=payload.get("email"),
             groups=self._extract_groups(payload),
         )

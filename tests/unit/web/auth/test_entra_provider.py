@@ -173,6 +173,24 @@ class TestEntraGroupClaims:
         assert profile.groups == ()
 
     @pytest.mark.asyncio
+    async def test_no_name_claims_returns_none_display_name(
+        self,
+        rsa_keypair,
+        mock_httpx_discovery,
+    ) -> None:
+        """When IdP provides neither name nor preferred_username, display_name is None."""
+        private_key, _ = rsa_keypair
+        provider = EntraAuthProvider(tenant_id=TENANT_ID, audience=AUDIENCE)
+        claims = _valid_entra_claims()
+        del claims["name"]
+        del claims["preferred_username"]
+        token = make_rs256_token(private_key, claims)
+        with mock_httpx_discovery:
+            profile = await provider.get_user_info(token)
+        assert profile.display_name is None
+        assert profile.username == "entra-user-456"  # Falls back to sub
+
+    @pytest.mark.asyncio
     async def test_non_list_groups_claim_raises(
         self,
         rsa_keypair,

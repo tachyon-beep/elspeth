@@ -566,6 +566,11 @@ allow_hits:
   reason: Run-ownership IDOR gate — narrowed from except Exception to except ValueError
   safety: Only not-found errors return 4004; infrastructure errors propagate to outer handler
   expires: null
+- key: web/execution/routes.py:R6:create_execution_router:websocket_run_progress:fp=8ff7d75c24b0f480
+  owner: web-execution
+  reason: TOCTOU guard — run may be deleted between verify_run_ownership and get_status
+  safety: Only not-found errors close with 4004; returns immediately
+  expires: null
 - key: web/app.py:R1:lifespan:fp=f74df10b8a73da45
   owner: web-app
   reason: False positive — httpx.AsyncClient.get() is an HTTP GET request, not dict.get()

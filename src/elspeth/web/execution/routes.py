@@ -237,7 +237,11 @@ def create_execution_router() -> APIRouter:
             # Seed: if the run already reached a terminal state before the
             # client connected (short runs, page refresh), send the terminal
             # status immediately and close.
-            current = await service.get_status(UUID(run_id))
+            try:
+                current = await service.get_status(UUID(run_id))
+            except ValueError:
+                await websocket.close(code=4004, reason="Run not found")
+                return
             if current.status in ("completed", "failed", "cancelled"):
                 await websocket.send_json(
                     {

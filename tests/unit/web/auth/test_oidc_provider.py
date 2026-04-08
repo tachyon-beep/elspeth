@@ -225,6 +225,24 @@ class TestOIDCGetUserInfo:
         assert profile.groups == ()
 
     @pytest.mark.asyncio
+    async def test_get_user_info_no_name_claims_returns_none(
+        self,
+        rsa_keypair,
+        mock_httpx_discovery,
+    ) -> None:
+        """When IdP provides neither name nor preferred_username, display_name is None."""
+        private_key, _ = rsa_keypair
+        provider = OIDCAuthProvider(issuer=ISSUER, audience=AUDIENCE)
+        claims = _valid_claims()
+        del claims["name"]
+        del claims["preferred_username"]
+        token = make_rs256_token(private_key, claims)
+        with mock_httpx_discovery:
+            profile = await provider.get_user_info(token)
+        assert profile.display_name is None
+        assert profile.username == "user-123"  # Falls back to sub
+
+    @pytest.mark.asyncio
     async def test_non_list_groups_claim_raises(
         self,
         rsa_keypair,

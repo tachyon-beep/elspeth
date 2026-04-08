@@ -315,7 +315,7 @@ def create_server(
                 scratch_dir,
                 baseline=baseline_ref[0],
             )
-        except (ValueError, KeyError) as exc:
+        except (ValueError, KeyError, TypeError) as exc:
             # Bad LLM arguments (wrong keys, invalid values) — report to agent
             return CallToolResult(
                 content=[TextContent(type="text", text=f"Tool error: {exc!s}")],
