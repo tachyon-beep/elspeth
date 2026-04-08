@@ -34,6 +34,7 @@ function makeState(
   overrides: Partial<CompositionState> = {},
 ): CompositionState {
   return {
+    id: "state-1",
     version: 1,
     source: null,
     nodes: [
@@ -85,7 +86,7 @@ describe("ValidationDot in InspectorPanel", () => {
       compositionState: makeState(),
     });
     useExecutionStore.setState({
-      validationResult: { is_valid: true, summary: "All checks passed", checks: [], errors: [] },
+      validationResult: { is_valid: true, summary: "All checks passed", checks: [], errors: [], warnings: [] },
     });
     render(<InspectorPanel />);
     const dot = screen.getByLabelText("Validation passed");
@@ -109,6 +110,7 @@ describe("ValidationDot in InspectorPanel", () => {
             suggestion: null,
           },
         ],
+        warnings: [],
       },
     });
     render(<InspectorPanel />);
@@ -144,6 +146,7 @@ describe("InspectorPanel three-state validation indicator", () => {
     useSessionStore.setState({
       activeSessionId: "session-1",
       compositionState: {
+        id: "state-1",
         version: 1,
         source: { plugin: "csv", options: {} },
         nodes: [],
@@ -153,6 +156,13 @@ describe("InspectorPanel three-state validation indicator", () => {
       },
       stateVersions: [],
       isLoadingVersions: false,
+    });
+    useExecutionStore.setState({
+      validationResult: null,
+      isValidating: false,
+      isExecuting: false,
+      progress: null,
+      error: null,
     });
   });
 
