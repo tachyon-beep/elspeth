@@ -791,6 +791,29 @@ class PluginContractViolation(RuntimeError):
 
 
 # =============================================================================
+# Tier 1 Guard Tuple — Single Source of Truth
+# =============================================================================
+# These exception types indicate system corruption, framework bugs, or
+# orchestration invariant violations. They must NEVER be caught by broad
+# `except Exception` handlers — doing so either swallows evidence of
+# corruption or pollutes the audit trail with misleading FAILED states.
+#
+# Usage: `except TIER_1_ERRORS: raise` before any `except Exception:` block.
+#
+# PluginContractViolation is intentionally excluded: it represents a plugin
+# bug (row-level failure), not system corruption. Recording FAILED state
+# for a PluginContractViolation is accurate; recording it for these three
+# is misleading.
+# =============================================================================
+
+TIER_1_ERRORS: tuple[type[Exception], ...] = (
+    AuditIntegrityError,
+    FrameworkBugError,
+    OrchestrationInvariantError,
+)
+
+
+# =============================================================================
 # Schema Contract Violation Types (Tier 3 - External Data)
 # =============================================================================
 # These exceptions represent validation failures on external/user data.

@@ -7,7 +7,7 @@ from typing import TYPE_CHECKING
 
 import structlog
 
-from elspeth.contracts.errors import AuditIntegrityError, FrameworkBugError
+from elspeth.contracts.errors import TIER_1_ERRORS
 from elspeth.contracts.freeze import freeze_fields
 
 slog = structlog.get_logger(__name__)
@@ -340,7 +340,7 @@ def bootstrap_and_run(settings_path: Path) -> "RunResult":
     finally:
         try:
             db.close()
-        except (FrameworkBugError, AuditIntegrityError):
+        except TIER_1_ERRORS:
             raise  # System bugs always crash through
         except Exception as close_exc:
             # db.close() failure must not mask the original pipeline exception.

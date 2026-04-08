@@ -155,6 +155,8 @@ from elspeth.contracts.enums import (
     error_edge_label,
 )
 from elspeth.contracts.errors import (
+    # Tier 1 guard tuple — single source of truth for "never catch" exceptions
+    TIER_1_ERRORS,
     BatchPendingError,
     CoalesceFailureReason,
     CommencementGateFailedError,
@@ -171,6 +173,7 @@ from elspeth.contracts.errors import (
     GracefulShutdownError,
     MaxRetriesExceeded,
     MissingFieldViolation,
+    OrchestrationInvariantError,
     PluginContractViolation,
     QueryFailureDetail,
     RetrievalNotReadyError,
@@ -295,6 +298,8 @@ __all__ = [  # Grouped by category for readability
     "DuplicateDocumentError",
     "FrameworkBugError",
     "GracefulShutdownError",
+    "OrchestrationInvariantError",
+    "TIER_1_ERRORS",
     "MaxRetriesExceeded",
     "PluginContractViolation",
     "RetrievalNotReadyError",

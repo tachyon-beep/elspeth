@@ -21,10 +21,9 @@ from pydantic import ValidationError
 from elspeth import __version__
 from elspeth.contracts import ExecutionResult, SecretResolutionInput
 from elspeth.contracts.errors import (
-    AuditIntegrityError,
+    TIER_1_ERRORS,
     CommencementGateFailedError,
     DependencyFailedError,
-    FrameworkBugError,
     GracefulShutdownError,
 )
 from elspeth.contracts.types import AggregationName
@@ -403,6 +402,8 @@ def run(
     # Instantiate plugins before graph construction
     try:
         plugins = instantiate_plugins_from_config(config)
+    except TIER_1_ERRORS:
+        raise  # Tier 1 errors must crash with full traceback, not Exit(1)
     except Exception as e:
         typer.echo(f"Error instantiating plugins: {e}", err=True)
         raise typer.Exit(1) from None
@@ -489,7 +490,7 @@ def run(
     except (DependencyFailedError, CommencementGateFailedError, ValueError) as e:
         typer.echo(f"Pre-flight check failed: {e}", err=True)
         raise typer.Exit(1) from None
-    except (FrameworkBugError, AuditIntegrityError) as e:
+    except TIER_1_ERRORS as e:
         import traceback
 
         typer.echo(f"\nFATAL — {type(e).__name__}: {e}", err=True)
@@ -532,7 +533,7 @@ def run(
             typer.echo(f"\nPipeline interrupted after {e.rows_processed} rows.")
             typer.echo(f"Resume with: elspeth resume {e.run_id} --execute")
         raise typer.Exit(3)  # noqa: B904 -- distinct exit code: 0=success, 1=error, 3=interrupted
-    except (FrameworkBugError, AuditIntegrityError) as e:
+    except TIER_1_ERRORS as e:
         # Tier 1 violations and framework bugs MUST be clearly distinguishable
         # from config errors. These indicate database corruption, tampering,
         # or bugs in ELSPETH itself — not operator mistakes.
@@ -578,7 +579,7 @@ def run(
         else:
             typer.echo(f"Error during pipeline execution: {e}", err=True)
             typer.echo(traceback.format_exc(), err=True)
-        raise typer.Exit(1) from None
+        raise typer.Exit(4) from e  # Exit 4: unknown errors during execution are likely framework bugs
 
     # Emit final execution summary in JSON mode for machine consumption
     if output_format == "json":
@@ -1159,6 +1160,8 @@ def validate(
             hint="Check plugin options match the plugin's requirements.",
         )
         raise typer.Exit(1) from None
+    except TIER_1_ERRORS:
+        raise  # Tier 1 errors must crash with full traceback, not Exit(1)
     except Exception as e:
         _format_validation_error(
             title="Plugin Instantiation Failed",
@@ -1727,6 +1730,8 @@ def resume(
 
         try:
             plugins = instantiate_plugins_from_config(settings_config)
+        except TIER_1_ERRORS:
+            raise  # Tier 1 errors must crash with full traceback, not Exit(1)
         except Exception as e:
             typer.echo(f"Error instantiating plugins: {e}", err=True)
             raise typer.Exit(1) from None
@@ -1734,6 +1739,8 @@ def resume(
         # Build both graphs from the same plugin instances
         try:
             validation_graph, execution_graph = _build_resume_graphs(settings_config, plugins)
+        except TIER_1_ERRORS:
+            raise  # Tier 1 errors must crash with full traceback, not Exit(1)
         except Exception as e:
             typer.echo(f"Error building validation graph: {e}", err=True)
             raise typer.Exit(1) from None
@@ -1918,7 +1925,7 @@ def resume(
                 typer.echo(f"\nResume interrupted after {e.rows_processed} rows.")
                 typer.echo(f"Resume with: elspeth resume {e.run_id} --execute")
             raise typer.Exit(3)  # noqa: B904 -- distinct exit code: 0=success, 1=error, 3=interrupted
-        except (FrameworkBugError, AuditIntegrityError) as e:
+        except TIER_1_ERRORS as e:
             # Tier 1 violations and framework bugs MUST be clearly distinguishable
             # from config errors — same pattern as the `run` command handler.
             import traceback
@@ -1961,7 +1968,7 @@ def resume(
             else:
                 typer.echo(f"Error during resume: {e}", err=True)
                 typer.echo(traceback.format_exc(), err=True)
-            raise typer.Exit(1) from None
+            raise typer.Exit(4) from e  # Exit 4: unknown errors during execution are likely framework bugs
 
         if output_format == "json":
             import json as json_module

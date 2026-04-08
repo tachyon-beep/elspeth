@@ -229,7 +229,6 @@ class PluginContext:
             FrameworkBugError: If neither or both of state_id and operation_id are set
         """
         from elspeth.contracts import FrameworkBugError
-        from elspeth.contracts.errors import AuditIntegrityError
 
         if self.landscape is None:
             raise FrameworkBugError(
@@ -373,12 +372,11 @@ class PluginContext:
                     token_usage=token_usage,
                 )
             )
-        except (FrameworkBugError, AuditIntegrityError):
-            raise  # System bugs and audit integrity violations must crash
-        except Exception as tel_err:
-            if isinstance(tel_err, (TypeError, AttributeError, NameError)):
-                raise  # Programming errors must crash — but not KeyError from external data
-            # Telemetry failure must not corrupt the call recording
+        except (OSError, ConnectionError, TimeoutError, KeyError) as tel_err:
+            # Telemetry transport failures and external data mismatches are
+            # expected and must not corrupt the call recording.
+            # All other exceptions (including Tier 1 and programming errors)
+            # propagate naturally — no allowlist needed.
             logger.warning(
                 "telemetry_emit_failed in record_call",
                 extra={

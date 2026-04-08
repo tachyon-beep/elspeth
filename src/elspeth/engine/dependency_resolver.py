@@ -10,12 +10,7 @@ from pathlib import Path
 import yaml
 
 from elspeth.contracts.enums import RunStatus
-from elspeth.contracts.errors import (
-    AuditIntegrityError,
-    DependencyFailedError,
-    FrameworkBugError,
-    GracefulShutdownError,
-)
+from elspeth.contracts.errors import TIER_1_ERRORS, DependencyFailedError, GracefulShutdownError
 from elspeth.contracts.pipeline_runner import PipelineRunner
 from elspeth.core.canonical import canonical_json
 from elspeth.core.dependency_config import DependencyConfig, DependencyRunResult
@@ -120,8 +115,8 @@ def resolve_dependencies(
             run_result = runner(dep_path)
         except KeyboardInterrupt:
             raise
-        except (FrameworkBugError, AuditIntegrityError):
-            # Fatal errors propagate unwrapped — the CLI's fatal-error
+        except TIER_1_ERRORS:
+            # Tier 1 errors propagate unwrapped — the CLI's fatal-error
             # handler must see these at their original severity, not
             # downgraded to an ordinary DependencyFailedError.
             raise

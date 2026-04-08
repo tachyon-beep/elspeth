@@ -143,7 +143,22 @@ class ChromaSearchProvider:
             self._collection = self._client.get_collection(
                 name=config.collection,
             )
-        except Exception as exc:
+            # Chroma collection metadata is Tier 3 (external/persisted data) — use .get()
+            # to safely detect mismatch rather than crashing on missing key.
+            collection_metadata = self._collection.metadata or {}
+            actual_space = collection_metadata.get("hnsw:space")
+            if actual_space is not None and actual_space != config.distance_function:
+                raise RetrievalError(
+                    f"Chroma collection {config.collection!r} exists with "
+                    f"distance_function={actual_space!r}, but config specifies "
+                    f"{config.distance_function!r}. Score normalization would use "
+                    f"the wrong formula. Either change the config to match the "
+                    f"existing collection, or use a different collection name.",
+                    retryable=False,
+                )
+        except RetrievalError:
+            raise
+        except (chromadb.errors.ChromaError, ConnectionError, OSError) as exc:
             raise RetrievalError(
                 f"Chroma collection {config.collection!r} does not exist or is "
                 f"unreachable. Retrieval requires a pre-populated collection — "
@@ -151,26 +166,6 @@ class ChromaSearchProvider:
                 f"Error: {exc}",
                 retryable=False,
             ) from exc
-
-        # Validate distance function matches what the collection was created with.
-        collection_metadata = self._collection.metadata or {}
-        if "hnsw:space" not in collection_metadata:
-            raise RetrievalError(
-                f"Chroma collection {config.collection!r} has no 'hnsw:space' "
-                f"in metadata. Score normalization cannot proceed without a "
-                f"known distance function.",
-                retryable=False,
-            )
-        actual_space = collection_metadata["hnsw:space"]
-        if actual_space != config.distance_function:
-            raise RetrievalError(
-                f"Chroma collection {config.collection!r} exists with "
-                f"distance_function={actual_space!r}, but config specifies "
-                f"{config.distance_function!r}. Score normalization would use "
-                f"the wrong formula. Either change the config to match the "
-                f"existing collection, or use a different collection name.",
-                retryable=False,
-            )
 
     def search(
         self,

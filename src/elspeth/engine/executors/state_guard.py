@@ -19,7 +19,7 @@ from typing import TYPE_CHECKING, Any
 
 from elspeth.contracts import ExecutionError, NodeStateOpen
 from elspeth.contracts.enums import NodeStateStatus
-from elspeth.contracts.errors import AuditIntegrityError, FrameworkBugError, OrchestrationInvariantError
+from elspeth.contracts.errors import TIER_1_ERRORS, AuditIntegrityError, OrchestrationInvariantError
 from elspeth.core.landscape import LandscapeRecorder
 
 if TYPE_CHECKING:
@@ -131,8 +131,8 @@ class NodeStateGuard:
                     duration_ms=duration_ms,
                     error=error,
                 )
-            except (FrameworkBugError, AuditIntegrityError):
-                raise  # System bugs and audit corruption must crash immediately
+            except TIER_1_ERRORS:
+                raise  # Tier 1 errors must crash immediately
             except Exception as db_err:
                 raise AuditIntegrityError(
                     f"Cannot record FAILED for state {self.state_id} after missing complete() — "
@@ -159,8 +159,8 @@ class NodeStateGuard:
                 duration_ms=duration_ms,
                 error=exc_error,
             )
-        except (FrameworkBugError, AuditIntegrityError):
-            raise  # System bugs and audit corruption must crash immediately
+        except TIER_1_ERRORS:
+            raise  # Tier 1 errors must crash immediately
         except (TypeError, AttributeError, KeyError, NameError):
             raise  # Programming errors in recorder — crash to surface the bug
         except Exception as db_err:

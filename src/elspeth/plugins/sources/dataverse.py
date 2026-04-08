@@ -23,7 +23,7 @@ from elspeth.contracts import CallStatus, CallType, Determinism, PluginSchema, S
 from elspeth.contracts.call_data import RawCallPayload
 from elspeth.contracts.contexts import LifecycleContext, SourceContext
 from elspeth.contracts.contract_builder import ContractBuilder
-from elspeth.contracts.errors import AuditIntegrityError, FrameworkBugError
+from elspeth.contracts.errors import TIER_1_ERRORS, AuditIntegrityError
 from elspeth.contracts.events import ExternalCallCompleted
 from elspeth.contracts.schema_contract_factory import create_contract_from_config
 from elspeth.core.canonical import stable_hash
@@ -463,7 +463,7 @@ class DataverseSource(BaseSource):
                     response_payload=resp_payload,
                 )
             )
-        except (FrameworkBugError, AuditIntegrityError):
+        except TIER_1_ERRORS:
             raise
         except Exception as tel_err:
             logger.warning(
@@ -513,7 +513,7 @@ class DataverseSource(BaseSource):
                     latency_ms=page.latency_ms,
                     provider="dataverse",
                 )
-            except (FrameworkBugError, AuditIntegrityError):
+            except TIER_1_ERRORS:
                 raise
             except Exception as exc:
                 raise AuditIntegrityError(
@@ -545,7 +545,7 @@ class DataverseSource(BaseSource):
                     latency_ms=error.latency_ms,
                     provider="dataverse",
                 )
-            except (FrameworkBugError, AuditIntegrityError):
+            except TIER_1_ERRORS:
                 raise
             except Exception as exc:
                 raise AuditIntegrityError(

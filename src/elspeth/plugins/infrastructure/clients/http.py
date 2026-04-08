@@ -18,7 +18,7 @@ import structlog
 
 from elspeth.contracts import CallStatus, CallType
 from elspeth.contracts.call_data import CallPayload, HTTPCallError, HTTPCallRequest, HTTPCallResponse
-from elspeth.contracts.errors import AuditIntegrityError, FrameworkBugError
+from elspeth.contracts.errors import TIER_1_ERRORS
 from elspeth.contracts.events import ExternalCallCompleted
 from elspeth.core.canonical import stable_hash
 from elspeth.core.security.web import (
@@ -248,7 +248,7 @@ class AuditedHTTPClient(AuditedClientBase):
                     token_usage=None,
                 )
             )
-        except (FrameworkBugError, AuditIntegrityError):
+        except TIER_1_ERRORS:
             raise  # System bugs and audit integrity violations must crash
         except Exception as tel_err:
             logger.warning(
@@ -373,7 +373,7 @@ class AuditedHTTPClient(AuditedClientBase):
 
             return response
 
-        except (FrameworkBugError, AuditIntegrityError):
+        except TIER_1_ERRORS:
             # Telemetry re-raise after successful Landscape record_call.
             # The SUCCESS record already exists — do NOT record a second
             # ERROR call with the same call_index (unique constraint).
@@ -641,7 +641,7 @@ class AuditedHTTPClient(AuditedClientBase):
                         token_usage=None,
                     )
                 )
-            except (FrameworkBugError, AuditIntegrityError):
+            except TIER_1_ERRORS:
                 raise  # System bugs and audit integrity violations must crash
             except Exception as tel_err:
                 logger.warning(
@@ -656,7 +656,7 @@ class AuditedHTTPClient(AuditedClientBase):
 
             return response, final_hostname_url, call
 
-        except (FrameworkBugError, AuditIntegrityError):
+        except TIER_1_ERRORS:
             # Telemetry re-raise after successful Landscape record_call.
             # The SUCCESS record already exists — do NOT record a second
             # ERROR call with the same call_index (unique constraint).
@@ -696,7 +696,7 @@ class AuditedHTTPClient(AuditedClientBase):
                         token_usage=None,
                     )
                 )
-            except (FrameworkBugError, AuditIntegrityError):
+            except TIER_1_ERRORS:
                 raise  # System bugs and audit integrity violations must crash
             except Exception as tel_err:
                 logger.warning(

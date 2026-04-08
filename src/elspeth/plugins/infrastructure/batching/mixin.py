@@ -18,7 +18,7 @@ from typing import TYPE_CHECKING
 
 import structlog
 
-from elspeth.contracts.errors import AuditIntegrityError, FrameworkBugError
+from elspeth.contracts.errors import TIER_1_ERRORS, FrameworkBugError
 from elspeth.plugins.infrastructure.batching.ports import OutputPort
 from elspeth.plugins.infrastructure.batching.row_reorder_buffer import (
     RowReorderBuffer,
@@ -254,8 +254,8 @@ class BatchTransformMixin:
 
         try:
             result = processor(row, ctx)
-        except (FrameworkBugError, AuditIntegrityError):
-            raise  # System bugs and audit corruption must crash immediately — never wrap
+        except TIER_1_ERRORS:
+            raise  # Tier 1 errors must crash immediately — never wrap
         except Exception as e:
             # Plugin bug - wrap exception for propagation to orchestrator
             # The waiter will re-raise this exception in the main thread
@@ -348,8 +348,8 @@ class BatchTransformMixin:
                     # Emit exception result so waiter can re-raise in orchestrator thread
                     # state_id is from the current entry (captured above before exception)
                     self._batch_output.emit(token, exception_result, state_id)
-                except (FrameworkBugError, AuditIntegrityError):
-                    raise  # System bugs and audit corruption must crash immediately
+                except TIER_1_ERRORS:
+                    raise  # Tier 1 errors must crash immediately
                 except Exception as emit_err:
                     # Port is completely broken — crash the release thread.
                     # A broken output port is a system bug: silently continuing
