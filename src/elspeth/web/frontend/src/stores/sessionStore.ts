@@ -215,7 +215,7 @@ export const useSessionStore = create<SessionState>((set, get) => ({
     const lines = ["Pipeline validation failed with the following errors:"];
     for (const err of result.errors) {
       lines.push(
-        `- [${err.component_type}] ${err.component_id}: ${err.message}`,
+        `- [${err.component_type ?? "unknown"}] ${err.component_id ?? "unknown"}: ${err.message}`,
       );
       if (err.suggestion) {
         lines.push(`  Suggestion: ${err.suggestion}`);

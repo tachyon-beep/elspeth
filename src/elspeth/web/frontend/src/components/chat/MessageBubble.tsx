@@ -73,7 +73,7 @@ export function MessageBubble({ message, isComposing, onRetry, onFork }: Message
           className="bubble bubble-system"
           role="status"
         >
-          {message.content}
+          <MarkdownRenderer content={message.content} />
         </div>
       </div>
     );

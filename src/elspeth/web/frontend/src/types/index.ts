@@ -142,6 +142,7 @@ export interface PipelineMetadata {
  * - Converted to YAML for execution
  */
 export interface CompositionState {
+  id: string;
   version: number;
   source: SourceSpec | null;
   nodes: NodeSpec[];
@@ -198,8 +199,8 @@ export interface ValidationCheck {
  * unlike Stage 1 errors which are simple strings.
  */
 export interface ValidationError {
-  component_id: string;
-  component_type: string;
+  component_id: string | null;
+  component_type: string | null;
   message: string;
   suggestion: string | null;
 }
@@ -209,8 +210,8 @@ export interface ValidationError {
  * Warnings indicate suboptimal configuration but do not prevent execution.
  */
 export interface ValidationWarning {
-  component_id: string;
-  component_type: string;
+  component_id: string | null;
+  component_type: string | null;
   message: string;
   suggestion: string | null;
 }
@@ -221,7 +222,7 @@ export interface ValidationWarning {
  */
 export interface ValidationResult {
   is_valid: boolean;
-  summary: string;
+  summary?: string;
   checks: ValidationCheck[];
   errors: ValidationError[];
   warnings?: ValidationWarning[];

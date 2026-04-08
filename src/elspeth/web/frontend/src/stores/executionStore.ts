@@ -142,7 +142,7 @@ export const useExecutionStore = create<ExecutionState>((set, get) => ({
       if (!result.is_valid && result.errors.length > 0) {
         const lines = ["**Validation failed** — the following errors were sent to the agent:"];
         for (const err of result.errors) {
-          lines.push(`- **[${err.component_type}] ${err.component_id}:** ${err.message}`);
+          lines.push(`- **[${err.component_type ?? "unknown"}] ${err.component_id ?? "unknown"}:** ${err.message}`);
         }
         useSessionStore.getState().injectSystemMessage(lines.join("\n"));
 
@@ -151,7 +151,7 @@ export const useExecutionStore = create<ExecutionState>((set, get) => ({
       } else if (result.is_valid && result.warnings && result.warnings.length > 0) {
         const lines = ["**Validation passed with warnings:**"];
         for (const warn of result.warnings) {
-          lines.push(`- **[${warn.component_type}] ${warn.component_id}:** ${warn.message}`);
+          lines.push(`- **[${warn.component_type ?? "unknown"}] ${warn.component_id ?? "unknown"}:** ${warn.message}`);
         }
         useSessionStore.getState().injectSystemMessage(lines.join("\n"));
       }
