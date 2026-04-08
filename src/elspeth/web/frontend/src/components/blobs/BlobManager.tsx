@@ -1,17 +1,38 @@
 // src/components/blobs/BlobManager.tsx
-import { useEffect, useRef, useCallback } from "react";
+import { useEffect, useRef, useCallback, useMemo } from "react";
 import { useBlobStore } from "@/stores/blobStore";
 import { useSessionStore } from "@/stores/sessionStore";
 import { BlobRow } from "./BlobRow";
-import type { BlobMetadata } from "@/types/api";
+import type { BlobMetadata, BlobCategory } from "@/types/api";
 
 interface BlobManagerProps {
   onUseAsInput: (blob: BlobMetadata) => void;
 }
 
 /**
- * Collapsible blob manager panel. Shows session-scoped files with
- * upload, download, delete, and "use as input" actions.
+ * Categorize a blob into source/sink/other based on who created it.
+ * - User uploads → source files (pipeline inputs)
+ * - Pipeline outputs → sink files (results)
+ * - Assistant-created → other (prompts, templates, config)
+ */
+function categorizeBlob(blob: BlobMetadata): BlobCategory {
+  if (blob.created_by === "user") return "source";
+  if (blob.created_by === "pipeline") return "sink";
+  return "other";
+}
+
+const CATEGORY_LABELS: Record<BlobCategory, string> = {
+  source: "Source files",
+  sink: "Output files",
+  other: "Other files",
+};
+
+const CATEGORY_ORDER: BlobCategory[] = ["source", "sink", "other"];
+
+/**
+ * Collapsible blob manager panel with categorized folders.
+ * Shows session-scoped files grouped by source/output/other
+ * with upload, download, delete, and "use as input" actions.
  */
 export function BlobManager({ onUseAsInput }: BlobManagerProps) {
   const activeSessionId = useSessionStore((s) => s.activeSessionId);
@@ -24,6 +45,18 @@ export function BlobManager({ onUseAsInput }: BlobManagerProps) {
       loadBlobs(activeSessionId);
     }
   }, [activeSessionId, loadBlobs]);
+
+  const grouped = useMemo(() => {
+    const groups: Record<BlobCategory, BlobMetadata[]> = {
+      source: [],
+      sink: [],
+      other: [],
+    };
+    for (const blob of blobs) {
+      groups[categorizeBlob(blob)].push(blob);
+    }
+    return groups;
+  }, [blobs]);
 
   const handleUpload = useCallback(
     async (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -65,7 +98,7 @@ export function BlobManager({ onUseAsInput }: BlobManagerProps) {
       className="blob-manager"
       style={{
         borderTop: "1px solid var(--color-border)",
-        maxHeight: 200,
+        maxHeight: 280,
         display: "flex",
         flexDirection: "column",
         fontSize: 13,
@@ -124,7 +157,7 @@ export function BlobManager({ onUseAsInput }: BlobManagerProps) {
         </div>
       )}
 
-      {/* Blob list */}
+      {/* Categorized file list */}
       <div style={{ flex: 1, overflowY: "auto" }}>
         {isLoading ? (
           <div style={{ padding: 12, color: "var(--color-text-muted)", textAlign: "center" }}>
@@ -135,15 +168,37 @@ export function BlobManager({ onUseAsInput }: BlobManagerProps) {
             No files yet. Upload a file to get started.
           </div>
         ) : (
-          blobs.map((blob) => (
-            <BlobRow
-              key={blob.id}
-              blob={blob}
-              onDownload={handleDownload}
-              onDelete={handleDelete}
-              onUseAsInput={onUseAsInput}
-            />
-          ))
+          CATEGORY_ORDER.map((category) => {
+            const categoryBlobs = grouped[category];
+            if (categoryBlobs.length === 0) return null;
+            return (
+              <div key={category}>
+                <div
+                  style={{
+                    padding: "4px 12px",
+                    fontSize: 11,
+                    fontWeight: 600,
+                    color: "var(--color-text-muted)",
+                    textTransform: "uppercase",
+                    letterSpacing: "0.5px",
+                    backgroundColor: "var(--color-surface-elevated)",
+                    borderBottom: "1px solid var(--color-border)",
+                  }}
+                >
+                  {CATEGORY_LABELS[category]}
+                </div>
+                {categoryBlobs.map((blob) => (
+                  <BlobRow
+                    key={blob.id}
+                    blob={blob}
+                    onDownload={handleDownload}
+                    onDelete={handleDelete}
+                    onUseAsInput={onUseAsInput}
+                  />
+                ))}
+              </div>
+            );
+          })
         )}
       </div>
     </div>
