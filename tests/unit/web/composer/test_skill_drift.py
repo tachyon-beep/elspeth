@@ -216,7 +216,7 @@ class TestValidationGlossaryCompleteness:
                 "has no outgoing edges",
                 "filename extension suggests a different format",
             ]:
-                if fragment in warning:
+                if fragment in warning.message:
                     assert fragment in _WEB_SKILL_CONTENT, (
                         f"Validation warning not in glossary: {warning!r}\nExpected fragment: {fragment!r}"
                     )
