@@ -192,9 +192,7 @@ class HTTPCallRequest:
     redirect_from: str | None = None
 
     def __post_init__(self) -> None:
-        if not isinstance(self.headers, MappingProxyType):
-            object.__setattr__(self, "headers", MappingProxyType(dict(self.headers)))
-        freeze_fields(self, "json", "params")
+        freeze_fields(self, "headers", "json", "params")
         if self.hop_number is not None and self.resolved_ip is None:
             msg = "hop_number requires resolved_ip (redirect hops are always SSRF-safe)"
             raise ValueError(msg)
@@ -247,8 +245,7 @@ class HTTPCallResponse:
         require_int(self.status_code, "status_code", min_value=100)
         require_int(self.body_size, "body_size", optional=True, min_value=0)
         require_int(self.redirect_count, "redirect_count", min_value=0)
-        if not isinstance(self.headers, MappingProxyType):
-            object.__setattr__(self, "headers", MappingProxyType(dict(self.headers)))
+        freeze_fields(self, "headers")
         if self.body is not None and isinstance(self.body, (Mapping, list)):
             frozen = deep_freeze(self.body)
             if frozen is not self.body:

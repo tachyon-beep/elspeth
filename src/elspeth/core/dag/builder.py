@@ -12,7 +12,6 @@ from __future__ import annotations
 import hashlib
 from collections import Counter, defaultdict
 from collections.abc import Mapping, Sequence
-from types import MappingProxyType
 from typing import TYPE_CHECKING, Any
 
 import networkx as nx
@@ -283,7 +282,7 @@ def build_execution_graph(
                 node_id=gid,
                 name=gate_config.name,
                 fork_to=tuple(gate_config.fork_to) if gate_config.fork_to is not None else None,
-                routes=MappingProxyType(dict(gate_config.routes)),
+                routes=dict(gate_config.routes),
             )
         )
 

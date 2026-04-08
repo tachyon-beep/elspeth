@@ -14,9 +14,8 @@ Trust-tier notes
 
 from __future__ import annotations
 
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, replace
-from types import MappingProxyType
 from typing import Any
 
 from elspeth.contracts.coalesce_enums import CoalescePolicy, MergeStrategy
@@ -84,7 +83,7 @@ class CoalesceMetadata:
     merge_strategy: MergeStrategy | None = None
     expected_branches: tuple[str, ...] | None = None
     branches_arrived: tuple[str, ...] | None = None
-    branches_lost: MappingProxyType[str, str] | None = None
+    branches_lost: Mapping[str, str] | None = None
     select_branch: str | None = None
 
     # Timing
@@ -96,7 +95,7 @@ class CoalesceMetadata:
     timeout_seconds: float | None = None
 
     # Union merge collision info
-    union_field_collisions: MappingProxyType[str, tuple[str, ...]] | None = None
+    union_field_collisions: Mapping[str, tuple[str, ...]] | None = None
 
     # ------------------------------------------------------------------
     # Serialization
@@ -158,7 +157,7 @@ class CoalesceMetadata:
             policy=policy,
             expected_branches=tuple(expected_branches),
             branches_arrived=tuple(branches_arrived),
-            branches_lost=MappingProxyType(branches_lost) if branches_lost is not None else None,
+            branches_lost=branches_lost,
             quorum_required=quorum_required,
             timeout_seconds=timeout_seconds,
         )
@@ -198,7 +197,7 @@ class CoalesceMetadata:
             merge_strategy=merge_strategy,
             expected_branches=tuple(expected_branches),
             branches_arrived=tuple(branches_arrived),
-            branches_lost=MappingProxyType(branches_lost),
+            branches_lost=branches_lost,
             arrival_order=tuple(arrival_order),
             wait_duration_ms=wait_duration_ms,
         )
@@ -214,5 +213,4 @@ class CoalesceMetadata:
         Since CoalesceMetadata is frozen, this creates a new instance
         via ``dataclasses.replace()``.
         """
-        frozen_collisions = MappingProxyType({k: tuple(v) for k, v in collisions.items()})
-        return replace(base, union_field_collisions=frozen_collisions)
+        return replace(base, union_field_collisions={k: tuple(v) for k, v in collisions.items()})

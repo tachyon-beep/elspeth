@@ -23,7 +23,7 @@ from elspeth.contracts.enums import (
     RowOutcome,
     RunStatus,
 )
-from elspeth.contracts.freeze import require_int
+from elspeth.contracts.freeze import freeze_fields, require_int
 from elspeth.contracts.token_usage import TokenUsage
 
 
@@ -323,7 +323,7 @@ class FieldResolutionApplied(TelemetryEvent):
     def __post_init__(self) -> None:
         """Snapshot + freeze: always copy to decouple from caller's dict."""
         require_int(self.field_count, "field_count", min_value=0)
-        object.__setattr__(self, "resolution_mapping", MappingProxyType(dict(self.resolution_mapping)))
+        freeze_fields(self, "resolution_mapping")
 
 
 # =============================================================================

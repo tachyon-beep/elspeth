@@ -6,17 +6,17 @@ Matches the orchestrator/types.py pattern.
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
 
 from elspeth.contracts.enums import NodeType
+from elspeth.contracts.freeze import freeze_fields
 from elspeth.contracts.schema import SchemaConfig
 from elspeth.contracts.types import CoalesceName, NodeID
 from elspeth.core.landscape.schema import NODE_ID_COLUMN_LENGTH
 
 if TYPE_CHECKING:
-    from types import MappingProxyType
-
     from elspeth.contracts import PluginSchema, TransformProtocol
     from elspeth.core.config import TransformSettings
 
@@ -120,7 +120,7 @@ class _GateEntry:
     node_id: NodeID
     name: str
     fork_to: tuple[str, ...] | None
-    routes: MappingProxyType[str, str]
+    routes: Mapping[str, str]
 
     def __post_init__(self) -> None:
         if not self.node_id:
@@ -131,6 +131,7 @@ class _GateEntry:
             raise ValueError("_GateEntry.fork_to must not be empty tuple (use None for no fork)")
         if len(self.routes) == 0:
             raise ValueError("_GateEntry.routes must have at least one entry")
+        freeze_fields(self, "routes")
 
 
 @dataclass(frozen=True, slots=True)
