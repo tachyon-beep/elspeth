@@ -22,6 +22,7 @@ from elspeth.web.auth.models import UserIdentity
 from elspeth.web.blobs.protocol import BlobQuotaExceededError, BlobServiceProtocol
 from elspeth.web.composer.protocol import ComposerConvergenceError, ComposerService
 from elspeth.web.composer.state import CompositionState, PipelineMetadata, ValidationEntry, ValidationSummary
+from elspeth.web.composer.tools import redact_source_storage_path
 from elspeth.web.composer.yaml_generator import generate_yaml
 from elspeth.web.middleware.rate_limit import ComposerRateLimiter, get_rate_limiter
 from elspeth.web.sessions.converters import state_from_record as _state_from_record
@@ -33,7 +34,6 @@ from elspeth.web.sessions.protocol import (
     SessionRecord,
     SessionServiceProtocol,
 )
-from elspeth.web.composer.tools import redact_source_storage_path
 from elspeth.web.sessions.schemas import (
     ChatMessageResponse,
     CompositionStateResponse,
@@ -109,13 +109,15 @@ def _state_response(
         is_valid=state.is_valid,
         validation_errors=deep_thaw(state.validation_errors),
         validation_warnings=[
-            ValidationEntryResponse(component=e.component, message=e.message, severity=e.severity)
-            for e in live_validation.warnings
-        ] if live_validation is not None else None,
+            ValidationEntryResponse(component=e.component, message=e.message, severity=e.severity) for e in live_validation.warnings
+        ]
+        if live_validation is not None
+        else None,
         validation_suggestions=[
-            ValidationEntryResponse(component=e.component, message=e.message, severity=e.severity)
-            for e in live_validation.suggestions
-        ] if live_validation is not None else None,
+            ValidationEntryResponse(component=e.component, message=e.message, severity=e.severity) for e in live_validation.suggestions
+        ]
+        if live_validation is not None
+        else None,
         derived_from_state_id=str(state.derived_from_state_id) if state.derived_from_state_id is not None else None,
         created_at=state.created_at,
     )

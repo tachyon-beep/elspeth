@@ -581,72 +581,77 @@ allow_hits:
   reason: Tier 3 — fingerprint key from deployment environment; os.environ.get followed by check-and-crash
   safety: Missing key raises RuntimeError immediately; no silent default
   expires: null
-- key: web/sessions/routes.py:R6:_handle_convergence_error:fp=9bf25120b03e9edc
+- key: web/sessions/routes.py:R1:_state_response:fp=52d5649f17fab4da
+  owner: web-sessions
+  reason: redact_source_storage_path returns dict — .get("source") safely extracts key with fallback to original
+  safety: Falls back to unredacted source_data; no data loss or fabrication
+  expires: null
+- key: web/sessions/routes.py:R6:_handle_convergence_error:fp=34e9bf9e71d649d8
   owner: web-sessions
   reason: Convergence partial-state validation may fail on damaged LLM output — narrowed to data-shape errors
   safety: Returns 422 with structured error, does not swallow
   expires: null
-- key: web/sessions/routes.py:R6:_handle_convergence_error:fp=55096436124ec1bc
+- key: web/sessions/routes.py:R6:_handle_convergence_error:fp=95fc40f04bd1b7ae
   owner: web-sessions
   reason: Convergence partial-state save may fail — narrowed to data-shape and DB integrity errors
   safety: Returns 422 with structured error, does not swallow
   expires: null
-- key: web/sessions/routes.py:R1:create_session_router:list_sessions:fp=e4fc1ae0724da91c
+- key: web/sessions/routes.py:R1:create_session_router:list_sessions:fp=d0351efeabe34448
   owner: web-sessions
   reason: False positive — @router.get() is FastAPI HTTP route decorator, not dict.get()
   safety: No dict access involved
   expires: null
-- key: web/sessions/routes.py:R1:create_session_router:get_session:fp=c3ac0897dc5917d2
+- key: web/sessions/routes.py:R1:create_session_router:get_session:fp=858016938427a4c7
   owner: web-sessions
   reason: False positive — @router.get() is FastAPI HTTP route decorator, not dict.get()
   safety: No dict access involved
   expires: null
-- key: web/sessions/routes.py:R1:create_session_router:get_messages:fp=8ff4b0f8424aabbe
+- key: web/sessions/routes.py:R1:create_session_router:get_messages:fp=8cd539425c28332e
   owner: web-sessions
   reason: False positive — @router.get() is FastAPI HTTP route decorator, not dict.get()
   safety: No dict access involved
   expires: null
-- key: web/sessions/routes.py:R1:create_session_router:list_session_runs:fp=a36e00032eabf083
+- key: web/sessions/routes.py:R1:create_session_router:list_session_runs:fp=2025353f221aa2a4
   owner: web-sessions
   reason: False positive — @router.get() is FastAPI HTTP route decorator, not dict.get()
   safety: No dict access involved
   expires: null
-- key: web/sessions/routes.py:R1:create_session_router:get_current_state:fp=c756aa20196fe282
+- key: web/sessions/routes.py:R1:create_session_router:get_current_state:fp=5a5f387ccf97bf00
   owner: web-sessions
   reason: False positive — @router.get() is FastAPI HTTP route decorator, not dict.get()
   safety: No dict access involved
   expires: null
-- key: web/sessions/routes.py:R1:create_session_router:get_state_versions:fp=6349b38d7438a2af
+- key: web/sessions/routes.py:R1:create_session_router:get_state_versions:fp=47c9fba41dfcbac0
   owner: web-sessions
   reason: False positive — @router.get() is FastAPI HTTP route decorator, not dict.get()
   safety: No dict access involved
   expires: null
-- key: web/sessions/routes.py:R1:create_session_router:get_state_yaml:fp=715d771227ed6645
+- key: web/sessions/routes.py:R1:create_session_router:get_state_yaml:fp=e31365aaca794803
   owner: web-sessions
   reason: False positive — @router.get() is FastAPI HTTP route decorator, not dict.get()
   safety: No dict access involved
   expires: null
-- key: web/sessions/routes.py:R5:create_session_router:fork_from_message:fp=023437ef69eedd86
+- key: web/sessions/routes.py:R5:create_session_router:fork_from_message:fp=b481ffd7e4b14e47
   owner: web-sessions
   reason: isinstance check on deserialized composition state source — Tier 3 boundary
   safety: Validates structure from persisted state
   expires: null
-- key: web/sessions/routes.py:R1:create_session_router:fork_from_message:fp=054abc0b0e94026a
+- key: web/sessions/routes.py:R1:create_session_router:fork_from_message:fp=dee3adcb8f567052
   owner: web-sessions
   reason: source_dict.get() on Tier 3 composition state — optional source options
   safety: Default empty dict is safe for optional field
   expires: null
-- key: web/sessions/routes.py:R1:create_session_router:fork_from_message:fp=c1134152465a6c22
+- key: web/sessions/routes.py:R1:create_session_router:fork_from_message:fp=7ce14b09a7d392de
   owner: web-sessions
   reason: options.get() on Tier 3 state source — blob_ref is optional
   safety: Returns None on miss, handled by conditional below
   expires: null
-- key: web/sessions/routes.py:R5:create_session_router:fork_from_message:fp=7b11e9e3fa323448
+- key: web/sessions/routes.py:R5:create_session_router:fork_from_message:fp=fcca3bebc2937d71
   owner: web-sessions
   reason: isinstance check on blob_ref — may be str or UUID from persisted state
   safety: Tier 3 boundary — persisted blob_ref type is not guaranteed
   expires: null
-- key: web/sessions/routes.py:R6:create_session_router:fork_from_message:fp=305adee697acd92c
+- key: web/sessions/routes.py:R6:create_session_router:fork_from_message:fp=5679c2e7a9e79c54
   owner: web-sessions
   reason: Tier 3 boundary — persisted blob_ref may be non-UUID string; skip rewrite gracefully
   safety: Falls through to use original ref unchanged
