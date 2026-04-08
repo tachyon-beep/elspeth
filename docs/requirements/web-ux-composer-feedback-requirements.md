@@ -418,6 +418,8 @@ source:
 
 This eliminates the need for tiny helper files entirely.
 
+**Status: Addressed** — The `create_blob` + `set_source_from_blob` two-step flow provides this capability using existing source plugins. See the "Inline data" section in the pipeline composer skill. A native inline plugin would duplicate schema validation logic with no benefit.
+
 ---
 
 ### E2. File creation visibility contract

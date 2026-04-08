@@ -343,13 +343,13 @@ class TestRedactStoragePaths:
         state_dict = {
             "source": {
                 "plugin": "csv",
-                "options": {"path": "/data/uploads/manual.csv"},
+                "options": {"path": "/data/blobs/manual.csv"},
                 "on_success": "t1",
             },
             "nodes": [],
         }
         redacted = redact_source_storage_path(state_dict)
-        assert redacted["source"]["options"]["path"] == "/data/uploads/manual.csv"
+        assert redacted["source"]["options"]["path"] == "/data/blobs/manual.csv"
 
     def test_no_source_passthrough(self) -> None:
         state_dict = {"source": None, "nodes": []}
@@ -860,6 +860,51 @@ class TestSetSourceFromBlob:
         )
         assert result.success is False
         assert "Cannot infer source plugin" in result.data["error"]
+
+
+class TestCreateBlobToSetSourceEndToEnd:
+    """E2E: create_blob then set_source_from_blob wires a valid CSV source."""
+
+    def test_create_then_set_source_produces_valid_state(self, blob_env: dict[str, Any]) -> None:
+        state = _empty_state()
+        catalog = _mock_catalog()
+
+        # Step 1: Create a blob with inline CSV content
+        csv_content = "name,age\nAlice,30\nBob,25"
+        create_result = execute_tool(
+            "create_blob",
+            {"filename": "people.csv", "mime_type": "text/csv", "content": csv_content},
+            state,
+            catalog,
+            data_dir=blob_env["data_dir"],
+            session_engine=blob_env["engine"],
+            session_id=blob_env["session_id"],
+        )
+        assert create_result.success is True
+        blob_id = create_result.data["blob_id"]
+
+        # Step 2: Wire the blob as the pipeline source
+        source_result = execute_tool(
+            "set_source_from_blob",
+            {"blob_id": blob_id, "on_success": "transform1"},
+            state,
+            catalog,
+            session_engine=blob_env["engine"],
+            session_id=blob_env["session_id"],
+        )
+        assert source_result.success is True
+
+        # Step 3: Verify the resulting CompositionState
+        new_state = source_result.updated_state
+        assert new_state.source is not None
+        assert new_state.source.plugin == "csv"
+        assert new_state.source.options["blob_ref"] == blob_id
+        assert new_state.source.on_success == "transform1"
+
+        # The storage path should point to the actual file on disk
+        storage_path = Path(new_state.source.options["path"])
+        assert storage_path.exists()
+        assert storage_path.read_text() == csv_content
 
 
 class TestListBlobsAndMetadata:

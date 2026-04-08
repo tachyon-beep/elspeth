@@ -10,7 +10,7 @@ from __future__ import annotations
 from urllib.parse import quote
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, File, HTTPException, Request, UploadFile
+from fastapi import APIRouter, Depends, File, HTTPException, Query, Request, UploadFile
 from fastapi.responses import Response
 
 from elspeth.web.auth.middleware import get_current_user
@@ -197,10 +197,12 @@ def create_blobs_router() -> APIRouter:
         session_id: UUID,
         request: Request,
         user: UserIdentity = Depends(get_current_user),  # noqa: B008
+        limit: int = Query(50, ge=1, le=500),
+        offset: int = Query(0, ge=0),
     ) -> list[BlobMetadataResponse]:
-        """List blobs for a session."""
+        """List blobs for a session, newest first."""
         blob_service = await _verify_session_and_get_blob_service(session_id, user, request)
-        records = await blob_service.list_blobs(session_id)
+        records = await blob_service.list_blobs(session_id, limit=limit, offset=offset)
         return [_blob_response(r) for r in records]
 
     @router.get("/{blob_id}", response_model=BlobMetadataResponse)

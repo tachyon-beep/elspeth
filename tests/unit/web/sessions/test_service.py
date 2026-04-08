@@ -107,6 +107,32 @@ class TestSessionCRUD:
         messages = await service.get_messages(session.id)
         assert len(messages) == 0
 
+    @pytest.mark.asyncio
+    async def test_archive_session_deletes_blob_directory(self, engine, tmp_path) -> None:
+        """Archiving a session removes its blob directory from the filesystem."""
+        data_dir = tmp_path / "data"
+        data_dir.mkdir()
+
+        service_with_dir = SessionServiceImpl(engine, data_dir=data_dir)
+
+        session = await service_with_dir.create_session("alice", "Blob Session", "local")
+        sid = str(session.id)
+
+        # Create blob directory with a file (simulating stored blobs)
+        blob_dir = data_dir / "blobs" / sid
+        blob_dir.mkdir(parents=True)
+        (blob_dir / "some-blob_data.csv").write_text("col1\nval1")
+        assert blob_dir.is_dir()
+
+        await service_with_dir.archive_session(session.id)
+
+        # Blob directory should be cleaned up
+        assert not blob_dir.exists()
+
+        # Session should be gone
+        with pytest.raises(ValueError):
+            await service_with_dir.get_session(session.id)
+
 
 class TestMessagePersistence:
     """Tests for chat message add and retrieval."""

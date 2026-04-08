@@ -19,7 +19,6 @@ import type {
   Run,
   SecretInventoryItem,
   Session,
-  UploadResult,
   UserProfile,
   ValidationResult,
   SystemStatus,
@@ -452,37 +451,6 @@ export async function fetchRuns(sessionId: string): Promise<Run[]> {
     headers: authHeaders(),
   });
   return parseResponse<Run[]>(response);
-}
-
-// ── File Upload ─────────────────────────────────────────────────────────────
-
-/**
- * Upload a file for use as pipeline source data.
- * The server returns the server-side path, which is auto-injected
- * into the chat input for the user to send to the composer.
- *
- * Content-Type is NOT set manually -- the browser sets it with the
- * multipart boundary automatically when using FormData.
- */
-export async function uploadFile(
-  sessionId: string,
-  file: File,
-): Promise<UploadResult> {
-  const formData = new FormData();
-  formData.append("file", file);
-
-  const token = getToken();
-  const headers: Record<string, string> = {};
-  if (token) {
-    headers["Authorization"] = `Bearer ${token}`;
-  }
-
-  const response = await fetch(`/api/sessions/${sessionId}/upload`, {
-    method: "POST",
-    headers,
-    body: formData,
-  });
-  return parseResponse<UploadResult>(response);
 }
 
 // ── Blobs ──────────────────────────────────────────────────────────────────

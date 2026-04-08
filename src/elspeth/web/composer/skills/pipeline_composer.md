@@ -276,6 +276,22 @@ For non-standard MIME types, pass the `plugin` parameter explicitly.
 
 Schema field format: `"field_name: type"` where type is `str`, `int`, `float`, `bool`, or `any`.
 
+### Inline data (no file upload needed)
+
+When the user provides data directly in conversation (a URL, a JSON snippet, a few CSV rows), create a blob and wire it as the source instead of asking for a file upload:
+
+1. Call `create_blob` with the content and appropriate MIME type
+2. Call `set_source_from_blob` with the returned `blob_id`
+
+This is the canonical way to handle inline/literal data. There is no separate "inline source" plugin — the blob system handles it.
+
+**Examples:**
+- User says "use this URL: https://example.com" → `create_blob(filename="input.txt", mime_type="text/plain", content="https://example.com")` then `set_source_from_blob`
+- User provides JSON data → `create_blob(filename="data.json", mime_type="application/json", content='[{"id": 1, "name": "test"}]')` then `set_source_from_blob`
+- User provides CSV rows → `create_blob(filename="data.csv", mime_type="text/csv", content="name,age\nAlice,30\nBob,25")` then `set_source_from_blob`
+
+Never ask the user to upload a file when the data is already in the conversation.
+
 ---
 
 ## Validation Warning Glossary

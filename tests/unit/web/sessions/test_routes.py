@@ -1,8 +1,7 @@
-"""Tests for session API routes -- CRUD, IDOR, upload, path traversal."""
+"""Tests for session API routes -- CRUD, IDOR, fork, YAML."""
 
 from __future__ import annotations
 
-import io
 import uuid
 from pathlib import Path
 from unittest.mock import AsyncMock
@@ -608,126 +607,6 @@ class TestRevertEndpoint:
             json={"state_id": str(v1_s2.id)},
         )
         assert resp.status_code == 404
-
-
-class TestUploadRoute:
-    """Tests for file upload endpoint including path traversal (B5)."""
-
-    def test_upload_file(self, tmp_path) -> None:
-        app, _ = _make_app(tmp_path)
-        client = TestClient(app)
-
-        resp = client.post("/api/sessions", json={"title": "Upload"})
-        session_id = resp.json()["id"]
-
-        file_content = b"col1,col2\na,b\nc,d"
-        upload_resp = client.post(
-            f"/api/sessions/{session_id}/upload",
-            files={"file": ("data.csv", io.BytesIO(file_content), "text/csv")},
-        )
-        assert upload_resp.status_code == 200
-        body = upload_resp.json()
-        assert body["filename"] == "data.csv"
-        assert body["size_bytes"] == len(file_content)
-        assert "path" in body
-
-        # Path should be absolute (starts with /) so it passes source-path
-        # validation in composer/tools.py and execution/service.py
-        assert body["path"].startswith("/")
-
-        # Verify the file exists on disk at the absolute path
-        saved_path = Path(body["path"])
-        assert saved_path.exists()
-        assert saved_path.read_bytes() == file_content
-
-    def test_upload_path_traversal_user_id_sanitized(self, tmp_path) -> None:
-        """B5: user_id containing ../../etc is sanitized to just 'etc'."""
-        app, _ = _make_app(tmp_path, user_id="../../etc")
-        client = TestClient(app)
-
-        resp = client.post("/api/sessions", json={"title": "Hack"})
-        session_id = resp.json()["id"]
-
-        file_content = b"malicious"
-        upload_resp = client.post(
-            f"/api/sessions/{session_id}/upload",
-            files={"file": ("payload.txt", io.BytesIO(file_content), "text/plain")},
-        )
-        assert upload_resp.status_code == 200
-        returned_path = upload_resp.json()["path"]
-        saved_path = Path(returned_path)
-
-        # Path should be absolute and under data_dir/uploads
-        assert returned_path.startswith("/")
-        assert saved_path.is_relative_to(tmp_path / "uploads")
-        # The path should NOT contain ".." components
-        assert ".." not in str(saved_path)
-        # Should be under uploads/etc/ (sanitized)
-        assert "etc" in saved_path.parts
-
-    def test_upload_path_traversal_filename_sanitized(self, tmp_path) -> None:
-        """Filename containing path traversal is sanitized."""
-        app, _ = _make_app(tmp_path)
-        client = TestClient(app)
-
-        resp = client.post("/api/sessions", json={"title": "Hack"})
-        session_id = resp.json()["id"]
-
-        file_content = b"malicious"
-        upload_resp = client.post(
-            f"/api/sessions/{session_id}/upload",
-            files={
-                "file": (
-                    "../../etc/passwd",
-                    io.BytesIO(file_content),
-                    "application/octet-stream",
-                ),
-            },
-        )
-        assert upload_resp.status_code == 200
-        returned_path = upload_resp.json()["path"]
-        saved_path = Path(returned_path)
-        # Path should be absolute and under data_dir/uploads
-        assert returned_path.startswith("/")
-        assert saved_path.is_relative_to(tmp_path / "uploads")
-        # Filename should end with "passwd" (UUID-prefixed), not "../../etc/passwd"
-        assert saved_path.name.endswith("_passwd")
-        assert ".." not in str(saved_path)
-
-    def test_upload_file_too_large(self, tmp_path) -> None:
-        """Files exceeding max_upload_bytes are rejected with 413."""
-        app, _ = _make_app(tmp_path, max_upload_bytes=100)
-        client = TestClient(app)
-
-        resp = client.post("/api/sessions", json={"title": "Big File"})
-        session_id = resp.json()["id"]
-
-        big_content = b"x" * 200  # 200 bytes > 100 byte limit
-        upload_resp = client.post(
-            f"/api/sessions/{session_id}/upload",
-            files={
-                "file": (
-                    "big.dat",
-                    io.BytesIO(big_content),
-                    "application/octet-stream",
-                ),
-            },
-        )
-        assert upload_resp.status_code == 413
-
-    def test_upload_empty_user_id_sanitization(self, tmp_path) -> None:
-        """User ID of '..' sanitizes to empty via Path.name, which should raise."""
-        app, _ = _make_app(tmp_path, user_id="..")
-        client = TestClient(app)
-
-        resp = client.post("/api/sessions", json={"title": "Hack"})
-        session_id = resp.json()["id"]
-
-        upload_resp = client.post(
-            f"/api/sessions/{session_id}/upload",
-            files={"file": ("test.txt", io.BytesIO(b"data"), "text/plain")},
-        )
-        assert upload_resp.status_code == 400
 
 
 class TestYamlEndpoint:

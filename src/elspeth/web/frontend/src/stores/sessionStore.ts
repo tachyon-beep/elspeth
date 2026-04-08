@@ -9,6 +9,7 @@ import type {
   ValidationResult,
 } from "@/types/api";
 import * as api from "@/api/client";
+import { useBlobStore } from "./blobStore";
 import { useExecutionStore } from "./executionStore";
 
 function getExecutionStore() {
@@ -124,6 +125,9 @@ export const useSessionStore = create<SessionState>((set, get) => ({
         api.fetchCompositionState(id),
       ]);
       set({ messages, compositionState });
+
+      // Fire-and-forget: refresh blob list for the newly selected session
+      useBlobStore.getState().loadBlobs(id);
     } catch {
       set({ error: "Failed to load session. Please refresh the page." });
     }
@@ -175,6 +179,9 @@ export const useSessionStore = create<SessionState>((set, get) => ({
           isComposing: false,
         };
       });
+
+      // Fire-and-forget: refresh blob list in case the LLM created files
+      useBlobStore.getState().loadBlobs(activeSessionId);
     } catch (err) {
       const apiErr = err as ApiError;
       let errorMessage: string;
@@ -277,6 +284,9 @@ export const useSessionStore = create<SessionState>((set, get) => ({
           isComposing: false,
         };
       });
+
+      // Fire-and-forget: refresh blob list in case the LLM created files
+      useBlobStore.getState().loadBlobs(activeSessionId);
     } catch (err) {
       const apiErr = err as ApiError;
       const errorMessage =
@@ -322,6 +332,9 @@ export const useSessionStore = create<SessionState>((set, get) => ({
         stateVersions: [],
         isComposing: false,
       }));
+
+      // Fire-and-forget: refresh blob list for the NEW forked session
+      useBlobStore.getState().loadBlobs(result.session.id);
     } catch {
       set({
         isComposing: false,

@@ -350,15 +350,6 @@ export interface SystemStatus {
   composer_missing_keys: string[];
 }
 
-// ── File Upload ─────────────────────────────────────────────────────────────
-
-/** Response from POST /api/sessions/{id}/upload. */
-export interface UploadResult {
-  path: string;
-  filename: string;
-  size_bytes: number;
-}
-
 // ── Blob Manager ────────────────────────────────────────────────────────────
 
 /** Blob metadata returned by all blob endpoints. */
