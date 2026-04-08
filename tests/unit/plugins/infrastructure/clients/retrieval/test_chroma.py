@@ -319,6 +319,19 @@ class TestChromaSearchProvider:
         with pytest.raises(RetrievalError, match="distance_function"):
             ChromaSearchProvider(config=config_l2, recorder=_mock_recorder(), run_id="test-run")
 
+    def test_missing_hnsw_space_metadata_raises(self, tmp_path):
+        """Collection without hnsw:space metadata must crash — can't normalize scores."""
+        client = chromadb.PersistentClient(path=str(tmp_path))
+        client.get_or_create_collection(name="no-metadata-test")
+
+        config = ChromaSearchProviderConfig(
+            collection="no-metadata-test",
+            mode="persistent",
+            persist_directory=str(tmp_path),
+        )
+        with pytest.raises(RetrievalError, match="hnsw:space"):
+            ChromaSearchProvider(config=config, recorder=_mock_recorder(), run_id="test-run")
+
     def test_close_does_not_raise(self):
         provider = self._make_provider()
         provider.close()

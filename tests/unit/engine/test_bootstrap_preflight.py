@@ -14,6 +14,7 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from elspeth.contracts.errors import CommencementGateFailedError
+from elspeth.contracts.pipeline_runner import PipelineRunner
 from elspeth.core.dependency_config import (
     CommencementGateConfig,
     CommencementGateResult,
@@ -52,7 +53,7 @@ class TestResolvePreflightDirect:
             indexed_at="2026-03-25T12:00:00Z",
         )
 
-        mock_runner = MagicMock()
+        mock_runner = MagicMock(spec=PipelineRunner)
 
         with (
             patch("elspeth.engine.dependency_resolver.detect_cycles") as mock_detect,
@@ -117,7 +118,7 @@ class TestResolvePreflightDirect:
             captured_context.update(context)
             return []
 
-        mock_runner = MagicMock()
+        mock_runner = MagicMock(spec=PipelineRunner)
         mock_probes: list[Any] = []
 
         with (
@@ -192,7 +193,7 @@ class TestResolvePreflightDirect:
         ]
         mock_config.commencement_gates = None
 
-        mock_runner = MagicMock()
+        mock_runner = MagicMock(spec=PipelineRunner)
 
         with (
             patch("elspeth.engine.dependency_resolver.detect_cycles") as mock_detect,

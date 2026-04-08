@@ -17,6 +17,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
+from elspeth.cli_helpers import PluginBundle
 from elspeth.contracts.errors import CommencementGateFailedError
 from elspeth.core.dependency_config import (
     CommencementGateConfig,
@@ -49,7 +50,7 @@ class TestBootstrapDependencyDispatch:
             patch("elspeth.engine.dependency_resolver.detect_cycles") as mock_detect,
             patch("elspeth.engine.dependency_resolver.resolve_dependencies") as mock_resolve,
         ):
-            mock_plugins.return_value = MagicMock()
+            mock_plugins.return_value = MagicMock(spec=PluginBundle)
             mock_graph = MagicMock()
             mock_graph_cls.from_plugin_instances.return_value = mock_graph
 
@@ -99,7 +100,7 @@ class TestBootstrapDependencyResultsFlow:
 
         with (
             patch("elspeth.cli._load_settings_with_secrets", return_value=(mock_config, [])),
-            patch("elspeth.cli_helpers.instantiate_plugins_from_config", return_value=MagicMock()),
+            patch("elspeth.cli_helpers.instantiate_plugins_from_config", return_value=MagicMock(spec=PluginBundle)),
             patch("elspeth.core.dag.ExecutionGraph") as mock_graph_cls,
             patch("elspeth.core.landscape.LandscapeDB"),
             patch("elspeth.core.payload_store.FilesystemPayloadStore"),
@@ -149,7 +150,7 @@ class TestBootstrapCommencementGateDispatch:
             patch("elspeth.cli._ensure_output_directories", return_value=[]),
             patch("elspeth.engine.commencement.evaluate_commencement_gates") as mock_eval_gates,
         ):
-            mock_plugins.return_value = MagicMock()
+            mock_plugins.return_value = MagicMock(spec=PluginBundle)
             mock_graph = MagicMock()
             mock_graph_cls.from_plugin_instances.return_value = mock_graph
 
@@ -190,7 +191,7 @@ class TestBootstrapCommencementGateDispatch:
                 ),
             ),
         ):
-            mock_plugins.return_value = MagicMock()
+            mock_plugins.return_value = MagicMock(spec=PluginBundle)
             mock_graph = MagicMock()
             mock_graph_cls.from_plugin_instances.return_value = mock_graph
 

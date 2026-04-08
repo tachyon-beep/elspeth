@@ -1053,6 +1053,19 @@ class TestVerifyRunOwnership:
         with pytest.raises(ValueError, match="Run not found"):
             await svc.verify_run_ownership(user, str(uuid4()))
 
+    @pytest.mark.asyncio
+    async def test_str_vs_non_str_user_id_rejects(self, idor_service) -> None:
+        """Regression: if session.user_id were stored as UUID, str comparison must reject."""
+        svc, session_svc = idor_service
+        run = MagicMock(session_id=uuid4())
+        user_uuid = uuid4()
+        session = MagicMock(user_id=user_uuid, auth_provider_type="local")
+        session_svc.get_run = AsyncMock(return_value=run)
+        session_svc.get_session = AsyncMock(return_value=session)
+
+        user = MagicMock(user_id=str(user_uuid))
+        assert await svc.verify_run_ownership(user, str(uuid4())) is False
+
 
 # ── Sink Path Restriction ─────────────────────────────────────────────
 
