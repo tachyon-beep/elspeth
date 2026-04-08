@@ -10,8 +10,18 @@ const INSPECTOR_WIDTH_KEY = "elspeth_inspector_width";
 const SIDEBAR_COLLAPSED_KEY = "elspeth_sidebar_collapsed";
 
 const MIN_INSPECTOR_WIDTH = 240;
-const DEFAULT_INSPECTOR_WIDTH = 320;
 const SIDEBAR_EXPANDED_WIDTH = 200;
+
+/**
+ * Compute the default inspector width as ~50% of the space remaining
+ * after the sidebar. This gives an even chat/inspector split (A4).
+ * Falls back to 50% of viewport if called before layout.
+ */
+function defaultInspectorWidth(): number {
+  const available = window.innerWidth - SIDEBAR_EXPANDED_WIDTH;
+  const half = Math.round(available / 2);
+  return Math.max(MIN_INSPECTOR_WIDTH, half);
+}
 const SIDEBAR_COLLAPSED_WIDTH = 40;
 
 function loadPersistedNumber(key: string, fallback: number): number {
@@ -38,13 +48,13 @@ interface LayoutProps {
  *
  * - Sessions sidebar: 200px fixed, collapsible to 40px (persisted to localStorage)
  * - Chat panel: flex (1fr, takes remaining space)
- * - Inspector panel: 320px default, resizable via drag handle (persisted to localStorage)
+ * - Inspector panel: ~50% of remaining viewport width by default, resizable via drag handle (persisted to localStorage)
  *   Min 240px, max 50% viewport width.
  * - Minimum supported width: 1280px (horizontal scroll below that).
  */
 export function Layout({ sidebar, chat, inspector }: LayoutProps) {
   const [inspectorWidth, setInspectorWidth] = useState(() =>
-    loadPersistedNumber(INSPECTOR_WIDTH_KEY, DEFAULT_INSPECTOR_WIDTH)
+    loadPersistedNumber(INSPECTOR_WIDTH_KEY, defaultInspectorWidth())
   );
   const [sidebarCollapsed, setSidebarCollapsed] = useState(() =>
     loadPersistedBoolean(SIDEBAR_COLLAPSED_KEY, false)

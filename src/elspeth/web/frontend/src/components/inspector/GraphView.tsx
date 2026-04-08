@@ -25,7 +25,8 @@ import {
 import dagre from "@dagrejs/dagre";
 import "@xyflow/react/dist/style.css";
 import { useSessionStore } from "@/stores/sessionStore";
-import { BADGE_COLORS, BADGE_BACKGROUNDS, EDGE_COLORS, EDGE_LABEL_COLOR } from "@/styles/tokens";
+import { useExecutionStore } from "@/stores/executionStore";
+import { BADGE_COLORS, BADGE_BACKGROUNDS, EDGE_COLORS, EDGE_LABEL_COLOR, VALIDATION_COLORS } from "@/styles/tokens";
 
 const NODE_WIDTH = 260;
 const NODE_HEIGHT = 80;
@@ -80,6 +81,30 @@ function layoutGraph(
 export function GraphView() {
   const compositionState = useSessionStore((s) => s.compositionState);
 
+  const validationResult = useExecutionStore((s) => s.validationResult);
+
+  // Build a map of component_id → validation severity for border coloring
+  const nodeValidationMap = useMemo(() => {
+    const map: Record<string, "valid" | "warning" | "error"> = {};
+    if (!validationResult) return map;
+
+    // All nodes with errors
+    for (const err of validationResult.errors) {
+      map[err.component_id] = "error";
+    }
+
+    // All nodes with warnings (only if not already error)
+    if (validationResult.warnings) {
+      for (const warn of validationResult.warnings) {
+        if (!map[warn.component_id]) {
+          map[warn.component_id] = "warning";
+        }
+      }
+    }
+
+    return map;
+  }, [validationResult]);
+
   const { nodes, edges } = useMemo(() => {
     const hasContent =
       compositionState &&
@@ -96,6 +121,7 @@ export function GraphView() {
       subtitle: string | null,
       badgeBg: string,
       badgeColor: string,
+      validationStatus?: "valid" | "warning" | "error",
     ): Node {
       return {
         id,
@@ -117,6 +143,29 @@ export function GraphView() {
                 <span style={{ fontSize: 13, fontWeight: 600, color: "var(--color-text)" }}>
                   {id}
                 </span>
+                {validationStatus && (
+                  <span
+                    style={{
+                      width: 8,
+                      height: 8,
+                      borderRadius: "50%",
+                      backgroundColor:
+                        validationStatus === "error"
+                          ? VALIDATION_COLORS.invalid
+                          : validationStatus === "warning"
+                            ? VALIDATION_COLORS.warning
+                            : VALIDATION_COLORS.valid,
+                      flexShrink: 0,
+                    }}
+                    title={
+                      validationStatus === "error"
+                        ? "Has validation errors"
+                        : validationStatus === "warning"
+                          ? "Has warnings"
+                          : "Valid"
+                    }
+                  />
+                )}
               </div>
               {subtitle && (
                 <div style={{ fontSize: 11, color: "var(--color-text-muted)" }}>
@@ -129,7 +178,13 @@ export function GraphView() {
         position: { x: 0, y: 0 },
         style: {
           backgroundColor: "var(--color-surface-elevated)",
-          border: "1px solid var(--color-border-strong)",
+          border: validationStatus === "error"
+            ? `2px solid ${VALIDATION_COLORS.invalid}`
+            : validationStatus === "warning"
+              ? `2px solid ${VALIDATION_COLORS.warning}`
+              : validationStatus === "valid"
+                ? `2px solid ${VALIDATION_COLORS.valid}`
+                : "1px solid var(--color-border-strong)",
           borderRadius: 8,
           width: NODE_WIDTH,
           height: NODE_HEIGHT,
@@ -143,21 +198,42 @@ export function GraphView() {
     // Source node (synthetic — "source" is used as from_node in edges)
     if (compositionState.source) {
       rfNodes.push(
-        makeRfNode("source", "source", compositionState.source.plugin, "rgba(77, 184, 154, 0.15)", "#4db89a"),
+        makeRfNode(
+          "source",
+          "source",
+          compositionState.source.plugin,
+          "rgba(77, 184, 154, 0.15)",
+          "#4db89a",
+          nodeValidationMap["source"],
+        ),
       );
     }
 
     // Pipeline nodes (transforms, gates, aggregations, coalesces)
     for (const node of compositionState.nodes) {
       rfNodes.push(
-        makeRfNode(node.id, node.node_type, node.plugin, BADGE_BACKGROUNDS[node.node_type], BADGE_COLORS[node.node_type]),
+        makeRfNode(
+          node.id,
+          node.node_type,
+          node.plugin,
+          BADGE_BACKGROUNDS[node.node_type],
+          BADGE_COLORS[node.node_type],
+          nodeValidationMap[node.id],
+        ),
       );
     }
 
     // Output/sink nodes (synthetic — output names are used as to_node in edges)
     for (const output of compositionState.outputs) {
       rfNodes.push(
-        makeRfNode(output.name, "sink", output.plugin, "rgba(224, 112, 64, 0.15)", "#e07040"),
+        makeRfNode(
+          output.name,
+          "sink",
+          output.plugin,
+          "rgba(224, 112, 64, 0.15)",
+          "#e07040",
+          nodeValidationMap[output.name],
+        ),
       );
     }
 
@@ -175,7 +251,7 @@ export function GraphView() {
     }));
 
     return layoutGraph(rfNodes, rfEdges);
-  }, [compositionState]);
+  }, [compositionState, nodeValidationMap]);
 
   // Empty state — must match the hasContent check above so that a
   // source-to-sink pipeline (zero transform nodes) still renders.

@@ -339,11 +339,7 @@ function VersionSelector({
 // InspectorPanel
 // ---------------------------------------------------------------------------
 
-interface InspectorPanelProps {
-  onOpenSecrets?: () => void;
-}
-
-export function InspectorPanel({ onOpenSecrets }: InspectorPanelProps) {
+export function InspectorPanel() {
   const [activeTab, setActiveTab] = useState<TabId>("spec");
   const [catalogOpen, setCatalogOpen] = useState(false);
 
@@ -353,6 +349,8 @@ export function InspectorPanel({ onOpenSecrets }: InspectorPanelProps) {
   const isLoadingVersions = useSessionStore((s) => s.isLoadingVersions);
   const revertToVersion = useSessionStore((s) => s.revertToVersion);
   const loadStateVersions = useSessionStore((s) => s.loadStateVersions);
+  const injectSystemMessage = useSessionStore((s) => s.injectSystemMessage);
+  const sendValidationFeedback = useSessionStore((s) => s.sendValidationFeedback);
 
   const validationResult = useExecutionStore((s) => s.validationResult);
   const isValidating = useExecutionStore((s) => s.isValidating);
@@ -381,11 +379,44 @@ export function InspectorPanel({ onOpenSecrets }: InspectorPanelProps) {
     !isValidating &&
     !isExecuting;
 
-  const handleValidate = useCallback(() => {
-    if (activeSessionId && canValidate) {
-      validate(activeSessionId);
+  const handleValidate = useCallback(async () => {
+    if (!activeSessionId || !canValidate) return;
+
+    // Store handles the API call and stores the result.
+    await validate(activeSessionId);
+
+    // Read the result and orchestrate side effects at the component level.
+    // This keeps the store focused on state and the component in control
+    // of cross-store interactions.
+    const result = useExecutionStore.getState().validationResult;
+    if (!result) return;
+
+    const VALIDATION_MSG_ID = "system-validation-current";
+
+    if (!result.is_valid && result.errors.length > 0) {
+      const lines = ["**Validation failed** — the following errors were sent to the agent:"];
+      for (const err of result.errors) {
+        lines.push(`- **[${err.component_type ?? "unknown"}] ${err.component_id ?? "unknown"}:** ${err.message}`);
+      }
+      injectSystemMessage(lines.join("\n"), VALIDATION_MSG_ID);
+
+      // Send to the LLM so it can attempt fixes.
+      // Await so errors are surfaced, not silently swallowed.
+      try {
+        await sendValidationFeedback(result);
+      } catch {
+        // Feedback send failed — user still sees the system message,
+        // but the agent didn't receive it. The error banner from
+        // sendMessage's catch block will surface this.
+      }
+    } else if (result.is_valid && result.warnings && result.warnings.length > 0) {
+      const lines = ["**Validation passed with warnings:**"];
+      for (const warn of result.warnings) {
+        lines.push(`- **[${warn.component_type ?? "unknown"}] ${warn.component_id ?? "unknown"}:** ${warn.message}`);
+      }
+      injectSystemMessage(lines.join("\n"), VALIDATION_MSG_ID);
     }
-  }, [activeSessionId, canValidate, validate]);
+  }, [activeSessionId, canValidate, validate, injectSystemMessage, sendValidationFeedback]);
 
   const handleExecute = useCallback(() => {
     if (activeSessionId && canExecute) {
@@ -465,72 +496,63 @@ export function InspectorPanel({ onOpenSecrets }: InspectorPanelProps) {
               />
             )}
 
-            {/* Validation status indicator — shape + color for accessibility */}
-            {hasCompositionContent && (
-              <span
-                aria-label={
-                  validationResult === null
-                    ? "Not validated"
-                    : validationResult.is_valid
-                      ? "Validation passed"
-                      : "Validation failed"
-                }
-                title={
-                  validationResult === null
-                    ? "Not validated"
-                    : validationResult.is_valid
-                      ? "Validation passed"
-                      : "Validation failed"
-                }
-                style={{
-                  display: "inline-flex",
-                  alignItems: "center",
-                  justifyContent: "center",
-                  width: 16,
-                  height: 16,
-                  fontSize: 12,
-                  lineHeight: 1,
-                  flexShrink: 0,
-                  color:
-                    validationResult === null
-                      ? "var(--color-warning)"
-                      : validationResult.is_valid
-                        ? "var(--color-success)"
-                        : "var(--color-error)",
-                }}
-              >
-                {validationResult === null
-                  ? "\u25CB"   /* ○ hollow circle — not validated */
-                  : validationResult.is_valid
-                    ? "\u2713" /* ✓ checkmark — passed */
-                    : "\u26A0" /* ⚠ warning — failed */}
-              </span>
-            )}
+            {/* Validation status indicator — three-state (A7) */}
+            {hasCompositionContent && (() => {
+              const hasWarnings = validationResult?.warnings && validationResult.warnings.length > 0;
+              const status: string =
+                validationResult === null
+                  ? "unchecked"
+                  : !validationResult.is_valid
+                    ? "invalid"
+                    : hasWarnings
+                      ? "warning"
+                      : "valid";
+
+              const labels: Record<string, string> = {
+                unchecked: "Not validated",
+                valid: "Validation passed",
+                warning: "Validation passed with warnings",
+                invalid: "Validation failed",
+              };
+
+              const colors: Record<string, string> = {
+                unchecked: "var(--color-warning)",
+                valid: "var(--color-success)",
+                warning: "var(--color-warning)",
+                invalid: "var(--color-error)",
+              };
+
+              const symbols: Record<string, string> = {
+                unchecked: "\u25CB",  // ○ hollow circle
+                valid: "\u2713",      // ✓ checkmark
+                warning: "\u26A0",    // ⚠ warning triangle
+                invalid: "\u2717",    // ✗ cross mark
+              };
+
+              return (
+                <span
+                  aria-label={labels[status]}
+                  title={labels[status]}
+                  style={{
+                    display: "inline-flex",
+                    alignItems: "center",
+                    justifyContent: "center",
+                    width: 16,
+                    height: 16,
+                    fontSize: 12,
+                    lineHeight: 1,
+                    flexShrink: 0,
+                    color: colors[status],
+                  }}
+                >
+                  {symbols[status]}
+                </span>
+              );
+            })()}
           </div>
 
-          {/* Right: Settings + Catalog + Validate + Execute */}
+          {/* Right: Catalog + Validate + Execute */}
           <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
-            {/* Settings gear */}
-            {onOpenSecrets && (
-              <button
-                onClick={onOpenSecrets}
-                aria-label="Open secrets settings"
-                title="API Keys & Secrets"
-                className="btn"
-                style={{
-                  padding: "6px 8px",
-                  fontSize: 14,
-                  minWidth: 36,
-                  minHeight: 36,
-                  display: "flex",
-                  alignItems: "center",
-                  justifyContent: "center",
-                }}
-              >
-                ⚙
-              </button>
-            )}
-
             {/* Catalog toggle */}
             <button
               onClick={() => setCatalogOpen(!catalogOpen)}

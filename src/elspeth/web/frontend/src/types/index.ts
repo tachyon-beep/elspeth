@@ -142,6 +142,7 @@ export interface PipelineMetadata {
  * - Converted to YAML for execution
  */
 export interface CompositionState {
+  id: string;
   version: number;
   source: SourceSpec | null;
   nodes: NodeSpec[];
@@ -198,8 +199,19 @@ export interface ValidationCheck {
  * unlike Stage 1 errors which are simple strings.
  */
 export interface ValidationError {
-  component_id: string;
-  component_type: string;
+  component_id: string | null;
+  component_type: string | null;
+  message: string;
+  suggestion: string | null;
+}
+
+/**
+ * A single validation warning — same shape as ValidationError but non-blocking.
+ * Warnings indicate suboptimal configuration but do not prevent execution.
+ */
+export interface ValidationWarning {
+  component_id: string | null;
+  component_type: string | null;
   message: string;
   suggestion: string | null;
 }
@@ -210,10 +222,21 @@ export interface ValidationError {
  */
 export interface ValidationResult {
   is_valid: boolean;
-  summary: string;
+  summary?: string;
   checks: ValidationCheck[];
   errors: ValidationError[];
+  warnings?: ValidationWarning[];
 }
+
+/**
+ * Derived three-state pipeline validation status.
+ *
+ * - "valid": no errors, no warnings — fully runnable
+ * - "valid-with-warnings": runnable but has non-blocking warnings (yellow)
+ * - "invalid": has blocking errors, cannot execute (red)
+ * - null: not yet validated
+ */
+export type PipelineStatus = "valid" | "valid-with-warnings" | "invalid";
 
 // ── Execution ───────────────────────────────────────────────────────────────
 
@@ -341,6 +364,12 @@ export interface BlobMetadata {
   source_description: string | null;
   status: "ready" | "pending" | "error";
 }
+
+/**
+ * User-facing file category for the blob manager folder view.
+ * Derived from the blob's mime_type and created_by fields.
+ */
+export type BlobCategory = "source" | "sink" | "other";
 
 // ── Secret References ───────────────────────────────────────────────────────
 

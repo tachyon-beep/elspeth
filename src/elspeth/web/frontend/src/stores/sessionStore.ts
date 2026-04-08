@@ -36,6 +36,7 @@ interface SessionState {
   isLoadingVersions: boolean;
   revertToVersion: (stateId: string) => Promise<void>;
   clearError: () => void;
+  injectSystemMessage: (content: string, stableId?: string) => void;
   reset: () => void;
 }
 
@@ -214,7 +215,7 @@ export const useSessionStore = create<SessionState>((set, get) => ({
     const lines = ["Pipeline validation failed with the following errors:"];
     for (const err of result.errors) {
       lines.push(
-        `- [${err.component_type}] ${err.component_id}: ${err.message}`,
+        `- [${err.component_type ?? "unknown"}] ${err.component_id ?? "unknown"}: ${err.message}`,
       );
       if (err.suggestion) {
         lines.push(`  Suggestion: ${err.suggestion}`);
@@ -364,6 +365,32 @@ export const useSessionStore = create<SessionState>((set, get) => ({
 
   clearError() {
     set({ error: null });
+  },
+
+  injectSystemMessage(content: string, stableId?: string) {
+    const { activeSessionId } = get();
+    if (!activeSessionId) return;
+
+    const messageId = stableId ?? `system-${crypto.randomUUID()}`;
+
+    const systemMessage: ChatMessage = {
+      id: messageId,
+      session_id: activeSessionId,
+      role: "system",
+      content,
+      tool_calls: null,
+      created_at: new Date().toISOString(),
+    };
+
+    set((state) => {
+      // If a stable ID was provided, replace any existing message with
+      // that ID instead of appending. This prevents noise accumulation
+      // from repeated validation cycles.
+      const filtered = stableId
+        ? state.messages.filter((m) => m.id !== stableId)
+        : state.messages;
+      return { messages: [...filtered, systemMessage] };
+    });
   },
 
   reset() {

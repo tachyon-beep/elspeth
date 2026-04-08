@@ -15,6 +15,8 @@ export type {
   PluginSummary,
   ValidationResult,
   ValidationError,
+  ValidationWarning,
+  PipelineStatus,
   Run,
   RunEvent,
   RunEventProgress,
@@ -25,5 +27,6 @@ export type {
   ApiError,
   UploadResult,
   BlobMetadata,
+  BlobCategory,
   SecretInventoryItem,
 } from "./index";

@@ -13,6 +13,7 @@
 
 import type {
   ValidationResult as ValidationResultType,
+  ValidationWarning,
   NodeSpec,
 } from "@/types/index";
 
@@ -27,12 +28,13 @@ interface ValidationResultProps {
  * Falls back to the raw component_id if no matching node is found.
  */
 function resolveComponentName(
-  componentId: string,
+  componentId: string | null,
   nodes: NodeSpec[] | undefined,
 ): string {
+  if (!componentId) return "unknown";
   if (!nodes) return componentId;
   const node = nodes.find((n) => n.id === componentId);
-  return node ? node.id : componentId;
+  return node ? `${node.node_type}:${node.id}` : componentId;
 }
 
 export function ValidationResultBanner({
@@ -52,7 +54,7 @@ export function ValidationResultBanner({
       >
         <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
           <span aria-hidden="true">{"\u2713"}</span>
-          <span style={{ fontWeight: 600 }}>{result.summary}</span>
+          <span style={{ fontWeight: 600 }}>{result.summary ?? "Validation passed"}</span>
         </div>
         {result.checks.length > 0 && (
           <ul
@@ -72,6 +74,42 @@ export function ValidationResultBanner({
               </li>
             ))}
           </ul>
+        )}
+        {result.warnings && result.warnings.length > 0 && (
+          <div style={{ marginTop: 6 }}>
+            <div style={{ fontWeight: 600, fontSize: 12, color: "var(--color-warning)" }}>
+              Warnings ({result.warnings.length}):
+            </div>
+            <ul
+              style={{
+                margin: "2px 0 0",
+                padding: "0 0 0 22px",
+                fontSize: 12,
+                color: "var(--color-warning)",
+              }}
+            >
+              {result.warnings.map((warn: ValidationWarning, i: number) => (
+                <li key={i} style={{ marginBottom: 2 }}>
+                  <strong>
+                    [{warn.component_type ?? "unknown"}]{" "}
+                    {resolveComponentName(warn.component_id, nodes)}:
+                  </strong>{" "}
+                  {warn.message}
+                  {warn.suggestion && (
+                    <div
+                      style={{
+                        color: "var(--color-text-muted)",
+                        fontSize: 12,
+                        marginTop: 2,
+                      }}
+                    >
+                      Suggestion: {warn.suggestion}
+                    </div>
+                  )}
+                </li>
+              ))}
+            </ul>
+          </div>
         )}
       </div>
     );
@@ -99,7 +137,7 @@ export function ValidationResultBanner({
         {result.errors.map((err, i) => (
           <li key={i} style={{ marginBottom: 4 }}>
             <strong>
-              [{err.component_type}]{" "}
+              [{err.component_type ?? "unknown"}]{" "}
               {resolveComponentName(err.component_id, nodes)}:
             </strong>{" "}
             {err.message}

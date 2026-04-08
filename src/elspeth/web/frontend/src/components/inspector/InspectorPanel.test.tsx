@@ -34,6 +34,7 @@ function makeState(
   overrides: Partial<CompositionState> = {},
 ): CompositionState {
   return {
+    id: "state-1",
     version: 1,
     source: null,
     nodes: [
@@ -85,7 +86,7 @@ describe("ValidationDot in InspectorPanel", () => {
       compositionState: makeState(),
     });
     useExecutionStore.setState({
-      validationResult: { is_valid: true, summary: "All checks passed", checks: [], errors: [] },
+      validationResult: { is_valid: true, summary: "All checks passed", checks: [], errors: [], warnings: [] },
     });
     render(<InspectorPanel />);
     const dot = screen.getByLabelText("Validation passed");
@@ -109,6 +110,7 @@ describe("ValidationDot in InspectorPanel", () => {
             suggestion: null,
           },
         ],
+        warnings: [],
       },
     });
     render(<InspectorPanel />);
@@ -136,6 +138,94 @@ describe("ValidationDot in InspectorPanel", () => {
     });
     render(<InspectorPanel />);
     expect(screen.queryByLabelText("Not validated")).not.toBeInTheDocument();
+  });
+});
+
+describe("InspectorPanel three-state validation indicator", () => {
+  beforeEach(() => {
+    useSessionStore.setState({
+      activeSessionId: "session-1",
+      compositionState: {
+        id: "state-1",
+        version: 1,
+        source: { plugin: "csv", options: {} },
+        nodes: [],
+        edges: [],
+        outputs: [{ name: "out", plugin: "json", options: {} }],
+        metadata: { name: null, description: null },
+      },
+      stateVersions: [],
+      isLoadingVersions: false,
+    });
+    useExecutionStore.setState({
+      validationResult: null,
+      isValidating: false,
+      isExecuting: false,
+      progress: null,
+      error: null,
+    });
+  });
+
+  it("shows hollow circle when not validated", () => {
+    useExecutionStore.setState({ validationResult: null });
+    render(<InspectorPanel />);
+    expect(screen.getByLabelText("Not validated")).toBeInTheDocument();
+  });
+
+  it("shows checkmark for valid pipeline (no warnings)", () => {
+    useExecutionStore.setState({
+      validationResult: {
+        is_valid: true,
+        summary: "All checks passed",
+        checks: [],
+        errors: [],
+        warnings: [],
+      },
+    });
+    render(<InspectorPanel />);
+    expect(screen.getByLabelText("Validation passed")).toBeInTheDocument();
+  });
+
+  it("shows warning indicator for valid-with-warnings", () => {
+    useExecutionStore.setState({
+      validationResult: {
+        is_valid: true,
+        summary: "Passed with warnings",
+        checks: [],
+        errors: [],
+        warnings: [
+          {
+            component_id: "source",
+            component_type: "source",
+            message: "No explicit schema",
+            suggestion: "Add schema",
+          },
+        ],
+      },
+    });
+    render(<InspectorPanel />);
+    expect(screen.getByLabelText("Validation passed with warnings")).toBeInTheDocument();
+  });
+
+  it("shows error indicator for invalid pipeline", () => {
+    useExecutionStore.setState({
+      validationResult: {
+        is_valid: false,
+        summary: "Validation failed",
+        checks: [],
+        errors: [
+          {
+            component_id: "llm",
+            component_type: "transform",
+            message: "Missing model",
+            suggestion: null,
+          },
+        ],
+        warnings: [],
+      },
+    });
+    render(<InspectorPanel />);
+    expect(screen.getByLabelText("Validation failed")).toBeInTheDocument();
   });
 });
 
