@@ -222,6 +222,51 @@ class TestCompleteNodeStateCrashPaths:
                 duration_ms=10.0,
             )
 
+    def test_completed_node_state_rewrite_raises(self) -> None:
+        """Cannot overwrite a COMPLETED node state.
+
+        Regression test for elspeth-2c99c9a451: complete_node_state() lacked the
+        terminal-state guard, allowing a completed node state to be silently
+        rewritten to FAILED (audit immutability violation).
+        """
+        _db, repo, _rec, tok = _make_repo_with_token()
+        repo.begin_node_state(tok, "transform-1", "run-1", 1, {"a": 1}, state_id="state-term-c", attempt=0)
+        repo.complete_node_state("state-term-c", NodeStateStatus.COMPLETED, output_data={"b": 2}, duration_ms=5.0)
+
+        from elspeth.contracts.errors import ExecutionError
+
+        with pytest.raises(AuditIntegrityError, match="already terminal"):
+            repo.complete_node_state(
+                "state-term-c",
+                NodeStateStatus.FAILED,
+                error=ExecutionError(exception="late failure", exception_type="RuntimeError"),
+                duration_ms=1.0,
+            )
+
+    def test_failed_node_state_rewrite_raises(self) -> None:
+        """Cannot overwrite a FAILED node state.
+
+        Same invariant as test_completed_node_state_rewrite_raises but in the
+        FAILED→COMPLETED direction.
+        """
+        from elspeth.contracts.errors import ExecutionError
+
+        _db, repo, _rec, tok = _make_repo_with_token()
+        repo.begin_node_state(tok, "transform-1", "run-1", 1, {"a": 1}, state_id="state-term-f", attempt=0)
+        error = ExecutionError(exception="first failure", exception_type="ValueError")
+        repo.complete_node_state("state-term-f", NodeStateStatus.FAILED, error=error, duration_ms=1.0)
+
+        with pytest.raises(AuditIntegrityError, match="already terminal"):
+            repo.complete_node_state("state-term-f", NodeStateStatus.COMPLETED, output_data={"b": 2}, duration_ms=5.0)
+
+    def test_pending_node_state_can_be_completed(self) -> None:
+        """PENDING is non-terminal — completing a PENDING state to COMPLETED must succeed."""
+        _db, repo, _rec, tok = _make_repo_with_token()
+        repo.begin_node_state(tok, "transform-1", "run-1", 1, {"a": 1}, state_id="state-pend", attempt=0)
+        repo.complete_node_state("state-pend", NodeStateStatus.PENDING, duration_ms=3.0)
+        result = repo.complete_node_state("state-pend", NodeStateStatus.COMPLETED, output_data={"b": 2}, duration_ms=5.0)
+        assert isinstance(result, NodeStateCompleted)
+
     def test_complete_returns_typed_union(self) -> None:
         """complete_node_state returns the correct typed variant for each status."""
         _db, repo, _rec, tok = _make_repo_with_token()

@@ -74,6 +74,7 @@ if TYPE_CHECKING:
 logger = structlog.get_logger(__name__)
 
 _TERMINAL_BATCH_STATUSES = frozenset({BatchStatus.COMPLETED, BatchStatus.FAILED})
+_TERMINAL_NODE_STATE_STATUSES = frozenset({NodeStateStatus.COMPLETED, NodeStateStatus.FAILED})
 
 
 class _PreparedCallData(NamedTuple):
@@ -304,10 +305,14 @@ class ExecutionRepository:
 
         # Single transaction: UPDATE + SELECT-back for atomicity.
         # Prevents a concurrent reader from seeing the row between states.
+        # Atomic conditional UPDATE: guard against already-terminal status in the
+        # WHERE clause (same TOCTOU-safe pattern as complete_batch).
+        terminal_values = [s.value for s in _TERMINAL_NODE_STATE_STATUSES]
         with self._db.connection() as conn:
             update_result = conn.execute(
                 node_states_table.update()
                 .where(node_states_table.c.state_id == state_id)
+                .where(node_states_table.c.status.notin_(terminal_values))
                 .values(
                     status=status,
                     output_hash=output_hash,
@@ -319,6 +324,13 @@ class ExecutionRepository:
                 )
             )
             if update_result.rowcount == 0:
+                # Distinguish "not found" from "already terminal".
+                existing = conn.execute(select(node_states_table.c.status).where(node_states_table.c.state_id == state_id)).fetchone()
+                if existing is not None:
+                    raise AuditIntegrityError(
+                        f"Cannot complete node state {state_id}: current status {existing.status!r} is already terminal. "
+                        f"Terminal node states are immutable."
+                    )
                 raise AuditIntegrityError(
                     f"complete_node_state: zero rows affected for state_id={state_id} — target row does not exist (audit data corruption)"
                 )
