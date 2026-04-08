@@ -209,6 +209,25 @@ No separate "inline source" plugin exists — the blob system handles it. Never 
 - JSON → `create_blob(filename="data.json", mime_type="application/json", content='[{"id": 1}]')` then `set_source_from_blob`
 - CSV rows → `create_blob(filename="data.csv", mime_type="text/csv", content="name,age\nAlice,30")` then `set_source_from_blob`
 
+## Validation Warning Glossary
+
+### Warnings (non-blocking)
+
+| Warning | Meaning | Fix |
+|---------|---------|-----|
+| Output '{name}' is not referenced by any on_success, on_error, or route | Orphaned output — nothing sends data to it | Match the output name to a node's on_success/route |
+| Source on_success '{target}' does not match any node input or output | Source sends data to a nonexistent connection point | Fix source on_success to match a node input or output name |
+| Node '{id}' has no outgoing edges | Processing step produces output that goes nowhere | Set the node's on_success to an output or downstream node |
+| Output '{name}' uses plugin '{plugin}' but filename extension suggests a different format | Sink plugin doesn't match file extension | Change extension or plugin to match |
+
+### Suggestions (optional)
+
+| Suggestion | Meaning | Fix |
+|------------|---------|-----|
+| Consider adding error routing | Transform failures have no dedicated destination | Add an error output and wire on_error to it |
+| Single output pipeline — consider adding a second output for rejected rows | No place for problem records | Add a quarantine/error output |
+| Source has no explicit schema | Downstream field references depend on runtime column names | Add explicit schema with expected field names and types |
+
 ## Common Patterns
 
 ### 1. URL → Scrape → Extract → JSON
