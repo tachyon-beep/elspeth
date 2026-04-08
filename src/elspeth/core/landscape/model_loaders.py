@@ -559,6 +559,14 @@ class TokenOutcomeLoader:
                 f"TokenOutcome {oid} has outcome=EXPANDED but expand_group_id is NULL — "
                 f"audit integrity violation (EXPANDED requires expand_group_id)"
             )
+        if outcome == RowOutcome.DIVERTED and row.sink_name is None:
+            raise AuditIntegrityError(
+                f"TokenOutcome {oid} has outcome=DIVERTED but sink_name is NULL — audit integrity violation (DIVERTED requires sink_name)"
+            )
+        if outcome == RowOutcome.DIVERTED and row.error_hash is None:
+            raise AuditIntegrityError(
+                f"TokenOutcome {oid} has outcome=DIVERTED but error_hash is NULL — audit integrity violation (DIVERTED requires error_hash)"
+            )
         if outcome in (RowOutcome.FAILED, RowOutcome.QUARANTINED) and row.error_hash is None:
             raise AuditIntegrityError(
                 f"TokenOutcome {oid} has outcome={outcome.value!r} but error_hash is NULL — "

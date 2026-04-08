@@ -1352,7 +1352,7 @@ class TestTokenOutcomeLoader:
         "forked": {"fork_group_id": "fg-1"},
         "failed": {"error_hash": "e" * 64},
         "quarantined": {"error_hash": "e" * 64},
-        "diverted": {},
+        "diverted": {"sink_name": "failsink", "error_hash": "e" * 16},
         "consumed_in_batch": {"batch_id": "batch-1"},
         "coalesced": {"join_group_id": "jg-1"},
         "expanded": {"expand_group_id": "eg-1"},
@@ -1526,6 +1526,34 @@ class TestTokenOutcomeLoader:
         """COALESCED outcome with NULL join_group_id is audit corruption."""
         sa_row = self._make_outcome_row(outcome="coalesced", is_terminal=1, join_group_id=None)
         with pytest.raises(AuditIntegrityError, match="COALESCED requires join_group_id"):
+            TokenOutcomeLoader().load(sa_row)
+
+    # Regression tests for elspeth-35ae03dad7: DIVERTED missing from Tier 1 guards
+
+    def test_valid_load_diverted(self) -> None:
+        """DIVERTED outcome loads successfully with required fields."""
+        sa_row = self._make_outcome_row(
+            outcome="diverted",
+            is_terminal=1,
+            sink_name="failsink",
+            error_hash="abc123",
+        )
+        loader = TokenOutcomeLoader()
+        result = loader.load(sa_row)
+        assert result.outcome == RowOutcome.DIVERTED
+        assert result.sink_name == "failsink"
+        assert result.error_hash == "abc123"
+
+    def test_diverted_without_sink_name_raises(self) -> None:
+        """DIVERTED outcome with NULL sink_name is audit corruption."""
+        sa_row = self._make_outcome_row(outcome="diverted", is_terminal=1, error_hash="abc123", sink_name=None)
+        with pytest.raises(AuditIntegrityError, match="DIVERTED requires sink_name"):
+            TokenOutcomeLoader().load(sa_row)
+
+    def test_diverted_without_error_hash_raises(self) -> None:
+        """DIVERTED outcome with NULL error_hash is audit corruption."""
+        sa_row = self._make_outcome_row(outcome="diverted", is_terminal=1, sink_name="failsink", error_hash=None)
+        with pytest.raises(AuditIntegrityError, match="DIVERTED requires error_hash"):
             TokenOutcomeLoader().load(sa_row)
 
 

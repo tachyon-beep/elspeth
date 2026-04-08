@@ -649,6 +649,37 @@ class TestValidateOutcomeFields:
         )
         assert outcome_id is not None
 
+    def test_diverted_requires_sink_name(self):
+        _db, recorder = _setup()
+        _row, token = _make_row(recorder)
+        with pytest.raises(ValueError, match="sink_name"):
+            recorder.record_token_outcome(
+                ref=TokenRef(token_id=token.token_id, run_id="run-1"),
+                outcome=RowOutcome.DIVERTED,
+                error_hash="abc123",
+            )
+
+    def test_diverted_requires_error_hash(self):
+        _db, recorder = _setup()
+        _row, token = _make_row(recorder)
+        with pytest.raises(ValueError, match="error_hash"):
+            recorder.record_token_outcome(
+                ref=TokenRef(token_id=token.token_id, run_id="run-1"),
+                outcome=RowOutcome.DIVERTED,
+                sink_name="failsink",
+            )
+
+    def test_diverted_accepts_sink_name_and_error_hash(self):
+        _db, recorder = _setup()
+        _row, token = _make_row(recorder)
+        outcome_id = recorder.record_token_outcome(
+            ref=TokenRef(token_id=token.token_id, run_id="run-1"),
+            outcome=RowOutcome.DIVERTED,
+            sink_name="failsink",
+            error_hash="abc123",
+        )
+        assert outcome_id is not None
+
     def test_buffered_requires_batch_id(self):
         _db, recorder = _setup()
         _row, token = _make_row(recorder)

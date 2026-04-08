@@ -21,6 +21,7 @@ It is derived from:
 | FORKED | yes | fork_group_id | RowProcessor (after gate fork) |
 | FAILED | yes | error_hash | RowProcessor or CoalesceExecutor |
 | QUARANTINED | yes | error_hash | RowProcessor or Orchestrator (source quarantine) |
+| DIVERTED | yes | sink_name, error_hash | SinkExecutor (failsink redirect or discard) |
 | CONSUMED_IN_BATCH | yes | batch_id | RowProcessor (aggregation) |
 | COALESCED | yes | join_group_id | CoalesceExecutor (consumed tokens) |
 | EXPANDED | yes | expand_group_id | RowProcessor (deaggregation parent) |

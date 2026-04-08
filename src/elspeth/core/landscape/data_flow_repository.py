@@ -256,6 +256,17 @@ class DataFlowRepository:
                     "EXPANDED outcome requires expand_group_id but got None. "
                     "Contract violation - see docs/contracts/token-outcomes/00-token-outcome-contract.md"
                 )
+        elif outcome == RowOutcome.DIVERTED:
+            if sink_name is None:
+                raise ValueError(
+                    "DIVERTED outcome requires sink_name but got None. "
+                    "Contract violation - see docs/contracts/token-outcomes/00-token-outcome-contract.md"
+                )
+            if error_hash is None:
+                raise ValueError(
+                    "DIVERTED outcome requires error_hash but got None. "
+                    "Contract violation - see docs/contracts/token-outcomes/00-token-outcome-contract.md"
+                )
         elif outcome == RowOutcome.BUFFERED:
             if batch_id is None:
                 raise ValueError(
