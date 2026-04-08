@@ -15,9 +15,10 @@ interface ChatInputProps {
   inputRef: React.RefObject<HTMLTextAreaElement>;
   onToggleBlobManager?: () => void;
   showBlobManager?: boolean;
+  onOpenSecrets?: () => void;
 }
 
-export function ChatInput({ onSend, disabled, inputRef, onToggleBlobManager, showBlobManager }: ChatInputProps) {
+export function ChatInput({ onSend, disabled, inputRef, onToggleBlobManager, showBlobManager, onOpenSecrets }: ChatInputProps) {
   const [text, setText] = useState("");
   const [uploadStatus, setUploadStatus] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -172,6 +173,32 @@ export function ChatInput({ onSend, disabled, inputRef, onToggleBlobManager, sho
           aria-hidden="true"
           tabIndex={-1}
         />
+
+        {/* Secrets button — key icon, co-located with file actions (A5) */}
+        {onOpenSecrets && (
+          <button
+            type="button"
+            onClick={onOpenSecrets}
+            style={{
+              padding: "8px 10px",
+              backgroundColor: "transparent",
+              border: "1px solid var(--color-border-strong)",
+              borderRadius: 6,
+              cursor: "pointer",
+              fontSize: 16,
+              color: "var(--color-text)",
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+              minWidth: 44,
+              minHeight: 44,
+            }}
+            title="API Keys & Secrets"
+            aria-label="Open secrets settings"
+          >
+            <span aria-hidden="true">{"\uD83D\uDD11"}</span>
+          </button>
+        )}
 
         {/* Send button */}
         <button

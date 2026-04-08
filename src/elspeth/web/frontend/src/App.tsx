@@ -105,8 +105,8 @@ function App() {
         <div style={{ flex: 1, minHeight: 0, position: "relative" }}>
           <Layout
             sidebar={<SessionSidebar />}
-            chat={<ChatPanel />}
-            inspector={<InspectorPanel onOpenSecrets={openSecrets} />}
+            chat={<ChatPanel onOpenSecrets={openSecrets} />}
+            inspector={<InspectorPanel />}
           />
         </div>
 

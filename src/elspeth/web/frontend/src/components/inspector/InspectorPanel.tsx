@@ -339,11 +339,7 @@ function VersionSelector({
 // InspectorPanel
 // ---------------------------------------------------------------------------
 
-interface InspectorPanelProps {
-  onOpenSecrets?: () => void;
-}
-
-export function InspectorPanel({ onOpenSecrets }: InspectorPanelProps) {
+export function InspectorPanel() {
   const [activeTab, setActiveTab] = useState<TabId>("spec");
   const [catalogOpen, setCatalogOpen] = useState(false);
 
@@ -508,29 +504,8 @@ export function InspectorPanel({ onOpenSecrets }: InspectorPanelProps) {
             )}
           </div>
 
-          {/* Right: Settings + Catalog + Validate + Execute */}
+          {/* Right: Catalog + Validate + Execute */}
           <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
-            {/* Settings gear */}
-            {onOpenSecrets && (
-              <button
-                onClick={onOpenSecrets}
-                aria-label="Open secrets settings"
-                title="API Keys & Secrets"
-                className="btn"
-                style={{
-                  padding: "6px 8px",
-                  fontSize: 14,
-                  minWidth: 36,
-                  minHeight: 36,
-                  display: "flex",
-                  alignItems: "center",
-                  justifyContent: "center",
-                }}
-              >
-                ⚙
-              </button>
-            )}
-
             {/* Catalog toggle */}
             <button
               onClick={() => setCatalogOpen(!catalogOpen)}

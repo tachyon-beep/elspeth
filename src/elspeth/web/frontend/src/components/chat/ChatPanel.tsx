@@ -8,13 +8,17 @@ import { ChatInput } from "./ChatInput";
 import { BlobManager } from "@/components/blobs/BlobManager";
 import type { BlobMetadata } from "@/types/api";
 
+interface ChatPanelProps {
+  onOpenSecrets?: () => void;
+}
+
 /**
  * Main chat panel combining the message list, composing indicator, and input.
  *
  * Auto-scrolls to the bottom on new messages unless the user has scrolled up.
  * Focus returns to the ChatInput textarea after the assistant response arrives.
  */
-export function ChatPanel() {
+export function ChatPanel({ onOpenSecrets }: ChatPanelProps) {
   const messages = useSessionStore((s) => s.messages);
   const activeSessionId = useSessionStore((s) => s.activeSessionId);
   const sessions = useSessionStore((s) => s.sessions);
@@ -255,6 +259,7 @@ export function ChatPanel() {
         inputRef={inputRef}
         onToggleBlobManager={() => setShowBlobManager((v) => !v)}
         showBlobManager={showBlobManager}
+        onOpenSecrets={onOpenSecrets}
       />
     </div>
   );
