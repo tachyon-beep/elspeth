@@ -40,7 +40,7 @@ def build_context_string(
     validation = state.validate()
     serialized["validation"] = {
         "is_valid": validation.is_valid,
-        "errors": list(validation.errors),
+        "errors": [e.to_dict() for e in validation.errors],
     }
 
     # Build lightweight plugin summary (names only).

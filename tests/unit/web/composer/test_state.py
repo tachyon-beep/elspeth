@@ -14,6 +14,7 @@ from elspeth.web.composer.state import (
     OutputSpec,
     PipelineMetadata,
     SourceSpec,
+    ValidationEntry,
     ValidationSummary,
 )
 
@@ -274,7 +275,7 @@ class TestValidationSummary:
         assert v.errors == ()
 
     def test_with_errors(self) -> None:
-        v = ValidationSummary(is_valid=False, errors=("No source configured.",))
+        v = ValidationSummary(is_valid=False, errors=(ValidationEntry("test", "No source configured.", "high"),))
         assert v.is_valid is False
         assert len(v.errors) == 1
 
@@ -707,8 +708,8 @@ class TestStage1Validation:
     def test_empty_state_has_errors(self) -> None:
         result = self._empty_state().validate()
         assert not result.is_valid
-        assert "No source configured." in result.errors
-        assert "No sinks configured." in result.errors
+        assert any(e.message == "No source configured." for e in result.errors)
+        assert any(e.message == "No sinks configured." for e in result.errors)
 
     def test_minimal_valid_pipeline(self) -> None:
         """source -> transform -> sink, fully connected."""
@@ -728,7 +729,7 @@ class TestStage1Validation:
         state = state.with_edge(self._make_edge("e1", "nonexistent", "main"))
         result = state.validate()
         assert not result.is_valid
-        assert any("nonexistent" in e and "from_node" in e for e in result.errors)
+        assert any("nonexistent" in e.message and "from_node" in e.message for e in result.errors)
 
     def test_dangling_edge_to_node(self) -> None:
         state = self._empty_state()
@@ -737,7 +738,7 @@ class TestStage1Validation:
         state = state.with_edge(self._make_edge("e1", "source", "nonexistent"))
         result = state.validate()
         assert not result.is_valid
-        assert any("nonexistent" in e and "to_node" in e for e in result.errors)
+        assert any("nonexistent" in e.message and "to_node" in e.message for e in result.errors)
 
     def test_duplicate_node_ids(self) -> None:
         """Two nodes with same id — caught by validation, not by with_node (which replaces)."""
@@ -752,7 +753,7 @@ class TestStage1Validation:
         )
         result = state.validate()
         assert not result.is_valid
-        assert any("Duplicate node ID" in e for e in result.errors)
+        assert any("Duplicate node ID" in e.message for e in result.errors)
 
     def test_duplicate_output_names(self) -> None:
         out = self._make_output("dup")
@@ -766,7 +767,7 @@ class TestStage1Validation:
         )
         result = state.validate()
         assert not result.is_valid
-        assert any("Duplicate output name" in e for e in result.errors)
+        assert any("Duplicate output name" in e.message for e in result.errors)
 
     def test_duplicate_edge_ids(self) -> None:
         edge = self._make_edge("dup", "source", "main")
@@ -780,7 +781,7 @@ class TestStage1Validation:
         )
         result = state.validate()
         assert not result.is_valid
-        assert any("Duplicate edge ID" in e for e in result.errors)
+        assert any("Duplicate edge ID" in e.message for e in result.errors)
 
     def test_gate_missing_condition(self) -> None:
         gate = NodeSpec(
@@ -804,7 +805,7 @@ class TestStage1Validation:
         state = state.with_edge(self._make_edge("e1", "source", "g1"))
         result = state.validate()
         assert not result.is_valid
-        assert any("condition" in e for e in result.errors)
+        assert any("condition" in e.message for e in result.errors)
 
     def test_gate_missing_routes(self) -> None:
         gate = NodeSpec(
@@ -828,7 +829,7 @@ class TestStage1Validation:
         state = state.with_edge(self._make_edge("e1", "source", "g1"))
         result = state.validate()
         assert not result.is_valid
-        assert any("routes" in e for e in result.errors)
+        assert any("routes" in e.message for e in result.errors)
 
     def test_transform_with_condition_is_error(self) -> None:
         node = NodeSpec(
@@ -852,7 +853,7 @@ class TestStage1Validation:
         state = state.with_edge(self._make_edge("e1", "source", "t1"))
         result = state.validate()
         assert not result.is_valid
-        assert any("condition" in e for e in result.errors)
+        assert any("condition" in e.message for e in result.errors)
 
     def test_coalesce_missing_branches(self) -> None:
         node = NodeSpec(
@@ -876,7 +877,7 @@ class TestStage1Validation:
         state = state.with_edge(self._make_edge("e1", "source", "c1"))
         result = state.validate()
         assert not result.is_valid
-        assert any("branches" in e for e in result.errors)
+        assert any("branches" in e.message for e in result.errors)
 
     def test_aggregation_missing_plugin(self) -> None:
         node = NodeSpec(
@@ -900,7 +901,7 @@ class TestStage1Validation:
         state = state.with_edge(self._make_edge("e1", "source", "a1"))
         result = state.validate()
         assert not result.is_valid
-        assert any("plugin" in e for e in result.errors)
+        assert any("plugin" in e.message for e in result.errors)
 
     def test_unreachable_node(self) -> None:
         """Node exists but no edge points to it and source.on_success doesn't match."""
@@ -910,7 +911,7 @@ class TestStage1Validation:
         state = state.with_output(self._make_output())
         result = state.validate()
         assert not result.is_valid
-        assert any("not reachable" in e for e in result.errors)
+        assert any("not reachable" in e.message for e in result.errors)
 
     def test_validate_after_from_dict_round_trip(self) -> None:
         """W-4A-2: validate() on reconstructed state matches original."""
@@ -938,7 +939,7 @@ class TestStage1Validation:
         state = state.with_edge(self._make_edge("e2", "t1", "main"))
         result = state.validate()
         assert result.is_valid
-        assert any("orphan" in w and "never receive data" in w for w in result.warnings)
+        assert any("orphan" in w.message and "never receive data" in w.message for w in result.warnings)
 
     def test_validate_source_on_success_mismatch_warns(self) -> None:
         """W2: Source on_success doesn't match any node input."""
@@ -949,7 +950,7 @@ class TestStage1Validation:
         state = state.with_edge(self._make_edge("e1", "source", "t1"))
         state = state.with_edge(self._make_edge("e2", "t1", "main"))
         result = state.validate()
-        assert any("nonexistent" in w and "does not match" in w for w in result.warnings)
+        assert any("nonexistent" in w.message and "does not match" in w.message for w in result.warnings)
 
     def test_validate_format_extension_mismatch_warns(self) -> None:
         """W4: Sink plugin/filename extension mismatch."""
@@ -967,7 +968,7 @@ class TestStage1Validation:
         state = state.with_edge(self._make_edge("e2", "t1", "results"))
         result = state.validate()
         assert result.is_valid
-        assert any("extension suggests a different format" in w for w in result.warnings)
+        assert any("extension suggests a different format" in w.message for w in result.warnings)
 
     # --- Suggestion rules (S1-S3) ---
 
@@ -981,7 +982,7 @@ class TestStage1Validation:
         state = state.with_edge(self._make_edge("e2", "t1", "main"))
         result = state.validate()
         assert result.is_valid
-        assert any("error routing" in s for s in result.suggestions)
+        assert any("error routing" in s.message for s in result.suggestions)
 
     def test_validate_single_output_suggests(self) -> None:
         """S2: Pipeline with only one output gets a suggestion."""
@@ -992,7 +993,7 @@ class TestStage1Validation:
         state = state.with_edge(self._make_edge("e1", "source", "t1"))
         state = state.with_edge(self._make_edge("e2", "t1", "main"))
         result = state.validate()
-        assert any("second output" in s for s in result.suggestions)
+        assert any("second output" in s.message for s in result.suggestions)
 
     def test_validate_no_schema_config_suggests(self) -> None:
         """S3: Source without schema_config in options gets a suggestion."""
@@ -1003,7 +1004,7 @@ class TestStage1Validation:
         state = state.with_edge(self._make_edge("e1", "source", "t1"))
         state = state.with_edge(self._make_edge("e2", "t1", "main"))
         result = state.validate()
-        assert any("no explicit schema" in s for s in result.suggestions)
+        assert any("no explicit schema" in s.message for s in result.suggestions)
 
     # --- Interaction tests ---
 
@@ -1028,7 +1029,7 @@ class TestStage1Validation:
         result = state.validate()
         assert result.is_valid is False
         assert len(result.errors) > 0
-        assert any("never receive data" in w for w in result.warnings)
+        assert any("never receive data" in w.message for w in result.warnings)
 
     def test_validate_clean_pipeline_no_warnings(self) -> None:
         """Well-formed pipeline with gates, error routing, schema, and

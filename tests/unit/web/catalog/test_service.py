@@ -23,7 +23,7 @@ def catalog(plugin_manager: PluginManager) -> CatalogServiceImpl:
     return CatalogServiceImpl(plugin_manager)
 
 
-class TestCatalogServiceProtocol:
+class TestCatalogService:
     """CatalogServiceImpl satisfies the CatalogService protocol."""
 
     def test_implements_protocol(self, catalog: CatalogServiceImpl) -> None:

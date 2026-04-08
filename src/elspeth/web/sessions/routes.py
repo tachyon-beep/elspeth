@@ -21,7 +21,7 @@ from elspeth.web.auth.middleware import get_current_user
 from elspeth.web.auth.models import UserIdentity
 from elspeth.web.blobs.protocol import BlobQuotaExceededError, BlobServiceProtocol
 from elspeth.web.composer.protocol import ComposerConvergenceError, ComposerService
-from elspeth.web.composer.state import CompositionState, PipelineMetadata, ValidationSummary
+from elspeth.web.composer.state import CompositionState, PipelineMetadata, ValidationEntry, ValidationSummary
 from elspeth.web.composer.yaml_generator import generate_yaml
 from elspeth.web.middleware.rate_limit import ComposerRateLimiter, get_rate_limiter
 from elspeth.web.sessions.converters import state_from_record as _state_from_record
@@ -100,8 +100,8 @@ def _state_response(
         metadata=deep_thaw(state.metadata_),
         is_valid=state.is_valid,
         validation_errors=deep_thaw(state.validation_errors),
-        validation_warnings=list(live_validation.warnings) if live_validation is not None else None,
-        validation_suggestions=list(live_validation.suggestions) if live_validation is not None else None,
+        validation_warnings=[e.message for e in live_validation.warnings] if live_validation is not None else None,
+        validation_suggestions=[e.message for e in live_validation.suggestions] if live_validation is not None else None,
         derived_from_state_id=str(state.derived_from_state_id) if state.derived_from_state_id is not None else None,
         created_at=state.created_at,
     )
@@ -163,7 +163,10 @@ async def _handle_convergence_error(
             validation = exc.partial_state.validate()
         except (ValueError, TypeError, KeyError) as val_err:
             slog.warning(f"{log_prefix}_validation_failed", error=str(val_err))
-            validation = ValidationSummary(is_valid=False, errors=("validation_failed",))
+            validation = ValidationSummary(
+                is_valid=False,
+                errors=(ValidationEntry("validation", "validation_failed", "high"),),
+            )
 
         # Persistence guard: DB write failure should not upgrade the
         # response from 422 (convergence error) to 500 (internal).
@@ -176,7 +179,7 @@ async def _handle_convergence_error(
                 outputs=state_d["outputs"],
                 metadata_=state_d["metadata"],
                 is_valid=validation.is_valid,
-                validation_errors=list(validation.errors) if validation.errors else None,
+                validation_errors=[e.message for e in validation.errors] if validation.errors else None,
             )
             await service.save_composition_state(session_id, state_data)
             response_body["partial_state"] = state_d
@@ -378,7 +381,7 @@ def create_session_router() -> APIRouter:
                 outputs=state_d["outputs"],
                 metadata_=state_d["metadata"],
                 is_valid=validation.is_valid,
-                validation_errors=list(validation.errors) if validation.errors else None,
+                validation_errors=[e.message for e in validation.errors] if validation.errors else None,
             )
             new_state_record = await service.save_composition_state(
                 session.id,
@@ -488,7 +491,7 @@ def create_session_router() -> APIRouter:
                 outputs=state_d["outputs"],
                 metadata_=state_d["metadata"],
                 is_valid=validation.is_valid,
-                validation_errors=list(validation.errors) if validation.errors else None,
+                validation_errors=[e.message for e in validation.errors] if validation.errors else None,
             )
             new_state_record = await service.save_composition_state(
                 session.id,

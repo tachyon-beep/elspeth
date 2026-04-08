@@ -16,6 +16,7 @@ from elspeth.web.catalog.schemas import (
 from elspeth.web.composer.state import (
     CompositionState,
     PipelineMetadata,
+    ValidationEntry,
 )
 from elspeth.web.composer.tools import (
     ToolResult,
@@ -99,7 +100,7 @@ class TestToolResult:
         result = ToolResult(
             success=True,
             updated_state=state,
-            validation=ValidationSummary(is_valid=False, errors=("err",)),
+            validation=ValidationSummary(is_valid=False, errors=(ValidationEntry("test", "err", "high"),)),
             affected_nodes=("n1", "n2"),
         )
         with pytest.raises(AttributeError):
@@ -127,14 +128,19 @@ class TestToolResult:
             validation=ValidationSummary(
                 is_valid=True,
                 errors=(),
-                warnings=("warn1", "warn2"),
-                suggestions=("sug1",),
+                warnings=(ValidationEntry("test", "warn1", "medium"), ValidationEntry("test", "warn2", "medium")),
+                suggestions=(ValidationEntry("test", "sug1", "low"),),
             ),
             affected_nodes=(),
         )
         d = result.to_dict()
-        assert d["validation"]["warnings"] == ["warn1", "warn2"]
-        assert d["validation"]["suggestions"] == ["sug1"]
+        assert d["validation"]["warnings"] == [
+            {"component": "test", "message": "warn1", "severity": "medium"},
+            {"component": "test", "message": "warn2", "severity": "medium"},
+        ]
+        assert d["validation"]["suggestions"] == [
+            {"component": "test", "message": "sug1", "severity": "low"},
+        ]
 
     def test_to_dict_empty_warnings_and_suggestions(self) -> None:
         state = _empty_state()
@@ -857,10 +863,10 @@ class TestDiscoveryTools:
 
 
 class TestToolDefinitions:
-    def test_has_twenty_seven_tools(self) -> None:
-        """8 discovery + 13 mutation + 3 blob tools + 3 secret tools = 27 tools."""
+    def test_has_thirty_two_tools(self) -> None:
+        """9 discovery + 13 mutation + 7 blob tools + 3 secret tools = 32 tools."""
         defs = get_tool_definitions()
-        assert len(defs) == 27
+        assert len(defs) == 32
 
     def test_all_have_json_schema(self) -> None:
         for defn in get_tool_definitions():
@@ -888,16 +894,16 @@ class TestToolResultValidation:
         assert result.validation is not None
         # Source is set but no sinks — should have validation error
         assert not result.validation.is_valid
-        assert any("No sinks" in e for e in result.validation.errors)
+        assert any("No sinks" in e.message for e in result.validation.errors)
 
 
 class TestToolRegistry:
     """Tests for the tool registry pattern — two dicts + cacheable frozenset."""
 
-    def test_discovery_tools_has_eight_entries(self) -> None:
+    def test_discovery_tools_has_nine_entries(self) -> None:
         from elspeth.web.composer.tools import _DISCOVERY_TOOLS
 
-        assert len(_DISCOVERY_TOOLS) == 8
+        assert len(_DISCOVERY_TOOLS) == 9
         expected = {
             "list_sources",
             "list_transforms",
@@ -907,6 +913,7 @@ class TestToolRegistry:
             "explain_validation_error",
             "list_models",
             "preview_pipeline",
+            "diff_pipeline",
         }
         assert set(_DISCOVERY_TOOLS.keys()) == expected
 
@@ -937,14 +944,14 @@ class TestToolRegistry:
         overlap = set(_DISCOVERY_TOOLS.keys()) & set(_MUTATION_TOOLS.keys())
         assert overlap == set(), f"Registry overlap: {overlap}"
 
-    def test_cacheable_discovery_equals_discovery(self) -> None:
-        """All discovery tools are cacheable (get_current_state was removed)."""
+    def test_cacheable_discovery_excludes_diff(self) -> None:
+        """diff_pipeline depends on mutable state, so it is not cacheable."""
         from elspeth.web.composer.tools import (
             _CACHEABLE_DISCOVERY_TOOLS,
             _DISCOVERY_TOOLS,
         )
 
-        assert frozenset(_DISCOVERY_TOOLS.keys()) == _CACHEABLE_DISCOVERY_TOOLS
+        assert frozenset(_DISCOVERY_TOOLS.keys()) - {"diff_pipeline"} == _CACHEABLE_DISCOVERY_TOOLS
 
     def test_cacheable_is_subset_of_discovery(self) -> None:
         from elspeth.web.composer.tools import (

@@ -38,10 +38,10 @@ class TestBuildToolDefs:
         tools = _build_tool_defs()
         assert len(tools) > 20
 
-    def test_expected_count_is_27(self) -> None:
-        """21 composer (8 discovery + 13 mutation) + 6 session = 27."""
+    def test_expected_count_is_28(self) -> None:
+        """22 composer (9 discovery + 13 mutation) + 6 session = 28."""
         tools = _build_tool_defs()
-        assert len(tools) == 27
+        assert len(tools) == 28
 
     def test_all_tools_have_name_and_description(self) -> None:
         for tool in _build_tool_defs():
