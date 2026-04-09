@@ -26,7 +26,7 @@ from elspeth.contracts import BatchPendingError
 if TYPE_CHECKING:
     from elspeth.contracts import Operation
     from elspeth.contracts.plugin_context import PluginContext
-    from elspeth.core.landscape.recorder import LandscapeRecorder
+    from elspeth.core.landscape.execution_repository import ExecutionRepository
 
 logger = logging.getLogger(__name__)
 
@@ -60,7 +60,7 @@ class OperationHandle:
 
 @contextmanager
 def track_operation(
-    recorder: LandscapeRecorder,
+    recorder: ExecutionRepository,
     run_id: str,
     node_id: str,
     operation_type: Literal["source_load", "sink_write"],
@@ -106,7 +106,7 @@ def track_operation(
             # No output_data for sources (row count tracked elsewhere)
 
     Args:
-        recorder: LandscapeRecorder for audit recording
+        recorder: ExecutionRepository for audit recording
         run_id: Run ID this operation belongs to
         node_id: Source or sink node performing the operation
         operation_type: Type of operation ('source_load' or 'sink_write')

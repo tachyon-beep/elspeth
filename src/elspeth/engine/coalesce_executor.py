@@ -26,6 +26,7 @@ from elspeth.contracts.freeze import deep_thaw
 from elspeth.contracts.schema_contract import FieldContract, PipelineRow, SchemaContract
 from elspeth.contracts.types import NodeID, StepResolver
 from elspeth.core.config import CoalesceSettings
+from elspeth.core.landscape.data_flow_repository import DataFlowRepository
 from elspeth.core.landscape.execution_repository import ExecutionRepository
 from elspeth.engine.clock import DEFAULT_CLOCK
 from elspeth.engine.spans import SpanFactory
@@ -128,6 +129,7 @@ class CoalesceExecutor:
         step_resolver: StepResolver,
         clock: "Clock | None" = None,
         max_completed_keys: int = 10000,
+        data_flow: DataFlowRepository | None = None,
     ) -> None:
         """Initialize executor.
 
@@ -142,11 +144,14 @@ class CoalesceExecutor:
             clock: Optional clock for time access. Defaults to system clock.
                    Inject MockClock for deterministic testing.
             max_completed_keys: Maximum late-arrival completion keys retained in memory.
+            data_flow: Data flow repository for token outcome recording.
+                       Optional for backwards compatibility with tests.
         """
         if max_completed_keys <= 0:
             raise OrchestrationInvariantError(f"max_completed_keys must be > 0, got {max_completed_keys}")
 
         self._execution = execution
+        self._data_flow = data_flow
         self._spans = span_factory
         self._token_manager = token_manager
         self._run_id = run_id
@@ -484,7 +489,11 @@ class CoalesceExecutor:
                 error=error,
                 duration_ms=0,
             )
-            self._execution.record_token_outcome(  # type: ignore[attr-defined]  # TODO: Task 5 — needs DataFlowRepository
+            if self._data_flow is None:
+                raise OrchestrationInvariantError(
+                    "CoalesceExecutor.data_flow is None but token outcome recording requires DataFlowRepository"
+                )
+            self._data_flow.record_token_outcome(
                 ref=TokenRef(token_id=token.token_id, run_id=self._run_id),
                 outcome=RowOutcome.FAILED,
                 error_hash=error_hash,
@@ -632,7 +641,11 @@ class CoalesceExecutor:
                 error=error,
                 duration_ms=(now - entry.arrival_time) * 1000,
             )
-            self._execution.record_token_outcome(  # type: ignore[attr-defined]  # TODO: Task 5 — needs DataFlowRepository
+            if self._data_flow is None:
+                raise OrchestrationInvariantError(
+                    "CoalesceExecutor.data_flow is None but token outcome recording requires DataFlowRepository"
+                )
+            self._data_flow.record_token_outcome(
                 ref=TokenRef(token_id=entry.token.token_id, run_id=self._run_id),
                 outcome=RowOutcome.FAILED,
                 error_hash=error_hash,
@@ -819,7 +832,11 @@ class CoalesceExecutor:
                 completed_state_ids.add(entry.state_id)
 
                 # Record terminal token outcome (COALESCED)
-                self._execution.record_token_outcome(  # type: ignore[attr-defined]  # TODO: Task 5 — needs DataFlowRepository
+                if self._data_flow is None:
+                    raise OrchestrationInvariantError(
+                        "CoalesceExecutor.data_flow is None but token outcome recording requires DataFlowRepository"
+                    )
+                self._data_flow.record_token_outcome(
                     ref=TokenRef(token_id=entry.token.token_id, run_id=self._run_id),
                     outcome=RowOutcome.COALESCED,
                     join_group_id=merged_token.join_group_id,

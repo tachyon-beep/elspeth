@@ -325,7 +325,7 @@ class SinkExecutor:
         # before re-raising — no token may exit this method without a terminal state.
         try:
             with track_operation(
-                recorder=self._execution,  # type: ignore[arg-type]  # TODO: Task 5 — track_operation needs updating
+                recorder=self._execution,
                 run_id=self._run_id,
                 node_id=sink_node_id,
                 operation_type="sink_write",

@@ -34,7 +34,7 @@ if TYPE_CHECKING:
     from elspeth.contracts.aggregation_checkpoint import AggregationCheckpointState
     from elspeth.contracts.plugin_context import PluginContext
     from elspeth.contracts.results import RowResult
-    from elspeth.core.landscape import LandscapeRecorder
+    from elspeth.core.landscape.execution_repository import ExecutionRepository
     from elspeth.engine.dag_navigator import WorkItem
     from elspeth.engine.processor import RowProcessor
 
@@ -79,7 +79,7 @@ def find_aggregation_transform(
 
 
 def handle_incomplete_batches(
-    recorder: LandscapeRecorder,
+    execution: ExecutionRepository,
     run_id: str,
 ) -> dict[str, str]:
     """Find and handle incomplete batches for recovery.
@@ -89,7 +89,7 @@ def handle_incomplete_batches(
     - DRAFT batches: Leave as-is (collection continues)
 
     Args:
-        recorder: LandscapeRecorder for database operations
+        execution: ExecutionRepository for database operations
         run_id: Run being recovered
 
     Returns:
@@ -100,18 +100,18 @@ def handle_incomplete_batches(
     """
     from elspeth.contracts.enums import BatchStatus
 
-    incomplete = recorder.get_incomplete_batches(run_id)
+    incomplete = execution.get_incomplete_batches(run_id)
     batch_id_mapping: dict[str, str] = {}
 
     for batch in incomplete:
         if batch.status == BatchStatus.EXECUTING:
             # Crash interrupted mid-execution, mark failed then retry
-            recorder.update_batch_status(batch.batch_id, BatchStatus.FAILED)
-            retry = recorder.retry_batch(batch.batch_id)
+            execution.update_batch_status(batch.batch_id, BatchStatus.FAILED)
+            retry = execution.retry_batch(batch.batch_id)
             batch_id_mapping[batch.batch_id] = retry.batch_id
         elif batch.status == BatchStatus.FAILED:
             # Previous failure, retry
-            retry = recorder.retry_batch(batch.batch_id)
+            retry = execution.retry_batch(batch.batch_id)
             batch_id_mapping[batch.batch_id] = retry.batch_id
         # DRAFT batches continue normally (collection resumes)
 

@@ -81,12 +81,12 @@ allow_hits:
   reason: 'Tier 3 validation: raw YAML from operator files — isinstance checks validate each entry is a mapping'
   safety: Raises ValueError with index and type info on malformed entry
   expires: null
-- key: engine/coalesce_executor.py:R5:CoalesceExecutor:_execute_merge:fp=61364cd3d94da4c1
+- key: engine/coalesce_executor.py:R5:CoalesceExecutor:_execute_merge:fp=ee6ddac937b88da7
   owner: architecture
   reason: AuditIntegrityError check prevents writing FAILED records to a compromised database — leaving node states as pending is more honest than corrupting further
   safety: Re-raises immediately; no writes to the untrustworthy database
   expires: null
-- key: engine/coalesce_executor.py:R4:CoalesceExecutor:_execute_merge:fp=353da908add18e11
+- key: engine/coalesce_executor.py:R4:CoalesceExecutor:_execute_merge:fp=08fbd24011be80f5
   owner: architecture
   reason: Best-effort cleanup of OPEN branch node_states after merge failure — broad catch prevents cleanup failure from masking original merge exception
   safety: Logs error with state_id and cleanup exception details; always re-raises the original error
@@ -136,72 +136,72 @@ allow_hits:
   reason: Cleanup/pop with default - entry may not exist due to race between timeout and emit
   safety: Documented TOCTOU race pattern - pop(None) is intentional cleanup of possibly-absent entry
   expires: '2026-05-02'
-- key: engine/processor.py:R1:RowProcessor:_notify_coalesce_of_lost_branch:fp=2c87707b5464ab57
+- key: engine/processor.py:R1:RowProcessor:_notify_coalesce_of_lost_branch:fp=9b15e02842f1c74a
   owner: architecture
   reason: dict.get() correct - not all branch names have coalesce point mapping
   safety: Crashes on type mismatch - no silent fallback
   expires: '2026-05-12'
-- key: engine/orchestrator/core.py:R4:Orchestrator:_emit_phase_error:fp=54285c021a5d6ce6
+- key: engine/orchestrator/core.py:R4:Orchestrator:_emit_phase_error:fp=d5f4b0f40784a973
   owner: architecture
   reason: Best-effort PhaseError emission — event-bus handler bugs must not mask the original pipeline exception
   safety: Catches and logs; original exception always re-raised by caller
   expires: '2026-07-10'
-- key: engine/orchestrator/core.py:R4:Orchestrator:_cleanup_plugins:fp=ca1f75b36a23f4e1
+- key: engine/orchestrator/core.py:R4:Orchestrator:_cleanup_plugins:fp=e999aef3a5d2e527
   owner: architecture
   reason: Plugin cleanup must attempt all closures; broad catch collects errors then raises
   safety: Code reviewed - collects all cleanup errors into list, raises ExceptionGroup after all attempted
   expires: '2026-07-10'
-- key: engine/orchestrator/core.py:R4:Orchestrator:_cleanup_plugins:fp=386b65daec51fd0c
+- key: engine/orchestrator/core.py:R4:Orchestrator:_cleanup_plugins:fp=02f8caea12aa2428
   owner: architecture
   reason: Plugin cleanup must attempt all closures; broad catch collects errors then raises
   safety: Code reviewed - collects all cleanup errors into list, raises ExceptionGroup after all attempted
   expires: '2026-07-10'
-- key: engine/orchestrator/core.py:R4:Orchestrator:_cleanup_plugins:fp=70b62d0116ccf349
+- key: engine/orchestrator/core.py:R4:Orchestrator:_cleanup_plugins:fp=8144ca9dec1004db
   owner: architecture
   reason: Plugin cleanup must attempt all closures; broad catch collects errors then raises
   safety: Code reviewed - collects all cleanup errors into list, raises ExceptionGroup after all attempted
   expires: '2026-07-10'
-- key: engine/orchestrator/core.py:R4:Orchestrator:_cleanup_plugins:fp=fc8f0e23fd753986
+- key: engine/orchestrator/core.py:R4:Orchestrator:_cleanup_plugins:fp=999cd2ea97688974
   owner: architecture
   reason: Plugin cleanup must attempt all closures; broad catch collects errors then raises
   safety: Code reviewed - collects all cleanup errors into list, raises ExceptionGroup after all attempted
   expires: '2026-07-10'
-- key: engine/orchestrator/core.py:R4:Orchestrator:_cleanup_plugins:fp=e69d4329a53182d4
+- key: engine/orchestrator/core.py:R4:Orchestrator:_cleanup_plugins:fp=5783e28c5cf2c03e
   owner: architecture
   reason: Plugin cleanup must attempt all closures; broad catch collects errors then raises
   safety: Code reviewed - collects all cleanup errors into list, raises ExceptionGroup after all attempted
   expires: '2026-07-10'
-- key: engine/orchestrator/core.py:R4:Orchestrator:_cleanup_plugins:fp=4416144fe1add000
+- key: engine/orchestrator/core.py:R4:Orchestrator:_cleanup_plugins:fp=ae2aa18717543f4d
   owner: architecture
   reason: Plugin cleanup must attempt all closures; broad catch collects errors then raises
   safety: Code reviewed - collects all cleanup errors into list, raises ExceptionGroup after all attempted
   expires: '2026-07-10'
-- key: engine/orchestrator/core.py:R4:Orchestrator:_execute_export_phase:fp=2c0f6c77b70aa070
+- key: engine/orchestrator/core.py:R4:Orchestrator:_execute_export_phase:fp=ef66ffb9ae27e535
   owner: architecture
   reason: Best-effort export status recording — must not mask original export exception
   safety: Catches and logs; original export exception always re-raised
   expires: '2026-07-10'
-- key: engine/orchestrator/core.py:R4:Orchestrator:run:fp=094b139109ce002f
+- key: engine/orchestrator/core.py:R4:Orchestrator:run:fp=9f7cf196c31b7bed
   owner: architecture
   reason: Best-effort interrupted ceremony — GracefulShutdownError must not be masked by ceremony failure
   safety: Catches and logs; original shutdown exception always re-raised
   expires: '2026-07-10'
-- key: engine/orchestrator/core.py:R4:Orchestrator:run:fp=ef57b1907b784718
+- key: engine/orchestrator/core.py:R4:Orchestrator:run:fp=85f3fa12a9c1ef13
   owner: architecture
   reason: Best-effort failure ceremony — original pipeline exception must not be masked
   safety: Catches and logs; original exception always re-raised
   expires: '2026-07-10'
-- key: engine/orchestrator/core.py:R6:Orchestrator:_handle_quarantine_row:fp=e9b3c7e504cd4189
+- key: engine/orchestrator/core.py:R6:Orchestrator:_handle_quarantine_row:fp=fc8b541b162da085
   owner: bugfix
   reason: Tier-3 boundary — quarantined row data may contain NaN/Infinity that stable_hash rejects
   safety: Falls back to repr_hash with debug logging; audit trail uses separate hashing path
   expires: '2026-07-10'
-- key: engine/orchestrator/core.py:R4:Orchestrator:resume:fp=31655b5293126445
+- key: engine/orchestrator/core.py:R4:Orchestrator:resume:fp=9a954f66620593a8
   owner: architecture
   reason: Best-effort interrupted ceremony on resume — must not mask original shutdown exception
   safety: Catches and logs; original exception always re-raised
   expires: '2026-07-10'
-- key: engine/orchestrator/core.py:R4:Orchestrator:resume:fp=69821e193ff95c22
+- key: engine/orchestrator/core.py:R4:Orchestrator:resume:fp=5ad40cafc8b2f751
   owner: architecture
   reason: Best-effort failure ceremony on resume — must not mask original exception
   safety: Catches and logs; original exception always re-raised

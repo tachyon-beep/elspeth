@@ -90,7 +90,8 @@ from elspeth.contracts.types import (
 from elspeth.core.canonical import sanitize_for_canonical, stable_hash
 from elspeth.core.config import AggregationSettings
 from elspeth.core.dag import ExecutionGraph
-from elspeth.core.landscape import LandscapeDB, LandscapeRecorder
+from elspeth.core.landscape import LandscapeDB
+from elspeth.core.landscape.factory import RecorderFactory
 from elspeth.core.operations import track_operation
 
 # Import module functions from orchestrator submodules
@@ -272,7 +273,7 @@ class Orchestrator:
     def _emit_interrupted_ceremony(
         self,
         run_id: str,
-        recorder: LandscapeRecorder,
+        factory: RecorderFactory,
         shutdown_exc: GracefulShutdownError,
         start_time: float,
     ) -> None:
@@ -284,7 +285,7 @@ class Orchestrator:
         from elspeth.telemetry import RunFinished
 
         total_duration = time.perf_counter() - start_time
-        recorder.finalize_run(run_id, status=RunStatus.INTERRUPTED)
+        factory.run_lifecycle.finalize_run(run_id, status=RunStatus.INTERRUPTED)
 
         self._emit_telemetry(
             RunFinished(
@@ -314,7 +315,7 @@ class Orchestrator:
     def _emit_failed_ceremony(
         self,
         run_id: str,
-        recorder: LandscapeRecorder,
+        factory: RecorderFactory,
         start_time: float,
     ) -> None:
         """Emit telemetry and EventBus events for a failed run.
@@ -326,7 +327,7 @@ class Orchestrator:
         from elspeth.telemetry import RunFinished
 
         total_duration = time.perf_counter() - start_time
-        recorder.finalize_run(run_id, status=RunStatus.FAILED)
+        factory.run_lifecycle.finalize_run(run_id, status=RunStatus.FAILED)
 
         self._emit_telemetry(
             RunFinished(
@@ -537,7 +538,7 @@ class Orchestrator:
 
     def _write_pending_to_sinks(
         self,
-        recorder: LandscapeRecorder,
+        factory: RecorderFactory,
         run_id: str,
         config: PipelineConfig,
         ctx: PluginContext,
@@ -554,7 +555,7 @@ class Orchestrator:
         duplication of the sink write orchestration pattern.
 
         Args:
-            recorder: LandscapeRecorder for audit trail
+            factory: RecorderFactory for audit trail
             run_id: Current run ID
             config: Pipeline configuration
             ctx: Plugin context
@@ -569,7 +570,7 @@ class Orchestrator:
 
         from elspeth.engine.executors import SinkExecutor
 
-        sink_executor = SinkExecutor(recorder, self._span_factory, run_id)  # type: ignore[arg-type,call-arg]  # TODO: Task 5 — pass ExecutionRepository + DataFlowRepository
+        sink_executor = SinkExecutor(factory.execution, factory.data_flow, self._span_factory, run_id)
         step = sink_step
         total_diversions = 0
 
@@ -843,7 +844,7 @@ class Orchestrator:
         graph: ExecutionGraph,
         config: PipelineConfig,
         settings: ElspethSettings | None,
-        recorder: LandscapeRecorder,
+        factory: RecorderFactory,
         run_id: str,
         source_id: NodeID,
         edge_map: dict[tuple[NodeID, str], str],
@@ -898,15 +899,16 @@ class Orchestrator:
             # payload_store intentionally omitted: CoalesceExecutor's TokenManager only
             # calls coalesce_tokens(), which does not persist payloads (payloads are
             # recorded by the RowProcessor's TokenManager during initial token creation).
-            token_manager = TokenManager(recorder, step_resolver=step_resolver)  # type: ignore[arg-type]  # TODO: Task 5 — pass DataFlowRepository
+            token_manager = TokenManager(factory.data_flow, step_resolver=step_resolver)
             coalesce_executor = CoalesceExecutor(
-                execution=recorder,  # type: ignore[arg-type]  # TODO: Task 5 — pass ExecutionRepository
+                execution=factory.execution,
                 span_factory=self._span_factory,
                 token_manager=token_manager,
                 run_id=run_id,
                 step_resolver=step_resolver,
                 clock=self._clock,
                 max_completed_keys=self._coalesce_completed_keys_limit,
+                data_flow=factory.data_flow,
             )
 
             for coalesce_settings_entry in settings.coalesce:
@@ -931,7 +933,8 @@ class Orchestrator:
         typed_aggregation_settings: dict[NodeID, AggregationSettings] = {NodeID(k): v for k, v in config.aggregation_settings.items()}
 
         processor = RowProcessor(
-            recorder=recorder,
+            execution=factory.execution,
+            data_flow=factory.data_flow,
             span_factory=self._span_factory,
             run_id=run_id,
             source_node_id=source_id,
@@ -1000,8 +1003,8 @@ class Orchestrator:
         config: PipelineConfig,
         payload_store: PayloadStore,
         secret_resolutions: list[SecretResolutionInput] | None,
-    ) -> tuple[LandscapeRecorder, Any]:
-        """Execute the DATABASE phase: create recorder, begin run, record secrets.
+    ) -> tuple[RecorderFactory, Any]:
+        """Execute the DATABASE phase: create factory, begin run, record secrets.
 
         Args:
             config: Pipeline configuration.
@@ -1009,7 +1012,7 @@ class Orchestrator:
             secret_resolutions: Optional secret resolution records.
 
         Returns:
-            Tuple of (recorder, run) where run has run_id and config_hash attributes.
+            Tuple of (factory, run) where run has run_id and config_hash attributes.
 
         Raises:
             Exception: Re-raises any database connection or initialization failure.
@@ -1029,8 +1032,8 @@ class Orchestrator:
             # This enables proper contract propagation when resuming from stored payloads
             source_contract = config.source.get_schema_contract()
 
-            recorder = LandscapeRecorder(self._db, payload_store=payload_store)
-            run = recorder.begin_run(
+            factory = RecorderFactory(self._db, payload_store=payload_store)
+            run = factory.run_lifecycle.begin_run(
                 config=config.config,
                 canonical_version=self._canonical_version,
                 source_schema_json=source_schema_json,
@@ -1040,7 +1043,7 @@ class Orchestrator:
             # Record secret resolutions in audit trail (deferred from pre-run loading)
             # Resolutions already contain pre-computed fingerprints (no plaintext values)
             if secret_resolutions:
-                recorder.record_secret_resolutions(
+                factory.run_lifecycle.record_secret_resolutions(
                     run_id=run.run_id,
                     resolutions=secret_resolutions,
                 )
@@ -1060,11 +1063,11 @@ class Orchestrator:
             self._emit_phase_error(PipelinePhase.DATABASE, e)
             raise  # CRITICAL: Always re-raise - database connection failure is fatal
 
-        return recorder, run
+        return factory, run
 
     def _execute_export_phase(
         self,
-        recorder: LandscapeRecorder,
+        factory: RecorderFactory,
         run_id: str,
         settings: ElspethSettings,
         sink_factory: Callable[[str], SinkProtocol],
@@ -1072,7 +1075,7 @@ class Orchestrator:
         """Execute the EXPORT phase: export Landscape data to configured sink.
 
         Args:
-            recorder: LandscapeRecorder for status tracking.
+            factory: RecorderFactory for status tracking.
             run_id: Run identifier.
             settings: Full settings (export config accessed from settings.landscape.export).
             sink_factory: Creates a fresh sink instance by name for export.
@@ -1083,7 +1086,7 @@ class Orchestrator:
         from elspeth.telemetry import PhaseChanged
 
         export_config = settings.landscape.export
-        recorder.set_export_status(
+        factory.run_lifecycle.set_export_status(
             run_id,
             status=ExportStatus.PENDING,
             export_format=export_config.format,
@@ -1106,12 +1109,12 @@ class Orchestrator:
 
             export_landscape(self._db, run_id, settings, sink_factory)
 
-            recorder.set_export_status(run_id, status=ExportStatus.COMPLETED)
+            factory.run_lifecycle.set_export_status(run_id, status=ExportStatus.COMPLETED)
             self._events.emit(PhaseCompleted(phase=PipelinePhase.EXPORT, duration_seconds=time.perf_counter() - phase_start))
         except Exception as export_error:
             self._emit_phase_error(PipelinePhase.EXPORT, export_error, target=export_config.sink)
             try:
-                recorder.set_export_status(
+                factory.run_lifecycle.set_export_status(
                     run_id,
                     status=ExportStatus.FAILED,
                     error=str(export_error),
@@ -1172,8 +1175,8 @@ class Orchestrator:
         # Schema validation now happens in ExecutionGraph.validate() during graph construction
         self._reset_checkpoint_sequence()
 
-        # DATABASE phase - create recorder and begin run
-        recorder, run = self._initialize_database_phase(
+        # DATABASE phase - create factory and begin run
+        factory, run = self._initialize_database_phase(
             config,
             payload_store,
             secret_resolutions,
@@ -1181,7 +1184,7 @@ class Orchestrator:
 
         # Record pre-flight results (deferred from bootstrap_and_run)
         if preflight_results is not None:
-            recorder.record_preflight_results(
+            factory.run_lifecycle.record_preflight_results(
                 run_id=run.run_id,
                 preflight=preflight_results,
             )
@@ -1196,7 +1199,7 @@ class Orchestrator:
             shutdown_ctx = nullcontext(shutdown_event) if shutdown_event is not None else self._shutdown_handler_context()
             with self._span_factory.run_span(run.run_id), shutdown_ctx as active_event:
                 result = self._execute_run(
-                    recorder,
+                    factory,
                     run.run_id,
                     config,
                     graph,
@@ -1207,7 +1210,7 @@ class Orchestrator:
                 )
 
             # Complete run with reproducibility grade computation
-            recorder.finalize_run(run.run_id, status=RunStatus.COMPLETED)
+            factory.run_lifecycle.finalize_run(run.run_id, status=RunStatus.COMPLETED)
             result = replace(result, status=RunStatus.COMPLETED)
             run_completed = True
 
@@ -1235,7 +1238,7 @@ class Orchestrator:
                         "The caller must supply a sink_factory so the export phase can create "
                         "a fresh sink instance (the pipeline's sinks are already closed)."
                     )
-                self._execute_export_phase(recorder, run.run_id, settings, sink_factory)
+                self._execute_export_phase(factory, run.run_id, settings, sink_factory)
 
             # Emit RunSummary event with final metrics
             total_duration = time.perf_counter() - run_start_time
@@ -1265,7 +1268,7 @@ class Orchestrator:
             raise
         except GracefulShutdownError as shutdown_exc:
             try:
-                self._emit_interrupted_ceremony(run.run_id, recorder, shutdown_exc, run_start_time)
+                self._emit_interrupted_ceremony(run.run_id, factory, shutdown_exc, run_start_time)
             except Exception:
                 slog.debug("Interrupted ceremony failed — original exception preserved", run_id=run.run_id)
             raise  # Propagate to CLI
@@ -1292,7 +1295,7 @@ class Orchestrator:
                         )
                     )
                 else:
-                    self._emit_failed_ceremony(run.run_id, recorder, run_start_time)
+                    self._emit_failed_ceremony(run.run_id, factory, run_start_time)
             except Exception:
                 slog.debug("Failure ceremony failed — original exception preserved", run_id=run.run_id)
             raise  # CRITICAL: Always re-raise - observability doesn't suppress errors
@@ -1301,7 +1304,7 @@ class Orchestrator:
 
     def _register_nodes_with_landscape(
         self,
-        recorder: LandscapeRecorder,
+        factory: RecorderFactory,
         run_id: str,
         config: PipelineConfig,
         graph: ExecutionGraph,
@@ -1315,10 +1318,10 @@ class Orchestrator:
 
         Iterates the topological execution order, resolves plugin metadata
         (version, determinism), schema config, and output contract for each node,
-        then calls recorder.register_node().
+        then calls factory.data_flow.register_node().
 
         Args:
-            recorder: LandscapeRecorder for audit trail.
+            factory: RecorderFactory for audit trail.
             run_id: Run identifier.
             config: Pipeline configuration (for source contract).
             graph: Execution graph (for node info lookup).
@@ -1372,7 +1375,7 @@ class Orchestrator:
             if node_id == source_id:
                 output_contract = config.source.get_schema_contract()
 
-            recorder.register_node(
+            factory.data_flow.register_node(
                 run_id=run_id,
                 node_id=node_id,
                 plugin_name=node_info.plugin_name,
@@ -1386,7 +1389,7 @@ class Orchestrator:
 
     def _register_graph_nodes_and_edges(
         self,
-        recorder: LandscapeRecorder,
+        factory: RecorderFactory,
         run_id: str,
         config: PipelineConfig,
         graph: ExecutionGraph,
@@ -1400,7 +1403,7 @@ class Orchestrator:
         4. Validate route destinations, error sinks, quarantine destinations
 
         Args:
-            recorder: LandscapeRecorder for audit trail
+            factory: RecorderFactory for audit trail
             run_id: Run identifier
             config: Pipeline configuration
             graph: Execution graph
@@ -1459,7 +1462,7 @@ class Orchestrator:
 
             # Register nodes with Landscape using graph's node IDs and actual plugin metadata
             self._register_nodes_with_landscape(
-                recorder,
+                factory,
                 run_id,
                 config,
                 graph,
@@ -1475,7 +1478,7 @@ class Orchestrator:
             edge_map: dict[tuple[NodeID, str], str] = {}
 
             for edge_info in graph.get_edges():
-                edge = recorder.register_edge(
+                edge = factory.data_flow.register_edge(
                     run_id=run_id,
                     from_node_id=edge_info.from_node,
                     to_node_id=edge_info.to_node,
@@ -1541,7 +1544,7 @@ class Orchestrator:
 
     def _initialize_run_context(
         self,
-        recorder: LandscapeRecorder,
+        factory: RecorderFactory,
         run_id: str,
         config: PipelineConfig,
         graph: ExecutionGraph,
@@ -1584,12 +1587,12 @@ class Orchestrator:
             sink_id_map=sink_id_map,
         )
 
-        # Create context with the LandscapeRecorder
+        # Create context with the PluginAuditWriter
         # Restore batch checkpoints if provided (from previous BatchPendingError)
         ctx = PluginContext(
             run_id=run_id,
             config=config.config,
-            landscape=recorder,
+            landscape=factory.plugin_audit_writer(),
             rate_limit_registry=self._rate_limit_registry,
             concurrency_config=self._concurrency_config,
             _batch_checkpoints=batch_checkpoints or {},
@@ -1613,7 +1616,7 @@ class Orchestrator:
                 graph=graph,
                 config=config,
                 settings=settings,
-                recorder=recorder,
+                factory=factory,
                 run_id=run_id,
                 source_id=source_id,
                 edge_map=edge_map,
@@ -1652,7 +1655,7 @@ class Orchestrator:
 
     def _setup_resume_context(
         self,
-        recorder: LandscapeRecorder,
+        factory: RecorderFactory,
         run_id: str,
         config: PipelineConfig,
         graph: ExecutionGraph,
@@ -1676,7 +1679,7 @@ class Orchestrator:
         # Build edge_map from database (load real edge IDs registered in original run)
         # CRITICAL: Must use real edge_ids for FK integrity when recording routing events
         # Convert keys from (str, str) to (NodeID, str) to match RowProcessor's type
-        raw_edge_map = recorder.get_edge_map(run_id)
+        raw_edge_map = factory.data_flow.get_edge_map(run_id)
         edge_map: dict[tuple[NodeID, str], str] = {(NodeID(k[0]), k[1]): v for k, v in raw_edge_map.items()}
 
         # Get route resolution map for validation
@@ -1728,7 +1731,7 @@ class Orchestrator:
 
     def _flush_and_write_sinks(
         self,
-        recorder: LandscapeRecorder,
+        factory: RecorderFactory,
         run_id: str,
         loop_ctx: LoopContext,
         sink_id_map: Mapping[SinkName, NodeID],
@@ -1751,7 +1754,7 @@ class Orchestrator:
         counters = loop_ctx.counters
 
         total_diversions = self._write_pending_to_sinks(
-            recorder=recorder,
+            factory=factory,
             run_id=run_id,
             config=loop_ctx.config,
             ctx=loop_ctx.ctx,
@@ -1786,7 +1789,7 @@ class Orchestrator:
 
     def _handle_quarantine_row(
         self,
-        recorder: LandscapeRecorder,
+        factory: RecorderFactory,
         run_id: str,
         source_id: NodeID,
         source_item: SourceRow,
@@ -1860,7 +1863,7 @@ class Orchestrator:
         # Status is FAILED because the source validation rejected this row.
         quarantine_data = source_item.row if isinstance(source_item.row, dict) else {"_raw": source_item.row}
         quarantine_error_msg = source_item.quarantine_error or "unknown_validation_error"
-        source_state = recorder.begin_node_state(
+        source_state = factory.execution.begin_node_state(
             token_id=quarantine_token.token_id,
             node_id=source_id,
             run_id=run_id,
@@ -1868,7 +1871,7 @@ class Orchestrator:
             input_data=quarantine_data,
             quarantined=True,
         )
-        recorder.complete_node_state(
+        factory.execution.complete_node_state(
             state_id=source_state.state_id,
             status=NodeStateStatus.FAILED,
             duration_ms=0,
@@ -1892,7 +1895,7 @@ class Orchestrator:
                 f"on_validation_failure should have created a DIVERT edge "
                 f"in from_plugin_instances()."
             ) from exc
-        recorder.record_routing_event(
+        factory.execution.record_routing_event(
             state_id=source_state.state_id,
             edge_id=quarantine_edge_id,
             mode=RoutingMode.DIVERT,
@@ -1934,7 +1937,7 @@ class Orchestrator:
 
     def _record_field_resolution(
         self,
-        recorder: LandscapeRecorder,
+        factory: RecorderFactory,
         run_id: str,
         config: PipelineConfig,
     ) -> bool:
@@ -1954,7 +1957,7 @@ class Orchestrator:
             return False
 
         resolution_mapping, normalization_version = field_resolution
-        recorder.record_source_field_resolution(
+        factory.run_lifecycle.record_source_field_resolution(
             run_id=run_id,
             resolution_mapping=resolution_mapping,
             normalization_version=normalization_version,
@@ -1974,7 +1977,7 @@ class Orchestrator:
 
     def _record_schema_contract(
         self,
-        recorder: LandscapeRecorder,
+        factory: RecorderFactory,
         run_id: str,
         source_id: NodeID,
         config: PipelineConfig,
@@ -1994,9 +1997,9 @@ class Orchestrator:
             return False
 
         # Update run-level contract
-        recorder.update_run_contract(run_id, schema_contract)
+        factory.run_lifecycle.update_run_contract(run_id, schema_contract)
         # Update source node's output_contract (was NULL at registration)
-        recorder.update_node_output_contract(run_id, source_id, schema_contract)
+        factory.data_flow.update_node_output_contract(run_id, source_id, schema_contract)
         # Make contract available to transforms via context
         ctx.contract = schema_contract
         return True
@@ -2063,7 +2066,7 @@ class Orchestrator:
     def _finalize_source_iteration(
         self,
         loop_ctx: LoopContext,
-        recorder: LandscapeRecorder,
+        factory: RecorderFactory,
         run_id: str,
         source_id: NodeID,
         source_operation_id: str,
@@ -2146,13 +2149,13 @@ class Orchestrator:
         # Record field resolution for empty sources (header-only files).
         # For sources with rows, this was recorded inside the loop on first iteration.
         if not field_resolution_recorded:
-            self._record_field_resolution(recorder, run_id, config)
+            self._record_field_resolution(factory, run_id, config)
 
         # Record schema contract for runs with no valid source rows.
         # In-loop recording happens on first VALID row. For all-invalid
         # or empty inputs, that branch never executes.
         if not schema_contract_recorded:
-            self._record_schema_contract(recorder, run_id, source_id, config, ctx)
+            self._record_schema_contract(factory, run_id, source_id, config, ctx)
 
     def _load_source_with_events(
         self,
@@ -2191,7 +2194,7 @@ class Orchestrator:
     def _run_main_processing_loop(
         self,
         loop_ctx: LoopContext,
-        recorder: LandscapeRecorder,
+        factory: RecorderFactory,
         run_id: str,
         source_id: NodeID,
         edge_map: Mapping[tuple[NodeID, str], str],
@@ -2224,7 +2227,7 @@ class Orchestrator:
 
         # source_load operation covers the entire source consumption lifecycle
         with track_operation(
-            recorder=recorder,
+            recorder=factory.execution,
             run_id=run_id,
             node_id=source_id,
             operation_type="source_load",
@@ -2246,7 +2249,7 @@ class Orchestrator:
             # schema contract after first VALID row. If begin_run already stored
             # a contract (FIXED mode), skip re-recording.
             field_resolution_recorded = False
-            schema_contract_recorded = recorder.get_run_contract(run_id) is not None
+            schema_contract_recorded = factory.run_lifecycle.get_run_contract(run_id) is not None
 
             # PROCESS phase
             phase_start = time.perf_counter()
@@ -2268,12 +2271,12 @@ class Orchestrator:
                     # Record field resolution on first iteration (generators execute body on first next())
                     if not field_resolution_recorded:
                         field_resolution_recorded = True
-                        self._record_field_resolution(recorder, run_id, config)
+                        self._record_field_resolution(factory, run_id, config)
 
                     # Quarantine path — route directly to sink, skip normal processing
                     if source_item.is_quarantined:
                         self._handle_quarantine_row(
-                            recorder,
+                            factory,
                             run_id,
                             source_id,
                             source_item,
@@ -2300,7 +2303,7 @@ class Orchestrator:
                         continue
 
                     # Record schema contract on first VALID row (quarantined rows don't populate contract)
-                    if not schema_contract_recorded and self._record_schema_contract(recorder, run_id, source_id, config, ctx):
+                    if not schema_contract_recorded and self._record_schema_contract(factory, run_id, source_id, config, ctx):
                         schema_contract_recorded = True
 
                     # Clear operation_id — source item is fetched, transforms set their own state_id
@@ -2358,7 +2361,7 @@ class Orchestrator:
                 # Post-loop: restore operation_id, flush aggregation/coalesce, record deferred state
                 self._finalize_source_iteration(
                     loop_ctx,
-                    recorder,
+                    factory,
                     run_id,
                     source_id,
                     source_operation_id,
@@ -2518,7 +2521,7 @@ class Orchestrator:
 
     def _execute_run(
         self,
-        recorder: LandscapeRecorder,
+        factory: RecorderFactory,
         run_id: str,
         config: PipelineConfig,
         graph: ExecutionGraph,
@@ -2537,11 +2540,11 @@ class Orchestrator:
         self._current_graph = graph
 
         # 1. Register graph nodes and edges
-        artifacts = self._register_graph_nodes_and_edges(recorder, run_id, config, graph)
+        artifacts = self._register_graph_nodes_and_edges(factory, run_id, config, graph)
 
         # 2. Initialize context + processor
         run_ctx = self._initialize_run_context(
-            recorder,
+            factory,
             run_id,
             config,
             graph,
@@ -2566,7 +2569,7 @@ class Orchestrator:
             # 3. Source + Process phase
             loop_result = self._run_main_processing_loop(
                 loop_ctx,
-                recorder,
+                factory,
                 run_id,
                 artifacts.source_id,
                 artifacts.edge_map,
@@ -2576,7 +2579,7 @@ class Orchestrator:
             # 4. Sink writes — outside source_load track_operation context.
             # Each sink write has its own track_operation (sink_write) in SinkExecutor.
             self._flush_and_write_sinks(
-                recorder,
+                factory,
                 run_id,
                 loop_ctx,
                 artifacts.sink_id_map,
@@ -2621,7 +2624,7 @@ class Orchestrator:
     ) -> ResumeState:
         """Reconstruct state needed to process resumed rows.
 
-        Creates a fresh recorder, handles incomplete batches, restores aggregation state,
+        Creates a fresh factory, handles incomplete batches, restores aggregation state,
         deserializes the source schema for type fidelity, validates the schema contract,
         and retrieves unprocessed rows from the payload store.
 
@@ -2638,15 +2641,15 @@ class Orchestrator:
         """
         run_id = resume_point.checkpoint.run_id
 
-        # Create fresh recorder (stateless, like run())
+        # Create fresh factory (stateless, like run())
         # Pass payload_store for external call payload persistence
-        recorder = LandscapeRecorder(self._db, payload_store=payload_store)
+        factory = RecorderFactory(self._db, payload_store=payload_store)
 
         # 1. Handle incomplete batches - call module function directly
-        batch_id_mapping = handle_incomplete_batches(recorder, run_id)
+        batch_id_mapping = handle_incomplete_batches(factory.execution, run_id)
 
         # 2. Update run status to running
-        recorder.update_run_status(run_id, RunStatus.RUNNING)
+        factory.run_lifecycle.update_run_status(run_id, RunStatus.RUNNING)
 
         # 3. Build restored aggregation state map, rebinding batch_ids to retry batches
         restored_state: dict[str, AggregationCheckpointState] = {}
@@ -2667,7 +2670,7 @@ class Orchestrator:
         # TYPE FIDELITY: Retrieve source schema from audit trail for type restoration
         # Resume must use the ORIGINAL run's schema, not the current source's schema
         # This enables proper type coercion (datetime/Decimal) from JSON payload strings
-        source_schema_json = recorder.get_source_schema(run_id)
+        source_schema_json = factory.run_lifecycle.get_source_schema(run_id)
 
         # Deserialize schema and recreate Pydantic model class with full type fidelity
         # Call module function directly (no wrapper method)
@@ -2677,7 +2680,7 @@ class Orchestrator:
         # PIPELINEROW MIGRATION: Retrieve contract from audit trail for row wrapping
         # During resume, we need to wrap plain dicts in PipelineRow with contract
         # This ensures type fidelity and maintains the same data structures as main run
-        schema_contract = recorder.get_run_contract(run_id)
+        schema_contract = factory.run_lifecycle.get_run_contract(run_id)
         if schema_contract is None:
             # TIER-1 AUDIT INTEGRITY: Crash if contract is missing from audit trail
             # Per CLAUDE.md: "Bad data in the audit trail = crash immediately"
@@ -2697,7 +2700,7 @@ class Orchestrator:
         unprocessed_rows = recovery.get_unprocessed_row_data(run_id, payload_store, source_schema_class=source_schema_class)
 
         return ResumeState(
-            recorder=recorder,
+            factory=factory,
             run_id=run_id,
             restored_aggregation_state=restored_state,
             restored_coalesce_state=restored_coalesce_state,
@@ -2717,7 +2720,7 @@ class Orchestrator:
     ) -> RunResult:
         """Resume a failed run from a checkpoint.
 
-        STATELESS: Like run(), creates fresh recorder and processor internally.
+        STATELESS: Like run(), creates fresh factory and processor internally.
         This mirrors the reality that recovery happens in a new process.
 
         Args:
@@ -2739,7 +2742,7 @@ class Orchestrator:
         self._rebase_checkpoint_sequence(resume_point.sequence_number)
         state = self._reconstruct_resume_state(resume_point, payload_store)
         run_id = state.run_id
-        recorder = state.recorder
+        factory = state.factory
         restored_state = state.restored_aggregation_state
         restored_coalesce_state = state.restored_coalesce_state
         schema_contract = state.schema_contract
@@ -2747,7 +2750,7 @@ class Orchestrator:
 
         if not unprocessed_rows and not restored_state and restored_coalesce_state is None:
             # All rows were processed - complete the run
-            recorder.finalize_run(run_id, status=RunStatus.COMPLETED)
+            factory.run_lifecycle.finalize_run(run_id, status=RunStatus.COMPLETED)
 
             # Emit RunFinished telemetry (matching the normal completion path)
             from elspeth.telemetry import RunFinished
@@ -2803,7 +2806,7 @@ class Orchestrator:
         try:
             with shutdown_ctx as active_event:
                 result = self._process_resumed_rows(
-                    recorder=recorder,
+                    factory=factory,
                     run_id=run_id,
                     config=config,
                     graph=graph,
@@ -2821,7 +2824,7 @@ class Orchestrator:
             # BEFORE the finally block flushes telemetry to exporters.
             # Fix: elspeth-rapid-sg0q — previously this was after the finally block,
             # meaning RunFinished was emitted after telemetry flush (never exported).
-            recorder.finalize_run(run_id, status=RunStatus.COMPLETED)
+            factory.run_lifecycle.finalize_run(run_id, status=RunStatus.COMPLETED)
             result = replace(result, status=RunStatus.COMPLETED)
 
             # 7. Emit RunFinished telemetry
@@ -2859,7 +2862,7 @@ class Orchestrator:
             return result
         except GracefulShutdownError as shutdown_exc:
             try:
-                self._emit_interrupted_ceremony(run_id, recorder, shutdown_exc, resume_start_time)
+                self._emit_interrupted_ceremony(run_id, factory, shutdown_exc, resume_start_time)
             except Exception:
                 slog.debug("Interrupted ceremony failed — original exception preserved", run_id=run_id)
             raise  # Propagate to CLI
@@ -2867,7 +2870,7 @@ class Orchestrator:
             # Finalize as FAILED to prevent the run from being stuck in RUNNING
             # permanently (which blocks future resume attempts).
             try:
-                self._emit_failed_ceremony(run_id, recorder, resume_start_time)
+                self._emit_failed_ceremony(run_id, factory, resume_start_time)
             except Exception:
                 slog.debug("Failure ceremony failed — original exception preserved", run_id=run_id)
             raise
@@ -2876,7 +2879,7 @@ class Orchestrator:
 
     def _process_resumed_rows(
         self,
-        recorder: LandscapeRecorder,
+        factory: RecorderFactory,
         run_id: str,
         config: PipelineConfig,
         graph: ExecutionGraph,
@@ -2911,11 +2914,11 @@ class Orchestrator:
         self._current_graph = graph
 
         # 1. Setup (loads graph artifacts from original run's DB records)
-        artifacts = self._setup_resume_context(recorder, run_id, config, graph)
+        artifacts = self._setup_resume_context(factory, run_id, config, graph)
 
         # 2. Initialize context + processor (source on_start skipped)
         run_ctx = self._initialize_run_context(
-            recorder,
+            factory,
             run_id,
             config,
             graph,
@@ -2953,7 +2956,7 @@ class Orchestrator:
 
             # 4. Flush + write sinks with checkpoint advancement
             self._flush_and_write_sinks(
-                recorder,
+                factory,
                 run_id,
                 loop_ctx,
                 artifacts.sink_id_map,

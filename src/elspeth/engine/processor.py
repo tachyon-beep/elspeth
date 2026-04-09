@@ -47,7 +47,8 @@ from elspeth.contracts.errors import (
 from elspeth.contracts.plugin_context import PluginContext
 from elspeth.contracts.results import FailureInfo
 from elspeth.core.config import AggregationSettings, GateSettings
-from elspeth.core.landscape import LandscapeRecorder
+from elspeth.core.landscape.data_flow_repository import DataFlowRepository
+from elspeth.core.landscape.execution_repository import ExecutionRepository
 from elspeth.engine.clock import DEFAULT_CLOCK
 from elspeth.engine.executors import (
     AggregationExecutor,
@@ -217,7 +218,7 @@ class RowProcessor:
 
     Example:
         processor = RowProcessor(
-            recorder, span_factory, run_id, source_node_id,
+            execution, data_flow, span_factory, run_id, source_node_id,
             traversal=traversal_context,
         )
 
@@ -231,7 +232,8 @@ class RowProcessor:
 
     def __init__(
         self,
-        recorder: LandscapeRecorder,
+        execution: ExecutionRepository,
+        data_flow: DataFlowRepository,
         span_factory: SpanFactory,
         run_id: str,
         source_node_id: NodeID,
@@ -256,7 +258,8 @@ class RowProcessor:
         """Initialize processor.
 
         Args:
-            recorder: Landscape recorder
+            execution: Execution repository for node states, routing, operations
+            data_flow: Data flow repository for token outcomes, schema contracts
             span_factory: Span factory for tracing
             run_id: Current run ID
             source_node_id: Source node ID
@@ -280,7 +283,8 @@ class RowProcessor:
             telemetry_manager: Optional TelemetryManager for emitting telemetry events.
                                If None, telemetry emission is disabled.
         """
-        self._recorder = recorder
+        self._execution = execution
+        self._data_flow = data_flow
         self._spans = span_factory
         self._run_id = run_id
         self._source_node_id: NodeID = source_node_id
@@ -334,19 +338,20 @@ class RowProcessor:
         self._error_edge_ids = error_edge_ids
 
         self._token_manager = TokenManager(
-            recorder,  # type: ignore[arg-type]  # TODO: Task 5 — pass DataFlowRepository
+            data_flow,
             step_resolver=self._step_resolver,
         )
         self._transform_executor = TransformExecutor(
-            recorder,  # type: ignore[arg-type]  # TODO: Task 5 — pass ExecutionRepository
+            execution,
             span_factory,
             self._step_resolver,
             max_workers=max_workers,
             error_edge_ids=error_edge_ids,
+            data_flow=data_flow,
         )
-        self._gate_executor = GateExecutor(recorder, span_factory, self._step_resolver, edge_map, route_resolution_map)  # type: ignore[arg-type]  # TODO: Task 5 — pass ExecutionRepository
+        self._gate_executor = GateExecutor(execution, span_factory, self._step_resolver, edge_map, route_resolution_map)
         self._aggregation_executor = AggregationExecutor(
-            recorder,  # type: ignore[arg-type]  # TODO: Task 5 — pass ExecutionRepository
+            execution,
             span_factory,
             self._step_resolver,
             run_id,
@@ -634,7 +639,7 @@ class RowProcessor:
         failure = FailureInfo(exception_type="TransformError", message=fctx.error_msg)
 
         for token in fctx.buffered_tokens:
-            self._recorder.record_token_outcome(
+            self._data_flow.record_token_outcome(
                 ref=TokenRef(token_id=token.token_id, run_id=self._run_id),
                 outcome=RowOutcome.FAILED,
                 error_hash=error_hash,
@@ -773,14 +778,14 @@ class RowProcessor:
             for i, token in enumerate(fctx.buffered_tokens):
                 if i in quarantined_index_set:
                     error_hash = hashlib.sha256(f"quarantined_in_batch:{fctx.batch_id}:{i}".encode()).hexdigest()[:16]
-                    self._recorder.record_token_outcome(
+                    self._data_flow.record_token_outcome(
                         ref=TokenRef(token_id=token.token_id, run_id=self._run_id),
                         outcome=RowOutcome.QUARANTINED,
                         error_hash=error_hash,
                     )
                     self._emit_token_completed(token, RowOutcome.QUARANTINED)
                 else:
-                    self._recorder.record_token_outcome(
+                    self._data_flow.record_token_outcome(
                         ref=TokenRef(token_id=token.token_id, run_id=self._run_id),
                         outcome=RowOutcome.CONSUMED_IN_BATCH,
                         batch_id=fctx.batch_id,
@@ -962,7 +967,7 @@ class RowProcessor:
         buf_batch_id = self._aggregation_executor.get_batch_id(node_id)
         if buf_batch_id is None:
             raise OrchestrationInvariantError(f"batch_id is None after buffer_row() for node {node_id}")
-        self._recorder.record_token_outcome(
+        self._data_flow.record_token_outcome(
             ref=TokenRef(token_id=current_token.token_id, run_id=self._run_id),
             outcome=RowOutcome.BUFFERED,
             batch_id=buf_batch_id,
@@ -1071,7 +1076,7 @@ class RowProcessor:
                 raise OrchestrationInvariantError(
                     f"ctx.state_id must be set by TransformExecutor before exception propagated (transform={transform.node_id})"
                 )
-            self._recorder.record_routing_event(
+            self._execution.record_routing_event(
                 state_id=ctx.state_id,
                 edge_id=error_edge_id,
                 mode=RoutingMode.DIVERT,
@@ -1201,14 +1206,14 @@ class RowProcessor:
         # the result immediately as COMPLETED with duration_ms=0.
         # Valid SourceRows always have dict data (SourceRow.valid() takes dict[str, Any]).
         source_input: dict[str, Any] = source_row.row
-        source_state = self._recorder.begin_node_state(
+        source_state = self._execution.begin_node_state(
             token_id=token.token_id,
             node_id=self._source_node_id,
             run_id=self._run_id,
             step_index=0,
             input_data=source_input,
         )
-        self._recorder.complete_node_state(
+        self._execution.complete_node_state(
             state_id=source_state.state_id,
             status=NodeStateStatus.COMPLETED,
             output_data=source_input,
@@ -1265,14 +1270,14 @@ class RowProcessor:
         # The row already exists from the original run, but this new token
         # needs its own source state for complete audit lineage.
         resumed_input = row_data.to_dict()
-        source_state = self._recorder.begin_node_state(
+        source_state = self._execution.begin_node_state(
             token_id=token.token_id,
             node_id=self._source_node_id,
             run_id=self._run_id,
             step_index=0,
             input_data=resumed_input,
         )
-        self._recorder.complete_node_state(
+        self._execution.complete_node_state(
             state_id=source_state.state_id,
             status=NodeStateStatus.COMPLETED,
             output_data=resumed_input,
@@ -1374,7 +1379,7 @@ class RowProcessor:
 
             # Bug 9z8 fix: Only record if CoalesceExecutor didn't already record
             if not coalesce_outcome.outcomes_recorded:
-                self._recorder.record_token_outcome(
+                self._data_flow.record_token_outcome(
                     ref=TokenRef(token_id=current_token.token_id, run_id=self._run_id),
                     outcome=RowOutcome.FAILED,
                     error_hash=error_hash,
@@ -1578,7 +1583,7 @@ class RowProcessor:
         except MaxRetriesExceeded as e:
             # All retries exhausted - return FAILED outcome
             error_hash = hashlib.sha256(str(e).encode()).hexdigest()[:16]
-            self._recorder.record_token_outcome(
+            self._data_flow.record_token_outcome(
                 ref=TokenRef(token_id=current_token.token_id, run_id=self._run_id),
                 outcome=RowOutcome.FAILED,
                 error_hash=error_hash,
@@ -1695,7 +1700,7 @@ class RowProcessor:
         if error_sink == "discard":
             # Intentionally discarded - QUARANTINED
             quarantine_error_hash = hashlib.sha256(error_detail.encode()).hexdigest()[:16]
-            self._recorder.record_token_outcome(
+            self._data_flow.record_token_outcome(
                 ref=TokenRef(token_id=current_token.token_id, run_id=self._run_id),
                 outcome=RowOutcome.QUARANTINED,
                 error_hash=quarantine_error_hash,

@@ -18,6 +18,7 @@ from elspeth.contracts.errors import TIER_1_ERRORS, OrchestrationInvariantError,
 from elspeth.contracts.plugin_context import PluginContext
 from elspeth.contracts.types import NodeID, StepResolver
 from elspeth.core.canonical import stable_hash
+from elspeth.core.landscape.data_flow_repository import DataFlowRepository
 from elspeth.core.landscape.execution_repository import ExecutionRepository
 from elspeth.engine.executors.state_guard import NodeStateGuard
 from elspeth.engine.spans import SpanFactory
@@ -59,6 +60,7 @@ class TransformExecutor:
         step_resolver: StepResolver,
         max_workers: int | None = None,
         error_edge_ids: dict[NodeID, str] | None = None,
+        data_flow: DataFlowRepository | None = None,
     ) -> None:
         """Initialize executor.
 
@@ -70,8 +72,11 @@ class TransformExecutor:
             error_edge_ids: Map of transform node_id -> DIVERT edge_id for error routing.
                            Built by the processor from the edge_map using error_edge_label().
                            Only populated for transforms with on_error pointing to a real sink.
+            data_flow: Data flow repository for schema contract updates.
+                       Optional for backwards compatibility with tests.
         """
         self._execution = execution
+        self._data_flow = data_flow
         self._spans = span_factory
         self._step_resolver = step_resolver
         self._max_workers = max_workers
@@ -388,7 +393,11 @@ class TransformExecutor:
                     output_contract = result.rows[0].contract
 
                 if output_contract is not None and output_contract is not token.row_data.contract:
-                    self._execution.update_node_output_contract(  # type: ignore[attr-defined]  # TODO: Task 5 — needs DataFlowRepository
+                    if self._data_flow is None:
+                        raise OrchestrationInvariantError(
+                            "TransformExecutor.data_flow is None but contract evolution requires DataFlowRepository"
+                        )
+                    self._data_flow.update_node_output_contract(
                         run_id=ctx.run_id,
                         node_id=transform.node_id,
                         contract=output_contract,

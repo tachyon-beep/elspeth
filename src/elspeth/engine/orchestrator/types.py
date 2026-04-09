@@ -36,7 +36,7 @@ if TYPE_CHECKING:
     from elspeth.contracts.schema_contract import SchemaContract
     from elspeth.contracts.types import CoalesceName, GateName, NodeID, SinkName
     from elspeth.core.config import AggregationSettings, CoalesceSettings, GateSettings
-    from elspeth.core.landscape.recorder import LandscapeRecorder
+    from elspeth.core.landscape.factory import RecorderFactory
     from elspeth.engine.coalesce_executor import CoalesceExecutor
     from elspeth.engine.processor import RowProcessor
 
@@ -375,7 +375,7 @@ class ResumeState:
     Short-lived: consumed immediately by the resume method.
     """
 
-    recorder: LandscapeRecorder
+    factory: RecorderFactory
     run_id: str
     restored_aggregation_state: Mapping[str, AggregationCheckpointState]
     restored_coalesce_state: CoalesceCheckpointState | None
