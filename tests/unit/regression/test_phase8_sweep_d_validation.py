@@ -216,13 +216,6 @@ class TestFieldBaseIdentifierValidation:
         with pytest.raises(ValueError, match="not a valid Python identifier"):
             get_llm_guaranteed_fields("my-prefix")
 
-    def test_invalid_audit_field_rejected(self) -> None:
-        """response_field in audit function also validated."""
-        from elspeth.plugins.transforms.llm import get_llm_audit_fields
-
-        with pytest.raises(ValueError, match="not a valid Python identifier"):
-            get_llm_audit_fields("has space")
-
 
 class TestPurgeRetentionDays:
     """D.8: retention_days <= 0 rejected at CLI boundary."""

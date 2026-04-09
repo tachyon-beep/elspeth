@@ -200,40 +200,6 @@ def _extract_wrapped_plugin_config_error(
     raise error
 
 
-def validate_schema_config(
-    schema_config: dict[str, Any],
-) -> list[ValidationError]:
-    """Validate schema configuration independently of plugin.
-
-    Args:
-        schema_config: Schema configuration dict (contents of 'schema' key)
-
-    Returns:
-        List of validation errors (empty if valid)
-    """
-    # Import here to avoid circular dependencies
-    from elspeth.contracts.schema import SchemaConfig
-
-    try:
-        SchemaConfig.from_dict(schema_config)
-        return []  # Valid
-    except ValueError as e:
-        # SchemaConfig.from_dict raises ValueError for invalid configs
-        # Convert to structured error
-        return [
-            ValidationError(
-                field="schema",
-                message=str(e),
-                value=schema_config,
-            )
-        ]
-    # NOTE: No catch-all Exception handler here.
-    # SchemaConfig.from_dict() documents it raises ValueError for invalid config.
-    # Any other exception (TypeError, AttributeError, etc.) is a bug in our code
-    # that should crash immediately per CLAUDE.md - not be silently converted
-    # to a "validation error" that hides the real problem.
-
-
 def get_transform_config_model(
     transform_type: str,
     config: dict[str, Any] | None = None,
