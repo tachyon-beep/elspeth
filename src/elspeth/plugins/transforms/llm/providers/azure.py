@@ -168,27 +168,16 @@ class AzureLLMProvider:
             # Extract finish_reason from raw_response.
             # raw_response is the Azure SDK's deserialized API response (Tier 3
             # external boundary — validate structure, then safe access on optional keys).
+            # Missing/empty choices or absent raw_response → finish_reason stays None.
+            # The full raw_response is already recorded in the audit trail via
+            # AuditedLLMClient.record_call(), so anomalies are diagnosable there.
             finish_reason = None
             if response.raw_response is not None:
-                if "choices" not in response.raw_response:
-                    logger.warning(
-                        "Azure SDK response missing choices — finish_reason unavailable, truncation undetectable",
-                        raw_response_keys=list(response.raw_response.keys()),
-                    )
-                else:
-                    choices = response.raw_response["choices"]
-                    if not choices:
-                        logger.warning(
-                            "Azure SDK response has empty choices — finish_reason unavailable",
-                        )
-                    else:
-                        raw_fr = choices[0].get("finish_reason")
-                        if raw_fr is not None:
-                            finish_reason = parse_finish_reason(str(raw_fr))
-            else:
-                logger.warning(
-                    "Azure SDK response has no raw_response — finish_reason unavailable, truncation undetectable",
-                )
+                choices = response.raw_response.get("choices")
+                if choices:
+                    raw_fr = choices[0].get("finish_reason")
+                    if raw_fr is not None:
+                        finish_reason = parse_finish_reason(str(raw_fr))
 
             # Empty/whitespace content — AuditedLLMClient converts None→""
             # (known fabrication). Detect here and raise typed errors so the

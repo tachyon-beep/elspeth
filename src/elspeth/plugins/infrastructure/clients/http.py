@@ -165,14 +165,8 @@ class AuditedHTTPClient(AuditedClientBase):
         if "application/json" in content_type:
             parsed, error = _parse_json_strict(response.text)
             if error is not None:
-                logger.warning(
-                    "JSON parse failed despite Content-Type: application/json",
-                    extra={
-                        "url": full_url,
-                        "status_code": response.status_code,
-                        "error": error,
-                    },
-                )
+                # JSON parse failure is captured in the audit trail via the
+                # _json_parse_failed sentinel dict recorded by record_call().
                 return {
                     "_json_parse_failed": True,
                     "_error": error,
@@ -569,14 +563,8 @@ class AuditedHTTPClient(AuditedClientBase):
             if "application/json" in content_type:
                 parsed, error = _parse_json_strict(response.text)
                 if error is not None:
-                    logger.warning(
-                        "JSON parse failed despite Content-Type: application/json",
-                        extra={
-                            "url": request.original_url,
-                            "status_code": response.status_code,
-                            "error": error,
-                        },
-                    )
+                    # JSON parse failure is captured in the audit trail via the
+                    # _json_parse_failed sentinel dict recorded by record_call().
                     response_body = {
                         "_json_parse_failed": True,
                         "_error": error,

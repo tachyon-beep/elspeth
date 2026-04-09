@@ -700,13 +700,6 @@ class AggregationExecutor:
         checkpoint_version = AGGREGATION_CHECKPOINT_VERSION
 
         if state.version != checkpoint_version:
-            # Log checkpoint rejection for observability
-            slog.warning(
-                "checkpoint_version_rejected",
-                found_version=state.version,
-                expected_version=checkpoint_version,
-                reason="incompatible_checkpoint_version",
-            )
             raise AuditIntegrityError(
                 f"Incompatible checkpoint version: {state.version!r}. "
                 f"Expected: {checkpoint_version!r}. "

@@ -1098,15 +1098,6 @@ class AzureBatchLLMTransform(BaseTransform):
                     latency_ms=error_latency,
                     provider="azure",
                 )
-                logger.warning(
-                    "error_file_download_failed",
-                    batch_id=batch.id,
-                    error_file_id=error_file_id,
-                    error=str(e),
-                    error_type=type(e).__name__,
-                    impact="per-row error details from Azure Batch error file are lost; "
-                    "affected rows will be classified as error_details_unavailable",
-                )
                 error_text = None
             else:
                 # Record successful error file download in audit trail.
@@ -1247,14 +1238,6 @@ class AzureBatchLLMTransform(BaseTransform):
         # so the audit trail shows WHY certain rows have no results. Without this,
         # malformed lines silently vanish and their rows get misclassified as result_not_found.
         if malformed_lines and results_by_id:
-            logger.warning(
-                "partial_malformed_jsonl_lines",
-                batch_id=batch.id,
-                malformed_count=len(malformed_lines),
-                parsed_count=len(results_by_id),
-                errors=malformed_lines[:10],
-                impact="affected rows will appear as result_not_found or error_details_unavailable",
-            )
             ctx.record_call(
                 call_type=CallType.HTTP,
                 status=CallStatus.ERROR,

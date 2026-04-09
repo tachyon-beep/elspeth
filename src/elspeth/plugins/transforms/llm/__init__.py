@@ -174,7 +174,7 @@ def build_llm_audit_metadata(
     lookup_hash: str | None,
     lookup_source: str | None,
     system_prompt_source: str | None,
-) -> dict[str, object]:
+) -> dict[str, str | None]:
     """Build audit provenance dict for inclusion in success_reason["metadata"].
 
     Does NOT write to the output row — audit provenance lives in the Landscape only.

@@ -158,7 +158,7 @@ allow_hits:
   owner: bugfix
   reason: Tier-3 boundary - PayloadStore.delete() is external I/O (filesystem/blob storage)
   safety: Exception caught and logged, ref added to failed_refs, loop continues
-- key: core/landscape/execution_repository.py:R6:ExecutionRepository:begin_node_state:fp=462184003f90e363
+- key: core/landscape/execution_repository.py:R6:ExecutionRepository:begin_node_state:fp=7d2319a46ba5b7dd
   owner: bugfix
   reason: Tier-3 boundary — quarantined row data may contain NaN/Infinity that stable_hash rejects
   safety: Falls back to repr_hash which always succeeds; audit trail integrity maintained
@@ -187,28 +187,28 @@ allow_hits:
 - key: core/landscape/exporter.py:R1:LandscapeExporter:_iter_records:fp=2c0214fa9a261b33
   owner: P2-2026-02-02-76r
   reason: Sparse lookup - not all rows have tokens (batch export uses pre-loaded dicts)
-- key: core/landscape/data_flow_repository.py:R6:DataFlowRepository:create_row:fp=fe653a74f3bd7cfc
+- key: core/landscape/data_flow_repository.py:R6:DataFlowRepository:create_row:fp=9b7f88a469cbf054
   owner: bugfix
   reason: Tier-3 boundary — quarantined row data may contain NaN/Infinity that stable_hash rejects
   safety: Falls back to repr_hash which always succeeds; audit trail integrity maintained
   expires: '2026-05-12'
-- key: core/landscape/data_flow_repository.py:R6:DataFlowRepository:create_row:fp=f7be99e01896f2db
+- key: core/landscape/data_flow_repository.py:R6:DataFlowRepository:create_row:fp=052acd8cc67da9d0
   owner: bugfix
   reason: Tier-3 boundary — quarantined row data may contain NaN/Infinity that stable_hash rejects
   safety: Falls back to repr_hash which always succeeds; audit trail integrity maintained
   expires: '2026-05-12'
-- key: core/landscape/data_flow_repository.py:R6:DataFlowRepository:record_validation_error:fp=d1d7eef0a341df0a
+- key: core/landscape/data_flow_repository.py:R6:DataFlowRepository:record_validation_error:fp=2504186a5b26f159
   owner: architecture
   reason: Tier-3 boundary - row_data may contain NaN/Infinity which are not canonically serializable
-  safety: Falls back to repr() with logging - audit trail preserved with metadata
-- key: core/landscape/data_flow_repository.py:R6:DataFlowRepository:record_transform_error:fp=6a2ce65435a6d6f0
+  safety: Falls back to repr() — audit trail preserved with NonCanonicalMetadata
+- key: core/landscape/data_flow_repository.py:R6:DataFlowRepository:record_transform_error:fp=3cc9ab95a2b61410
   owner: bugfix
   reason: Tier-3 boundary — error_details from transform results may contain NaN/Infinity that canonical_json rejects
-  safety: Falls back to repr() with logging — audit trail preserved with metadata
-- key: core/landscape/data_flow_repository.py:R6:DataFlowRepository:record_transform_error:fp=81498e7a740069ed
+  safety: Falls back to repr() — audit trail preserved with NonCanonicalMetadata
+- key: core/landscape/data_flow_repository.py:R6:DataFlowRepository:record_transform_error:fp=6d0f4a4f2f667141
   owner: bugfix
   reason: Tier-2 boundary — row_data entering audit trail may contain NaN/Infinity that canonical_json rejects
-  safety: Falls back to repr_hash + NonCanonicalMetadata with warning log — audit trail preserved
+  safety: Falls back to repr_hash + NonCanonicalMetadata — audit trail preserved
 - key: core/security/web.py:R4:validate_url_for_ssrf:_resolve_worker:fp=bdf07052a9f75058
   owner: bugfix
   reason: DNS resolver worker catches BaseException to relay ALL errors through the queue to the caller thread

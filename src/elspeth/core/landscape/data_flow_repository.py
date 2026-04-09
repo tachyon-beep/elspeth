@@ -10,7 +10,6 @@ import json
 from collections.abc import Mapping
 from typing import TYPE_CHECKING, Any
 
-import structlog
 from sqlalchemy import select
 
 from elspeth.contracts import (
@@ -54,8 +53,6 @@ from elspeth.core.landscape.schema import (
     transform_errors_table,
     validation_errors_table,
 )
-
-logger = structlog.get_logger(__name__)
 
 if TYPE_CHECKING:
     from elspeth.contracts.errors import ContractViolation
@@ -320,10 +317,6 @@ class DataFlowRepository:
             try:
                 data_hash = stable_hash(data)
             except (ValueError, TypeError):
-                logger.warning(
-                    "Quarantined row data not canonically hashable (using repr_hash fallback): %s",
-                    type(data).__name__,
-                )
                 data_hash = repr_hash(data)
         else:
             data_hash = stable_hash(data)
@@ -340,10 +333,6 @@ class DataFlowRepository:
                 try:
                     payload_bytes = canonical_json(data).encode("utf-8")
                 except (ValueError, TypeError):
-                    logger.warning(
-                        "Quarantined row data not canonically serializable (using repr fallback for payload): %s",
-                        type(data).__name__,
-                    )
                     payload_bytes = json.dumps({"_repr": repr(data)}, allow_nan=False).encode("utf-8")
             else:
                 payload_bytes = canonical_json(data).encode("utf-8")
@@ -1314,14 +1303,6 @@ class DataFlowRepository:
             row_hash = stable_hash(row_data)
             row_data_json = canonical_json(row_data)
         except (ValueError, TypeError) as e:
-            # Non-canonical data (NaN, Infinity, non-dict, etc.)
-            # Use repr() fallback to preserve audit trail
-            row_preview = repr(row_data)[:200] + "..." if len(repr(row_data)) > 200 else repr(row_data)
-            logger.warning(
-                "Validation error row not canonically serializable (using repr fallback): %s | Row preview: %s",
-                str(e),
-                row_preview,
-            )
             row_hash = repr_hash(row_data)
             # Store non-canonical representation with type metadata
             metadata = NonCanonicalMetadata.from_error(row_data, e)
@@ -1420,10 +1401,6 @@ class DataFlowRepository:
         try:
             error_details_json = canonical_json(error_details)
         except (ValueError, TypeError) as e:
-            logger.warning(
-                "Transform error details not canonically serializable (using repr fallback): %s",
-                str(e),
-            )
             error_details_json = json.dumps(
                 {
                     "__non_canonical__": True,
@@ -1441,10 +1418,6 @@ class DataFlowRepository:
             row_hash = stable_hash(row_data)
             row_data_json = canonical_json(row_data)
         except (ValueError, TypeError) as e:
-            logger.warning(
-                "Transform error row data not canonically serializable (using repr fallback): %s",
-                str(e),
-            )
             row_hash = repr_hash(row_data)
             metadata = NonCanonicalMetadata.from_error(row_data, e)
             row_data_json = json.dumps(metadata.to_dict(), allow_nan=False)

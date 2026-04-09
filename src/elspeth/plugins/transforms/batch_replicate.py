@@ -14,7 +14,6 @@ row, with parent linkage to track deaggregation lineage.
 import copy
 from typing import Any
 
-import structlog
 from pydantic import Field, model_validator
 
 from elspeth.contracts.contexts import TransformContext
@@ -23,8 +22,6 @@ from elspeth.contracts.schema_contract import FieldContract, PipelineRow, Schema
 from elspeth.plugins.infrastructure.base import BaseTransform
 from elspeth.plugins.infrastructure.config_base import TransformDataConfig
 from elspeth.plugins.infrastructure.results import TransformResult
-
-logger = structlog.get_logger(__name__)
 
 
 class BatchReplicateConfig(TransformDataConfig):
@@ -230,19 +227,6 @@ class BatchReplicate(BaseTransform):
             fields=tuple(merged_fields.values()),
             locked=True,
         )
-
-        # Record each quarantine decision in the audit trail so an auditor
-        # can trace which specific source rows were dropped and why.
-        # Without this, quarantined rows are only in success_reason metadata —
-        # invisible to Landscape queries and explain(token_id).
-        if quarantined:
-            logger.warning(
-                "batch_replicate_rows_quarantined",
-                quarantined_count=len(quarantined),
-                total_rows=len(rows),
-                valid_count=len(valid_rows),
-                quarantined_indices=quarantined_indices,
-            )
 
         success_reason: TransformSuccessReason = {
             "action": "processed",

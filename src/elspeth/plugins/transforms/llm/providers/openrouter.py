@@ -19,7 +19,6 @@ from threading import Lock
 from typing import TYPE_CHECKING, Any, Literal
 
 import httpx
-import structlog
 from pydantic import Field
 
 from elspeth.contracts.token_usage import TokenUsage
@@ -44,8 +43,6 @@ __all__ = [
     "OpenRouterConfig",
     "OpenRouterLLMProvider",
 ]
-
-logger = structlog.get_logger(__name__)
 
 
 class OpenRouterConfig(LLMConfig):
@@ -277,14 +274,13 @@ class OpenRouterLLMProvider:
             raw_finish_reason = choices[0].get("finish_reason") if isinstance(choices[0], dict) else None
             finish_reason = parse_finish_reason(str(raw_finish_reason)) if raw_finish_reason is not None else None
 
-            # Extract model (provider may return different model than requested)
+            # Extract model (provider may return different model than requested).
+            # Missing 'model' field → fall back to the requested model.
+            # The full response is already recorded in the audit trail via
+            # AuditedHTTPClient.record_call(), so the absence is diagnosable there.
             if isinstance(data, dict) and "model" in data:
                 response_model = data["model"]
             else:
-                logger.warning(
-                    "LLM response missing 'model' field — using requested model for audit",
-                    requested_model=model,
-                )
                 response_model = model
 
             return LLMQueryResult(

@@ -11,7 +11,6 @@ from threading import Lock
 from typing import TYPE_CHECKING, Any, Literal, NamedTuple, overload
 from uuid import uuid4
 
-import structlog
 from sqlalchemy import func, select
 
 from elspeth.contracts import (
@@ -71,8 +70,6 @@ if TYPE_CHECKING:
     from elspeth.contracts.errors import TransformSuccessReason
     from elspeth.contracts.node_state_context import NodeStateContext
     from elspeth.contracts.payload_store import PayloadStore
-
-logger = structlog.get_logger(__name__)
 
 _TERMINAL_BATCH_STATUSES = frozenset({BatchStatus.COMPLETED, BatchStatus.FAILED})
 _TERMINAL_NODE_STATE_STATUSES = frozenset({NodeStateStatus.COMPLETED, NodeStateStatus.FAILED})
@@ -160,10 +157,6 @@ class ExecutionRepository:
             try:
                 input_hash = stable_hash(input_data)
             except (ValueError, TypeError):
-                logger.warning(
-                    "Quarantined node state input not canonically hashable (using repr_hash fallback): %s",
-                    type(input_data).__name__,
-                )
                 input_hash = repr_hash(input_data)
         else:
             input_hash = stable_hash(input_data)

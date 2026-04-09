@@ -258,11 +258,6 @@ class CoalesceExecutor:
         elspeth-cc36c8eaef). Phase 3 will remove it from the checkpoint schema.
         """
         if state.version != COALESCE_CHECKPOINT_VERSION:
-            slog.warning(
-                "coalesce_checkpoint_version_rejected",
-                found_version=state.version,
-                expected_version=COALESCE_CHECKPOINT_VERSION,
-            )
             raise AuditIntegrityError(
                 f"Incompatible coalesce checkpoint version: {state.version!r}. Expected: {COALESCE_CHECKPOINT_VERSION!r}."
             )
@@ -730,23 +725,9 @@ class CoalesceExecutor:
                     except Exception as e:
                         # Contract merge failure is an orchestration invariant violation
                         # Contracts with conflicting types cannot be merged
-                        slog.error(
-                            "contract_merge_failed",
-                            coalesce_name=coalesce_name,
-                            branches=list(pending.branches.keys()),
-                            error=str(e),
-                        )
                         raise OrchestrationInvariantError(
                             f"Contract merge failed at coalesce point '{coalesce_name}'. Branches: {list(pending.branches.keys())}. Error: {e}"
                         ) from e
-
-                slog.info(
-                    "contract_merge_success",
-                    coalesce_name=coalesce_name,
-                    merge_strategy="union",
-                    branch_count=len(pending.branches),
-                    branches=list(pending.branches.keys()),
-                )
 
             elif settings.merge == "nested":
                 # Nested: Contract declares branch keys with object type
@@ -771,15 +752,6 @@ class CoalesceExecutor:
                     locked=True,
                 )
 
-                slog.info(
-                    "contract_created_for_nested_merge",
-                    coalesce_name=coalesce_name,
-                    merge_strategy="nested",
-                    branch_count=len(pending.branches),
-                    branches=list(pending.branches.keys()),
-                    output_keys=list(merged_data_dict.keys()),
-                )
-
             elif settings.merge == "select":
                 # Select: Use selected branch's contract directly (data has only those fields)
                 # Find the selected branch's contract
@@ -791,14 +763,6 @@ class CoalesceExecutor:
                 # Get the token for the selected branch
                 selected_entry = pending.branches[settings.select_branch]
                 merged_contract = selected_entry.token.row_data.contract
-
-                slog.info(
-                    "contract_from_selected_branch",
-                    coalesce_name=coalesce_name,
-                    merge_strategy="select",
-                    selected_branch=settings.select_branch,
-                    branches_arrived=tuple(pending.branches.keys()),
-                )
 
             else:
                 # Unreachable - config validation ensures merge is one of the above

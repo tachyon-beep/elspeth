@@ -450,7 +450,7 @@ class MultiQueryStrategy:
         """
 
         fields: dict[str, Any]
-        audit_metadata: dict[str, object]
+        audit_metadata: dict[str, str | None]
 
     def _execute_one_query(
         self,
@@ -819,7 +819,7 @@ class MultiQueryStrategy:
         # Side channel for audit metadata — _process_fn writes here, outer scope reads after pool.
         # Protected by lock: PooledExecutor runs _process_fn across ThreadPoolExecutor
         # workers, so concurrent dict writes require synchronization.
-        audit_metadata_by_index: dict[int, dict[str, object]] = {}
+        audit_metadata_by_index: dict[int, dict[str, str | None]] = {}
         audit_metadata_lock = threading.Lock()
 
         # Build RowContext for each query — the pool treats each as a "row"
