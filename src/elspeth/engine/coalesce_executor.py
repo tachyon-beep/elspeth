@@ -26,7 +26,7 @@ from elspeth.contracts.freeze import deep_thaw
 from elspeth.contracts.schema_contract import FieldContract, PipelineRow, SchemaContract
 from elspeth.contracts.types import NodeID, StepResolver
 from elspeth.core.config import CoalesceSettings
-from elspeth.core.landscape import LandscapeRecorder
+from elspeth.core.landscape.execution_repository import ExecutionRepository
 from elspeth.engine.clock import DEFAULT_CLOCK
 from elspeth.engine.spans import SpanFactory
 
@@ -121,7 +121,7 @@ class CoalesceExecutor:
 
     def __init__(
         self,
-        recorder: LandscapeRecorder,
+        execution: ExecutionRepository,
         span_factory: SpanFactory,
         token_manager: "TokenManager",
         run_id: str,
@@ -132,7 +132,7 @@ class CoalesceExecutor:
         """Initialize executor.
 
         Args:
-            recorder: Landscape recorder for audit trail
+            execution: Execution repository for audit trail
             span_factory: Span factory for tracing
             token_manager: TokenManager for creating merged tokens
             run_id: Run identifier for audit context
@@ -146,7 +146,7 @@ class CoalesceExecutor:
         if max_completed_keys <= 0:
             raise OrchestrationInvariantError(f"max_completed_keys must be > 0, got {max_completed_keys}")
 
-        self._recorder = recorder
+        self._execution = execution
         self._spans = span_factory
         self._token_manager = token_manager
         self._run_id = run_id
@@ -325,7 +325,7 @@ class CoalesceExecutor:
         # Build reverse map: node_id → coalesce_name
         node_id_to_name: dict[str, str] = {str(nid): name for name, nid in self._node_ids.items()}
 
-        completed_pairs = self._recorder.get_completed_row_ids_for_nodes(
+        completed_pairs = self._execution.get_completed_row_ids_for_nodes(
             run_id=self._run_id,
             node_ids=frozenset(node_id_to_name.keys()),
         )
@@ -363,7 +363,7 @@ class CoalesceExecutor:
             return False
         node_id = self._node_ids[coalesce_name]
 
-        completed_pairs = self._recorder.get_completed_row_ids_for_nodes(
+        completed_pairs = self._execution.get_completed_row_ids_for_nodes(
             run_id=self._run_id,
             node_ids=frozenset({str(node_id)}),
         )
@@ -465,7 +465,7 @@ class CoalesceExecutor:
             # Record failure audit trail for this late token
             failure_reason = "late_arrival_after_merge"
             error_hash = hashlib.sha256(failure_reason.encode()).hexdigest()[:16]
-            state = self._recorder.begin_node_state(
+            state = self._execution.begin_node_state(
                 token_id=token.token_id,
                 node_id=node_id,
                 run_id=self._run_id,
@@ -478,13 +478,13 @@ class CoalesceExecutor:
                 branches_arrived=(),  # Late arrival — merge already happened
                 merge_policy=settings.merge,
             )
-            self._recorder.complete_node_state(
+            self._execution.complete_node_state(
                 state_id=state.state_id,
                 status=NodeStateStatus.FAILED,
                 error=error,
                 duration_ms=0,
             )
-            self._recorder.record_token_outcome(
+            self._execution.record_token_outcome(  # type: ignore[attr-defined]  # TODO: Task 5 — needs DataFlowRepository
                 ref=TokenRef(token_id=token.token_id, run_id=self._run_id),
                 outcome=RowOutcome.FAILED,
                 error_hash=error_hash,
@@ -523,7 +523,7 @@ class CoalesceExecutor:
 
         # Record pending node state for audit trail FIRST,
         # then store entry atomically (all per-branch state in one assignment)
-        state = self._recorder.begin_node_state(
+        state = self._execution.begin_node_state(
             token_id=token.token_id,
             node_id=node_id,
             run_id=self._run_id,
@@ -626,13 +626,13 @@ class CoalesceExecutor:
             select_branch=select_branch,
         )
         for _branch_name, entry in pending.branches.items():
-            self._recorder.complete_node_state(
+            self._execution.complete_node_state(
                 state_id=entry.state_id,
                 status=NodeStateStatus.FAILED,
                 error=error,
                 duration_ms=(now - entry.arrival_time) * 1000,
             )
-            self._recorder.record_token_outcome(
+            self._execution.record_token_outcome(  # type: ignore[attr-defined]  # TODO: Task 5 — needs DataFlowRepository
                 ref=TokenRef(token_id=entry.token.token_id, run_id=self._run_id),
                 outcome=RowOutcome.FAILED,
                 error_hash=error_hash,
@@ -809,7 +809,7 @@ class CoalesceExecutor:
             for _branch_name, entry in pending.branches.items():
                 # Complete it now that merge is happening
                 # Bug l4h fix: include coalesce metadata in context_after for audit trail
-                self._recorder.complete_node_state(
+                self._execution.complete_node_state(
                     state_id=entry.state_id,
                     status=NodeStateStatus.COMPLETED,
                     output_data={"merged_into": merged_token.token_id},
@@ -819,7 +819,7 @@ class CoalesceExecutor:
                 completed_state_ids.add(entry.state_id)
 
                 # Record terminal token outcome (COALESCED)
-                self._recorder.record_token_outcome(
+                self._execution.record_token_outcome(  # type: ignore[attr-defined]  # TODO: Task 5 — needs DataFlowRepository
                     ref=TokenRef(token_id=entry.token.token_id, run_id=self._run_id),
                     outcome=RowOutcome.COALESCED,
                     join_group_id=merged_token.join_group_id,
@@ -856,7 +856,7 @@ class CoalesceExecutor:
                 if entry.state_id in completed_state_ids:
                     continue
                 try:
-                    self._recorder.complete_node_state(
+                    self._execution.complete_node_state(
                         state_id=entry.state_id,
                         status=NodeStateStatus.FAILED,
                         output_data={},

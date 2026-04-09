@@ -20,7 +20,7 @@ from typing import TYPE_CHECKING, Any
 from elspeth.contracts import ExecutionError, NodeStateOpen
 from elspeth.contracts.enums import NodeStateStatus
 from elspeth.contracts.errors import TIER_1_ERRORS, AuditIntegrityError, OrchestrationInvariantError
-from elspeth.core.landscape import LandscapeRecorder
+from elspeth.core.landscape.execution_repository import ExecutionRepository
 
 if TYPE_CHECKING:
     from elspeth.contracts.errors import CoalesceFailureReason, TransformErrorReason, TransformSuccessReason
@@ -53,9 +53,9 @@ class NodeStateGuard:
         "_completed",
         "_completion_attempted",
         "_enter_time",
+        "_execution",
         "_input_data",
         "_node_id",
-        "_recorder",
         "_run_id",
         "_state",
         "_step_index",
@@ -64,7 +64,7 @@ class NodeStateGuard:
 
     def __init__(
         self,
-        recorder: LandscapeRecorder,
+        execution: ExecutionRepository,
         *,
         token_id: str,
         node_id: str,
@@ -73,7 +73,7 @@ class NodeStateGuard:
         input_data: dict[str, Any],  # Row data (Tier 2 pipeline data)
         attempt: int = 0,
     ) -> None:
-        self._recorder = recorder
+        self._execution = execution
         self._token_id = token_id
         self._node_id = node_id
         self._run_id = run_id
@@ -89,7 +89,7 @@ class NodeStateGuard:
 
     def __enter__(self) -> NodeStateGuard:
         self._enter_time = time.perf_counter()
-        self._state = self._recorder.begin_node_state(
+        self._state = self._execution.begin_node_state(
             token_id=self._token_id,
             node_id=self._node_id,
             run_id=self._run_id,
@@ -125,7 +125,7 @@ class NodeStateGuard:
                 phase="executor_guard_missing_complete",
             )
             try:
-                self._recorder.complete_node_state(
+                self._execution.complete_node_state(
                     state_id=self.state_id,
                     status=NodeStateStatus.FAILED,
                     duration_ms=duration_ms,
@@ -153,7 +153,7 @@ class NodeStateGuard:
             phase="executor_post_process",
         )
         try:
-            self._recorder.complete_node_state(
+            self._execution.complete_node_state(
                 state_id=self.state_id,
                 status=NodeStateStatus.FAILED,
                 duration_ms=duration_ms,
@@ -209,7 +209,7 @@ class NodeStateGuard:
         terminal state with FAILED.
         """
         self._completion_attempted = True
-        self._recorder.complete_node_state(  # type: ignore[call-overload,misc]  # generic NodeStateStatus vs Literal overloads
+        self._execution.complete_node_state(  # type: ignore[call-overload,misc]  # generic NodeStateStatus vs Literal overloads
             state_id=self.state_id,
             status=status,
             output_data=output_data,

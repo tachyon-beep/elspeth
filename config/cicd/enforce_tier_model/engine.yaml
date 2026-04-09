@@ -91,27 +91,27 @@ allow_hits:
   reason: Best-effort cleanup of OPEN branch node_states after merge failure — broad catch prevents cleanup failure from masking original merge exception
   safety: Logs error with state_id and cleanup exception details; always re-raises the original error
   expires: null
-- key: engine/executors/sink.py:R4:SinkExecutor:_best_effort_cleanup:fp=da964e2238a2d1d2
+- key: engine/executors/sink.py:R4:SinkExecutor:_best_effort_cleanup:fp=5a67eb74ec24e870
   owner: architecture
   reason: Best-effort cleanup of OPEN node_states before system error crash — broad catch prevents cleanup failure from masking original FrameworkBugError/AuditIntegrityError
   safety: Logs warning with cleanup exception details; always re-raises the original system error
   expires: null
-- key: engine/executors/sink.py:R4:SinkExecutor:write:fp=7d76e07ecd3b08cc
+- key: engine/executors/sink.py:R4:SinkExecutor:write:fp=5799263a1889e73a
   owner: architecture
   reason: Cleanup of OPEN pre-phase states after begin_node_state failure must not mask original error
   safety: Logs warning with cleanup exception details; always re-raises the original error
   expires: null
-- key: engine/executors/sink.py:R5:SinkExecutor:write:fp=11523f57525bd7cc
+- key: engine/executors/sink.py:R5:SinkExecutor:write:fp=17a7c1a561c81655
   owner: bugfix
   reason: Offensive isinstance — validates sink.write() returns SinkWriteResult, not a bare ArtifactDescriptor or other type
   safety: Crashes immediately with PluginContractViolation identifying the buggy sink plugin
   expires: null
-- key: engine/executors/sink.py:R5:SinkExecutor:write:fp=c4f7d9cee58b0def
+- key: engine/executors/sink.py:R5:SinkExecutor:write:fp=3d05d6ade4967df3
   owner: bugfix
   reason: Offensive isinstance — validates plugin return type to crash with PluginContractViolation instead of opaque AttributeError
   safety: Crashes immediately with clear error identifying the buggy sink plugin
   expires: null
-- key: engine/executors/sink.py:R5:SinkExecutor:write:fp=10e42c13ccba2d63
+- key: engine/executors/sink.py:R5:SinkExecutor:write:fp=ba7dac0a367e236a
   owner: bugfix
   reason: Offensive isinstance — validates failsink return type to crash with PluginContractViolation instead of opaque AttributeError
   safety: Crashes immediately with clear error identifying the buggy failsink plugin

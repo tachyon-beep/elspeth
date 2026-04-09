@@ -30,7 +30,8 @@ from elspeth.contracts.errors import (
 )
 from elspeth.contracts.plugin_context import PluginContext
 from elspeth.contracts.results import ArtifactDescriptor
-from elspeth.core.landscape import LandscapeRecorder
+from elspeth.core.landscape.data_flow_repository import DataFlowRepository
+from elspeth.core.landscape.execution_repository import ExecutionRepository
 from elspeth.core.operations import track_operation
 from elspeth.engine.spans import SpanFactory
 
@@ -72,18 +73,21 @@ class SinkExecutor:
 
     def __init__(
         self,
-        recorder: LandscapeRecorder,
+        execution: ExecutionRepository,
+        data_flow: DataFlowRepository,
         span_factory: SpanFactory,
         run_id: str,
     ) -> None:
         """Initialize executor.
 
         Args:
-            recorder: Landscape recorder for audit trail
+            execution: Execution repository for node states, routing, artifacts
+            data_flow: Data flow repository for token outcomes
             span_factory: Span factory for tracing
             run_id: Run identifier for artifact registration
         """
-        self._recorder = recorder
+        self._execution = execution
+        self._data_flow = data_flow
         self._spans = span_factory
         self._run_id = run_id
 
@@ -99,7 +103,7 @@ class SinkExecutor:
             return
         per_token_ms = duration_ms / len(states)
         for _, state in states:
-            self._recorder.complete_node_state(
+            self._execution.complete_node_state(
                 state_id=state.state_id,
                 status=NodeStateStatus.FAILED,
                 duration_ms=per_token_ms,
@@ -277,7 +281,7 @@ class SinkExecutor:
         try:
             for token in tokens:
                 input_dict = token.row_data.to_dict()
-                state = self._recorder.begin_node_state(
+                state = self._execution.begin_node_state(
                     token_id=token.token_id,
                     node_id=sink_node_id,
                     run_id=ctx.run_id,
@@ -321,7 +325,7 @@ class SinkExecutor:
         # before re-raising — no token may exit this method without a terminal state.
         try:
             with track_operation(
-                recorder=self._recorder,
+                recorder=self._execution,  # type: ignore[arg-type]  # TODO: Task 5 — track_operation needs updating
                 run_id=self._run_id,
                 node_id=sink_node_id,
                 operation_type="sink_write",
@@ -416,7 +420,7 @@ class SinkExecutor:
                     "artifact_path": artifact_info.path_or_uri,
                     "content_hash": artifact_info.content_hash,
                 }
-                self._recorder.complete_node_state(
+                self._execution.complete_node_state(
                     state_id=state.state_id,
                     status=NodeStateStatus.COMPLETED,
                     output_data=sink_output,
@@ -425,7 +429,7 @@ class SinkExecutor:
 
             # Register artifact (linked to first primary state)
             first_state = primary_states[0][1]
-            artifact = self._recorder.register_artifact(
+            artifact = self._execution.register_artifact(
                 run_id=self._run_id,
                 state_id=first_state.state_id,
                 sink_node_id=sink_node_id,
@@ -437,7 +441,7 @@ class SinkExecutor:
 
             # Record COMPLETED outcomes for primary tokens
             for token, _ in primary_states:
-                self._recorder.record_token_outcome(
+                self._data_flow.record_token_outcome(
                     ref=TokenRef(token_id=token.token_id, run_id=self._run_id),
                     outcome=pending_outcome.outcome,
                     error_hash=pending_outcome.error_hash,
@@ -554,7 +558,7 @@ class SinkExecutor:
                 try:
                     for token, _idx, _primary_state in primary_divert_states:
                         input_dict = enriched_by_token[token.token_id]
-                        state = self._recorder.begin_node_state(
+                        state = self._execution.begin_node_state(
                             token_id=token.token_id,
                             node_id=failsink_node_id,
                             run_id=ctx.run_id,
@@ -607,7 +611,7 @@ class SinkExecutor:
                         reason: SinkDiversionReason = {"diversion_reason": diversion.reason}
 
                         # Routing event anchored to primary sink state
-                        self._recorder.record_routing_event(
+                        self._execution.record_routing_event(
                             state_id=primary_state.state_id,
                             edge_id=failsink_edge_id,
                             mode=RoutingMode.DIVERT,
@@ -623,7 +627,7 @@ class SinkExecutor:
                             exception_type="SinkDiversion",
                             phase="write",
                         )
-                        self._recorder.complete_node_state(
+                        self._execution.complete_node_state(
                             state_id=primary_state.state_id,
                             status=NodeStateStatus.FAILED,
                             output_data={"diverted_to": failsink_name, "reason": diversion.reason},
@@ -639,7 +643,7 @@ class SinkExecutor:
                             "artifact_path": failsink_artifact_info.path_or_uri,
                             "content_hash": failsink_artifact_info.content_hash,
                         }
-                        self._recorder.complete_node_state(
+                        self._execution.complete_node_state(
                             state_id=fs_state.state_id,
                             status=NodeStateStatus.COMPLETED,
                             output_data=failsink_output,
@@ -679,7 +683,7 @@ class SinkExecutor:
 
                 # Register failsink artifact
                 first_fs_state = failsink_states[0][1]
-                self._recorder.register_artifact(
+                self._execution.register_artifact(
                     run_id=self._run_id,
                     state_id=first_fs_state.state_id,
                     sink_node_id=failsink_node_id,
@@ -693,7 +697,7 @@ class SinkExecutor:
                 for token, idx, _primary_state in primary_divert_states:
                     diversion = diversion_by_index[idx]
                     error_hash = hashlib.sha256(diversion.reason.encode()).hexdigest()[:16]
-                    self._recorder.record_token_outcome(
+                    self._data_flow.record_token_outcome(
                         ref=TokenRef(token_id=token.token_id, run_id=self._run_id),
                         outcome=RowOutcome.DIVERTED,
                         error_hash=error_hash,
@@ -730,7 +734,7 @@ class SinkExecutor:
                         exception_type="SinkDiscard",
                         phase="write",
                     )
-                    self._recorder.complete_node_state(
+                    self._execution.complete_node_state(
                         state_id=primary_state.state_id,
                         status=NodeStateStatus.FAILED,
                         output_data={"discarded": True, "reason": diversion.reason},
@@ -739,7 +743,7 @@ class SinkExecutor:
                     )
 
                     error_hash = hashlib.sha256(diversion.reason.encode()).hexdigest()[:16]
-                    self._recorder.record_token_outcome(
+                    self._data_flow.record_token_outcome(
                         ref=TokenRef(token_id=token.token_id, run_id=self._run_id),
                         outcome=RowOutcome.DIVERTED,
                         error_hash=error_hash,

@@ -569,7 +569,7 @@ class Orchestrator:
 
         from elspeth.engine.executors import SinkExecutor
 
-        sink_executor = SinkExecutor(recorder, self._span_factory, run_id)
+        sink_executor = SinkExecutor(recorder, self._span_factory, run_id)  # type: ignore[arg-type,call-arg]  # TODO: Task 5 — pass ExecutionRepository + DataFlowRepository
         step = sink_step
         total_diversions = 0
 
@@ -898,9 +898,9 @@ class Orchestrator:
             # payload_store intentionally omitted: CoalesceExecutor's TokenManager only
             # calls coalesce_tokens(), which does not persist payloads (payloads are
             # recorded by the RowProcessor's TokenManager during initial token creation).
-            token_manager = TokenManager(recorder, step_resolver=step_resolver)
+            token_manager = TokenManager(recorder, step_resolver=step_resolver)  # type: ignore[arg-type]  # TODO: Task 5 — pass DataFlowRepository
             coalesce_executor = CoalesceExecutor(
-                recorder=recorder,
+                execution=recorder,  # type: ignore[arg-type]  # TODO: Task 5 — pass ExecutionRepository
                 span_factory=self._span_factory,
                 token_manager=token_manager,
                 run_id=run_id,

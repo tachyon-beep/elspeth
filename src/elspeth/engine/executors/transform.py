@@ -18,7 +18,7 @@ from elspeth.contracts.errors import TIER_1_ERRORS, OrchestrationInvariantError,
 from elspeth.contracts.plugin_context import PluginContext
 from elspeth.contracts.types import NodeID, StepResolver
 from elspeth.core.canonical import stable_hash
-from elspeth.core.landscape import LandscapeRecorder
+from elspeth.core.landscape.execution_repository import ExecutionRepository
 from elspeth.engine.executors.state_guard import NodeStateGuard
 from elspeth.engine.spans import SpanFactory
 from elspeth.plugins.infrastructure.batching.mixin import BatchTransformMixin
@@ -54,7 +54,7 @@ class TransformExecutor:
 
     def __init__(
         self,
-        recorder: LandscapeRecorder,
+        execution: ExecutionRepository,
         span_factory: SpanFactory,
         step_resolver: StepResolver,
         max_workers: int | None = None,
@@ -63,7 +63,7 @@ class TransformExecutor:
         """Initialize executor.
 
         Args:
-            recorder: Landscape recorder for audit trail
+            execution: Execution repository for audit trail
             span_factory: Span factory for tracing
             step_resolver: Resolves NodeID to 1-indexed audit step position
             max_workers: Maximum concurrent workers (None = no limit)
@@ -71,7 +71,7 @@ class TransformExecutor:
                            Built by the processor from the edge_map using error_edge_label().
                            Only populated for transforms with on_error pointing to a real sink.
         """
-        self._recorder = recorder
+        self._execution = execution
         self._spans = span_factory
         self._step_resolver = step_resolver
         self._max_workers = max_workers
@@ -186,7 +186,7 @@ class TransformExecutor:
         # (e.g., in output hashing or contract evolution), the guard auto-
         # completes the state as FAILED.
         with NodeStateGuard(
-            self._recorder,
+            self._execution,
             token_id=token.token_id,
             node_id=transform.node_id,
             run_id=ctx.run_id,
@@ -388,7 +388,7 @@ class TransformExecutor:
                     output_contract = result.rows[0].contract
 
                 if output_contract is not None and output_contract is not token.row_data.contract:
-                    self._recorder.update_node_output_contract(
+                    self._execution.update_node_output_contract(  # type: ignore[attr-defined]  # TODO: Task 5 — needs DataFlowRepository
                         run_id=ctx.run_id,
                         node_id=transform.node_id,
                         contract=output_contract,
@@ -464,7 +464,7 @@ class TransformExecutor:
                             f"DIVERT edge registered. DAG construction should have created an "
                             f"__error_{{name}}__ edge in from_plugin_instances()."
                         ) from exc
-                    self._recorder.record_routing_event(
+                    self._execution.record_routing_event(
                         state_id=guard.state_id,
                         edge_id=error_edge_id,
                         mode=RoutingMode.DIVERT,

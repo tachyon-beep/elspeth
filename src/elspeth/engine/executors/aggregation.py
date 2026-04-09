@@ -37,7 +37,7 @@ from elspeth.contracts.plugin_context import PluginContext
 from elspeth.contracts.types import NodeID, StepResolver
 from elspeth.core.canonical import stable_hash
 from elspeth.core.config import AggregationSettings
-from elspeth.core.landscape import LandscapeRecorder
+from elspeth.core.landscape.execution_repository import ExecutionRepository
 from elspeth.engine.clock import DEFAULT_CLOCK
 from elspeth.engine.executors.state_guard import NodeStateGuard
 from elspeth.engine.spans import SpanFactory
@@ -97,7 +97,7 @@ class AggregationExecutor:
 
     def __init__(
         self,
-        recorder: LandscapeRecorder,
+        execution: ExecutionRepository,
         span_factory: SpanFactory,
         step_resolver: StepResolver,
         run_id: str,
@@ -108,7 +108,7 @@ class AggregationExecutor:
         """Initialize executor.
 
         Args:
-            recorder: Landscape recorder for audit trail
+            execution: Execution repository for audit trail
             span_factory: Span factory for tracing
             step_resolver: Resolves NodeID to 1-indexed audit step position
             run_id: Run identifier for batch creation
@@ -116,7 +116,7 @@ class AggregationExecutor:
             clock: Optional clock for time access. Defaults to system clock.
                    Inject MockClock for deterministic testing.
         """
-        self._recorder = recorder
+        self._execution = execution
         self._spans = span_factory
         self._step_resolver = step_resolver
         self._run_id = run_id
@@ -171,7 +171,7 @@ class AggregationExecutor:
 
         # Create batch on first row if needed
         if node.batch_id is None:
-            batch = self._recorder.create_batch(
+            batch = self._execution.create_batch(
                 run_id=self._run_id,
                 aggregation_node_id=node_id,
             )
@@ -189,7 +189,7 @@ class AggregationExecutor:
 
         # Record batch membership for audit trail
         ordinal = node.member_count
-        self._recorder.add_batch_member(
+        self._execution.add_batch_member(
             batch_id=batch_id,
             token_id=token.token_id,
             ordinal=ordinal,
@@ -319,7 +319,7 @@ class AggregationExecutor:
             pipeline_rows.append(PipelineRow(row_dict, contract))
 
         # Step 1: Transition batch to "executing"
-        self._recorder.update_batch_status(
+        self._execution.update_batch_status(
             batch_id=batch_id,
             status=BatchStatus.EXECUTING,
             trigger_type=trigger_type,
@@ -341,7 +341,7 @@ class AggregationExecutor:
         # before the state is explicitly completed, the guard auto-completes
         # it as FAILED.  Batch lifecycle cleanup is handled separately below.
         with NodeStateGuard(
-            self._recorder,
+            self._execution,
             token_id=representative_token.token_id,
             node_id=node_id,
             run_id=ctx.run_id,
@@ -398,7 +398,7 @@ class AggregationExecutor:
 
                         # Link batch to the aggregation state for traceability.
                         # Keep status as "executing" but set aggregation_state_id.
-                        self._recorder.update_batch_status(
+                        self._execution.update_batch_status(
                             batch_id=batch_id,
                             status=BatchStatus.EXECUTING,
                             state_id=guard.state_id,
@@ -482,7 +482,7 @@ class AggregationExecutor:
                     )
 
                     # Transition batch to completed
-                    self._recorder.complete_batch(
+                    self._execution.complete_batch(
                         batch_id=batch_id,
                         status=BatchStatus.COMPLETED,
                         trigger_type=trigger_type,
@@ -502,7 +502,7 @@ class AggregationExecutor:
                     )
 
                     # Transition batch to failed
-                    self._recorder.complete_batch(
+                    self._execution.complete_batch(
                         batch_id=batch_id,
                         status=BatchStatus.FAILED,
                         trigger_type=trigger_type,
@@ -529,7 +529,7 @@ class AggregationExecutor:
                 # (avoids double-write if complete_batch itself raised).
                 if not batch_finalized:
                     try:
-                        self._recorder.complete_batch(
+                        self._execution.complete_batch(
                             batch_id=batch_id,
                             status=BatchStatus.FAILED,
                             trigger_type=trigger_type,
@@ -874,7 +874,7 @@ class AggregationExecutor:
         Raises:
             AuditIntegrityError: If batch not found in audit trail
         """
-        batch = self._recorder.get_batch(batch_id)
+        batch = self._execution.get_batch(batch_id)
         if batch is None:
             raise AuditIntegrityError(f"Batch not found in audit trail: {batch_id}")
 
@@ -883,5 +883,5 @@ class AggregationExecutor:
         node.batch_id = batch_id
 
         # Restore member count from database
-        members = self._recorder.get_batch_members(batch_id)
+        members = self._execution.get_batch_members(batch_id)
         node.member_count = len(members)

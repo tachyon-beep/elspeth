@@ -16,7 +16,7 @@ from elspeth.contracts.audit import TokenRef
 from elspeth.contracts.errors import OrchestrationInvariantError
 from elspeth.contracts.schema_contract import PipelineRow, SchemaContract
 from elspeth.contracts.types import NodeID, StepResolver
-from elspeth.core.landscape import LandscapeRecorder
+from elspeth.core.landscape.data_flow_repository import DataFlowRepository
 
 
 class TokenManager:
@@ -52,18 +52,18 @@ class TokenManager:
 
     def __init__(
         self,
-        recorder: LandscapeRecorder,
+        data_flow: DataFlowRepository,
         *,
         step_resolver: StepResolver,
     ) -> None:
-        """Initialize with recorder and step resolver.
+        """Initialize with data flow repository and step resolver.
 
         Args:
-            recorder: LandscapeRecorder for audit trail
+            data_flow: DataFlowRepository for audit trail
             step_resolver: Callable that resolves NodeID to 1-indexed audit step position.
                 The canonical implementation is RowProcessor._resolve_audit_step_for_node.
         """
-        self._recorder = recorder
+        self._data_flow = data_flow
         self._step_resolver = step_resolver
 
     def create_initial_token(
@@ -101,7 +101,7 @@ class TokenManager:
         pipeline_row = source_row.to_pipeline_row()
 
         # Create row record - recorder stores dict representation
-        row = self._recorder.create_row(
+        row = self._data_flow.create_row(
             run_id=run_id,
             source_node_id=source_node_id,
             row_index=row_index,
@@ -109,7 +109,7 @@ class TokenManager:
         )
 
         # Create initial token
-        token = self._recorder.create_token(row_id=row.row_id)
+        token = self._data_flow.create_token(row_id=row.row_id)
 
         return TokenInfo(
             row_id=row.row_id,
@@ -171,7 +171,7 @@ class TokenManager:
 
         # Create row record — quarantined=True enables safe hashing for
         # Tier-3 external data that may contain non-canonical values (NaN, Infinity)
-        row = self._recorder.create_row(
+        row = self._data_flow.create_row(
             run_id=run_id,
             source_node_id=source_node_id,
             row_index=row_index,
@@ -180,7 +180,7 @@ class TokenManager:
         )
 
         # Create initial token
-        token = self._recorder.create_token(row_id=row.row_id)
+        token = self._data_flow.create_token(row_id=row.row_id)
 
         return TokenInfo(
             row_id=row.row_id,
@@ -206,7 +206,7 @@ class TokenManager:
             TokenInfo with row and token IDs
         """
         # Create token for existing row
-        token = self._recorder.create_token(row_id=row_id)
+        token = self._data_flow.create_token(row_id=row_id)
 
         return TokenInfo(
             row_id=row_id,
@@ -244,7 +244,7 @@ class TokenManager:
         data = row_data if row_data is not None else parent_token.row_data
         step = self._step_resolver(node_id)
 
-        children, fork_group_id = self._recorder.fork_token(
+        children, fork_group_id = self._data_flow.fork_token(
             parent_ref=TokenRef(token_id=parent_token.token_id, run_id=run_id),
             row_id=parent_token.row_id,
             branches=branches,
@@ -297,7 +297,7 @@ class TokenManager:
 
         step = self._step_resolver(node_id)
 
-        merged = self._recorder.coalesce_tokens(
+        merged = self._data_flow.coalesce_tokens(
             parent_refs=[TokenRef(token_id=p.token_id, run_id=run_id) for p in parents],
             row_id=row_id,
             step_in_pipeline=step,
@@ -356,7 +356,7 @@ class TokenManager:
 
         # Delegate to recorder which handles DB operations and parent linking
         step = self._step_resolver(node_id)
-        db_children, expand_group_id = self._recorder.expand_token(
+        db_children, expand_group_id = self._data_flow.expand_token(
             parent_ref=TokenRef(token_id=parent_token.token_id, run_id=run_id),
             row_id=parent_token.row_id,
             count=len(expanded_rows),

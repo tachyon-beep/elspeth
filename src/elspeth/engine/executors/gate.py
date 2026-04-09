@@ -33,7 +33,7 @@ from elspeth.core.expression_parser import (
     ExpressionSecurityError,
     ExpressionSyntaxError,
 )
-from elspeth.core.landscape import LandscapeRecorder
+from elspeth.core.landscape.execution_repository import ExecutionRepository
 from elspeth.engine.executors.state_guard import NodeStateGuard
 from elspeth.engine.executors.types import GateOutcome, MissingEdgeError
 from elspeth.engine.spans import SpanFactory
@@ -92,7 +92,7 @@ class GateExecutor:
 
     def __init__(
         self,
-        recorder: LandscapeRecorder,
+        execution: ExecutionRepository,
         span_factory: SpanFactory,
         step_resolver: StepResolver,
         edge_map: dict[tuple[NodeID, str], str] | None = None,
@@ -101,13 +101,13 @@ class GateExecutor:
         """Initialize executor.
 
         Args:
-            recorder: Landscape recorder for audit trail
+            execution: Execution repository for audit trail
             span_factory: Span factory for tracing
             step_resolver: Resolves NodeID to 1-indexed audit step position
             edge_map: Maps (node_id, label) -> edge_id for routing
             route_resolution_map: Maps (node_id, label) -> resolved route destination
         """
-        self._recorder = recorder
+        self._execution = execution
         self._spans = span_factory
         self._step_resolver = step_resolver
         self._edge_map = edge_map or {}
@@ -238,7 +238,7 @@ class GateExecutor:
         # If any unhandled exception occurs before guard.complete() is called,
         # the guard auto-completes the state as FAILED in __exit__.
         with NodeStateGuard(
-            self._recorder,
+            self._execution,
             token_id=token.token_id,
             node_id=node_id,
             run_id=ctx.run_id,
@@ -357,7 +357,7 @@ class GateExecutor:
             if edge_id is None:
                 raise MissingEdgeError(node_id=typed_node_id, label=dest)
 
-            self._recorder.record_routing_event(
+            self._execution.record_routing_event(
                 state_id=state_id,
                 edge_id=edge_id,
                 mode=action.mode,
@@ -372,7 +372,7 @@ class GateExecutor:
                     raise MissingEdgeError(node_id=typed_node_id, label=dest)
                 routes.append(RoutingSpec(edge_id=edge_id, mode=action.mode))
 
-            self._recorder.record_routing_events(
+            self._execution.record_routing_events(
                 state_id=state_id,
                 routes=routes,
                 reason=action.reason,

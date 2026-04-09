@@ -334,19 +334,19 @@ class RowProcessor:
         self._error_edge_ids = error_edge_ids
 
         self._token_manager = TokenManager(
-            recorder,
+            recorder,  # type: ignore[arg-type]  # TODO: Task 5 — pass DataFlowRepository
             step_resolver=self._step_resolver,
         )
         self._transform_executor = TransformExecutor(
-            recorder,
+            recorder,  # type: ignore[arg-type]  # TODO: Task 5 — pass ExecutionRepository
             span_factory,
             self._step_resolver,
             max_workers=max_workers,
             error_edge_ids=error_edge_ids,
         )
-        self._gate_executor = GateExecutor(recorder, span_factory, self._step_resolver, edge_map, route_resolution_map)
+        self._gate_executor = GateExecutor(recorder, span_factory, self._step_resolver, edge_map, route_resolution_map)  # type: ignore[arg-type]  # TODO: Task 5 — pass ExecutionRepository
         self._aggregation_executor = AggregationExecutor(
-            recorder,
+            recorder,  # type: ignore[arg-type]  # TODO: Task 5 — pass ExecutionRepository
             span_factory,
             self._step_resolver,
             run_id,
