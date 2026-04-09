@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import Protocol, runtime_checkable
+from typing import Any, Protocol, runtime_checkable
 
 from elspeth.contracts.errors import PluginRetryableError
 from elspeth.contracts.probes import CollectionReadinessResult
@@ -35,6 +35,7 @@ class RetrievalProvider(Protocol):
     """
 
     last_skipped_count: int
+    last_skipped_reasons: list[dict[str, Any]]
 
     def search(
         self,

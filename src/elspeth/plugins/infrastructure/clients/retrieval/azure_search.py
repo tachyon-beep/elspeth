@@ -8,7 +8,6 @@ import urllib.parse
 from typing import TYPE_CHECKING, Any, Literal, Self, cast
 
 import httpx
-import structlog
 from pydantic import BaseModel, field_validator, model_validator
 
 from elspeth.contracts.probes import CollectionReadinessResult
@@ -20,8 +19,6 @@ if TYPE_CHECKING:
     from elspeth.core.rate_limit.limiter import RateLimiter
     from elspeth.core.rate_limit.registry import NoOpLimiter
     from elspeth.plugins.infrastructure.clients.base import TelemetryEmitCallback
-
-logger = structlog.get_logger(__name__)
 
 
 class AzureSearchProviderConfig(BaseModel):
@@ -166,15 +163,13 @@ class AzureSearchProvider:
         # Store on instance so callers (RAGRetrievalTransform) can include
         # skip counts in their audit success_reason metadata, which flows
         # into the Landscape audit trail.
+        # "Record what we didn't get" — skipped items are audit evidence.
+        # Stored on instance for the caller (RAGRetrievalTransform) to include
+        # in the Landscape audit trail via success_reason metadata.
+        # No logger.debug — per logging policy, pipeline activity belongs
+        # in the Landscape, not in logs.
         self.last_skipped_count = len(skipped_items)
         self.last_skipped_reasons = skipped_items
-        if skipped_items:
-            logger.debug(
-                "azure_search_skipped_items",
-                state_id=state_id,
-                skipped=skipped_items,
-                skipped_count=len(skipped_items),
-            )
         return chunks
 
     def _execute_search(

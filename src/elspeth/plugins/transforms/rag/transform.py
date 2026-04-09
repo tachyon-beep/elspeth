@@ -282,9 +282,11 @@ class RAGRetrievalTransform(BaseTransform):
             transform_adds_fields=True,
         )
 
-        # Include skipped_count in audit metadata — "record what we didn't get".
-        # All providers implement last_skipped_count per the RetrievalProvider protocol.
+        # Include skip details in audit metadata — "record what we didn't get".
+        # All providers implement last_skipped_count and last_skipped_reasons
+        # per the RetrievalProvider protocol.
         skipped_count = self._provider.last_skipped_count
+        skipped_reasons = self._provider.last_skipped_reasons
 
         success_metadata: dict[str, Any] = {
             "chunk_count": len(chunks),
@@ -293,6 +295,8 @@ class RAGRetrievalTransform(BaseTransform):
         }
         if skipped_count > 0:
             success_metadata["skipped_count"] = skipped_count
+        if skipped_reasons:
+            success_metadata["skipped_reasons"] = skipped_reasons
 
         return TransformResult.success(
             PipelineRow(output, output_contract),

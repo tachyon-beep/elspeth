@@ -19,7 +19,7 @@ from __future__ import annotations
 import math
 import re
 import time
-from typing import TYPE_CHECKING, Literal, Self
+from typing import TYPE_CHECKING, Any, Literal, Self
 
 import chromadb
 from pydantic import BaseModel, field_validator, model_validator
@@ -120,6 +120,7 @@ class ChromaSearchProvider:
         self._recorder = recorder
         self._run_id = run_id
         self.last_skipped_count: int = 0
+        self.last_skipped_reasons: list[dict[str, Any]] = []
 
         if config.mode == "ephemeral":
             self._client = chromadb.Client()
@@ -214,8 +215,52 @@ class ChromaSearchProvider:
             raise RetrievalError(f"Chroma connection failed: {exc}", retryable=True) from exc
         elapsed_ms = (time.monotonic() - start_time) * 1000
 
-        # Tier 3 boundary: ChromaDB SDK response structure is external data.
-        # Wrap access to guard against malformed/unexpected SDK responses.
+        # Post-query processing: parse response, validate distances, build chunks.
+        # The external call already happened — any failure here must still produce
+        # an audit record. Without this try/except, response parsing errors,
+        # distance validation crashes, and normalization failures would leave
+        # no trace in the Landscape (fix: elspeth-9454d584d2).
+        try:
+            chunks, skipped = self._parse_and_build_chunks(results, min_score)
+        except RetrievalError as exc:
+            self._record_error(state_id, start_time, request_payload, exc, retryable=exc.retryable)
+            raise
+
+        chunks.sort(key=lambda c: c.score, reverse=True)
+        self.last_skipped_count = skipped
+
+        call_index = self._recorder.allocate_call_index(state_id)
+        self._recorder.record_call(
+            state_id=state_id,
+            call_index=call_index,
+            call_type=CallType.VECTOR,
+            status=CallStatus.SUCCESS,
+            request_data=request_payload,
+            response_data=RawCallPayload(
+                {"result_count": len(chunks), "skipped_count": skipped, "top_score": chunks[0].score if chunks else None}
+            ),
+            latency_ms=round(elapsed_ms),
+        )
+
+        return chunks
+
+    def _parse_and_build_chunks(
+        self,
+        results: Any,
+        min_score: float,
+    ) -> tuple[list[RetrievalChunk], int]:
+        """Parse ChromaDB query results and build RetrievalChunk list.
+
+        Tier 3 boundary: the SDK response structure is external data.
+        All access is guarded against malformed/unexpected responses.
+
+        Returns:
+            Tuple of (chunks, skipped_count)
+
+        Raises:
+            RetrievalError: On malformed response structure, corrupt distances,
+                or non-finite distance values.
+        """
         try:
             raw_documents = results["documents"]
             raw_distances = results["distances"]
@@ -239,7 +284,7 @@ class ChromaSearchProvider:
         skipped = 0
         for doc, distance, metadata, doc_id in zip(documents, distances, metadatas, ids, strict=True):
             if not isinstance(doc, str):  # Tier 3: SDK may return non-str from corrupt index
-                skipped += 1  # type: ignore[unreachable]
+                skipped += 1
                 continue
 
             # ChromaDB is our infrastructure, not an external API — corrupt
@@ -268,23 +313,7 @@ class ChromaSearchProvider:
                 )
             )
 
-        chunks.sort(key=lambda c: c.score, reverse=True)
-        self.last_skipped_count = skipped
-
-        call_index = self._recorder.allocate_call_index(state_id)
-        self._recorder.record_call(
-            state_id=state_id,
-            call_index=call_index,
-            call_type=CallType.VECTOR,
-            status=CallStatus.SUCCESS,
-            request_data=request_payload,
-            response_data=RawCallPayload(
-                {"result_count": len(chunks), "skipped_count": skipped, "top_score": chunks[0].score if chunks else None}
-            ),
-            latency_ms=round(elapsed_ms),
-        )
-
-        return chunks
+        return chunks, skipped
 
     def _normalize_distance(self, distance: float) -> float:
         if not math.isfinite(distance):

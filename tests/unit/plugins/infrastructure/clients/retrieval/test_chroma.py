@@ -15,6 +15,7 @@ import pytest
 
 chromadb = pytest.importorskip("chromadb")
 
+from elspeth.contracts.enums import CallStatus  # noqa: E402
 from elspeth.core.landscape.recorder import LandscapeRecorder  # noqa: E402
 from elspeth.plugins.infrastructure.clients.retrieval.base import RetrievalError  # noqa: E402
 from elspeth.plugins.infrastructure.clients.retrieval.chroma import (  # noqa: E402
@@ -629,6 +630,129 @@ class TestDistanceTypeValidation:
             pytest.raises(RetrievalError, match=r"non-numeric distance.*collection may need to be rebuilt"),
         ):
             provider.search("test", top_k=2, min_score=0.0, state_id="s1", token_id=None)
+
+
+class TestPostQueryFailureAudit:
+    """Tests for elspeth-9454d584d2: failures after successful query must produce audit records.
+
+    The external call to ChromaDB happened and returned a response. If
+    post-processing fails (malformed response, corrupt distances, non-finite
+    values), the audit trail must still record the call.
+    """
+
+    def test_malformed_response_records_error_call(self):
+        """Malformed SDK response produces audit record before raising."""
+        from unittest.mock import patch
+
+        unique_name = f"pqa-{uuid.uuid4().hex[:12]}"
+        _precreate_collection(unique_name)
+        recorder = _mock_recorder()
+        provider = ChromaSearchProvider(
+            config=ChromaSearchProviderConfig(collection=unique_name, mode="ephemeral"),
+            recorder=recorder,
+            run_id="test-run",
+        )
+        provider._collection.add(documents=["test doc"], ids=["doc1"])
+
+        with (
+            patch.object(provider._collection, "query", return_value={"ids": [["doc1"]]}),
+            pytest.raises(RetrievalError),
+        ):
+            provider.search("test", top_k=1, min_score=0.0, state_id="s1", token_id=None)
+
+        recorder.record_call.assert_called_once()
+        assert recorder.record_call.call_args.kwargs["status"] == CallStatus.ERROR
+
+    def test_non_numeric_distance_records_error_call(self):
+        """Corrupt distance produces audit record before crashing."""
+        from unittest.mock import patch
+
+        unique_name = f"pqd-{uuid.uuid4().hex[:12]}"
+        _precreate_collection(unique_name)
+        recorder = _mock_recorder()
+        provider = ChromaSearchProvider(
+            config=ChromaSearchProviderConfig(collection=unique_name, mode="ephemeral"),
+            recorder=recorder,
+            run_id="test-run",
+        )
+        provider._collection.add(documents=["doc a"], ids=["doc1"])
+
+        with (
+            patch.object(
+                provider._collection,
+                "query",
+                return_value={
+                    "ids": [["doc1"]],
+                    "documents": [["doc a"]],
+                    "distances": [["not_a_number"]],
+                    "metadatas": [[{}]],
+                },
+            ),
+            pytest.raises(RetrievalError),
+        ):
+            provider.search("test", top_k=1, min_score=0.0, state_id="s1", token_id=None)
+
+        recorder.record_call.assert_called_once()
+        assert recorder.record_call.call_args.kwargs["status"] == CallStatus.ERROR
+
+    def test_nan_distance_records_error_call(self):
+        """NaN distance from corrupt index produces audit record."""
+        from unittest.mock import patch
+
+        unique_name = f"pqn-{uuid.uuid4().hex[:12]}"
+        _precreate_collection(unique_name)
+        recorder = _mock_recorder()
+        provider = ChromaSearchProvider(
+            config=ChromaSearchProviderConfig(collection=unique_name, mode="ephemeral"),
+            recorder=recorder,
+            run_id="test-run",
+        )
+        provider._collection.add(documents=["doc a"], ids=["doc1"])
+
+        with (
+            patch.object(
+                provider._collection,
+                "query",
+                return_value={
+                    "ids": [["doc1"]],
+                    "documents": [["doc a"]],
+                    "distances": [[float("nan")]],
+                    "metadatas": [[{}]],
+                },
+            ),
+            pytest.raises(RetrievalError),
+        ):
+            provider.search("test", top_k=1, min_score=0.0, state_id="s1", token_id=None)
+
+        recorder.record_call.assert_called_once()
+        assert recorder.record_call.call_args.kwargs["status"] == CallStatus.ERROR
+
+    def test_none_documents_records_error_call(self):
+        """None in response fields produces audit record."""
+        from unittest.mock import patch
+
+        unique_name = f"pqnr-{uuid.uuid4().hex[:12]}"
+        _precreate_collection(unique_name)
+        recorder = _mock_recorder()
+        provider = ChromaSearchProvider(
+            config=ChromaSearchProviderConfig(collection=unique_name, mode="ephemeral"),
+            recorder=recorder,
+            run_id="test-run",
+        )
+        provider._collection.add(documents=["test doc"], ids=["doc1"])
+
+        with (
+            patch.object(
+                provider._collection,
+                "query",
+                return_value={"ids": [["doc1"]], "documents": None, "distances": [[0.1]], "metadatas": [[{}]]},
+            ),
+            pytest.raises(RetrievalError),
+        ):
+            provider.search("test", top_k=1, min_score=0.0, state_id="s1", token_id=None)
+
+        recorder.record_call.assert_called_once()
+        assert recorder.record_call.call_args.kwargs["status"] == CallStatus.ERROR
 
 
 class TestDocTypeValidation:
