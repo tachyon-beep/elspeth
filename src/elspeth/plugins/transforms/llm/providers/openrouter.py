@@ -323,7 +323,13 @@ class OpenRouterLLMProvider:
         """Decrement reference count and close client when last user releases it."""
         client_to_close: AuditedHTTPClient | None = None
         with self._http_clients_lock:
-            count = self._http_client_refs.get(state_id, 0) - 1
+            if state_id not in self._http_client_refs:
+                raise RuntimeError(
+                    f"_release_http_client called for unknown state_id={state_id!r}. "
+                    f"This is a refcount underflow — _get_http_client() was never called "
+                    f"for this state_id, or it was already fully released."
+                )
+            count = self._http_client_refs[state_id] - 1
             self._http_client_refs[state_id] = count
             if count <= 0:
                 client_to_close = self._http_clients.pop(state_id, None)

@@ -103,7 +103,14 @@ class SchemaContract:
             raise ValueError(f"Duplicate normalized_name in fields: {set(duplicates)}")
 
         by_norm: dict[str, FieldContract] = {fc.normalized_name: fc for fc in self.fields}
-        by_orig: dict[str, str] = {fc.original_name: fc.normalized_name for fc in self.fields}
+        by_orig: dict[str, str] = {}
+        for fc in self.fields:
+            if fc.original_name in by_orig:
+                raise ValueError(
+                    f"Duplicate original_name in fields: '{fc.original_name}' maps to "
+                    f"both '{by_orig[fc.original_name]}' and '{fc.normalized_name}'"
+                )
+            by_orig[fc.original_name] = fc.normalized_name
         object.__setattr__(self, "_by_normalized", types.MappingProxyType(by_norm))
         object.__setattr__(self, "_by_original", types.MappingProxyType(by_orig))
 

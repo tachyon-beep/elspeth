@@ -504,6 +504,25 @@ class TestContractBuilderEdgeCases:
         items_field = updated.fields[0]
         assert items_field.python_type is object
 
+    def test_colliding_normalized_names_rejected(self) -> None:
+        """field_resolution with duplicate normalized values raises ValueError.
+
+        If multiple original names map to the same normalized name, the reverse
+        lookup would silently lose entries. Upstream normalization should prevent
+        this, but ContractBuilder must self-protect.
+        """
+        from elspeth.contracts.contract_builder import ContractBuilder
+
+        contract = SchemaContract(mode="OBSERVED", fields=(), locked=False)
+        builder = ContractBuilder(contract)
+
+        first_row = {"amount_usd": 100}
+        # Two originals map to same normalized name
+        field_resolution = {"Amount USD": "amount_usd", "Amount_USD": "amount_usd"}
+
+        with pytest.raises(ValueError, match="amount_usd"):
+            builder.process_first_row(first_row, field_resolution)
+
     def test_field_in_row_not_in_resolution_crashes(self) -> None:
         """Field in row but not in resolution raises KeyError (Tier 1 integrity).
 

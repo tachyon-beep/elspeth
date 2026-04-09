@@ -685,6 +685,54 @@ class TestSensitiveParams:
         assert result.fingerprint is not None
 
 
+class TestBracketDotParamSanitization:
+    """Tests for bracket/dot notation param matching.
+
+    SECURITY: parse_qs preserves bracket notation in keys, so api_key[0]=secret
+    produces key "api_key[0]" which must still match "api_key" in SENSITIVE_PARAMS.
+    """
+
+    def test_bracket_notation_sanitized(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """api_key[0]=secret must be stripped as sensitive."""
+        monkeypatch.setenv("ELSPETH_FINGERPRINT_KEY", "test-key")
+        url = "https://api.example.com?api_key[0]=secret&format=json"
+
+        result = SanitizedWebhookUrl.from_raw_url(url)
+
+        assert "secret" not in result.sanitized_url
+        assert "api_key" not in result.sanitized_url
+        assert "format=json" in result.sanitized_url
+        assert result.fingerprint is not None
+
+    def test_dot_notation_sanitized(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """token.value=secret must be stripped as sensitive."""
+        monkeypatch.setenv("ELSPETH_FINGERPRINT_KEY", "test-key")
+        url = "https://api.example.com?token.value=secret&keep=me"
+
+        result = SanitizedWebhookUrl.from_raw_url(url)
+
+        assert "secret" not in result.sanitized_url
+        assert "token" not in result.sanitized_url
+        assert "keep=me" in result.sanitized_url
+        assert result.fingerprint is not None
+
+    def test_bracket_notation_rejected_by_post_init(self) -> None:
+        """__post_init__ must reject bracket-notated sensitive params."""
+        with pytest.raises(ValueError, match="sensitive query parameters"):
+            SanitizedWebhookUrl(
+                sanitized_url="https://api.example.com?api_key[0]=secret",
+                fingerprint=None,
+            )
+
+    def test_dot_notation_rejected_by_post_init(self) -> None:
+        """__post_init__ must reject dot-notated sensitive params."""
+        with pytest.raises(ValueError, match="sensitive query parameters"):
+            SanitizedWebhookUrl(
+                sanitized_url="https://api.example.com?token.value=secret",
+                fingerprint=None,
+            )
+
+
 class TestFragmentTokenSanitization:
     """Tests for URL fragment token sanitization.
 

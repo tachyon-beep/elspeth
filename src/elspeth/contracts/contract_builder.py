@@ -74,8 +74,16 @@ class ContractBuilder:
         if self._contract.locked:
             return self._contract
 
-        # Build reverse mapping: normalized -> original
-        normalized_to_original = {v: k for k, v in field_resolution.items()}
+        # Build reverse mapping: normalized -> original (with collision detection)
+        normalized_to_original: dict[str, str] = {}
+        for orig, norm in field_resolution.items():
+            if norm in normalized_to_original:
+                raise ValueError(
+                    f"field_resolution collision: normalized name '{norm}' maps to "
+                    f"both '{normalized_to_original[norm]}' and '{orig}'. "
+                    f"Upstream normalization should prevent this — this is a source plugin bug."
+                )
+            normalized_to_original[norm] = orig
 
         # Start from current contract
         updated = self._contract

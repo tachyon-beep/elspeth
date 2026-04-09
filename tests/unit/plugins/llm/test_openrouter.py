@@ -17,7 +17,7 @@ from elspeth.contracts.schema_contract import SchemaContract
 from elspeth.engine.batch_adapter import ExceptionResult
 from elspeth.plugins.infrastructure.batching.ports import CollectorOutputPort
 from elspeth.plugins.infrastructure.config_base import PluginConfigError
-from elspeth.plugins.transforms.llm.providers.openrouter import OpenRouterConfig
+from elspeth.plugins.transforms.llm.providers.openrouter import OpenRouterConfig, OpenRouterLLMProvider
 from elspeth.plugins.transforms.llm.transform import LLMTransform
 from elspeth.testing import make_pipeline_row, make_row
 from tests.fixtures.factories import make_context
@@ -1728,3 +1728,23 @@ class TestOpenRouterMalformedUtf8:
             assert result.reason["reason"] == "llm_call_failed"
         finally:
             transform.close()
+
+
+class TestOpenRouterRefcount:
+    """Tests for HTTP client reference counting correctness."""
+
+    def _make_provider(self) -> OpenRouterLLMProvider:
+        """Create provider with mock dependencies for refcount testing."""
+        return OpenRouterLLMProvider(
+            api_key="sk-test",
+            recorder=Mock(),
+            run_id="test-run",
+            telemetry_emit=Mock(),
+        )
+
+    def test_release_unknown_state_id_raises(self) -> None:
+        """Releasing an unacquired state_id is a refcount underflow — must crash."""
+        provider = self._make_provider()
+
+        with pytest.raises(RuntimeError, match="unknown state_id"):
+            provider._release_http_client("never-acquired")

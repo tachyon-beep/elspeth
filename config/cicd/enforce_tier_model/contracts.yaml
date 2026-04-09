@@ -112,6 +112,12 @@ per_file_rules:
   reason: SanitizedUrl type validation at Tier 3 boundary
   expires: null
   max_hits: 2
+- pattern: contracts/diversion.py
+  rules:
+  - R5
+  reason: Offensive __post_init__ type guards — validates artifact is ArtifactDescriptor, diversions is tuple, elements are RowDiversion
+  expires: null
+  max_hits: 3
 - pattern: contracts/routing.py
   rules:
   - R5
@@ -131,12 +137,12 @@ per_file_rules:
   expires: null
   max_hits: 1
 allow_hits:
-- key: contracts/url.py:R6:SanitizedDatabaseUrl:from_raw_url:fp=20b25721d9adf860
+- key: contracts/url.py:R6:SanitizedDatabaseUrl:from_raw_url:fp=a8a9139e2ff09e37
   owner: architecture
   reason: except ValueError on get_fingerprint_key() — explicit branch for dev mode (no key) vs production (fail_if_no_key)
   safety: Raises SecretFingerprintError when fail_if_no_key=True; only silently continues in dev mode
   expires: null
-- key: contracts/url.py:R6:SanitizedWebhookUrl:from_raw_url:fp=21ce92115665de50
+- key: contracts/url.py:R6:SanitizedWebhookUrl:from_raw_url:fp=ec8dd835c4c43c96
   owner: architecture
   reason: except ValueError on get_fingerprint_key() — explicit branch for dev mode (no key) vs production (fail_if_no_key)
   safety: Raises SecretFingerprintError when fail_if_no_key=True; only silently continues in dev mode
@@ -181,7 +187,7 @@ allow_hits:
   reason: vars(item) raises TypeError on non-object Pydantic metadata (plain strings, ints); skipping is correct since only object metadata can carry allow_inf_nan
   safety: Only catches TypeError from vars(); attribute access on the result uses direct dict lookup, not hasattr
   expires: '2026-05-15'
-- key: contracts/contract_builder.py:R6:ContractBuilder:process_first_row:fp=e1e21d94387cca2c
+- key: contracts/contract_builder.py:R6:ContractBuilder:process_first_row:fp=4d3f0bdcf6fdd56f
   owner: bugfix
   reason: TypeError from normalize_type_for_contract for unsupported types (dict, list, Decimal) — maps to object
   safety: Preserves field in contract as 'any' type; no data loss or silent skip

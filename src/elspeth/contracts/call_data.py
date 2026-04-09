@@ -245,11 +245,13 @@ class HTTPCallResponse:
         require_int(self.status_code, "status_code", min_value=100)
         require_int(self.body_size, "body_size", optional=True, min_value=0)
         require_int(self.redirect_count, "redirect_count", min_value=0)
-        freeze_fields(self, "headers")
-        if self.body is not None and isinstance(self.body, (Mapping, list)):
-            frozen = deep_freeze(self.body)
-            if frozen is not self.body:
-                object.__setattr__(self, "body", frozen)
+        if self.body is not None and self.body_size is None:
+            raise ValueError(
+                "HTTPCallResponse.body requires body_size — without it, "
+                "to_dict() silently drops body from the audit record. "
+                "Set body_size=len(content) or omit body for redirect hops."
+            )
+        freeze_fields(self, "headers", "body")
 
     def to_dict(self) -> dict[str, Any]:
         """Serialize to audit-trail dict.

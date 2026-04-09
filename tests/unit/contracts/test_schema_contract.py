@@ -317,6 +317,18 @@ class TestSchemaContractEdgeCases:
         assert "simple_field" in contract._by_normalized
         assert "simple_field" in contract._by_original
 
+    def test_duplicate_original_name_raises_valueerror(self) -> None:
+        """Duplicate original_name in fields raises ValueError.
+
+        Two fields with different normalized_names but the same original_name
+        would cause _by_original dict to silently overwrite, breaking reverse lookups.
+        """
+        fc1 = make_field("amount_usd", int, original_name="Amount", required=True, source="declared")
+        fc2 = make_field("amount_eur", float, original_name="Amount", required=False, source="declared")
+
+        with pytest.raises(ValueError, match=r"Duplicate original_name.*Amount"):
+            SchemaContract(mode="FIXED", fields=(fc1, fc2), locked=True)
+
     def test_indices_are_read_only(self, sample_fields: tuple[FieldContract, ...]) -> None:
         """Internal indices are immutable after construction."""
         contract = SchemaContract(
