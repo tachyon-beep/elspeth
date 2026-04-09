@@ -760,7 +760,7 @@ def query(db: LandscapeDB, recorder: LandscapeRecorder, sql: str, params: dict[s
 
     from sqlalchemy import text
 
-    with db.connection() as conn:
+    with db.read_only_connection() as conn:
         result = conn.execute(text(sql), params or {})
         columns = list(result.keys())
         rows = result.fetchall()

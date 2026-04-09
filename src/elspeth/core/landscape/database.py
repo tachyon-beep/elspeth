@@ -9,7 +9,7 @@ from contextlib import contextmanager
 from pathlib import Path
 from typing import Any, Self
 
-from sqlalchemy import Connection, create_engine, event
+from sqlalchemy import Connection, create_engine, event, text
 from sqlalchemy.engine import Engine
 from sqlalchemy.engine.url import make_url
 
@@ -646,3 +646,25 @@ class LandscapeDB:
         """
         with self.engine.begin() as conn:
             yield conn
+
+    @contextmanager
+    def read_only_connection(self) -> Iterator[Connection]:
+        """Get a database connection that rejects all write operations.
+
+        Defense-in-depth for untrusted SQL execution (e.g., MCP query tool).
+        For SQLite, sets PRAGMA query_only = ON at the connection level
+        and resets it to OFF in the finally block so the pooled DBAPI
+        connection is returned in a writable state.
+
+        For other backends, falls back to the standard connection (the
+        analyzer-level blocklist is the only guard).
+        """
+        is_sqlite = self.connection_string.startswith("sqlite")
+        with self.engine.begin() as conn:
+            if is_sqlite:
+                conn.execute(text("PRAGMA query_only = ON"))
+            try:
+                yield conn
+            finally:
+                if is_sqlite:
+                    conn.execute(text("PRAGMA query_only = OFF"))

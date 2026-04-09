@@ -174,9 +174,12 @@ class DataverseAuthConfig(BaseModel):
         from azure.identity import ClientSecretCredential, ManagedIdentityCredential
 
         if self.method == "service_principal":
-            assert self.tenant_id is not None
-            assert self.client_id is not None
-            assert self.client_secret is not None
+            if self.tenant_id is None or self.client_id is None or self.client_secret is None:
+                missing = [f for f in ("tenant_id", "client_id", "client_secret") if getattr(self, f) is None]
+                raise RuntimeError(
+                    f"service_principal auth fields are None at credential creation time: {missing}. "
+                    f"model_validator should have rejected this at construction — this is a bug."
+                )
             return ClientSecretCredential(
                 tenant_id=self.tenant_id,
                 client_id=self.client_id,

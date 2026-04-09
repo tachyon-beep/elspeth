@@ -273,8 +273,10 @@ class DataverseSource(BaseSource):
         Failures are non-fatal — the entity may exist but the metadata
         endpoint may be restricted. Logs a warning and continues.
         """
-        assert self._client is not None
-        assert self._entity is not None, "called only in structured query mode"
+        if self._client is None:
+            raise RuntimeError("on_start() must be called before _probe_entity_metadata() — this is a bug")
+        if self._entity is None:
+            raise RuntimeError("_probe_entity_metadata() called outside structured query mode — this is a bug")
         encoded_entity = urllib.parse.quote(self._entity, safe="")
         metadata_url = (
             f"{self._environment_url.rstrip('/')}/api/data/{self._api_version}"
@@ -311,7 +313,8 @@ class DataverseSource(BaseSource):
         values to prevent silent corruption from special characters.
         OData $-prefixed parameter names are kept literal (servers require them).
         """
-        assert self._entity is not None, "called only in structured query mode"
+        if self._entity is None:
+            raise RuntimeError("_build_query_url() called outside structured query mode — this is a bug")
         encoded_entity = urllib.parse.quote(self._entity, safe="")
         url = f"{self._environment_url.rstrip('/')}/api/data/{self._api_version}/{encoded_entity}"
 
@@ -445,7 +448,8 @@ class DataverseSource(BaseSource):
         if self._telemetry_emit is None:
             return
         try:
-            assert self._run_id is not None, "run_id is None during telemetry emission — on_start() must set _run_id before load()"
+            if self._run_id is None:
+                raise RuntimeError("run_id is None during telemetry emission — on_start() must set _run_id before load()")
             req_payload = RawCallPayload(request_data)
             resp_payload = RawCallPayload(response_data) if response_data else None
             self._telemetry_emit(
@@ -575,7 +579,8 @@ class DataverseSource(BaseSource):
         quarantine_count = 0
 
         # Client must be constructed by on_start() before load()
-        assert self._client is not None, "on_start() must be called before load()"
+        if self._client is None:
+            raise RuntimeError("on_start() must be called before load() — this is a bug")
 
         # Track the last URL seen — used in the error path where we don't
         # have a page response but need the actual URL for audit accuracy.
@@ -588,7 +593,8 @@ class DataverseSource(BaseSource):
                 page_iterator = self._client.paginate_odata(url)
             else:
                 # FetchXML query
-                assert self._fetch_xml is not None, "config validator ensures entity or fetch_xml"
+                if self._fetch_xml is None:
+                    raise RuntimeError("config validator ensures entity or fetch_xml — neither is set, this is a bug")
                 # Extract entity name from FetchXML
                 root = ET.fromstring(self._fetch_xml)
                 entity_elem = root.find("entity")
@@ -725,7 +731,8 @@ class DataverseSource(BaseSource):
             )
             # 401 with retryable=True: reconstruct credential before engine retry
             if e.status_code == 401 and e.retryable:
-                assert self._client is not None, "on_start() must be called before load()"
+                if self._client is None:
+                    raise RuntimeError("on_start() must be called before load() — this is a bug") from None
                 self._client.reconstruct_credential(self._auth_config)
             raise
 
