@@ -2604,6 +2604,12 @@ class TestErrorFileDownloadPath:
         assert client.files.content.call_count == 2
         client.files.content.assert_any_call("error-file-001")
 
+        # Verify row-1 got the error from the error file
+        row1_dict = result.rows[1].to_dict()
+        assert row1_dict["llm_response"] is None
+        assert row1_dict["llm_response_error"]["reason"] == "api_error"
+        assert row1_dict["llm_response_error"]["error"]["code"] == "content_filter"
+
     def test_error_file_download_failure_sets_flag(self, transform: AzureBatchLLMTransform) -> None:
         """When error file download fails, rows missing from output get error_details_unavailable."""
         ctx = MagicMock()
@@ -2653,11 +2659,9 @@ class TestErrorFileDownloadPath:
         assert len(result.rows) == 2
 
         # Row 1 should have error_details_unavailable (not result_not_found)
-        row1 = result.rows[1]
-        row1_dict = row1.to_dict() if hasattr(row1, "to_dict") else dict(row1)
-        error_info = row1_dict.get("llm_response_error", row1_dict.get("response_error"))
-        assert error_info is not None
-        assert error_info["reason"] == "error_details_unavailable"
+        row1_dict = result.rows[1].to_dict()
+        assert row1_dict["llm_response"] is None
+        assert row1_dict["llm_response_error"]["reason"] == "error_details_unavailable"
 
     def test_error_file_malformed_jsonl_records_malformed_lines(self, transform: AzureBatchLLMTransform) -> None:
         """Malformed lines in the error file are tracked but don't crash."""
@@ -2705,6 +2709,12 @@ class TestErrorFileDownloadPath:
 
         # Should still succeed — malformed error file lines are non-fatal
         assert result.status == "success"
+        assert result.rows is not None
+        assert len(result.rows) == 1
+
+        # Row 0 should have the successful response
+        row0_dict = result.rows[0].to_dict()
+        assert row0_dict["llm_response"] == "OK"
 
 
 class TestUploadFailureNoCheckpoint:
