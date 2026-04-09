@@ -318,31 +318,33 @@ class TestHTTPCallRequest:
         assert stable_hash(new_dict) == stable_hash(old_dict)
 
     def test_ssrf_request_hash_stability(self) -> None:
-        old_dict = {
+        expected = {
             "method": "GET",
             "url": "https://example.com/page",
             "resolved_ip": "93.184.216.34",
             "headers": {"Host": "example.com"},
+            "params": None,  # GET always emits params for hash stability
         }
-        new_dict = HTTPCallRequest(
+        actual = HTTPCallRequest(
             method="GET",
             url="https://example.com/page",
             headers={"Host": "example.com"},
             resolved_ip="93.184.216.34",
         ).to_dict()
-        assert new_dict == old_dict
-        assert stable_hash(new_dict) == stable_hash(old_dict)
+        assert actual == expected
+        assert stable_hash(actual) == stable_hash(expected)
 
     def test_redirect_hop_hash_stability(self) -> None:
-        old_dict = {
+        expected = {
             "method": "GET",
             "url": "https://new.example.com/page",
             "resolved_ip": "1.2.3.4",
             "hop_number": 1,
             "redirect_from": "https://old.example.com/page",
             "headers": {"Host": "new.example.com"},
+            "params": None,  # GET always emits params for hash stability
         }
-        new_dict = HTTPCallRequest(
+        actual = HTTPCallRequest(
             method="GET",
             url="https://new.example.com/page",
             headers={"Host": "new.example.com"},
@@ -350,8 +352,8 @@ class TestHTTPCallRequest:
             hop_number=1,
             redirect_from="https://old.example.com/page",
         ).to_dict()
-        assert new_dict == old_dict
-        assert stable_hash(new_dict) == stable_hash(old_dict)
+        assert actual == expected
+        assert stable_hash(actual) == stable_hash(expected)
 
     def test_standard_post_always_includes_json(self) -> None:
         d = HTTPCallRequest(
@@ -410,15 +412,29 @@ class TestHTTPCallRequest:
         assert "params" in d
         assert d["params"] == {"force": "true"}
 
-    def test_ssrf_request_excludes_json_params(self) -> None:
+    def test_ssrf_get_includes_params_for_hash_stability(self) -> None:
+        """GET with resolved_ip still emits params (None) for hash stability."""
         d = HTTPCallRequest(
             method="GET",
             url="https://example.com",
             headers={},
             resolved_ip="1.2.3.4",
         ).to_dict()
-        assert "json" not in d
-        assert "params" not in d
+        assert "json" not in d  # GET doesn't emit json unless explicitly set
+        assert d["params"] is None  # GET always emits params for hash stability
+
+    def test_ssrf_post_includes_json(self) -> None:
+        """POST with resolved_ip must not silently drop json body."""
+        d = HTTPCallRequest(
+            method="POST",
+            url="https://example.com/api",
+            headers={"Content-Type": "application/json"},
+            json={"query": "test data"},
+            resolved_ip="1.2.3.4",
+        ).to_dict()
+        assert d["json"] == {"query": "test data"}
+        assert d["resolved_ip"] == "1.2.3.4"
+        assert "params" not in d  # POST doesn't emit params unless explicitly set
 
     def test_frozen(self) -> None:
         obj = HTTPCallRequest(method="GET", url="https://x.com", headers={})

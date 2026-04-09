@@ -203,9 +203,11 @@ class HTTPCallRequest:
     def to_dict(self) -> dict[str, Any]:
         """Serialize to audit-trail dict.
 
-        Standard path (``resolved_ip`` is None) includes json/params
-        for all methods when present.  SSRF/redirect path skips
-        json/params and includes resolved_ip and hop tracking fields.
+        SSRF fields (resolved_ip, hop_number, redirect_from) are additive —
+        they never suppress other fields.  json/params are serialized for
+        all request shapes using hash-stability rules: POST always emits
+        json (even None), GET always emits params (even None), other
+        methods emit when non-None.
         """
         d: dict[str, Any] = {"method": self.method, "url": self.url}
         if self.resolved_ip is not None:
@@ -215,15 +217,13 @@ class HTTPCallRequest:
         if self.redirect_from is not None:
             d["redirect_from"] = self.redirect_from
         d["headers"] = dict(self.headers)
-        # Standard path only: include json/params.
         # POST always emits json (even None) and GET always emits params
         # (even None) for hash stability with existing audit records.
         # All other methods emit json/params when non-None — no silent drops.
-        if self.resolved_ip is None:
-            if self.json is not None or self.method == "POST":
-                d["json"] = deep_thaw(self.json) if self.json is not None else None
-            if self.params is not None or self.method == "GET":
-                d["params"] = deep_thaw(self.params) if self.params is not None else None
+        if self.json is not None or self.method == "POST":
+            d["json"] = deep_thaw(self.json) if self.json is not None else None
+        if self.params is not None or self.method == "GET":
+            d["params"] = deep_thaw(self.params) if self.params is not None else None
         return d
 
 
