@@ -443,3 +443,96 @@ class TestFreezeFieldsUtility:
         assert isinstance(cp.row_mapping, MappingProxyType)
         assert isinstance(cp.template_errors, tuple)
         assert isinstance(cp.requests, MappingProxyType)
+
+
+# ── Nested Mutation Rejection Tests ─────────────────────────────────────────
+#
+# These verify that deep-frozen dataclasses reject nested mutation attempts
+# with TypeError.  Top-level mutation is tested elsewhere; these target
+# the nested container paths that shallow freezing would miss.
+
+
+class TestPipelineRowNestedMutationRejected:
+    """PipelineRow deep-freezes its data dict — nested dicts must be immutable."""
+
+    def test_nested_dict_mutation_raises(self) -> None:
+        from elspeth.testing import make_pipeline_row
+
+        row = make_pipeline_row({"meta": {"key": "val"}, "score": 42})
+        with pytest.raises(TypeError):
+            row["meta"]["key"] = "mutated"
+
+    def test_nested_list_in_dict_is_tuple(self) -> None:
+        from elspeth.testing import make_pipeline_row
+
+        row = make_pipeline_row({"tags": ["a", "b"]})
+        assert isinstance(row["tags"], tuple)
+
+    def test_to_dict_round_trip_produces_json_compatible_types(self) -> None:
+        """to_dict() must return list (not tuple) for list-valued fields."""
+        from elspeth.testing import make_pipeline_row
+
+        row = make_pipeline_row({"tags": ["a", "b"], "meta": {"k": "v"}})
+        d = row.to_dict()
+        assert isinstance(d["tags"], list), f"Expected list, got {type(d['tags']).__name__}"
+        assert isinstance(d["meta"], dict), f"Expected dict, got {type(d['meta']).__name__}"
+
+
+class TestPipelineConfigNestedMutationRejected:
+    """PipelineConfig freeze_fields its config — nested dicts must be immutable."""
+
+    def test_nested_config_mutation_raises(self) -> None:
+        from unittest.mock import MagicMock
+
+        from elspeth.engine.orchestrator.types import PipelineConfig
+
+        config = PipelineConfig(
+            source=MagicMock(),
+            transforms=[],
+            sinks={"out": MagicMock()},
+            config={"nested": {"key": "val"}},
+        )
+        with pytest.raises(TypeError):
+            config.config["nested"]["key"] = "mutated"
+
+
+class TestPluginContextNestedMutationRejected:
+    """PluginContext deep-freezes config — nested dicts must be immutable."""
+
+    def test_nested_config_mutation_raises(self) -> None:
+        from elspeth.contracts.plugin_context import PluginContext
+
+        ctx = PluginContext(
+            run_id="test-run",
+            config={"nested": {"key": "val"}},
+        )
+        with pytest.raises(TypeError):
+            ctx.config["nested"]["key"] = "mutated"
+
+
+class TestReplayedCallNestedMutationRejected:
+    """ReplayedCall deep-freezes response_data and error_data."""
+
+    def test_response_data_nested_mutation_raises(self) -> None:
+        from elspeth.plugins.infrastructure.clients.replayer import ReplayedCall
+
+        call = ReplayedCall(
+            response_data={"body": {"content": "hello"}},
+            original_latency_ms=50.0,
+            request_hash="abc123",
+        )
+        with pytest.raises(TypeError):
+            call.response_data["body"]["content"] = "mutated"
+
+    def test_error_data_nested_mutation_raises(self) -> None:
+        from elspeth.plugins.infrastructure.clients.replayer import ReplayedCall
+
+        call = ReplayedCall(
+            response_data={"status": "error"},
+            original_latency_ms=50.0,
+            request_hash="abc123",
+            was_error=True,
+            error_data={"detail": {"code": 500}},
+        )
+        with pytest.raises(TypeError):
+            call.error_data["detail"]["code"] = 999

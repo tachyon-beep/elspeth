@@ -222,6 +222,28 @@ class Orchestrator:
         if self._telemetry is not None:
             self._telemetry.flush()
 
+    def _emit_phase_error(
+        self,
+        phase: PipelinePhase,
+        error: BaseException,
+        target: str | None = None,
+    ) -> None:
+        """Best-effort PhaseError emission that never masks the original exception.
+
+        Called from except blocks before re-raise. If PhaseError construction
+        or EventBus.emit() fails (e.g., handler bug), the original exception
+        must take precedence — observable telemetry is secondary to preserving
+        the actual error.
+        """
+        try:
+            self._events.emit(PhaseError(phase=phase, error=error, target=target))
+        except Exception:
+            slog.debug(
+                "PhaseError emission failed — original exception preserved",
+                phase=phase.value,
+                original_error=type(error).__name__,
+            )
+
     def _safe_flush_telemetry(self) -> None:
         """Flush telemetry in a finally block, preserving any pending exception.
 
@@ -1035,7 +1057,7 @@ class Orchestrator:
 
             self._events.emit(PhaseCompleted(phase=PipelinePhase.DATABASE, duration_seconds=time.perf_counter() - phase_start))
         except Exception as e:
-            self._events.emit(PhaseError(phase=PipelinePhase.DATABASE, error=e))
+            self._emit_phase_error(PipelinePhase.DATABASE, e)
             raise  # CRITICAL: Always re-raise - database connection failure is fatal
 
         return recorder, run
@@ -1087,12 +1109,19 @@ class Orchestrator:
             recorder.set_export_status(run_id, status=ExportStatus.COMPLETED)
             self._events.emit(PhaseCompleted(phase=PipelinePhase.EXPORT, duration_seconds=time.perf_counter() - phase_start))
         except Exception as export_error:
-            self._events.emit(PhaseError(phase=PipelinePhase.EXPORT, error=export_error, target=export_config.sink))
-            recorder.set_export_status(
-                run_id,
-                status=ExportStatus.FAILED,
-                error=str(export_error),
-            )
+            self._emit_phase_error(PipelinePhase.EXPORT, export_error, target=export_config.sink)
+            try:
+                recorder.set_export_status(
+                    run_id,
+                    status=ExportStatus.FAILED,
+                    error=str(export_error),
+                )
+            except Exception:
+                slog.debug(
+                    "Export status recording failed — original exception preserved",
+                    run_id=run_id,
+                    original_error=type(export_error).__name__,
+                )
             # Re-raise so caller knows export failed
             # (run is still "completed" in Landscape)
             raise
@@ -1235,31 +1264,37 @@ class Orchestrator:
             # Re-raise for caller to schedule retry based on check_after_seconds.
             raise
         except GracefulShutdownError as shutdown_exc:
-            self._emit_interrupted_ceremony(run.run_id, recorder, shutdown_exc, run_start_time)
+            try:
+                self._emit_interrupted_ceremony(run.run_id, recorder, shutdown_exc, run_start_time)
+            except Exception:
+                slog.debug("Interrupted ceremony failed — original exception preserved", run_id=run.run_id)
             raise  # Propagate to CLI
         except Exception:
-            # Emit RunSummary with failure status
-            if run_completed:
-                # Export failed after successful run — emit PARTIAL status.
-                # RunFinished was already emitted before the export attempt,
-                # so only emit the EventBus RunSummary here.
-                total_duration = time.perf_counter() - run_start_time
-                self._events.emit(
-                    RunSummary(
-                        run_id=run.run_id,
-                        status=RunCompletionStatus.PARTIAL,
-                        total_rows=result.rows_processed,
-                        succeeded=result.rows_succeeded,
-                        failed=result.rows_failed,
-                        quarantined=result.rows_quarantined,
-                        duration_seconds=total_duration,
-                        exit_code=1,
-                        routed=result.rows_routed,
-                        routed_destinations=tuple(result.routed_destinations.items()),
+            # Emit RunSummary with failure status — best-effort, must not mask
+            try:
+                if run_completed:
+                    # Export failed after successful run — emit PARTIAL status.
+                    # RunFinished was already emitted before the export attempt,
+                    # so only emit the EventBus RunSummary here.
+                    total_duration = time.perf_counter() - run_start_time
+                    self._events.emit(
+                        RunSummary(
+                            run_id=run.run_id,
+                            status=RunCompletionStatus.PARTIAL,
+                            total_rows=result.rows_processed,
+                            succeeded=result.rows_succeeded,
+                            failed=result.rows_failed,
+                            quarantined=result.rows_quarantined,
+                            duration_seconds=total_duration,
+                            exit_code=1,
+                            routed=result.rows_routed,
+                            routed_destinations=tuple(result.routed_destinations.items()),
+                        )
                     )
-                )
-            else:
-                self._emit_failed_ceremony(run.run_id, recorder, run_start_time)
+                else:
+                    self._emit_failed_ceremony(run.run_id, recorder, run_start_time)
+            except Exception:
+                slog.debug("Failure ceremony failed — original exception preserved", run_id=run.run_id)
             raise  # CRITICAL: Always re-raise - observability doesn't suppress errors
         finally:
             self._safe_flush_telemetry()
@@ -1492,7 +1527,7 @@ class Orchestrator:
 
             self._events.emit(PhaseCompleted(phase=PipelinePhase.GRAPH, duration_seconds=time.perf_counter() - phase_start))
         except Exception as e:
-            self._events.emit(PhaseError(phase=PipelinePhase.GRAPH, error=e))
+            self._emit_phase_error(PipelinePhase.GRAPH, e)
             raise  # CRITICAL: Always re-raise - graph validation failure is fatal
 
         return GraphArtifacts(
@@ -2147,7 +2182,7 @@ class Orchestrator:
             with self._span_factory.source_span(config.source.name):
                 source_iterator = config.source.load(ctx)
         except Exception as e:
-            self._events.emit(PhaseError(phase=PipelinePhase.SOURCE, error=e, target=config.source.name))
+            self._emit_phase_error(PipelinePhase.SOURCE, e, target=config.source.name)
             raise
 
         self._events.emit(PhaseCompleted(phase=PipelinePhase.SOURCE, duration_seconds=time.perf_counter() - phase_start))
@@ -2335,7 +2370,7 @@ class Orchestrator:
             except BatchPendingError:
                 raise  # Control-flow signal, not an error
             except Exception as e:
-                self._events.emit(PhaseError(phase=PipelinePhase.PROCESS, error=e, target=config.source.name))
+                self._emit_phase_error(PipelinePhase.PROCESS, e, target=config.source.name)
                 raise
 
         return LoopResult(
@@ -2823,12 +2858,18 @@ class Orchestrator:
 
             return result
         except GracefulShutdownError as shutdown_exc:
-            self._emit_interrupted_ceremony(run_id, recorder, shutdown_exc, resume_start_time)
+            try:
+                self._emit_interrupted_ceremony(run_id, recorder, shutdown_exc, resume_start_time)
+            except Exception:
+                slog.debug("Interrupted ceremony failed — original exception preserved", run_id=run_id)
             raise  # Propagate to CLI
         except Exception:
             # Finalize as FAILED to prevent the run from being stuck in RUNNING
             # permanently (which blocks future resume attempts).
-            self._emit_failed_ceremony(run_id, recorder, resume_start_time)
+            try:
+                self._emit_failed_ceremony(run_id, recorder, resume_start_time)
+            except Exception:
+                slog.debug("Failure ceremony failed — original exception preserved", run_id=run_id)
             raise
         finally:
             self._safe_flush_telemetry()

@@ -838,3 +838,54 @@ class TestBatchTransformMixinShutdownGuard:
 
         # Clean up: do full shutdown so threads stop
         transform.shutdown_batch_processing()
+
+
+class TestFlushTimeoutRaisesTimeoutError:
+    """Tests for flush_batch_processing() timeout path.
+
+    When workers are stalled and the flush deadline expires,
+    flush_batch_processing must raise TimeoutError rather than
+    hanging indefinitely.
+    """
+
+    @pytest.fixture
+    def collector(self) -> CollectorOutputPort:
+        return CollectorOutputPort()
+
+    @pytest.fixture
+    def blocking_transform(self, collector: CollectorOutputPort) -> Generator[BlockingBatchTransform, None, None]:
+        transform = BlockingBatchTransform()
+        transform.connect_output(collector, max_pending=5)
+        yield transform
+        transform.close()
+
+    def test_flush_raises_timeout_when_workers_stalled(
+        self, blocking_transform: BlockingBatchTransform, collector: CollectorOutputPort
+    ) -> None:
+        """flush_batch_processing raises TimeoutError when rows remain pending past deadline."""
+        token = make_token("row-stalled")
+        ctx = make_context(landscape=_make_recorder(), token=token, state_id="state-stalled")
+
+        blocking_transform.accept({"data": "stuck"}, ctx)
+        blocking_transform.wait_for_processing_started()
+
+        assert blocking_transform.batch_pending_count > 0
+
+        with pytest.raises(TimeoutError, match="rows still pending"):
+            blocking_transform.flush_batch_processing(timeout=0.2)
+
+    def test_flush_timeout_reports_pending_count(self, blocking_transform: BlockingBatchTransform, collector: CollectorOutputPort) -> None:
+        """TimeoutError message includes the number of rows still pending."""
+        tokens = [make_token(f"row-{i}") for i in range(3)]
+        for i, token in enumerate(tokens):
+            ctx = make_context(landscape=_make_recorder(), token=token, state_id=f"state-{i}")
+            blocking_transform.accept({"idx": i}, ctx)
+
+        _wait_for(
+            lambda: blocking_transform.batch_pending_count >= 1,
+            timeout=3.0,
+            desc="at least one row pending",
+        )
+
+        with pytest.raises(TimeoutError, match=r"\d+ rows still pending"):
+            blocking_transform.flush_batch_processing(timeout=0.2)

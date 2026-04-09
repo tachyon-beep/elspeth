@@ -2502,5 +2502,276 @@ class TestAzureBatchQuarantinedIndices:
         assert metadata["quarantined_count"] == 2
 
 
+class TestErrorFileDownloadPath:
+    """Tests for the error_file_id download and parsing path in _download_results.
+
+    Every prior test sets error_file_id=None.  These tests exercise the ~60-line
+    branch that downloads, parses, and merges the error file into results.
+    """
+
+    @pytest.fixture
+    def transform(self) -> AzureBatchLLMTransform:
+        return AzureBatchLLMTransform(
+            {
+                "deployment_name": "gpt-4o-batch",
+                "endpoint": "https://test.openai.azure.com",
+                "api_key": "test-key",
+                "template": "Analyze: {{ row.text }}",
+                "schema": DYNAMIC_SCHEMA,
+                "required_input_fields": [],
+            }
+        )
+
+    def _make_checkpoint(self, num_rows: int = 2) -> BatchCheckpointState:
+        """Build a checkpoint with `num_rows` entries."""
+        row_mapping = {}
+        requests = {}
+        for i in range(num_rows):
+            cid = f"row-{i}-abc"
+            row_mapping[cid] = RowMappingEntry(index=i, variables_hash=f"hash{i}")
+            requests[cid] = {
+                "messages": [{"role": "user", "content": f"Analyze: text{i}"}],
+                "model": "gpt-4o-batch",
+            }
+        return BatchCheckpointState(
+            batch_id="batch-err-test",
+            input_file_id="input-file-001",
+            row_mapping=row_mapping,
+            template_errors=[],
+            submitted_at="2024-01-01T00:00:00Z",
+            row_count=num_rows,
+            requests=requests,
+        )
+
+    def test_error_file_parsed_and_merged_into_results(self, transform: AzureBatchLLMTransform) -> None:
+        """When error_file_id is set, error file is downloaded and rows merged."""
+        ctx = MagicMock()
+        ctx.run_id = "test-run"
+        ctx.state_id = "batch-state"
+        ctx.record_call = MagicMock(return_value=MagicMock())
+        ctx.clear_checkpoint = MagicMock()
+
+        checkpoint = self._make_checkpoint(2)
+
+        # Row 0 succeeds in output file, row 1 has error in error file
+        mock_batch = MagicMock()
+        mock_batch.id = "batch-err-test"
+        mock_batch.output_file_id = "output-file-001"
+        mock_batch.error_file_id = "error-file-001"  # Non-None triggers download
+
+        output_jsonl = json.dumps(
+            {
+                "custom_id": "row-0-abc",
+                "response": {
+                    "body": {
+                        "choices": [{"message": {"content": "Result 0"}}],
+                        "usage": {"total_tokens": 10},
+                    },
+                },
+            }
+        )
+        error_jsonl = json.dumps(
+            {
+                "custom_id": "row-1-abc",
+                "error": {"code": "content_filter", "message": "Filtered"},
+            }
+        )
+
+        mock_output = MagicMock()
+        mock_output.text = output_jsonl
+        mock_error = MagicMock()
+        mock_error.text = error_jsonl
+
+        with patch.object(transform, "_get_client") as mock_get:
+            client = mock_get.return_value
+            # First call: output file, second call: error file
+            client.files.content.side_effect = [mock_output, mock_error]
+            result = transform._download_results(
+                mock_batch,
+                checkpoint,
+                [
+                    make_pipeline_row({"text": "t0"}),
+                    make_pipeline_row({"text": "t1"}),
+                ],
+                ctx,
+            )
+
+        assert result.status == "success"
+        assert result.rows is not None
+        assert len(result.rows) == 2
+
+        # Verify error file was actually downloaded (2 files.content calls)
+        assert client.files.content.call_count == 2
+        client.files.content.assert_any_call("error-file-001")
+
+    def test_error_file_download_failure_sets_flag(self, transform: AzureBatchLLMTransform) -> None:
+        """When error file download fails, rows missing from output get error_details_unavailable."""
+        ctx = MagicMock()
+        ctx.run_id = "test-run"
+        ctx.state_id = "batch-state"
+        ctx.record_call = MagicMock(return_value=MagicMock())
+        ctx.clear_checkpoint = MagicMock()
+
+        checkpoint = self._make_checkpoint(2)
+
+        mock_batch = MagicMock()
+        mock_batch.id = "batch-err-test"
+        mock_batch.output_file_id = "output-file-001"
+        mock_batch.error_file_id = "error-file-001"
+
+        # Only row 0 in output — row 1 was in the error file we can't download
+        output_jsonl = json.dumps(
+            {
+                "custom_id": "row-0-abc",
+                "response": {
+                    "body": {
+                        "choices": [{"message": {"content": "Result 0"}}],
+                        "usage": {"total_tokens": 10},
+                    },
+                },
+            }
+        )
+        mock_output = MagicMock()
+        mock_output.text = output_jsonl
+
+        with patch.object(transform, "_get_client") as mock_get:
+            client = mock_get.return_value
+            # Output succeeds, error file raises
+            client.files.content.side_effect = [mock_output, ConnectionError("Network error")]
+            result = transform._download_results(
+                mock_batch,
+                checkpoint,
+                [
+                    make_pipeline_row({"text": "t0"}),
+                    make_pipeline_row({"text": "t1"}),
+                ],
+                ctx,
+            )
+
+        assert result.status == "success"
+        assert result.rows is not None
+        assert len(result.rows) == 2
+
+        # Row 1 should have error_details_unavailable (not result_not_found)
+        row1 = result.rows[1]
+        row1_dict = row1.to_dict() if hasattr(row1, "to_dict") else dict(row1)
+        error_info = row1_dict.get("llm_response_error", row1_dict.get("response_error"))
+        assert error_info is not None
+        assert error_info["reason"] == "error_details_unavailable"
+
+    def test_error_file_malformed_jsonl_records_malformed_lines(self, transform: AzureBatchLLMTransform) -> None:
+        """Malformed lines in the error file are tracked but don't crash."""
+        ctx = MagicMock()
+        ctx.run_id = "test-run"
+        ctx.state_id = "batch-state"
+        ctx.record_call = MagicMock(return_value=MagicMock())
+        ctx.clear_checkpoint = MagicMock()
+
+        checkpoint = self._make_checkpoint(1)
+
+        mock_batch = MagicMock()
+        mock_batch.id = "batch-err-test"
+        mock_batch.output_file_id = "output-file-001"
+        mock_batch.error_file_id = "error-file-001"
+
+        output_jsonl = json.dumps(
+            {
+                "custom_id": "row-0-abc",
+                "response": {
+                    "body": {
+                        "choices": [{"message": {"content": "OK"}}],
+                        "usage": {"total_tokens": 5},
+                    },
+                },
+            }
+        )
+        mock_output = MagicMock()
+        mock_output.text = output_jsonl
+
+        mock_error = MagicMock()
+        mock_error.text = "not valid json{{"  # Malformed
+
+        with patch.object(transform, "_get_client") as mock_get:
+            client = mock_get.return_value
+            client.files.content.side_effect = [mock_output, mock_error]
+            result = transform._download_results(
+                mock_batch,
+                checkpoint,
+                [
+                    make_pipeline_row({"text": "t0"}),
+                ],
+                ctx,
+            )
+
+        # Should still succeed — malformed error file lines are non-fatal
+        assert result.status == "success"
+
+
+class TestUploadFailureNoCheckpoint:
+    """Tests that upload/create failures return error WITHOUT writing a checkpoint.
+
+    The invariant: checkpoint is only written after successful batch creation.
+    If upload or batch-create fails, no checkpoint must be set, so retries
+    start fresh rather than trying to resume a non-existent batch.
+    """
+
+    @pytest.fixture
+    def ctx(self) -> PluginContext:
+        return _make_batch_ctx()
+
+    @pytest.fixture
+    def transform(self) -> AzureBatchLLMTransform:
+        return AzureBatchLLMTransform(
+            {
+                "deployment_name": "gpt-4o-batch",
+                "endpoint": "https://test.openai.azure.com",
+                "api_key": "test-key",
+                "template": "Analyze: {{ row.text }}",
+                "schema": DYNAMIC_SCHEMA,
+                "required_input_fields": [],
+            }
+        )
+
+    def test_file_upload_failure_returns_error_no_checkpoint(self, ctx: PluginContext, transform: AzureBatchLLMTransform) -> None:
+        """When files.create() raises, result is error and no checkpoint is written."""
+        mock_client = Mock()
+        mock_client.files.create.side_effect = ConnectionError("Upload failed")
+        transform._client = mock_client
+
+        rows = [make_pipeline_row({"text": "hello"})]
+        result = transform.process(rows, ctx)
+
+        assert result.status == "error"
+        assert result.reason is not None
+        assert result.reason["reason"] == "file_upload_failed"
+        assert result.retryable is True
+
+        # Critical: no checkpoint written
+        assert ctx._checkpoint is None
+
+    def test_batch_create_failure_returns_error_no_checkpoint(self, ctx: PluginContext, transform: AzureBatchLLMTransform) -> None:
+        """When batches.create() raises, result is error and no checkpoint is written."""
+        mock_client = Mock()
+        # Upload succeeds
+        mock_file = Mock()
+        mock_file.id = "file-123"
+        mock_file.status = "uploaded"
+        mock_client.files.create.return_value = mock_file
+        # Batch creation fails
+        mock_client.batches.create.side_effect = ConnectionError("Batch create failed")
+        transform._client = mock_client
+
+        rows = [make_pipeline_row({"text": "hello"})]
+        result = transform.process(rows, ctx)
+
+        assert result.status == "error"
+        assert result.reason is not None
+        assert result.reason["reason"] == "batch_create_failed"
+        assert result.retryable is True
+
+        # Critical: no checkpoint written
+        assert ctx._checkpoint is None
+
+
 # RowMappingEntry tests moved to tests/unit/contracts/test_batch_checkpoint.py
 # (class is now in contracts.batch_checkpoint, not azure_batch)

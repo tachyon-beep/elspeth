@@ -945,3 +945,132 @@ class TestDatabaseSinkFalseSuccess:
         # Mock _ensure_table to be a no-op, leaving _engine and _table as None
         with patch.object(sink, "_ensure_table"), pytest.raises(AssertionError, match=r"engine.*None.*invariant"):
             sink.write([{"id": 1, "name": "should_fail"}], ctx)
+
+
+class TestDDLAuditRecording:
+    """Tests that DDL operations (CREATE TABLE, DROP TABLE) are recorded in the audit trail.
+
+    The database sink instruments DDL via ctx.record_call with CallType.SQL.
+    INSERT-level record_call is tested elsewhere; these tests cover the DDL paths.
+    """
+
+    def test_create_table_records_audit_call(self, tmp_path: Path) -> None:
+        """First write triggers CREATE TABLE and records it via record_call."""
+        from unittest.mock import patch
+
+        from elspeth.contracts import CallStatus, CallType
+
+        db_path = tmp_path / "test.db"
+        sink = inject_write_failure(
+            DatabaseSink(
+                {
+                    "url": f"sqlite:///{db_path}",
+                    "table": "audit_test",
+                    "schema": STRICT_SCHEMA,
+                }
+            )
+        )
+        ctx = make_operation_context(
+            node_id="sink-0",
+            plugin_name="database",
+            node_type="SINK",
+            operation_type="sink_write",
+        )
+
+        original_record_call = ctx.record_call
+        recorded_calls: list[dict] = []
+
+        def tracking_record_call(**kwargs: object) -> None:
+            recorded_calls.append(dict(kwargs))
+            original_record_call(**kwargs)  # type: ignore[arg-type]
+
+        with patch.object(ctx, "record_call", side_effect=tracking_record_call):
+            sink.write([{"id": 1, "name": "alice"}], ctx)
+
+        sink.close()
+
+        # Find the CREATE_TABLE call
+        ddl_calls = [c for c in recorded_calls if c.get("request_data", {}).get("operation") == "CREATE_TABLE"]
+        assert len(ddl_calls) == 1, f"Expected 1 CREATE_TABLE call, got {len(ddl_calls)}"
+
+        create_call = ddl_calls[0]
+        assert create_call["call_type"] == CallType.SQL
+        assert create_call["status"] == CallStatus.SUCCESS
+        assert create_call["request_data"]["table"] == "audit_test"
+        assert create_call["response_data"]["table_created"] == "audit_test"
+        assert create_call["provider"] == "sqlalchemy"
+
+    def test_replace_mode_records_drop_and_create(self, tmp_path: Path) -> None:
+        """With if_exists='replace', both DROP TABLE and CREATE TABLE are audited."""
+        from unittest.mock import patch
+
+        from elspeth.contracts import CallStatus, CallType
+
+        db_path = tmp_path / "test.db"
+
+        # Create initial table
+        sink1 = inject_write_failure(
+            DatabaseSink(
+                {
+                    "url": f"sqlite:///{db_path}",
+                    "table": "replace_test",
+                    "schema": STRICT_SCHEMA,
+                }
+            )
+        )
+        ctx1 = make_operation_context(
+            node_id="sink-0",
+            plugin_name="database",
+            node_type="SINK",
+            operation_type="sink_write",
+        )
+        sink1.write([{"id": 1, "name": "alice"}], ctx1)
+        sink1.close()
+
+        # Now open with replace mode — should DROP then CREATE
+        sink2 = inject_write_failure(
+            DatabaseSink(
+                {
+                    "url": f"sqlite:///{db_path}",
+                    "table": "replace_test",
+                    "if_exists": "replace",
+                    "schema": STRICT_SCHEMA,
+                }
+            )
+        )
+        ctx2 = make_operation_context(
+            node_id="sink-0",
+            plugin_name="database",
+            node_type="SINK",
+            operation_type="sink_write",
+        )
+
+        original_record_call = ctx2.record_call
+        recorded_calls: list[dict] = []
+
+        def tracking_record_call(**kwargs: object) -> None:
+            recorded_calls.append(dict(kwargs))
+            original_record_call(**kwargs)  # type: ignore[arg-type]
+
+        with patch.object(ctx2, "record_call", side_effect=tracking_record_call):
+            sink2.write([{"id": 2, "name": "bob"}], ctx2)
+
+        sink2.close()
+
+        operations = [c.get("request_data", {}).get("operation") for c in recorded_calls]
+
+        # Should have DROP_TABLE then CREATE_TABLE (then INSERT)
+        assert "DROP_TABLE" in operations, f"Expected DROP_TABLE in {operations}"
+        assert "CREATE_TABLE" in operations, f"Expected CREATE_TABLE in {operations}"
+
+        # Verify DROP came before CREATE
+        drop_idx = operations.index("DROP_TABLE")
+        create_idx = operations.index("CREATE_TABLE")
+        assert drop_idx < create_idx, "DROP_TABLE should precede CREATE_TABLE"
+
+        # Verify DROP details
+        drop_call = recorded_calls[drop_idx]
+        assert drop_call["call_type"] == CallType.SQL
+        assert drop_call["status"] == CallStatus.SUCCESS
+        assert drop_call["request_data"]["table"] == "replace_test"
+        assert drop_call["response_data"]["table_dropped"] == "replace_test"
