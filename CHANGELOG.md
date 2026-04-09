@@ -10,7 +10,7 @@ All notable changes to ELSPETH are documented here.
 
 ## [0.5.0] (RC-5 — Web UX Composer + Systematic Hardening)
 
-Full web application platform for chat-first pipeline composition, three-provider authentication, session management with versioning, blob storage, secret management, background pipeline execution with WebSocket progress, and a React frontend themed to DTA/AGDS guidelines. Also: sink failsink pattern for per-row write failure routing, pipeline composer MCP server, a 100+ P1 bug closure campaign across all subsystems, and a comprehensive test hygiene sweep removing ~500 low-value tests while adding ~200 gap-filling tests.
+Full web application platform for chat-first pipeline composition, three-provider authentication, session management with versioning, blob storage, secret management, background pipeline execution with WebSocket progress, and a React frontend themed to DTA/AGDS guidelines. Also: sink failsink pattern for per-row write failure routing, pipeline composer MCP server, DAG schema propagation (`output_schema_config` as single source of truth), frontend UX refresh (A1-A7), composer agent tooling (B1-B5) and skill pack update (C1-D4), guard symmetry CI scanner, `TokenRef` type, exception hygiene with `TIER_1_ERRORS`, a 200+ bug closure campaign across all subsystems, and a comprehensive test hygiene sweep removing ~500 low-value tests while adding ~200 gap-filling tests.
 
 ### Added
 
@@ -101,6 +101,49 @@ Full web application platform for chat-first pipeline composition, three-provide
 - **`SinkExecutor.write()` routing** — failsink dispatch on per-row write failure.
 - **Hypothesis property tests** — partition-completeness and exactly-once routing invariants.
 
+#### DAG Schema Propagation
+
+- **`output_schema_config` as single source of truth** — populated for all node types (source, transform, gate, aggregation, coalesce) at construction time. `_assign_schema` refactored to only set `output_schema_config`, dropping the parallel dict write.
+
+#### Frontend UX Refresh (A1-A7)
+
+- **A1: Categorized file folders in blob manager** — files organized by category.
+- **A2: Markdown and Mermaid rendering in chat** — rich content display with DOMPurify sanitization.
+- **A3: Route validation errors visibly through chat** — errors surface in the conversation flow.
+- **A4: Default 50/50 panel split** — balanced layout for graph and chat.
+- **A5: Secrets button in chat toolbar** — moved with key icon for discoverability.
+- **A6: Per-node validation indicators on graph** — visual status on each node.
+- **A7: Three-state pipeline status indicator** — clear pipeline readiness feedback.
+- **Validation indicator design tokens** — consistent visual language for validation states.
+- **Validation orchestration extraction** — refactored to component layer.
+
+#### Composer Agent Tooling (B1-B5)
+
+- **Blob CRUD, structured validation, path redaction, pipeline diff** — agent-facing tools for the composer MCP server.
+
+#### Composer Skill Pack Update
+
+- **C1-C8, D1-D4 + deployment skill layer** — expanded skill definitions for composer interactions.
+
+#### Web Group E
+
+- **Unified file storage, blob refresh, inline source docs** — file handling consolidation.
+
+#### Guard Symmetry Scanner
+
+- **`enforce_guard_symmetry` CI tool** — detects write/read guard parity gaps (every Landscape write site must have a corresponding read guard). GitHub Actions workflow and allowlist support.
+
+#### TokenRef Type
+
+- **`TokenRef`** — bundled `token_id + run_id` frozen dataclass in `contracts/`. Replaces loose 2-tuple passing.
+- **`AuditIntegrityError` loader guards** — Landscape read sites crash on corruption.
+- **`coalesce_tokens` on TokenRef** — Landscape API accepts `TokenRef` directly.
+- **`_validate_token_run_ownership` refactored** — accepts `TokenRef` instead of separate args.
+
+#### Exception Hygiene
+
+- **`TIER_1_ERRORS` constant** — canonical tuple of exception types for Tier 1 catch sites, applied across all layers.
+
 #### Server Configuration
 
 - **Default port 8451** — server config design with skill restoration.
@@ -169,16 +212,79 @@ Full web application platform for chat-first pipeline composition, three-provide
 - **15 bugfixes from systematic code review** — expression parser, sink executor, Chroma, probes, bootstrap.
 - **`hasattr` ban enforcement** — env isolation, type-check stubs.
 
+#### Systematic Bug Sweep (Post-RC5-Cut — ~130 additional bugs)
+
+- **36 bugs across 9 clusters** — audit integrity, silent failure, security, race conditions, resource leaks, freeze gaps, error handling, performance, web execution.
+- **32 bugs across 6 groups** — audit integrity, validation, module hygiene, serialization, headers, engine contracts.
+- **7 confirmed bugs** — audit integrity, state ordering, silent coercion.
+- **8 type-safety and contract bugs** — from RC4 bug sweep.
+- **7 quick-win bugs** — path anchoring, type contracts, dead params, stale docstring.
+- **7 bugs + test infrastructure hardening** — phases 1-3.
+- **6 Tier 1 audit integrity bugs** — inverted telemetry exception pattern.
+- **5 validation-too-late bugs** — push constraints to construction boundaries.
+- **6 P2 bugs** — config truncation, cache race, DNS ordering, schema tables, checkpoint integrity.
+- **4 DAG/engine bugs** — plus telemetry circular import fix.
+- **4 frozen dataclass / type safety bugs** — class-level shared-state hazard.
+- **6 plugin/source/sink bugs** — config timing, type guards, boundary checks.
+- **4 CLI/config/defensive-access bugs** — immutability, error messages, offensive guards.
+- **AIMD zero-config guard** — `WebScrapeError` contract, plan doc types.
+
+#### Tier Model & Exception Hygiene
+
+- **7 unjustified `.get()` calls eliminated** — on Tier 1/2 data; replaced with direct access, `Counter`, freeze guard.
+- **4 frozen DCs** — replaced shallow `MappingProxyType` wraps with `freeze_fields`.
+- **Broad exception handlers narrowed** — `display_name` fabrication eliminated.
+- **Typed `SchemaConfig` propagation** — `MappingProxyType` `to_dict` serialization fix.
+- **Azure batch error shape probe** — split from field access; 3 reviewed-OK patterns documented.
+
+#### Landscape & Audit Integrity
+
+- **`complete_node_state()` terminal guard** — prevents terminal status overwrite.
+- **`complete_batch()` terminal guard** — prevents terminal state overwrite.
+- **DIVERTED in outcome validation** — added to Tier 1 read guards.
+- **Terminal outcomes derived from `RowOutcome` enum** — closes DIVERTED gap in recovery.
+
+#### Security
+
+- **DSN credential scrubbing** — `_sanitize_dsn()` strips credentials from query parameters.
+
+#### Web & Frontend Hardening
+
+- **26 UX design review issues** — accessibility, contrast, touch targets (two review rounds: 14 + 12).
+- **Mermaid SVG sanitization** — DOMPurify added to frontend.
+- **Frontend type alignment** — types matched to backend schemas, system message rendering fixed.
+- **Composer path resolution** — relative paths resolved against `data_dir`, not CWD.
+
+#### Infrastructure & Contracts
+
+- **`np.ndarray` in canonical JSON** — `sanitize_for_canonical()` handles NumPy arrays.
+- **HTTP method serialization** — `to_dict()` serializes json/params for all methods.
+- **Chroma distance function validation** — crash on missing metadata (offensive guard).
+- **TOCTOU race fix** — seed race, `PluginNotFoundError` for validation, `str()` coercion removed.
+- **Plugin discovery** — optional extras handling, JSONL MIME mapping.
+- **DataverseClientError** — request metadata added.
+- **LLM multi-query validation** — `WebSettings` required composer fields.
+- **AIMD bootstrap** — fix after recovery, remove redundant finish-reason logging.
+- **Session table DateTime columns** — timezone support added.
+- **Review follow-ups** — TOCTOU guard, redundant or-None, TypeError catch.
+- **8 stale code comments** — corrected across codebase.
+- **221 logging errors** — from stale stdout capture in test suite.
+- **Tier model fingerprints** — allowlist updates and `_state_response` entry.
+
 ### Changed
 
 - **README web startup docs** — explicit instructions for `.[webui]` extra, building the frontend, `ELSPETH_WEB__SECRET_KEY`, creating a local auth user, and running the MVP locally.
 - **Plugin manager singleton** — extracted from `cli.py` to `manager.py`.
 - **532 mypy/ruff errors resolved** — across the full test suite.
 - **CI hygiene** — format, mypy, stale allowlists from Sub-2 merge.
+- **`_raise_if_invalid` extraction** — eliminates 3x error formatting duplication in manager.
+- **`_make_span` extraction** — eliminates 7x no-op guard duplication in spans.
+- **Stale schema mode references** — `fields: dynamic` → `mode: observed` across docs.
 
 ### Removed
 
 - **errorworks test suite** — tests belong in the standalone package.
+- **`archive/` directory** — all content preserved in git history.
 
 ### Tests
 
@@ -209,6 +315,21 @@ Systematic removal of low-value tests and replacement with behavioural gap-filli
 - **Web/Prompts** — message isolation, ordering, context injection tests.
 - **Buffer rollback** — strengthened to verify two-write scenario.
 
+#### Post-Cut Coverage
+
+- **8 coverage gaps closed** — IDOR, timezone, chroma metadata, schemas, mocks.
+- **Source schema test strengthened** — verify `guaranteed_fields` round-trip.
+- **Frontend test gaps** — from review, localStorage mock type annotation.
+- **`error_edge_label`, control-flow exceptions, `CompatibilityResult`, `CONTRACT_TYPE_MAP`** — missing tests added, plus landscape error paths.
+- **Mock spec enforcement** — `spec=LLMProvider` on unspec'd mocks, `spec=LandscapeRecorder` on resume failure test, `make_context()` landscape mock spec'd.
+- **ChromaSink MagicMock contexts** — replaced with factories.
+- **Batch transform tests** — `time.sleep` replaced with condition-based waits.
+- **Autouse fixture narrowing** — scoped to telemetry dirs only.
+- **Property test column strategy** — Python keywords filtered out.
+- **`_on_write_failure` fixture** — replaced session-scoped fixture with explicit injection; hoisted to root conftest; `BaseSink.__init__` patched for integration tests.
+- **`test_version_validation` reclassified** — `test_bootstrap_preflight` split.
+- **`test_skill_drift`** — updated for `ValidationEntry` type change.
+
 ### Design Documentation
 
 - **Web UX LLM Composer MVP** — design spec, 6 sub-specs, 6 sub-plans, program overview.
@@ -218,6 +339,10 @@ Systematic removal of low-value tests and replacement with behavioural gap-filli
 - **System Landscape spec** — platform-level audit trail.
 - **Web test hygiene plan.**
 - **Server config design.**
+- **Frontend UX (A1-A7) implementation plan.**
+- **VerifiedTokenRef implementation plan and review.**
+- **Validation warning glossary** — added to CLI pipeline-composer skill.
+- **Single-schema source-of-truth plan** — DAG `output_schema_config` propagation design.
 
 ## [0.4.1] (RC-4.1 — RAG Ingestion Pipeline)
 
