@@ -84,6 +84,9 @@ def _make_executor(
     """
     recorder = MagicMock()
     recorder.begin_node_state.side_effect = lambda **kw: Mock(state_id=_next_state_id())
+    # Default: Landscape returns no completed coalesces (unit tests don't have a real DB).
+    # Tests that exercise Landscape-based restoration override this per-test.
+    recorder.get_completed_row_ids_for_nodes.return_value = set()
     span_factory = MagicMock()
     token_manager = MagicMock()
 
@@ -1055,16 +1058,17 @@ class TestMarkCompleted:
             executor._mark_completed(("c", f"row_{i}"))
         assert len(executor._completed_keys) == 5
 
-    def test_eviction_emits_structured_warning(self):
+    def test_eviction_emits_structured_debug_log(self):
+        """Eviction is harmless (Landscape fallback catches late arrivals) so logs at debug."""
         executor, *_ = _make_executor(max_completed_keys=2)
-        with patch("elspeth.engine.coalesce_executor.slog.warning") as warning_mock:
+        with patch("elspeth.engine.coalesce_executor.slog.debug") as debug_mock:
             executor._mark_completed(("c", "row_0"))
             executor._mark_completed(("c", "row_1"))
             executor._mark_completed(("c", "row_2"))  # Triggers eviction
 
-        warning_mock.assert_called_once()
-        assert warning_mock.call_args.kwargs["max_completed_keys"] == 2
-        assert warning_mock.call_args.kwargs["evicted_count"] == 1
+        debug_mock.assert_called_once()
+        assert debug_mock.call_args.kwargs["max_completed_keys"] == 2
+        assert debug_mock.call_args.kwargs["evicted_count"] == 1
 
     def test_fifo_eviction_oldest_removed(self):
         executor, *_ = _make_executor()
@@ -1658,8 +1662,13 @@ class TestCheckpointCompletedKeys:
     the same fork group).
     """
 
-    def test_completed_keys_survive_checkpoint_restore(self):
-        """A coalesce that completed before checkpoint must reject late arrivals after restore."""
+    def test_completed_keys_restored_from_landscape_on_resume(self):
+        """On restore, completed keys are reconstructed from Landscape, not checkpoint.
+
+        The Landscape is the source of truth. The checkpoint's completed_keys
+        field is ignored — the Landscape query returns ALL completed coalesces
+        (no FIFO eviction limit).
+        """
         executor, _recorder, _, _clock = _make_executor()
         executor.register_coalesce(_settings(branches=["a", "b"]), "node_1")
 
@@ -1670,15 +1679,18 @@ class TestCheckpointCompletedKeys:
         # Verify the key is marked completed
         assert ("merge", "row_1") in executor._completed_keys
 
-        # Checkpoint
+        # Checkpoint (completed_keys is now written as empty)
         checkpoint = executor.get_checkpoint_state()
+        assert checkpoint.completed_keys == ()  # No longer serialized
 
-        # Build a new executor and restore (simulates crash/resume)
+        # Build a new executor and restore, with Landscape mock returning the completed key
         executor2, _recorder2, _, _clock2 = _make_executor()
         executor2.register_coalesce(_settings(branches=["a", "b"]), "node_1")
+        _recorder2.get_completed_row_ids_for_nodes.return_value = {("node_1", "row_1")}
         executor2.restore_from_checkpoint(checkpoint)
 
-        # Late arrival on the restored executor must be detected
+        # Late arrival on the restored executor must be detected (via Landscape)
+        assert ("merge", "row_1") in executor2._completed_keys
         late = _make_token(branch_name="a", token_id="t_late", row_id="row_1")
         outcome = executor2.accept(late, "merge")
 
@@ -1686,8 +1698,8 @@ class TestCheckpointCompletedKeys:
         assert outcome.failure_reason == "late_arrival_after_merge"
         assert outcome.outcomes_recorded is True
 
-    def test_completed_keys_roundtrip_preserves_all_entries(self):
-        """Multiple completed keys should all survive checkpoint/restore."""
+    def test_landscape_reconstruction_restores_all_completed_keys(self):
+        """Multiple completed keys restored from Landscape, not checkpoint."""
         executor, _, _, _clock = _make_executor()
         s = _settings(branches=["a", "b"])
         executor.register_coalesce(s, "node_1")
@@ -1700,40 +1712,44 @@ class TestCheckpointCompletedKeys:
 
         assert len(executor._completed_keys) == 3
 
-        # Checkpoint → restore
+        # Checkpoint → restore with Landscape mock
         checkpoint = executor.get_checkpoint_state()
-        executor2, _, _, _ = _make_executor()
+        executor2, recorder2, _, _ = _make_executor()
         executor2.register_coalesce(s, "node_1")
+        recorder2.get_completed_row_ids_for_nodes.return_value = {("node_1", f"row_{i}") for i in range(3)}
         executor2.restore_from_checkpoint(checkpoint)
 
-        # All 3 completed keys must be present
+        # All 3 completed keys must be present (from Landscape)
         for i in range(3):
             assert ("merge", f"row_{i}") in executor2._completed_keys
 
-    def test_completed_keys_checkpoint_respects_fifo_order(self):
-        """Restored completed keys should maintain insertion order."""
-        executor, _, _, _ = _make_executor(max_completed_keys=3)
+    def test_landscape_fallback_catches_evicted_keys(self):
+        """After FIFO eviction, the Landscape fallback still detects late arrivals."""
+        executor, recorder, _, _ = _make_executor(max_completed_keys=2)
         s = _settings(branches=["a", "b"])
         executor.register_coalesce(s, "node_1")
 
-        # Complete 3 coalesces in order
+        # Complete 3 coalesces — row_0 will be evicted from FIFO (max=2)
         for i in range(3):
             row_id = f"row_{i}"
             executor.accept(_make_token(row_id=row_id, branch_name="a", token_id=f"t{i}_a"), "merge")
             executor.accept(_make_token(row_id=row_id, branch_name="b", token_id=f"t{i}_b"), "merge")
 
-        # Checkpoint → restore
-        checkpoint = executor.get_checkpoint_state()
-        executor2, _, _, _ = _make_executor(max_completed_keys=3)
-        executor2.register_coalesce(s, "node_1")
-        executor2.restore_from_checkpoint(checkpoint)
+        # row_0 was evicted from FIFO
+        assert ("merge", "row_0") not in executor._completed_keys
+        # row_1 and row_2 remain in FIFO
+        assert ("merge", "row_1") in executor._completed_keys
+        assert ("merge", "row_2") in executor._completed_keys
 
-        # Adding a 4th should evict the first (row_0), not a random entry
-        executor2._mark_completed(("merge", "row_99"))
-        assert ("merge", "row_0") not in executor2._completed_keys
-        assert ("merge", "row_1") in executor2._completed_keys
-        assert ("merge", "row_2") in executor2._completed_keys
-        assert ("merge", "row_99") in executor2._completed_keys
+        # Late arrival for evicted row_0 — Landscape fallback should catch it
+        recorder.get_completed_row_ids_for_nodes.return_value = {("node_1", "row_0")}
+        late = _make_token(branch_name="a", token_id="t_late", row_id="row_0")
+        outcome = executor.accept(late, "merge")
+
+        assert outcome.held is False
+        assert outcome.failure_reason == "late_arrival_after_merge"
+        # Key should now be in the FIFO cache (backfilled from Landscape)
+        assert ("merge", "row_0") in executor._completed_keys
 
     def test_pending_and_completed_both_restored(self):
         """Checkpoint with both pending and completed entries restores both."""
@@ -1753,17 +1769,19 @@ class TestCheckpointCompletedKeys:
 
         checkpoint = executor.get_checkpoint_state()
 
-        executor2, _, _, _ = _make_executor()
+        executor2, recorder2, _, _ = _make_executor()
         executor2.register_coalesce(s, "node_1")
+        # Mock Landscape to return completed key for row_1
+        recorder2.get_completed_row_ids_for_nodes.return_value = {("node_1", "row_1")}
         executor2.restore_from_checkpoint(checkpoint)
 
-        # Completed key restored
+        # Completed key restored (from Landscape)
         assert ("merge", "row_1") in executor2._completed_keys
-        # Pending entry restored
+        # Pending entry restored (from checkpoint)
         assert ("merge", "row_2") in executor2._pending
 
-    def test_checkpoint_dto_includes_completed_keys(self):
-        """CoalesceCheckpointState should carry completed_keys in its wire format."""
+    def test_checkpoint_dto_writes_empty_completed_keys(self):
+        """Checkpoint no longer serializes completed_keys (Landscape is source of truth)."""
         executor, _, _, _ = _make_executor()
         s = _settings(branches=["a", "b"])
         executor.register_coalesce(s, "node_1")
@@ -1774,10 +1792,9 @@ class TestCheckpointCompletedKeys:
         checkpoint = executor.get_checkpoint_state()
         wire = checkpoint.to_dict()
 
-        # Wire format should include completed_keys
+        # Wire format still includes the field (schema compat) but it's empty
         assert "completed_keys" in wire
-        assert len(wire["completed_keys"]) == 1
-        assert wire["completed_keys"][0] == ["merge", "row_1"]
+        assert wire["completed_keys"] == []
 
     def test_checkpoint_dto_from_dict_restores_completed_keys(self):
         """CoalesceCheckpointState.from_dict should parse completed_keys."""

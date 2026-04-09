@@ -392,6 +392,124 @@ class TestTerminalStateEdgeCases:
         assert missing == 0
 
 
+class TestTerminalStateAggregation:
+    """Property tests: BUFFERED tokens in aggregation pipelines reach terminal state.
+
+    These tests exercise the BUFFERED → terminal transition that only occurs
+    in pipelines with aggregation. The BUFFERED outcome is the only non-terminal
+    outcome in RowOutcome — if a token is BUFFERED but never reaches terminal
+    state, the audit trail is incomplete.
+
+    Fix for elspeth-27b9cd6f6c: existing terminal state property tests only
+    covered simple (source → transform → sink) pipelines, never exercising
+    the BUFFERED path at all.
+    """
+
+    @given(n=st.integers(min_value=1, max_value=30))
+    @settings(max_examples=50, deadline=None)
+    def test_aggregation_buffered_tokens_reach_terminal(self, n: int) -> None:
+        """Property: All tokens BUFFERED during aggregation reach terminal state.
+
+        Transform-mode aggregation: N input tokens → BUFFERED → CONSUMED_IN_BATCH.
+        Count trigger set unreachably high so all tokens flush at end-of-source.
+        """
+        from elspeth.contracts import PipelineRow
+        from elspeth.contracts.schema_contract import FieldContract, SchemaContract
+        from elspeth.core.config import AggregationSettings, SourceSettings, TriggerConfig
+        from elspeth.plugins.infrastructure.results import TransformResult
+        from elspeth.testing import make_pipeline_row
+        from tests.fixtures.base_classes import _TestSchema, _TestTransformBase
+        from tests.fixtures.factories import wire_transforms
+
+        class SumBatchTransform(_TestTransformBase):
+            """Batch transform that sums values."""
+
+            name = "sum_batch"
+            input_schema = _TestSchema
+            output_schema = _TestSchema
+            is_batch_aware = True
+            on_success: str | None = "default"
+
+            def process(self, row: PipelineRow | list[PipelineRow], ctx: object) -> TransformResult:
+                if isinstance(row, list):
+                    total = sum(r.get("value", 0) for r in row)
+                    output = {"value": total, "count": len(row)}
+                    contract = SchemaContract(
+                        mode="OBSERVED",
+                        fields=(
+                            FieldContract(
+                                normalized_name="value", original_name="value", python_type=int, required=False, source="inferred"
+                            ),
+                            FieldContract(
+                                normalized_name="count", original_name="count", python_type=int, required=False, source="inferred"
+                            ),
+                        ),
+                        locked=True,
+                    )
+                    return TransformResult.success(
+                        PipelineRow(output, contract),
+                        success_reason={"action": "batch_sum"},
+                    )
+                return TransformResult.success(make_pipeline_row(row.to_dict()), success_reason={"action": "buffer"})
+
+        rows = [{"id": i, "value": i * 10} for i in range(n)]
+        source = as_source(ListSource(rows, name="agg_source", on_success="source_out"))
+        transform = as_transform(SumBatchTransform())
+        sink = as_sink(CollectSink())
+
+        # Build graph via production path (same as T18 characterization tests)
+        graph = ExecutionGraph.from_plugin_instances(
+            source=source,
+            source_settings=SourceSettings(plugin=source.name, on_success="source_out", options={}),
+            transforms=wire_transforms([transform], source_connection="source_out", final_sink="default"),
+            sinks={"default": sink},
+            aggregations={},
+            gates=[],
+            coalesce_settings=None,
+        )
+
+        # Map transform's node ID to aggregation settings
+        transform_id_map = graph.get_transform_id_map()
+        transform_node_id = transform_id_map[0]
+
+        agg_settings = AggregationSettings(
+            name="test_agg",
+            plugin="sum_batch",
+            input="source_out",
+            on_success="default",
+            on_error="discard",
+            trigger=TriggerConfig(count=9999),  # Never triggers mid-stream
+            output_mode="transform",
+        )
+
+        config = PipelineConfig(
+            source=source,
+            transforms=[transform],
+            sinks={"default": sink},
+            aggregation_settings={transform_node_id: agg_settings},
+        )
+
+        db = make_landscape_db()
+        orchestrator = Orchestrator(db)
+        payload_store = MockPayloadStore()
+        run = orchestrator.run(config, graph=graph, payload_store=payload_store)
+
+        # THE INVARIANT: No tokens missing terminal outcome
+        missing = count_tokens_missing_terminal(db, run.run_id)
+        assert missing == 0, (
+            f"AUDIT INTEGRITY VIOLATION: {missing} tokens missing terminal outcome "
+            f"in aggregation pipeline. Rows: {n}. "
+            f"BUFFERED tokens must reach terminal state at end-of-source flush."
+        )
+
+        # No duplicate terminals
+        duplicates = count_duplicate_terminal_outcomes(db, run.run_id)
+        assert duplicates == 0, f"AUDIT INTEGRITY VIOLATION: {duplicates} tokens have multiple terminal outcomes in aggregation pipeline."
+
+        # Counter sanity: all rows should have been buffered
+        assert run.rows_buffered == n, f"Expected {n} rows_buffered, got {run.rows_buffered}"
+
+
 class TestRowOutcomeEnumProperties:
     """Property tests for the RowOutcome enum itself."""
 

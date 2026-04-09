@@ -224,8 +224,10 @@ class RecoveryManager:
             Empty list if run cannot be resumed or all rows were processed.
 
         Raises:
-            ValueError: If row data cannot be retrieved (payload purged or missing),
-                or if schema validation fails (indicates data corruption or schema mismatch)
+            AuditIntegrityError: If row not found in database, payload is corrupt,
+                or decoded payload is not a dict (Tier 1 violations).
+            ValueError: If payload has been purged or schema validation fails
+                (operational errors that prevent resume but aren't data corruption)
         """
         row_ids = self.get_unprocessed_rows(run_id)
         if not row_ids:

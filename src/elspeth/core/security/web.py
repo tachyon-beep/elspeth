@@ -255,6 +255,8 @@ def validate_url_for_ssrf(
     Args:
         url: URL to validate and prepare for fetching
         timeout: DNS resolution timeout in seconds
+        allowed_ranges: Additional IP ranges to permit (e.g. RFC1918 for
+            internal services). These bypass the default blocklist check.
 
     Returns:
         SSRFSafeRequest ready for secure fetching

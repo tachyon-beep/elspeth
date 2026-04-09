@@ -870,6 +870,18 @@ class LandscapeRecorder:
         """Get all token outcomes for a row. Delegates to DataFlowRepository."""
         return self._data_flow.get_token_outcomes_for_row(run_id, row_id)
 
+    def get_completed_row_ids_for_nodes(
+        self,
+        run_id: str,
+        node_ids: frozenset[str],
+    ) -> set[tuple[str, str]]:
+        """Get (node_id, row_id) pairs where a node completed at given nodes.
+
+        Delegates to ExecutionRepository. Used by coalesce executor to
+        reconstruct late-arrival detection state from the Landscape.
+        """
+        return self._execution.get_completed_row_ids_for_nodes(run_id, node_ids)
+
     # Graph recording
 
     def register_node(

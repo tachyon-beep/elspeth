@@ -94,6 +94,9 @@ def explain(
         ValueError: If neither token_id nor row_id provided.
         ValueError: If row_id has multiple terminal tokens and sink not specified.
         ValueError: If row_id with sink has multiple tokens (pipeline config issue).
+        AuditIntegrityError: If a token resolved from token_outcomes is missing
+            from the tokens table, or if a row referenced by a token doesn't
+            exist (Tier 1 database corruption).
     """
     if token_id is None and row_id is None:
         raise ValueError("Must provide either token_id or row_id")

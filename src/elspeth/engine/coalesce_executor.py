@@ -223,10 +223,14 @@ class CoalesceExecutor:
                 )
             )
 
+        # completed_keys is no longer persisted in checkpoints — it's
+        # reconstructed from the Landscape on restore (Phase 1 of
+        # elspeth-cc36c8eaef). Empty tuple preserves schema compatibility
+        # with existing checkpoint parsers / version validation.
         checkpoint = CoalesceCheckpointState(
             version=COALESCE_CHECKPOINT_VERSION,
             pending=tuple(pending_entries),
-            completed_keys=tuple(self._completed_keys.keys()),
+            completed_keys=(),
         )
 
         serialized = checkpoint_dumps(checkpoint.to_dict())
@@ -243,7 +247,16 @@ class CoalesceExecutor:
         return checkpoint
 
     def restore_from_checkpoint(self, state: CoalesceCheckpointState) -> None:
-        """Restore pending coalesces from checkpoint."""
+        """Restore pending coalesces from checkpoint.
+
+        Completed keys are reconstructed from the Landscape (source of truth)
+        rather than from checkpoint data. This eliminates the FIFO eviction gap:
+        the Landscape query returns ALL completed coalesces for this run, not
+        just the last max_completed_keys entries.
+
+        The checkpoint's completed_keys field is ignored (Phase 1 of
+        elspeth-cc36c8eaef). Phase 3 will remove it from the checkpoint schema.
+        """
         if state.version != COALESCE_CHECKPOINT_VERSION:
             slog.warning(
                 "coalesce_checkpoint_version_rejected",
@@ -263,21 +276,15 @@ class CoalesceExecutor:
                     f"Configured coalesces: {sorted(self._settings)}"
                 )
 
-        # Validate completed_keys reference known coalesce names
-        for coalesce_name, _row_id in state.completed_keys:
-            if coalesce_name not in self._settings:
-                raise AuditIntegrityError(
-                    f"Checkpoint completed_keys references unknown coalesce '{coalesce_name}'. "
-                    f"Configured coalesces: {sorted(self._settings)}"
-                )
-
         now = self._clock.monotonic()
         self._pending.clear()
         self._completed_keys.clear()
 
-        # Restore completed keys for late-arrival detection
-        for key in state.completed_keys:
-            self._completed_keys[key] = None
+        # Reconstruct completed keys from Landscape (source of truth).
+        # This replaces checkpoint-based restoration, eliminating:
+        # - FIFO eviction gap (Landscape has ALL completed, not just last 10K)
+        # - Checkpoint-Landscape divergence risk
+        self._reconstruct_completed_keys_from_landscape()
 
         for pending_entry in state.pending:
             first_arrival = now - pending_entry.elapsed_age_seconds
@@ -306,13 +313,81 @@ class CoalesceExecutor:
                 lost_branches=dict(pending_entry.lost_branches),
             )
 
+    def _reconstruct_completed_keys_from_landscape(self) -> None:
+        """Populate _completed_keys from the Landscape audit trail.
+
+        Queries node_states for completed entries at coalesce node IDs, joined
+        with tokens to get row_ids. Maps node_id → coalesce_name via the
+        reverse of self._node_ids.
+
+        This is the source-of-truth path: the Landscape records ALL completed
+        coalesces (no FIFO eviction), so late-arrival detection works correctly
+        even for pipelines with >max_completed_keys coalesced rows.
+        """
+        if not self._node_ids:
+            return
+
+        # Build reverse map: node_id → coalesce_name
+        node_id_to_name: dict[str, str] = {str(nid): name for name, nid in self._node_ids.items()}
+
+        completed_pairs = self._recorder.get_completed_row_ids_for_nodes(
+            run_id=self._run_id,
+            node_ids=frozenset(node_id_to_name.keys()),
+        )
+
+        for node_id_str, row_id in completed_pairs:
+            if node_id_str in node_id_to_name:
+                self._completed_keys[(node_id_to_name[node_id_str], row_id)] = None
+
+        if self._completed_keys:
+            slog.info(
+                "coalesce_completed_keys_restored_from_landscape",
+                count=len(self._completed_keys),
+            )
+
+    def _check_landscape_for_completion(self, coalesce_name: str, row_id: str) -> bool:
+        """Check the Landscape for whether a coalesce key has completed.
+
+        Cache-miss fallback for late-arrival detection. When the FIFO cache
+        (self._completed_keys) doesn't contain a key, this queries the
+        Landscape before allowing a new pending entry. If the Landscape
+        shows the coalesce completed, the key is added to the cache and
+        the token is treated as a late arrival.
+
+        This eliminates the FIFO eviction window: evicted keys are
+        rediscovered from the Landscape on the next lookup.
+
+        Args:
+            coalesce_name: Coalesce point name
+            row_id: Source row ID
+
+        Returns:
+            True if the Landscape shows this coalesce already completed
+        """
+        if coalesce_name not in self._node_ids:
+            return False
+        node_id = self._node_ids[coalesce_name]
+
+        completed_pairs = self._recorder.get_completed_row_ids_for_nodes(
+            run_id=self._run_id,
+            node_ids=frozenset({str(node_id)}),
+        )
+
+        # Check if any of the completed pairs match our row_id
+        for _nid, completed_row_id in completed_pairs:
+            if completed_row_id == row_id:
+                # Cache hit: add to FIFO so subsequent lookups are fast
+                self._completed_keys[(coalesce_name, row_id)] = None
+                return True
+        return False
+
     def _mark_completed(self, key: tuple[str, str]) -> None:
         """Mark a coalesce key as completed with bounded memory.
 
         Uses FIFO eviction to prevent unbounded memory growth in long-running
         pipelines. When max capacity is exceeded, oldest entries are removed.
-        Late arrivals after eviction will create new pending entries which
-        timeout or flush correctly - acceptable trade-off vs OOM.
+        Late arrivals after eviction are caught by the Landscape fallback in
+        accept() — the FIFO is a performance cache, not a correctness mechanism.
 
         Args:
             key: (coalesce_name, row_id) tuple to mark as completed
@@ -324,12 +399,12 @@ class CoalesceExecutor:
             evicted_key, _ = self._completed_keys.popitem(last=False)
             evicted_keys.append(evicted_key)
         if evicted_keys:
-            slog.warning(
-                "coalesce_completed_keys_evicted",
+            # Eviction is harmless: Landscape fallback in accept() catches
+            # late arrivals for evicted keys. Log at debug level.
+            slog.debug(
+                "coalesce_completed_keys_cache_evicted",
                 max_completed_keys=self._max_completed_keys,
                 evicted_count=len(evicted_keys),
-                oldest_evicted=evicted_keys[0],
-                newest_evicted=evicted_keys[-1],
                 retained_count=len(self._completed_keys),
             )
 
@@ -385,8 +460,12 @@ class CoalesceExecutor:
         key = (coalesce_name, token.row_id)
         now = self._clock.monotonic()
 
-        # Check if this coalesce already completed (late arrival)
-        if key in self._completed_keys:
+        # Check if this coalesce already completed (late arrival).
+        # Two-level lookup: FIFO cache first, then Landscape fallback.
+        # The FIFO is a performance optimization; the Landscape is the
+        # source of truth. Evicted FIFO entries are rediscovered from
+        # the Landscape, eliminating the eviction window.
+        if key in self._completed_keys or self._check_landscape_for_completion(coalesce_name, token.row_id):
             # Late arrival after merge/failure already happened
             # Record failure audit trail for this late token
             failure_reason = "late_arrival_after_merge"
@@ -1118,8 +1197,9 @@ class CoalesceExecutor:
 
         key = (coalesce_name, row_id)
 
-        # Already completed (race with normal merge) — ignore
-        if key in self._completed_keys:
+        # Already completed (race with normal merge) — ignore.
+        # Two-level lookup: FIFO cache then Landscape fallback.
+        if key in self._completed_keys or self._check_landscape_for_completion(coalesce_name, row_id):
             return None
 
         settings = self._settings[coalesce_name]

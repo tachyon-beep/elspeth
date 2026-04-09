@@ -81,12 +81,12 @@ allow_hits:
   reason: 'Tier 3 validation: raw YAML from operator files — isinstance checks validate each entry is a mapping'
   safety: Raises ValueError with index and type info on malformed entry
   expires: null
-- key: engine/coalesce_executor.py:R5:CoalesceExecutor:_execute_merge:fp=1cbffe464bfc83dc
+- key: engine/coalesce_executor.py:R5:CoalesceExecutor:_execute_merge:fp=61364cd3d94da4c1
   owner: architecture
   reason: AuditIntegrityError check prevents writing FAILED records to a compromised database — leaving node states as pending is more honest than corrupting further
   safety: Re-raises immediately; no writes to the untrustworthy database
   expires: null
-- key: engine/coalesce_executor.py:R4:CoalesceExecutor:_execute_merge:fp=e3a5fcf2a5fe7d9e
+- key: engine/coalesce_executor.py:R4:CoalesceExecutor:_execute_merge:fp=353da908add18e11
   owner: architecture
   reason: Best-effort cleanup of OPEN branch node_states after merge failure — broad catch prevents cleanup failure from masking original merge exception
   safety: Logs error with state_id and cleanup exception details; always re-raises the original error

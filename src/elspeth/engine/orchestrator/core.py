@@ -2085,6 +2085,18 @@ class Orchestrator:
                 )
                 counters.accumulate_flush_result(flush_result)
 
+                # TERMINAL GUARANTEE: After end-of-source flush, all aggregation
+                # buffers must be empty. Any remaining tokens would be silently
+                # lost — never reaching a terminal state in the audit trail.
+                for agg_node_id_str in config.aggregation_settings:
+                    remaining = processor.get_aggregation_buffer_count(NodeID(agg_node_id_str))
+                    if remaining > 0:
+                        raise OrchestrationInvariantError(
+                            f"Aggregation buffer for node '{agg_node_id_str}' still has "
+                            f"{remaining} tokens after end-of-source flush. "
+                            f"These tokens would never reach a terminal state."
+                        )
+
             # Flush pending coalesce operations only when the source is actually exhausted.
             if coalesce_executor is not None:
                 flush_coalesce_pending(
@@ -2445,6 +2457,16 @@ class Orchestrator:
                     pending_tokens=pending_tokens,
                 )
                 counters.accumulate_flush_result(flush_result)
+
+                # TERMINAL GUARANTEE: same assertion as _post_source_iteration_work.
+                for agg_node_id_str in config.aggregation_settings:
+                    remaining = processor.get_aggregation_buffer_count(NodeID(agg_node_id_str))
+                    if remaining > 0:
+                        raise OrchestrationInvariantError(
+                            f"Aggregation buffer for node '{agg_node_id_str}' still has "
+                            f"{remaining} tokens after end-of-source flush. "
+                            f"These tokens would never reach a terminal state."
+                        )
 
             # Flush pending coalesce operations only when resume processing exhausted all rows.
             if coalesce_executor is not None:

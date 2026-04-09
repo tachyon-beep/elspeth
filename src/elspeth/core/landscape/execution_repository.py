@@ -64,6 +64,7 @@ from elspeth.core.landscape.schema import (
     node_states_table,
     operations_table,
     routing_events_table,
+    tokens_table,
 )
 
 if TYPE_CHECKING:
@@ -359,6 +360,47 @@ class ExecutionRepository:
         if row is None:
             return None
         return self._node_state_loader.load(row)
+
+    def get_completed_row_ids_for_nodes(
+        self,
+        run_id: str,
+        node_ids: frozenset[str],
+    ) -> set[tuple[str, str]]:
+        """Get (node_id, row_id) pairs where a node_state has been completed.
+
+        Used to reconstruct coalesce late-arrival detection state from the
+        Landscape rather than from checkpoint data. The Landscape is the source
+        of truth — checkpoint-based completed_keys is a cache optimization.
+
+        Args:
+            run_id: Run ID to scope the query
+            node_ids: Set of node IDs to query (e.g., coalesce node IDs)
+
+        Returns:
+            Set of (node_id, row_id) tuples where the node_state has a
+            completed_at timestamp (meaning the coalesce resolved — success
+            or failure).
+        """
+        if not node_ids:
+            return set()
+
+        query = (
+            select(node_states_table.c.node_id, tokens_table.c.row_id)
+            .select_from(
+                node_states_table.join(
+                    tokens_table,
+                    node_states_table.c.token_id == tokens_table.c.token_id,
+                )
+            )
+            .where(
+                node_states_table.c.run_id == run_id,
+                node_states_table.c.node_id.in_(node_ids),
+                node_states_table.c.completed_at.isnot(None),
+            )
+            .distinct()
+        )
+        rows = self._ops.execute_fetchall(query)
+        return {(row.node_id, row.row_id) for row in rows}
 
     def record_routing_event(
         self,

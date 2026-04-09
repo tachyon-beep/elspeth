@@ -128,7 +128,9 @@ def accumulate_row_outcomes(
             # Deaggregation parent token - children counted separately
             counters.rows_expanded += 1
         elif result.outcome == RowOutcome.BUFFERED:
-            # Passthrough mode buffered token
+            # Non-terminal: token held in aggregation buffer (passthrough or transform mode).
+            # Terminal outcome deferred to flush time (count trigger, timeout, or end-of-source).
+            # Post-flush assertion in _post_source_iteration_work verifies no tokens remain buffered.
             counters.rows_buffered += 1
         else:
             raise OrchestrationInvariantError(f"Unhandled RowOutcome variant: {result.outcome!r}. Token: {result.token}")
