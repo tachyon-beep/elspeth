@@ -731,7 +731,8 @@ class AzureBatchLLMTransform(BaseTransform):
             )
 
         for custom_id, original_request in checkpoint.requests.items():
-            row_index = checkpoint.row_mapping[custom_id].index
+            mapping_entry = checkpoint.row_mapping[custom_id]
+            row_index = mapping_entry.index
             error_info: dict[str, Any] = {
                 "reason": f"batch_{terminal_status}",
                 "batch_id": checkpoint.batch_id,
@@ -750,6 +751,7 @@ class AzureBatchLLMTransform(BaseTransform):
                     request_data={
                         "custom_id": custom_id,
                         "row_index": row_index,
+                        "variables_hash": mapping_entry.variables_hash,
                         **original_request,
                     },
                     response_data=None,
@@ -1325,6 +1327,7 @@ class AzureBatchLLMTransform(BaseTransform):
                         request_data={
                             "custom_id": custom_id,
                             "row_index": idx,
+                            "variables_hash": row_mapping[custom_id].variables_hash,
                             **original_request,
                         },
                         response_data=None,
@@ -1443,7 +1446,8 @@ class AzureBatchLLMTransform(BaseTransform):
 
         for custom_id, result in results_by_id.items():
             original_request = requests_data[custom_id]
-            row_index = row_mapping[custom_id].index
+            mapping_entry = row_mapping[custom_id]
+            row_index = mapping_entry.index
 
             # Determine call status from result (Tier 2 - validated at boundary)
             if "error" in result:
@@ -1467,6 +1471,7 @@ class AzureBatchLLMTransform(BaseTransform):
                     request_data={
                         "custom_id": custom_id,
                         "row_index": row_index,
+                        "variables_hash": mapping_entry.variables_hash,
                         **original_request,
                     },
                     response_data=response_data,
@@ -1522,7 +1527,7 @@ class AzureBatchLLMTransform(BaseTransform):
         batch_audit = build_llm_audit_metadata(
             self._response_field,
             template_hash=self._template.template_hash,
-            variables_hash=None,  # Per-row hashes recorded in calls table via record_call()
+            variables_hash=None,  # Batch-level: per-row hashes are in calls table request_data
             template_source=self._template.template_source,
             lookup_hash=self._template.lookup_hash,
             lookup_source=self._template.lookup_source,
