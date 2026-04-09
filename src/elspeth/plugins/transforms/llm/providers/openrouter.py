@@ -21,6 +21,7 @@ from typing import TYPE_CHECKING, Any, Literal
 import httpx
 from pydantic import Field
 
+from elspeth.contracts.audit_protocols import PluginAuditWriter
 from elspeth.contracts.token_usage import TokenUsage
 from elspeth.plugins.infrastructure.clients.http import AuditedHTTPClient
 from elspeth.plugins.infrastructure.clients.llm import (
@@ -36,7 +37,6 @@ from elspeth.plugins.transforms.llm.provider import LLMQueryResult, parse_finish
 from elspeth.plugins.transforms.llm.validation import reject_nonfinite_constant
 
 if TYPE_CHECKING:
-    from elspeth.core.landscape.recorder import LandscapeRecorder
     from elspeth.plugins.infrastructure.clients.base import TelemetryEmitCallback
 
 __all__ = [
@@ -101,7 +101,7 @@ class OpenRouterLLMProvider:
         api_key: str,
         base_url: str = "https://openrouter.ai/api/v1",
         timeout_seconds: float = 60.0,
-        recorder: LandscapeRecorder,
+        recorder: PluginAuditWriter,
         run_id: str,
         telemetry_emit: TelemetryEmitCallback,
         limiter: Any = None,
@@ -301,7 +301,7 @@ class OpenRouterLLMProvider:
         with self._http_clients_lock:
             if state_id not in self._http_clients:
                 self._http_clients[state_id] = AuditedHTTPClient(
-                    recorder=self._recorder,
+                    recorder=self._recorder,  # type: ignore[arg-type]  # Task 6: AuditedHTTPClient will accept PluginAuditWriter
                     state_id=state_id,
                     run_id=self._run_id,
                     telemetry_emit=self._telemetry_emit,

@@ -14,7 +14,7 @@ from __future__ import annotations
 
 from collections.abc import Callable
 from threading import Lock
-from typing import TYPE_CHECKING, Any
+from typing import Any
 from urllib.parse import urlparse
 
 import httpx
@@ -22,6 +22,7 @@ import structlog
 from pydantic import Field, field_validator
 
 from elspeth.contracts import Determinism
+from elspeth.contracts.audit_protocols import PluginAuditWriter
 from elspeth.contracts.contexts import LifecycleContext, TransformContext
 from elspeth.contracts.errors import PluginRetryableError
 from elspeth.contracts.schema_contract import PipelineRow
@@ -34,9 +35,6 @@ from elspeth.plugins.infrastructure.schema_factory import create_schema_from_con
 from elspeth.plugins.transforms.azure.errors import MalformedResponseError
 from elspeth.plugins.transforms.safety_utils import get_fields_to_scan
 from elspeth.plugins.transforms.safety_utils import validate_fields_not_empty as _validate_fields
-
-if TYPE_CHECKING:
-    from elspeth.core.landscape.recorder import LandscapeRecorder
 
 logger = structlog.get_logger(__name__)
 
@@ -130,7 +128,7 @@ class BaseAzureSafetyTransform(BaseTransform, BatchTransformMixin):
         self.input_schema = schema
         self.output_schema = schema
 
-        self._recorder: LandscapeRecorder | None = None
+        self._recorder: PluginAuditWriter | None = None
         self._run_id: str = ""
         self._telemetry_emit: Callable[[Any], None] = _warn_telemetry_before_start
         self._limiter: Any = None  # RateLimiter | NoOpLimiter | None
@@ -356,7 +354,7 @@ class BaseAzureSafetyTransform(BaseTransform, BatchTransformMixin):
                 if self._recorder is None:
                     raise RuntimeError(f"{self.name}: recorder not initialized — call on_start() before processing")
                 self._http_clients[state_id] = AuditedHTTPClient(
-                    recorder=self._recorder,
+                    recorder=self._recorder,  # type: ignore[arg-type]  # Task 6: AuditedHTTPClient will accept PluginAuditWriter
                     state_id=state_id,
                     run_id=self._run_id,
                     telemetry_emit=self._telemetry_emit,

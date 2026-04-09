@@ -18,13 +18,13 @@ from typing import TYPE_CHECKING, Any, Literal
 import structlog
 from pydantic import Field, model_validator
 
+from elspeth.contracts.audit_protocols import PluginAuditWriter
 from elspeth.plugins.infrastructure.clients.llm import AuditedLLMClient, ContentPolicyError, LLMClientError
 from elspeth.plugins.transforms.llm.base import LLMConfig
 from elspeth.plugins.transforms.llm.provider import FinishReason, LLMQueryResult, parse_finish_reason
 from elspeth.plugins.transforms.llm.tracing import AzureAITracingConfig, TracingConfig
 
 if TYPE_CHECKING:
-    from elspeth.core.landscape.recorder import LandscapeRecorder
     from elspeth.plugins.infrastructure.clients.base import TelemetryEmitCallback
 
 logger = structlog.get_logger(__name__)
@@ -99,7 +99,7 @@ class AzureLLMProvider:
         api_key: str,
         api_version: str,
         deployment_name: str,
-        recorder: LandscapeRecorder,
+        recorder: PluginAuditWriter,
         run_id: str,
         telemetry_emit: TelemetryEmitCallback,
         limiter: Any = None,
@@ -224,7 +224,7 @@ class AzureLLMProvider:
         with self._llm_clients_lock:
             if state_id not in self._llm_clients:
                 self._llm_clients[state_id] = AuditedLLMClient(
-                    recorder=self._recorder,
+                    recorder=self._recorder,  # type: ignore[arg-type]  # Task 6: AuditedLLMClient will accept PluginAuditWriter
                     state_id=state_id,
                     run_id=self._run_id,
                     telemetry_emit=self._telemetry_emit,

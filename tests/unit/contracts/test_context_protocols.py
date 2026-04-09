@@ -14,7 +14,7 @@ from elspeth.contracts.contexts import (
     TransformContext,
 )
 from elspeth.core.landscape.database import LandscapeDB
-from elspeth.core.landscape.recorder import LandscapeRecorder
+from elspeth.core.landscape.factory import RecorderFactory
 
 
 class TestPluginContextSatisfiesProtocols:
@@ -28,7 +28,7 @@ class TestPluginContextSatisfiesProtocols:
         from elspeth.contracts.plugin_context import PluginContext
 
         db = LandscapeDB.in_memory()
-        recorder = LandscapeRecorder(db)
+        recorder = RecorderFactory(db).plugin_audit_writer()
         return PluginContext(run_id="test", config={}, landscape=recorder)
 
     def test_satisfies_source_context(self) -> None:
@@ -160,7 +160,7 @@ class TestProtocolFieldCoverage:
         from elspeth.contracts.plugin_context import PluginContext
 
         db = LandscapeDB.in_memory()
-        recorder = LandscapeRecorder(db)
+        recorder = RecorderFactory(db).plugin_audit_writer()
         ctx = PluginContext(run_id="test", config={}, landscape=recorder)
         all_protocols = [SourceContext, TransformContext, SinkContext, LifecycleContext]
         for protocol in all_protocols:

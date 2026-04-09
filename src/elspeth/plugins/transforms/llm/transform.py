@@ -20,11 +20,12 @@ import threading
 import time
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING, Any, Protocol, cast
+from typing import Any, Protocol, cast
 
 import structlog
 
 from elspeth.contracts import Determinism, TransformErrorReason, TransformResult, propagate_contract
+from elspeth.contracts.audit_protocols import PluginAuditWriter
 from elspeth.contracts.contexts import LifecycleContext, TransformContext
 from elspeth.contracts.errors import FrameworkBugError
 from elspeth.contracts.freeze import freeze_fields
@@ -54,9 +55,6 @@ from elspeth.plugins.transforms.llm.providers.openrouter import OpenRouterConfig
 from elspeth.plugins.transforms.llm.templates import PromptTemplate
 from elspeth.plugins.transforms.llm.tracing import AzureAITracingConfig, TracingConfig, parse_tracing_config
 from elspeth.plugins.transforms.llm.validation import reject_nonfinite_constant, strip_markdown_fences, validate_field_value
-
-if TYPE_CHECKING:
-    from elspeth.core.landscape.recorder import LandscapeRecorder
 
 logger = structlog.get_logger(__name__)
 
@@ -1135,7 +1133,7 @@ class LLMTransform(BaseTransform, BatchTransformMixin):
         self._provider: LLMProvider | None = None
 
         # Recorder, telemetry, rate limit (set in on_start)
-        self._recorder: LandscapeRecorder | None = None
+        self._recorder: PluginAuditWriter | None = None
         self._run_id: str = ""
         self._telemetry_emit: Callable[[Any], None] = _warn_telemetry_before_start
         self._limiter: Any = None

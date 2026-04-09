@@ -21,12 +21,14 @@ from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass
 from threading import Lock
-from typing import TYPE_CHECKING, Any, Literal
+from typing import Any, Literal
 
 import httpx
+import structlog
 from pydantic import Field
 
 from elspeth.contracts import CallStatus, CallType, Determinism, TransformResult
+from elspeth.contracts.audit_protocols import PluginAuditWriter
 from elspeth.contracts.contexts import LifecycleContext, TransformContext
 from elspeth.contracts.schema import SchemaConfig
 from elspeth.contracts.schema_contract import FieldContract, PipelineRow, SchemaContract
@@ -51,11 +53,6 @@ from elspeth.plugins.transforms.llm.tracing import (
     validate_tracing_config,
 )
 from elspeth.plugins.transforms.llm.validation import reject_nonfinite_constant
-
-if TYPE_CHECKING:
-    from elspeth.core.landscape.recorder import LandscapeRecorder
-
-import structlog
 
 _logger = structlog.get_logger(__name__)
 
@@ -236,7 +233,7 @@ class OpenRouterBatchLLMTransform(BaseTransform):
         )
 
         # Recorder and telemetry references (set in on_start)
-        self._recorder: LandscapeRecorder | None = None
+        self._recorder: PluginAuditWriter | None = None
         self._run_id: str = ""
         self._telemetry_emit: Callable[[Any], None] = _warn_telemetry_before_start
         self._limiter: Any = None  # RateLimiter | NoOpLimiter | None
@@ -532,7 +529,7 @@ class OpenRouterBatchLLMTransform(BaseTransform):
                 if self._recorder is None:
                     raise RuntimeError("_recorder not initialized — _get_http_client called before begin_run()")
                 self._http_clients[state_id] = AuditedHTTPClient(
-                    recorder=self._recorder,
+                    recorder=self._recorder,  # type: ignore[arg-type]  # Task 6: AuditedHTTPClient will accept PluginAuditWriter
                     state_id=state_id,
                     run_id=self._run_id,
                     telemetry_emit=self._telemetry_emit,

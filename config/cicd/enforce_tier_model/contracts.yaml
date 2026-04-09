@@ -157,19 +157,9 @@ allow_hits:
   reason: TypeError from normalize_type_for_contract for ALL unsupported types during narrowing — maps to object
   safety: Preserves field in narrowed contract as 'any' type; no data loss
   expires: '2026-05-14'
-- key: contracts/plugin_context.py:TC:_module_:fp=2281c9d4d4f9c832
-  owner: architecture
-  reason: TYPE_CHECKING import of LandscapeRecorder — PluginContext type annotations need L1 recorder type
-  safety: No runtime coupling — annotation-only import behind TYPE_CHECKING guard
-  expires: null
 - key: contracts/plugin_context.py:TC:_module_:fp=5dfc642462528293
   owner: architecture
   reason: TYPE_CHECKING import of RateLimitRegistry — PluginContext type annotations need L1 rate limiter type
-  safety: No runtime coupling — annotation-only import behind TYPE_CHECKING guard
-  expires: null
-- key: contracts/contexts.py:TC:_module_:fp=fe23a281512d9222
-  owner: architecture
-  reason: TYPE_CHECKING import of LandscapeRecorder — context protocols declare landscape property type
   safety: No runtime coupling — annotation-only import behind TYPE_CHECKING guard
   expires: null
 - key: contracts/contexts.py:TC:_module_:fp=b29b41656c78b873

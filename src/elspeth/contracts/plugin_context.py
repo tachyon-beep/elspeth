@@ -21,12 +21,12 @@ from elspeth.contracts.freeze import deep_freeze
 
 if TYPE_CHECKING:
     from elspeth.contracts import Call, CallStatus, CallType, TransformErrorReason
+    from elspeth.contracts.audit_protocols import PluginAuditWriter
     from elspeth.contracts.batch_checkpoint import BatchCheckpointState
     from elspeth.contracts.config.runtime import RuntimeConcurrencyConfig
     from elspeth.contracts.errors import ContractViolation
     from elspeth.contracts.identity import TokenInfo
     from elspeth.contracts.schema_contract import PipelineRow, SchemaContract
-    from elspeth.core.landscape.recorder import LandscapeRecorder
     from elspeth.core.rate_limit import RateLimitRegistry
 
 logger = logging.getLogger(__name__)
@@ -82,7 +82,7 @@ class PluginContext:
     config: Mapping[str, Any]
 
     # === Audit & Infrastructure ===
-    landscape: LandscapeRecorder | None = None
+    landscape: PluginAuditWriter | None = None
     rate_limit_registry: RateLimitRegistry | None = None
     concurrency_config: RuntimeConcurrencyConfig | None = None
 
@@ -115,7 +115,7 @@ class PluginContext:
     # Exactly one of state_id or operation_id should be set when recording calls
     state_id: str | None = field(default=None)  # For transform calls (via node_states)
     operation_id: str | None = field(default=None)  # For source/sink calls (via operations)
-    # Note: call_index allocation is delegated to LandscapeRecorder.allocate_call_index()
+    # Note: call_index allocation is delegated to PluginAuditWriter.allocate_call_index()
     # to ensure coordination with audited clients.
 
     # === Telemetry Callback ===
@@ -258,7 +258,7 @@ class PluginContext:
 
         # Route to appropriate recorder method
         if has_state:
-            # Delegate call_index allocation to centralized LandscapeRecorder.
+            # Delegate call_index allocation to centralized PluginAuditWriter.
             # This ensures UNIQUE(state_id, call_index) when mixing ctx.record_call()
             # with audited clients (AuditedLLMClient, AuditedHTTPClient), which also
             # use recorder.allocate_call_index().

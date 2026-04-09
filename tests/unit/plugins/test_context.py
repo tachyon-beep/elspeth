@@ -4,7 +4,7 @@
 from typing import TYPE_CHECKING
 
 from elspeth.core.landscape.database import LandscapeDB
-from elspeth.core.landscape.recorder import LandscapeRecorder
+from elspeth.core.landscape.factory import RecorderFactory
 from tests.fixtures.factories import make_source_context
 
 if TYPE_CHECKING:
@@ -18,7 +18,7 @@ class TestPluginContext:
         from elspeth.contracts.plugin_context import PluginContext
 
         db = LandscapeDB.in_memory()
-        recorder = LandscapeRecorder(db)
+        recorder = RecorderFactory(db).plugin_audit_writer()
         ctx = PluginContext(run_id="run-001", config={}, landscape=recorder)
         assert ctx.run_id == "run-001"
         assert ctx.config == {}
@@ -27,7 +27,7 @@ class TestPluginContext:
         from elspeth.contracts.plugin_context import PluginContext
 
         db = LandscapeDB.in_memory()
-        recorder = LandscapeRecorder(db)
+        recorder = RecorderFactory(db).plugin_audit_writer()
         ctx = PluginContext(run_id="run-001", config={}, landscape=recorder)
         assert ctx.rate_limit_registry is None
         assert ctx.concurrency_config is None
@@ -58,7 +58,7 @@ class TestCheckpointAPI:
         from elspeth.contracts.plugin_context import PluginContext
 
         db = LandscapeDB.in_memory()
-        recorder = LandscapeRecorder(db)
+        recorder = RecorderFactory(db).plugin_audit_writer()
         ctx = PluginContext(run_id="run-001", config={}, landscape=recorder)
         assert ctx.get_checkpoint() is None
 
@@ -67,7 +67,7 @@ class TestCheckpointAPI:
         from elspeth.contracts.plugin_context import PluginContext
 
         db = LandscapeDB.in_memory()
-        recorder = LandscapeRecorder(db)
+        recorder = RecorderFactory(db).plugin_audit_writer()
         ctx = PluginContext(run_id="run-001", config={}, landscape=recorder)
         state = _make_checkpoint(batch_id="batch-123", row_count=5)
         ctx.set_checkpoint(state)
@@ -82,7 +82,7 @@ class TestCheckpointAPI:
         from elspeth.contracts.plugin_context import PluginContext
 
         db = LandscapeDB.in_memory()
-        recorder = LandscapeRecorder(db)
+        recorder = RecorderFactory(db).plugin_audit_writer()
         ctx = PluginContext(run_id="run-001", config={}, landscape=recorder)
         ctx.set_checkpoint(_make_checkpoint(batch_id="batch-old"))
         ctx.set_checkpoint(_make_checkpoint(batch_id="batch-new"))
@@ -96,7 +96,7 @@ class TestCheckpointAPI:
         from elspeth.contracts.plugin_context import PluginContext
 
         db = LandscapeDB.in_memory()
-        recorder = LandscapeRecorder(db)
+        recorder = RecorderFactory(db).plugin_audit_writer()
         ctx = PluginContext(run_id="run-001", config={}, landscape=recorder)
         ctx.set_checkpoint(_make_checkpoint())
         assert ctx.get_checkpoint() is not None
@@ -109,7 +109,7 @@ class TestCheckpointAPI:
         from elspeth.contracts.plugin_context import PluginContext
 
         db = LandscapeDB.in_memory()
-        recorder = LandscapeRecorder(db)
+        recorder = RecorderFactory(db).plugin_audit_writer()
         ctx = PluginContext(run_id="run-001", config={}, landscape=recorder)
 
         # Phase 1: Submit - no existing checkpoint
@@ -551,7 +551,7 @@ class TestTokenField:
         from elspeth.contracts.plugin_context import PluginContext
 
         db = LandscapeDB.in_memory()
-        recorder = LandscapeRecorder(db)
+        recorder = RecorderFactory(db).plugin_audit_writer()
         ctx = PluginContext(run_id="test-run", config={}, landscape=recorder)
         assert ctx.token is None
 
@@ -572,7 +572,7 @@ class TestTokenField:
 
         token = TokenInfo(row_id="row-1", token_id="token-row-1", row_data=row_data)
         db = LandscapeDB.in_memory()
-        recorder = LandscapeRecorder(db)
+        recorder = RecorderFactory(db).plugin_audit_writer()
         ctx = PluginContext(run_id="test-run", config={}, landscape=recorder, token=token)
 
         assert ctx.token is not None
@@ -598,7 +598,7 @@ class TestTokenField:
 
         token = TokenInfo(row_id="row-42", token_id="token-42", row_data=row_data)
         db = LandscapeDB.in_memory()
-        recorder = LandscapeRecorder(db)
+        recorder = RecorderFactory(db).plugin_audit_writer()
         ctx = PluginContext(run_id="test-run", config={}, landscape=recorder, token=token)
 
         # Multiple accesses should return the exact same object
@@ -615,7 +615,7 @@ class TestTokenField:
         from elspeth.testing import make_field, make_row
 
         db = LandscapeDB.in_memory()
-        recorder = LandscapeRecorder(db)
+        recorder = RecorderFactory(db).plugin_audit_writer()
         ctx = PluginContext(run_id="test-run", config={}, landscape=recorder)
         assert ctx.token is None
 

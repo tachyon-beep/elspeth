@@ -348,7 +348,7 @@ class WebScrapeTransform(BaseTransform):
         response_raw_hash = call.response_ref
 
         # Store processed content via recorder (transform-produced artifact)
-        response_processed_hash = self._recorder.store_payload(content.encode(), purpose="processed_content")
+        response_processed_hash = self._recorder.store_payload(content.encode(), purpose="processed_content")  # type: ignore[attr-defined]  # Task 6: store_payload will be on PluginAuditWriter or separate protocol
 
         # Enrich row with scraped data — operational fields only
         # Use explicit to_dict() conversion (PipelineRow guaranteed by engine)
@@ -401,7 +401,7 @@ class WebScrapeTransform(BaseTransform):
 
         # Create audited client (records to Landscape)
         client = AuditedHTTPClient(
-            recorder=self._recorder,
+            recorder=self._recorder,  # type: ignore[arg-type]  # Task 6: AuditedHTTPClient will accept PluginAuditWriter
             state_id=ctx.state_id,
             run_id=ctx.run_id,
             telemetry_emit=self._telemetry_emit,

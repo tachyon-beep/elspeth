@@ -24,12 +24,12 @@ from typing import TYPE_CHECKING, Any, Protocol, runtime_checkable
 
 if TYPE_CHECKING:
     from elspeth.contracts import Call, CallStatus, CallType
+    from elspeth.contracts.audit_protocols import PluginAuditWriter
     from elspeth.contracts.batch_checkpoint import BatchCheckpointState
     from elspeth.contracts.config.runtime import RuntimeConcurrencyConfig
     from elspeth.contracts.identity import TokenInfo
     from elspeth.contracts.plugin_context import ValidationErrorToken
     from elspeth.contracts.schema_contract import SchemaContract
-    from elspeth.core.landscape.recorder import LandscapeRecorder
     from elspeth.core.rate_limit import RateLimitRegistry
 
 
@@ -54,7 +54,7 @@ class SourceContext(Protocol):
     def operation_id(self) -> str | None: ...
 
     @property
-    def landscape(self) -> LandscapeRecorder | None: ...
+    def landscape(self) -> PluginAuditWriter | None: ...
 
     @property
     def telemetry_emit(self) -> Callable[[Any], None]: ...
@@ -148,7 +148,7 @@ class SinkContext(Protocol):
     def contract(self) -> SchemaContract | None: ...
 
     @property
-    def landscape(self) -> LandscapeRecorder | None: ...
+    def landscape(self) -> PluginAuditWriter | None: ...
 
     @property
     def operation_id(self) -> str | None: ...
@@ -186,7 +186,7 @@ class LifecycleContext(Protocol):
     def node_id(self) -> str | None: ...  # [R1] Set by orchestrator before on_start()
 
     @property
-    def landscape(self) -> LandscapeRecorder | None: ...
+    def landscape(self) -> PluginAuditWriter | None: ...
 
     @property
     def rate_limit_registry(self) -> RateLimitRegistry | None: ...
