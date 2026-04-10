@@ -1311,7 +1311,7 @@ Also update the retrieval clients (`chroma.py`, `azure_search.py`) — these acc
 
 - [ ] **Step 3: Update web_scrape.py**
 
-`web_scrape.py` calls `recorder.store_payload()`, which is the one method on the facade that doesn't delegate to any repository — it goes directly to `PayloadStore`. 
+`web_scrape.py` calls `recorder.store_payload()`, which is the one method on the facade that doesn't delegate to any repository — it goes directly to `PayloadStore`.
 
 `store_payload` does NOT belong on `PluginAuditWriter` — it's payload persistence, not audit recording (review finding). Route through `PayloadStore` directly instead.
 
