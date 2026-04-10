@@ -72,17 +72,19 @@ def _validate_output_schema_contract(transform: Any) -> None:
             f"in __init__ after setting declared_output_fields."
         )
 
-    # Containment: declared fields must appear in guaranteed_fields.
+    # Containment: declared fields must appear in effective guaranteed fields.
+    # Uses get_effective_guaranteed_fields() rather than raw guaranteed_fields
+    # to include implicit guarantees from fixed/flexible mode declared fields.
     # Without this, collision detection checks fields that the DAG contract
     # doesn't guarantee — downstream required_fields validation has a blind spot.
-    if declared and config is not None and config.guaranteed_fields is not None:
-        guaranteed = set(config.guaranteed_fields)
-        missing = set(declared) - guaranteed
+    if declared and config is not None and config.declares_guaranteed_fields:
+        effective = config.get_effective_guaranteed_fields()
+        missing = set(declared) - effective
         if missing:
             raise FrameworkBugError(
                 f"Transform {transform.name!r} declares output fields "
-                f"{sorted(missing)} not present in _output_schema_config.guaranteed_fields "
-                f"{sorted(config.guaranteed_fields)}. "
+                f"{sorted(missing)} not present in effective guaranteed fields "
+                f"{sorted(effective)}. "
                 f"declared_output_fields must be a subset of guaranteed_fields."
             )
 
@@ -863,18 +865,14 @@ def build_execution_graph(
         #   guaranteed_fields = intersection of branches that declare guarantees
         #   audit_fields = union (any audit field from any branch)
         #
-        # None vs empty tuple distinction:
-        #   None  = "observed schema, unknown fields" → abstain from vote
-        #   ()    = "explicitly guarantee zero fields" → participates, kills intersection
-        #
-        # Only branches with explicit guaranteed_fields participate in the
-        # intersection. An observed-schema branch that doesn't declare
-        # guarantees shouldn't erase guarantees from branches that do.
+        # Only branches that declare guarantees participate in the intersection.
+        # See SchemaConfig.declares_guaranteed_fields for the None-vs-empty
+        # contract (None = abstain, () = participate with empty set).
         guaranteed_sets: list[set[str]] = []
         audit_sets: list[set[str]] = []
         for schema_cfg in branch_to_schema.values():
             gf = schema_cfg.guaranteed_fields
-            if gf is not None:
+            if gf is not None:  # See SchemaConfig.declares_guaranteed_fields for semantics
                 guaranteed_sets.append(set(gf))
             af = schema_cfg.audit_fields
             if af is not None:

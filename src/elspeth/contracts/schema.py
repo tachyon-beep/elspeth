@@ -472,6 +472,21 @@ class SchemaConfig:
         return result
 
     @property
+    def declares_guaranteed_fields(self) -> bool:
+        """Whether this schema explicitly declares what fields it guarantees.
+
+        The None-vs-empty-tuple distinction on guaranteed_fields is semantic:
+          None  = "no declaration" — the producer abstains from guarantee votes.
+                  In coalesce intersection logic, this branch is skipped.
+          ()    = "explicitly guarantees zero fields" — participates in
+                  intersection and collapses the result to the empty set.
+
+        Use this property instead of raw ``guaranteed_fields is not None``
+        checks to centralise the abstain-vs-empty contract.
+        """
+        return self.guaranteed_fields is not None
+
+    @property
     def allows_extra_fields(self) -> bool:
         """Whether extra fields beyond schema are allowed."""
         return self.is_observed or self.mode == "flexible"
