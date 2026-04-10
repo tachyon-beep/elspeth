@@ -25,6 +25,7 @@ from elspeth.contracts.errors import AuditIntegrityError, CoalesceFailureReason,
 from elspeth.contracts.freeze import deep_thaw
 from elspeth.contracts.schema_contract import FieldContract, PipelineRow, SchemaContract
 from elspeth.contracts.types import NodeID, StepResolver
+from elspeth.core.checkpoint.serialization import checkpoint_dumps
 from elspeth.core.config import CoalesceSettings
 from elspeth.core.landscape.data_flow_repository import DataFlowRepository
 from elspeth.core.landscape.execution_repository import ExecutionRepository
@@ -199,7 +200,6 @@ class CoalesceExecutor:
 
     def get_checkpoint_state(self) -> CoalesceCheckpointState:
         """Return checkpoint state for pending coalesces."""
-        from elspeth.core.checkpoint.serialization import checkpoint_dumps
 
         pending_entries: list[CoalescePendingCheckpoint] = []
         for (coalesce_name, row_id), pending in self._pending.items():
@@ -240,12 +240,6 @@ class CoalesceExecutor:
 
         serialized = checkpoint_dumps(checkpoint.to_dict())
         size_mb = len(serialized) / 1_000_000
-        if size_mb > 1:
-            slog.warning(
-                "large_coalesce_checkpoint",
-                size_mb=size_mb,
-                pending_count=len(pending_entries),
-            )
         if size_mb > 10:
             raise RuntimeError(f"Coalesce checkpoint size {size_mb:.1f}MB exceeds 10MB limit. Pending joins: {len(pending_entries)}.")
 
@@ -339,12 +333,6 @@ class CoalesceExecutor:
             if node_id_str in node_id_to_name:
                 self._completed_keys[(node_id_to_name[node_id_str], row_id)] = None
 
-        if self._completed_keys:
-            slog.info(
-                "coalesce_completed_keys_restored_from_landscape",
-                count=len(self._completed_keys),
-            )
-
     def _check_landscape_for_completion(self, coalesce_name: str, row_id: str) -> bool:
         """Check the Landscape for whether a coalesce key has completed.
 
@@ -393,20 +381,11 @@ class CoalesceExecutor:
             key: (coalesce_name, row_id) tuple to mark as completed
         """
         self._completed_keys[key] = None
-        # Evict oldest entries if over capacity
-        evicted_keys: list[tuple[str, str]] = []
+        # Evict oldest entries if over capacity.
+        # Eviction is harmless: Landscape fallback in accept() catches
+        # late arrivals for evicted keys.
         while len(self._completed_keys) > self._max_completed_keys:
-            evicted_key, _ = self._completed_keys.popitem(last=False)
-            evicted_keys.append(evicted_key)
-        if evicted_keys:
-            # Eviction is harmless: Landscape fallback in accept() catches
-            # late arrivals for evicted keys. Log at debug level.
-            slog.debug(
-                "coalesce_completed_keys_cache_evicted",
-                max_completed_keys=self._max_completed_keys,
-                evicted_count=len(evicted_keys),
-                retained_count=len(self._completed_keys),
-            )
+            self._completed_keys.popitem(last=False)
 
     def _require_quorum_count(self, settings: CoalesceSettings) -> int:
         """Return quorum_count or crash if None — config validation should have caught this."""
@@ -889,6 +868,7 @@ class CoalesceExecutor:
                         "coalesce_merge_cleanup_failed",
                         state_id=entry.state_id,
                         error=str(cleanup_exc),
+                        exc_info=True,
                     )
             raise
 

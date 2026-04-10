@@ -10,7 +10,7 @@ and audit trail recording.
 from __future__ import annotations
 
 from typing import Any
-from unittest.mock import MagicMock, Mock, patch
+from unittest.mock import MagicMock, Mock
 from uuid import uuid4
 
 import pytest
@@ -1062,18 +1062,6 @@ class TestMarkCompleted:
         for i in range(10):
             executor._mark_completed(("c", f"row_{i}"))
         assert len(executor._completed_keys) == 5
-
-    def test_eviction_emits_structured_debug_log(self):
-        """Eviction is harmless (Landscape fallback catches late arrivals) so logs at debug."""
-        executor, *_ = _make_executor(max_completed_keys=2)
-        with patch("elspeth.engine.coalesce_executor.slog.debug") as debug_mock:
-            executor._mark_completed(("c", "row_0"))
-            executor._mark_completed(("c", "row_1"))
-            executor._mark_completed(("c", "row_2"))  # Triggers eviction
-
-        debug_mock.assert_called_once()
-        assert debug_mock.call_args.kwargs["max_completed_keys"] == 2
-        assert debug_mock.call_args.kwargs["evicted_count"] == 1
 
     def test_fifo_eviction_oldest_removed(self):
         executor, *_ = _make_executor()

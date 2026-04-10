@@ -36,6 +36,7 @@ from elspeth.contracts.node_state_context import AggregationFlushContext
 from elspeth.contracts.plugin_context import PluginContext
 from elspeth.contracts.types import NodeID, StepResolver
 from elspeth.core.canonical import stable_hash
+from elspeth.core.checkpoint.serialization import checkpoint_dumps
 from elspeth.core.config import AggregationSettings
 from elspeth.core.landscape.execution_repository import ExecutionRepository
 from elspeth.engine.clock import DEFAULT_CLOCK
@@ -613,8 +614,6 @@ class AggregationExecutor:
         Raises:
             RuntimeError: If checkpoint exceeds 10MB size limit
         """
-        from elspeth.core.checkpoint.serialization import checkpoint_dumps
-
         # Build checkpoint state from all nodes
         nodes: dict[str, AggregationNodeCheckpoint] = {}
         for node_id, node in self._nodes.items():
