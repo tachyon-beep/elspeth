@@ -38,8 +38,10 @@ class CoalesceTokenCheckpoint:
             ("branch_name", self.branch_name),
             ("state_id", self.state_id),
         ):
-            if not isinstance(value, str) or not value:
-                raise ValueError(f"{field_name} must be a non-empty string, got {type(value).__name__}: {value!r}")
+            if not isinstance(value, str):
+                raise TypeError(f"{field_name} must be a str, got {type(value).__name__}: {value!r}")
+            if not value:
+                raise ValueError(f"{field_name} must be non-empty, got empty string")
         if not isinstance(self.row_data, Mapping):
             raise TypeError(f"CoalesceTokenCheckpoint.row_data must be a Mapping, got {type(self.row_data).__name__}")
         if not isinstance(self.contract, Mapping):
@@ -109,20 +111,32 @@ class CoalescePendingCheckpoint:
             ("coalesce_name", self.coalesce_name),
             ("row_id", self.row_id),
         ):
-            if not isinstance(value, str) or not value:
-                raise ValueError(f"{field_name} must be a non-empty string, got {type(value).__name__}: {value!r}")
+            if not isinstance(value, str):
+                raise TypeError(f"{field_name} must be a str, got {type(value).__name__}: {value!r}")
+            if not value:
+                raise ValueError(f"{field_name} must be non-empty, got empty string")
         if self.elapsed_age_seconds < 0 or not math.isfinite(self.elapsed_age_seconds):
             raise ValueError(f"elapsed_age_seconds must be non-negative and finite, got {self.elapsed_age_seconds!r}")
         # Validate branch keys are non-empty strings (before freeze — scalar validation first)
         for branch_key in self.branches:
-            if not isinstance(branch_key, str) or not branch_key:
-                raise ValueError(f"branches key must be a non-empty string, got {type(branch_key).__name__}: {branch_key!r}")
+            if not isinstance(branch_key, str):
+                raise TypeError(f"branches key must be a str, got {type(branch_key).__name__}: {branch_key!r}")
+            if not branch_key:
+                raise ValueError("branches key must be non-empty, got empty string")
         # Validate lost_branches keys and values are non-empty strings
         for lb_key, lb_val in self.lost_branches.items():
-            if not isinstance(lb_key, str) or not lb_key:
-                raise ValueError(f"lost_branches key must be a non-empty string, got {type(lb_key).__name__}: {lb_key!r}")
-            if not isinstance(lb_val, str) or not lb_val:
-                raise ValueError(f"lost_branches[{lb_key!r}] must be a non-empty string, got {type(lb_val).__name__}: {lb_val!r}")
+            if not isinstance(lb_key, str):
+                raise TypeError(f"lost_branches key must be a str, got {type(lb_key).__name__}: {lb_key!r}")
+            if not lb_key:
+                raise ValueError("lost_branches key must be non-empty, got empty string")
+            if not isinstance(lb_val, str):
+                raise TypeError(f"lost_branches[{lb_key!r}] must be a str, got {type(lb_val).__name__}: {lb_val!r}")
+            if not lb_val:
+                raise ValueError(f"lost_branches[{lb_key!r}] must be non-empty, got empty string")
+        # Safe: values of `branches` are CoalesceTokenCheckpoint (frozen dataclass
+        # with its own freeze_fields in __post_init__), so deep_freeze returns them
+        # unchanged.  The MappingProxyType wrap on the outer dict prevents key mutation.
+        # `lost_branches` values are str (immutable scalar).
         freeze_fields(self, "branches", "lost_branches")
         # Validate branch key matches embedded token's branch_name (dual-encoding consistency)
         for branch_key, token_ckpt in self.branches.items():
@@ -207,8 +221,10 @@ class CoalesceCheckpointState:
 
     def __post_init__(self) -> None:
         """Validate Tier 1 invariants at construction time."""
-        if not isinstance(self.version, str) or not self.version:
-            raise ValueError(f"version must be a non-empty string, got {type(self.version).__name__}: {self.version!r}")
+        if not isinstance(self.version, str):
+            raise TypeError(f"version must be a str, got {type(self.version).__name__}: {self.version!r}")
+        if not self.version:
+            raise ValueError("version must be non-empty, got empty string")
         object.__setattr__(self, "pending", tuple(self.pending))
         object.__setattr__(self, "completed_keys", tuple(self.completed_keys))
         for i, key in enumerate(self.completed_keys):
@@ -233,17 +249,15 @@ class CoalesceCheckpointState:
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> CoalesceCheckpointState:
-        if "_version" not in data:
-            raise AuditIntegrityError(f"Corrupted coalesce checkpoint: missing '_version'. Found keys: {sorted(data.keys())}.")
-        if "pending" not in data:
-            raise AuditIntegrityError(f"Corrupted coalesce checkpoint: missing 'pending'. Found keys: {sorted(data.keys())}.")
+        required_fields = {"_version", "pending", "completed_keys"}
+        missing = required_fields - set(data.keys())
+        if missing:
+            raise AuditIntegrityError(f"Corrupted coalesce checkpoint: missing required fields {missing}. Found: {set(data.keys())}")
 
         pending = data["pending"]
         if not isinstance(pending, list):
             raise AuditIntegrityError(f"Corrupted coalesce checkpoint: 'pending' must be a list, got {type(pending).__name__}.")
 
-        if "completed_keys" not in data:
-            raise AuditIntegrityError(f"Corrupted coalesce checkpoint: missing 'completed_keys'. Found keys: {sorted(data.keys())}.")
         raw_keys = data["completed_keys"]
         if not isinstance(raw_keys, list):
             raise AuditIntegrityError(f"Corrupted coalesce checkpoint: 'completed_keys' must be a list, got {type(raw_keys).__name__}.")

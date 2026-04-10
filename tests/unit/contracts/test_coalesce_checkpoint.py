@@ -61,7 +61,7 @@ class TestCoalesceTokenCheckpointPostInit:
         """Required string fields reject non-string types (e.g. corrupted JSON with int)."""
         kwargs = _valid_token_kwargs()
         kwargs[field] = 42
-        with pytest.raises(ValueError, match=field):
+        with pytest.raises(TypeError, match=field):
             CoalesceTokenCheckpoint(**kwargs)
 
     def test_rejects_negative_arrival_offset(self) -> None:
@@ -200,7 +200,7 @@ class TestCoalescePendingCheckpointPostInit:
     def test_rejects_empty_lost_branches_value(self) -> None:
         """lost_branches values must be non-empty strings."""
         valid = _valid_token()
-        with pytest.raises(ValueError, match=r"lost_branches.*non-empty string"):
+        with pytest.raises(ValueError, match=r"lost_branches.*non-empty"):
             CoalescePendingCheckpoint(
                 coalesce_name="merge_1",
                 row_id="row-1",
@@ -263,7 +263,7 @@ class TestCoalesceCheckpointStatePostInit:
             CoalesceCheckpointState(version="", pending=(), completed_keys=())
 
     def test_rejects_non_string_version(self) -> None:
-        with pytest.raises(ValueError, match="version"):
+        with pytest.raises(TypeError, match="version"):
             CoalesceCheckpointState(version=42, pending=(), completed_keys=())  # type: ignore[arg-type]
 
     def test_rejects_wrong_length_completed_key(self) -> None:
