@@ -1,7 +1,6 @@
 """RecorderFactory: construction point for Landscape repositories.
 
-Replaces the former LandscapeRecorder facade as the single place that wires up loaders,
-database operations, and repository instances.
+Single place that wires up loaders, database operations, and repository instances.
 """
 
 from __future__ import annotations
