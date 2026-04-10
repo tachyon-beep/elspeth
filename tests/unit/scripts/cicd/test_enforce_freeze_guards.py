@@ -9,6 +9,7 @@ Follows the pattern established by test_enforce_frozen_annotations.py.
 
 from __future__ import annotations
 
+import argparse
 import ast
 import textwrap
 from datetime import UTC, datetime, timedelta
@@ -22,6 +23,7 @@ from scripts.cicd.enforce_freeze_guards import (
     FreezeGuardVisitor,
     PerFileRule,
     load_allowlist,
+    run_check,
     scan_file,
 )
 
@@ -139,6 +141,29 @@ class TestFG2Detection:
         """)
         assert len(findings) == 0
 
+    def test_mapping_proxy_type_in_isinstance(self) -> None:
+        """isinstance(self.x, MappingProxyType) is a freeze-guard type."""
+        findings = _scan("""
+            class Foo:
+                def __post_init__(self):
+                    if isinstance(self.data, MappingProxyType):
+                        pass
+        """)
+        assert len(findings) == 1
+        assert findings[0].rule_id == "FG2"
+        assert "MappingProxyType" in findings[0].message
+
+    def test_mapping_abstract_type_in_isinstance(self) -> None:
+        """isinstance(self.x, Mapping) is a freeze-guard type."""
+        findings = _scan("""
+            class Foo:
+                def __post_init__(self):
+                    if isinstance(self.data, Mapping):
+                        pass
+        """)
+        assert len(findings) == 1
+        assert findings[0].rule_id == "FG2"
+
     def test_not_flagged_outside_post_init(self) -> None:
         """isinstance in other methods is not flagged."""
         findings = _scan("""
@@ -177,6 +202,19 @@ class TestScopeHandling:
         """)
         assert len(findings) == 0
 
+    def test_nested_post_init_inside_function_not_flagged(self) -> None:
+        """__post_init__ nested inside a module-level function is not a dataclass method.
+
+        The parent scope is a function, not a class — even though symbol_stack
+        has multiple entries, the immediate enclosing scope must be a ClassDef.
+        """
+        findings = _scan("""
+            def outer():
+                def __post_init__(self):
+                    MappingProxyType(dict(self.x))
+        """)
+        assert len(findings) == 0
+
     def test_nested_class_own_post_init_flagged(self) -> None:
         """Nested class with its own __post_init__ is flagged independently."""
         findings = _scan("""
@@ -189,7 +227,17 @@ class TestScopeHandling:
                         MappingProxyType(dict(self.x))
         """)
         assert len(findings) == 1
-        assert "Inner" in findings[0].symbol_context
+        assert findings[0].symbol_context == ("Outer", "Inner", "__post_init__")
+
+    def test_async_post_init_flagged(self) -> None:
+        """async def __post_init__ is handled by visit_AsyncFunctionDef alias."""
+        findings = _scan("""
+            class Foo:
+                async def __post_init__(self):
+                    MappingProxyType(dict(self.x))
+        """)
+        assert len(findings) == 1
+        assert findings[0].rule_id == "FG1"
 
     def test_sibling_method_not_flagged(self) -> None:
         """Other methods in the same class are not in __post_init__ scope."""
@@ -235,7 +283,7 @@ class TestAllowlist:
     """Allowlist matching, staleness, and loading."""
 
     def test_suppresses_finding(self) -> None:
-        """Allowlisted finding is not reported as a violation."""
+        """Allowlisted finding is matched and can be filtered out."""
         findings = _scan("""
             class Foo:
                 def __post_init__(self):
@@ -253,8 +301,9 @@ class TestAllowlist:
                 ),
             ]
         )
-        match = allowlist.match(findings[0])
-        assert match is not None
+        # End-to-end: match and filter
+        violations = [f for f in findings if allowlist.match(f) is None]
+        assert violations == []
 
     def test_non_matching_pattern_not_suppressed(self) -> None:
         """Finding with non-matching pattern is not suppressed."""
@@ -289,6 +338,70 @@ class TestAllowlist:
         allowlist = Allowlist(per_file_rules=[rule])
         exceeded = allowlist.get_exceeded_rules()
         assert len(exceeded) == 1
+
+    def test_max_hits_exact_boundary_not_exceeded(self) -> None:
+        """matched_count == max_hits is NOT exceeded (only > is exceeded)."""
+        rule = PerFileRule(
+            pattern="test.py",
+            rules=["FG1"],
+            reason="test",
+            expires=None,
+            max_hits=1,
+        )
+        rule.matched_count = 1
+        allowlist = Allowlist(per_file_rules=[rule])
+        exceeded = allowlist.get_exceeded_rules()
+        assert len(exceeded) == 0
+
+    def test_max_hits_via_match_flow(self) -> None:
+        """max_hits exceeded detected through the match() call flow."""
+        findings = _scan("""
+            class Foo:
+                def __post_init__(self):
+                    MappingProxyType(dict(self.a))
+                    MappingProxyType(dict(self.b))
+        """)
+        assert len(findings) == 2
+
+        allowlist = Allowlist(
+            per_file_rules=[
+                PerFileRule(
+                    pattern="test.py",
+                    rules=["FG1"],
+                    reason="test",
+                    expires=None,
+                    max_hits=1,
+                ),
+            ]
+        )
+        for f in findings:
+            allowlist.match(f)
+        exceeded = allowlist.get_exceeded_rules()
+        assert len(exceeded) == 1
+
+    def test_glob_pattern_matching(self) -> None:
+        """Glob patterns in allowlist match file paths correctly.
+
+        fnmatch.fnmatch matches * across path separators on POSIX.
+        """
+        rule = PerFileRule(
+            pattern="contracts/*.py",
+            rules=["FG1"],
+            reason="test",
+            expires=None,
+        )
+        assert rule.matches("contracts/diversion.py", "FG1") is True
+        assert rule.matches("plugins/transform.py", "FG1") is False
+
+    def test_glob_wrong_rule_id_not_matched(self) -> None:
+        """Matching pattern but wrong rule_id does not match."""
+        rule = PerFileRule(
+            pattern="contracts/*.py",
+            rules=["FG1"],
+            reason="test",
+            expires=None,
+        )
+        assert rule.matches("contracts/diversion.py", "FG2") is False
 
     def test_unused_rule_reported(self) -> None:
         """Rules with zero matches are reported as unused."""
@@ -374,6 +487,67 @@ class TestAllowlist:
             load_allowlist(tmp_path)
         assert exc_info.value.code == 1
 
+    def test_single_file_loading(self, tmp_path: Path) -> None:
+        """load_allowlist reads a single YAML file (non-directory)."""
+        rules_file = tmp_path / "allowlist.yaml"
+        rules_file.write_text(
+            yaml.dump(
+                {
+                    "defaults": {"fail_on_stale": False},
+                    "per_file_rules": [
+                        {
+                            "pattern": "bar.py",
+                            "rules": ["FG2"],
+                            "reason": "test",
+                        }
+                    ],
+                }
+            )
+        )
+
+        allowlist = load_allowlist(rules_file)
+        assert allowlist.fail_on_stale is False
+        assert len(allowlist.per_file_rules) == 1
+        assert allowlist.per_file_rules[0].rules == ["FG2"]
+
+    def test_directory_loading_without_defaults(self, tmp_path: Path) -> None:
+        """load_allowlist from directory works when _defaults.yaml is absent."""
+        rules_file = tmp_path / "rules.yaml"
+        rules_file.write_text(yaml.dump({"per_file_rules": [{"pattern": "x.py", "rules": ["FG1"], "reason": "test"}]}))
+
+        allowlist = load_allowlist(tmp_path)
+        # Default fail_on_stale is True when _defaults.yaml is absent
+        assert allowlist.fail_on_stale is True
+        assert len(allowlist.per_file_rules) == 1
+
+    def test_malformed_expires_date_produces_none(self, tmp_path: Path) -> None:
+        """Invalid expires date format is warned but does not crash."""
+        rules_file = tmp_path / "rules.yaml"
+        rules_file.write_text(
+            yaml.dump(
+                {
+                    "per_file_rules": [
+                        {
+                            "pattern": "x.py",
+                            "rules": ["FG1"],
+                            "reason": "test",
+                            "expires": "not-a-date",
+                        }
+                    ]
+                }
+            )
+        )
+
+        allowlist = load_allowlist(tmp_path)
+        assert len(allowlist.per_file_rules) == 1
+        assert allowlist.per_file_rules[0].expires is None
+
+    def test_nonexistent_path_returns_empty_allowlist(self) -> None:
+        """load_allowlist with nonexistent file path returns empty allowlist."""
+        allowlist = load_allowlist(Path("/nonexistent/path.yaml"))
+        assert len(allowlist.per_file_rules) == 0
+        assert allowlist.fail_on_stale is True
+
 
 # =============================================================================
 # File scanning
@@ -430,3 +604,173 @@ class TestScanFile:
         assert len(findings) == 1
         assert findings[0].rule_id == "FG1"
         assert findings[0].file_path == "bad.py"
+
+
+# =============================================================================
+# run_check integration
+# =============================================================================
+
+
+class TestRunCheck:
+    """Integration tests for run_check — the CI entry point."""
+
+    def _make_args(
+        self,
+        root: Path,
+        allowlist: Path | None = None,
+        files: list[Path] | None = None,
+    ) -> argparse.Namespace:
+        return argparse.Namespace(
+            command="check",
+            root=root,
+            allowlist=allowlist,
+            files=files or [],
+        )
+
+    def test_clean_codebase_returns_zero(self, tmp_path: Path) -> None:
+        """No violations, no stale rules → exit 0."""
+        src = tmp_path / "src"
+        src.mkdir()
+        (src / "clean.py").write_text(
+            textwrap.dedent("""
+            class Foo:
+                def __post_init__(self):
+                    pass
+        """)
+        )
+        allowlist_dir = tmp_path / "allowlist"
+        allowlist_dir.mkdir()
+
+        args = self._make_args(root=src, allowlist=allowlist_dir)
+        assert run_check(args) == 0
+
+    def test_violation_returns_one(self, tmp_path: Path) -> None:
+        """Unallowlisted violation → exit 1."""
+        src = tmp_path / "src"
+        src.mkdir()
+        (src / "bad.py").write_text(
+            textwrap.dedent("""
+            class Foo:
+                def __post_init__(self):
+                    MappingProxyType(dict(self.x))
+        """)
+        )
+        allowlist_dir = tmp_path / "allowlist"
+        allowlist_dir.mkdir()
+
+        args = self._make_args(root=src, allowlist=allowlist_dir)
+        assert run_check(args) == 1
+
+    def test_allowlisted_violation_returns_zero(self, tmp_path: Path) -> None:
+        """Violation covered by allowlist → exit 0."""
+        src = tmp_path / "src"
+        src.mkdir()
+        (src / "bad.py").write_text(
+            textwrap.dedent("""
+            class Foo:
+                def __post_init__(self):
+                    MappingProxyType(dict(self.x))
+        """)
+        )
+        allowlist_dir = tmp_path / "allowlist"
+        allowlist_dir.mkdir()
+        (allowlist_dir / "rules.yaml").write_text(
+            yaml.dump(
+                {
+                    "per_file_rules": [
+                        {
+                            "pattern": "bad.py",
+                            "rules": ["FG1"],
+                            "reason": "test",
+                            "max_hits": 1,
+                        }
+                    ]
+                }
+            )
+        )
+
+        args = self._make_args(root=src, allowlist=allowlist_dir)
+        assert run_check(args) == 0
+
+    def test_precommit_mode_skips_staleness(self, tmp_path: Path) -> None:
+        """Pre-commit mode (files arg) skips unused rule check."""
+        src = tmp_path / "src"
+        src.mkdir()
+        clean_file = src / "clean.py"
+        clean_file.write_text("x = 1\n")
+
+        allowlist_dir = tmp_path / "allowlist"
+        allowlist_dir.mkdir()
+        # This rule will be unused — but pre-commit mode should not fail
+        (allowlist_dir / "rules.yaml").write_text(
+            yaml.dump(
+                {
+                    "per_file_rules": [
+                        {
+                            "pattern": "nonexistent.py",
+                            "rules": ["FG1"],
+                            "reason": "stale entry",
+                        }
+                    ]
+                }
+            )
+        )
+
+        args = self._make_args(root=src, allowlist=allowlist_dir, files=[clean_file])
+        assert run_check(args) == 0
+
+    def test_file_outside_root_skipped(self, tmp_path: Path) -> None:
+        """Pre-commit mode silently skips files not under --root."""
+        src = tmp_path / "src"
+        src.mkdir()
+        outside = tmp_path / "outside.py"
+        outside.write_text(
+            textwrap.dedent("""
+            class Foo:
+                def __post_init__(self):
+                    MappingProxyType(dict(self.x))
+        """)
+        )
+        allowlist_dir = tmp_path / "allowlist"
+        allowlist_dir.mkdir()
+
+        args = self._make_args(root=src, allowlist=allowlist_dir, files=[outside])
+        # outside.py is not under src/ — should be skipped, returning 0
+        assert run_check(args) == 0
+
+
+# =============================================================================
+# Finding data structure
+# =============================================================================
+
+
+class TestFinding:
+    """Tests for Finding data structure."""
+
+    def test_canonical_key_with_symbol_context(self) -> None:
+        """canonical_key includes file path, rule, symbol context, and fingerprint."""
+        findings = _scan("""
+            class Foo:
+                def __post_init__(self):
+                    MappingProxyType(dict(self.x))
+        """)
+        assert len(findings) == 1
+        key = findings[0].canonical_key
+        assert "test.py" in key
+        assert "FG1" in key
+        assert "Foo:__post_init__" in key
+        assert "fp=" in key
+
+    def test_canonical_key_module_level_uses_sentinel(self) -> None:
+        """canonical_key uses _module_ sentinel when no symbol context."""
+        finding = Finding(
+            rule_id="FG1",
+            file_path="test.py",
+            line=1,
+            col=0,
+            symbol_context=(),
+            fingerprint="abc123",
+            code_snippet="x = 1",
+            message="test",
+        )
+        assert "_module_" in finding.canonical_key

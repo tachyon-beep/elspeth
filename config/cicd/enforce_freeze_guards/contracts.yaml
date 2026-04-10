@@ -4,7 +4,7 @@ per_file_rules:
   - FG2
   reason: isinstance guards validate SinkWriteResult field types at construction (crash on wrong type) — offensive programming, not freeze guards
   expires: null
-  max_hits: 3
+  max_hits: 1
 - pattern: contracts/schema_contract.py
   rules:
   - FG1

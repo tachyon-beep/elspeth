@@ -122,6 +122,7 @@ class FreezeGuardVisitor(ast.NodeVisitor):
         self.source_lines = source_lines
         self.findings: list[Finding] = []
         self.symbol_stack: list[str] = []
+        self._scope_is_class: list[bool] = []  # Parallel to symbol_stack: True if pushed by ClassDef
         self._in_post_init = False
 
     def _get_code_snippet(self, lineno: int) -> str:
@@ -151,24 +152,33 @@ class FreezeGuardVisitor(ast.NodeVisitor):
 
     def visit_ClassDef(self, node: ast.ClassDef) -> None:
         self.symbol_stack.append(node.name)
+        self._scope_is_class.append(True)
         was_in_post_init = self._in_post_init
         self._in_post_init = False  # New class scope — not in any __post_init__
         self.generic_visit(node)
         self._in_post_init = was_in_post_init
+        self._scope_is_class.pop()
         self.symbol_stack.pop()
+
+    def _parent_is_class(self) -> bool:
+        """Check if the immediate enclosing scope is a class definition."""
+        return len(self._scope_is_class) >= 2 and self._scope_is_class[-2]
 
     def visit_FunctionDef(self, node: ast.FunctionDef) -> None:
         self.symbol_stack.append(node.name)
+        self._scope_is_class.append(False)
         was_in_post_init = self._in_post_init
-        if node.name == "__post_init__" and len(self.symbol_stack) >= 2:
-            # Only treat as __post_init__ if inside a class (stack has class + method).
-            # Module-level functions named __post_init__ are not dataclass methods.
+        if node.name == "__post_init__" and self._parent_is_class():
+            # Only treat as __post_init__ if directly inside a class.
+            # Module-level functions and nested functions named __post_init__
+            # inside non-class scopes are not dataclass methods.
             self._in_post_init = True
         else:
             # Nested functions and non-__post_init__ methods exit the scope.
             self._in_post_init = False
         self.generic_visit(node)
         self._in_post_init = was_in_post_init
+        self._scope_is_class.pop()
         self.symbol_stack.pop()
 
     visit_AsyncFunctionDef = visit_FunctionDef
