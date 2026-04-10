@@ -6,8 +6,8 @@ from collections.abc import Callable
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
+    from elspeth.contracts.audit_protocols import CallRecorder
     from elspeth.contracts.events import ExternalCallCompleted
-    from elspeth.core.landscape.execution_repository import ExecutionRepository
     from elspeth.core.rate_limit import NoOpLimiter
     from elspeth.core.rate_limit.limiter import RateLimiter
 
@@ -52,7 +52,7 @@ class AuditedClientBase:
 
     def __init__(
         self,
-        execution: ExecutionRepository,
+        execution: CallRecorder,
         state_id: str,
         run_id: str,
         telemetry_emit: TelemetryEmitCallback,
@@ -63,7 +63,7 @@ class AuditedClientBase:
         """Initialize audited client.
 
         Args:
-            execution: ExecutionRepository for audit trail storage and call index allocation
+            execution: CallRecorder for audit trail storage and call index allocation
             state_id: Node state ID to associate calls with
             run_id: Pipeline run ID for telemetry correlation
             telemetry_emit: Callback to emit telemetry events (no-op when disabled)
@@ -103,6 +103,20 @@ class AuditedClientBase:
         """
         if self._limiter is not None:
             self._limiter.acquire()
+
+    def update_call_context(self, state_id: str, token_id: str | None = None) -> None:
+        """Update the per-call audit scoping on a shared client.
+
+        Used by providers that reuse a single client instance across multiple
+        rows (e.g., AzureSearchProvider). Safe because row processing is serial
+        within a transform — no concurrent calls to this method.
+
+        Args:
+            state_id: New state_id for subsequent calls
+            token_id: New token_id for subsequent calls (None to clear)
+        """
+        self._state_id = state_id
+        self._token_id = token_id
 
     def close(self) -> None:
         """Release any resources held by the client.

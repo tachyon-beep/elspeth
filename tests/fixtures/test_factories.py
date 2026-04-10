@@ -55,17 +55,17 @@ class TestMakeContext:
         assert ctx.config == {"key": "value"}
 
     def test_mock_landscape_is_specced(self) -> None:
-        """Default mock landscape must be specced to _PluginAuditWriterAdapter."""
+        """Default mock landscape must be specced to PluginAuditWriter."""
         from unittest.mock import Mock
 
-        from elspeth.core.landscape.factory import _PluginAuditWriterAdapter
+        from elspeth.contracts.audit_protocols import PluginAuditWriter
         from tests.fixtures.factories import make_context
 
         ctx = make_context()
         assert ctx.landscape is not None
         assert isinstance(ctx.landscape, Mock)
-        # spec= ensures only real _PluginAuditWriterAdapter methods are accessible
-        assert isinstance(ctx.landscape, _PluginAuditWriterAdapter)
+        # spec= ensures only real PluginAuditWriter methods are accessible
+        assert isinstance(ctx.landscape, PluginAuditWriter)
         # get_node_state must return a mock with token_id matching the token
         node_state = ctx.landscape.get_node_state("any-state-id")
         assert node_state.token_id == ctx.token.token_id
@@ -103,12 +103,12 @@ class TestMakeSourceContext:
         assert ctx.run_id == "test-run"
 
     def test_landscape_is_real_adapter(self) -> None:
-        """Verify delegated factory produces a real PluginAuditWriter adapter, not a Mock."""
-        from elspeth.core.landscape.factory import _PluginAuditWriterAdapter
+        """Verify delegated factory produces a real PluginAuditWriter, not a Mock."""
+        from elspeth.contracts.audit_protocols import PluginAuditWriter
         from tests.fixtures.factories import make_source_context
 
         ctx = make_source_context()
-        assert isinstance(ctx.landscape, _PluginAuditWriterAdapter)
+        assert isinstance(ctx.landscape, PluginAuditWriter)
 
     def test_create_row_round_trip(self) -> None:
         """Prove FK chain is intact: run -> node -> row."""

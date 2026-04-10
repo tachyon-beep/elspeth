@@ -183,9 +183,7 @@ class AzureSearchProvider:
         body = self._build_request_body(query, top_k)
 
         # Update per-call audit scoping on the shared client.
-        # Safe because row processing is serial within a transform.
-        self._http_client._state_id = state_id
-        self._http_client._token_id = token_id
+        self._http_client.update_call_context(state_id, token_id)
 
         try:
             response = self._http_client.post(self._search_url, json=body)

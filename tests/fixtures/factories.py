@@ -96,9 +96,9 @@ def make_context(
         token = make_token_info()
 
     if landscape is None:
-        from elspeth.core.landscape.factory import _PluginAuditWriterAdapter
+        from elspeth.contracts.audit_protocols import PluginAuditWriter
 
-        landscape = Mock(spec=_PluginAuditWriterAdapter)
+        landscape = Mock(spec=PluginAuditWriter)
         # Configure get_node_state() to return a mock with matching token_id
         # so that PluginContext.record_call() token consistency checks pass.
         node_state_mock = Mock()

@@ -10,7 +10,7 @@ Method-count budget: Do not exceed 20 methods.
 from __future__ import annotations
 
 from collections.abc import Mapping
-from typing import TYPE_CHECKING, Any, Protocol
+from typing import TYPE_CHECKING, Any, Protocol, runtime_checkable
 
 from elspeth.contracts import (
     Call,
@@ -31,6 +31,34 @@ if TYPE_CHECKING:
     from elspeth.contracts.schema_contract import PipelineRow
 
 
+class CallRecorder(Protocol):
+    """Narrow protocol for clients that record external calls.
+
+    AuditedClientBase and its subclasses (HTTP, LLM) only need these two
+    methods. This protocol is satisfied by both ExecutionRepository (direct
+    injection) and PluginAuditWriter (via adapter), eliminating the need
+    for type: ignore[arg-type] at plugin call sites.
+    """
+
+    def allocate_call_index(self, state_id: str) -> int: ...
+
+    def record_call(
+        self,
+        state_id: str,
+        call_index: int,
+        call_type: CallType,
+        status: CallStatus,
+        request_data: CallPayload,
+        response_data: CallPayload | None = None,
+        error: CallPayload | None = None,
+        latency_ms: float | None = None,
+        *,
+        request_ref: str | None = None,
+        response_ref: str | None = None,
+    ) -> Call: ...
+
+
+@runtime_checkable
 class PluginAuditWriter(Protocol):
     """Protocol for plugin-facing audit recording operations.
 

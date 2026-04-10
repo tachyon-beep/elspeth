@@ -23,7 +23,7 @@ from elspeth.core.canonical import stable_hash
 from elspeth.plugins.infrastructure.clients.base import AuditedClientBase, TelemetryEmitCallback
 
 if TYPE_CHECKING:
-    from elspeth.core.landscape.execution_repository import ExecutionRepository
+    from elspeth.contracts.audit_protocols import CallRecorder
     from elspeth.core.rate_limit import NoOpLimiter
     from elspeth.core.rate_limit.limiter import RateLimiter
 
@@ -224,7 +224,7 @@ class AuditedLLMClient(AuditedClientBase):
 
     def __init__(
         self,
-        execution: ExecutionRepository,
+        execution: CallRecorder,
         state_id: str,
         run_id: str,
         telemetry_emit: TelemetryEmitCallback,
@@ -237,7 +237,7 @@ class AuditedLLMClient(AuditedClientBase):
         """Initialize audited LLM client.
 
         Args:
-            execution: ExecutionRepository for audit trail storage
+            execution: CallRecorder for audit trail storage
             state_id: Node state ID to associate calls with
             run_id: Pipeline run ID for telemetry correlation
             telemetry_emit: Callback to emit telemetry events

@@ -411,7 +411,7 @@ class WebScrapeTransform(BaseTransform):
 
         # Create audited client (records to Landscape)
         client = AuditedHTTPClient(
-            execution=self._recorder,  # type: ignore[arg-type]  # PluginAuditWriter structurally matches ExecutionRepository for client methods
+            execution=self._recorder,
             state_id=ctx.state_id,
             run_id=ctx.run_id,
             telemetry_emit=self._telemetry_emit,

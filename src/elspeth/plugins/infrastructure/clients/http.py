@@ -41,7 +41,7 @@ logger = structlog.get_logger(__name__)
 
 if TYPE_CHECKING:
     from elspeth.contracts import Call
-    from elspeth.core.landscape.execution_repository import ExecutionRepository
+    from elspeth.contracts.audit_protocols import CallRecorder
     from elspeth.core.rate_limit import NoOpLimiter
     from elspeth.core.rate_limit.limiter import RateLimiter
 
@@ -75,7 +75,7 @@ class AuditedHTTPClient(AuditedClientBase):
 
     def __init__(
         self,
-        execution: ExecutionRepository,
+        execution: CallRecorder,
         state_id: str,
         run_id: str,
         telemetry_emit: TelemetryEmitCallback,
@@ -89,7 +89,7 @@ class AuditedHTTPClient(AuditedClientBase):
         """Initialize audited HTTP client.
 
         Args:
-            execution: ExecutionRepository for audit trail storage
+            execution: CallRecorder for audit trail storage
             state_id: Node state ID to associate calls with
             run_id: Pipeline run ID for telemetry correlation
             telemetry_emit: Callback to emit telemetry events

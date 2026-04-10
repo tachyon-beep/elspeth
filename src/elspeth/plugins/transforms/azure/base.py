@@ -354,7 +354,7 @@ class BaseAzureSafetyTransform(BaseTransform, BatchTransformMixin):
                 if self._recorder is None:
                     raise RuntimeError(f"{self.name}: recorder not initialized — call on_start() before processing")
                 self._http_clients[state_id] = AuditedHTTPClient(
-                    execution=self._recorder,  # type: ignore[arg-type]  # PluginAuditWriter structurally satisfies ExecutionRepository for client methods
+                    execution=self._recorder,
                     state_id=state_id,
                     run_id=self._run_id,
                     telemetry_emit=self._telemetry_emit,
