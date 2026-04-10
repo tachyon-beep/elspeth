@@ -123,7 +123,7 @@ class RAGRetrievalTransform(BaseTransform):
 
         self._provider = factory(
             provider_config,
-            recorder=ctx.landscape,
+            execution=ctx.landscape,  # type: ignore[arg-type]  # PluginAuditWriter structurally satisfies ExecutionRepository for client methods
             run_id=ctx.run_id,
             telemetry_emit=ctx.telemetry_emit,
             limiter=(ctx.rate_limit_registry.get_limiter(provider_name) if ctx.rate_limit_registry is not None else None),
