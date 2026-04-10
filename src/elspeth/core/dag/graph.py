@@ -1561,11 +1561,20 @@ class ExecutionGraph:
                 return self.get_guaranteed_fields(node_id)
 
             # union: intersection of branch guarantees. Only fields present in
-            # ALL branches are guaranteed in the flat merged output.
+            # ALL declaring branches are guaranteed in the flat merged output.
+            #
+            # None vs empty distinction: branches with guaranteed_fields=None
+            # (observed schema, unknown fields) abstain from the intersection.
+            # Branches with guaranteed_fields=() explicitly guarantee nothing
+            # and collapse the intersection to ∅.
             incoming = list(self._graph.in_edges(node_id, keys=True, data=True))
             if not incoming:
                 return frozenset()
-            branch_guarantees = [self.get_effective_guaranteed_fields(from_id) for from_id, _, _key, _ in incoming]
+            branch_guarantees: list[frozenset[str]] = []
+            for from_id, _, _key, _ in incoming:
+                schema_config = self.get_schema_config_from_node(from_id)
+                if schema_config is not None and schema_config.guaranteed_fields is not None:
+                    branch_guarantees.append(schema_config.get_effective_guaranteed_fields())
             if not branch_guarantees:
                 return frozenset()
             result = branch_guarantees[0]

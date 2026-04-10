@@ -51,19 +51,40 @@ if TYPE_CHECKING:
 
 
 def _validate_output_schema_contract(transform: Any) -> None:
-    """Validate that transforms declaring output fields provide a DAG contract.
+    """Validate consistency between declared_output_fields and _output_schema_config.
 
-    Raises FrameworkBugError if declared_output_fields is non-empty but
-    _output_schema_config is None. This prevents silent DAG validation gaps.
+    Two-directional check:
+    1. Forward: declared_output_fields non-empty → _output_schema_config must exist.
+    2. Containment: declared_output_fields ⊆ guaranteed_fields when both are set.
+
+    Raises FrameworkBugError on any contract violation.
     """
-    if transform.declared_output_fields and transform._output_schema_config is None:
+    declared = transform.declared_output_fields
+    config = transform._output_schema_config
+
+    # Forward: declares fields but no schema contract → silent DAG validation gap.
+    if declared and config is None:
         raise FrameworkBugError(
             f"Transform {transform.name!r} declares output fields "
-            f"{sorted(transform.declared_output_fields)} but provides no "
+            f"{sorted(declared)} but provides no "
             f"_output_schema_config for DAG contract validation. "
             f"Call self._output_schema_config = self._build_output_schema_config(schema_config) "
             f"in __init__ after setting declared_output_fields."
         )
+
+    # Containment: declared fields must appear in guaranteed_fields.
+    # Without this, collision detection checks fields that the DAG contract
+    # doesn't guarantee — downstream required_fields validation has a blind spot.
+    if declared and config is not None and config.guaranteed_fields is not None:
+        guaranteed = set(config.guaranteed_fields)
+        missing = set(declared) - guaranteed
+        if missing:
+            raise FrameworkBugError(
+                f"Transform {transform.name!r} declares output fields "
+                f"{sorted(missing)} not present in _output_schema_config.guaranteed_fields "
+                f"{sorted(config.guaranteed_fields)}. "
+                f"declared_output_fields must be a subset of guaranteed_fields."
+            )
 
 
 def build_execution_graph(
@@ -839,18 +860,22 @@ def build_execution_graph(
                         break
 
         # Collect contract fields from ALL branches for propagation.
-        #   guaranteed_fields = intersection (guaranteed by ALL branches)
+        #   guaranteed_fields = intersection of branches that declare guarantees
         #   audit_fields = union (any audit field from any branch)
         #
-        # Every branch participates — absent guaranteed_fields means "I
-        # guarantee nothing", not "I abstain from the vote".  An undeclared
-        # branch collapses the intersection to ∅, which is correct: we
-        # can't promise downstream what an undeclared branch provides.
+        # None vs empty tuple distinction:
+        #   None  = "observed schema, unknown fields" → abstain from vote
+        #   ()    = "explicitly guarantee zero fields" → participates, kills intersection
+        #
+        # Only branches with explicit guaranteed_fields participate in the
+        # intersection. An observed-schema branch that doesn't declare
+        # guarantees shouldn't erase guarantees from branches that do.
         guaranteed_sets: list[set[str]] = []
         audit_sets: list[set[str]] = []
         for schema_cfg in branch_to_schema.values():
             gf = schema_cfg.guaranteed_fields
-            guaranteed_sets.append(set(gf) if gf is not None else set())
+            if gf is not None:
+                guaranteed_sets.append(set(gf))
             af = schema_cfg.audit_fields
             if af is not None:
                 audit_sets.append(set(af))

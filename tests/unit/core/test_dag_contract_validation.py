@@ -867,3 +867,174 @@ class TestForkCoalesceContracts:
 
         with pytest.raises(ValueError, match="any_field"):
             graph.validate_edge_compatibility()
+
+
+class TestCoalesceGuaranteedFieldsSemantics:
+    """Tests for None vs empty-tuple distinction in coalesce guaranteed_fields.
+
+    The intersection of guaranteed_fields across coalesce branches must
+    distinguish between:
+      None  = "observed schema, unknown fields" → abstain from intersection
+      ()    = "explicitly guarantee zero fields" → participates, kills intersection
+    """
+
+    def _build_coalesce_graph(
+        self,
+        branch_configs: dict[str, dict],
+    ) -> ExecutionGraph:
+        """Build a two-branch coalesce graph with given schema configs."""
+        graph = ExecutionGraph()
+        graph.add_node("source", node_type=NodeType.SOURCE, plugin_name="csv")
+
+        for branch_name, config in branch_configs.items():
+            graph.add_node(
+                branch_name,
+                node_type=NodeType.TRANSFORM,
+                plugin_name="transform",
+                config=config,
+            )
+            graph.add_edge("source", branch_name, label=branch_name)
+
+        graph.add_node(
+            "coalesce",
+            node_type=NodeType.COALESCE,
+            plugin_name="coalesce",
+            config={"merge": "union", "branches": {}, "policy": "require_all"},
+        )
+        for branch_name in branch_configs:
+            graph.add_edge(branch_name, "coalesce", label="continue")
+
+        graph.add_node("sink", node_type=NodeType.SINK, plugin_name="csv")
+        graph.add_edge("coalesce", "sink", label="continue")
+        return graph
+
+    def test_both_branches_with_guarantees_intersects(self) -> None:
+        """Two branches with explicit guaranteed_fields → intersection."""
+        graph = self._build_coalesce_graph(
+            {
+                "branch_a": {"schema": {"mode": "observed", "guaranteed_fields": ["common", "a_only"]}},
+                "branch_b": {"schema": {"mode": "observed", "guaranteed_fields": ["common", "b_only"]}},
+            }
+        )
+        result = graph.get_effective_guaranteed_fields("coalesce")
+        assert result == frozenset({"common"})
+
+    def test_one_branch_none_guarantees_abstains(self) -> None:
+        """Branch with None guaranteed_fields abstains — doesn't kill intersection."""
+        graph = self._build_coalesce_graph(
+            {
+                "branch_a": {"schema": {"mode": "observed", "guaranteed_fields": ["x", "y"]}},
+                "branch_b": {"schema": {"mode": "observed"}},  # guaranteed_fields=None
+            }
+        )
+        result = graph.get_effective_guaranteed_fields("coalesce")
+        # branch_b abstains, so branch_a's guarantees survive
+        assert result == frozenset({"x", "y"})
+
+    def test_all_branches_none_guarantees_returns_empty(self) -> None:
+        """All branches with None guaranteed_fields → no guarantees (empty set)."""
+        graph = self._build_coalesce_graph(
+            {
+                "branch_a": {"schema": {"mode": "observed"}},
+                "branch_b": {"schema": {"mode": "observed"}},
+            }
+        )
+        result = graph.get_effective_guaranteed_fields("coalesce")
+        assert result == frozenset()
+
+    def test_empty_list_guarantees_treated_as_none(self) -> None:
+        """Empty list in config is normalized to None by _parse_field_names_list → abstains."""
+        graph = self._build_coalesce_graph(
+            {
+                "branch_a": {"schema": {"mode": "observed", "guaranteed_fields": ["x", "y"]}},
+                "branch_b": {"schema": {"mode": "observed", "guaranteed_fields": []}},  # [] → None
+            }
+        )
+        result = graph.get_effective_guaranteed_fields("coalesce")
+        # Empty list is parsed as None (unspecified), so branch_b abstains
+        assert result == frozenset({"x", "y"})
+
+    def test_explicit_empty_tuple_kills_intersection(self) -> None:
+        """SchemaConfig with guaranteed_fields=() (Python API) participates and kills intersection.
+
+        This distinction only exists at the Python API level — config parsing
+        normalizes [] to None. A transform that explicitly constructs
+        SchemaConfig(guaranteed_fields=()) is saying "I guarantee zero fields."
+        """
+        from elspeth.contracts.schema import SchemaConfig
+
+        graph = ExecutionGraph()
+        graph.add_node("source", node_type=NodeType.SOURCE, plugin_name="csv")
+
+        graph.add_node(
+            "branch_a",
+            node_type=NodeType.TRANSFORM,
+            plugin_name="transform",
+            config={"schema": {"mode": "observed", "guaranteed_fields": ["x", "y"]}},
+        )
+        # Manually set output_schema_config with explicit empty tuple
+        graph.add_node(
+            "branch_b",
+            node_type=NodeType.TRANSFORM,
+            plugin_name="transform",
+            config={},
+            output_schema_config=SchemaConfig(mode="observed", fields=None, guaranteed_fields=()),
+        )
+
+        graph.add_node(
+            "coalesce",
+            node_type=NodeType.COALESCE,
+            plugin_name="coalesce",
+            config={"merge": "union", "branches": {}, "policy": "require_all"},
+        )
+        graph.add_node("sink", node_type=NodeType.SINK, plugin_name="csv")
+
+        graph.add_edge("source", "branch_a", label="a")
+        graph.add_edge("source", "branch_b", label="b")
+        graph.add_edge("branch_a", "coalesce", label="continue")
+        graph.add_edge("branch_b", "coalesce", label="continue")
+        graph.add_edge("coalesce", "sink", label="continue")
+
+        result = graph.get_effective_guaranteed_fields("coalesce")
+        # branch_b explicitly guarantees nothing → intersection is ∅
+        assert result == frozenset()
+
+    def test_three_branches_mixed_none_and_explicit(self) -> None:
+        """Three branches: two explicit, one None → intersection of explicit only."""
+        graph = ExecutionGraph()
+        graph.add_node("source", node_type=NodeType.SOURCE, plugin_name="csv")
+
+        graph.add_node(
+            "branch_a",
+            node_type=NodeType.TRANSFORM,
+            plugin_name="transform",
+            config={"schema": {"mode": "observed", "guaranteed_fields": ["x", "y", "z"]}},
+        )
+        graph.add_node(
+            "branch_b",
+            node_type=NodeType.TRANSFORM,
+            plugin_name="transform",
+            config={"schema": {"mode": "observed", "guaranteed_fields": ["x", "z"]}},
+        )
+        graph.add_node(
+            "branch_c",
+            node_type=NodeType.TRANSFORM,
+            plugin_name="transform",
+            config={"schema": {"mode": "observed"}},  # None → abstains
+        )
+        graph.add_node(
+            "coalesce",
+            node_type=NodeType.COALESCE,
+            plugin_name="coalesce",
+            config={"merge": "union", "branches": {}, "policy": "require_all"},
+        )
+        graph.add_node("sink", node_type=NodeType.SINK, plugin_name="csv")
+
+        for b in ("branch_a", "branch_b", "branch_c"):
+            graph.add_edge("source", b, label=b)
+            graph.add_edge(b, "coalesce", label="continue")
+        graph.add_edge("coalesce", "sink", label="continue")
+
+        result = graph.get_effective_guaranteed_fields("coalesce")
+        # branch_c abstains, intersection of a ∩ b = {"x", "z"}
+        assert result == frozenset({"x", "z"})
