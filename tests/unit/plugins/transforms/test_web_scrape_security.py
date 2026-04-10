@@ -87,10 +87,14 @@ def mock_ctx():
     rate_limit_registry = Mock()
     rate_limit_registry.get_limiter.return_value = None
 
+    payload_store = Mock()
+    payload_store.store.return_value = "test-processed-hash"
+
     ctx = PluginContext(
         run_id="test-run-456",
         config={},
         landscape=landscape,
+        payload_store=payload_store,
         rate_limit_registry=rate_limit_registry,
         state_id="state-123",
     )

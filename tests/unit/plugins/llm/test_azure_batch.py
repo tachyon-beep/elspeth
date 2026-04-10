@@ -63,7 +63,7 @@ def _make_batch_ctx(*, run_id: str = "test-run") -> PluginContext:
     return PluginContext(
         run_id=run_id,
         config={},
-        landscape=factory.plugin_audit_writer,
+        landscape=factory.plugin_audit_writer(),
         node_id="azure-batch-node",
         state_id=state.state_id,
     )

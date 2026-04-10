@@ -317,28 +317,36 @@ def _make_exporter(
     batch_members: list[Any] | None = None,
     artifacts: list[Any] | None = None,
 ) -> LandscapeExporter:
-    """Create an exporter with mocked database and recorder."""
+    """Create an exporter with mocked database and factory."""
     mock_db = Mock()
     exporter = LandscapeExporter(mock_db, signing_key=signing_key)
 
-    # Mock all recorder methods used by _iter_records
-    recorder = exporter._recorder
-    object.__setattr__(recorder, "get_run", Mock(return_value=run if run is not None else _RUN))
-    object.__setattr__(recorder, "get_secret_resolutions_for_run", Mock(return_value=secret_resolutions or []))
-    object.__setattr__(recorder, "get_nodes", Mock(return_value=nodes or []))
-    object.__setattr__(recorder, "get_edges", Mock(return_value=edges or []))
-    object.__setattr__(recorder, "get_operations_for_run", Mock(return_value=operations or []))
-    object.__setattr__(recorder, "get_all_operation_calls_for_run", Mock(return_value=operation_calls or []))
-    object.__setattr__(recorder, "get_rows", Mock(return_value=rows or []))
-    object.__setattr__(recorder, "get_all_tokens_for_run", Mock(return_value=tokens or []))
-    object.__setattr__(recorder, "get_all_token_parents_for_run", Mock(return_value=token_parents or []))
-    object.__setattr__(recorder, "get_all_token_outcomes_for_run", Mock(return_value=token_outcomes or []))
-    object.__setattr__(recorder, "get_all_node_states_for_run", Mock(return_value=node_states or []))
-    object.__setattr__(recorder, "get_all_routing_events_for_run", Mock(return_value=routing_events or []))
-    object.__setattr__(recorder, "get_all_calls_for_run", Mock(return_value=state_calls or []))
-    object.__setattr__(recorder, "get_batches", Mock(return_value=batches or []))
-    object.__setattr__(recorder, "get_all_batch_members_for_run", Mock(return_value=batch_members or []))
-    object.__setattr__(recorder, "get_artifacts", Mock(return_value=artifacts or []))
+    # Mock all factory sub-repository methods used by _iter_records
+    factory = exporter._factory
+
+    # run_lifecycle repository
+    object.__setattr__(factory.run_lifecycle, "get_run", Mock(return_value=run if run is not None else _RUN))
+    object.__setattr__(factory.run_lifecycle, "get_secret_resolutions_for_run", Mock(return_value=secret_resolutions or []))
+
+    # data_flow repository
+    object.__setattr__(factory.data_flow, "get_nodes", Mock(return_value=nodes or []))
+    object.__setattr__(factory.data_flow, "get_edges", Mock(return_value=edges or []))
+
+    # execution repository
+    object.__setattr__(factory.execution, "get_operations_for_run", Mock(return_value=operations or []))
+    object.__setattr__(factory.execution, "get_all_operation_calls_for_run", Mock(return_value=operation_calls or []))
+    object.__setattr__(factory.execution, "get_batches", Mock(return_value=batches or []))
+    object.__setattr__(factory.execution, "get_all_batch_members_for_run", Mock(return_value=batch_members or []))
+    object.__setattr__(factory.execution, "get_artifacts", Mock(return_value=artifacts or []))
+
+    # query repository
+    object.__setattr__(factory.query, "get_rows", Mock(return_value=rows or []))
+    object.__setattr__(factory.query, "get_all_tokens_for_run", Mock(return_value=tokens or []))
+    object.__setattr__(factory.query, "get_all_token_parents_for_run", Mock(return_value=token_parents or []))
+    object.__setattr__(factory.query, "get_all_token_outcomes_for_run", Mock(return_value=token_outcomes or []))
+    object.__setattr__(factory.query, "get_all_node_states_for_run", Mock(return_value=node_states or []))
+    object.__setattr__(factory.query, "get_all_routing_events_for_run", Mock(return_value=routing_events or []))
+    object.__setattr__(factory.query, "get_all_calls_for_run", Mock(return_value=state_calls or []))
 
     return exporter
 
@@ -351,7 +359,7 @@ def _make_exporter(
 class TestConstructor:
     """Tests for exporter initialization."""
 
-    def test_creates_recorder_from_db(self) -> None:
+    def test_creates_factory_from_db(self) -> None:
         db = Mock()
         exporter = LandscapeExporter(db)
         assert exporter._db is db
@@ -409,7 +417,7 @@ class TestExportRunUnsigned:
 
     def test_unknown_run_raises(self) -> None:
         exporter = _make_exporter(run=None)
-        object.__setattr__(exporter._recorder, "get_run", Mock(return_value=None))
+        object.__setattr__(exporter._factory.run_lifecycle, "get_run", Mock(return_value=None))
         with pytest.raises(ValueError, match="Run not found"):
             list(exporter.export_run("unknown-run"))
 

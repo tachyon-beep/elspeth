@@ -96,10 +96,13 @@ def make_token(
 
 def make_mock_executor(clock: MockClock | None = None) -> CoalesceExecutor:
     """Create a CoalesceExecutor with mocked dependencies."""
-    mock_recorder = MagicMock()
-    mock_recorder.begin_node_state.return_value = MagicMock(state_id="state-001")
-    mock_recorder.complete_node_state.return_value = None
-    mock_recorder.record_token_outcome.return_value = None
+    mock_execution = MagicMock()
+    mock_execution.begin_node_state.return_value = MagicMock(state_id="state-001")
+    mock_execution.complete_node_state.return_value = None
+    mock_execution.get_completed_row_ids_for_nodes.return_value = []
+
+    mock_data_flow = MagicMock()
+    mock_data_flow.record_token_outcome.return_value = None
 
     span_factory = SpanFactory()
     mock_token_manager = MagicMock()
@@ -121,12 +124,13 @@ def make_mock_executor(clock: MockClock | None = None) -> CoalesceExecutor:
     step_resolver = lambda node_id: 0  # noqa: E731
 
     return CoalesceExecutor(
-        recorder=mock_recorder,
+        mock_execution,
         span_factory=span_factory,
         token_manager=mock_token_manager,
         run_id="test-run",
         step_resolver=step_resolver,
         clock=clock or MockClock(start=0.0),
+        data_flow=mock_data_flow,
     )
 
 

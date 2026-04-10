@@ -37,10 +37,10 @@ def http_client():
         shared_mock = MagicMock()
         MockClient.side_effect = [shared_mock, ephemeral_mock, ephemeral_mock, ephemeral_mock, ephemeral_mock, ephemeral_mock]
 
-        recorder = Mock()
-        recorder.record_call = Mock()
+        execution = Mock()
+        execution.record_call = Mock()
         client = AuditedHTTPClient(
-            recorder=recorder,
+            execution=execution,
             state_id="test-state-001",
             run_id="test-run-001",
             telemetry_emit=Mock(),
@@ -298,7 +298,7 @@ class TestRedirectAuditRecording:
             original_url="https://example.com/old-path",
         )
 
-        recorder = http_client._recorder
+        recorder = http_client._execution
         recorder.record_call.assert_called_once()
         kw = recorder.record_call.call_args.kwargs
         assert kw["call_type"] == CallType.HTTP_REDIRECT
@@ -329,7 +329,7 @@ class TestRedirectAuditRecording:
             original_url="https://example.com/step1",
         )
 
-        recorder = http_client._recorder
+        recorder = http_client._execution
         assert recorder.record_call.call_count == 2
 
         # First hop
@@ -361,7 +361,7 @@ class TestRedirectAuditRecording:
             original_url="https://example.com/start",
         )
 
-        kw = http_client._recorder.record_call.call_args.kwargs
+        kw = http_client._execution.record_call.call_args.kwargs
         assert kw["request_data"].to_dict()["redirect_from"] == "https://example.com/start"
         assert kw["request_data"].to_dict()["url"] == "https://other.com/page"
 
@@ -382,7 +382,7 @@ class TestRedirectAuditRecording:
             original_url="https://example.com/old-path",
         )
 
-        kw = http_client._recorder.record_call.call_args.kwargs
+        kw = http_client._execution.record_call.call_args.kwargs
         assert kw["request_data"].to_dict()["resolved_ip"] == "93.184.216.34"
 
     @patch("elspeth.plugins.infrastructure.clients.http.validate_url_for_ssrf")
@@ -402,7 +402,7 @@ class TestRedirectAuditRecording:
             original_url="https://example.com/old-path",
         )
 
-        kw = http_client._recorder.record_call.call_args.kwargs
+        kw = http_client._execution.record_call.call_args.kwargs
         assert "latency_ms" in kw
         assert isinstance(kw["latency_ms"], float)
         assert kw["latency_ms"] >= 0
@@ -419,7 +419,7 @@ class TestRedirectAuditRecording:
             original_url="https://example.com/page",
         )
 
-        http_client._recorder.record_call.assert_not_called()
+        http_client._execution.record_call.assert_not_called()
 
 
 class TestBug4_7_FailedHopRecordsAuditTrail:
@@ -450,8 +450,8 @@ class TestBug4_7_FailedHopRecordsAuditTrail:
             )
 
         # The failed hop MUST still be recorded in the audit trail
-        http_client._recorder.record_call.assert_called_once()
-        call_kwargs = http_client._recorder.record_call.call_args.kwargs
+        http_client._execution.record_call.assert_called_once()
+        call_kwargs = http_client._execution.record_call.call_args.kwargs
         assert call_kwargs["call_type"] == CallType.HTTP_REDIRECT
         assert call_kwargs["status"] == CallStatus.ERROR
         assert "ConnectError" in call_kwargs["error"].type

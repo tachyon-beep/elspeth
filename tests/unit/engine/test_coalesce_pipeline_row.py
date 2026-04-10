@@ -109,16 +109,18 @@ class TestCoalesceExecutorPipelineRow:
             ]
         )
 
-        recorder = _make_mock_recorder()
+        execution = _make_mock_recorder()
+        data_flow = MagicMock()
         span_factory = _make_mock_span_factory()
-        token_manager = _make_mock_token_manager(recorder)
+        token_manager = _make_mock_token_manager(execution)
 
         executor = CoalesceExecutor(
-            recorder=recorder,
+            execution=execution,
             span_factory=span_factory,
             token_manager=token_manager,
             run_id="run_001",
             step_resolver=lambda node_id: 3,
+            data_flow=data_flow,
         )
 
         # Register coalesce point
@@ -176,16 +178,18 @@ class TestCoalesceExecutorPipelineRow:
         from elspeth.engine.coalesce_executor import CoalesceExecutor
 
         contract = _make_contract()
-        recorder = _make_mock_recorder()
+        execution = _make_mock_recorder()
+        data_flow = MagicMock()
         span_factory = _make_mock_span_factory()
-        token_manager = _make_mock_token_manager(recorder)
+        token_manager = _make_mock_token_manager(execution)
 
         executor = CoalesceExecutor(
-            recorder=recorder,
+            execution=execution,
             span_factory=span_factory,
             token_manager=token_manager,
             run_id="run_001",
             step_resolver=lambda node_id: 3,
+            data_flow=data_flow,
         )
 
         settings = CoalesceSettings(
@@ -258,16 +262,18 @@ class TestCoalesceExecutorPipelineRow:
             ]
         )
 
-        recorder = _make_mock_recorder()
+        execution = _make_mock_recorder()
+        data_flow = MagicMock()
         span_factory = _make_mock_span_factory()
-        token_manager = _make_mock_token_manager(recorder)
+        token_manager = _make_mock_token_manager(execution)
 
         executor = CoalesceExecutor(
-            recorder=recorder,
+            execution=execution,
             span_factory=span_factory,
             token_manager=token_manager,
             run_id="run_001",
             step_resolver=lambda node_id: 3,
+            data_flow=data_flow,
         )
 
         settings = CoalesceSettings(
@@ -308,16 +314,18 @@ class TestCoalesceExecutorPipelineRow:
         from elspeth.engine.coalesce_executor import CoalesceExecutor
 
         contract = _make_contract()
-        recorder = _make_mock_recorder()
+        execution = _make_mock_recorder()
+        data_flow = MagicMock()
         span_factory = _make_mock_span_factory()
-        token_manager = _make_mock_token_manager(recorder)
+        token_manager = _make_mock_token_manager(execution)
 
         executor = CoalesceExecutor(
-            recorder=recorder,
+            execution=execution,
             span_factory=span_factory,
             token_manager=token_manager,
             run_id="run_001",
             step_resolver=lambda node_id: 3,
+            data_flow=data_flow,
         )
 
         # Two branches with "first" policy - merge on first arrival
@@ -352,16 +360,18 @@ class TestCoalesceExecutorPipelineRow:
         from elspeth.engine.coalesce_executor import CoalesceExecutor
 
         contract = _make_contract()
-        recorder = _make_mock_recorder()
+        execution = _make_mock_recorder()
+        data_flow = MagicMock()
         span_factory = _make_mock_span_factory()
-        token_manager = _make_mock_token_manager(recorder)
+        token_manager = _make_mock_token_manager(execution)
 
         executor = CoalesceExecutor(
-            recorder=recorder,
+            execution=execution,
             span_factory=span_factory,
             token_manager=token_manager,
             run_id="run_001",
             step_resolver=lambda node_id: 3,
+            data_flow=data_flow,
         )
 
         settings = CoalesceSettings(

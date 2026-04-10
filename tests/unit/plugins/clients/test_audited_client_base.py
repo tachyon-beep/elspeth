@@ -26,14 +26,14 @@ class TestCallIndexThreadSafety:
 
     def test_concurrent_call_index_no_duplicates(self) -> None:
         """Multiple threads should get unique call indices."""
-        mock_recorder = MagicMock()
+        mock_execution = MagicMock()
         # Simulate ExecutionRepository's thread-safe counter with itertools.count()
         import itertools
 
         counter = itertools.count()
-        mock_recorder.allocate_call_index.side_effect = lambda _: next(counter)
+        mock_execution.allocate_call_index.side_effect = lambda _: next(counter)
         client = ConcreteAuditedClient(
-            recorder=mock_recorder,
+            execution=mock_execution,
             state_id="test-state",
             run_id="test-run",
             telemetry_emit=lambda event: None,
@@ -69,11 +69,11 @@ class TestCallIndexThreadSafety:
         """Repeated test to increase chance of catching race conditions."""
         import itertools
 
-        mock_recorder = MagicMock()
+        mock_execution = MagicMock()
         counter = itertools.count()
-        mock_recorder.allocate_call_index.side_effect = lambda _: next(counter)
+        mock_execution.allocate_call_index.side_effect = lambda _: next(counter)
         client = ConcreteAuditedClient(
-            recorder=mock_recorder,
+            execution=mock_execution,
             state_id=f"test-state-{iteration}",
             run_id=f"test-run-{iteration}",
             telemetry_emit=lambda event: None,

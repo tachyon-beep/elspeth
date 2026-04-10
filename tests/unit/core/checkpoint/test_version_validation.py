@@ -52,7 +52,7 @@ class TestCheckpointVersionValidation:
         """
         span_factory = SpanFactory()
         executor = AggregationExecutor(
-            recorder=None,  # type: ignore
+            execution=None,  # type: ignore
             span_factory=span_factory,
             step_resolver=lambda node_id: 1,
             run_id="test_run",
@@ -81,7 +81,7 @@ class TestCheckpointVersionValidation:
         """
         span_factory = SpanFactory()
         executor = AggregationExecutor(
-            recorder=None,  # type: ignore
+            execution=None,  # type: ignore
             span_factory=span_factory,
             step_resolver=lambda node_id: 1,
             run_id="test_run",
@@ -153,7 +153,7 @@ class TestCheckpointVersionValidation:
             node_id: AggregationSettings(name="test_agg", plugin="batch_stats", input="source_out", on_error="discard", trigger=trigger)
         }
         executor = AggregationExecutor(
-            recorder=None,  # type: ignore
+            execution=None,  # type: ignore
             span_factory=span_factory,
             step_resolver=lambda node_id: 1,
             run_id="test_run",
@@ -214,7 +214,7 @@ class TestCheckpointVersionValidation:
         recorder.create_batch.return_value = Mock(batch_id="batch-001")
         recorder.add_batch_member.return_value = None
         executor = AggregationExecutor(
-            recorder=recorder,
+            execution=recorder,
             span_factory=span_factory,
             step_resolver=lambda node_id: 1,
             run_id="test_run",

@@ -108,11 +108,17 @@ class TestWebScrapeContract(TransformContractPropertyTestBase):
         mock_landscape.allocate_call_index.return_value = 0
         mock_landscape.store_payload.return_value = "test-processed-hash"
 
+        # PayloadStore mock — WebScrapeTransform.process() stores processed
+        # content via self._payload_store.store() captured during on_start().
+        mock_payload_store = Mock()
+        mock_payload_store.store.return_value = "test-processed-content-hash"
+
         return PluginContext(
             run_id="test-run-001",
             config={},
             node_id="test-transform",
             rate_limit_registry=mock_registry,
             landscape=mock_landscape,
+            payload_store=mock_payload_store,
             state_id="test-state-001",
         )

@@ -76,11 +76,11 @@ class TestAzureSearchProviderSearch:
             api_key="test-key",
             search_mode=search_mode,
         )
-        recorder = MagicMock()
+        execution = MagicMock()
         telemetry_emit = MagicMock()
         return AzureSearchProvider(
             config=config,
-            recorder=recorder,
+            execution=execution,
             run_id="run-1",
             telemetry_emit=telemetry_emit,
         )
@@ -155,7 +155,7 @@ class TestScoreNormalization:
         )
         return AzureSearchProvider(
             config=config,
-            recorder=MagicMock(),
+            execution=MagicMock(),
             run_id="run-1",
             telemetry_emit=MagicMock(),
         )
@@ -194,7 +194,7 @@ class TestScoreNormalization:
         )
         provider = AzureSearchProvider(
             config=config,
-            recorder=MagicMock(),
+            execution=MagicMock(),
             run_id="run-1",
             telemetry_emit=MagicMock(),
         )
@@ -230,7 +230,7 @@ class TestBuildRequestBody:
         config = AzureSearchProviderConfig(**config_data)
         return AzureSearchProvider(
             config=config,
-            recorder=MagicMock(),
+            execution=MagicMock(),
             run_id="run-1",
             telemetry_emit=MagicMock(),
         )
@@ -271,7 +271,7 @@ class TestParseResponse:
         )
         return AzureSearchProvider(
             config=config,
-            recorder=MagicMock(),
+            execution=MagicMock(),
             run_id="run-1",
             telemetry_emit=MagicMock(),
         )
@@ -362,7 +362,7 @@ class TestAzureSearchProviderReadiness:
         )
         return AzureSearchProvider(
             config=config,
-            recorder=MagicMock(),
+            execution=MagicMock(),
             run_id="run-1",
             telemetry_emit=MagicMock(),
         )
@@ -482,7 +482,7 @@ class TestAzureSearchProviderReadiness:
         )
         provider = AzureSearchProvider(
             config=config,
-            recorder=MagicMock(),
+            execution=MagicMock(),
             run_id="run-1",
             telemetry_emit=MagicMock(),
         )
@@ -535,11 +535,11 @@ class TestExecuteSearchHTTP:
             index="test-index",
             api_key="test-key",
         )
-        recorder = MagicMock()
+        execution = MagicMock()
         telemetry_emit = MagicMock()
         return AzureSearchProvider(
             config=config,
-            recorder=recorder,
+            execution=execution,
             run_id="run-1",
             telemetry_emit=telemetry_emit,
         )

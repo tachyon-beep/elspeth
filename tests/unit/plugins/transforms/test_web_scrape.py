@@ -70,7 +70,9 @@ def mock_ctx():
     )
     landscape.record_call.return_value = mock_call
     landscape.allocate_call_index.return_value = 0
-    landscape.store_payload.return_value = "test-processed-hash"
+    # Mock payload store (WebScrapeTransform uses self._payload_store.store())
+    payload_store = Mock()
+    payload_store.store.return_value = "test-processed-hash"
 
     # Mock rate limit registry
     rate_limit_registry = Mock()
@@ -81,6 +83,7 @@ def mock_ctx():
         run_id="test-run-456",
         config={},
         landscape=landscape,
+        payload_store=payload_store,
         rate_limit_registry=rate_limit_registry,
         state_id="state-123",
     )
