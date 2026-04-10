@@ -1,8 +1,8 @@
 per_file_rules:
-- pattern: contracts/call_data.py
+- pattern: contracts/diversion.py
   rules:
   - FG2
-  reason: isinstance guards on headers (scalar values) and body (Mapping|str|None union — guard is load-bearing)
+  reason: isinstance guards validate SinkWriteResult field types at construction (crash on wrong type) — offensive programming, not freeze guards
   expires: null
   max_hits: 3
 - pattern: contracts/schema_contract.py

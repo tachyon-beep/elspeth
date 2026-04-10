@@ -151,14 +151,22 @@ class FreezeGuardVisitor(ast.NodeVisitor):
 
     def visit_ClassDef(self, node: ast.ClassDef) -> None:
         self.symbol_stack.append(node.name)
+        was_in_post_init = self._in_post_init
+        self._in_post_init = False  # New class scope — not in any __post_init__
         self.generic_visit(node)
+        self._in_post_init = was_in_post_init
         self.symbol_stack.pop()
 
     def visit_FunctionDef(self, node: ast.FunctionDef) -> None:
         self.symbol_stack.append(node.name)
         was_in_post_init = self._in_post_init
-        if node.name == "__post_init__":
+        if node.name == "__post_init__" and len(self.symbol_stack) >= 2:
+            # Only treat as __post_init__ if inside a class (stack has class + method).
+            # Module-level functions named __post_init__ are not dataclass methods.
             self._in_post_init = True
+        else:
+            # Nested functions and non-__post_init__ methods exit the scope.
+            self._in_post_init = False
         self.generic_visit(node)
         self._in_post_init = was_in_post_init
         self.symbol_stack.pop()
