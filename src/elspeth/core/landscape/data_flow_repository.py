@@ -301,7 +301,7 @@ class DataFlowRepository:
             Row model
 
         Note:
-            Payload persistence is handled by LandscapeRecorder, not callers.
+            Payload persistence is handled by PayloadStore, not callers.
             If self._payload_store is configured, the method will:
             1. Serialize data using canonical_json (handles pandas/numpy/datetime/Decimal)
             2. Store in payload store

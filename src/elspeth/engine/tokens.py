@@ -1,6 +1,6 @@
 """TokenManager: High-level token operations for the SDA engine.
 
-Provides a simplified interface over LandscapeRecorder for managing
+Provides a simplified interface over DataFlowRepository for managing
 tokens (row instances flowing through the DAG).
 """
 
@@ -88,7 +88,7 @@ class TokenManager:
             ValueError: If source_row has no contract
 
         Note:
-            Payload persistence is now handled by LandscapeRecorder.create_row(),
+            Payload persistence is now handled by DataFlowRepository.create_row(),
             not by TokenManager. This ensures Landscape owns its audit format.
         """
         # Guard: source must provide contract

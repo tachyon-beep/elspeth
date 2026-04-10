@@ -243,7 +243,7 @@ class TransformExecutor:
             # and batch checkpoint lookup (node_id required for _batch_checkpoints keying)
             ctx.state_id = guard.state_id
             ctx.node_id = transform.node_id
-            # Note: call_index allocation is handled by LandscapeRecorder.allocate_call_index()
+            # Note: call_index allocation is handled by ExecutionRepository.allocate_call_index()
             # which automatically starts at 0 for each new state_id
 
             # Set ctx.contract for plugins that use fallback access (dual-name resolution)

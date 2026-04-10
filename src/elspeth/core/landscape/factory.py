@@ -1,6 +1,6 @@
 """RecorderFactory: construction point for Landscape repositories.
 
-Replaces LandscapeRecorder as the single place that wires up loaders,
+Replaces the former LandscapeRecorder facade as the single place that wires up loaders,
 database operations, and repository instances.
 """
 

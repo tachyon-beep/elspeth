@@ -104,7 +104,7 @@ class CoalesceExecutor:
     - Tracks which tokens have arrived for each row_id
     - Evaluates merge conditions based on policy
     - Merges row data according to strategy
-    - Records audit trail via LandscapeRecorder
+    - Records audit trail via ExecutionRepository
 
     Example:
         executor = CoalesceExecutor(recorder, span_factory, token_manager, run_id, step_resolver)

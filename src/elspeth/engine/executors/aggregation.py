@@ -353,7 +353,7 @@ class AggregationExecutor:
             # and batch checkpoint lookup (node_id required for _batch_checkpoints keying)
             ctx.state_id = guard.state_id
             ctx.node_id = node_id
-            # Note: call_index allocation handled by LandscapeRecorder.allocate_call_index()
+            # Note: call_index allocation handled by ExecutionRepository.allocate_call_index()
 
             # Expose per-row token identity for batch transforms. This allows transforms
             # like OpenRouterBatchLLMTransform to pass the correct token_id to audited
