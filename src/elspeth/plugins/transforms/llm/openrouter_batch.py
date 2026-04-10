@@ -223,12 +223,19 @@ class OpenRouterBatchLLMTransform(BaseTransform):
         guaranteed = get_llm_guaranteed_fields(self._response_field)
 
         # Merge with any existing fields from base schema
-        base_guaranteed = schema_config.guaranteed_fields or ()
+        base_guaranteed = set(schema_config.guaranteed_fields or ())
+        output_fields = base_guaranteed | set(guaranteed)
+        # Preserve None-vs-empty-tuple semantics: None = abstain, () = explicitly empty.
+        upstream_declared = schema_config.guaranteed_fields is not None
+        if upstream_declared or output_fields:
+            guaranteed_fields_result = tuple(sorted(output_fields))
+        else:
+            guaranteed_fields_result = None
 
         self._output_schema_config = SchemaConfig(
             mode=schema_config.mode,
             fields=schema_config.fields,
-            guaranteed_fields=tuple(set(base_guaranteed) | set(guaranteed)),
+            guaranteed_fields=guaranteed_fields_result,
             required_fields=schema_config.required_fields,
         )
 

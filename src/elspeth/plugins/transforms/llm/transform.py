@@ -1073,11 +1073,18 @@ class LLMTransform(BaseTransform, BatchTransformMixin):
             # _build_output_schema_config) because multi-query field computation
             # requires prefix interpolation beyond the generic helper's scope.
             # See: docs/superpowers/specs/2026-03-20-output-schema-contract-enforcement-design.md
-            base_guaranteed = schema_config.guaranteed_fields or ()
+            base_guaranteed = set(schema_config.guaranteed_fields or ())
+            output_fields = base_guaranteed | prefixed_guaranteed
+            # Preserve None-vs-empty-tuple semantics: None = abstain, () = explicitly empty.
+            upstream_declared = schema_config.guaranteed_fields is not None
+            if upstream_declared or output_fields:
+                guaranteed_fields_result = tuple(sorted(output_fields))
+            else:
+                guaranteed_fields_result = None
             self._output_schema_config = SchemaConfig(
                 mode=schema_config.mode,
                 fields=schema_config.fields,
-                guaranteed_fields=tuple(set(base_guaranteed) | prefixed_guaranteed),
+                guaranteed_fields=guaranteed_fields_result,
                 required_fields=schema_config.required_fields,
             )
 
@@ -1114,11 +1121,17 @@ class LLMTransform(BaseTransform, BatchTransformMixin):
             # Output schema config with LLM output fields for DAG contract propagation.
             # INVARIANT: guaranteed_fields must be a superset of declared_output_fields.
             # See: docs/superpowers/specs/2026-03-20-output-schema-contract-enforcement-design.md
-            base_guaranteed = schema_config.guaranteed_fields or ()
+            base_guaranteed = set(schema_config.guaranteed_fields or ())
+            output_fields = base_guaranteed | set(guaranteed)
+            upstream_declared = schema_config.guaranteed_fields is not None
+            if upstream_declared or output_fields:
+                guaranteed_fields_result = tuple(sorted(output_fields))
+            else:
+                guaranteed_fields_result = None
             self._output_schema_config = SchemaConfig(
                 mode=schema_config.mode,
                 fields=schema_config.fields,
-                guaranteed_fields=tuple(set(base_guaranteed) | set(guaranteed)),
+                guaranteed_fields=guaranteed_fields_result,
                 required_fields=schema_config.required_fields,
             )
 

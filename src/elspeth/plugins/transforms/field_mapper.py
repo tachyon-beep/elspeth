@@ -130,10 +130,18 @@ class FieldMapper(BaseTransform):
         # Always include declared_output_fields (targets that aren't also sources)
         output_fields |= self.declared_output_fields
 
+        # Preserve None-vs-empty-tuple semantics: None = abstain, () = explicitly empty.
+        # If upstream declared guarantees or we computed non-empty output, declare explicitly.
+        upstream_declared = cfg.schema_config.guaranteed_fields is not None
+        if upstream_declared or output_fields:
+            guaranteed_fields_result = tuple(sorted(output_fields))
+        else:
+            guaranteed_fields_result = None
+
         return SchemaConfig(
             mode=cfg.schema_config.mode,
             fields=cfg.schema_config.fields,
-            guaranteed_fields=tuple(sorted(output_fields)) if output_fields else None,
+            guaranteed_fields=guaranteed_fields_result,
             audit_fields=cfg.schema_config.audit_fields,
             required_fields=cfg.schema_config.required_fields,
         )

@@ -493,7 +493,8 @@ class TestOutputSchemaConfig:
             }
         )
         assert transform._output_schema_config is not None
-        assert frozenset(transform._output_schema_config.guaranteed_fields) == frozenset()
+        # No upstream guaranteed_fields + no declared fields → abstain (None)
+        assert transform._output_schema_config.guaranteed_fields is None
 
 
 class TestBatchReplicateContractPreservation:

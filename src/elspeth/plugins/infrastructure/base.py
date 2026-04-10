@@ -243,11 +243,21 @@ class BaseTransform(ABC):
         """
         from elspeth.contracts.schema import SchemaConfig
 
-        base_guaranteed = schema_config.guaranteed_fields or ()
+        base_guaranteed = set(schema_config.guaranteed_fields or ())
+        output_fields = base_guaranteed | self.declared_output_fields
+
+        # Preserve None-vs-empty-tuple semantics: None = abstain, () = explicitly empty.
+        # If upstream declared guarantees or we computed non-empty output, declare explicitly.
+        upstream_declared = schema_config.guaranteed_fields is not None
+        if upstream_declared or output_fields:
+            guaranteed_fields_result = tuple(sorted(output_fields))
+        else:
+            guaranteed_fields_result = None
+
         return SchemaConfig(
             mode=schema_config.mode,
             fields=schema_config.fields,
-            guaranteed_fields=tuple(set(base_guaranteed) | self.declared_output_fields),
+            guaranteed_fields=guaranteed_fields_result,
             audit_fields=schema_config.audit_fields,
             required_fields=schema_config.required_fields,
         )

@@ -586,9 +586,46 @@ class TestOutputSchemaConfig:
             }
         )
         assert transform._output_schema_config is not None
-        # Empty mapping produces no output guarantees (None or empty tuple)
-        guaranteed = transform._output_schema_config.guaranteed_fields
-        assert guaranteed is None or frozenset(guaranteed) == frozenset()
+        # Empty mapping with no upstream guaranteed_fields → abstain (None)
+        assert transform._output_schema_config.guaranteed_fields is None
+
+    def test_upstream_none_guaranteed_with_mapping_produces_explicit(self):
+        """Upstream guaranteed_fields=None + non-empty mapping → explicit guarantees."""
+        from elspeth.plugins.transforms.field_mapper import FieldMapper
+
+        transform = FieldMapper(
+            {
+                "mapping": {"old": "new"},
+                "schema": {"mode": "observed"},
+                # No guaranteed_fields key → upstream is None (abstain)
+            }
+        )
+        assert transform._output_schema_config is not None
+        # Transform adds "new" via mapping, so it CAN guarantee something
+        assert transform._output_schema_config.guaranteed_fields is not None
+        assert "new" in transform._output_schema_config.guaranteed_fields
+
+    def test_upstream_declared_empty_produces_explicit_empty(self):
+        """Upstream guaranteed_fields=[] (parsed as None) + empty mapping → abstain.
+
+        When upstream has no guaranteed_fields AND the mapping adds nothing,
+        the transform should abstain (None), not declare empty guarantees.
+        """
+        from elspeth.plugins.transforms.field_mapper import FieldMapper
+
+        transform = FieldMapper(
+            {
+                "mapping": {},
+                "schema": {"mode": "observed", "guaranteed_fields": ["x"]},
+                "select_only": True,
+            }
+        )
+        assert transform._output_schema_config is not None
+        # select_only with empty mapping produces no fields, but upstream declared → ()
+        # Actually mapping is empty so output_fields is empty, but upstream declared
+        # so we should get explicit empty tuple
+        assert transform._output_schema_config.guaranteed_fields is not None
+        assert transform._output_schema_config.guaranteed_fields == ()
 
     def test_declared_output_fields_set_from_mapping(self):
         from elspeth.plugins.transforms.field_mapper import FieldMapper

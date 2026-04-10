@@ -877,10 +877,19 @@ def build_execution_graph(
             af = schema_cfg.audit_fields
             if af is not None:
                 audit_sets.append(set(af))
-        merged_guaranteed = set.intersection(*guaranteed_sets) if guaranteed_sets else set()
-        merged_audit = set.union(*audit_sets) if audit_sets else set()
-        merged_guaranteed_tuple = tuple(sorted(merged_guaranteed)) if merged_guaranteed else None
-        merged_audit_tuple = tuple(sorted(merged_audit)) if merged_audit else None
+
+        # Preserve None-vs-empty-tuple semantics (see declares_guaranteed_fields):
+        #   No branch declared → None (abstain: coalesce makes no claim)
+        #   Branches declared but intersection is ∅ → () (explicitly guarantees nothing)
+        # Using truthiness (``if merged``) would conflate these two cases.
+        if guaranteed_sets:
+            merged_guaranteed_tuple = tuple(sorted(set.intersection(*guaranteed_sets)))
+        else:
+            merged_guaranteed_tuple = None
+        if audit_sets:
+            merged_audit_tuple = tuple(sorted(set.union(*audit_sets)))
+        else:
+            merged_audit_tuple = None
 
         if coal_config.merge == "union":
             # Union merge: require compatible types on ALL pairwise overlapping fields.

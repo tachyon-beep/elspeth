@@ -910,3 +910,50 @@ class TestJSONExplodeOutputSchemaExcludesArrayField:
         assert "tag" in guaranteed
         assert "id" in guaranteed
         assert "name" in guaranteed
+
+
+class TestJSONExplodeNoneAbstainSemantics:
+    """Tests that JSONExplode preserves None-vs-empty-tuple semantics.
+
+    When upstream guaranteed_fields is None (abstain), the transform should
+    still produce explicit guarantees if it adds its own fields (output_field,
+    item_index). When upstream declares but the transform removes everything,
+    the result should be explicit (not None).
+    """
+
+    def test_upstream_none_with_declared_fields_produces_explicit(self):
+        """Upstream None + transform adds output_field → explicit guarantees."""
+        from elspeth.plugins.transforms.json_explode import JSONExplode
+
+        transform = JSONExplode(
+            {
+                "array_field": "items",
+                "output_field": "item",
+                "include_index": False,
+                "schema": {"mode": "observed"},
+                # No guaranteed_fields key → upstream is None
+            }
+        )
+        assert transform._output_schema_config is not None
+        # Transform always adds output_field, so it can guarantee it
+        assert transform._output_schema_config.guaranteed_fields is not None
+        assert "item" in transform._output_schema_config.guaranteed_fields
+
+    def test_upstream_declared_array_only_produces_explicit_after_removal(self):
+        """Upstream declares only array_field → removed → output has only declared fields."""
+        from elspeth.plugins.transforms.json_explode import JSONExplode
+
+        transform = JSONExplode(
+            {
+                "array_field": "items",
+                "output_field": "item",
+                "include_index": False,
+                "schema": {"mode": "observed", "guaranteed_fields": ["items"]},
+            }
+        )
+        assert transform._output_schema_config is not None
+        guaranteed = transform._output_schema_config.guaranteed_fields
+        # "items" removed, "item" added → explicit tuple with just "item"
+        assert guaranteed is not None
+        assert "items" not in guaranteed
+        assert "item" in guaranteed

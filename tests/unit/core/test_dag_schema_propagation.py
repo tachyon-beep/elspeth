@@ -11,7 +11,7 @@ contracts from upstream transforms, so audit records reflect actual data contrac
 (P1-2026-02-05: pass-through nodes drop computed schema contracts)
 """
 
-from typing import TYPE_CHECKING, Any, ClassVar
+from typing import Any, ClassVar
 
 import pytest
 
@@ -26,9 +26,6 @@ from elspeth.core.config import (
     TriggerConfig,
 )
 from elspeth.core.dag import ExecutionGraph, WiredTransform
-
-if TYPE_CHECKING:
-    pass
 
 
 class MockTransformWithSchemaConfig:
@@ -468,7 +465,7 @@ class TestAggregationSchemaConfigPropagation:
         )
 
         # Find the aggregation node
-        agg_nodes = [n for n in graph.get_nodes() if n.node_type == "aggregation"]
+        agg_nodes = [n for n in graph.get_nodes() if n.node_type == NodeType.AGGREGATION]
         assert len(agg_nodes) == 1
 
         node_info = agg_nodes[0]
@@ -914,3 +911,159 @@ class TestPassThroughNodesUseTypedSchema:
         assert coal_info.output_schema_config is not None
         assert coal_info.output_schema_config.guaranteed_fields == ("field_a", "field_b")
         assert "schema" not in coal_info.config
+
+
+class _ConfigurableTransform:
+    """Mock transform with per-instance guaranteed_fields for schema tests."""
+
+    input_schema = None
+    output_schema = None
+    config: ClassVar[dict[str, Any]] = {"schema": {"mode": "observed"}}
+    on_error: str | None = None
+    on_success: str | None = "output"
+    declared_output_fields: frozenset[str] = frozenset()
+
+    def __init__(self, name: str, guaranteed_fields: tuple[str, ...] | None) -> None:
+        self.name = name
+        self._output_schema_config = SchemaConfig(
+            mode="observed",
+            fields=None,
+            guaranteed_fields=guaranteed_fields,
+        )
+
+
+class TestCoalesceMaterializedSchemaFromBuilder:
+    """Integration tests: builder coalesce schema materialization via from_plugin_instances().
+
+    These verify the materialized output_schema_config on the coalesce node
+    preserves the None-vs-empty-tuple contract when branches have different
+    guaranteed_fields declarations.
+
+    The unit tests in test_dag_contract_validation.py exercise
+    get_effective_guaranteed_fields() on manually-built graphs. These tests
+    exercise the builder's coalesce path that COMPUTES and MATERIALIZES
+    the intersection during from_plugin_instances().
+    """
+
+    def _build_fork_coalesce_with_branch_transforms(
+        self,
+        transform_a_guaranteed: tuple[str, ...] | None,
+        transform_b_guaranteed: tuple[str, ...] | None,
+    ) -> ExecutionGraph:
+        """Build: source → fork → [transform_a, transform_b] → coalesce → sink."""
+        source = MockSource()
+
+        t_a = _ConfigurableTransform("branch_transform_a", transform_a_guaranteed)
+        t_b = _ConfigurableTransform("branch_transform_b", transform_b_guaranteed)
+
+        wired_a = WiredTransform(
+            plugin=t_a,  # type: ignore[arg-type]
+            settings=TransformSettings(
+                name="t_a",
+                plugin=t_a.name,
+                input="branch_a",
+                on_success="t_a_out",
+                on_error="discard",
+                options={},
+            ),
+        )
+        wired_b = WiredTransform(
+            plugin=t_b,  # type: ignore[arg-type]
+            settings=TransformSettings(
+                name="t_b",
+                plugin=t_b.name,
+                input="branch_b",
+                on_success="t_b_out",
+                on_error="discard",
+                options={},
+            ),
+        )
+
+        fork_gate = GateSettings(
+            name="splitter",
+            input="source_out",
+            condition="True",
+            routes={"true": "fork", "false": "output"},
+            fork_to=["branch_a", "branch_b"],
+        )
+
+        coalesce = CoalesceSettings(
+            name="merger",
+            branches={"branch_a": "t_a_out", "branch_b": "t_b_out"},
+            policy="require_all",
+            merge="union",
+            on_success="output",
+        )
+
+        return ExecutionGraph.from_plugin_instances(
+            source=source,  # type: ignore[arg-type]
+            source_settings=SourceSettings(plugin=source.name, on_success="source_out", options={}),
+            transforms=[wired_a, wired_b],
+            sinks={"output": MockSink()},  # type: ignore[dict-item]
+            aggregations={},
+            gates=[fork_gate],
+            coalesce_settings=[coalesce],
+        )
+
+    def test_mixed_none_and_explicit_materializes_abstain(self) -> None:
+        """Branch with None guaranteed_fields abstains — doesn't kill materialized intersection."""
+        graph = self._build_fork_coalesce_with_branch_transforms(
+            transform_a_guaranteed=("x", "y"),
+            transform_b_guaranteed=None,
+        )
+        coalesce_nodes = [n for n in graph.get_nodes() if n.node_type == NodeType.COALESCE]
+        assert len(coalesce_nodes) == 1
+        coal_schema = coalesce_nodes[0].output_schema_config
+        assert coal_schema is not None
+        # branch_b abstains, branch_a's guarantees survive
+        assert coal_schema.guaranteed_fields is not None
+        assert set(coal_schema.guaranteed_fields) == {"x", "y"}
+
+    def test_empty_intersection_materializes_empty_tuple_not_none(self) -> None:
+        """Branches with disjoint fields → guaranteed_fields is (), not None.
+
+        () means "explicitly guarantees nothing" (branches declared but share
+        no fields). None means "abstains" (no branch made any declaration).
+        The audit trail must distinguish these for IRAP traceability.
+        """
+        graph = self._build_fork_coalesce_with_branch_transforms(
+            transform_a_guaranteed=("x",),
+            transform_b_guaranteed=("y",),
+        )
+        coalesce_nodes = [n for n in graph.get_nodes() if n.node_type == NodeType.COALESCE]
+        assert len(coalesce_nodes) == 1
+        coal_schema = coalesce_nodes[0].output_schema_config
+        assert coal_schema is not None
+        assert coal_schema.guaranteed_fields is not None, "guaranteed_fields should be () (explicitly empty), not None (abstain)"
+        assert coal_schema.guaranteed_fields == ()
+
+    def test_all_none_materializes_none(self) -> None:
+        """Both branches with None guaranteed_fields → materialized as None (abstain)."""
+        graph = self._build_fork_coalesce_with_branch_transforms(
+            transform_a_guaranteed=None,
+            transform_b_guaranteed=None,
+        )
+        coalesce_nodes = [n for n in graph.get_nodes() if n.node_type == NodeType.COALESCE]
+        assert len(coalesce_nodes) == 1
+        coal_schema = coalesce_nodes[0].output_schema_config
+        assert coal_schema is not None
+        assert coal_schema.guaranteed_fields is None
+
+    def test_explicit_empty_tuple_kills_materialized_intersection(self) -> None:
+        """Branch with guaranteed_fields=() participates and collapses materialized intersection.
+
+        This tests the Python API boundary: a transform that constructs
+        SchemaConfig(guaranteed_fields=()) is saying "I guarantee zero fields."
+        The coalesce should materialize () (explicitly empty), not None (abstain).
+        """
+        graph = self._build_fork_coalesce_with_branch_transforms(
+            transform_a_guaranteed=("x", "y"),
+            transform_b_guaranteed=(),
+        )
+        coalesce_nodes = [n for n in graph.get_nodes() if n.node_type == NodeType.COALESCE]
+        assert len(coalesce_nodes) == 1
+        coal_schema = coalesce_nodes[0].output_schema_config
+        assert coal_schema is not None
+        # branch_b explicitly guarantees nothing → intersection collapses to ()
+        assert coal_schema.guaranteed_fields is not None, "guaranteed_fields should be () (explicitly empty), not None (abstain)"
+        assert coal_schema.guaranteed_fields == ()
