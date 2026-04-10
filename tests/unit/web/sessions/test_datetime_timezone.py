@@ -3,9 +3,8 @@
 Verifies that DateTime(timezone=True) columns preserve timezone info
 through SQLite storage and retrieval via SessionService.
 
-NOTE: SQLite stores timestamps as text and strips tzinfo on read.
-These tests are xfail to document the known gap — a future fix should
-add UTC back on retrieval in SessionServiceImpl.
+SQLite stores timestamps as text and strips tzinfo on read.
+SessionServiceImpl._ensure_utc() restores UTC on all datetime reads.
 """
 
 from __future__ import annotations
@@ -15,6 +14,7 @@ from sqlalchemy import create_engine
 from sqlalchemy.pool import StaticPool
 
 from elspeth.web.sessions.models import metadata
+from elspeth.web.sessions.protocol import CompositionStateData
 from elspeth.web.sessions.service import SessionServiceImpl
 
 
@@ -40,7 +40,6 @@ class TestDatetimeTimezoneRoundTrip:
     """DateTime(timezone=True) columns must preserve tzinfo through SQLite."""
 
     @pytest.mark.asyncio
-    @pytest.mark.xfail(reason="SQLite strips tzinfo on storage — needs UTC restoration on read", strict=True)
     async def test_session_created_at_preserves_timezone(self, service) -> None:
         """created_at on a freshly-created session must be timezone-aware."""
         session = await service.create_session("alice", "TZ Test", "local")
@@ -50,7 +49,6 @@ class TestDatetimeTimezoneRoundTrip:
         assert fetched.created_at.tzinfo is not None, "created_at lost timezone info after round-trip through SQLite"
 
     @pytest.mark.asyncio
-    @pytest.mark.xfail(reason="SQLite strips tzinfo on storage — needs UTC restoration on read", strict=True)
     async def test_session_updated_at_preserves_timezone(self, service) -> None:
         """updated_at on a freshly-created session must be timezone-aware."""
         session = await service.create_session("alice", "TZ Test", "local")
@@ -60,13 +58,12 @@ class TestDatetimeTimezoneRoundTrip:
         assert fetched.updated_at.tzinfo is not None, "updated_at lost timezone info after round-trip through SQLite"
 
     @pytest.mark.asyncio
-    @pytest.mark.xfail(reason="SQLite strips tzinfo on storage — needs UTC restoration on read", strict=True)
     async def test_run_started_at_preserves_timezone(self, service) -> None:
         """started_at on a run record must be timezone-aware after retrieval."""
         session = await service.create_session("alice", "Run TZ Test", "local")
         state = await service.save_composition_state(
             session_id=session.id,
-            state={"source": None, "nodes": [], "edges": [], "outputs": [], "metadata": {}, "is_valid": False},
+            state=CompositionStateData(source=None, nodes=[], edges=[], outputs=[], metadata_=None, is_valid=False),
         )
         run = await service.create_run(
             session_id=session.id,
@@ -78,7 +75,6 @@ class TestDatetimeTimezoneRoundTrip:
         assert fetched.started_at.tzinfo is not None, "run.started_at lost timezone info after round-trip through SQLite"
 
     @pytest.mark.asyncio
-    @pytest.mark.xfail(reason="SQLite strips tzinfo on storage — needs UTC restoration on read", strict=True)
     async def test_message_created_at_preserves_timezone(self, service) -> None:
         """created_at on a chat message must be timezone-aware after retrieval."""
         session = await service.create_session("alice", "Msg TZ Test", "local")

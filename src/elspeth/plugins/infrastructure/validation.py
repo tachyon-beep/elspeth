@@ -174,6 +174,32 @@ def validate_sink_config(
         return _extract_wrapped_plugin_config_error(e, config)
 
 
+def validate_schema_config(
+    schema_config: dict[str, Any],
+) -> list[ValidationError]:
+    """Validate schema configuration independently of plugin.
+
+    Args:
+        schema_config: Schema configuration dict (contents of 'schema' key)
+
+    Returns:
+        List of validation errors (empty if valid)
+    """
+    from elspeth.contracts.schema import SchemaConfig
+
+    try:
+        SchemaConfig.from_dict(schema_config)
+        return []
+    except ValueError as e:
+        return [
+            ValidationError(
+                field="schema",
+                message=str(e),
+                value=schema_config,
+            )
+        ]
+
+
 def _extract_wrapped_plugin_config_error(
     error: PluginConfigError,
     config: dict[str, object],

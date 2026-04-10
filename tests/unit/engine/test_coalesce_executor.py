@@ -1333,14 +1333,30 @@ class TestDefaultClock:
 
         execution = MagicMock(spec=ExecutionRepository)
         execution.begin_node_state.side_effect = lambda **kw: Mock(state_id="s1")
-        executor = CoalesceExecutor(execution, MagicMock(), MagicMock(), "run_1", step_resolver=lambda n: 0, clock=None, data_flow=MagicMock(spec=DataFlowRepository))
+        executor = CoalesceExecutor(
+            execution,
+            MagicMock(),
+            MagicMock(),
+            "run_1",
+            step_resolver=lambda n: 0,
+            clock=None,
+            data_flow=MagicMock(spec=DataFlowRepository),
+        )
         assert executor._clock is DEFAULT_CLOCK
 
     def test_uses_injected_clock(self):
         clock = MockClock(start=42.0)
         execution = MagicMock(spec=ExecutionRepository)
         execution.begin_node_state.side_effect = lambda **kw: Mock(state_id="s1")
-        executor = CoalesceExecutor(execution, MagicMock(), MagicMock(), "run_1", step_resolver=lambda n: 0, clock=clock, data_flow=MagicMock(spec=DataFlowRepository))
+        executor = CoalesceExecutor(
+            execution,
+            MagicMock(),
+            MagicMock(),
+            "run_1",
+            step_resolver=lambda n: 0,
+            clock=clock,
+            data_flow=MagicMock(spec=DataFlowRepository),
+        )
         assert executor._clock is clock
 
 

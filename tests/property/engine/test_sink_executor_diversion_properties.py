@@ -76,7 +76,7 @@ def test_partition_completeness(batch_size: int, diverted_indices_raw: list[int]
     """Every token gets exactly one outcome: COMPLETED + DIVERTED == total batch."""
     diverted_indices = {i for i in diverted_indices_raw if i < batch_size}
     tokens, sink = _build_scenario(batch_size, diverted_indices)
-    executor, execution, data_flow = _make_executor()
+    executor, _execution, data_flow = _make_executor()
 
     executor.write(
         sink=sink,
@@ -109,7 +109,7 @@ def test_exactly_once_terminal_state(batch_size: int, diverted_indices_raw: list
     """Each token_id appears in exactly one record_token_outcome call."""
     diverted_indices = {i for i in diverted_indices_raw if i < batch_size}
     tokens, sink = _build_scenario(batch_size, diverted_indices)
-    executor, execution, data_flow = _make_executor()
+    executor, _execution, data_flow = _make_executor()
 
     executor.write(
         sink=sink,
@@ -163,7 +163,7 @@ def test_failsink_partition_completeness(batch_size: int, diverted_indices_raw: 
     """Failsink mode: every token gets exactly one outcome (COMPLETED or DIVERTED)."""
     diverted_indices = {i for i in diverted_indices_raw if i < batch_size}
     tokens, sink, failsink = _build_failsink_scenario(batch_size, diverted_indices)
-    executor, execution, data_flow = _make_executor()
+    executor, _execution, data_flow = _make_executor()
 
     executor.write(
         sink=sink,
@@ -195,7 +195,7 @@ def test_failsink_exactly_once_terminal_state(batch_size: int, diverted_indices_
     """Failsink mode: each token_id appears in exactly one record_token_outcome call."""
     diverted_indices = {i for i in diverted_indices_raw if i < batch_size}
     tokens, sink, failsink = _build_failsink_scenario(batch_size, diverted_indices)
-    executor, execution, data_flow = _make_executor()
+    executor, _execution, data_flow = _make_executor()
 
     executor.write(
         sink=sink,

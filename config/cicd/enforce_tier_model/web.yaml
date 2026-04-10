@@ -411,17 +411,17 @@ allow_hits:
   reason: Best-effort cleanup on fork failure — delete_blob may fail if DB disconnected
   safety: Falls back to file unlink; original error re-raised
   expires: null
-- key: web/sessions/service.py:R5:SessionServiceImpl:_unwrap_envelope:fp=92be5b7dd57e1352
+- key: web/sessions/service.py:R5:SessionServiceImpl:_unwrap_envelope:fp=a45b7c9e7eabfd38
   owner: web-sessions
   reason: Type check for envelope format in composition state deserialization
   safety: Handles both raw and enveloped formats
   expires: null
-- key: web/sessions/service.py:R6:SessionServiceImpl:save_composition_state:_sync:fp=37078bb0de6f4e8c
+- key: web/sessions/service.py:R6:SessionServiceImpl:save_composition_state:_sync:fp=4c165d8f1a54b3c7
   owner: web-sessions
   reason: IntegrityError on duplicate version is expected race condition
   safety: Upsert-or-skip
   expires: null
-- key: web/sessions/service.py:R6:SessionServiceImpl:set_active_state:_sync:fp=4363acb177f59bfe
+- key: web/sessions/service.py:R6:SessionServiceImpl:set_active_state:_sync:fp=211985262d8ac34d
   owner: web-sessions
   reason: IntegrityError on duplicate active state is expected race condition
   safety: Upsert-or-skip

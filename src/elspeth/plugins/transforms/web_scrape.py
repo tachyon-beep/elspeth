@@ -260,17 +260,11 @@ class WebScrapeTransform(BaseTransform):
         """Capture infrastructure dependencies at pipeline start."""
         super().on_start(ctx)
         if ctx.landscape is None:
-            raise FrameworkBugError(
-                "WebScrapeTransform requires landscape — orchestrator must inject it before on_start()."
-            )
+            raise FrameworkBugError("WebScrapeTransform requires landscape — orchestrator must inject it before on_start().")
         if ctx.rate_limit_registry is None:
-            raise FrameworkBugError(
-                "WebScrapeTransform requires rate_limit_registry — orchestrator must inject it before on_start()."
-            )
+            raise FrameworkBugError("WebScrapeTransform requires rate_limit_registry — orchestrator must inject it before on_start().")
         if ctx.payload_store is None:
-            raise FrameworkBugError(
-                "WebScrapeTransform requires payload_store — orchestrator must configure it before on_start()."
-            )
+            raise FrameworkBugError("WebScrapeTransform requires payload_store — orchestrator must configure it before on_start().")
         self._recorder = ctx.landscape
         self._payload_store = ctx.payload_store
         self._limiter = ctx.rate_limit_registry

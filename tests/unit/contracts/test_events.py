@@ -271,10 +271,11 @@ class TestExternalCallCompletedSerialization:
         )
 
         d = event.to_dict()
-        # SSRF-safe path: resolved_ip present, no json/params
+        # SSRF fields are additive — they never suppress other fields.
+        # GET always emits params (even None) for hash stability.
         assert d["request_payload"]["resolved_ip"] == "93.184.216.34"
         assert "json" not in d["request_payload"]
-        assert "params" not in d["request_payload"]
+        assert d["request_payload"]["params"] is None
 
 
 # ---------------------------------------------------------------------------

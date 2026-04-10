@@ -17,17 +17,15 @@ BUDGET = 20
 
 def main() -> int:
     public_methods = [
-        name
-        for name, method in inspect.getmembers(_PluginAuditWriterAdapter, predicate=inspect.isfunction)
-        if not name.startswith("_")
+        name for name, method in inspect.getmembers(_PluginAuditWriterAdapter, predicate=inspect.isfunction) if not name.startswith("_")
     ]
 
     count = len(public_methods)
     if count > BUDGET:
         print(f"FAIL: _PluginAuditWriterAdapter has {count} public methods (budget: {BUDGET})")
         print(f"Methods: {', '.join(sorted(public_methods))}")
-        print(f"\nIf a new method is genuinely needed, consider whether the caller")
-        print(f"should inject the specific repository directly instead.")
+        print("\nIf a new method is genuinely needed, consider whether the caller")
+        print("should inject the specific repository directly instead.")
         return 1
 
     print(f"OK: _PluginAuditWriterAdapter has {count}/{BUDGET} public methods")

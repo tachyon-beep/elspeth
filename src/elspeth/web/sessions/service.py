@@ -60,6 +60,18 @@ class SessionServiceImpl:
     def _now(self) -> datetime:
         return datetime.now(UTC)
 
+    @staticmethod
+    def _ensure_utc(dt: datetime) -> datetime:
+        """Restore UTC tzinfo stripped by SQLite round-trip.
+
+        SQLite stores DateTime(timezone=True) as ISO-8601 text and drops
+        tzinfo on read.  All timestamps in this service originate from
+        _now() which uses UTC, so re-attaching UTC is safe.
+        """
+        if dt.tzinfo is not None:
+            return dt
+        return dt.replace(tzinfo=UTC)
+
     async def create_session(
         self,
         user_id: str,
@@ -117,8 +129,8 @@ class SessionServiceImpl:
             user_id=row.user_id,
             auth_provider_type=row.auth_provider_type,
             title=row.title,
-            created_at=row.created_at,
-            updated_at=row.updated_at,
+            created_at=self._ensure_utc(row.created_at),
+            updated_at=self._ensure_utc(row.updated_at),
             forked_from_session_id=UUID(row.forked_from_session_id) if row.forked_from_session_id else None,
             forked_from_message_id=UUID(row.forked_from_message_id) if row.forked_from_message_id else None,
         )
@@ -153,8 +165,8 @@ class SessionServiceImpl:
                 user_id=row.user_id,
                 auth_provider_type=row.auth_provider_type,
                 title=row.title,
-                created_at=row.created_at,
-                updated_at=row.updated_at,
+                created_at=self._ensure_utc(row.created_at),
+                updated_at=self._ensure_utc(row.updated_at),
                 forked_from_session_id=UUID(row.forked_from_session_id) if row.forked_from_session_id else None,
                 forked_from_message_id=UUID(row.forked_from_message_id) if row.forked_from_message_id else None,
             )
@@ -253,7 +265,7 @@ class SessionServiceImpl:
                 role=row.role,
                 content=row.content,
                 tool_calls=row.tool_calls,
-                created_at=row.created_at,
+                created_at=self._ensure_utc(row.created_at),
                 composition_state_id=UUID(row.composition_state_id) if row.composition_state_id else None,
             )
             for row in rows
@@ -413,7 +425,7 @@ class SessionServiceImpl:
             metadata_=self._unwrap_envelope(row.metadata_),
             is_valid=row.is_valid,
             validation_errors=row.validation_errors,
-            created_at=row.created_at,
+            created_at=self._ensure_utc(row.created_at),
             derived_from_state_id=(UUID(row.derived_from_state_id) if row.derived_from_state_id is not None else None),
         )
 
@@ -717,7 +729,7 @@ class SessionServiceImpl:
                             session_id=UUID(row.session_id),
                             state_id=UUID(row.state_id),
                             status="cancelled",
-                            started_at=row.started_at,
+                            started_at=self._ensure_utc(row.started_at),
                             finished_at=now,
                             rows_processed=row.rows_processed,
                             rows_failed=row.rows_failed,
@@ -1052,8 +1064,8 @@ class SessionServiceImpl:
             session_id=UUID(row.session_id),
             state_id=UUID(row.state_id),
             status=row.status,
-            started_at=row.started_at,
-            finished_at=row.finished_at,
+            started_at=self._ensure_utc(row.started_at),
+            finished_at=self._ensure_utc(row.finished_at) if row.finished_at is not None else None,
             rows_processed=row.rows_processed,
             rows_failed=row.rows_failed,
             error=row.error,

@@ -31,9 +31,9 @@ TEST_CSV = FIXTURES_DIR / "test_input.csv"
 @pytest.fixture
 def work_dir(tmp_path: Path) -> Path:
     """Create a working directory with the test CSV and output dir."""
-    uploads_dir = tmp_path / "uploads"
-    uploads_dir.mkdir()
-    csv_dest = uploads_dir / "input.csv"
+    blobs_dir = tmp_path / "blobs"
+    blobs_dir.mkdir()
+    csv_dest = blobs_dir / "input.csv"
     shutil.copy(TEST_CSV, csv_dest)
     output_dir = tmp_path / "outputs"
     output_dir.mkdir()
@@ -106,7 +106,7 @@ class TestEndToEndPipelineExecution:
             session_id = resp.json()["id"]  # SessionResponse.id, NOT session_id
 
             # 2. Save composition state programmatically
-            csv_path = str(work_dir / "uploads" / "input.csv")
+            csv_path = str(work_dir / "blobs" / "input.csv")
             output_path = str(work_dir / "outputs" / "result.csv")
 
             state = CompositionState(

@@ -84,12 +84,12 @@ def field_contracts(draw: st.DrawFn) -> FieldContract:
 
 @st.composite
 def schema_contracts(draw: st.DrawFn, max_fields: int = 5) -> SchemaContract:
-    """Generate a valid SchemaContract with unique normalized names."""
+    """Generate a valid SchemaContract with unique normalized and original names."""
     mode = draw(modes)
     locked = draw(st.booleans())
     n_fields = draw(st.integers(min_value=0, max_value=max_fields))
 
-    # Generate unique normalized names first
+    # Generate unique normalized AND original names
     names = draw(
         st.lists(
             normalized_names,
@@ -98,10 +98,17 @@ def schema_contracts(draw: st.DrawFn, max_fields: int = 5) -> SchemaContract:
             unique=True,
         )
     )
+    origs = draw(
+        st.lists(
+            original_names,
+            min_size=n_fields,
+            max_size=n_fields,
+            unique=True,
+        )
+    )
 
     fields = []
-    for name in names:
-        orig = draw(original_names)
+    for name, orig in zip(names, origs, strict=True):
         ptype = draw(allowed_types)
         req = draw(st.booleans())
         src = draw(sources)
