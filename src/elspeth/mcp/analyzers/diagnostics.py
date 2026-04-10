@@ -2,7 +2,7 @@
 
 Functions: diagnose, get_failure_context, get_recent_activity.
 
-All functions accept (db, recorder) as their first two parameters.
+All functions accept (db, factory) as their first two parameters.
 """
 
 from __future__ import annotations
@@ -13,7 +13,7 @@ from typing import Any
 
 from elspeth.contracts.errors import AuditIntegrityError
 from elspeth.core.landscape.database import LandscapeDB
-from elspeth.core.landscape.recorder import LandscapeRecorder
+from elspeth.core.landscape.factory import RecorderFactory
 from elspeth.mcp.types import (
     DiagnosticReport,
     ErrorResult,
@@ -22,7 +22,7 @@ from elspeth.mcp.types import (
 )
 
 
-def diagnose(db: LandscapeDB, recorder: LandscapeRecorder) -> DiagnosticReport:
+def diagnose(db: LandscapeDB, factory: RecorderFactory) -> DiagnosticReport:
     """Emergency diagnostic: What's broken right now?
 
     Scans for failed runs, high error rates, stuck runs, and recent problems.
@@ -30,7 +30,7 @@ def diagnose(db: LandscapeDB, recorder: LandscapeRecorder) -> DiagnosticReport:
 
     Args:
         db: Database connection
-        recorder: Landscape recorder
+        factory: Recorder factory
 
     Returns:
         Diagnostic summary with problems, recent failures, and recommendations
@@ -218,7 +218,7 @@ def diagnose(db: LandscapeDB, recorder: LandscapeRecorder) -> DiagnosticReport:
     }
 
 
-def get_failure_context(db: LandscapeDB, recorder: LandscapeRecorder, run_id: str, limit: int = 10) -> FailureContextReport | ErrorResult:
+def get_failure_context(db: LandscapeDB, factory: RecorderFactory, run_id: str, limit: int = 10) -> FailureContextReport | ErrorResult:
     """Get comprehensive context about failures in a run.
 
     Use this when investigating why a run failed. Returns failed node states,
@@ -226,7 +226,7 @@ def get_failure_context(db: LandscapeDB, recorder: LandscapeRecorder, run_id: st
 
     Args:
         db: Database connection
-        recorder: Landscape recorder
+        factory: Recorder factory
         run_id: Run ID to investigate
         limit: Max failures to return
 
@@ -242,7 +242,7 @@ def get_failure_context(db: LandscapeDB, recorder: LandscapeRecorder, run_id: st
         validation_errors_table,
     )
 
-    run = recorder.get_run(run_id)
+    run = factory.run_lifecycle.get_run(run_id)
     if run is None:
         return {"error": f"Run '{run_id}' not found"}
 
@@ -390,14 +390,14 @@ def get_failure_context(db: LandscapeDB, recorder: LandscapeRecorder, run_id: st
     }
 
 
-def get_recent_activity(db: LandscapeDB, recorder: LandscapeRecorder, minutes: int = 60) -> RecentActivityReport:
+def get_recent_activity(db: LandscapeDB, factory: RecorderFactory, minutes: int = 60) -> RecentActivityReport:
     """Get recent pipeline activity timeline.
 
     Use this to understand what happened recently when investigating issues.
 
     Args:
         db: Database connection
-        recorder: Landscape recorder
+        factory: Recorder factory
         minutes: Look back this many minutes (default 60)
 
     Returns:

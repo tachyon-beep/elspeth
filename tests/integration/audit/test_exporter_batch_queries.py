@@ -204,18 +204,18 @@ class TestExporterBatchQueryIntegrity:
             db.close()
 
     def test_record_counts_match_direct_queries(self, tmp_path: Path) -> None:
-        """Exported record counts must match direct recorder queries."""
+        """Exported record counts must match direct query repository queries."""
         source_data = [{"id": f"r{i}", "value": i * 10} for i in range(10)]
         run_id, db = _run_linear(tmp_path, source_data)
 
         try:
-            from tests.fixtures.landscape import make_recorder
+            from tests.fixtures.landscape import make_factory
 
-            recorder = make_recorder(db)
-            direct_rows = recorder.get_rows(run_id)
-            direct_tokens = recorder.get_all_tokens_for_run(run_id)
-            direct_states = recorder.get_all_node_states_for_run(run_id)
-            direct_outcomes = recorder.get_all_token_outcomes_for_run(run_id)
+            factory = make_factory(db)
+            direct_rows = factory.query.get_rows(run_id)
+            direct_tokens = factory.query.get_all_tokens_for_run(run_id)
+            direct_states = factory.query.get_all_node_states_for_run(run_id)
+            direct_outcomes = factory.query.get_all_token_outcomes_for_run(run_id)
 
             grouped = _group_records(list(LandscapeExporter(db).export_run(run_id)))
 

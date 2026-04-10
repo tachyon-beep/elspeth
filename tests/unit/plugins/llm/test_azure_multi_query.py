@@ -362,7 +362,7 @@ class TestRowProcessingWithPipelining:
 
     @pytest.fixture
     def mock_recorder(self) -> Mock:
-        """Create mock LandscapeRecorder."""
+        """Create mock ExecutionRepository."""
         recorder = Mock()
         recorder.record_call = Mock()
         return recorder
@@ -630,7 +630,7 @@ class TestMultiRowPipelining:
 
     @pytest.fixture
     def mock_recorder(self) -> Mock:
-        """Create mock LandscapeRecorder."""
+        """Create mock ExecutionRepository."""
         recorder = Mock()
         recorder.record_call = Mock()
         return recorder
@@ -731,7 +731,7 @@ class TestMultiQueryWithMockProvider:
 
     @pytest.fixture
     def mock_recorder(self) -> Mock:
-        """Create mock LandscapeRecorder."""
+        """Create mock ExecutionRepository."""
         recorder = Mock()
         recorder.record_call = Mock()
         return recorder

@@ -27,8 +27,8 @@ from elspeth.contracts import (
 from elspeth.core.config import SourceSettings
 from elspeth.core.dag import ExecutionGraph
 from elspeth.core.landscape.database import LandscapeDB
+from elspeth.core.landscape.factory import RecorderFactory
 from elspeth.core.landscape.lineage import explain
-from elspeth.core.landscape.recorder import LandscapeRecorder
 from elspeth.core.landscape.schema import (
     token_outcomes_table,
     tokens_table,
@@ -180,7 +180,7 @@ class TestPartialFailure:
         assert RowOutcome.COMPLETED in outcome_values
 
         # 5. Explain query works for both successful and failed rows
-        recorder = LandscapeRecorder(db, payload_store=payload_store)
+        factory = RecorderFactory(db, payload_store=payload_store)
 
         # Get all tokens to test explain
         with db.engine.connect() as conn:
@@ -197,7 +197,8 @@ class TestPartialFailure:
         explained_count = 0
         for token_row in token_rows:
             lineage = explain(
-                recorder,
+                factory.query,
+                factory.data_flow,
                 result.run_id,
                 token_id=token_row.token_id,
             )

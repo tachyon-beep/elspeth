@@ -28,6 +28,7 @@ if TYPE_CHECKING:
     from elspeth.contracts.batch_checkpoint import BatchCheckpointState
     from elspeth.contracts.config.runtime import RuntimeConcurrencyConfig
     from elspeth.contracts.identity import TokenInfo
+    from elspeth.contracts.payload_store import PayloadStore
     from elspeth.contracts.plugin_context import ValidationErrorToken
     from elspeth.contracts.schema_contract import SchemaContract
     from elspeth.core.rate_limit import RateLimitRegistry
@@ -187,6 +188,9 @@ class LifecycleContext(Protocol):
 
     @property
     def landscape(self) -> PluginAuditWriter | None: ...
+
+    @property
+    def payload_store(self) -> PayloadStore | None: ...
 
     @property
     def rate_limit_registry(self) -> RateLimitRegistry | None: ...

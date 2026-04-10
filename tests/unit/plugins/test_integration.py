@@ -7,7 +7,7 @@ from typing import Any, ClassVar
 from elspeth.contracts.schema_contract import PipelineRow
 from elspeth.testing import make_field, make_pipeline_row
 from tests.fixtures.factories import make_context
-from tests.fixtures.landscape import make_recorder
+from tests.fixtures.landscape import make_factory
 
 
 class TestPluginSystemIntegration:
@@ -106,8 +106,8 @@ class TestPluginSystemIntegration:
         assert len(manager.get_sinks()) == 1
 
         # Create instances and process
-        recorder = make_recorder()
-        ctx = make_context(run_id="test-001", landscape=recorder)
+        factory = make_factory()
+        ctx = make_context(run_id="test-001", landscape=factory)
 
         source_cls = manager.get_source_by_name("list")
         transform_cls = manager.get_transform_by_name("double")

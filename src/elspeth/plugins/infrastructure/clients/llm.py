@@ -23,7 +23,7 @@ from elspeth.core.canonical import stable_hash
 from elspeth.plugins.infrastructure.clients.base import AuditedClientBase, TelemetryEmitCallback
 
 if TYPE_CHECKING:
-    from elspeth.core.landscape.recorder import LandscapeRecorder
+    from elspeth.core.landscape.execution_repository import ExecutionRepository
     from elspeth.core.rate_limit import NoOpLimiter
     from elspeth.core.rate_limit.limiter import RateLimiter
 
@@ -206,7 +206,7 @@ class AuditedLLMClient(AuditedClientBase):
 
     Example:
         client = AuditedLLMClient(
-            recorder=recorder,
+            execution=execution_repo,
             state_id=state_id,
             run_id=run_id,
             telemetry_emit=telemetry_emit,
@@ -224,7 +224,7 @@ class AuditedLLMClient(AuditedClientBase):
 
     def __init__(
         self,
-        recorder: LandscapeRecorder,
+        execution: ExecutionRepository,
         state_id: str,
         run_id: str,
         telemetry_emit: TelemetryEmitCallback,
@@ -237,7 +237,7 @@ class AuditedLLMClient(AuditedClientBase):
         """Initialize audited LLM client.
 
         Args:
-            recorder: LandscapeRecorder for audit trail storage
+            execution: ExecutionRepository for audit trail storage
             state_id: Node state ID to associate calls with
             run_id: Pipeline run ID for telemetry correlation
             telemetry_emit: Callback to emit telemetry events
@@ -246,7 +246,7 @@ class AuditedLLMClient(AuditedClientBase):
             limiter: Optional rate limiter for throttling requests
             token_id: Optional token identity for telemetry correlation
         """
-        super().__init__(recorder, state_id, run_id, telemetry_emit, limiter=limiter, token_id=token_id)
+        super().__init__(execution, state_id, run_id, telemetry_emit, limiter=limiter, token_id=token_id)
         self._client = underlying_client
         self._provider = provider
 
@@ -316,7 +316,7 @@ class AuditedLLMClient(AuditedClientBase):
             # Classify error for retry decision
             is_retryable = error_class in {"rate_limit", "server", "network"}
 
-            self._recorder.record_call(
+            self._execution.record_call(
                 state_id=self._state_id,
                 call_index=call_index,
                 call_type=CallType.LLM,
@@ -397,7 +397,7 @@ class AuditedLLMClient(AuditedClientBase):
             except (TypeError, ValueError, RecursionError, AttributeError) as dump_exc:
                 # model_dump() failed on Tier 3 data — still record the call
                 # to prevent call-index gaps, then re-raise.
-                self._recorder.record_call(
+                self._execution.record_call(
                     state_id=self._state_id,
                     call_index=call_index,
                     call_type=CallType.LLM,
@@ -425,7 +425,7 @@ class AuditedLLMClient(AuditedClientBase):
                 usage=usage,
                 raw_response=raw_response,
             )
-            self._recorder.record_call(
+            self._execution.record_call(
                 state_id=self._state_id,
                 call_index=call_index,
                 call_type=CallType.LLM,
@@ -453,7 +453,7 @@ class AuditedLLMClient(AuditedClientBase):
                 except (TypeError, ValueError, RecursionError, AttributeError) as dump_exc:
                     # model_dump() failed on Tier 3 data — still record the call
                     # to prevent call-index gaps, then re-raise.
-                    self._recorder.record_call(
+                    self._execution.record_call(
                         state_id=self._state_id,
                         call_index=call_index,
                         call_type=CallType.LLM,
@@ -483,7 +483,7 @@ class AuditedLLMClient(AuditedClientBase):
                     usage=usage,
                     raw_response=raw_response,
                 )
-                self._recorder.record_call(
+                self._execution.record_call(
                     state_id=self._state_id,
                     call_index=call_index,
                     call_type=CallType.LLM,
@@ -509,7 +509,7 @@ class AuditedLLMClient(AuditedClientBase):
                 except (TypeError, ValueError, RecursionError, AttributeError) as dump_exc:
                     # model_dump() failed — still record the call to prevent
                     # call-index gaps, then re-raise.
-                    self._recorder.record_call(
+                    self._execution.record_call(
                         state_id=self._state_id,
                         call_index=call_index,
                         call_type=CallType.LLM,
@@ -539,7 +539,7 @@ class AuditedLLMClient(AuditedClientBase):
                     usage=usage,
                     raw_response=raw_response,
                 )
-                self._recorder.record_call(
+                self._execution.record_call(
                     state_id=self._state_id,
                     call_index=call_index,
                     call_type=CallType.LLM,
@@ -602,7 +602,7 @@ class AuditedLLMClient(AuditedClientBase):
             error_msg = (
                 f"LLM response content is {type(content).__name__}, expected str. Provider returned malformed data at Tier 3 boundary."
             )
-            self._recorder.record_call(
+            self._execution.record_call(
                 state_id=self._state_id,
                 call_index=call_index,
                 call_type=CallType.LLM,
@@ -636,7 +636,7 @@ class AuditedLLMClient(AuditedClientBase):
             # The LLM call happened — record it before re-raising so the
             # audit trail reflects the consumed tokens even though we can't
             # fully serialize the response.
-            self._recorder.record_call(
+            self._execution.record_call(
                 state_id=self._state_id,
                 call_index=call_index,
                 call_type=CallType.LLM,
@@ -662,7 +662,7 @@ class AuditedLLMClient(AuditedClientBase):
         )
         response_data = response_dto.to_dict()
 
-        self._recorder.record_call(
+        self._execution.record_call(
             state_id=self._state_id,
             call_index=call_index,
             call_type=CallType.LLM,

@@ -26,7 +26,7 @@ import pytest
 
 from tests.fixtures.base_classes import inject_write_failure
 from tests.fixtures.factories import make_context
-from tests.fixtures.landscape import make_recorder
+from tests.fixtures.landscape import make_factory
 
 # ---------------------------------------------------------------------------
 # Shared config helpers
@@ -180,8 +180,8 @@ class TestAssertToRaiseConversions:
                     }
                 )
             )
-            recorder = make_recorder()
-            ctx = make_context(run_id="test-run", landscape=recorder)
+            factory = make_factory()
+            ctx = make_context(run_id="test-run", landscape=factory)
 
             # Patch _open_file so it opens _file but leaves _writer as None.
             # This simulates partial initialisation — the exact state the guard
@@ -236,8 +236,8 @@ class TestAssertToRaiseConversions:
                     }
                 )
             )
-            recorder = make_recorder()
-            ctx = make_context(run_id="test-run", landscape=recorder)
+            factory = make_factory()
+            ctx = make_context(run_id="test-run", landscape=factory)
 
             mock_writer = MagicMock()
 

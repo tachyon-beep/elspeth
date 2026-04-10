@@ -656,11 +656,11 @@ def explain(
     from elspeth.cli_helpers import resolve_database_url, resolve_run_id
     from elspeth.core.landscape import (
         LandscapeDB,
-        LandscapeRecorder,
         LineageTextFormatter,
         dataclass_to_dict,
     )
     from elspeth.core.landscape import explain as explain_lineage
+    from elspeth.core.landscape.factory import RecorderFactory
 
     if database is None:
         message = "--database is required for explain."
@@ -733,10 +733,10 @@ def explain(
         raise typer.Exit(1) from None
 
     try:
-        recorder = LandscapeRecorder(db)
+        factory = RecorderFactory(db)
 
         # Resolve 'latest' run_id
-        resolved_run_id = resolve_run_id(run_id, recorder)
+        resolved_run_id = resolve_run_id(run_id, factory)
         if resolved_run_id is None:
             if json_output:
                 typer.echo(json_module.dumps({"error": "No runs found in database"}))
@@ -756,7 +756,8 @@ def explain(
         if json_output or no_tui:
             try:
                 lineage_result = explain_lineage(
-                    recorder,
+                    factory.query,
+                    factory.data_flow,
                     run_id=resolved_run_id,
                     token_id=token,
                     row_id=row,
@@ -1853,10 +1854,10 @@ def resume(
             # For sinks with headers: original, provide field resolution
             # mapping BEFORE validation so they can correctly compare display names
             if sink.needs_resume_field_resolution:
-                from elspeth.core.landscape import LandscapeRecorder
+                from elspeth.core.landscape.factory import RecorderFactory
 
-                recorder = LandscapeRecorder(db)
-                field_resolution = recorder.get_source_field_resolution(run_id)
+                factory = RecorderFactory(db)
+                field_resolution = factory.run_lifecycle.get_source_field_resolution(run_id)
                 if field_resolution is not None:
                     sink.set_resume_field_resolution(field_resolution)
 

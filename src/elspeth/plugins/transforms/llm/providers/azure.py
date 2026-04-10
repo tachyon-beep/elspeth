@@ -224,7 +224,7 @@ class AzureLLMProvider:
         with self._llm_clients_lock:
             if state_id not in self._llm_clients:
                 self._llm_clients[state_id] = AuditedLLMClient(
-                    recorder=self._recorder,  # type: ignore[arg-type]  # Task 6: AuditedLLMClient will accept PluginAuditWriter
+                    execution=self._recorder,  # type: ignore[arg-type]  # PluginAuditWriter structurally satisfies ExecutionRepository for client methods
                     state_id=state_id,
                     run_id=self._run_id,
                     telemetry_emit=self._telemetry_emit,

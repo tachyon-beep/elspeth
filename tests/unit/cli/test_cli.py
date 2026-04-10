@@ -223,14 +223,14 @@ class TestExplainPassphraseResolution:
         from elspeth.cli import app
         from elspeth.contracts import RunStatus
         from elspeth.core.landscape import LandscapeDB
-        from tests.fixtures.landscape import make_recorder
+        from tests.fixtures.landscape import make_factory
 
         # Create a valid Landscape database with one run
         db_path = tmp_path / "audit.db"
         db = LandscapeDB.from_url(f"sqlite:///{db_path}")
-        recorder = make_recorder(db)
-        recorder.begin_run(config={}, canonical_version="v1", run_id="run-1")
-        recorder.complete_run("run-1", RunStatus.COMPLETED)
+        factory = make_factory(db)
+        factory.run_lifecycle.begin_run(config={}, canonical_version="v1", run_id="run-1")
+        factory.run_lifecycle.complete_run("run-1", RunStatus.COMPLETED)
         db.close()
 
         # Create a malformed YAML settings file
@@ -265,14 +265,14 @@ class TestExplainPassphraseResolution:
         from elspeth.cli import app
         from elspeth.contracts import RunStatus
         from elspeth.core.landscape import LandscapeDB
-        from tests.fixtures.landscape import make_recorder
+        from tests.fixtures.landscape import make_factory
 
         # Create a valid Landscape database with one run
         db_path = tmp_path / "audit.db"
         db = LandscapeDB.from_url(f"sqlite:///{db_path}")
-        recorder = make_recorder(db)
-        recorder.begin_run(config={}, canonical_version="v1", run_id="run-1")
-        recorder.complete_run("run-1", RunStatus.COMPLETED)
+        factory = make_factory(db)
+        factory.run_lifecycle.begin_run(config={}, canonical_version="v1", run_id="run-1")
+        factory.run_lifecycle.complete_run("run-1", RunStatus.COMPLETED)
         db.close()
 
         result = runner.invoke(
@@ -307,14 +307,14 @@ class TestExplainSecretLoading:
         from elspeth.cli import app
         from elspeth.contracts import RunStatus
         from elspeth.core.landscape import LandscapeDB
-        from tests.fixtures.landscape import make_recorder
+        from tests.fixtures.landscape import make_factory
 
         # Create a valid Landscape database with one run
         db_path = tmp_path / "audit.db"
         db = LandscapeDB.from_url(f"sqlite:///{db_path}")
-        recorder = make_recorder(db)
-        recorder.begin_run(config={}, canonical_version="v1", run_id="run-1")
-        recorder.complete_run("run-1", RunStatus.COMPLETED)
+        factory = make_factory(db)
+        factory.run_lifecycle.begin_run(config={}, canonical_version="v1", run_id="run-1")
+        factory.run_lifecycle.complete_run("run-1", RunStatus.COMPLETED)
         db.close()
 
         # Create a valid settings file

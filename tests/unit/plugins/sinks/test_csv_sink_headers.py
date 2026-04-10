@@ -16,7 +16,7 @@ from elspeth.plugins.sinks.csv_sink import CSVSink
 from elspeth.testing import make_field
 from tests.fixtures.base_classes import inject_write_failure
 from tests.fixtures.factories import make_context
-from tests.fixtures.landscape import make_landscape_db, make_recorder
+from tests.fixtures.landscape import make_factory
 
 # CSVSink requires fixed-column structure (strict mode)
 STRICT_SCHEMA = {"mode": "fixed", "fields": ["amount_usd: int", "customer_id: str"]}
@@ -45,9 +45,8 @@ class TestCSVSinkContractSupport:
     @pytest.fixture
     def ctx(self) -> PluginContext:
         """Create a minimal plugin context."""
-        db = make_landscape_db()
-        recorder = make_recorder(db)
-        return make_context(landscape=recorder)
+        factory = make_factory()
+        return make_context(landscape=factory)
 
     def test_set_output_contract(self, output_path: Path, sample_contract: SchemaContract) -> None:
         """set_output_contract stores contract for header resolution."""
@@ -117,9 +116,8 @@ class TestCSVSinkHeaderModes:
     @pytest.fixture
     def ctx(self) -> PluginContext:
         """Create a minimal plugin context."""
-        db = make_landscape_db()
-        recorder = make_recorder(db)
-        return make_context(landscape=recorder)
+        factory = make_factory()
+        return make_context(landscape=factory)
 
     def test_normalized_headers_default(self, output_path: Path, ctx: PluginContext) -> None:
         """Default mode uses normalized (Python identifier) headers."""
@@ -276,9 +274,8 @@ class TestCSVSinkHeaderModeInteraction:
     @pytest.fixture
     def ctx(self) -> PluginContext:
         """Create a minimal plugin context."""
-        db = make_landscape_db()
-        recorder = make_recorder(db)
-        return make_context(landscape=recorder)
+        factory = make_factory()
+        return make_context(landscape=factory)
 
     def test_headers_mode_attribute_stored(self, output_path: Path) -> None:
         """CSVSink stores headers_mode from config."""

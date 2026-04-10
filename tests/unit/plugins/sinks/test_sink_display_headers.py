@@ -14,7 +14,7 @@ import pytest
 from elspeth.contracts.plugin_context import PluginContext
 from tests.fixtures.base_classes import inject_write_failure
 from tests.fixtures.factories import make_context
-from tests.fixtures.landscape import make_recorder
+from tests.fixtures.landscape import make_factory
 
 
 class TestCSVSinkHeaders:
@@ -23,8 +23,8 @@ class TestCSVSinkHeaders:
     @pytest.fixture
     def ctx(self) -> PluginContext:
         """Create a minimal plugin context."""
-        recorder = make_recorder()
-        return make_context(landscape=recorder)
+        factory = make_factory()
+        return make_context(landscape=factory)
 
     def test_explicit_custom_headers(self, tmp_path: Path, ctx: PluginContext) -> None:
         """headers dict maps normalized names to display names in CSV header."""
@@ -250,8 +250,8 @@ class TestJSONSinkHeaders:
     @pytest.fixture
     def ctx(self) -> PluginContext:
         """Create a minimal plugin context."""
-        recorder = make_recorder()
-        return make_context(landscape=recorder)
+        factory = make_factory()
+        return make_context(landscape=factory)
 
     def test_explicit_custom_headers_jsonl(self, tmp_path: Path, ctx: PluginContext) -> None:
         """headers dict maps normalized names to display names in JSONL keys."""
@@ -375,8 +375,8 @@ class TestCSVCustomHeadersAppendMode:
     @pytest.fixture
     def ctx(self) -> PluginContext:
         """Create a minimal plugin context."""
-        recorder = make_recorder()
-        return make_context(landscape=recorder)
+        factory = make_factory()
+        return make_context(landscape=factory)
 
     def test_append_with_custom_headers(self, tmp_path: Path, ctx: PluginContext) -> None:
         """Append mode correctly validates and appends when custom headers match."""
@@ -430,8 +430,8 @@ class TestCSVCustomHeadersSpecialCharacters:
     @pytest.fixture
     def ctx(self) -> PluginContext:
         """Create a minimal plugin context."""
-        recorder = make_recorder()
-        return make_context(landscape=recorder)
+        factory = make_factory()
+        return make_context(landscape=factory)
 
     def test_header_with_comma(self, tmp_path: Path, ctx: PluginContext) -> None:
         """Custom headers containing commas are properly quoted in CSV."""
@@ -524,8 +524,8 @@ class TestJSONLCustomHeadersAppendMode:
     @pytest.fixture
     def ctx(self) -> PluginContext:
         """Create a minimal plugin context."""
-        recorder = make_recorder()
-        return make_context(landscape=recorder)
+        factory = make_factory()
+        return make_context(landscape=factory)
 
     def test_append_with_custom_headers(self, tmp_path: Path, ctx: PluginContext) -> None:
         """Append mode correctly validates and appends when custom headers match."""

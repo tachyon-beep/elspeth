@@ -14,7 +14,7 @@ import pytest
 from elspeth.contracts.schema_contract import SchemaContract
 from elspeth.testing import make_field, make_row
 from tests.fixtures.factories import make_context
-from tests.fixtures.landscape import make_landscape_db, make_recorder
+from tests.fixtures.landscape import make_factory, make_landscape_db
 
 DYNAMIC_SCHEMA = {"mode": "observed"}
 
@@ -109,8 +109,8 @@ class TestBatchStatsAggregateOverwrite:
 
         transform = BatchStats({"schema": DYNAMIC_SCHEMA, "value_field": "amount", "group_by": "category"})
         db = make_landscape_db()
-        recorder = make_recorder(db)
-        ctx = make_context(run_id="test", landscape=recorder)
+        factory = make_factory(db)
+        ctx = make_context(run_id="test", landscape=factory)
         rows = [_make_row({"amount": 10, "category": "A"})]
         result = transform.process(rows, ctx)
         assert result.status == "success"
@@ -145,8 +145,8 @@ class TestBatchReplicateMaxCopies:
 
         transform = BatchReplicate({"schema": DYNAMIC_SCHEMA, "max_copies": 5})
         db = make_landscape_db()
-        recorder = make_recorder(db)
-        ctx = make_context(run_id="test", landscape=recorder)
+        factory = make_factory(db)
+        ctx = make_context(run_id="test", landscape=factory)
         # Single row exceeding max_copies — all rows quarantined → error result
         rows = [_make_row({"copies": 10, "data": "value"})]
         result = transform.process(rows, ctx)
@@ -268,10 +268,10 @@ class TestMCPErrorTypeValidation:
         from elspeth.mcp.analyzers.queries import get_errors
 
         db = MagicMock()
-        recorder = MagicMock()
+        factory = MagicMock()
 
         with pytest.raises(ValueError, match="Invalid error_type"):
-            get_errors(db, recorder, "run-123", error_type="fatal")
+            get_errors(db, factory, "run-123", error_type="fatal")
 
     def test_valid_error_types_accepted(self) -> None:
         """Known error types should not raise on the validation check itself."""
@@ -290,8 +290,8 @@ class TestBoolExcludedFromInt:
 
         transform = BatchStats({"schema": DYNAMIC_SCHEMA, "value_field": "flag"})
         db = make_landscape_db()
-        recorder = make_recorder(db)
-        ctx = make_context(run_id="test", landscape=recorder)
+        factory = make_factory(db)
+        ctx = make_context(run_id="test", landscape=factory)
         rows = [_make_row({"flag": True})]
 
         with pytest.raises(TypeError, match="must be numeric"):
@@ -303,8 +303,8 @@ class TestBoolExcludedFromInt:
 
         transform = BatchStats({"schema": DYNAMIC_SCHEMA, "value_field": "amount"})
         db = make_landscape_db()
-        recorder = make_recorder(db)
-        ctx = make_context(run_id="test", landscape=recorder)
+        factory = make_factory(db)
+        ctx = make_context(run_id="test", landscape=factory)
         rows = [_make_row({"amount": 42})]
         result = transform.process(rows, ctx)
         assert result.status == "success"

@@ -18,7 +18,7 @@ from hypothesis import strategies as st
 from elspeth.plugins.sinks.csv_sink import CSVSink
 from tests.fixtures.base_classes import inject_write_failure
 from tests.fixtures.factories import make_context
-from tests.fixtures.landscape import make_landscape_db, make_recorder
+from tests.fixtures.landscape import make_factory, make_landscape_db
 
 from .test_sink_protocol import SinkContractTestBase, SinkDeterminismContractTestBase
 
@@ -94,8 +94,8 @@ class TestCSVSinkHashVerification:
         """Contract: content_hash MUST match SHA-256 of actual file bytes."""
         csv_path = tmp_path / "hash_verify.csv"
         db = make_landscape_db()
-        recorder = make_recorder(db)
-        ctx = make_context(landscape=recorder)
+        factory = make_factory(db)
+        ctx = make_context(landscape=factory)
 
         rows = [{"id": 1, "name": "Alice"}, {"id": 2, "name": "Bob"}]
         sink = inject_write_failure(CSVSink({"path": str(csv_path), "schema": {"mode": "fixed", "fields": ["id: int", "name: str"]}}))
@@ -111,8 +111,8 @@ class TestCSVSinkHashVerification:
         """Contract: size_bytes MUST match actual file size."""
         csv_path = tmp_path / "size_verify.csv"
         db = make_landscape_db()
-        recorder = make_recorder(db)
-        ctx = make_context(landscape=recorder)
+        factory = make_factory(db)
+        ctx = make_context(landscape=factory)
 
         rows = [{"id": 1, "name": "Alice"}, {"id": 2, "name": "Bob"}]
         sink = inject_write_failure(CSVSink({"path": str(csv_path), "schema": {"mode": "fixed", "fields": ["id: int", "name: str"]}}))
@@ -132,8 +132,8 @@ class TestCSVSinkAppendMode:
         """Append mode MUST add rows to existing file."""
         csv_path = tmp_path / "append_test.csv"
         db = make_landscape_db()
-        recorder = make_recorder(db)
-        ctx = make_context(landscape=recorder)
+        factory = make_factory(db)
+        ctx = make_context(landscape=factory)
 
         sink1 = inject_write_failure(
             CSVSink(
@@ -170,8 +170,8 @@ class TestCSVSinkAppendMode:
         """Append mode on non-existent file MUST create it with header."""
         csv_path = tmp_path / "new_file.csv"
         db = make_landscape_db()
-        recorder = make_recorder(db)
-        ctx = make_context(landscape=recorder)
+        factory = make_factory(db)
+        ctx = make_context(landscape=factory)
 
         assert not csv_path.exists()
 
@@ -228,8 +228,8 @@ class TestCSVSinkPropertyBased:
             )
         )
         db = make_landscape_db()
-        recorder = make_recorder(db)
-        ctx = make_context(landscape=recorder)
+        factory = make_factory(db)
+        ctx = make_context(landscape=factory)
 
         result = sink.write(rows, ctx)
         sink.close()
@@ -256,8 +256,8 @@ class TestCSVSinkPropertyBased:
         import uuid
 
         db = make_landscape_db()
-        recorder = make_recorder(db)
-        ctx = make_context(landscape=recorder)
+        factory = make_factory(db)
+        ctx = make_context(landscape=factory)
 
         path1 = tmp_path / f"test1_{uuid.uuid4().hex[:8]}.csv"
         path2 = tmp_path / f"test2_{uuid.uuid4().hex[:8]}.csv"
@@ -282,8 +282,8 @@ class TestCSVSinkQuotingCharacters:
 
         csv_path = tmp_path / "quoting_commas.csv"
         db = make_landscape_db()
-        recorder = make_recorder(db)
-        ctx = make_context(landscape=recorder)
+        factory = make_factory(db)
+        ctx = make_context(landscape=factory)
 
         rows = [{"id": 1, "data": "value with, comma"}]
         sink = inject_write_failure(CSVSink({"path": str(csv_path), "schema": {"mode": "fixed", "fields": ["id: int", "data: str"]}}))
@@ -303,8 +303,8 @@ class TestCSVSinkQuotingCharacters:
 
         csv_path = tmp_path / "quoting_quotes.csv"
         db = make_landscape_db()
-        recorder = make_recorder(db)
-        ctx = make_context(landscape=recorder)
+        factory = make_factory(db)
+        ctx = make_context(landscape=factory)
 
         rows = [{"id": 1, "data": 'value with "quotes"'}]
         sink = inject_write_failure(CSVSink({"path": str(csv_path), "schema": {"mode": "fixed", "fields": ["id: int", "data: str"]}}))
@@ -324,8 +324,8 @@ class TestCSVSinkQuotingCharacters:
 
         csv_path = tmp_path / "quoting_newlines.csv"
         db = make_landscape_db()
-        recorder = make_recorder(db)
-        ctx = make_context(landscape=recorder)
+        factory = make_factory(db)
+        ctx = make_context(landscape=factory)
 
         rows = [{"id": 1, "data": "value with\nnewline"}]
         sink = inject_write_failure(CSVSink({"path": str(csv_path), "schema": {"mode": "fixed", "fields": ["id: int", "data: str"]}}))
@@ -345,8 +345,8 @@ class TestCSVSinkQuotingCharacters:
 
         csv_path = tmp_path / "quoting_all.csv"
         db = make_landscape_db()
-        recorder = make_recorder(db)
-        ctx = make_context(landscape=recorder)
+        factory = make_factory(db)
+        ctx = make_context(landscape=factory)
 
         rows = [{"id": 1, "data": 'value with "quotes" and, commas\nand newlines'}]
         sink = inject_write_failure(CSVSink({"path": str(csv_path), "schema": {"mode": "fixed", "fields": ["id: int", "data: str"]}}))
@@ -363,8 +363,8 @@ class TestCSVSinkQuotingCharacters:
     def test_csv_quoting_roundtrip_determinism(self, tmp_path: Path) -> None:
         """CSVSink MUST produce deterministic output with special characters."""
         db = make_landscape_db()
-        recorder = make_recorder(db)
-        ctx = make_context(landscape=recorder)
+        factory = make_factory(db)
+        ctx = make_context(landscape=factory)
 
         rows = [
             {"id": 1, "data": 'complex "value", with\nspecial chars'},

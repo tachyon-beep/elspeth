@@ -91,7 +91,7 @@ class TestAuditedLLMClient:
     """Tests for AuditedLLMClient."""
 
     def _create_mock_recorder(self) -> MagicMock:
-        """Create a mock LandscapeRecorder."""
+        """Create a mock ExecutionRepository."""
         import itertools
 
         recorder = MagicMock()

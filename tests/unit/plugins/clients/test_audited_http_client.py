@@ -14,7 +14,7 @@ class TestAuditedHTTPClient:
     """Tests for AuditedHTTPClient."""
 
     def _create_mock_recorder(self) -> MagicMock:
-        """Create a mock LandscapeRecorder."""
+        """Create a mock ExecutionRepository."""
         import itertools
 
         recorder = MagicMock()
@@ -844,7 +844,7 @@ class TestAuditedHTTPClient:
 
         This test verifies that the HTTP client does not truncate large non-JSON
         responses before passing them to record_call(). The payload store auto-persist
-        mechanism in LandscapeRecorder is designed to handle large payloads.
+        mechanism in ExecutionRepository is designed to handle large payloads.
         """
         recorder = self._create_mock_recorder()
 
@@ -1156,7 +1156,7 @@ class TestAuditedHTTPClientGet:
     """Tests for AuditedHTTPClient.get() method."""
 
     def _create_mock_recorder(self) -> MagicMock:
-        """Create a mock LandscapeRecorder."""
+        """Create a mock ExecutionRepository."""
         import itertools
 
         recorder = MagicMock()

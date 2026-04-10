@@ -7,7 +7,7 @@ Tests cover:
 - AggregationExecutor: buffer management, flush lifecycle, trigger delegation
 - SinkExecutor: write lifecycle, artifact recording, callback handling
 
-All tests mock the LandscapeRecorder and SpanFactory to isolate executor logic.
+All tests mock the RecorderFactory and SpanFactory to isolate executor logic.
 
 Error Routing Decision Tree (exd audit)
 ========================================
@@ -86,7 +86,7 @@ from elspeth.contracts.routing import RouteDestination, RoutingAction
 from elspeth.contracts.schema_contract import PipelineRow, SchemaContract
 from elspeth.contracts.types import NodeID, SinkName
 from elspeth.core.config import AggregationSettings, GateSettings, TriggerConfig
-from elspeth.core.landscape import LandscapeRecorder
+from elspeth.core.landscape.factory import RecorderFactory
 from elspeth.engine.executors import (
     AGGREGATION_CHECKPOINT_VERSION,
     AggregationExecutor,
@@ -162,16 +162,16 @@ def _make_token(
     return TokenInfo(row_id=row_id, token_id=token_id, row_data=row_data)
 
 
-def _make_recorder() -> MagicMock:
-    """Create a mock LandscapeRecorder with sensible defaults."""
-    recorder = MagicMock(spec=LandscapeRecorder)
+def _make_factory() -> MagicMock:
+    """Create a mock RecorderFactory with sensible defaults."""
+    factory = MagicMock(spec=RecorderFactory)
     state = Mock(state_id="state_001")
-    recorder.begin_node_state.return_value = state
-    recorder.register_artifact.return_value = Mock(artifact_id="art_001")
+    factory.execution.begin_node_state.return_value = state
+    factory.execution.register_artifact.return_value = Mock(artifact_id="art_001")
     batch = Mock(batch_id="batch_001")
-    recorder.create_batch.return_value = batch
-    recorder.begin_operation.return_value = Mock(operation_id="op_001")
-    return recorder
+    factory.execution.create_batch.return_value = batch
+    factory.execution.begin_operation.return_value = Mock(operation_id="op_001")
+    return factory
 
 
 def _make_span_factory() -> SpanFactory:
@@ -354,8 +354,8 @@ class TestTransformExecutor:
 
     def test_no_node_id_raises_orchestration_invariant_error(self) -> None:
         """Transform without node_id must raise OrchestrationInvariantError."""
-        recorder = _make_recorder()
-        executor = TransformExecutor(recorder, _make_span_factory(), _make_step_resolver())
+        factory = _make_factory()
+        executor = TransformExecutor(factory.execution, _make_span_factory(), _make_step_resolver(), data_flow=factory.data_flow)
         transform = _make_transform(node_id=None)
         token = _make_token()
         ctx = make_context()
@@ -367,8 +367,8 @@ class TestTransformExecutor:
 
     def test_unconditional_input_validation_rejects_wrong_type(self) -> None:
         """Executor rejects row that fails input schema validation (Tier 2)."""
-        recorder = _make_recorder()
-        executor = TransformExecutor(recorder, _make_span_factory(), _make_step_resolver())
+        factory = _make_factory()
+        executor = TransformExecutor(factory.execution, _make_span_factory(), _make_step_resolver(), data_flow=factory.data_flow)
         transform = _make_transform()
         # Create a schema that expects int — give it a string
         from elspeth.contracts import PluginSchema
@@ -389,8 +389,8 @@ class TestTransformExecutor:
 
     def test_successful_transform_returns_result_token_none(self) -> None:
         """Successful transform returns (result, updated_token, None)."""
-        recorder = _make_recorder()
-        executor = TransformExecutor(recorder, _make_span_factory(), _make_step_resolver())
+        factory = _make_factory()
+        executor = TransformExecutor(factory.execution, _make_span_factory(), _make_step_resolver(), data_flow=factory.data_flow)
         contract = _make_contract()
         token = _make_token(contract=contract)
         transform = _make_transform()
@@ -412,8 +412,10 @@ class TestTransformExecutor:
 
     def test_begin_node_state_called_with_correct_args(self) -> None:
         """Recorder.begin_node_state called with token_id, node_id, run_id, step, dict input."""
-        recorder = _make_recorder()
-        executor = TransformExecutor(recorder, _make_span_factory(), _make_step_resolver({"node_1": 3}))
+        factory = _make_factory()
+        executor = TransformExecutor(
+            factory.execution, _make_span_factory(), _make_step_resolver({"node_1": 3}), data_flow=factory.data_flow
+        )
         contract = _make_contract()
         token = _make_token(contract=contract)
         transform = _make_transform()
@@ -425,8 +427,8 @@ class TestTransformExecutor:
 
         executor.execute_transform(transform, token, ctx, attempt=2)
 
-        recorder.begin_node_state.assert_called_once()
-        kwargs = recorder.begin_node_state.call_args[1]
+        factory.execution.begin_node_state.assert_called_once()
+        kwargs = factory.execution.begin_node_state.call_args[1]
         assert kwargs["token_id"] == "tok_1"
         assert kwargs["node_id"] == "node_1"
         assert kwargs["run_id"] == "test-run"
@@ -436,8 +438,8 @@ class TestTransformExecutor:
 
     def test_complete_node_state_called_completed_on_success(self) -> None:
         """On success, complete_node_state is called with COMPLETED status."""
-        recorder = _make_recorder()
-        executor = TransformExecutor(recorder, _make_span_factory(), _make_step_resolver())
+        factory = _make_factory()
+        executor = TransformExecutor(factory.execution, _make_span_factory(), _make_step_resolver(), data_flow=factory.data_flow)
         contract = _make_contract()
         token = _make_token(contract=contract)
         transform = _make_transform()
@@ -449,15 +451,15 @@ class TestTransformExecutor:
 
         executor.execute_transform(transform, token, ctx)
 
-        recorder.complete_node_state.assert_called_once()
-        kwargs = recorder.complete_node_state.call_args[1]
+        factory.execution.complete_node_state.assert_called_once()
+        kwargs = factory.execution.complete_node_state.call_args[1]
         assert kwargs["status"] == NodeStateStatus.COMPLETED
         assert kwargs["state_id"] == "state_001"
 
     def test_result_has_audit_fields_populated(self) -> None:
         """Result has input_hash, output_hash, duration_ms populated by executor."""
-        recorder = _make_recorder()
-        executor = TransformExecutor(recorder, _make_span_factory(), _make_step_resolver())
+        factory = _make_factory()
+        executor = TransformExecutor(factory.execution, _make_span_factory(), _make_step_resolver(), data_flow=factory.data_flow)
         contract = _make_contract()
         token = _make_token(contract=contract)
         transform = _make_transform()
@@ -480,8 +482,8 @@ class TestTransformExecutor:
 
     def test_updated_token_has_new_row_data(self) -> None:
         """Updated token has row_data from the result, preserving lineage."""
-        recorder = _make_recorder()
-        executor = TransformExecutor(recorder, _make_span_factory(), _make_step_resolver())
+        factory = _make_factory()
+        executor = TransformExecutor(factory.execution, _make_span_factory(), _make_step_resolver(), data_flow=factory.data_flow)
         contract = _make_contract()
         token = _make_token(data={"value": "original"}, contract=contract)
         transform = _make_transform()
@@ -504,8 +506,8 @@ class TestTransformExecutor:
 
     def test_ctx_state_id_set_for_external_call_recording(self) -> None:
         """ctx.state_id and ctx.node_id are set before transform.process()."""
-        recorder = _make_recorder()
-        executor = TransformExecutor(recorder, _make_span_factory(), _make_step_resolver())
+        factory = _make_factory()
+        executor = TransformExecutor(factory.execution, _make_span_factory(), _make_step_resolver(), data_flow=factory.data_flow)
         contract = _make_contract()
         token = _make_token(contract=contract)
 
@@ -534,15 +536,17 @@ class TestTransformExecutor:
 
     def test_error_result_with_on_error_sink_returns_error_sink(self) -> None:
         """Error result with on_error=sink_name returns that as error_sink."""
-        recorder = _make_recorder()
+        factory = _make_factory()
         edge_ids = {NodeID("node_1"): "divert_edge_1"}
-        executor = TransformExecutor(recorder, _make_span_factory(), _make_step_resolver(), error_edge_ids=edge_ids)
+        executor = TransformExecutor(
+            factory.execution, _make_span_factory(), _make_step_resolver(), error_edge_ids=edge_ids, data_flow=factory.data_flow
+        )
         transform = _make_transform(on_error="quarantine_sink")
         transform.process.return_value = TransformResult.error(
             reason={"reason": "test_error"},
         )
         token = _make_token()
-        ctx = make_context(landscape=recorder)
+        ctx = make_context(landscape=factory.execution)
 
         result, updated_token, error_sink = executor.execute_transform(
             transform,
@@ -557,14 +561,14 @@ class TestTransformExecutor:
 
     def test_error_result_with_on_error_discard_returns_discard(self) -> None:
         """Error result with on_error='discard' returns 'discard'."""
-        recorder = _make_recorder()
-        executor = TransformExecutor(recorder, _make_span_factory(), _make_step_resolver())
+        factory = _make_factory()
+        executor = TransformExecutor(factory.execution, _make_span_factory(), _make_step_resolver(), data_flow=factory.data_flow)
         transform = _make_transform(on_error="discard")
         transform.process.return_value = TransformResult.error(
             reason={"reason": "test_error"},
         )
         token = _make_token()
-        ctx = make_context(landscape=recorder)
+        ctx = make_context(landscape=factory.execution)
 
         _, _, error_sink = executor.execute_transform(
             transform,
@@ -583,39 +587,39 @@ class TestTransformExecutor:
         """
         # Every transform constructed via TransformSettings will have on_error set.
         # Verify a transform with on_error="discard" works (the minimum valid value).
-        recorder = _make_recorder()
-        executor = TransformExecutor(recorder, _make_span_factory(), _make_step_resolver())
+        factory = _make_factory()
+        executor = TransformExecutor(factory.execution, _make_span_factory(), _make_step_resolver(), data_flow=factory.data_flow)
         transform = _make_transform(on_error="discard")
         transform.process.return_value = TransformResult.error(
             reason={"reason": "test_error"},
         )
         token = _make_token()
-        ctx = make_context(landscape=recorder)
+        ctx = make_context(landscape=factory.execution)
 
         _, _, error_sink = executor.execute_transform(transform, token, ctx)
         assert error_sink == "discard"
 
     def test_error_path_records_failed_state(self) -> None:
         """Error result records FAILED node_state."""
-        recorder = _make_recorder()
-        executor = TransformExecutor(recorder, _make_span_factory(), _make_step_resolver())
+        factory = _make_factory()
+        executor = TransformExecutor(factory.execution, _make_span_factory(), _make_step_resolver(), data_flow=factory.data_flow)
         transform = _make_transform(on_error="discard")
         transform.process.return_value = TransformResult.error(
             reason={"reason": "test_error"},
         )
         token = _make_token()
-        ctx = make_context(landscape=recorder)
+        ctx = make_context(landscape=factory.execution)
 
         executor.execute_transform(transform, token, ctx)
 
-        recorder.complete_node_state.assert_called_once()
-        kwargs = recorder.complete_node_state.call_args[1]
+        factory.execution.complete_node_state.assert_called_once()
+        kwargs = factory.execution.complete_node_state.call_args[1]
         assert kwargs["status"] == NodeStateStatus.FAILED
 
     def test_error_path_records_transform_error(self) -> None:
         """Error result calls ctx.record_transform_error."""
-        recorder = _make_recorder()
-        executor = TransformExecutor(recorder, _make_span_factory(), _make_step_resolver())
+        factory = _make_factory()
+        executor = TransformExecutor(factory.execution, _make_span_factory(), _make_step_resolver(), data_flow=factory.data_flow)
         transform = _make_transform(on_error="discard")
         transform.process.return_value = TransformResult.error(
             reason={"reason": "test_error"},
@@ -630,34 +634,36 @@ class TestTransformExecutor:
 
     def test_error_path_non_discard_records_divert_routing(self) -> None:
         """Non-discard error routing records a DIVERT routing_event."""
-        recorder = _make_recorder()
+        factory = _make_factory()
         edge_ids = {NodeID("node_1"): "divert_edge_1"}
-        executor = TransformExecutor(recorder, _make_span_factory(), _make_step_resolver(), error_edge_ids=edge_ids)
+        executor = TransformExecutor(
+            factory.execution, _make_span_factory(), _make_step_resolver(), error_edge_ids=edge_ids, data_flow=factory.data_flow
+        )
         transform = _make_transform(on_error="quarantine_sink")
         transform.process.return_value = TransformResult.error(
             reason={"reason": "test_error"},
         )
         token = _make_token()
-        ctx = make_context(landscape=recorder)
+        ctx = make_context(landscape=factory.execution)
 
         executor.execute_transform(transform, token, ctx)
 
-        recorder.record_routing_event.assert_called_once()
-        kwargs = recorder.record_routing_event.call_args[1]
+        factory.execution.record_routing_event.assert_called_once()
+        kwargs = factory.execution.record_routing_event.call_args[1]
         assert kwargs["edge_id"] == "divert_edge_1"
         assert kwargs["mode"] == RoutingMode.DIVERT
 
     def test_error_path_missing_divert_edge_raises(self) -> None:
         """Non-discard error without DIVERT edge raises OrchestrationInvariantError."""
-        recorder = _make_recorder()
+        factory = _make_factory()
         # No error_edge_ids registered
-        executor = TransformExecutor(recorder, _make_span_factory(), _make_step_resolver())
+        executor = TransformExecutor(factory.execution, _make_span_factory(), _make_step_resolver(), data_flow=factory.data_flow)
         transform = _make_transform(on_error="quarantine_sink")
         transform.process.return_value = TransformResult.error(
             reason={"reason": "test_error"},
         )
         token = _make_token()
-        ctx = make_context(landscape=recorder)
+        ctx = make_context(landscape=factory.execution)
 
         with pytest.raises(OrchestrationInvariantError, match="DIVERT edge"):
             executor.execute_transform(transform, token, ctx)
@@ -666,8 +672,8 @@ class TestTransformExecutor:
 
     def test_exception_from_process_records_failed_and_reraises(self) -> None:
         """Exception from transform.process() records FAILED and re-raises."""
-        recorder = _make_recorder()
-        executor = TransformExecutor(recorder, _make_span_factory(), _make_step_resolver())
+        factory = _make_factory()
+        executor = TransformExecutor(factory.execution, _make_span_factory(), _make_step_resolver(), data_flow=factory.data_flow)
         transform = _make_transform()
         transform.process.side_effect = ValueError("plugin bug")
         token = _make_token()
@@ -676,15 +682,15 @@ class TestTransformExecutor:
         with pytest.raises(ValueError, match="plugin bug"):
             executor.execute_transform(transform, token, ctx)
 
-        recorder.complete_node_state.assert_called_once()
-        kwargs = recorder.complete_node_state.call_args[1]
+        factory.execution.complete_node_state.assert_called_once()
+        kwargs = factory.execution.complete_node_state.call_args[1]
         assert kwargs["status"] == NodeStateStatus.FAILED
         assert "plugin bug" in kwargs["error"].exception
 
     def test_exception_path_captures_duration(self) -> None:
         """Duration is captured even when exception is raised."""
-        recorder = _make_recorder()
-        executor = TransformExecutor(recorder, _make_span_factory(), _make_step_resolver())
+        factory = _make_factory()
+        executor = TransformExecutor(factory.execution, _make_span_factory(), _make_step_resolver(), data_flow=factory.data_flow)
         transform = _make_transform()
         transform.process.side_effect = RuntimeError("crash")
         token = _make_token()
@@ -693,7 +699,7 @@ class TestTransformExecutor:
         with pytest.raises(RuntimeError):
             executor.execute_transform(transform, token, ctx)
 
-        kwargs = recorder.complete_node_state.call_args[1]
+        kwargs = factory.execution.complete_node_state.call_args[1]
         assert kwargs["duration_ms"] >= 0
 
     # --- Error routing edge cases (exd audit) ---
@@ -704,32 +710,32 @@ class TestTransformExecutor:
         Discard means quarantine silently — no routing decision was made,
         so recording a DIVERT event would misrepresent the audit trail.
         """
-        recorder = _make_recorder()
-        executor = TransformExecutor(recorder, _make_span_factory(), _make_step_resolver())
+        factory = _make_factory()
+        executor = TransformExecutor(factory.execution, _make_span_factory(), _make_step_resolver(), data_flow=factory.data_flow)
         transform = _make_transform(on_error="discard")
         transform.process.return_value = TransformResult.error(
             reason={"reason": "test_error"},
         )
         token = _make_token()
-        ctx = make_context(landscape=recorder)
+        ctx = make_context(landscape=factory.execution)
 
         executor.execute_transform(transform, token, ctx)
 
-        recorder.record_routing_event.assert_not_called()
+        factory.execution.record_routing_event.assert_not_called()
 
     def test_error_reason_propagated_to_node_state_error_field(self) -> None:
         """TransformResult.error() reason dict stored as node_state error."""
-        recorder = _make_recorder()
-        executor = TransformExecutor(recorder, _make_span_factory(), _make_step_resolver())
+        factory = _make_factory()
+        executor = TransformExecutor(factory.execution, _make_span_factory(), _make_step_resolver(), data_flow=factory.data_flow)
         transform = _make_transform(on_error="discard")
         error_reason: TransformErrorReason = {"reason": "content_filtered", "provider": "azure", "code": "CF-01"}  # type: ignore[typeddict-unknown-key]
         transform.process.return_value = TransformResult.error(reason=error_reason)
         token = _make_token()
-        ctx = make_context(landscape=recorder)
+        ctx = make_context(landscape=factory.execution)
 
         executor.execute_transform(transform, token, ctx)
 
-        kwargs = recorder.complete_node_state.call_args[1]
+        kwargs = factory.execution.complete_node_state.call_args[1]
         assert kwargs["error"] == error_reason
 
     def test_non_discard_error_records_both_transform_error_and_divert(self) -> None:
@@ -739,9 +745,11 @@ class TestTransformExecutor:
         captures the error details, and the DIVERT records the routing
         decision for lineage tracing.
         """
-        recorder = _make_recorder()
+        factory = _make_factory()
         edge_ids = {NodeID("node_1"): "divert_edge_1"}
-        executor = TransformExecutor(recorder, _make_span_factory(), _make_step_resolver(), error_edge_ids=edge_ids)
+        executor = TransformExecutor(
+            factory.execution, _make_span_factory(), _make_step_resolver(), error_edge_ids=edge_ids, data_flow=factory.data_flow
+        )
         transform = _make_transform(on_error="error_sink")
         transform.process.return_value = TransformResult.error(
             reason={"reason": "api_error"},
@@ -754,8 +762,8 @@ class TestTransformExecutor:
 
         # Both must be recorded
         ctx.record_transform_error.assert_called_once()
-        recorder.record_routing_event.assert_called_once()
-        assert recorder.record_routing_event.call_args[1]["mode"] == RoutingMode.DIVERT
+        factory.execution.record_routing_event.assert_called_once()
+        assert factory.execution.record_routing_event.call_args[1]["mode"] == RoutingMode.DIVERT
 
     # --- Field collision enforcement ---
 
@@ -766,8 +774,8 @@ class TestTransformExecutor:
         calling transform.process(). Collisions crash the pipeline (not graceful error)
         because field collision is a pipeline configuration bug, not a data issue.
         """
-        recorder = _make_recorder()
-        executor = TransformExecutor(recorder, _make_span_factory(), _make_step_resolver())
+        factory = _make_factory()
+        executor = TransformExecutor(factory.execution, _make_span_factory(), _make_step_resolver(), data_flow=factory.data_flow)
         transform = _make_transform(
             declared_output_fields=frozenset({"llm_response", "llm_response_model"}),
         )
@@ -784,8 +792,8 @@ class TestTransformExecutor:
         Transforms that don't add fields (e.g., passthrough, truncate) have
         declared_output_fields = frozenset(). The executor skips the check entirely.
         """
-        recorder = _make_recorder()
-        executor = TransformExecutor(recorder, _make_span_factory(), _make_step_resolver())
+        factory = _make_factory()
+        executor = TransformExecutor(factory.execution, _make_span_factory(), _make_step_resolver(), data_flow=factory.data_flow)
         contract = _make_contract()
         transform = _make_transform(declared_output_fields=frozenset())
         transform.process.return_value = TransformResult.success(
@@ -806,8 +814,8 @@ class TestTransformExecutor:
         This is the key efficiency property: expensive external calls (LLM, HTTP)
         are never made when we already know the output will collide with the input.
         """
-        recorder = _make_recorder()
-        executor = TransformExecutor(recorder, _make_span_factory(), _make_step_resolver())
+        factory = _make_factory()
+        executor = TransformExecutor(factory.execution, _make_span_factory(), _make_step_resolver(), data_flow=factory.data_flow)
         transform = _make_transform(
             declared_output_fields=frozenset({"value"}),
         )
@@ -822,8 +830,8 @@ class TestTransformExecutor:
 
     def test_no_collision_when_declared_fields_disjoint_from_input(self) -> None:
         """No collision raised when declared output fields don't overlap with input."""
-        recorder = _make_recorder()
-        executor = TransformExecutor(recorder, _make_span_factory(), _make_step_resolver())
+        factory = _make_factory()
+        executor = TransformExecutor(factory.execution, _make_span_factory(), _make_step_resolver(), data_flow=factory.data_flow)
         contract = _make_contract()
         transform = _make_transform(
             declared_output_fields=frozenset({"new_field", "another_new"}),
@@ -844,8 +852,8 @@ class TestTransformExecutor:
 
     def test_passes_pipeline_row_to_plugin(self) -> None:
         """TransformExecutor should pass PipelineRow (not dict) to transform.process()."""
-        recorder = _make_recorder()
-        executor = TransformExecutor(recorder, _make_span_factory(), _make_step_resolver())
+        factory = _make_factory()
+        executor = TransformExecutor(factory.execution, _make_span_factory(), _make_step_resolver(), data_flow=factory.data_flow)
         contract = _make_contract()
         transform = _make_transform()
         transform.process.return_value = TransformResult.success(
@@ -864,8 +872,8 @@ class TestTransformExecutor:
 
     def test_extracts_dict_for_landscape_recording(self) -> None:
         """Landscape recording should receive plain dict, not PipelineRow."""
-        recorder = _make_recorder()
-        executor = TransformExecutor(recorder, _make_span_factory(), _make_step_resolver())
+        factory = _make_factory()
+        executor = TransformExecutor(factory.execution, _make_span_factory(), _make_step_resolver(), data_flow=factory.data_flow)
         contract = _make_contract()
         transform = _make_transform()
         transform.process.return_value = TransformResult.success(
@@ -877,16 +885,16 @@ class TestTransformExecutor:
 
         executor.execute_transform(transform, token, ctx)
 
-        recorder.begin_node_state.assert_called_once()
-        input_data = recorder.begin_node_state.call_args[1]["input_data"]
+        factory.execution.begin_node_state.assert_called_once()
+        input_data = factory.execution.begin_node_state.call_args[1]["input_data"]
         assert isinstance(input_data, dict)
         assert type(input_data) is not PipelineRow  # type: ignore[comparison-overlap, unreachable]
         assert input_data == {"value": "test"}
 
     def test_sets_ctx_contract_from_token(self) -> None:
         """TransformExecutor should set ctx.contract from token.row_data.contract."""
-        recorder = _make_recorder()
-        executor = TransformExecutor(recorder, _make_span_factory(), _make_step_resolver())
+        factory = _make_factory()
+        executor = TransformExecutor(factory.execution, _make_span_factory(), _make_step_resolver(), data_flow=factory.data_flow)
         contract = _make_contract()
 
         captured_ctx = None
@@ -912,8 +920,8 @@ class TestTransformExecutor:
 
     def test_creates_pipeline_row_from_result(self) -> None:
         """Updated token should have PipelineRow with output contract."""
-        recorder = _make_recorder()
-        executor = TransformExecutor(recorder, _make_span_factory(), _make_step_resolver())
+        factory = _make_factory()
+        executor = TransformExecutor(factory.execution, _make_span_factory(), _make_step_resolver(), data_flow=factory.data_flow)
         input_contract = _make_contract()
         output_contract = SchemaContract(
             fields=(
@@ -940,15 +948,15 @@ class TestTransformExecutor:
 
     def test_error_preserves_original_token(self) -> None:
         """When transform returns error, token should be unchanged."""
-        recorder = _make_recorder()
-        executor = TransformExecutor(recorder, _make_span_factory(), _make_step_resolver())
+        factory = _make_factory()
+        executor = TransformExecutor(factory.execution, _make_span_factory(), _make_step_resolver(), data_flow=factory.data_flow)
         contract = _make_contract()
         transform = _make_transform(on_error="discard")
         transform.process.return_value = TransformResult.error(
             reason={"reason": "test_error"},
         )
         token = _make_token(contract=contract)
-        ctx = make_context(landscape=recorder)
+        ctx = make_context(landscape=factory.execution)
 
         _result, updated_token, _error_sink = executor.execute_transform(transform, token, ctx)
 
@@ -959,8 +967,8 @@ class TestTransformExecutor:
 
     def test_on_start_not_called_raises_plugin_contract_violation(self) -> None:
         """Lifecycle guard: executing a transform before on_start() raises PluginContractViolation."""
-        recorder = _make_recorder()
-        executor = TransformExecutor(recorder, _make_span_factory(), _make_step_resolver())
+        factory = _make_factory()
+        executor = TransformExecutor(factory.execution, _make_span_factory(), _make_step_resolver(), data_flow=factory.data_flow)
         transform = _make_transform()
         transform._on_start_called = False  # Simulate missing lifecycle call
         token = _make_token()
@@ -971,22 +979,22 @@ class TestTransformExecutor:
 
     def test_on_error_none_raises_orchestration_invariant_error(self) -> None:
         """on_error=None invariant: last-line defense if config layer regresses."""
-        recorder = _make_recorder()
-        executor = TransformExecutor(recorder, _make_span_factory(), _make_step_resolver())
+        factory = _make_factory()
+        executor = TransformExecutor(factory.execution, _make_span_factory(), _make_step_resolver(), data_flow=factory.data_flow)
         transform = _make_transform(on_error=None)  # Simulate config regression
         transform.process.return_value = TransformResult.error(
             reason={"reason": "test_error"},
         )
         token = _make_token()
-        ctx = make_context(landscape=recorder)
+        ctx = make_context(landscape=factory.execution)
 
         with pytest.raises(OrchestrationInvariantError, match="on_error=None"):
             executor.execute_transform(transform, token, ctx)
 
     def test_error_reason_none_raises_orchestration_invariant_error(self) -> None:
         """reason=None invariant: prevents incomplete audit records from error results."""
-        recorder = _make_recorder()
-        executor = TransformExecutor(recorder, _make_span_factory(), _make_step_resolver())
+        factory = _make_factory()
+        executor = TransformExecutor(factory.execution, _make_span_factory(), _make_step_resolver(), data_flow=factory.data_flow)
         transform = _make_transform(on_error="discard")
         # Construct a valid error result, then corrupt it to bypass __post_init__
         # This simulates a hypothetical bug in TransformResult construction.
@@ -994,15 +1002,15 @@ class TestTransformExecutor:
         object.__setattr__(result, "reason", None)
         transform.process.return_value = result
         token = _make_token()
-        ctx = make_context(landscape=recorder)
+        ctx = make_context(landscape=factory.execution)
 
         with pytest.raises(OrchestrationInvariantError, match="reason is None"):
             executor.execute_transform(transform, token, ctx)
 
     def test_success_with_no_output_data_raises_runtime_error(self) -> None:
         """Success with no output data: prevents empty results entering audit trail."""
-        recorder = _make_recorder()
-        executor = TransformExecutor(recorder, _make_span_factory(), _make_step_resolver())
+        factory = _make_factory()
+        executor = TransformExecutor(factory.execution, _make_span_factory(), _make_step_resolver(), data_flow=factory.data_flow)
         transform = _make_transform()
         # Construct a valid success result, then strip output to bypass __post_init__
         result = TransformResult.success(
@@ -1031,11 +1039,11 @@ class TestGateExecutor:
 
     def test_config_gate_boolean_true_routes_via_true_label(self) -> None:
         """Boolean True condition evaluates to 'true' label."""
-        recorder = _make_recorder()
+        factory = _make_factory()
         edge_map = {(NodeID("cg_1"), "true"): "edge_true"}
         route_map = {(NodeID("cg_1"), "true"): RouteDestination.processing_node(NodeID("next_node"))}
         executor = GateExecutor(
-            recorder,
+            factory.execution,
             _make_span_factory(),
             _make_step_resolver(),
             edge_map=edge_map,
@@ -1063,12 +1071,12 @@ class TestGateExecutor:
 
     def test_config_gate_boolean_false_routes_via_false_label(self) -> None:
         """Boolean False condition evaluates to 'false' label."""
-        recorder = _make_recorder()
+        factory = _make_factory()
         # Edge map must have the route label that will be used for recording
         edge_map = {(NodeID("cg_1"), "false"): "edge_false"}
         route_map = {(NodeID("cg_1"), "false"): RouteDestination.sink(SinkName("error_sink"))}
         executor = GateExecutor(
-            recorder,
+            factory.execution,
             _make_span_factory(),
             _make_step_resolver(),
             edge_map=edge_map,
@@ -1095,11 +1103,11 @@ class TestGateExecutor:
 
     def test_config_gate_string_result_used_as_label(self) -> None:
         """String condition result used as route label directly."""
-        recorder = _make_recorder()
+        factory = _make_factory()
         edge_map = {(NodeID("cg_1"), "high"): "edge_high"}
         route_map = {(NodeID("cg_1"), "high"): RouteDestination.processing_node(NodeID("next_node"))}
         executor = GateExecutor(
-            recorder,
+            factory.execution,
             _make_span_factory(),
             _make_step_resolver(),
             edge_map=edge_map,
@@ -1127,11 +1135,11 @@ class TestGateExecutor:
 
     def test_config_gate_route_to_processing_node(self) -> None:
         """Config gate route label can branch to a processing node."""
-        recorder = _make_recorder()
+        factory = _make_factory()
         edge_map = {(NodeID("cg_1"), "high"): "edge_high"}
         route_map = {(NodeID("cg_1"), "high"): RouteDestination.processing_node(NodeID("transform_2"))}
         executor = GateExecutor(
-            recorder,
+            factory.execution,
             _make_span_factory(),
             _make_step_resolver(),
             edge_map=edge_map,
@@ -1159,8 +1167,8 @@ class TestGateExecutor:
 
     def test_config_gate_unknown_route_label_raises_value_error(self) -> None:
         """Unknown route label raises ValueError with FAILED state recorded."""
-        recorder = _make_recorder()
-        executor = GateExecutor(recorder, _make_span_factory(), _make_step_resolver())
+        factory = _make_factory()
+        executor = GateExecutor(factory.execution, _make_span_factory(), _make_step_resolver())
         config = GateSettings(
             name="my_gate",
             input="in_conn",
@@ -1180,13 +1188,13 @@ class TestGateExecutor:
             )
 
         # Verify FAILED state was recorded before raising
-        assert recorder.complete_node_state.call_count >= 1
-        last_call = recorder.complete_node_state.call_args_list[-1]
+        assert factory.execution.complete_node_state.call_count >= 1
+        last_call = factory.execution.complete_node_state.call_args_list[-1]
         assert last_call[1]["status"] == NodeStateStatus.FAILED
 
     def test_config_gate_fork_destination_creates_children(self) -> None:
         """Config gate with 'fork' destination creates child tokens."""
-        recorder = _make_recorder()
+        factory = _make_factory()
         edge_map = {
             (NodeID("cg_1"), "path_a"): "edge_a",
             (NodeID("cg_1"), "path_b"): "edge_b",
@@ -1194,7 +1202,7 @@ class TestGateExecutor:
         }
         route_map = {(NodeID("cg_1"), "true"): RouteDestination.fork()}
         executor = GateExecutor(
-            recorder,
+            factory.execution,
             _make_span_factory(),
             _make_step_resolver(),
             edge_map=edge_map,
@@ -1235,7 +1243,7 @@ class TestGateExecutor:
         All exceptions during dispatch/routing close the node state to prevent
         non-terminal OPEN states in the audit trail.
         """
-        recorder = _make_recorder()
+        factory = _make_factory()
         edge_map = {
             (NodeID("cg_1"), "path_a"): "edge_a",
             (NodeID("cg_1"), "path_b"): "edge_b",
@@ -1243,7 +1251,7 @@ class TestGateExecutor:
         }
         route_map = {(NodeID("cg_1"), "true"): RouteDestination.fork()}
         executor = GateExecutor(
-            recorder,
+            factory.execution,
             _make_span_factory(),
             _make_step_resolver(),
             edge_map=edge_map,
@@ -1268,14 +1276,14 @@ class TestGateExecutor:
                 token_manager=None,
             )
 
-        statuses = [call.kwargs.get("status") for call in recorder.complete_node_state.call_args_list]
+        statuses = [call.kwargs.get("status") for call in factory.execution.complete_node_state.call_args_list]
         assert NodeStateStatus.FAILED in statuses
 
     def test_config_gate_missing_route_resolution_fails_closed(self) -> None:
         """Missing route resolution mapping raises MissingEdgeError (no fallback)."""
-        recorder = _make_recorder()
+        factory = _make_factory()
         edge_map = {(NodeID("cg_1"), "continue"): "edge_cont"}
-        executor = GateExecutor(recorder, _make_span_factory(), _make_step_resolver(), edge_map=edge_map)
+        executor = GateExecutor(factory.execution, _make_span_factory(), _make_step_resolver(), edge_map=edge_map)
         config = GateSettings(
             name="my_gate",
             input="in_conn",
@@ -1294,8 +1302,8 @@ class TestGateExecutor:
                 ctx,
             )
 
-        assert recorder.complete_node_state.call_count >= 1
-        last_call = recorder.complete_node_state.call_args_list[-1]
+        assert factory.execution.complete_node_state.call_count >= 1
+        last_call = factory.execution.complete_node_state.call_args_list[-1]
         assert last_call[1]["status"] == NodeStateStatus.FAILED
 
     def test_config_gate_exception_records_failed_and_reraises(self) -> None:
@@ -1305,8 +1313,8 @@ class TestGateExecutor:
         use a condition that is syntactically valid but raises at evaluation time
         (e.g., accessing a non-existent field on the row data via a runtime error).
         """
-        recorder = _make_recorder()
-        executor = GateExecutor(recorder, _make_span_factory(), _make_step_resolver())
+        factory = _make_factory()
+        executor = GateExecutor(factory.execution, _make_span_factory(), _make_step_resolver())
         # Syntactically valid but references a key that will cause evaluation error
         config = GateSettings(
             name="my_gate",
@@ -1328,8 +1336,8 @@ class TestGateExecutor:
                 ctx,
             )
 
-        assert recorder.complete_node_state.call_count >= 1
-        last_call = recorder.complete_node_state.call_args_list[-1]
+        assert factory.execution.complete_node_state.call_count >= 1
+        last_call = factory.execution.complete_node_state.call_args_list[-1]
         assert last_call[1]["status"] == NodeStateStatus.FAILED
 
     def test_config_gate_runtime_error_in_dispatch_records_failed_state(self) -> None:
@@ -1341,7 +1349,7 @@ class TestGateExecutor:
 
         Fix: Widened except from MissingEdgeError to Exception.
         """
-        recorder = _make_recorder()
+        factory = _make_factory()
         # Create a route_resolution_map that resolves to a fork destination
         # but provide NO token_manager — this triggers OrchestrationInvariantError
         # We also test with a completely custom RuntimeError via mock
@@ -1352,7 +1360,7 @@ class TestGateExecutor:
         }
         route_map = {(NodeID("cg_1"), "true"): RouteDestination.fork()}
         executor = GateExecutor(
-            recorder,
+            factory.execution,
             _make_span_factory(),
             _make_step_resolver(),
             edge_map=edge_map,
@@ -1382,7 +1390,7 @@ class TestGateExecutor:
             )
 
         # Verify FAILED status was recorded (the fix ensures this)
-        statuses = [call.kwargs.get("status") for call in recorder.complete_node_state.call_args_list]
+        statuses = [call.kwargs.get("status") for call in factory.execution.complete_node_state.call_args_list]
         assert NodeStateStatus.FAILED in statuses, (
             "Node state should be FAILED when dispatch raises any Exception, not just MissingEdgeError"
         )
@@ -1391,8 +1399,8 @@ class TestGateExecutor:
 
     def test_config_gate_none_result_raises_type_error(self) -> None:
         """Expression returning None raises TypeError — only bool/str are valid."""
-        recorder = _make_recorder()
-        executor = GateExecutor(recorder, _make_span_factory(), _make_step_resolver())
+        factory = _make_factory()
+        executor = GateExecutor(factory.execution, _make_span_factory(), _make_step_resolver())
         config = GateSettings(
             name="my_gate",
             input="in_conn",
@@ -1408,8 +1416,8 @@ class TestGateExecutor:
 
     def test_config_gate_int_result_raises_type_error(self) -> None:
         """Expression returning int raises TypeError — only bool/str are valid."""
-        recorder = _make_recorder()
-        executor = GateExecutor(recorder, _make_span_factory(), _make_step_resolver())
+        factory = _make_factory()
+        executor = GateExecutor(factory.execution, _make_span_factory(), _make_step_resolver())
         config = GateSettings(
             name="my_gate",
             input="in_conn",
@@ -1427,11 +1435,11 @@ class TestGateExecutor:
 
     def test_config_gate_records_context_after(self) -> None:
         """Gate evaluation metadata is passed as context_after for audit completeness."""
-        recorder = _make_recorder()
+        factory = _make_factory()
         edge_map = {(NodeID("cg_1"), "true"): "edge_true"}
         route_map = {(NodeID("cg_1"), "true"): RouteDestination.processing_node(NodeID("next_node"))}
         executor = GateExecutor(
-            recorder,
+            factory.execution,
             _make_span_factory(),
             _make_step_resolver(),
             edge_map=edge_map,
@@ -1451,7 +1459,7 @@ class TestGateExecutor:
 
         # Find the COMPLETED call (not the begin_node_state call)
         completed_call = None
-        for call in recorder.complete_node_state.call_args_list:
+        for call in factory.execution.complete_node_state.call_args_list:
             if call.kwargs.get("status") == NodeStateStatus.COMPLETED:
                 completed_call = call
                 break
@@ -1470,9 +1478,9 @@ class TestGateExecutor:
 
     def test_config_gate_failure_does_not_set_context_after(self) -> None:
         """Failed gate evaluations should not set context_after."""
-        recorder = _make_recorder()
+        factory = _make_factory()
         executor = GateExecutor(
-            recorder,
+            factory.execution,
             _make_span_factory(),
             _make_step_resolver(),
         )
@@ -1491,7 +1499,7 @@ class TestGateExecutor:
             executor.execute_config_gate(config, "cg_1", token, ctx)
 
         # The FAILED call should not have context_after
-        failed_call = recorder.complete_node_state.call_args_list[-1]
+        failed_call = factory.execution.complete_node_state.call_args_list[-1]
         assert failed_call.kwargs.get("status") == NodeStateStatus.FAILED
         assert "context_after" not in failed_call.kwargs
 
@@ -1506,11 +1514,11 @@ class TestGateExecutor:
         (used for output_hash computation) AFTER successful gate evaluation
         and dispatch — code that runs after all manual try/except blocks.
         """
-        recorder = _make_recorder()
+        factory = _make_factory()
         edge_map = {(NodeID("cg_1"), "true"): "edge_true"}
         route_map = {(NodeID("cg_1"), "true"): RouteDestination.processing_node(NodeID("next_node"))}
         executor = GateExecutor(
-            recorder,
+            factory.execution,
             _make_span_factory(),
             _make_step_resolver(),
             edge_map=edge_map,
@@ -1551,7 +1559,9 @@ class TestGateExecutor:
             gate_mod.stable_hash = original_ref  # type: ignore[attr-defined]
 
         # State must be FAILED (auto-completed by guard), not orphan OPEN
-        completed_calls = [c for c in recorder.complete_node_state.call_args_list if c.kwargs.get("status") == NodeStateStatus.FAILED]
+        completed_calls = [
+            c for c in factory.execution.complete_node_state.call_args_list if c.kwargs.get("status") == NodeStateStatus.FAILED
+        ]
         assert len(completed_calls) >= 1, (
             "Node state should be FAILED when post-dispatch processing raises. "
             "Without NodeStateGuard, this failure would leave the state OPEN."
@@ -1579,7 +1589,7 @@ class TestDispatchResolvedDestinationPerVariant:
         route_map: dict[tuple[NodeID, str], RouteDestination] | None = None,
     ) -> GateExecutor:
         return GateExecutor(
-            _make_recorder(),
+            _make_factory().execution,
             _make_span_factory(),
             _make_step_resolver(),
             edge_map=edge_map,
@@ -1937,13 +1947,13 @@ class TestAggregationExecutor:
 
     def _make_agg_executor(
         self,
-        recorder: MagicMock | None = None,
+        factory: MagicMock | None = None,
         node_id: str = "agg_1",
         count: int = 3,
     ) -> tuple[AggregationExecutor, MagicMock, NodeID]:
         """Create an AggregationExecutor with a single configured node."""
-        if recorder is None:
-            recorder = _make_recorder()
+        if factory is None:
+            factory = _make_factory()
         span_factory = _make_span_factory()
         nid = NodeID(node_id)
         settings = AggregationSettings(
@@ -1954,13 +1964,13 @@ class TestAggregationExecutor:
             trigger=TriggerConfig(count=count),
         )
         executor = AggregationExecutor(
-            recorder,
+            factory.execution,
             span_factory,
             _make_step_resolver(),
             run_id="test-run",
             aggregation_settings={nid: settings},
         )
-        return executor, recorder, nid
+        return executor, factory, nid
 
     # --- buffer_row ---
 
@@ -1973,35 +1983,35 @@ class TestAggregationExecutor:
             executor.buffer_row(NodeID("unknown"), token)
 
     def test_buffer_row_first_row_creates_batch(self) -> None:
-        """First buffered row creates a new batch via recorder."""
-        executor, recorder, nid = self._make_agg_executor()
+        """First buffered row creates a new batch via execution repo."""
+        executor, factory, nid = self._make_agg_executor()
         token = _make_token()
 
         executor.buffer_row(nid, token)
 
-        recorder.create_batch.assert_called_once_with(
+        factory.execution.create_batch.assert_called_once_with(
             run_id="test-run",
             aggregation_node_id=nid,
         )
 
     def test_buffer_row_subsequent_rows_reuse_batch(self) -> None:
         """Second row does not create a new batch."""
-        executor, recorder, nid = self._make_agg_executor()
+        executor, factory, nid = self._make_agg_executor()
 
         executor.buffer_row(nid, _make_token(token_id="t1"))
         executor.buffer_row(nid, _make_token(token_id="t2"))
 
         # Only one batch created
-        assert recorder.create_batch.call_count == 1
+        assert factory.execution.create_batch.call_count == 1
 
     def test_buffer_row_records_batch_member_with_ordinal(self) -> None:
         """Each buffered row records a batch member with incrementing ordinal."""
-        executor, recorder, nid = self._make_agg_executor()
+        executor, factory, nid = self._make_agg_executor()
 
         executor.buffer_row(nid, _make_token(token_id="t1"))
         executor.buffer_row(nid, _make_token(token_id="t2"))
 
-        calls = recorder.add_batch_member.call_args_list
+        calls = factory.execution.add_batch_member.call_args_list
         assert len(calls) == 2
         assert calls[0][1]["ordinal"] == 0
         assert calls[1][1]["ordinal"] == 1
@@ -2123,7 +2133,7 @@ class TestAggregationExecutor:
 
     def test_execute_flush_success_completes_batch_and_state(self) -> None:
         """Successful flush transitions batch to COMPLETED and state to COMPLETED."""
-        executor, recorder, nid = self._make_agg_executor(count=2)
+        executor, factory, nid = self._make_agg_executor(count=2)
         contract = _make_contract()
 
         # Buffer two rows
@@ -2151,14 +2161,14 @@ class TestAggregationExecutor:
         assert batch_id == "batch_001"
 
         # Verify batch completed
-        complete_calls = [c for c in recorder.complete_batch.call_args_list if c[1].get("status") == BatchStatus.COMPLETED]
+        complete_calls = [c for c in factory.execution.complete_batch.call_args_list if c[1].get("status") == BatchStatus.COMPLETED]
         assert len(complete_calls) == 1
 
     def test_execute_flush_success_passes_aggregation_flush_context(self) -> None:
         """Successful flush passes AggregationFlushContext as context_after."""
         from elspeth.contracts.node_state_context import AggregationFlushContext
 
-        executor, recorder, nid = self._make_agg_executor(count=2)
+        executor, factory, nid = self._make_agg_executor(count=2)
         contract = _make_contract()
 
         # Buffer two rows
@@ -2177,7 +2187,9 @@ class TestAggregationExecutor:
         executor.execute_flush(nid, transform, ctx, TriggerType.COUNT)
 
         # Find the COMPLETED call to complete_node_state (success path)
-        completed_calls = [c for c in recorder.complete_node_state.call_args_list if c[1].get("status") == NodeStateStatus.COMPLETED]
+        completed_calls = [
+            c for c in factory.execution.complete_node_state.call_args_list if c[1].get("status") == NodeStateStatus.COMPLETED
+        ]
         assert len(completed_calls) == 1
 
         context_after = completed_calls[0][1]["context_after"]
@@ -2188,7 +2200,7 @@ class TestAggregationExecutor:
 
     def test_execute_flush_error_result_marks_batch_failed(self) -> None:
         """Error result from transform marks batch as FAILED."""
-        executor, recorder, nid = self._make_agg_executor(count=2)
+        executor, factory, nid = self._make_agg_executor(count=2)
         contract = _make_contract()
 
         executor.buffer_row(nid, _make_token(data={"value": "a"}, token_id="t1", contract=contract))
@@ -2211,12 +2223,12 @@ class TestAggregationExecutor:
         assert result.status == "error"
 
         # Verify batch marked failed
-        failed_calls = [c for c in recorder.complete_batch.call_args_list if c[1].get("status") == BatchStatus.FAILED]
+        failed_calls = [c for c in factory.execution.complete_batch.call_args_list if c[1].get("status") == BatchStatus.FAILED]
         assert len(failed_calls) == 1
 
     def test_execute_flush_exception_marks_batch_failed_and_reraises(self) -> None:
         """Exception from transform marks batch as FAILED and re-raises."""
-        executor, recorder, nid = self._make_agg_executor(count=2)
+        executor, factory, nid = self._make_agg_executor(count=2)
         contract = _make_contract()
 
         executor.buffer_row(nid, _make_token(data={"value": "a"}, token_id="t1", contract=contract))
@@ -2231,7 +2243,7 @@ class TestAggregationExecutor:
             executor.execute_flush(nid, transform, ctx, TriggerType.COUNT)
 
         # Verify batch marked failed
-        failed_calls = [c for c in recorder.complete_batch.call_args_list if c[1].get("status") == BatchStatus.FAILED]
+        failed_calls = [c for c in factory.execution.complete_batch.call_args_list if c[1].get("status") == BatchStatus.FAILED]
         assert len(failed_calls) == 1
 
     def test_execute_flush_exception_clears_batch_token_ids(self) -> None:
@@ -2242,7 +2254,7 @@ class TestAggregationExecutor:
         (e.g. OpenRouterBatchLLMTransform) see stale IDs and misattribute
         telemetry to tokens from the failed batch.
         """
-        executor, _recorder, nid = self._make_agg_executor(count=2)
+        executor, _factory, nid = self._make_agg_executor(count=2)
         contract = _make_contract()
 
         executor.buffer_row(nid, _make_token(data={"v": "a"}, token_id="t1", contract=contract))
@@ -2267,7 +2279,7 @@ class TestAggregationExecutor:
         """
         from elspeth.contracts.errors import BatchPendingError
 
-        executor, _recorder, nid = self._make_agg_executor(count=2)
+        executor, _factory, nid = self._make_agg_executor(count=2)
         contract = _make_contract()
 
         executor.buffer_row(nid, _make_token(data={"v": "a"}, token_id="t1", contract=contract))
@@ -2285,7 +2297,7 @@ class TestAggregationExecutor:
         assert ctx.batch_token_ids is None
 
     def test_execute_flush_preserves_batch_state_on_post_pending_failure(self) -> None:
-        """Post-submission recorder failure must NOT wipe in-memory batch state.
+        """Post-submission execution repo failure must NOT wipe in-memory batch state.
 
         Regression: If BatchPendingError is caught (batch submitted to external
         service), guard transitions to PENDING, but update_batch_status() fails
@@ -2295,12 +2307,12 @@ class TestAggregationExecutor:
         """
         from elspeth.contracts.errors import BatchPendingError
 
-        recorder = _make_recorder()
+        factory = _make_factory()
         # Make update_batch_status succeed on the first call (EXECUTING transition)
         # but fail on the second call (post-BatchPendingError status link).
         # This exercises the actual post-submission failure path.
-        recorder.update_batch_status.side_effect = [None, RuntimeError("DB write failed")]
-        executor, _, nid = self._make_agg_executor(recorder=recorder, count=2)
+        factory.execution.update_batch_status.side_effect = [None, RuntimeError("DB write failed")]
+        executor, _, nid = self._make_agg_executor(factory=factory, count=2)
         contract = _make_contract()
 
         executor.buffer_row(nid, _make_token(data={"v": "a"}, token_id="t1", contract=contract))
@@ -2324,7 +2336,7 @@ class TestAggregationExecutor:
 
     def test_execute_flush_resets_batch_state(self) -> None:
         """After flush, batch state is reset (new batch on next row)."""
-        executor, _recorder, nid = self._make_agg_executor(count=1)
+        executor, _factory, nid = self._make_agg_executor(count=1)
         contract = _make_contract()
 
         executor.buffer_row(nid, _make_token(token_id="t1", contract=contract))
@@ -2491,7 +2503,7 @@ class TestAggregationExecutor:
 
     def test_restore_from_checkpoint_creates_pipeline_row(self) -> None:
         """restore_from_checkpoint should reconstruct TokenInfo with PipelineRow."""
-        executor, recorder, nid = self._make_agg_executor(count=10)
+        executor, factory, nid = self._make_agg_executor(count=10)
         contract = _make_contract()
         token = _make_token(data={"value": "test"}, contract=contract)
 
@@ -2500,7 +2512,7 @@ class TestAggregationExecutor:
 
         # Create new executor and restore from checkpoint
         new_executor = AggregationExecutor(
-            recorder,
+            factory.execution,
             _make_span_factory(),
             _make_step_resolver(),
             run_id="test-run",
@@ -2525,7 +2537,7 @@ class TestAggregationExecutor:
 
     def test_restore_from_checkpoint_buffer_has_dicts(self) -> None:
         """After restore, _buffers should contain dicts (not PipelineRow)."""
-        executor, recorder, nid = self._make_agg_executor(count=10)
+        executor, factory, nid = self._make_agg_executor(count=10)
         contract = _make_contract()
         token = _make_token(data={"value": "test"}, contract=contract)
 
@@ -2534,7 +2546,7 @@ class TestAggregationExecutor:
 
         # Create new executor and restore from checkpoint
         new_executor = AggregationExecutor(
-            recorder,
+            factory.execution,
             _make_span_factory(),
             _make_step_resolver(),
             run_id="test-run",
@@ -2569,8 +2581,8 @@ class TestSinkExecutor:
 
     def test_empty_tokens_returns_none(self) -> None:
         """Write with empty token list returns None immediately."""
-        recorder = _make_recorder()
-        executor = SinkExecutor(recorder, _make_span_factory(), run_id="test-run")
+        factory = _make_factory()
+        executor = SinkExecutor(factory.execution, factory.data_flow, _make_span_factory(), run_id="test-run")
         sink = _make_sink()
         ctx = make_context()
         pending = PendingOutcome(outcome=RowOutcome.COMPLETED)
@@ -2590,8 +2602,8 @@ class TestSinkExecutor:
     # --- No node_id ---
 
     def test_no_node_id_raises_orchestration_invariant_error(self) -> None:
-        recorder = _make_recorder()
-        executor = SinkExecutor(recorder, _make_span_factory(), run_id="test-run")
+        factory = _make_factory()
+        executor = SinkExecutor(factory.execution, factory.data_flow, _make_span_factory(), run_id="test-run")
         sink = _make_sink(node_id=None)
         token = _make_token()
         ctx = make_context()
@@ -2616,8 +2628,8 @@ class TestSinkExecutor:
         class StrictSinkSchema(PluginSchema):
             count: int
 
-        recorder = _make_recorder()
-        executor = SinkExecutor(recorder, _make_span_factory(), run_id="test-run")
+        factory = _make_factory()
+        executor = SinkExecutor(factory.execution, factory.data_flow, _make_span_factory(), run_id="test-run")
         token = _make_token(data={"count": "not_an_int"})
         sink = _make_sink()
         sink.input_schema = StrictSinkSchema
@@ -2640,8 +2652,8 @@ class TestSinkExecutor:
 
     def test_missing_required_field_raises_plugin_contract_violation(self) -> None:
         """Executor rejects rows missing declared required fields before sink.write()."""
-        recorder = _make_recorder()
-        executor = SinkExecutor(recorder, _make_span_factory(), run_id="test-run")
+        factory = _make_factory()
+        executor = SinkExecutor(factory.execution, factory.data_flow, _make_span_factory(), run_id="test-run")
         token = _make_token(data={"id": "1"})  # Missing 'name' field
         sink = _make_sink()
         sink.declared_required_fields = frozenset({"id", "name"})
@@ -2663,8 +2675,8 @@ class TestSinkExecutor:
 
     def test_missing_required_field_mid_batch_rejects_entire_batch(self) -> None:
         """If any row in a batch misses a required field, the whole batch fails."""
-        recorder = _make_recorder()
-        executor = SinkExecutor(recorder, _make_span_factory(), run_id="test-run")
+        factory = _make_factory()
+        executor = SinkExecutor(factory.execution, factory.data_flow, _make_span_factory(), run_id="test-run")
         contract = _make_contract()
         tokens = [
             _make_token(data={"id": "1", "name": "alice"}, token_id="t1", contract=contract),
@@ -2691,8 +2703,8 @@ class TestSinkExecutor:
 
     def test_successful_write_completes_states_and_registers_artifact(self) -> None:
         """Successful write: node states COMPLETED, artifact registered, outcomes recorded."""
-        recorder = _make_recorder()
-        executor = SinkExecutor(recorder, _make_span_factory(), run_id="test-run")
+        factory = _make_factory()
+        executor = SinkExecutor(factory.execution, factory.data_flow, _make_span_factory(), run_id="test-run")
         contract = _make_contract()
         tokens = [
             _make_token(data={"value": "a"}, token_id="t1", contract=contract),
@@ -2713,22 +2725,24 @@ class TestSinkExecutor:
 
         assert artifact is not None
         # 2 begin_node_state calls (one per token)
-        assert recorder.begin_node_state.call_count == 2
+        assert factory.execution.begin_node_state.call_count == 2
         # 2 complete_node_state with COMPLETED (one per token)
-        completed_calls = [c for c in recorder.complete_node_state.call_args_list if c[1].get("status") == NodeStateStatus.COMPLETED]
+        completed_calls = [
+            c for c in factory.execution.complete_node_state.call_args_list if c[1].get("status") == NodeStateStatus.COMPLETED
+        ]
         assert len(completed_calls) == 2
         # Artifact registered
-        recorder.register_artifact.assert_called_once()
+        factory.execution.register_artifact.assert_called_once()
         # Token outcomes recorded
-        assert recorder.record_token_outcome.call_count == 2
-        for c in recorder.record_token_outcome.call_args_list:
+        assert factory.data_flow.record_token_outcome.call_count == 2
+        for c in factory.data_flow.record_token_outcome.call_args_list:
             assert c[1]["outcome"] == RowOutcome.COMPLETED
             assert c[1]["sink_name"] == "out"
 
     def test_successful_write_calls_sink_flush(self) -> None:
         """Successful write calls sink.flush() after sink.write()."""
-        recorder = _make_recorder()
-        executor = SinkExecutor(recorder, _make_span_factory(), run_id="test-run")
+        factory = _make_factory()
+        executor = SinkExecutor(factory.execution, factory.data_flow, _make_span_factory(), run_id="test-run")
         token = _make_token()
         sink = _make_sink()
         ctx = make_context()
@@ -2748,8 +2762,8 @@ class TestSinkExecutor:
 
     def test_successful_write_passes_dicts_to_sink(self) -> None:
         """Sink receives plain dicts, not PipelineRow."""
-        recorder = _make_recorder()
-        executor = SinkExecutor(recorder, _make_span_factory(), run_id="test-run")
+        factory = _make_factory()
+        executor = SinkExecutor(factory.execution, factory.data_flow, _make_span_factory(), run_id="test-run")
         token = _make_token(data={"value": "test"})
         sink = _make_sink()
         ctx = make_context()
@@ -2776,8 +2790,8 @@ class TestSinkExecutor:
         In the restructured flow, contract merge happens before track_operation.
         No node_states are opened, so none need cleanup.
         """
-        recorder = _make_recorder()
-        executor = SinkExecutor(recorder, _make_span_factory(), run_id="test-run")
+        factory = _make_factory()
+        executor = SinkExecutor(factory.execution, factory.data_flow, _make_span_factory(), run_id="test-run")
         contract_a = _make_contract()
         contract_b = SchemaContract(
             fields=(
@@ -2812,7 +2826,7 @@ class TestSinkExecutor:
 
         sink.write.assert_not_called()
         sink.flush.assert_not_called()
-        recorder.record_token_outcome.assert_not_called()
+        factory.data_flow.record_token_outcome.assert_not_called()
 
     def test_write_exception_reraises_with_failed_states(self) -> None:
         """Exception from sink.write() re-raises after completing states as FAILED.
@@ -2820,8 +2834,8 @@ class TestSinkExecutor:
         Node_states are opened BEFORE I/O (pre-phase) so that Phase 1 failures
         produce FAILED states — no token may exit without a terminal state.
         """
-        recorder = _make_recorder()
-        executor = SinkExecutor(recorder, _make_span_factory(), run_id="test-run")
+        factory = _make_factory()
+        executor = SinkExecutor(factory.execution, factory.data_flow, _make_span_factory(), run_id="test-run")
         contract = _make_contract()
         tokens = [
             _make_token(token_id="t1", contract=contract),
@@ -2843,9 +2857,9 @@ class TestSinkExecutor:
             )
 
         # States were opened in pre-phase, then completed as FAILED
-        assert recorder.begin_node_state.call_count == 2
-        assert recorder.complete_node_state.call_count == 2
-        for call in recorder.complete_node_state.call_args_list:
+        assert factory.execution.begin_node_state.call_count == 2
+        assert factory.execution.complete_node_state.call_count == 2
+        for call in factory.execution.complete_node_state.call_args_list:
             assert call.kwargs["status"] == NodeStateStatus.FAILED
             assert call.kwargs["error"].phase == "sink_write"
 
@@ -2857,8 +2871,8 @@ class TestSinkExecutor:
         Node_states are opened BEFORE I/O (pre-phase). If flush() fails,
         all pre-opened states are completed as FAILED.
         """
-        recorder = _make_recorder()
-        executor = SinkExecutor(recorder, _make_span_factory(), run_id="test-run")
+        factory = _make_factory()
+        executor = SinkExecutor(factory.execution, factory.data_flow, _make_span_factory(), run_id="test-run")
         tokens = [_make_token()]
         sink = _make_sink()
         sink.flush.side_effect = OSError("flush failed")
@@ -2876,9 +2890,9 @@ class TestSinkExecutor:
             )
 
         # State was opened in pre-phase, then completed as FAILED
-        assert recorder.begin_node_state.call_count == 1
-        assert recorder.complete_node_state.call_count == 1
-        call = recorder.complete_node_state.call_args
+        assert factory.execution.begin_node_state.call_count == 1
+        assert factory.execution.complete_node_state.call_count == 1
+        call = factory.execution.complete_node_state.call_args
         assert call.kwargs["status"] == NodeStateStatus.FAILED
         assert call.kwargs["error"].phase == "sink_write"
 
@@ -2886,8 +2900,8 @@ class TestSinkExecutor:
 
     def test_on_token_written_called_per_token(self) -> None:
         """on_token_written callback called for each token."""
-        recorder = _make_recorder()
-        executor = SinkExecutor(recorder, _make_span_factory(), run_id="test-run")
+        factory = _make_factory()
+        executor = SinkExecutor(factory.execution, factory.data_flow, _make_span_factory(), run_id="test-run")
         contract = _make_contract()
         tokens = [
             _make_token(token_id="t1", contract=contract),
@@ -2921,8 +2935,8 @@ class TestSinkExecutor:
         inconsistency. Logging and continuing would cause silent duplicate
         writes on resume.
         """
-        recorder = _make_recorder()
-        executor = SinkExecutor(recorder, _make_span_factory(), run_id="test-run")
+        factory = _make_factory()
+        executor = SinkExecutor(factory.execution, factory.data_flow, _make_span_factory(), run_id="test-run")
         token = _make_token()
         sink = _make_sink()
         ctx = make_context()
@@ -2947,8 +2961,8 @@ class TestSinkExecutor:
 
     def test_pending_outcome_used_for_token_outcome(self) -> None:
         """pending_outcome.outcome and error_hash propagated to record_token_outcome."""
-        recorder = _make_recorder()
-        executor = SinkExecutor(recorder, _make_span_factory(), run_id="test-run")
+        factory = _make_factory()
+        executor = SinkExecutor(factory.execution, factory.data_flow, _make_span_factory(), run_id="test-run")
         token = _make_token()
         sink = _make_sink()
         ctx = make_context()
@@ -2963,8 +2977,8 @@ class TestSinkExecutor:
             pending_outcome=pending,
         )
 
-        recorder.record_token_outcome.assert_called_once()
-        kwargs = recorder.record_token_outcome.call_args[1]
+        factory.data_flow.record_token_outcome.assert_called_once()
+        kwargs = factory.data_flow.record_token_outcome.call_args[1]
         assert kwargs["outcome"] == RowOutcome.QUARANTINED
         assert kwargs["error_hash"] == "err_hash_123"
         assert kwargs["sink_name"] == "quarantine"
@@ -2973,12 +2987,12 @@ class TestSinkExecutor:
 
     def test_artifact_linked_to_first_state(self) -> None:
         """Artifact is registered linked to the first token's state."""
-        recorder = _make_recorder()
+        factory = _make_factory()
         # Make begin_node_state return different state_ids per call
         states = [Mock(state_id="state_001"), Mock(state_id="state_002")]
-        recorder.begin_node_state.side_effect = states
+        factory.execution.begin_node_state.side_effect = states
 
-        executor = SinkExecutor(recorder, _make_span_factory(), run_id="test-run")
+        executor = SinkExecutor(factory.execution, factory.data_flow, _make_span_factory(), run_id="test-run")
         contract = _make_contract()
         tokens = [
             _make_token(token_id="t1", contract=contract),
@@ -2997,16 +3011,16 @@ class TestSinkExecutor:
             pending_outcome=pending,
         )
 
-        recorder.register_artifact.assert_called_once()
-        kwargs = recorder.register_artifact.call_args[1]
+        factory.execution.register_artifact.assert_called_once()
+        kwargs = factory.execution.register_artifact.call_args[1]
         assert kwargs["state_id"] == "state_001"  # First token's state
 
     # --- Duration amortization (sm22) ---
 
     def test_duration_amortized_across_tokens_on_success(self) -> None:
         """Each token gets batch_duration / N, not the full batch duration."""
-        recorder = _make_recorder()
-        executor = SinkExecutor(recorder, _make_span_factory(), run_id="test-run")
+        factory = _make_factory()
+        executor = SinkExecutor(factory.execution, factory.data_flow, _make_span_factory(), run_id="test-run")
         contract = _make_contract()
         tokens = [
             _make_token(data={"value": "a"}, token_id="t1", contract=contract),
@@ -3026,7 +3040,9 @@ class TestSinkExecutor:
             pending_outcome=pending,
         )
 
-        completed_calls = [c for c in recorder.complete_node_state.call_args_list if c[1].get("status") == NodeStateStatus.COMPLETED]
+        completed_calls = [
+            c for c in factory.execution.complete_node_state.call_args_list if c[1].get("status") == NodeStateStatus.COMPLETED
+        ]
         assert len(completed_calls) == 3
         durations = [c[1]["duration_ms"] for c in completed_calls]
         # All three tokens should get the same amortized duration
@@ -3039,8 +3055,8 @@ class TestSinkExecutor:
 
     def test_write_failure_completes_states_as_failed(self) -> None:
         """Write failure: pre-opened node_states completed as FAILED."""
-        recorder = _make_recorder()
-        executor = SinkExecutor(recorder, _make_span_factory(), run_id="test-run")
+        factory = _make_factory()
+        executor = SinkExecutor(factory.execution, factory.data_flow, _make_span_factory(), run_id="test-run")
         contract = _make_contract()
         tokens = [
             _make_token(data={"value": "a"}, token_id="t1", contract=contract),
@@ -3061,15 +3077,15 @@ class TestSinkExecutor:
                 pending_outcome=pending,
             )
 
-        assert recorder.begin_node_state.call_count == 2
-        assert recorder.complete_node_state.call_count == 2
-        for call in recorder.complete_node_state.call_args_list:
+        assert factory.execution.begin_node_state.call_count == 2
+        assert factory.execution.complete_node_state.call_count == 2
+        for call in factory.execution.complete_node_state.call_args_list:
             assert call.kwargs["status"] == NodeStateStatus.FAILED
 
     def test_flush_failure_completes_states_as_failed(self) -> None:
         """Flush failure: pre-opened node_states completed as FAILED."""
-        recorder = _make_recorder()
-        executor = SinkExecutor(recorder, _make_span_factory(), run_id="test-run")
+        factory = _make_factory()
+        executor = SinkExecutor(factory.execution, factory.data_flow, _make_span_factory(), run_id="test-run")
         contract = _make_contract()
         tokens = [
             _make_token(data={"value": "a"}, token_id="t1", contract=contract),
@@ -3090,15 +3106,15 @@ class TestSinkExecutor:
                 pending_outcome=pending,
             )
 
-        assert recorder.begin_node_state.call_count == 2
-        assert recorder.complete_node_state.call_count == 2
-        for call in recorder.complete_node_state.call_args_list:
+        assert factory.execution.begin_node_state.call_count == 2
+        assert factory.execution.complete_node_state.call_count == 2
+        for call in factory.execution.complete_node_state.call_args_list:
             assert call.kwargs["status"] == NodeStateStatus.FAILED
 
     def test_single_token_duration_unchanged(self) -> None:
         """Single-token write: duration_ms is total (N/N = total)."""
-        recorder = _make_recorder()
-        executor = SinkExecutor(recorder, _make_span_factory(), run_id="test-run")
+        factory = _make_factory()
+        executor = SinkExecutor(factory.execution, factory.data_flow, _make_span_factory(), run_id="test-run")
         token = _make_token()
         sink = _make_sink()
         ctx = make_context()
@@ -3113,7 +3129,9 @@ class TestSinkExecutor:
             pending_outcome=pending,
         )
 
-        completed_calls = [c for c in recorder.complete_node_state.call_args_list if c[1].get("status") == NodeStateStatus.COMPLETED]
+        completed_calls = [
+            c for c in factory.execution.complete_node_state.call_args_list if c[1].get("status") == NodeStateStatus.COMPLETED
+        ]
         assert len(completed_calls) == 1
         # With 1 token, amortized = total (no division effect)
         assert completed_calls[0][1]["duration_ms"] > 0
@@ -3122,8 +3140,8 @@ class TestSinkExecutor:
 
     def test_sink_extracts_dict_for_landscape_input(self) -> None:
         """SinkExecutor should extract dict (not PipelineRow) for Landscape input_data recording."""
-        recorder = _make_recorder()
-        executor = SinkExecutor(recorder, _make_span_factory(), run_id="test-run")
+        factory = _make_factory()
+        executor = SinkExecutor(factory.execution, factory.data_flow, _make_span_factory(), run_id="test-run")
         token = _make_token(data={"value": "test"})
         sink = _make_sink()
         ctx = make_context()
@@ -3138,8 +3156,8 @@ class TestSinkExecutor:
             pending_outcome=pending,
         )
 
-        recorder.begin_node_state.assert_called_once()
-        call_kwargs = recorder.begin_node_state.call_args[1]
+        factory.execution.begin_node_state.assert_called_once()
+        call_kwargs = factory.execution.begin_node_state.call_args[1]
         input_data = call_kwargs["input_data"]
         assert isinstance(input_data, dict)
         assert type(input_data) is not PipelineRow  # type: ignore[comparison-overlap, unreachable]
@@ -3147,8 +3165,8 @@ class TestSinkExecutor:
 
     def test_sink_extracts_dict_for_landscape_output(self) -> None:
         """SinkExecutor should extract dict (not PipelineRow) for Landscape output_data recording."""
-        recorder = _make_recorder()
-        executor = SinkExecutor(recorder, _make_span_factory(), run_id="test-run")
+        factory = _make_factory()
+        executor = SinkExecutor(factory.execution, factory.data_flow, _make_span_factory(), run_id="test-run")
         token = _make_token(data={"value": "test"})
         sink = _make_sink()
         ctx = make_context()
@@ -3163,7 +3181,7 @@ class TestSinkExecutor:
             pending_outcome=pending,
         )
 
-        complete_calls = [c for c in recorder.complete_node_state.call_args_list if c[1].get("output_data") is not None]
+        complete_calls = [c for c in factory.execution.complete_node_state.call_args_list if c[1].get("output_data") is not None]
         assert len(complete_calls) == 1
         output_data = complete_calls[0][1]["output_data"]
         row_in_output = output_data["row"]
@@ -3173,8 +3191,8 @@ class TestSinkExecutor:
 
     def test_sink_preserves_all_fields_in_dict(self) -> None:
         """Sink should receive all fields, including extras not in contract."""
-        recorder = _make_recorder()
-        executor = SinkExecutor(recorder, _make_span_factory(), run_id="test-run")
+        factory = _make_factory()
+        executor = SinkExecutor(factory.execution, factory.data_flow, _make_span_factory(), run_id="test-run")
         contract = _make_contract()
         row_data = {"value": "test", "extra_field": "extra_value", "another": 123}
         token = _make_token(data=row_data, contract=contract)
@@ -3198,8 +3216,8 @@ class TestSinkExecutor:
 
     def test_sink_updates_ctx_contract_from_tokens(self) -> None:
         """SinkExecutor should synchronize ctx.contract to sink token contracts."""
-        recorder = _make_recorder()
-        executor = SinkExecutor(recorder, _make_span_factory(), run_id="test-run")
+        factory = _make_factory()
+        executor = SinkExecutor(factory.execution, factory.data_flow, _make_span_factory(), run_id="test-run")
 
         stale_contract = _make_contract()
         sink_contract = SchemaContract(
@@ -3252,8 +3270,8 @@ class TestSinkExecutor:
 
     def test_sink_merges_mixed_token_contracts_for_context(self) -> None:
         """SinkExecutor should merge mixed token contracts before sink.write()."""
-        recorder = _make_recorder()
-        executor = SinkExecutor(recorder, _make_span_factory(), run_id="test-run")
+        factory = _make_factory()
+        executor = SinkExecutor(factory.execution, factory.data_flow, _make_span_factory(), run_id="test-run")
 
         contract_a = SchemaContract(
             fields=(
@@ -3341,7 +3359,7 @@ class TestAggregationCheckpointVersion:
 
     def test_old_checkpoint_version_rejected(self) -> None:
         """Old checkpoint version (2.1) is rejected — prevents silent state corruption."""
-        executor, _recorder, _nid = TestAggregationExecutor._make_agg_executor(TestAggregationExecutor())
+        executor, _factory, _nid = TestAggregationExecutor._make_agg_executor(TestAggregationExecutor())
 
         # Construct typed DTO with wrong version — restore_from_checkpoint checks value
         old_checkpoint = AggregationCheckpointState(version="2.1", nodes={})
@@ -3351,7 +3369,7 @@ class TestAggregationCheckpointVersion:
 
     def test_current_version_accepted(self) -> None:
         """Current checkpoint version is accepted without error."""
-        executor, _recorder, _nid = TestAggregationExecutor._make_agg_executor(TestAggregationExecutor())
+        executor, _factory, _nid = TestAggregationExecutor._make_agg_executor(TestAggregationExecutor())
 
         # Minimal valid v3.0 checkpoint with no buffered tokens
         checkpoint = AggregationCheckpointState(version=AGGREGATION_CHECKPOINT_VERSION, nodes={})
@@ -3394,9 +3412,9 @@ class TestNodeStateGuard:
         from elspeth.contracts.errors import OrchestrationInvariantError
         from elspeth.engine.executors import NodeStateGuard
 
-        recorder = _make_recorder()
+        factory = _make_factory()
         guard = NodeStateGuard(
-            recorder,
+            factory.execution,
             token_id="tok_1",
             node_id="node_1",
             run_id="run_1",
@@ -3407,10 +3425,10 @@ class TestNodeStateGuard:
             pass  # Don't call complete()
 
         # begin_node_state was called (in __enter__)
-        recorder.begin_node_state.assert_called_once()
+        factory.execution.begin_node_state.assert_called_once()
         # complete_node_state WAS called — state recorded as FAILED before crash
-        recorder.complete_node_state.assert_called_once()
-        kwargs = recorder.complete_node_state.call_args[1]
+        factory.execution.complete_node_state.assert_called_once()
+        kwargs = factory.execution.complete_node_state.call_args[1]
         assert kwargs["status"] == NodeStateStatus.FAILED
         assert kwargs["error"].phase == "executor_guard_missing_complete"
 
@@ -3418,9 +3436,9 @@ class TestNodeStateGuard:
         """Unhandled exception triggers auto-complete as FAILED."""
         from elspeth.engine.executors import NodeStateGuard
 
-        recorder = _make_recorder()
+        factory = _make_factory()
         guard = NodeStateGuard(
-            recorder,
+            factory.execution,
             token_id="tok_1",
             node_id="node_1",
             run_id="run_1",
@@ -3431,8 +3449,8 @@ class TestNodeStateGuard:
             raise ValueError("test crash")
 
         # Auto-completed as FAILED
-        recorder.complete_node_state.assert_called_once()
-        kwargs = recorder.complete_node_state.call_args[1]
+        factory.execution.complete_node_state.assert_called_once()
+        kwargs = factory.execution.complete_node_state.call_args[1]
         assert kwargs["status"] == NodeStateStatus.FAILED
         assert kwargs["state_id"] == "state_001"
         assert "test crash" in kwargs["error"].exception
@@ -3444,9 +3462,9 @@ class TestNodeStateGuard:
         """If caller calls complete() before exception, guard is no-op."""
         from elspeth.engine.executors import NodeStateGuard
 
-        recorder = _make_recorder()
+        factory = _make_factory()
         guard = NodeStateGuard(
-            recorder,
+            factory.execution,
             token_id="tok_1",
             node_id="node_1",
             run_id="run_1",
@@ -3458,17 +3476,17 @@ class TestNodeStateGuard:
             raise RuntimeError("post-complete crash")
 
         # Only one complete_node_state call (the explicit one)
-        recorder.complete_node_state.assert_called_once()
-        kwargs = recorder.complete_node_state.call_args[1]
+        factory.execution.complete_node_state.assert_called_once()
+        kwargs = factory.execution.complete_node_state.call_args[1]
         assert kwargs["status"] == NodeStateStatus.COMPLETED
 
     def test_state_id_accessible_inside_block(self) -> None:
         """guard.state_id is available after __enter__."""
         from elspeth.engine.executors import NodeStateGuard
 
-        recorder = _make_recorder()
+        factory = _make_factory()
         guard = NodeStateGuard(
-            recorder,
+            factory.execution,
             token_id="tok_1",
             node_id="node_1",
             run_id="run_1",
@@ -3486,7 +3504,7 @@ class TestNodeStateGuard:
         from elspeth.engine.executors import NodeStateGuard
 
         guard = NodeStateGuard(
-            _make_recorder(),
+            _make_factory().execution,
             token_id="tok_1",
             node_id="node_1",
             run_id="run_1",
@@ -3496,8 +3514,8 @@ class TestNodeStateGuard:
         with pytest.raises(OrchestrationInvariantError, match="before __enter__"):
             _ = guard.state_id
 
-    def test_auto_fail_when_recorder_down_raises_audit_integrity_error(self) -> None:
-        """If recorder.complete_node_state fails during auto-fail, AuditIntegrityError raised.
+    def test_auto_fail_when_execution_repo_down_raises_audit_integrity_error(self) -> None:
+        """If factory.execution.complete_node_state fails during auto-fail, AuditIntegrityError raised.
 
         Regression: Previously the original exception propagated and the DB failure
         was silently logged. This violates crash-on-anomaly: the audit trail has a
@@ -3507,10 +3525,10 @@ class TestNodeStateGuard:
         from elspeth.contracts.errors import AuditIntegrityError
         from elspeth.engine.executors import NodeStateGuard
 
-        recorder = _make_recorder()
-        recorder.complete_node_state.side_effect = RuntimeError("DB is down")
+        factory = _make_factory()
+        factory.execution.complete_node_state.side_effect = RuntimeError("DB is down")
         guard = NodeStateGuard(
-            recorder,
+            factory.execution,
             token_id="tok_1",
             node_id="node_1",
             run_id="run_1",
@@ -3525,9 +3543,9 @@ class TestNodeStateGuard:
         """attempt parameter is forwarded to begin_node_state."""
         from elspeth.engine.executors import NodeStateGuard
 
-        recorder = _make_recorder()
+        factory = _make_factory()
         with NodeStateGuard(
-            recorder,
+            factory.execution,
             token_id="tok_1",
             node_id="node_1",
             run_id="run_1",
@@ -3537,26 +3555,26 @@ class TestNodeStateGuard:
         ) as guard:
             guard.complete(NodeStateStatus.COMPLETED, duration_ms=1.0)
 
-        kwargs = recorder.begin_node_state.call_args[1]
+        kwargs = factory.execution.begin_node_state.call_args[1]
         assert kwargs["attempt"] == 3
         assert kwargs["step_index"] == 2
 
     # -- Re-raise guard tests: clean-exit path (missing complete()) ----------
 
     def test_framework_bug_error_propagates_on_clean_exit(self) -> None:
-        """FrameworkBugError from recorder supersedes OrchestrationInvariantError.
+        """FrameworkBugError from execution repo supersedes OrchestrationInvariantError.
 
         When the block exits normally without complete(), the guard tries to
-        record FAILED.  If that recorder call raises FrameworkBugError, it must
+        record FAILED.  If that execution repo call raises FrameworkBugError, it must
         propagate directly — it's more critical than the "missing complete()" bug.
         """
         from elspeth.contracts.errors import FrameworkBugError
         from elspeth.engine.executors import NodeStateGuard
 
-        recorder = _make_recorder()
-        recorder.complete_node_state.side_effect = FrameworkBugError("internal inconsistency")
+        factory = _make_factory()
+        factory.execution.complete_node_state.side_effect = FrameworkBugError("internal inconsistency")
         guard = NodeStateGuard(
-            recorder,
+            factory.execution,
             token_id="tok_1",
             node_id="node_1",
             run_id="run_1",
@@ -3568,7 +3586,7 @@ class TestNodeStateGuard:
             pass  # Exit without complete()
 
     def test_audit_integrity_error_propagates_on_clean_exit(self) -> None:
-        """AuditIntegrityError from recorder supersedes OrchestrationInvariantError.
+        """AuditIntegrityError from execution repo supersedes OrchestrationInvariantError.
 
         Same as above but for AuditIntegrityError — audit corruption is always
         the highest-priority failure signal.
@@ -3576,10 +3594,10 @@ class TestNodeStateGuard:
         from elspeth.contracts.errors import AuditIntegrityError
         from elspeth.engine.executors import NodeStateGuard
 
-        recorder = _make_recorder()
-        recorder.complete_node_state.side_effect = AuditIntegrityError("corrupt state table")
+        factory = _make_factory()
+        factory.execution.complete_node_state.side_effect = AuditIntegrityError("corrupt state table")
         guard = NodeStateGuard(
-            recorder,
+            factory.execution,
             token_id="tok_1",
             node_id="node_1",
             run_id="run_1",
@@ -3589,10 +3607,10 @@ class TestNodeStateGuard:
         with pytest.raises(AuditIntegrityError, match="corrupt state table"), guard:
             pass
 
-    def test_regular_recorder_error_on_clean_exit_raises_audit_integrity(self) -> None:
-        """Non-system recorder error on clean exit → AuditIntegrityError raised.
+    def test_regular_execution_repo_error_on_clean_exit_raises_audit_integrity(self) -> None:
+        """Non-system execution repo error on clean exit → AuditIntegrityError raised.
 
-        When recorder.complete_node_state fails with a regular exception (e.g., DB
+        When factory.execution.complete_node_state fails with a regular exception (e.g., DB
         down) during the clean-exit path, AuditIntegrityError supersedes the
         OrchestrationInvariantError that would have been raised for missing complete().
         Audit corruption is always the highest-priority failure signal.
@@ -3600,10 +3618,10 @@ class TestNodeStateGuard:
         from elspeth.contracts.errors import AuditIntegrityError
         from elspeth.engine.executors import NodeStateGuard
 
-        recorder = _make_recorder()
-        recorder.complete_node_state.side_effect = RuntimeError("DB connection lost")
+        factory = _make_factory()
+        factory.execution.complete_node_state.side_effect = RuntimeError("DB connection lost")
         guard = NodeStateGuard(
-            recorder,
+            factory.execution,
             token_id="tok_1",
             node_id="node_1",
             run_id="run_1",
@@ -3616,19 +3634,19 @@ class TestNodeStateGuard:
     # -- Re-raise guard tests: exception path (auto-fail) --------------------
 
     def test_framework_bug_error_supersedes_original_exception(self) -> None:
-        """FrameworkBugError from recorder supersedes the original exception.
+        """FrameworkBugError from execution repo supersedes the original exception.
 
-        When an exception triggers __exit__ and the auto-fail recorder call
+        When an exception triggers __exit__ and the auto-fail execution repo call
         raises FrameworkBugError, it must propagate instead of the original
         exception — system-level corruption outranks the triggering error.
         """
         from elspeth.contracts.errors import FrameworkBugError
         from elspeth.engine.executors import NodeStateGuard
 
-        recorder = _make_recorder()
-        recorder.complete_node_state.side_effect = FrameworkBugError("broken invariant")
+        factory = _make_factory()
+        factory.execution.complete_node_state.side_effect = FrameworkBugError("broken invariant")
         guard = NodeStateGuard(
-            recorder,
+            factory.execution,
             token_id="tok_1",
             node_id="node_1",
             run_id="run_1",
@@ -3640,17 +3658,17 @@ class TestNodeStateGuard:
             raise ValueError("original processing error")
 
     def test_audit_integrity_error_supersedes_original_exception(self) -> None:
-        """AuditIntegrityError from recorder supersedes the original exception.
+        """AuditIntegrityError from execution repo supersedes the original exception.
 
         Same as above: audit corruption is always the highest-priority signal.
         """
         from elspeth.contracts.errors import AuditIntegrityError
         from elspeth.engine.executors import NodeStateGuard
 
-        recorder = _make_recorder()
-        recorder.complete_node_state.side_effect = AuditIntegrityError("state table corrupt")
+        factory = _make_factory()
+        factory.execution.complete_node_state.side_effect = AuditIntegrityError("state table corrupt")
         guard = NodeStateGuard(
-            recorder,
+            factory.execution,
             token_id="tok_1",
             node_id="node_1",
             run_id="run_1",
@@ -3670,12 +3688,12 @@ class TestNodeStateGuard:
         """
         from elspeth.engine.executors import NodeStateGuard
 
-        recorder = _make_recorder()
+        factory = _make_factory()
         call_count = [0]
-        original_complete = recorder.complete_node_state
+        original_complete = factory.execution.complete_node_state
 
         def _commit_then_raise(**kwargs: object) -> None:
-            """Simulate a recorder that commits, then raises post-commit."""
+            """Simulate an execution repo that commits, then raises post-commit."""
             call_count[0] += 1
             if call_count[0] == 1:
                 # First call: the explicit complete() — simulate post-commit failure
@@ -3683,9 +3701,9 @@ class TestNodeStateGuard:
             # Second call would be __exit__ overwriting — should NOT happen
             original_complete(**kwargs)
 
-        recorder.complete_node_state.side_effect = _commit_then_raise
+        factory.execution.complete_node_state.side_effect = _commit_then_raise
         guard = NodeStateGuard(
-            recorder,
+            factory.execution,
             token_id="tok_1",
             node_id="node_1",
             run_id="run_1",
@@ -3727,8 +3745,8 @@ class TestTransformExecutorTerminality:
         """
         from elspeth.core.canonical import stable_hash
 
-        recorder = _make_recorder()
-        executor = TransformExecutor(recorder, _make_span_factory(), _make_step_resolver())
+        factory = _make_factory()
+        executor = TransformExecutor(factory.execution, _make_span_factory(), _make_step_resolver(), data_flow=factory.data_flow)
         transform = _make_transform()
 
         # Make transform return a row that will fail hashing
@@ -3766,8 +3784,8 @@ class TestTransformExecutorTerminality:
             transform_mod.stable_hash = original_ref  # type: ignore[attr-defined]
 
         # State must be FAILED (auto-completed by guard), not OPEN
-        recorder.complete_node_state.assert_called_once()
-        kwargs = recorder.complete_node_state.call_args[1]
+        factory.execution.complete_node_state.assert_called_once()
+        kwargs = factory.execution.complete_node_state.call_args[1]
         assert kwargs["status"] == NodeStateStatus.FAILED
         assert "executor_post_process" in kwargs["error"].phase
 
@@ -3778,8 +3796,8 @@ class TestTransformExecutorTerminality:
         complete(COMPLETED), so a failure left a misleading COMPLETED state.
         Now evolution happens BEFORE complete(), so the guard catches it.
         """
-        recorder = _make_recorder()
-        executor = TransformExecutor(recorder, _make_span_factory(), _make_step_resolver())
+        factory = _make_factory()
+        executor = TransformExecutor(factory.execution, _make_span_factory(), _make_step_resolver(), data_flow=factory.data_flow)
         transform = _make_transform(declared_output_fields=frozenset({"new_field"}))
 
         contract = _make_contract()
@@ -3794,21 +3812,21 @@ class TestTransformExecutorTerminality:
         ctx = make_context()
 
         # Make contract propagation fail
-        recorder.update_node_output_contract.side_effect = RuntimeError("contract evolution failed")
+        factory.data_flow.update_node_output_contract.side_effect = RuntimeError("contract evolution failed")
 
         with pytest.raises(RuntimeError, match="contract evolution failed"):
             executor.execute_transform(transform, token, ctx)
 
         # State must be FAILED (guard auto-complete), NOT COMPLETED
-        recorder.complete_node_state.assert_called_once()
-        kwargs = recorder.complete_node_state.call_args[1]
+        factory.execution.complete_node_state.assert_called_once()
+        kwargs = factory.execution.complete_node_state.call_args[1]
         assert kwargs["status"] == NodeStateStatus.FAILED
         assert kwargs["error"].phase == "executor_post_process"
 
     def test_successful_transform_still_completes_normally(self) -> None:
         """Sanity: guard does not interfere with normal success path."""
-        recorder = _make_recorder()
-        executor = TransformExecutor(recorder, _make_span_factory(), _make_step_resolver())
+        factory = _make_factory()
+        executor = TransformExecutor(factory.execution, _make_span_factory(), _make_step_resolver(), data_flow=factory.data_flow)
         transform = _make_transform()
         contract = _make_contract()
         transform.process.return_value = TransformResult.success(
@@ -3822,8 +3840,8 @@ class TestTransformExecutorTerminality:
 
         assert result.status == "success"
         assert error_sink is None
-        recorder.complete_node_state.assert_called_once()
-        kwargs = recorder.complete_node_state.call_args[1]
+        factory.execution.complete_node_state.assert_called_once()
+        kwargs = factory.execution.complete_node_state.call_args[1]
         assert kwargs["status"] == NodeStateStatus.COMPLETED
 
 
@@ -3846,9 +3864,9 @@ class TestAggregationExecutorTerminality:
     def _make_agg_executor(
         count: int = 2,
     ) -> tuple[AggregationExecutor, MagicMock, NodeID]:
-        """Create executor + mock recorder + node_id."""
+        """Create executor + mock factory + node_id."""
         nid = NodeID("agg_1")
-        recorder = _make_recorder()
+        factory = _make_factory()
         settings = AggregationSettings(
             name="test_agg",
             plugin="batch_stats",
@@ -3857,13 +3875,13 @@ class TestAggregationExecutorTerminality:
             trigger=TriggerConfig(count=count),
         )
         executor = AggregationExecutor(
-            recorder,
+            factory.execution,
             _make_span_factory(),
             _make_step_resolver(),
             run_id="test-run",
             aggregation_settings={nid: settings},
         )
-        return executor, recorder, nid
+        return executor, factory, nid
 
     def test_output_hash_failure_marks_state_and_batch_failed(self) -> None:
         """Output hash failure → state FAILED (guard) AND batch FAILED, buffers cleared.
@@ -3871,7 +3889,7 @@ class TestAggregationExecutorTerminality:
         Regression: B2 — stable_hash raises for non-canonical data after
         transform.process() succeeds, but this was outside the old try/except.
         """
-        executor, recorder, nid = self._make_agg_executor(count=2)
+        executor, factory, nid = self._make_agg_executor(count=2)
         contract = _make_contract()
 
         executor.buffer_row(nid, _make_token(data={"value": "a"}, token_id="t1", contract=contract))
@@ -3907,14 +3925,14 @@ class TestAggregationExecutorTerminality:
 
         # Node state: FAILED (auto-completed by guard)
         # Find the FAILED call — guard auto-completes with phase="executor_post_process"
-        failed_calls = [c for c in recorder.complete_node_state.call_args_list if c[1].get("status") == NodeStateStatus.FAILED]
+        failed_calls = [c for c in factory.execution.complete_node_state.call_args_list if c[1].get("status") == NodeStateStatus.FAILED]
         assert len(failed_calls) >= 1
         # At least one FAILED call should have the guard's phase tag
         guard_fail = [c for c in failed_calls if getattr(c[1].get("error"), "phase", None) == "executor_post_process"]
         assert len(guard_fail) == 1
 
         # Batch: FAILED (outer except handler)
-        batch_failed = [c for c in recorder.complete_batch.call_args_list if c[1].get("status") == BatchStatus.FAILED]
+        batch_failed = [c for c in factory.execution.complete_batch.call_args_list if c[1].get("status") == BatchStatus.FAILED]
         assert len(batch_failed) >= 1
 
         # Buffers cleared for recovery
@@ -3927,7 +3945,7 @@ class TestAggregationExecutorTerminality:
         raises (e.g., DB write failure). Leaving the batch in non-terminal
         state would corrupt the audit trail, so we crash immediately.
         """
-        executor, recorder, nid = self._make_agg_executor(count=1)
+        executor, factory, nid = self._make_agg_executor(count=1)
         contract = _make_contract()
 
         executor.buffer_row(nid, _make_token(data={"value": "a"}, token_id="t1", contract=contract))
@@ -3939,14 +3957,14 @@ class TestAggregationExecutorTerminality:
         ctx = make_context()
 
         # Make complete_batch fail (DB is down during cleanup)
-        recorder.complete_batch.side_effect = RuntimeError("DB down")
+        factory.execution.complete_batch.side_effect = RuntimeError("DB down")
 
         with pytest.raises(AuditIntegrityError, match="non-terminal state"):
             executor.execute_flush(nid, transform, ctx, TriggerType.COUNT)
 
     def test_successful_flush_still_completes_normally(self) -> None:
         """Sanity: guard does not interfere with normal flush success path."""
-        executor, recorder, nid = self._make_agg_executor(count=1)
+        executor, factory, nid = self._make_agg_executor(count=1)
         contract = _make_contract()
 
         executor.buffer_row(nid, _make_token(data={"value": "a"}, token_id="t1", contract=contract))
@@ -3965,7 +3983,7 @@ class TestAggregationExecutorTerminality:
         assert len(tokens) == 1
 
         # Verify batch completed (not failed)
-        completed_calls = [c for c in recorder.complete_batch.call_args_list if c[1].get("status") == BatchStatus.COMPLETED]
+        completed_calls = [c for c in factory.execution.complete_batch.call_args_list if c[1].get("status") == BatchStatus.COMPLETED]
         assert len(completed_calls) == 1
 
 
@@ -3989,13 +4007,13 @@ class TestSinkExecutorTerminality:
         fails mid-batch, already-opened states are completed as FAILED and
         sink.write() is never reached.
         """
-        recorder = _make_recorder()
+        factory = _make_factory()
 
         # First call succeeds, second raises
         state_1 = Mock(state_id="state_001")
-        recorder.begin_node_state.side_effect = [state_1, RuntimeError("DB connection lost")]
+        factory.execution.begin_node_state.side_effect = [state_1, RuntimeError("DB connection lost")]
 
-        executor = SinkExecutor(recorder, _make_span_factory(), run_id="test-run")
+        executor = SinkExecutor(factory.execution, factory.data_flow, _make_span_factory(), run_id="test-run")
         contract = _make_contract()
         tokens = [
             _make_token(data={"value": "a"}, token_id="t1", contract=contract),
@@ -4019,7 +4037,7 @@ class TestSinkExecutorTerminality:
         sink.write.assert_not_called()
 
         # First state must be completed as FAILED (not left OPEN)
-        failed_calls = [c for c in recorder.complete_node_state.call_args_list if c[1].get("status") == NodeStateStatus.FAILED]
+        failed_calls = [c for c in factory.execution.complete_node_state.call_args_list if c[1].get("status") == NodeStateStatus.FAILED]
         assert len(failed_calls) == 1
         assert failed_calls[0][1]["state_id"] == "state_001"
         assert failed_calls[0][1]["error"].phase == "begin_node_state"
@@ -4029,10 +4047,10 @@ class TestSinkExecutorTerminality:
 
         Pre-phase fails immediately, no states opened, sink.write() never called.
         """
-        recorder = _make_recorder()
-        recorder.begin_node_state.side_effect = RuntimeError("DB down from start")
+        factory = _make_factory()
+        factory.execution.begin_node_state.side_effect = RuntimeError("DB down from start")
 
-        executor = SinkExecutor(recorder, _make_span_factory(), run_id="test-run")
+        executor = SinkExecutor(factory.execution, factory.data_flow, _make_span_factory(), run_id="test-run")
         token = _make_token()
         sink = _make_sink()
         ctx = make_context()
@@ -4049,7 +4067,7 @@ class TestSinkExecutorTerminality:
             )
 
         # No states were opened, so no cleanup needed
-        recorder.complete_node_state.assert_not_called()
+        factory.execution.complete_node_state.assert_not_called()
         # Write NOT called — pre-phase failed before Phase 1
         sink.write.assert_not_called()
 
@@ -4058,13 +4076,13 @@ class TestSinkExecutorTerminality:
 
         Verifies correct handling when multiple states need cleanup.
         """
-        recorder = _make_recorder()
+        factory = _make_factory()
 
         state_1 = Mock(state_id="state_001")
         state_2 = Mock(state_id="state_002")
-        recorder.begin_node_state.side_effect = [state_1, state_2, RuntimeError("out of IDs")]
+        factory.execution.begin_node_state.side_effect = [state_1, state_2, RuntimeError("out of IDs")]
 
-        executor = SinkExecutor(recorder, _make_span_factory(), run_id="test-run")
+        executor = SinkExecutor(factory.execution, factory.data_flow, _make_span_factory(), run_id="test-run")
         contract = _make_contract()
         tokens = [
             _make_token(data={"value": "a"}, token_id="t1", contract=contract),
@@ -4086,7 +4104,7 @@ class TestSinkExecutorTerminality:
             )
 
         # Both opened states must be FAILED
-        failed_calls = [c for c in recorder.complete_node_state.call_args_list if c[1].get("status") == NodeStateStatus.FAILED]
+        failed_calls = [c for c in factory.execution.complete_node_state.call_args_list if c[1].get("status") == NodeStateStatus.FAILED]
         assert len(failed_calls) == 2
         failed_state_ids = {c[1]["state_id"] for c in failed_calls}
         assert failed_state_ids == {"state_001", "state_002"}
@@ -4098,14 +4116,14 @@ class TestSinkExecutorTerminality:
         original begin_node_state error — a violation of the "crash with the
         most informative error" principle.
         """
-        recorder = _make_recorder()
+        factory = _make_factory()
 
         state_1 = Mock(state_id="state_001")
-        recorder.begin_node_state.side_effect = [state_1, RuntimeError("DB down")]
+        factory.execution.begin_node_state.side_effect = [state_1, RuntimeError("DB down")]
         # Make cleanup also fail
-        recorder.complete_node_state.side_effect = RuntimeError("cleanup also broken")
+        factory.execution.complete_node_state.side_effect = RuntimeError("cleanup also broken")
 
-        executor = SinkExecutor(recorder, _make_span_factory(), run_id="test-run")
+        executor = SinkExecutor(factory.execution, factory.data_flow, _make_span_factory(), run_id="test-run")
         contract = _make_contract()
         tokens = [
             _make_token(data={"value": "a"}, token_id="t1", contract=contract),
@@ -4133,15 +4151,15 @@ class TestSinkExecutorTerminality:
         """
         from elspeth.contracts.errors import ExecutionError
 
-        recorder = _make_recorder()
-        executor = SinkExecutor(recorder, _make_span_factory(), run_id="test-run")
+        factory = _make_factory()
+        executor = SinkExecutor(factory.execution, factory.data_flow, _make_span_factory(), run_id="test-run")
         error = ExecutionError(exception="test", exception_type="RuntimeError", phase="test")
 
         # Must not raise ZeroDivisionError
         executor._complete_states_failed(states=[], duration_ms=100.0, error=error)
 
-        # No recorder calls made
-        recorder.complete_node_state.assert_not_called()
+        # No execution repo calls made
+        factory.execution.complete_node_state.assert_not_called()
 
 
 # =============================================================================
@@ -4154,7 +4172,7 @@ class TestGateExecutorExecutionErrorFieldRename:
 
     The ExecutionError dataclass has field ``exception_type`` but serializes as
     ``"type"`` in ``to_dict()`` for hash stability. This test verifies the full
-    path: gate expression error -> ExecutionError -> recorder -> serialized dict
+    path: gate expression error -> ExecutionError -> execution repo -> serialized dict
     has the correct key name.
     """
 
@@ -4162,14 +4180,14 @@ class TestGateExecutorExecutionErrorFieldRename:
         """Gate execution error should record 'type' (not 'exception_type') in the error dict.
 
         Exercises the full path: GateExecutor catches expression evaluation error,
-        creates ExecutionError, passes it to recorder.complete_node_state(error=...),
+        creates ExecutionError, passes it to factory.execution.complete_node_state(error=...),
         and the serialized form uses 'type' as the key name.
         """
         from elspeth.contracts.errors import ExecutionError
         from elspeth.core.expression_parser import ExpressionEvaluationError
 
-        recorder = _make_recorder()
-        executor = GateExecutor(recorder, _make_span_factory(), _make_step_resolver())
+        factory = _make_factory()
+        executor = GateExecutor(factory.execution, _make_span_factory(), _make_step_resolver())
         config = GateSettings(
             name="my_gate",
             input="in_conn",
@@ -4185,7 +4203,9 @@ class TestGateExecutorExecutionErrorFieldRename:
             executor.execute_config_gate(config, "cg_1", token, ctx)
 
         # Find the FAILED call to complete_node_state
-        failed_calls = [call for call in recorder.complete_node_state.call_args_list if call.kwargs.get("status") == NodeStateStatus.FAILED]
+        failed_calls = [
+            call for call in factory.execution.complete_node_state.call_args_list if call.kwargs.get("status") == NodeStateStatus.FAILED
+        ]
         assert len(failed_calls) >= 1, "Expected at least one FAILED node state call"
 
         # Extract the error argument — it should be an ExecutionError
@@ -4210,8 +4230,8 @@ class TestGateExecutorExecutionErrorFieldRename:
         """
         from elspeth.contracts.errors import ExecutionError
 
-        recorder = _make_recorder()
-        executor = GateExecutor(recorder, _make_span_factory(), _make_step_resolver())
+        factory = _make_factory()
+        executor = GateExecutor(factory.execution, _make_span_factory(), _make_step_resolver())
         config = GateSettings(
             name="my_gate",
             input="in_conn",
@@ -4226,7 +4246,9 @@ class TestGateExecutorExecutionErrorFieldRename:
         with pytest.raises(ValueError, match="unknown_route"):
             executor.execute_config_gate(config, "cg_1", token, ctx)
 
-        failed_calls = [call for call in recorder.complete_node_state.call_args_list if call.kwargs.get("status") == NodeStateStatus.FAILED]
+        failed_calls = [
+            call for call in factory.execution.complete_node_state.call_args_list if call.kwargs.get("status") == NodeStateStatus.FAILED
+        ]
         assert len(failed_calls) >= 1
 
         error_obj = failed_calls[0].kwargs.get("error")
@@ -4393,8 +4415,8 @@ class TestTransformExecutorBatchPath:
         """When transform implements BatchTransformMixin, accept() is called instead of process()."""
         from elspeth.engine.batch_adapter import SharedBatchAdapter
 
-        recorder = _make_recorder()
-        executor = TransformExecutor(recorder, _make_span_factory(), _make_step_resolver())
+        factory = _make_factory()
+        executor = TransformExecutor(factory.execution, _make_span_factory(), _make_step_resolver(), data_flow=factory.data_flow)
         contract = _make_contract()
         transform = self._make_batch_transform()
 
@@ -4423,8 +4445,8 @@ class TestTransformExecutorBatchPath:
 
     def test_non_batch_transform_uses_process(self) -> None:
         """A regular transform (no BatchTransformMixin) uses process(), not accept()."""
-        recorder = _make_recorder()
-        executor = TransformExecutor(recorder, _make_span_factory(), _make_step_resolver())
+        factory = _make_factory()
+        executor = TransformExecutor(factory.execution, _make_span_factory(), _make_step_resolver(), data_flow=factory.data_flow)
         contract = _make_contract()
         transform = _make_transform()
         transform.process.return_value = TransformResult.success(
@@ -4445,8 +4467,8 @@ class TestTransformExecutorBatchPath:
         """_get_batch_adapter creates one adapter per node_id and reuses it."""
         from elspeth.engine.batch_adapter import SharedBatchAdapter
 
-        recorder = _make_recorder()
-        executor = TransformExecutor(recorder, _make_span_factory(), _make_step_resolver())
+        factory = _make_factory()
+        executor = TransformExecutor(factory.execution, _make_span_factory(), _make_step_resolver(), data_flow=factory.data_flow)
         transform = self._make_batch_transform(node_id="node_A")
 
         adapter1 = executor._get_batch_adapter(transform)
@@ -4459,8 +4481,8 @@ class TestTransformExecutorBatchPath:
 
     def test_get_batch_adapter_separate_per_node_id(self) -> None:
         """Different node_ids get different adapters."""
-        recorder = _make_recorder()
-        executor = TransformExecutor(recorder, _make_span_factory(), _make_step_resolver())
+        factory = _make_factory()
+        executor = TransformExecutor(factory.execution, _make_span_factory(), _make_step_resolver(), data_flow=factory.data_flow)
         transform_a = self._make_batch_transform(node_id="node_A")
         transform_b = self._make_batch_transform(node_id="node_B")
 
@@ -4471,8 +4493,8 @@ class TestTransformExecutorBatchPath:
 
     def test_get_batch_adapter_raises_without_node_id(self) -> None:
         """_get_batch_adapter raises OrchestrationInvariantError if node_id is None."""
-        recorder = _make_recorder()
-        executor = TransformExecutor(recorder, _make_span_factory(), _make_step_resolver())
+        factory = _make_factory()
+        executor = TransformExecutor(factory.execution, _make_span_factory(), _make_step_resolver(), data_flow=factory.data_flow)
         transform = self._make_batch_transform(node_id=None)
 
         with pytest.raises(OrchestrationInvariantError, match="node_id must be set"):
@@ -4480,12 +4502,13 @@ class TestTransformExecutorBatchPath:
 
     def test_get_batch_adapter_caps_max_pending_to_max_workers(self) -> None:
         """When executor has max_workers, adapter max_pending is capped."""
-        recorder = _make_recorder()
+        factory = _make_factory()
         executor = TransformExecutor(
-            recorder,
+            factory.execution,
             _make_span_factory(),
             _make_step_resolver(),
             max_workers=3,
+            data_flow=factory.data_flow,
         )
         transform = self._make_batch_transform(pool_size=10)
 
@@ -4498,8 +4521,8 @@ class TestTransformExecutorBatchPath:
 
     def test_get_batch_adapter_uses_pool_size_when_no_max_workers(self) -> None:
         """Without max_workers, adapter max_pending equals transform pool_size."""
-        recorder = _make_recorder()
-        executor = TransformExecutor(recorder, _make_span_factory(), _make_step_resolver())
+        factory = _make_factory()
+        executor = TransformExecutor(factory.execution, _make_span_factory(), _make_step_resolver(), data_flow=factory.data_flow)
         transform = self._make_batch_transform(pool_size=7)
 
         executor._get_batch_adapter(transform)
@@ -4513,8 +4536,8 @@ class TestTransformExecutorBatchPath:
         """register() is called before accept() for correct waiter ordering."""
         from elspeth.engine.batch_adapter import SharedBatchAdapter
 
-        recorder = _make_recorder()
-        executor = TransformExecutor(recorder, _make_span_factory(), _make_step_resolver())
+        factory = _make_factory()
+        executor = TransformExecutor(factory.execution, _make_span_factory(), _make_step_resolver(), data_flow=factory.data_flow)
         contract = _make_contract()
         transform = self._make_batch_transform()
 
@@ -4548,8 +4571,8 @@ class TestTransformExecutorBatchPath:
         """TimeoutError from waiter.wait() calls evict_submission() on the mixin."""
         from elspeth.engine.batch_adapter import SharedBatchAdapter
 
-        recorder = _make_recorder()
-        executor = TransformExecutor(recorder, _make_span_factory(), _make_step_resolver())
+        factory = _make_factory()
+        executor = TransformExecutor(factory.execution, _make_span_factory(), _make_step_resolver(), data_flow=factory.data_flow)
         contract = _make_contract()
         transform = self._make_batch_transform()
 
@@ -4569,16 +4592,16 @@ class TestTransformExecutorBatchPath:
         transform.evict_submission.assert_called_once_with(token.token_id, "state_001")
 
         # Node state recorded as FAILED before re-raise
-        recorder.complete_node_state.assert_called_once()
-        kwargs = recorder.complete_node_state.call_args[1]
+        factory.execution.complete_node_state.assert_called_once()
+        kwargs = factory.execution.complete_node_state.call_args[1]
         assert kwargs["status"] == NodeStateStatus.FAILED
 
     def test_eviction_failure_wraps_in_runtime_error(self) -> None:
         """If evict_submission() fails, the error is wrapped in RuntimeError."""
         from elspeth.engine.batch_adapter import SharedBatchAdapter
 
-        recorder = _make_recorder()
-        executor = TransformExecutor(recorder, _make_span_factory(), _make_step_resolver())
+        factory = _make_factory()
+        executor = TransformExecutor(factory.execution, _make_span_factory(), _make_step_resolver(), data_flow=factory.data_flow)
         contract = _make_contract()
         transform = self._make_batch_transform()
 
@@ -4601,8 +4624,8 @@ class TestTransformExecutorBatchPath:
         """Non-TimeoutError exceptions do NOT trigger eviction."""
         from elspeth.engine.batch_adapter import SharedBatchAdapter
 
-        recorder = _make_recorder()
-        executor = TransformExecutor(recorder, _make_span_factory(), _make_step_resolver())
+        factory = _make_factory()
+        executor = TransformExecutor(factory.execution, _make_span_factory(), _make_step_resolver(), data_flow=factory.data_flow)
         contract = _make_contract()
         transform = self._make_batch_transform()
 
@@ -4626,8 +4649,8 @@ class TestTransformExecutorBatchPath:
         """Batch transform returning TransformResult.error() routes via on_error."""
         from elspeth.engine.batch_adapter import SharedBatchAdapter
 
-        recorder = _make_recorder()
-        executor = TransformExecutor(recorder, _make_span_factory(), _make_step_resolver())
+        factory = _make_factory()
+        executor = TransformExecutor(factory.execution, _make_span_factory(), _make_step_resolver(), data_flow=factory.data_flow)
         transform = self._make_batch_transform(on_error="discard")
 
         error_result = TransformResult.error(reason={"reason": "batch_failed"})
@@ -4639,7 +4662,7 @@ class TestTransformExecutorBatchPath:
         executor._get_batch_adapter = MagicMock(return_value=mock_adapter)  # type: ignore[method-assign]
 
         token = _make_token()
-        ctx = make_context(landscape=recorder)
+        ctx = make_context(landscape=factory.execution)
 
         _, _, error_sink = executor.execute_transform(transform, token, ctx)
 
@@ -4651,8 +4674,8 @@ class TestTransformExecutorBatchPath:
         """Batch transform results have input_hash, output_hash, duration_ms populated."""
         from elspeth.engine.batch_adapter import SharedBatchAdapter
 
-        recorder = _make_recorder()
-        executor = TransformExecutor(recorder, _make_span_factory(), _make_step_resolver())
+        factory = _make_factory()
+        executor = TransformExecutor(factory.execution, _make_span_factory(), _make_step_resolver(), data_flow=factory.data_flow)
         contract = _make_contract()
         transform = self._make_batch_transform()
 

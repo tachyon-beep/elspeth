@@ -16,7 +16,7 @@ import pytest
 chromadb = pytest.importorskip("chromadb")
 
 from elspeth.contracts.enums import CallStatus  # noqa: E402
-from elspeth.core.landscape.recorder import LandscapeRecorder  # noqa: E402
+from elspeth.core.landscape.execution_repository import ExecutionRepository  # noqa: E402
 from elspeth.plugins.infrastructure.clients.retrieval.base import RetrievalError  # noqa: E402
 from elspeth.plugins.infrastructure.clients.retrieval.chroma import (  # noqa: E402
     ChromaSearchProvider,
@@ -25,13 +25,13 @@ from elspeth.plugins.infrastructure.clients.retrieval.chroma import (  # noqa: E
 from elspeth.plugins.infrastructure.clients.retrieval.types import RetrievalChunk  # noqa: E402
 
 
-def _mock_recorder() -> MagicMock:
-    """Create a mock recorder with spec enforcement.
+def _mock_execution() -> MagicMock:
+    """Create a mock execution repository with spec enforcement.
 
-    Using spec=LandscapeRecorder ensures misspelled method names
+    Using spec=ExecutionRepository ensures misspelled method names
     (e.g., allocate_call_indax) raise AttributeError in tests.
     """
-    return MagicMock(spec=LandscapeRecorder)
+    return MagicMock(spec=ExecutionRepository)
 
 
 def _precreate_collection(name: str, distance_function: str = "cosine") -> None:
@@ -180,7 +180,7 @@ class TestChromaSearchProvider:
             mode="ephemeral",
             distance_function=distance_function,
         )
-        return ChromaSearchProvider(config=config, recorder=_mock_recorder(), run_id="test-run")
+        return ChromaSearchProvider(config=config, execution=_mock_execution(), run_id="test-run")
 
     def test_search_returns_retrieval_chunks(self):
         provider = self._make_provider(
@@ -308,7 +308,7 @@ class TestChromaSearchProvider:
             persist_directory=str(tmp_path),
             distance_function="cosine",
         )
-        ChromaSearchProvider(config=config_cosine, recorder=_mock_recorder(), run_id="test-run")
+        ChromaSearchProvider(config=config_cosine, execution=_mock_execution(), run_id="test-run")
 
         # Provider with mismatched distance function should fail
         config_l2 = ChromaSearchProviderConfig(
@@ -318,7 +318,7 @@ class TestChromaSearchProvider:
             distance_function="l2",
         )
         with pytest.raises(RetrievalError, match="distance_function"):
-            ChromaSearchProvider(config=config_l2, recorder=_mock_recorder(), run_id="test-run")
+            ChromaSearchProvider(config=config_l2, execution=_mock_execution(), run_id="test-run")
 
     def test_missing_hnsw_space_metadata_raises(self, tmp_path):
         """Collection without hnsw:space metadata must crash — can't normalize scores."""
@@ -331,7 +331,7 @@ class TestChromaSearchProvider:
             persist_directory=str(tmp_path),
         )
         with pytest.raises(RetrievalError, match="hnsw:space"):
-            ChromaSearchProvider(config=config, recorder=_mock_recorder(), run_id="test-run")
+            ChromaSearchProvider(config=config, execution=_mock_execution(), run_id="test-run")
 
     def test_close_does_not_raise(self):
         provider = self._make_provider()
@@ -369,10 +369,10 @@ class TestChromaSearchProvider:
             mode="ephemeral",
             distance_function="cosine",
         )
-        mock_recorder = _mock_recorder()
+        mock_execution = _mock_execution()
         provider = ChromaSearchProvider(
             config=config,
-            recorder=mock_recorder,
+            execution=mock_execution,
             run_id="run-1",
         )
         provider._collection.add(documents=["test doc"], ids=["doc1"])
@@ -383,7 +383,7 @@ class TestChromaSearchProvider:
             state_id="state-1",
             token_id="token-1",
         )
-        mock_recorder.record_call.assert_called_once()
+        mock_execution.record_call.assert_called_once()
 
 
 class TestChromaScoreNormalization:
@@ -396,7 +396,7 @@ class TestChromaScoreNormalization:
             mode="ephemeral",
             distance_function=distance_function,
         )
-        provider = ChromaSearchProvider(config=config, recorder=_mock_recorder(), run_id="test-run")
+        provider = ChromaSearchProvider(config=config, execution=_mock_execution(), run_id="test-run")
         provider._collection.add(documents=["test document"], ids=["doc1"])
         return provider
 
@@ -454,10 +454,10 @@ class TestCallTypeCorrectness:
             mode="ephemeral",
             distance_function="cosine",
         )
-        mock_recorder = _mock_recorder()
+        mock_execution = _mock_execution()
         provider = ChromaSearchProvider(
             config=config,
-            recorder=mock_recorder,
+            execution=mock_execution,
             run_id="run-1",
         )
         provider._collection.add(documents=["test doc"], ids=["doc1"])
@@ -468,8 +468,8 @@ class TestCallTypeCorrectness:
             state_id="state-1",
             token_id="token-1",
         )
-        mock_recorder.record_call.assert_called_once()
-        assert mock_recorder.record_call.call_args.kwargs["call_type"] == CallType.VECTOR
+        mock_execution.record_call.assert_called_once()
+        assert mock_execution.record_call.call_args.kwargs["call_type"] == CallType.VECTOR
 
 
 class TestTier3ResultBoundary:
@@ -485,7 +485,7 @@ class TestTier3ResultBoundary:
             collection=unique_name,
             mode="ephemeral",
         )
-        provider = ChromaSearchProvider(config=config, recorder=_mock_recorder(), run_id="test-run")
+        provider = ChromaSearchProvider(config=config, execution=_mock_execution(), run_id="test-run")
         provider._collection.add(documents=["test doc"], ids=["doc1"])
 
         # Simulate malformed SDK response — missing 'documents' key
@@ -505,7 +505,7 @@ class TestTier3ResultBoundary:
             collection=unique_name,
             mode="ephemeral",
         )
-        provider = ChromaSearchProvider(config=config, recorder=_mock_recorder(), run_id="test-run")
+        provider = ChromaSearchProvider(config=config, execution=_mock_execution(), run_id="test-run")
         provider._collection.add(documents=["test doc"], ids=["doc1"])
 
         with (
@@ -528,7 +528,7 @@ class TestTier3ResultBoundary:
             collection=unique_name,
             mode="ephemeral",
         )
-        provider = ChromaSearchProvider(config=config, recorder=_mock_recorder(), run_id="test-run")
+        provider = ChromaSearchProvider(config=config, execution=_mock_execution(), run_id="test-run")
         provider._collection.add(documents=["test doc"], ids=["doc1"])
 
         with (
@@ -553,7 +553,7 @@ class TestNonFiniteDistanceHandling:
             mode="ephemeral",
             distance_function="cosine",
         )
-        provider = ChromaSearchProvider(config=config, recorder=_mock_recorder(), run_id="test-run")
+        provider = ChromaSearchProvider(config=config, execution=_mock_execution(), run_id="test-run")
         return provider
 
     def test_nan_distance_raises_retrieval_error(self):
@@ -613,7 +613,7 @@ class TestDistanceTypeValidation:
             collection=unique_name,
             mode="ephemeral",
         )
-        provider = ChromaSearchProvider(config=config, recorder=_mock_recorder(), run_id="test-run")
+        provider = ChromaSearchProvider(config=config, execution=_mock_execution(), run_id="test-run")
         provider._collection.add(documents=["doc a", "doc b"], ids=["doc1", "doc2"])
 
         with (
@@ -646,10 +646,10 @@ class TestPostQueryFailureAudit:
 
         unique_name = f"pqa-{uuid.uuid4().hex[:12]}"
         _precreate_collection(unique_name)
-        recorder = _mock_recorder()
+        execution = _mock_execution()
         provider = ChromaSearchProvider(
             config=ChromaSearchProviderConfig(collection=unique_name, mode="ephemeral"),
-            recorder=recorder,
+            execution=execution,
             run_id="test-run",
         )
         provider._collection.add(documents=["test doc"], ids=["doc1"])
@@ -660,8 +660,8 @@ class TestPostQueryFailureAudit:
         ):
             provider.search("test", top_k=1, min_score=0.0, state_id="s1", token_id=None)
 
-        recorder.record_call.assert_called_once()
-        assert recorder.record_call.call_args.kwargs["status"] == CallStatus.ERROR
+        execution.record_call.assert_called_once()
+        assert execution.record_call.call_args.kwargs["status"] == CallStatus.ERROR
 
     def test_non_numeric_distance_records_error_call(self):
         """Corrupt distance produces audit record before crashing."""
@@ -669,10 +669,10 @@ class TestPostQueryFailureAudit:
 
         unique_name = f"pqd-{uuid.uuid4().hex[:12]}"
         _precreate_collection(unique_name)
-        recorder = _mock_recorder()
+        execution = _mock_execution()
         provider = ChromaSearchProvider(
             config=ChromaSearchProviderConfig(collection=unique_name, mode="ephemeral"),
-            recorder=recorder,
+            execution=execution,
             run_id="test-run",
         )
         provider._collection.add(documents=["doc a"], ids=["doc1"])
@@ -692,8 +692,8 @@ class TestPostQueryFailureAudit:
         ):
             provider.search("test", top_k=1, min_score=0.0, state_id="s1", token_id=None)
 
-        recorder.record_call.assert_called_once()
-        assert recorder.record_call.call_args.kwargs["status"] == CallStatus.ERROR
+        execution.record_call.assert_called_once()
+        assert execution.record_call.call_args.kwargs["status"] == CallStatus.ERROR
 
     def test_nan_distance_records_error_call(self):
         """NaN distance from corrupt index produces audit record."""
@@ -701,10 +701,10 @@ class TestPostQueryFailureAudit:
 
         unique_name = f"pqn-{uuid.uuid4().hex[:12]}"
         _precreate_collection(unique_name)
-        recorder = _mock_recorder()
+        execution = _mock_execution()
         provider = ChromaSearchProvider(
             config=ChromaSearchProviderConfig(collection=unique_name, mode="ephemeral"),
-            recorder=recorder,
+            execution=execution,
             run_id="test-run",
         )
         provider._collection.add(documents=["doc a"], ids=["doc1"])
@@ -724,8 +724,8 @@ class TestPostQueryFailureAudit:
         ):
             provider.search("test", top_k=1, min_score=0.0, state_id="s1", token_id=None)
 
-        recorder.record_call.assert_called_once()
-        assert recorder.record_call.call_args.kwargs["status"] == CallStatus.ERROR
+        execution.record_call.assert_called_once()
+        assert execution.record_call.call_args.kwargs["status"] == CallStatus.ERROR
 
     def test_none_documents_records_error_call(self):
         """None in response fields produces audit record."""
@@ -733,10 +733,10 @@ class TestPostQueryFailureAudit:
 
         unique_name = f"pqnr-{uuid.uuid4().hex[:12]}"
         _precreate_collection(unique_name)
-        recorder = _mock_recorder()
+        execution = _mock_execution()
         provider = ChromaSearchProvider(
             config=ChromaSearchProviderConfig(collection=unique_name, mode="ephemeral"),
-            recorder=recorder,
+            execution=execution,
             run_id="test-run",
         )
         provider._collection.add(documents=["test doc"], ids=["doc1"])
@@ -751,8 +751,8 @@ class TestPostQueryFailureAudit:
         ):
             provider.search("test", top_k=1, min_score=0.0, state_id="s1", token_id=None)
 
-        recorder.record_call.assert_called_once()
-        assert recorder.record_call.call_args.kwargs["status"] == CallStatus.ERROR
+        execution.record_call.assert_called_once()
+        assert execution.record_call.call_args.kwargs["status"] == CallStatus.ERROR
 
 
 class TestDocTypeValidation:
@@ -768,7 +768,7 @@ class TestDocTypeValidation:
             collection=unique_name,
             mode="ephemeral",
         )
-        provider = ChromaSearchProvider(config=config, recorder=_mock_recorder(), run_id="test-run")
+        provider = ChromaSearchProvider(config=config, execution=_mock_execution(), run_id="test-run")
         provider._collection.add(documents=["real doc"], ids=["doc1"])
 
         # Simulate SDK returning non-string document (corrupt index)
@@ -813,7 +813,7 @@ class TestChromaSearchProviderReadiness:
             mode="ephemeral",
             distance_function="cosine",
         )
-        return ChromaSearchProvider(config=config, recorder=_mock_recorder(), run_id="test-run")
+        return ChromaSearchProvider(config=config, execution=_mock_execution(), run_id="test-run")
 
     def test_collection_with_documents_is_ready(self) -> None:
         """Collection exists and has documents."""

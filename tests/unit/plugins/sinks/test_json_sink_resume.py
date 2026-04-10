@@ -9,15 +9,15 @@ from elspeth.contracts.plugin_context import PluginContext
 from elspeth.plugins.sinks.json_sink import JSONSink
 from tests.fixtures.base_classes import inject_write_failure
 from tests.fixtures.factories import make_context
-from tests.fixtures.landscape import make_landscape_db, make_recorder
+from tests.fixtures.landscape import make_factory, make_landscape_db
 
 
 @pytest.fixture
 def ctx() -> PluginContext:
     """Create test context."""
     db = make_landscape_db()
-    recorder = make_recorder(db)
-    return make_context(landscape=recorder)
+    factory = make_factory(db)
+    return make_context(landscape=factory)
 
 
 class TestJSONSinkResumeCapability:

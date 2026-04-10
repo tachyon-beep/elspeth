@@ -780,7 +780,7 @@ class TestInterruptAndResume:
             runs_table,
             tokens_table,
         )
-        from tests.fixtures.landscape import make_recorder
+        from tests.fixtures.landscape import make_factory
         from tests.fixtures.plugins import PassTransform
 
         now = datetime.now(UTC)
@@ -891,9 +891,9 @@ class TestInterruptAndResume:
                 )
 
         # Mark first N rows as completed
-        recorder = make_recorder(db)
+        factory = make_factory(db)
         for i in range(processed_count):
-            recorder.record_token_outcome(
+            factory.data_flow.record_token_outcome(
                 ref=TokenRef(token_id=f"t{i}", run_id=run_id),
                 outcome=RowOutcome.COMPLETED,
                 sink_name="default",

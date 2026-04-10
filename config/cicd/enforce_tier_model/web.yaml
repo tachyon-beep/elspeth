@@ -406,7 +406,7 @@ allow_hits:
   reason: ValueError from int() on non-numeric -w arg
   safety: Skips this argv entry
   expires: null
-- key: web/blobs/service.py:R4:BlobServiceImpl:copy_blobs_for_fork:fp=c451cb77cd2a1933
+- key: web/blobs/service.py:R4:BlobServiceImpl:copy_blobs_for_fork:fp=d8b44ad06e9e270b
   owner: web-blobs
   reason: Best-effort cleanup on fork failure — delete_blob may fail if DB disconnected
   safety: Falls back to file unlink; original error re-raised
@@ -521,7 +521,7 @@ allow_hits:
   reason: False positive — @router.get() is FastAPI route decorator
   safety: No dict access involved
   expires: null
-- key: web/blobs/service.py:R6:BlobServiceImpl:finalize_run_output_blobs:_sync:fp=761754008730ef48
+- key: web/blobs/service.py:R6:BlobServiceImpl:finalize_run_output_blobs:_sync:fp=c09366e02831de24
   owner: web-blobs
   reason: Quota exceeded during finalization marks blob as error instead of crashing run
   safety: Over-quota file deleted; blob marked error; run still finalized
@@ -664,12 +664,12 @@ allow_hits:
   reason: Tier 1 read guard — COALESCE(SUM()) must return int; isinstance assertion crashes on anomaly instead of silent coercion
   safety: Assert crashes immediately with diagnostic message; no silent handling
   expires: null
-- key: web/blobs/service.py:R5:BlobServiceImpl:copy_blobs_for_fork:_check_quota:fp=23f144b71270e1d6
+- key: web/blobs/service.py:R5:BlobServiceImpl:copy_blobs_for_fork:_check_quota:fp=157021998c1d231a
   owner: web-blobs
   reason: Tier 1 read guard — COALESCE(SUM()) must return int; isinstance assertion crashes on anomaly instead of silent coercion
   safety: Assert crashes immediately with diagnostic message; no silent handling
   expires: null
-- key: web/blobs/service.py:R5:BlobServiceImpl:_finalize_blob_sync:fp=9410952b1f15f5d9
+- key: web/blobs/service.py:R5:BlobServiceImpl:_finalize_blob_sync:fp=28a6713f0bbc8130
   owner: web-blobs
   reason: Tier 1 read guard — COALESCE(SUM()) must return int; isinstance assertion crashes on anomaly instead of silent coercion
   safety: Assert crashes immediately with diagnostic message; no silent handling

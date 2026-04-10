@@ -83,13 +83,13 @@ class TestGetRunWhereExactness:
     def test_returns_only_target_run(self, multi_run_landscape: MultiRunFixture) -> None:
         fix = multi_run_landscape
 
-        run = fix.recorder.get_run("run-B")
+        run = fix.factory.run_lifecycle.get_run("run-B")
 
         assert run is not None
         assert run.run_id == "run-B"
         # Adjacent runs exist but are distinct — inequality would merge them
-        assert fix.recorder.get_run("run-A").run_id == "run-A"
-        assert fix.recorder.get_run("run-C").run_id == "run-C"
+        assert fix.factory.run_lifecycle.get_run("run-A").run_id == "run-A"
+        assert fix.factory.run_lifecycle.get_run("run-C").run_id == "run-C"
 
 
 class TestCompleteRunWhereExactness:
@@ -98,14 +98,14 @@ class TestCompleteRunWhereExactness:
     def test_completes_only_target_run(self, multi_run_landscape: MultiRunFixture) -> None:
         fix = multi_run_landscape
 
-        fix.recorder.complete_run("run-B", RunStatus.COMPLETED)
+        fix.factory.run_lifecycle.complete_run("run-B", RunStatus.COMPLETED)
 
-        run_b = fix.recorder.get_run("run-B")
+        run_b = fix.factory.run_lifecycle.get_run("run-B")
         assert run_b is not None
         assert run_b.status == RunStatus.COMPLETED
         # Adjacent runs must be unaffected
-        assert fix.recorder.get_run("run-A").status == RunStatus.RUNNING
-        assert fix.recorder.get_run("run-C").status == RunStatus.RUNNING
+        assert fix.factory.run_lifecycle.get_run("run-A").status == RunStatus.RUNNING
+        assert fix.factory.run_lifecycle.get_run("run-C").status == RunStatus.RUNNING
 
 
 class TestUpdateRunStatusWhereExactness:
@@ -114,13 +114,13 @@ class TestUpdateRunStatusWhereExactness:
     def test_updates_only_target_run(self, multi_run_landscape: MultiRunFixture) -> None:
         fix = multi_run_landscape
 
-        fix.recorder.update_run_status("run-B", RunStatus.INTERRUPTED)
+        fix.factory.run_lifecycle.update_run_status("run-B", RunStatus.INTERRUPTED)
 
-        run_b = fix.recorder.get_run("run-B")
+        run_b = fix.factory.run_lifecycle.get_run("run-B")
         assert run_b is not None
         assert run_b.status == RunStatus.INTERRUPTED
-        assert fix.recorder.get_run("run-A").status == RunStatus.RUNNING
-        assert fix.recorder.get_run("run-C").status == RunStatus.RUNNING
+        assert fix.factory.run_lifecycle.get_run("run-A").status == RunStatus.RUNNING
+        assert fix.factory.run_lifecycle.get_run("run-C").status == RunStatus.RUNNING
 
 
 class TestUpdateRunContractWhereExactness:
@@ -130,11 +130,11 @@ class TestUpdateRunContractWhereExactness:
         fix = multi_run_landscape
         contract = _make_schema_contract()
 
-        fix.recorder.update_run_contract("run-B", contract)
+        fix.factory.run_lifecycle.update_run_contract("run-B", contract)
 
-        assert fix.recorder.get_run_contract("run-B") is not None
-        assert fix.recorder.get_run_contract("run-A") is None
-        assert fix.recorder.get_run_contract("run-C") is None
+        assert fix.factory.run_lifecycle.get_run_contract("run-B") is not None
+        assert fix.factory.run_lifecycle.get_run_contract("run-A") is None
+        assert fix.factory.run_lifecycle.get_run_contract("run-C") is None
 
 
 class TestGetSourceFieldResolutionWhereExactness:
@@ -143,13 +143,13 @@ class TestGetSourceFieldResolutionWhereExactness:
     def test_returns_only_target_run_resolution(self, multi_run_landscape: MultiRunFixture) -> None:
         fix = multi_run_landscape
 
-        fix.recorder.record_source_field_resolution("run-B", {"Original Header": "original_header"}, "v1")
+        fix.factory.run_lifecycle.record_source_field_resolution("run-B", {"Original Header": "original_header"}, "v1")
 
-        resolution = fix.recorder.get_source_field_resolution("run-B")
+        resolution = fix.factory.run_lifecycle.get_source_field_resolution("run-B")
         assert resolution is not None
         assert resolution == {"Original Header": "original_header"}
-        assert fix.recorder.get_source_field_resolution("run-A") is None
-        assert fix.recorder.get_source_field_resolution("run-C") is None
+        assert fix.factory.run_lifecycle.get_source_field_resolution("run-A") is None
+        assert fix.factory.run_lifecycle.get_source_field_resolution("run-C") is None
 
 
 class TestSetExportStatusWhereExactness:
@@ -158,13 +158,13 @@ class TestSetExportStatusWhereExactness:
     def test_updates_only_target_run(self, multi_run_landscape: MultiRunFixture) -> None:
         fix = multi_run_landscape
 
-        fix.recorder.set_export_status("run-B", ExportStatus.COMPLETED)
+        fix.factory.run_lifecycle.set_export_status("run-B", ExportStatus.COMPLETED)
 
-        run_b = fix.recorder.get_run("run-B")
+        run_b = fix.factory.run_lifecycle.get_run("run-B")
         assert run_b is not None
         assert run_b.export_status == ExportStatus.COMPLETED
-        assert fix.recorder.get_run("run-A").export_status != ExportStatus.COMPLETED
-        assert fix.recorder.get_run("run-C").export_status != ExportStatus.COMPLETED
+        assert fix.factory.run_lifecycle.get_run("run-A").export_status != ExportStatus.COMPLETED
+        assert fix.factory.run_lifecycle.get_run("run-C").export_status != ExportStatus.COMPLETED
 
 
 class TestGetSecretResolutionsForRunWhereExactness:
@@ -173,11 +173,11 @@ class TestGetSecretResolutionsForRunWhereExactness:
     def test_returns_only_target_run_resolutions(self, multi_run_landscape: MultiRunFixture) -> None:
         fix = multi_run_landscape
 
-        fix.recorder.record_secret_resolutions("run-A", [_make_secret_resolution("KEY_A", "a")])
-        fix.recorder.record_secret_resolutions("run-B", [_make_secret_resolution("KEY_B", "b")])
-        fix.recorder.record_secret_resolutions("run-C", [_make_secret_resolution("KEY_C", "c")])
+        fix.factory.run_lifecycle.record_secret_resolutions("run-A", [_make_secret_resolution("KEY_A", "a")])
+        fix.factory.run_lifecycle.record_secret_resolutions("run-B", [_make_secret_resolution("KEY_B", "b")])
+        fix.factory.run_lifecycle.record_secret_resolutions("run-C", [_make_secret_resolution("KEY_C", "c")])
 
-        resolutions = fix.recorder.get_secret_resolutions_for_run("run-B")
+        resolutions = fix.factory.run_lifecycle.get_secret_resolutions_for_run("run-B")
 
         assert len(resolutions) == 1
         assert resolutions[0].env_var_name == "KEY_B"
@@ -190,20 +190,20 @@ class TestListRunsWhereExactness:
     def test_filters_by_exact_status(self, multi_run_landscape: MultiRunFixture) -> None:
         fix = multi_run_landscape
 
-        fix.recorder.complete_run("run-B", RunStatus.COMPLETED)
+        fix.factory.run_lifecycle.complete_run("run-B", RunStatus.COMPLETED)
 
-        completed_runs = fix.recorder.list_runs(status=RunStatus.COMPLETED)
+        completed_runs = fix.factory.run_lifecycle.list_runs(status=RunStatus.COMPLETED)
         assert len(completed_runs) == 1
         assert completed_runs[0].run_id == "run-B"
 
-        running_runs = fix.recorder.list_runs(status=RunStatus.RUNNING)
+        running_runs = fix.factory.run_lifecycle.list_runs(status=RunStatus.RUNNING)
         assert len(running_runs) == 2
         assert {r.run_id for r in running_runs} == {"run-A", "run-C"}
 
     def test_unfiltered_returns_all(self, multi_run_landscape: MultiRunFixture) -> None:
         fix = multi_run_landscape
 
-        all_runs = fix.recorder.list_runs()
+        all_runs = fix.factory.run_lifecycle.list_runs()
 
         assert len(all_runs) == 3
         assert {r.run_id for r in all_runs} == {"run-A", "run-B", "run-C"}
@@ -221,7 +221,7 @@ class TestGetRowsWhereExactness:
         fix = multi_run_landscape
         target = fix.run("B")
 
-        rows = fix.recorder.get_rows(target.run_id)
+        rows = fix.factory.query.get_rows(target.run_id)
 
         assert len(rows) == 2
         assert all(r.run_id == target.run_id for r in rows)
@@ -235,7 +235,7 @@ class TestGetAllTokensForRunWhereExactness:
         fix = multi_run_landscape
         target = fix.run("B")
 
-        tokens = fix.recorder.get_all_tokens_for_run(target.run_id)
+        tokens = fix.factory.query.get_all_tokens_for_run(target.run_id)
 
         assert len(tokens) == 2
         assert {t.token_id for t in tokens} == {t.token_id for t in target.tokens}
@@ -248,7 +248,7 @@ class TestGetAllNodeStatesForRunWhereExactness:
         fix = multi_run_landscape
         target = fix.run("B")
 
-        states = fix.recorder.get_all_node_states_for_run(target.run_id)
+        states = fix.factory.query.get_all_node_states_for_run(target.run_id)
 
         assert len(states) == 2
         assert {s.state_id for s in states} == {t.state_id for t in target.tokens}
@@ -261,7 +261,7 @@ class TestGetAllCallsForRunWhereExactness:
         fix = multi_run_landscape
         target = fix.run("B")
 
-        calls = fix.recorder.get_all_calls_for_run(target.run_id)
+        calls = fix.factory.query.get_all_calls_for_run(target.run_id)
 
         # Only the first token per run has a call
         expected_call_ids = {t.call_id for t in target.tokens if t.call_id is not None}
@@ -276,7 +276,7 @@ class TestGetAllRoutingEventsForRunWhereExactness:
         fix = multi_run_landscape
         target = fix.run("B")
 
-        events = fix.recorder.get_all_routing_events_for_run(target.run_id)
+        events = fix.factory.query.get_all_routing_events_for_run(target.run_id)
 
         expected_re_ids = {t.routing_event_id for t in target.tokens if t.routing_event_id is not None}
         assert len(events) == 1
@@ -290,7 +290,7 @@ class TestGetAllTokenOutcomesForRunWhereExactness:
         fix = multi_run_landscape
         target = fix.run("B")
 
-        outcomes = fix.recorder.get_all_token_outcomes_for_run(target.run_id)
+        outcomes = fix.factory.query.get_all_token_outcomes_for_run(target.run_id)
 
         assert len(outcomes) == 2
         assert {o.token_id for o in outcomes} == {t.token_id for t in target.tokens}
@@ -303,7 +303,7 @@ class TestGetBatchesWhereExactness:
         fix = multi_run_landscape
         target = fix.run("B")
 
-        batches = fix.recorder.get_batches(target.run_id)
+        batches = fix.factory.execution.get_batches(target.run_id)
 
         assert len(batches) == 1
         assert batches[0].batch_id == target.batch_id
@@ -321,7 +321,7 @@ class TestGetNodeWhereExactness:
         fix = multi_run_landscape
         target = fix.run("B")
 
-        node = fix.recorder.get_node(target.source_node_id, target.run_id)
+        node = fix.factory.data_flow.get_node(target.source_node_id, target.run_id)
 
         assert node is not None
         assert node.node_id == target.source_node_id
@@ -338,11 +338,11 @@ class TestGetNodeWhereExactness:
         run_b = fix.run("B")
 
         # run-B's node with run-A's run_id — must not find anything
-        result = fix.recorder.get_node(run_b.source_node_id, run_a.run_id)
+        result = fix.factory.data_flow.get_node(run_b.source_node_id, run_a.run_id)
         assert result is None
 
         # run-A's node with run-B's run_id — must not find anything
-        result2 = fix.recorder.get_node(run_a.source_node_id, run_b.run_id)
+        result2 = fix.factory.data_flow.get_node(run_a.source_node_id, run_b.run_id)
         assert result2 is None
 
 
@@ -353,7 +353,7 @@ class TestGetEdgesWhereExactness:
         fix = multi_run_landscape
         target = fix.run("B")
 
-        edges = fix.recorder.get_edges(target.run_id)
+        edges = fix.factory.data_flow.get_edges(target.run_id)
 
         assert len(edges) == 2
         assert {e.edge_id for e in edges} == {
@@ -374,7 +374,7 @@ class TestGetTokenOutcomeWhereExactness:
         fix = multi_run_landscape
         tok = fix.run("B").tokens[0]
 
-        outcome = fix.recorder.get_token_outcome(tok.token_id)
+        outcome = fix.factory.data_flow.get_token_outcome(tok.token_id)
 
         assert outcome is not None
         assert outcome.token_id == tok.token_id
@@ -387,7 +387,7 @@ class TestGetTokenOutcomesForRowWhereExactness:
         fix = multi_run_landscape
         target = fix.run("B")
 
-        outcomes = fix.recorder.get_token_outcomes_for_row(target.run_id, target.row_ids[0])
+        outcomes = fix.factory.data_flow.get_token_outcomes_for_row(target.run_id, target.row_ids[0])
 
         assert len(outcomes) == 1
         assert outcomes[0].token_id == target.tokens[0].token_id
@@ -399,7 +399,7 @@ class TestGetTokenOutcomesForRowWhereExactness:
         """
         fix = multi_run_landscape
 
-        outcomes = fix.recorder.get_token_outcomes_for_row("run-B", fix.run("A").row_ids[0])
+        outcomes = fix.factory.data_flow.get_token_outcomes_for_row("run-B", fix.run("A").row_ids[0])
 
         assert len(outcomes) == 0
 
@@ -417,7 +417,7 @@ class TestValidationErrorsWhereExactness:
 
         for suffix in ("A", "B", "C"):
             run = fix.run(suffix)
-            fix.recorder.record_validation_error(
+            fix.factory.data_flow.record_validation_error(
                 run_id=run.run_id,
                 node_id=run.source_node_id,
                 row_data={"bad_field": f"val-{suffix}"},
@@ -426,7 +426,7 @@ class TestValidationErrorsWhereExactness:
                 destination="discard",
             )
 
-        errors = fix.recorder.get_validation_errors_for_run("run-B")
+        errors = fix.factory.data_flow.get_validation_errors_for_run("run-B")
 
         assert len(errors) == 1
         assert errors[0].run_id == "run-B"
@@ -442,7 +442,7 @@ class TestTransformErrorsWhereExactness:
         for suffix in ("A", "B", "C"):
             run = fix.run(suffix)
             tok = run.tokens[0]
-            fix.recorder.record_transform_error(
+            fix.factory.data_flow.record_transform_error(
                 ref=TokenRef(token_id=tok.token_id, run_id=run.run_id),
                 transform_id=run.transform_node_id,
                 row_data={"val": f"err-{suffix}"},
@@ -450,7 +450,7 @@ class TestTransformErrorsWhereExactness:
                 destination="discard",
             )
 
-        errors = fix.recorder.get_transform_errors_for_run("run-B")
+        errors = fix.factory.data_flow.get_transform_errors_for_run("run-B")
 
         assert len(errors) == 1
         assert errors[0].run_id == "run-B"
@@ -469,7 +469,7 @@ class TestGetNodeStateWhereExactness:
         fix = multi_run_landscape
         target_state_id = fix.run("B").tokens[0].state_id  # st-B-0
 
-        state = fix.recorder.get_node_state(target_state_id)
+        state = fix.factory.execution.get_node_state(target_state_id)
 
         assert state is not None
         assert state.state_id == target_state_id
@@ -482,7 +482,7 @@ class TestGetNodeStatesForTokenWhereExactness:
         fix = multi_run_landscape
         target_token = fix.run("B").tokens[0]
 
-        states = fix.recorder.get_node_states_for_token(target_token.token_id)
+        states = fix.factory.query.get_node_states_for_token(target_token.token_id)
 
         assert len(states) == 1
         assert states[0].state_id == target_token.state_id
@@ -501,7 +501,7 @@ class TestGetCallsWhereExactness:
         target = fix.run("B")
         target_state_id = target.tokens[0].state_id  # st-B-0 has a call
 
-        calls = fix.recorder.get_calls(target_state_id)
+        calls = fix.factory.query.get_calls(target_state_id)
 
         assert len(calls) == 1
         assert calls[0].call_id == target.tokens[0].call_id
@@ -510,7 +510,7 @@ class TestGetCallsWhereExactness:
         """Second token in each run has no call — verify empty, not leaking."""
         fix = multi_run_landscape
 
-        calls = fix.recorder.get_calls(fix.run("B").tokens[1].state_id)  # st-B-1
+        calls = fix.factory.query.get_calls(fix.run("B").tokens[1].state_id)  # st-B-1
 
         assert calls == []
 
@@ -528,11 +528,11 @@ class TestFindCallByRequestHashWhereExactness:
         fix = multi_run_landscape
         target = fix.run("B")
 
-        calls_b = fix.recorder.get_calls(target.tokens[0].state_id)
+        calls_b = fix.factory.query.get_calls(target.tokens[0].state_id)
         assert len(calls_b) == 1
         request_hash = calls_b[0].request_hash
 
-        result = fix.recorder.find_call_by_request_hash(target.run_id, CallType.HTTP, request_hash)
+        result = fix.factory.execution.find_call_by_request_hash(target.run_id, CallType.HTTP, request_hash)
 
         assert result is not None
         assert result.call_id == target.tokens[0].call_id
@@ -542,10 +542,10 @@ class TestFindCallByRequestHashWhereExactness:
         fix = multi_run_landscape
         run_b = fix.run("B")
 
-        calls_b = fix.recorder.get_calls(run_b.tokens[0].state_id)
+        calls_b = fix.factory.query.get_calls(run_b.tokens[0].state_id)
         request_hash_b = calls_b[0].request_hash
 
-        result = fix.recorder.find_call_by_request_hash(fix.run("A").run_id, CallType.HTTP, request_hash_b)
+        result = fix.factory.execution.find_call_by_request_hash(fix.run("A").run_id, CallType.HTTP, request_hash_b)
 
         assert result is None
 
@@ -563,7 +563,7 @@ class TestGetRoutingEventsWhereExactness:
         target = fix.run("B")
         target_state_id = target.tokens[0].state_id  # st-B-0 has a routing event
 
-        events = fix.recorder.get_routing_events(target_state_id)
+        events = fix.factory.query.get_routing_events(target_state_id)
 
         assert len(events) == 1
         assert events[0].event_id == target.tokens[0].routing_event_id
@@ -572,7 +572,7 @@ class TestGetRoutingEventsWhereExactness:
         """Second token in each run has no routing event."""
         fix = multi_run_landscape
 
-        events = fix.recorder.get_routing_events(fix.run("B").tokens[1].state_id)
+        events = fix.factory.query.get_routing_events(fix.run("B").tokens[1].state_id)
 
         assert events == []
 
@@ -589,7 +589,7 @@ class TestGetBatchWhereExactness:
         fix = multi_run_landscape
         target = fix.run("B")
 
-        batch = fix.recorder.get_batch(target.batch_id)
+        batch = fix.factory.execution.get_batch(target.batch_id)
 
         assert batch is not None
         assert batch.batch_id == target.batch_id
@@ -602,7 +602,7 @@ class TestGetBatchMembersWhereExactness:
         fix = multi_run_landscape
         target = fix.run("B")
 
-        members = fix.recorder.get_batch_members(target.batch_id)
+        members = fix.factory.execution.get_batch_members(target.batch_id)
 
         assert len(members) == 2
         assert {m.token_id for m in members} == {t.token_id for t in target.tokens}
@@ -619,10 +619,10 @@ class TestGetOperationWhereExactness:
     def test_returns_only_target_operation(self, multi_run_landscape: MultiRunFixture) -> None:
         fix = multi_run_landscape
 
-        op_b = fix.recorder.begin_operation(fix.run("B").run_id, fix.run("B").source_node_id, "source_load")
-        op_c = fix.recorder.begin_operation(fix.run("C").run_id, fix.run("C").source_node_id, "source_load")
+        op_b = fix.factory.execution.begin_operation(fix.run("B").run_id, fix.run("B").source_node_id, "source_load")
+        op_c = fix.factory.execution.begin_operation(fix.run("C").run_id, fix.run("C").source_node_id, "source_load")
 
-        result = fix.recorder.get_operation(op_b.operation_id)
+        result = fix.factory.execution.get_operation(op_b.operation_id)
 
         assert result is not None
         assert result.operation_id == op_b.operation_id
@@ -635,8 +635,8 @@ class TestGetOperationCallsWhereExactness:
     def test_returns_only_target_operation_calls(self, multi_run_landscape: MultiRunFixture) -> None:
         fix = multi_run_landscape
 
-        op_b = fix.recorder.begin_operation(fix.run("B").run_id, fix.run("B").source_node_id, "source_load")
-        call_b = fix.recorder.record_operation_call(
+        op_b = fix.factory.execution.begin_operation(fix.run("B").run_id, fix.run("B").source_node_id, "source_load")
+        call_b = fix.factory.execution.record_operation_call(
             op_b.operation_id,
             CallType.HTTP,
             CallStatus.SUCCESS,
@@ -645,8 +645,8 @@ class TestGetOperationCallsWhereExactness:
             latency_ms=10.0,
         )
 
-        op_c = fix.recorder.begin_operation(fix.run("C").run_id, fix.run("C").source_node_id, "source_load")
-        fix.recorder.record_operation_call(
+        op_c = fix.factory.execution.begin_operation(fix.run("C").run_id, fix.run("C").source_node_id, "source_load")
+        fix.factory.execution.record_operation_call(
             op_c.operation_id,
             CallType.HTTP,
             CallStatus.SUCCESS,
@@ -655,7 +655,7 @@ class TestGetOperationCallsWhereExactness:
             latency_ms=10.0,
         )
 
-        calls = fix.recorder.get_operation_calls(op_b.operation_id)
+        calls = fix.factory.execution.get_operation_calls(op_b.operation_id)
 
         assert len(calls) == 1
         assert calls[0].call_id == call_b.call_id

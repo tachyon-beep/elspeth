@@ -26,6 +26,7 @@ if TYPE_CHECKING:
     from elspeth.contracts.config.runtime import RuntimeConcurrencyConfig
     from elspeth.contracts.errors import ContractViolation
     from elspeth.contracts.identity import TokenInfo
+    from elspeth.contracts.payload_store import PayloadStore
     from elspeth.contracts.schema_contract import PipelineRow, SchemaContract
     from elspeth.core.rate_limit import RateLimitRegistry
 
@@ -83,6 +84,7 @@ class PluginContext:
 
     # === Audit & Infrastructure ===
     landscape: PluginAuditWriter | None = None
+    payload_store: PayloadStore | None = None
     rate_limit_registry: RateLimitRegistry | None = None
     concurrency_config: RuntimeConcurrencyConfig | None = None
 

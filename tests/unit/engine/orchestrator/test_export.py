@@ -5,7 +5,7 @@ export.py has two responsibilities:
 1. Export audit trail to JSON/CSV sinks after run completion
 2. Reconstruct Pydantic schemas from JSON schema dicts (for pipeline resume)
 
-The export functions mock the LandscapeExporter and sinks.
+The export functions mock the LandscapeExporter, RecorderFactory, and sinks.
 The schema reconstruction functions are pure logic — no mocks needed.
 """
 
@@ -49,9 +49,9 @@ def _make_sink_and_factory(*, config: dict[str, Any] | None = None, **overrides:
 
 
 @pytest.fixture(autouse=True)
-def _mock_landscape_recorder():
-    """Prevent export tests from hitting real DB via LandscapeRecorder.register_node()."""
-    with patch("elspeth.core.landscape.recorder.LandscapeRecorder"):
+def _mock_recorder_factory():
+    """Prevent export tests from hitting real DB via RecorderFactory.register_node()."""
+    with patch("elspeth.core.landscape.factory.RecorderFactory"):
         yield
 
 

@@ -9,7 +9,7 @@ from elspeth.contracts.schema_contract import PipelineRow, SchemaContract
 from elspeth.testing import make_field, make_pipeline_row
 from tests.fixtures.base_classes import inject_write_failure
 from tests.fixtures.factories import make_context
-from tests.fixtures.landscape import make_recorder
+from tests.fixtures.landscape import make_factory
 
 # Common schema config for dynamic field handling (accepts any fields)
 DYNAMIC_SCHEMA = {"mode": "observed"}
@@ -549,11 +549,11 @@ class TestFieldMapperContractPropagation:
                 }
             )
         )
-        sink_recorder = make_recorder()
+        factory = make_factory()
         sink_ctx = PluginContext(
             run_id="test-run",
             config={},
-            landscape=sink_recorder,
+            landscape=factory.plugin_audit_writer,
             contract=result.row.contract,
         )
         sink.write([result.row.to_dict()], sink_ctx)

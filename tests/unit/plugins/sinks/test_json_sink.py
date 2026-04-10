@@ -12,7 +12,7 @@ from elspeth.contracts.plugin_context import PluginContext
 from elspeth.plugins.infrastructure.config_base import PluginConfigError
 from tests.fixtures.base_classes import inject_write_failure
 from tests.fixtures.factories import make_context
-from tests.fixtures.landscape import make_landscape_db, make_recorder
+from tests.fixtures.landscape import make_factory, make_landscape_db
 
 # Dynamic schema config for tests - PathConfig now requires schema
 DYNAMIC_SCHEMA = {"mode": "observed"}
@@ -25,8 +25,8 @@ class TestJSONSink:
     def ctx(self) -> PluginContext:
         """Create a minimal plugin context."""
         db = make_landscape_db()
-        recorder = make_recorder(db)
-        return make_context(landscape=recorder)
+        factory = make_factory(db)
+        return make_context(landscape=factory)
 
     def test_write_json_array(self, tmp_path: Path, ctx: PluginContext) -> None:
         """Write rows as JSON array."""
@@ -358,8 +358,8 @@ class TestJSONSinkNonFiniteRejection:
     @pytest.fixture
     def ctx(self) -> PluginContext:
         db = make_landscape_db()
-        recorder = make_recorder(db)
-        return make_context(landscape=recorder)
+        factory = make_factory(db)
+        return make_context(landscape=factory)
 
     @pytest.mark.parametrize("bad_value", [float("nan"), float("inf"), float("-inf")], ids=["nan", "inf", "neg_inf"])
     def test_jsonl_rejects_non_finite_float(self, tmp_path: Path, ctx: PluginContext, bad_value: float) -> None:

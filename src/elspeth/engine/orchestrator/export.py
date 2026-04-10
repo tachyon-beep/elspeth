@@ -90,7 +90,9 @@ def export_landscape(
     from elspeth.core.landscape.factory import RecorderFactory
 
     factory = RecorderFactory(db)
-    ctx = PluginContext(run_id=run_id, config={}, landscape=factory.plugin_audit_writer(), node_id=sink.node_id)
+    ctx = PluginContext(
+        run_id=run_id, config={}, landscape=factory.plugin_audit_writer(), payload_store=factory.payload_store, node_id=sink.node_id
+    )
 
     # Register the export sink as a node so the FK constraint in `operations` is satisfied.
     # The export sink writes post-run audit data and is not part of the execution graph,

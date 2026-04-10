@@ -3,7 +3,7 @@
 
 Migrated from tests/cli/test_explain_tui.py.
 Tests that require LandscapeDB (screen loading, state transitions with real DB)
-are deferred to integration tier.
+are deferred to integration tier. Uses RecorderFactory to access data_flow repository.
 """
 
 from unittest.mock import MagicMock, patch
@@ -81,10 +81,10 @@ class TestExplainScreenStateModel:
 
 
 class TestExplainScreenLoading:
-    """Tests for ExplainScreen loading from mocked LandscapeDB."""
+    """Tests for ExplainScreen loading from mocked RecorderFactory."""
 
     def _make_mock_node(self, *, node_id: str, plugin_name: str, node_type: NodeType) -> MagicMock:
-        """Create a mock node matching the LandscapeRecorder.get_nodes() return shape."""
+        """Create a mock node matching the RecorderFactory.data_flow.get_nodes() return shape."""
         node = MagicMock()
         node.node_id = node_id
         node.plugin_name = plugin_name
@@ -100,8 +100,8 @@ class TestExplainScreenLoading:
             self._make_mock_node(node_id="sink-1", plugin_name="csv_sink", node_type=NodeType.SINK),
         ]
 
-        with patch("elspeth.tui.screens.explain_screen.LandscapeRecorder") as MockRecorder:
-            MockRecorder.return_value.get_nodes.return_value = nodes
+        with patch("elspeth.tui.screens.explain_screen.RecorderFactory") as MockFactory:
+            MockFactory.return_value.data_flow.get_nodes.return_value = nodes
             screen = ExplainScreen(db=mock_db, run_id="run-123")
 
         assert isinstance(screen.state, LoadedState)
@@ -120,8 +120,8 @@ class TestExplainScreenLoading:
         """Database error during loading produces LoadingFailedState."""
         mock_db = MagicMock()
 
-        with patch("elspeth.tui.screens.explain_screen.LandscapeRecorder") as MockRecorder:
-            MockRecorder.return_value.get_nodes.side_effect = OperationalError("connection refused", {}, None)
+        with patch("elspeth.tui.screens.explain_screen.RecorderFactory") as MockFactory:
+            MockFactory.return_value.data_flow.get_nodes.side_effect = OperationalError("connection refused", {}, None)
             screen = ExplainScreen(db=mock_db, run_id="run-123")
 
         assert isinstance(screen.state, LoadingFailedState)
@@ -141,8 +141,8 @@ class TestExplainScreenLoading:
             self._make_mock_node(node_id="sink-1", plugin_name="output", node_type=NodeType.SINK),
         ]
 
-        with patch("elspeth.tui.screens.explain_screen.LandscapeRecorder") as MockRecorder:
-            MockRecorder.return_value.get_nodes.return_value = nodes
+        with patch("elspeth.tui.screens.explain_screen.RecorderFactory") as MockFactory:
+            MockFactory.return_value.data_flow.get_nodes.return_value = nodes
             screen = ExplainScreen(db=mock_db, run_id="run-456")
 
         assert isinstance(screen.state, LoadedState)
@@ -158,8 +158,8 @@ class TestExplainScreenLoading:
         """Pipeline with no nodes produces LoadedState with empty fields."""
         mock_db = MagicMock()
 
-        with patch("elspeth.tui.screens.explain_screen.LandscapeRecorder") as MockRecorder:
-            MockRecorder.return_value.get_nodes.return_value = []
+        with patch("elspeth.tui.screens.explain_screen.RecorderFactory") as MockFactory:
+            MockFactory.return_value.data_flow.get_nodes.return_value = []
             screen = ExplainScreen(db=mock_db, run_id="run-empty")
 
         assert isinstance(screen.state, LoadedState)
@@ -180,8 +180,8 @@ class TestExplainScreenLoading:
         screen = ExplainScreen()  # Starts in UninitializedState
         assert isinstance(screen.state, UninitializedState)
 
-        with patch("elspeth.tui.screens.explain_screen.LandscapeRecorder") as MockRecorder:
-            MockRecorder.return_value.get_nodes.return_value = nodes
+        with patch("elspeth.tui.screens.explain_screen.RecorderFactory") as MockFactory:
+            MockFactory.return_value.data_flow.get_nodes.return_value = nodes
             screen.load(mock_db, "run-789")
 
         assert isinstance(screen.state, LoadedState)
@@ -194,8 +194,8 @@ class TestExplainScreenLoading:
             self._make_mock_node(node_id="src-1", plugin_name="csv_source", node_type=NodeType.SOURCE),
         ]
 
-        with patch("elspeth.tui.screens.explain_screen.LandscapeRecorder") as MockRecorder:
-            MockRecorder.return_value.get_nodes.return_value = nodes
+        with patch("elspeth.tui.screens.explain_screen.RecorderFactory") as MockFactory:
+            MockFactory.return_value.data_flow.get_nodes.return_value = nodes
             screen = ExplainScreen(db=mock_db, run_id="run-loaded")
 
         assert isinstance(screen.state, LoadedState)
@@ -211,7 +211,7 @@ class TestExplainScreenNodeSelection:
     """Tests for ExplainScreen node selection and detail panel updates."""
 
     def _make_mock_node(self, *, node_id: str, plugin_name: str, node_type: NodeType) -> MagicMock:
-        """Create a mock node matching the LandscapeRecorder return shape."""
+        """Create a mock node matching the RecorderFactory.data_flow return shape."""
         node = MagicMock()
         node.node_id = node_id
         node.plugin_name = plugin_name
@@ -225,8 +225,8 @@ class TestExplainScreenNodeSelection:
             self._make_mock_node(node_id="tfm-1", plugin_name="filter", node_type=NodeType.TRANSFORM),
             self._make_mock_node(node_id="sink-1", plugin_name="csv_sink", node_type=NodeType.SINK),
         ]
-        with patch("elspeth.tui.screens.explain_screen.LandscapeRecorder") as MockRecorder:
-            MockRecorder.return_value.get_nodes.return_value = nodes
+        with patch("elspeth.tui.screens.explain_screen.RecorderFactory") as MockFactory:
+            MockFactory.return_value.data_flow.get_nodes.return_value = nodes
             screen = ExplainScreen(db=mock_db, run_id="run-sel")
         assert isinstance(screen.state, LoadedState)
         return screen
@@ -237,8 +237,8 @@ class TestExplainScreenNodeSelection:
         screen = self._make_loaded_screen(mock_db)
 
         mock_node = self._make_mock_node(node_id="tfm-1", plugin_name="filter", node_type=NodeType.TRANSFORM)
-        with patch("elspeth.tui.screens.explain_screen.LandscapeRecorder") as MockRecorder:
-            MockRecorder.return_value.get_node.return_value = mock_node
+        with patch("elspeth.tui.screens.explain_screen.RecorderFactory") as MockFactory:
+            MockFactory.return_value.data_flow.get_node.return_value = mock_node
             screen.on_tree_select("tfm-1")
 
         content = screen.detail_panel.render_content()
@@ -250,8 +250,8 @@ class TestExplainScreenNodeSelection:
         mock_db = MagicMock()
         screen = self._make_loaded_screen(mock_db)
 
-        with patch("elspeth.tui.screens.explain_screen.LandscapeRecorder") as MockRecorder:
-            MockRecorder.return_value.get_node.return_value = None
+        with patch("elspeth.tui.screens.explain_screen.RecorderFactory") as MockFactory:
+            MockFactory.return_value.data_flow.get_node.return_value = None
             screen.on_tree_select("nonexistent-node")
 
         content = screen.detail_panel.render_content()
@@ -272,16 +272,16 @@ class TestExplainScreenNodeSelection:
         mock_db = MagicMock()
 
         # Create a screen that enters LoadingFailedState
-        with patch("elspeth.tui.screens.explain_screen.LandscapeRecorder") as MockRecorder:
-            MockRecorder.return_value.get_nodes.side_effect = OperationalError("connection refused", {}, None)
+        with patch("elspeth.tui.screens.explain_screen.RecorderFactory") as MockFactory:
+            MockFactory.return_value.data_flow.get_nodes.side_effect = OperationalError("connection refused", {}, None)
             screen = ExplainScreen(db=mock_db, run_id="run-failed")
 
         assert isinstance(screen.state, LoadingFailedState)
 
         # Now select a node — should still work via the LoadingFailedState branch
         mock_node = self._make_mock_node(node_id="tfm-1", plugin_name="filter", node_type=NodeType.TRANSFORM)
-        with patch("elspeth.tui.screens.explain_screen.LandscapeRecorder") as MockRecorder:
-            MockRecorder.return_value.get_node.return_value = mock_node
+        with patch("elspeth.tui.screens.explain_screen.RecorderFactory") as MockFactory:
+            MockFactory.return_value.data_flow.get_node.return_value = mock_node
             screen.on_tree_select("tfm-1")
 
         content = screen.detail_panel.render_content()

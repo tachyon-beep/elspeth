@@ -23,7 +23,7 @@ from elspeth.contracts.events import (
     RunSummary,
 )
 from elspeth.core.landscape.database import LandscapeDB
-from elspeth.core.landscape.recorder import LandscapeRecorder
+from elspeth.core.landscape.factory import RecorderFactory
 from elspeth.engine.orchestrator import Orchestrator, PipelineConfig
 from elspeth.plugins.infrastructure.base import BaseTransform
 from elspeth.plugins.infrastructure.results import TransformResult
@@ -243,8 +243,8 @@ class TestDatabaseInitialization:
         orchestrator = Orchestrator(db)
         result = orchestrator.run(config, graph=graph, payload_store=payload_store)
 
-        recorder = LandscapeRecorder(db)
-        run = recorder.get_run(result.run_id)
+        factory = RecorderFactory(db)
+        run = factory.run_lifecycle.get_run(result.run_id)
         assert run is not None, f"Run {result.run_id} not found in Landscape"
         assert run.status == RunStatus.COMPLETED
 

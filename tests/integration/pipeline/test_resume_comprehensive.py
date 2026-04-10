@@ -41,7 +41,7 @@ from elspeth.plugins.sinks.json_sink import JSONSink
 from elspeth.plugins.sources.null_source import NullSource
 from elspeth.plugins.transforms.passthrough import PassThrough
 from tests.fixtures.base_classes import inject_write_failure
-from tests.fixtures.landscape import make_recorder
+from tests.fixtures.landscape import make_factory
 
 
 def _null_source(on_success: str = "default") -> NullSource:
@@ -266,9 +266,9 @@ class TestResumeComprehensive:
                 f.write(f"{i},row-{i}\n")
 
         # Mark first 3 rows as completed
-        recorder = make_recorder(db)
+        factory = make_factory(db)
         for i in range(3):
-            recorder.record_token_outcome(
+            factory.data_flow.record_token_outcome(
                 ref=TokenRef(token_id=f"t{i}", run_id=run_id),
                 outcome=RowOutcome.COMPLETED,
                 sink_name="sink",
@@ -373,9 +373,9 @@ class TestResumeComprehensive:
                 f.write(f"{i},row-{i}\n")
 
         # Mark ALL rows as completed (terminal outcome)
-        recorder = make_recorder(db)
+        factory = make_factory(db)
         for i in range(3):
-            recorder.record_token_outcome(
+            factory.data_flow.record_token_outcome(
                 ref=TokenRef(token_id=f"t{i}", run_id=run_id),
                 outcome=RowOutcome.COMPLETED,
                 sink_name="sink",
@@ -582,8 +582,8 @@ class TestResumeComprehensive:
                 )
 
         # Mark first row as completed (checkpoint will be at row 0)
-        recorder = make_recorder(db)
-        recorder.record_token_outcome(
+        factory = make_factory(db)
+        factory.data_flow.record_token_outcome(
             ref=TokenRef(token_id="t0", run_id=run_id),
             outcome=RowOutcome.COMPLETED,
             sink_name="sink",
@@ -787,8 +787,8 @@ class TestResumeComprehensive:
                 )
 
         # Mark first row as completed (checkpoint will be at row 0)
-        recorder = make_recorder(db)
-        recorder.record_token_outcome(
+        factory = make_factory(db)
+        factory.data_flow.record_token_outcome(
             ref=TokenRef(token_id="t0", run_id=run_id),
             outcome=RowOutcome.COMPLETED,
             sink_name="sink",
@@ -987,8 +987,8 @@ class TestResumeComprehensive:
                 )
 
         # Mark first row as completed (checkpoint will be at row 0)
-        recorder = make_recorder(db)
-        recorder.record_token_outcome(
+        factory = make_factory(db)
+        factory.data_flow.record_token_outcome(
             ref=TokenRef(token_id="t0", run_id=run_id),
             outcome=RowOutcome.COMPLETED,
             sink_name="sink",
@@ -1189,8 +1189,8 @@ class TestResumeComprehensive:
                 )
 
         # Mark first row as completed (checkpoint will be at row 0)
-        recorder = make_recorder(db)
-        recorder.record_token_outcome(
+        factory = make_factory(db)
+        factory.data_flow.record_token_outcome(
             ref=TokenRef(token_id="t0", run_id=run_id),
             outcome=RowOutcome.COMPLETED,
             sink_name="sink",

@@ -17,7 +17,7 @@ from elspeth.core.landscape.exporter import LandscapeExporter
 from elspeth.core.payload_store import FilesystemPayloadStore
 from elspeth.engine.orchestrator import Orchestrator, PipelineConfig
 from tests.fixtures.base_classes import as_sink, as_source, as_transform
-from tests.fixtures.landscape import make_recorder
+from tests.fixtures.landscape import make_factory
 from tests.fixtures.pipeline import build_linear_pipeline
 from tests.fixtures.plugins import CollectSink, PassTransform
 
@@ -134,12 +134,12 @@ class TestExportReimport:
         source_data = [{"id": f"row_{i}", "value": i * 10} for i in range(5)]
         run_id, db, _payload_store, _sink = _run_pipeline(tmp_path, source_data)
 
-        # Get counts from direct recorder queries
-        recorder = make_recorder(db)
-        direct_rows = recorder.get_rows(run_id)
-        direct_nodes = recorder.get_nodes(run_id)
-        direct_edges = recorder.get_edges(run_id)
-        direct_tokens = recorder.get_all_tokens_for_run(run_id)
+        # Get counts from direct repository queries
+        factory = make_factory(db)
+        direct_rows = factory.query.get_rows(run_id)
+        direct_nodes = factory.data_flow.get_nodes(run_id)
+        direct_edges = factory.data_flow.get_edges(run_id)
+        direct_tokens = factory.query.get_all_tokens_for_run(run_id)
 
         # Get counts from export
         exporter = LandscapeExporter(db)

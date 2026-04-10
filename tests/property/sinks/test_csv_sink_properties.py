@@ -14,7 +14,7 @@ from hypothesis import strategies as st
 from elspeth.plugins.sinks.csv_sink import CSVSink
 from tests.fixtures.base_classes import inject_write_failure
 from tests.fixtures.factories import make_context
-from tests.fixtures.landscape import make_landscape_db, make_recorder
+from tests.fixtures.landscape import make_factory, make_landscape_db
 from tests.strategies.settings import SLOW_SETTINGS
 
 # =============================================================================
@@ -71,8 +71,8 @@ class TestCSVSinkProperties:
                 )
             )
             db = make_landscape_db()
-            recorder = make_recorder(db)
-            ctx = make_context(landscape=recorder)
+            factory = make_factory(db)
+            ctx = make_context(landscape=factory)
 
             result = sink.write(rows, ctx)
             sink.close()
@@ -107,8 +107,8 @@ class TestCSVSinkProperties:
                 )
             )
             db = make_landscape_db()
-            recorder = make_recorder(db)
-            ctx = make_context(landscape=recorder)
+            factory = make_factory(db)
+            ctx = make_context(landscape=factory)
 
             sink.write([row], ctx)
             sink.close()

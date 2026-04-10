@@ -1,7 +1,7 @@
 """Tests for PluginContext.record_validation_error() and record_transform_error().
 
 Tests the offensive programming guards (FrameworkBugError) and basic delegation
-to LandscapeRecorder. Uses make_source_context() for real landscape integration
+to ExecutionRepository. Uses make_source_context() for real landscape integration
 and manual PluginContext construction for guard-clause tests.
 """
 

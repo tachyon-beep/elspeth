@@ -18,7 +18,7 @@ class ConcreteAuditedClient(AuditedClientBase):
 class TestCallIndexThreadSafety:
     """Test that _next_call_index is thread-safe.
 
-    Note: Call index allocation is delegated to LandscapeRecorder.allocate_call_index(),
+    Note: Call index allocation is delegated to ExecutionRepository.allocate_call_index(),
     which is tested separately in test_recorder.py. These tests verify the delegation
     works correctly under concurrent load by using a mock that simulates the recorder's
     thread-safe counter behavior.
@@ -27,7 +27,7 @@ class TestCallIndexThreadSafety:
     def test_concurrent_call_index_no_duplicates(self) -> None:
         """Multiple threads should get unique call indices."""
         mock_recorder = MagicMock()
-        # Simulate LandscapeRecorder's thread-safe counter with itertools.count()
+        # Simulate ExecutionRepository's thread-safe counter with itertools.count()
         import itertools
 
         counter = itertools.count()

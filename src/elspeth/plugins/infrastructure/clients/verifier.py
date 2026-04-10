@@ -24,7 +24,7 @@ from elspeth.contracts.errors import AuditIntegrityError
 from elspeth.core.canonical import stable_hash
 
 if TYPE_CHECKING:
-    from elspeth.core.landscape.recorder import LandscapeRecorder
+    from elspeth.core.landscape.execution_repository import ExecutionRepository
 
 from elspeth.contracts.freeze import deep_thaw
 from elspeth.core.landscape.row_data import CallDataState
@@ -237,7 +237,7 @@ class CallVerifier:
     and recorded baseline. Uses DeepDiff for comparison.
 
     Example:
-        verifier = CallVerifier(recorder, source_run_id="run-abc123")
+        verifier = CallVerifier(execution, source_run_id="run-abc123")
 
         # After making a live call:
         result = verifier.verify(
@@ -257,7 +257,7 @@ class CallVerifier:
 
     def __init__(
         self,
-        recorder: LandscapeRecorder,
+        execution: ExecutionRepository,
         source_run_id: str,
         *,
         ignore_paths: list[str] | None = None,
@@ -266,7 +266,7 @@ class CallVerifier:
         """Initialize verifier.
 
         Args:
-            recorder: LandscapeRecorder for looking up recorded calls
+            execution: ExecutionRepository for looking up recorded calls
             source_run_id: The run_id containing baseline recordings
             ignore_paths: Paths to ignore in comparison (e.g., ["root['latency']"])
                          These paths will be excluded from DeepDiff comparison.
@@ -274,7 +274,7 @@ class CallVerifier:
                          If False, list elements must appear in the same order to match.
                          Set to False for order-sensitive data like ranked results.
         """
-        self._recorder = recorder
+        self._execution = execution
         self._source_run_id = source_run_id
         self._ignore_paths = ignore_paths or []
         self._ignore_order = ignore_order
@@ -322,7 +322,7 @@ class CallVerifier:
         self._sequence_counters[sequence_key] = sequence_index + 1
 
         # Look up recorded call with sequence index to get Nth occurrence
-        call = self._recorder.find_call_by_request_hash(
+        call = self._execution.find_call_by_request_hash(
             run_id=self._source_run_id,
             call_type=call_type,
             request_hash=request_hash,
@@ -341,7 +341,7 @@ class CallVerifier:
             return result
 
         # Get recorded response with explicit state discrimination
-        call_data = self._recorder.get_call_response_data(call.call_id)
+        call_data = self._execution.get_call_response_data(call.call_id)
 
         # Handle non-available states explicitly
         if call_data.state != CallDataState.AVAILABLE:

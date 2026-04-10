@@ -26,7 +26,7 @@ from elspeth.core.security.web import SSRFSafeRequest
 
 @pytest.fixture
 def mock_recorder():
-    """Minimal LandscapeRecorder mock for AuditedHTTPClient."""
+    """Minimal ExecutionRepository mock for AuditedHTTPClient."""
     recorder = Mock()
     recorder.record_call = Mock()
     return recorder

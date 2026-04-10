@@ -49,7 +49,7 @@ def _get_providers() -> dict[str, _ProviderEntry]:
             ever calls this factory without recorder, it should crash at startup, not
             silently skip audit recording at query time.
             """
-            return ChromaSearchProvider(config=config, recorder=recorder, run_id=run_id)
+            return ChromaSearchProvider(config=config, execution=recorder, run_id=run_id)
 
         providers["chroma"] = (ChromaSearchProviderConfig, _chroma_factory)
     except ModuleNotFoundError:

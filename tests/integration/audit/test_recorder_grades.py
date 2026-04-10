@@ -1,4 +1,4 @@
-"""Tests for LandscapeRecorder reproducibility grade computation."""
+"""Tests for RecorderFactory reproducibility grade computation."""
 
 from __future__ import annotations
 
@@ -30,7 +30,7 @@ def _insert_purged_call(
     has been purged (response_hash set, response_ref NULL). This is the condition
     update_grade_after_purge checks before downgrading REPLAY_REPRODUCIBLE.
 
-    The node itself must already be registered via recorder.register_node() before
+    The node itself must already be registered via data_flow.register_node() before
     calling this helper so that the FK constraints on node_states are satisfied.
 
     Args:
@@ -102,15 +102,15 @@ class TestReproducibilityGradeComputation:
         """Pipeline with only deterministic/seeded nodes gets FULL_REPRODUCIBLE."""
         from elspeth.contracts import Determinism
         from elspeth.core.landscape.database import LandscapeDB
-        from elspeth.core.landscape.recorder import LandscapeRecorder
+        from elspeth.core.landscape.factory import RecorderFactory
         from elspeth.core.landscape.reproducibility import ReproducibilityGrade
 
         db = LandscapeDB.in_memory()
-        recorder = LandscapeRecorder(db)
-        run = recorder.begin_run(config={}, canonical_version="v1")
+        factory = RecorderFactory(db)
+        run = factory.run_lifecycle.begin_run(config={}, canonical_version="v1")
 
         # All deterministic nodes
-        recorder.register_node(
+        factory.data_flow.register_node(
             run_id=run.run_id,
             plugin_name="csv_source",
             node_type=NodeType.SOURCE,
@@ -119,7 +119,7 @@ class TestReproducibilityGradeComputation:
             determinism=Determinism.DETERMINISTIC,
             schema_config=DYNAMIC_SCHEMA,
         )
-        recorder.register_node(
+        factory.data_flow.register_node(
             run_id=run.run_id,
             plugin_name="field_mapper",
             node_type=NodeType.TRANSFORM,
@@ -128,7 +128,7 @@ class TestReproducibilityGradeComputation:
             determinism=Determinism.DETERMINISTIC,
             schema_config=DYNAMIC_SCHEMA,
         )
-        recorder.register_node(
+        factory.data_flow.register_node(
             run_id=run.run_id,
             plugin_name="seeded_sampler",
             node_type=NodeType.TRANSFORM,
@@ -137,7 +137,7 @@ class TestReproducibilityGradeComputation:
             determinism=Determinism.SEEDED,  # seeded counts as reproducible
             schema_config=DYNAMIC_SCHEMA,
         )
-        recorder.register_node(
+        factory.data_flow.register_node(
             run_id=run.run_id,
             plugin_name="csv_sink",
             node_type=NodeType.SINK,
@@ -147,7 +147,7 @@ class TestReproducibilityGradeComputation:
             schema_config=DYNAMIC_SCHEMA,
         )
 
-        grade = recorder.compute_reproducibility_grade(run.run_id)
+        grade = factory.run_lifecycle.compute_reproducibility_grade(run.run_id)
 
         assert grade == ReproducibilityGrade.FULL_REPRODUCIBLE
 
@@ -155,15 +155,15 @@ class TestReproducibilityGradeComputation:
         """Pipeline with nondeterministic nodes gets REPLAY_REPRODUCIBLE."""
         from elspeth.contracts import Determinism
         from elspeth.core.landscape.database import LandscapeDB
-        from elspeth.core.landscape.recorder import LandscapeRecorder
+        from elspeth.core.landscape.factory import RecorderFactory
         from elspeth.core.landscape.reproducibility import ReproducibilityGrade
 
         db = LandscapeDB.in_memory()
-        recorder = LandscapeRecorder(db)
-        run = recorder.begin_run(config={}, canonical_version="v1")
+        factory = RecorderFactory(db)
+        run = factory.run_lifecycle.begin_run(config={}, canonical_version="v1")
 
         # Mix of deterministic and nondeterministic nodes
-        recorder.register_node(
+        factory.data_flow.register_node(
             run_id=run.run_id,
             plugin_name="csv_source",
             node_type=NodeType.SOURCE,
@@ -172,7 +172,7 @@ class TestReproducibilityGradeComputation:
             determinism=Determinism.DETERMINISTIC,
             schema_config=DYNAMIC_SCHEMA,
         )
-        recorder.register_node(
+        factory.data_flow.register_node(
             run_id=run.run_id,
             plugin_name="llm_classifier",
             node_type=NodeType.TRANSFORM,
@@ -181,7 +181,7 @@ class TestReproducibilityGradeComputation:
             determinism=Determinism.EXTERNAL_CALL,  # LLM call
             schema_config=DYNAMIC_SCHEMA,
         )
-        recorder.register_node(
+        factory.data_flow.register_node(
             run_id=run.run_id,
             plugin_name="csv_sink",
             node_type=NodeType.SINK,
@@ -191,7 +191,7 @@ class TestReproducibilityGradeComputation:
             schema_config=DYNAMIC_SCHEMA,
         )
 
-        grade = recorder.compute_reproducibility_grade(run.run_id)
+        grade = factory.run_lifecycle.compute_reproducibility_grade(run.run_id)
 
         assert grade == ReproducibilityGrade.REPLAY_REPRODUCIBLE
 
@@ -199,15 +199,15 @@ class TestReproducibilityGradeComputation:
         """finalize_run() computes grade and completes the run."""
         from elspeth.contracts import Determinism, RunStatus
         from elspeth.core.landscape.database import LandscapeDB
-        from elspeth.core.landscape.recorder import LandscapeRecorder
+        from elspeth.core.landscape.factory import RecorderFactory
         from elspeth.core.landscape.reproducibility import ReproducibilityGrade
 
         db = LandscapeDB.in_memory()
-        recorder = LandscapeRecorder(db)
-        run = recorder.begin_run(config={}, canonical_version="v1")
+        factory = RecorderFactory(db)
+        run = factory.run_lifecycle.begin_run(config={}, canonical_version="v1")
 
         # Register deterministic nodes
-        recorder.register_node(
+        factory.data_flow.register_node(
             run_id=run.run_id,
             plugin_name="csv_source",
             node_type=NodeType.SOURCE,
@@ -216,7 +216,7 @@ class TestReproducibilityGradeComputation:
             determinism=Determinism.DETERMINISTIC,
             schema_config=DYNAMIC_SCHEMA,
         )
-        recorder.register_node(
+        factory.data_flow.register_node(
             run_id=run.run_id,
             plugin_name="csv_sink",
             node_type=NodeType.SINK,
@@ -226,7 +226,7 @@ class TestReproducibilityGradeComputation:
             schema_config=DYNAMIC_SCHEMA,
         )
 
-        completed_run = recorder.finalize_run(run.run_id, status=RunStatus.COMPLETED)
+        completed_run = factory.run_lifecycle.finalize_run(run.run_id, status=RunStatus.COMPLETED)
 
         assert completed_run.status == RunStatus.COMPLETED
         assert completed_run.completed_at is not None
@@ -240,18 +240,18 @@ class TestReproducibilityGradeComputation:
         but response_ref NULL (payload has been deleted).
         """
         from elspeth.core.landscape.database import LandscapeDB
-        from elspeth.core.landscape.recorder import LandscapeRecorder
+        from elspeth.core.landscape.factory import RecorderFactory
         from elspeth.core.landscape.reproducibility import (
             ReproducibilityGrade,
             update_grade_after_purge,
         )
 
         db = LandscapeDB.in_memory()
-        recorder = LandscapeRecorder(db)
-        run = recorder.begin_run(config={}, canonical_version="v1")
+        factory = RecorderFactory(db)
+        run = factory.run_lifecycle.begin_run(config={}, canonical_version="v1")
 
         # Nondeterministic pipeline
-        node = recorder.register_node(
+        node = factory.data_flow.register_node(
             run_id=run.run_id,
             plugin_name="llm_source",
             node_type=NodeType.SOURCE,
@@ -262,7 +262,7 @@ class TestReproducibilityGradeComputation:
         )
 
         # Finalize with REPLAY_REPRODUCIBLE grade
-        completed_run = recorder.finalize_run(run.run_id, status=RunStatus.COMPLETED)
+        completed_run = factory.run_lifecycle.finalize_run(run.run_id, status=RunStatus.COMPLETED)
         assert completed_run.reproducibility_grade == ReproducibilityGrade.REPLAY_REPRODUCIBLE
 
         # Simulate a purged response: insert a call with response_hash set but
@@ -273,7 +273,7 @@ class TestReproducibilityGradeComputation:
         update_grade_after_purge(db, run.run_id)
 
         # Check grade was degraded
-        updated_run = recorder.get_run(run.run_id)
+        updated_run = factory.run_lifecycle.get_run(run.run_id)
         assert updated_run is not None
         assert updated_run.reproducibility_grade == ReproducibilityGrade.ATTRIBUTABLE_ONLY
 
@@ -281,18 +281,18 @@ class TestReproducibilityGradeComputation:
         """FULL_REPRODUCIBLE remains unchanged after purge (payloads not needed for replay)."""
         from elspeth.contracts import Determinism
         from elspeth.core.landscape.database import LandscapeDB
-        from elspeth.core.landscape.recorder import LandscapeRecorder
+        from elspeth.core.landscape.factory import RecorderFactory
         from elspeth.core.landscape.reproducibility import (
             ReproducibilityGrade,
             update_grade_after_purge,
         )
 
         db = LandscapeDB.in_memory()
-        recorder = LandscapeRecorder(db)
-        run = recorder.begin_run(config={}, canonical_version="v1")
+        factory = RecorderFactory(db)
+        run = factory.run_lifecycle.begin_run(config={}, canonical_version="v1")
 
         # Deterministic pipeline
-        recorder.register_node(
+        factory.data_flow.register_node(
             run_id=run.run_id,
             plugin_name="csv_source",
             node_type=NodeType.SOURCE,
@@ -303,29 +303,29 @@ class TestReproducibilityGradeComputation:
         )
 
         # Finalize with FULL_REPRODUCIBLE grade
-        completed_run = recorder.finalize_run(run.run_id, status=RunStatus.COMPLETED)
+        completed_run = factory.run_lifecycle.finalize_run(run.run_id, status=RunStatus.COMPLETED)
         assert completed_run.reproducibility_grade == ReproducibilityGrade.FULL_REPRODUCIBLE
 
         # Simulate purge - grade should NOT degrade
         update_grade_after_purge(db, run.run_id)
 
         # Check grade unchanged
-        updated_run = recorder.get_run(run.run_id)
+        updated_run = factory.run_lifecycle.get_run(run.run_id)
         assert updated_run is not None
         assert updated_run.reproducibility_grade == ReproducibilityGrade.FULL_REPRODUCIBLE
 
     def test_compute_grade_empty_pipeline(self) -> None:
         """Empty pipeline (no nodes) gets FULL_REPRODUCIBLE."""
         from elspeth.core.landscape.database import LandscapeDB
-        from elspeth.core.landscape.recorder import LandscapeRecorder
+        from elspeth.core.landscape.factory import RecorderFactory
         from elspeth.core.landscape.reproducibility import ReproducibilityGrade
 
         db = LandscapeDB.in_memory()
-        recorder = LandscapeRecorder(db)
-        run = recorder.begin_run(config={}, canonical_version="v1")
+        factory = RecorderFactory(db)
+        run = factory.run_lifecycle.begin_run(config={}, canonical_version="v1")
 
         # No nodes registered
-        grade = recorder.compute_reproducibility_grade(run.run_id)
+        grade = factory.run_lifecycle.compute_reproducibility_grade(run.run_id)
 
         # Empty pipeline is trivially reproducible
         assert grade == ReproducibilityGrade.FULL_REPRODUCIBLE
@@ -347,18 +347,18 @@ class TestReproducibilityGradeComputation:
         of purged replay-critical payloads). Second purge is a no-op.
         """
         from elspeth.core.landscape.database import LandscapeDB
-        from elspeth.core.landscape.recorder import LandscapeRecorder
+        from elspeth.core.landscape.factory import RecorderFactory
         from elspeth.core.landscape.reproducibility import (
             ReproducibilityGrade,
             update_grade_after_purge,
         )
 
         db = LandscapeDB.in_memory()
-        recorder = LandscapeRecorder(db)
-        run = recorder.begin_run(config={}, canonical_version="v1")
+        factory = RecorderFactory(db)
+        run = factory.run_lifecycle.begin_run(config={}, canonical_version="v1")
 
         # Nondeterministic pipeline
-        node = recorder.register_node(
+        node = factory.data_flow.register_node(
             run_id=run.run_id,
             plugin_name="llm_source",
             node_type=NodeType.SOURCE,
@@ -369,7 +369,7 @@ class TestReproducibilityGradeComputation:
         )
 
         # Finalize with REPLAY_REPRODUCIBLE grade
-        recorder.finalize_run(run.run_id, status=RunStatus.COMPLETED)
+        factory.run_lifecycle.finalize_run(run.run_id, status=RunStatus.COMPLETED)
 
         # Insert a purged call record — evidence that a replay-critical payload was deleted
         _insert_purged_call(db, run.run_id, node_id=node.node_id)
@@ -378,29 +378,29 @@ class TestReproducibilityGradeComputation:
         update_grade_after_purge(db, run.run_id)
 
         # Verify it's ATTRIBUTABLE_ONLY
-        run_after_first_purge = recorder.get_run(run.run_id)
+        run_after_first_purge = factory.run_lifecycle.get_run(run.run_id)
         assert run_after_first_purge is not None
         assert run_after_first_purge.reproducibility_grade == ReproducibilityGrade.ATTRIBUTABLE_ONLY
 
         # Second purge: no-op, already at lowest grade
         update_grade_after_purge(db, run.run_id)
 
-        run_after_second_purge = recorder.get_run(run.run_id)
+        run_after_second_purge = factory.run_lifecycle.get_run(run.run_id)
         assert run_after_second_purge is not None
         assert run_after_second_purge.reproducibility_grade == ReproducibilityGrade.ATTRIBUTABLE_ONLY
 
     def test_default_determinism_counts_as_deterministic(self) -> None:
         """Nodes registered without explicit determinism default to DETERMINISTIC."""
         from elspeth.core.landscape.database import LandscapeDB
-        from elspeth.core.landscape.recorder import LandscapeRecorder
+        from elspeth.core.landscape.factory import RecorderFactory
         from elspeth.core.landscape.reproducibility import ReproducibilityGrade
 
         db = LandscapeDB.in_memory()
-        recorder = LandscapeRecorder(db)
-        run = recorder.begin_run(config={}, canonical_version="v1")
+        factory = RecorderFactory(db)
+        run = factory.run_lifecycle.begin_run(config={}, canonical_version="v1")
 
         # Register nodes WITHOUT specifying determinism - should default to DETERMINISTIC
-        recorder.register_node(
+        factory.data_flow.register_node(
             run_id=run.run_id,
             plugin_name="csv_source",
             node_type=NodeType.SOURCE,
@@ -409,7 +409,7 @@ class TestReproducibilityGradeComputation:
             schema_config=DYNAMIC_SCHEMA,
             # determinism not specified - should default to DETERMINISTIC
         )
-        recorder.register_node(
+        factory.data_flow.register_node(
             run_id=run.run_id,
             plugin_name="field_mapper",
             node_type=NodeType.TRANSFORM,
@@ -419,7 +419,7 @@ class TestReproducibilityGradeComputation:
             # determinism not specified - should default to DETERMINISTIC
         )
 
-        grade = recorder.compute_reproducibility_grade(run.run_id)
+        grade = factory.run_lifecycle.compute_reproducibility_grade(run.run_id)
 
         # Since defaults are DETERMINISTIC, should get FULL_REPRODUCIBLE
         assert grade == ReproducibilityGrade.FULL_REPRODUCIBLE

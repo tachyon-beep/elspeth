@@ -1,5 +1,5 @@
 # tests/core/landscape/test_recorder_routing_events.py
-"""Tests for LandscapeRecorder routing event operations."""
+"""Tests for RecorderFactory routing event operations."""
 
 from __future__ import annotations
 
@@ -14,18 +14,18 @@ from elspeth.contracts.schema import SchemaConfig
 DYNAMIC_SCHEMA = SchemaConfig.from_dict({"mode": "observed"})
 
 
-class TestLandscapeRecorderRouting:
+class TestRecorderFactoryRouting:
     """Routing event recording (gate decisions)."""
 
     def test_record_routing_event(self) -> None:
         from elspeth.core.landscape.database import LandscapeDB
-        from elspeth.core.landscape.recorder import LandscapeRecorder
+        from elspeth.core.landscape.factory import RecorderFactory
 
         db = LandscapeDB.in_memory()
-        recorder = LandscapeRecorder(db)
-        run = recorder.begin_run(config={}, canonical_version="v1")
+        factory = RecorderFactory(db)
+        run = factory.run_lifecycle.begin_run(config={}, canonical_version="v1")
 
-        source = recorder.register_node(
+        source = factory.data_flow.register_node(
             run_id=run.run_id,
             plugin_name="source",
             node_type=NodeType.SOURCE,
@@ -33,7 +33,7 @@ class TestLandscapeRecorderRouting:
             config={},
             schema_config=DYNAMIC_SCHEMA,
         )
-        gate = recorder.register_node(
+        gate = factory.data_flow.register_node(
             run_id=run.run_id,
             plugin_name="gate",
             node_type=NodeType.GATE,
@@ -41,7 +41,7 @@ class TestLandscapeRecorderRouting:
             config={},
             schema_config=DYNAMIC_SCHEMA,
         )
-        sink = recorder.register_node(
+        sink = factory.data_flow.register_node(
             run_id=run.run_id,
             plugin_name="sink",
             node_type=NodeType.SINK,
@@ -49,7 +49,7 @@ class TestLandscapeRecorderRouting:
             config={},
             schema_config=DYNAMIC_SCHEMA,
         )
-        edge = recorder.register_edge(
+        edge = factory.data_flow.register_edge(
             run_id=run.run_id,
             from_node_id=gate.node_id,
             to_node_id=sink.node_id,
@@ -57,14 +57,14 @@ class TestLandscapeRecorderRouting:
             mode=RoutingMode.MOVE,
         )
 
-        row = recorder.create_row(
+        row = factory.data_flow.create_row(
             run_id=run.run_id,
             source_node_id=source.node_id,
             row_index=0,
             data={},
         )
-        token = recorder.create_token(row_id=row.row_id)
-        state = recorder.begin_node_state(
+        token = factory.data_flow.create_token(row_id=row.row_id)
+        state = factory.execution.begin_node_state(
             token_id=token.token_id,
             node_id=gate.node_id,
             run_id=run.run_id,
@@ -72,7 +72,7 @@ class TestLandscapeRecorderRouting:
             input_data={},
         )
 
-        event = recorder.record_routing_event(
+        event = factory.execution.record_routing_event(
             state_id=state.state_id,
             edge_id=edge.edge_id,
             mode=RoutingMode.MOVE,
@@ -87,13 +87,13 @@ class TestLandscapeRecorderRouting:
     def test_record_multiple_routing_events(self) -> None:
         """Test recording fork to multiple destinations."""
         from elspeth.core.landscape.database import LandscapeDB
-        from elspeth.core.landscape.recorder import LandscapeRecorder
+        from elspeth.core.landscape.factory import RecorderFactory
 
         db = LandscapeDB.in_memory()
-        recorder = LandscapeRecorder(db)
-        run = recorder.begin_run(config={}, canonical_version="v1")
+        factory = RecorderFactory(db)
+        run = factory.run_lifecycle.begin_run(config={}, canonical_version="v1")
 
-        gate = recorder.register_node(
+        gate = factory.data_flow.register_node(
             run_id=run.run_id,
             plugin_name="gate",
             node_type=NodeType.GATE,
@@ -101,7 +101,7 @@ class TestLandscapeRecorderRouting:
             config={},
             schema_config=DYNAMIC_SCHEMA,
         )
-        sink_a = recorder.register_node(
+        sink_a = factory.data_flow.register_node(
             run_id=run.run_id,
             plugin_name="sink_a",
             node_type=NodeType.SINK,
@@ -109,7 +109,7 @@ class TestLandscapeRecorderRouting:
             config={},
             schema_config=DYNAMIC_SCHEMA,
         )
-        sink_b = recorder.register_node(
+        sink_b = factory.data_flow.register_node(
             run_id=run.run_id,
             plugin_name="sink_b",
             node_type=NodeType.SINK,
@@ -117,14 +117,14 @@ class TestLandscapeRecorderRouting:
             config={},
             schema_config=DYNAMIC_SCHEMA,
         )
-        edge_a = recorder.register_edge(
+        edge_a = factory.data_flow.register_edge(
             run_id=run.run_id,
             from_node_id=gate.node_id,
             to_node_id=sink_a.node_id,
             label="path_a",
             mode=RoutingMode.COPY,
         )
-        edge_b = recorder.register_edge(
+        edge_b = factory.data_flow.register_edge(
             run_id=run.run_id,
             from_node_id=gate.node_id,
             to_node_id=sink_b.node_id,
@@ -132,14 +132,14 @@ class TestLandscapeRecorderRouting:
             mode=RoutingMode.COPY,
         )
 
-        row = recorder.create_row(
+        row = factory.data_flow.create_row(
             run_id=run.run_id,
             source_node_id=gate.node_id,
             row_index=0,
             data={},
         )
-        token = recorder.create_token(row_id=row.row_id)
-        state = recorder.begin_node_state(
+        token = factory.data_flow.create_token(row_id=row.row_id)
+        state = factory.execution.begin_node_state(
             token_id=token.token_id,
             node_id=gate.node_id,
             run_id=run.run_id,
@@ -148,7 +148,7 @@ class TestLandscapeRecorderRouting:
         )
 
         # Fork to both paths using batch method
-        events = recorder.record_routing_events(
+        events = factory.execution.record_routing_events(
             state_id=state.state_id,
             routes=[
                 RoutingSpec(edge_id=edge_a.edge_id, mode=RoutingMode.COPY),
@@ -168,16 +168,16 @@ class TestLandscapeRecorderRouting:
         import json
 
         from elspeth.core.landscape.database import LandscapeDB
-        from elspeth.core.landscape.recorder import LandscapeRecorder
+        from elspeth.core.landscape.factory import RecorderFactory
         from elspeth.core.payload_store import FilesystemPayloadStore
 
         db = LandscapeDB.in_memory()
         with tempfile.TemporaryDirectory() as tmp_dir:
             payload_store = FilesystemPayloadStore(Path(tmp_dir))
-            recorder = LandscapeRecorder(db, payload_store=payload_store)
-            run = recorder.begin_run(config={}, canonical_version="v1")
+            factory = RecorderFactory(db, payload_store=payload_store)
+            run = factory.run_lifecycle.begin_run(config={}, canonical_version="v1")
 
-            source = recorder.register_node(
+            source = factory.data_flow.register_node(
                 run_id=run.run_id,
                 plugin_name="source",
                 node_type=NodeType.SOURCE,
@@ -185,7 +185,7 @@ class TestLandscapeRecorderRouting:
                 config={},
                 schema_config=DYNAMIC_SCHEMA,
             )
-            gate = recorder.register_node(
+            gate = factory.data_flow.register_node(
                 run_id=run.run_id,
                 plugin_name="gate",
                 node_type=NodeType.GATE,
@@ -193,7 +193,7 @@ class TestLandscapeRecorderRouting:
                 config={},
                 schema_config=DYNAMIC_SCHEMA,
             )
-            sink = recorder.register_node(
+            sink = factory.data_flow.register_node(
                 run_id=run.run_id,
                 plugin_name="sink",
                 node_type=NodeType.SINK,
@@ -201,7 +201,7 @@ class TestLandscapeRecorderRouting:
                 config={},
                 schema_config=DYNAMIC_SCHEMA,
             )
-            edge = recorder.register_edge(
+            edge = factory.data_flow.register_edge(
                 run_id=run.run_id,
                 from_node_id=gate.node_id,
                 to_node_id=sink.node_id,
@@ -209,14 +209,14 @@ class TestLandscapeRecorderRouting:
                 mode=RoutingMode.MOVE,
             )
 
-            row = recorder.create_row(
+            row = factory.data_flow.create_row(
                 run_id=run.run_id,
                 source_node_id=source.node_id,
                 row_index=0,
                 data={},
             )
-            token = recorder.create_token(row_id=row.row_id)
-            state = recorder.begin_node_state(
+            token = factory.data_flow.create_token(row_id=row.row_id)
+            state = factory.execution.begin_node_state(
                 token_id=token.token_id,
                 node_id=gate.node_id,
                 run_id=run.run_id,
@@ -225,7 +225,7 @@ class TestLandscapeRecorderRouting:
             )
 
             reason: ConfigGateReason = {"condition": "value > 1000", "result": "true"}
-            event = recorder.record_routing_event(
+            event = factory.execution.record_routing_event(
                 state_id=state.state_id,
                 edge_id=edge.edge_id,
                 mode=RoutingMode.MOVE,
@@ -246,16 +246,16 @@ class TestLandscapeRecorderRouting:
         import json
 
         from elspeth.core.landscape.database import LandscapeDB
-        from elspeth.core.landscape.recorder import LandscapeRecorder
+        from elspeth.core.landscape.factory import RecorderFactory
         from elspeth.core.payload_store import FilesystemPayloadStore
 
         db = LandscapeDB.in_memory()
         with tempfile.TemporaryDirectory() as tmp_dir:
             payload_store = FilesystemPayloadStore(Path(tmp_dir))
-            recorder = LandscapeRecorder(db, payload_store=payload_store)
-            run = recorder.begin_run(config={}, canonical_version="v1")
+            factory = RecorderFactory(db, payload_store=payload_store)
+            run = factory.run_lifecycle.begin_run(config={}, canonical_version="v1")
 
-            gate = recorder.register_node(
+            gate = factory.data_flow.register_node(
                 run_id=run.run_id,
                 plugin_name="gate",
                 node_type=NodeType.GATE,
@@ -263,7 +263,7 @@ class TestLandscapeRecorderRouting:
                 config={},
                 schema_config=DYNAMIC_SCHEMA,
             )
-            sink_a = recorder.register_node(
+            sink_a = factory.data_flow.register_node(
                 run_id=run.run_id,
                 plugin_name="sink_a",
                 node_type=NodeType.SINK,
@@ -271,7 +271,7 @@ class TestLandscapeRecorderRouting:
                 config={},
                 schema_config=DYNAMIC_SCHEMA,
             )
-            sink_b = recorder.register_node(
+            sink_b = factory.data_flow.register_node(
                 run_id=run.run_id,
                 plugin_name="sink_b",
                 node_type=NodeType.SINK,
@@ -279,14 +279,14 @@ class TestLandscapeRecorderRouting:
                 config={},
                 schema_config=DYNAMIC_SCHEMA,
             )
-            edge_a = recorder.register_edge(
+            edge_a = factory.data_flow.register_edge(
                 run_id=run.run_id,
                 from_node_id=gate.node_id,
                 to_node_id=sink_a.node_id,
                 label="path_a",
                 mode=RoutingMode.COPY,
             )
-            edge_b = recorder.register_edge(
+            edge_b = factory.data_flow.register_edge(
                 run_id=run.run_id,
                 from_node_id=gate.node_id,
                 to_node_id=sink_b.node_id,
@@ -294,14 +294,14 @@ class TestLandscapeRecorderRouting:
                 mode=RoutingMode.COPY,
             )
 
-            row = recorder.create_row(
+            row = factory.data_flow.create_row(
                 run_id=run.run_id,
                 source_node_id=gate.node_id,
                 row_index=0,
                 data={},
             )
-            token = recorder.create_token(row_id=row.row_id)
-            state = recorder.begin_node_state(
+            token = factory.data_flow.create_token(row_id=row.row_id)
+            state = factory.execution.begin_node_state(
                 token_id=token.token_id,
                 node_id=gate.node_id,
                 run_id=run.run_id,
@@ -310,7 +310,7 @@ class TestLandscapeRecorderRouting:
             )
 
             reason: ConfigGateReason = {"condition": "fork_to_paths", "result": "path_a,path_b"}
-            events = recorder.record_routing_events(
+            events = factory.execution.record_routing_events(
                 state_id=state.state_id,
                 routes=[
                     RoutingSpec(edge_id=edge_a.edge_id, mode=RoutingMode.COPY),

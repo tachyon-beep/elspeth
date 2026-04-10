@@ -21,13 +21,13 @@ from elspeth.contracts.contexts import TransformContext
 from elspeth.contracts.identity import TokenInfo
 from elspeth.contracts.plugin_context import PluginContext
 from elspeth.contracts.schema_contract import PipelineRow
-from elspeth.core.landscape.recorder import LandscapeRecorder
+from elspeth.core.landscape.factory import RecorderFactory
 from elspeth.plugins.infrastructure.base import BaseTransform
 from elspeth.plugins.infrastructure.batching import BatchTransformMixin
 from elspeth.plugins.infrastructure.batching.ports import CollectorOutputPort, OutputPort
 from elspeth.testing import make_pipeline_row
 from tests.fixtures.factories import make_context
-from tests.fixtures.landscape import make_recorder
+from tests.fixtures.landscape import make_factory
 
 
 def _wait_for(condition: Callable[[], bool], *, timeout: float = 3.0, poll: float = 0.05, desc: str = "condition") -> None:
@@ -39,9 +39,9 @@ def _wait_for(condition: Callable[[], bool], *, timeout: float = 3.0, poll: floa
         time.sleep(poll)
 
 
-def _make_recorder() -> LandscapeRecorder:
-    """Create an in-memory LandscapeRecorder for testing."""
-    return make_recorder()
+def _make_factory() -> RecorderFactory:
+    """Create an in-memory RecorderFactory for testing."""
+    return make_factory()
 
 
 def make_token(row_id: str, token_id: str | None = None, row_data: dict[str, Any] | None = None) -> TokenInfo:
@@ -116,7 +116,7 @@ class TestBatchTransformMixinTokenValidation:
         ctx = PluginContext(
             run_id="test-run",
             config={},
-            landscape=_make_recorder(),
+            landscape=_make_factory(),
             token=None,  # Explicitly None - contract violation
         )
 
@@ -127,7 +127,7 @@ class TestBatchTransformMixinTokenValidation:
         """accept() succeeds when ctx.token is properly set."""
         token = make_token("row-1", row_data={"data": "test"})
         ctx = make_context(
-            landscape=_make_recorder(),
+            landscape=_make_factory(),
             token=token,
             state_id="test-state-1",  # Required for batch processing
         )
@@ -163,7 +163,7 @@ class TestBatchTransformMixinTokenIdentity:
         2. Audit attribution - the token tracks row lineage through the DAG
         """
         input_token = make_token("row-42", row_data={"value": 100})
-        ctx = make_context(landscape=_make_recorder(), token=input_token, state_id="test-state-1")
+        ctx = make_context(landscape=_make_factory(), token=input_token, state_id="test-state-1")
 
         transform.accept({"value": 100}, ctx)
         transform.flush_batch_processing(timeout=10.0)
@@ -181,7 +181,7 @@ class TestBatchTransformMixinTokenIdentity:
         tokens = [make_token(f"row-{i}") for i in range(3)]
 
         for i, token in enumerate(tokens):
-            ctx = make_context(landscape=_make_recorder(), token=token, state_id=f"state-{i}")
+            ctx = make_context(landscape=_make_factory(), token=token, state_id=f"state-{i}")
             transform.accept({"index": i}, ctx)
 
         transform.flush_batch_processing(timeout=10.0)
@@ -226,7 +226,7 @@ class TestStaleTokenDetection:
         reused across multiple rows, with ctx.token updated per-row.
         """
         # Create a single context (engine pattern)
-        ctx = make_context(landscape=_make_recorder())
+        ctx = make_context(landscape=_make_factory())
 
         # Process row 1 with token 1
         token1 = make_token("row-1")
@@ -258,7 +258,7 @@ class TestStaleTokenDetection:
         update ctx.token, they would see the SAME token for multiple rows,
         which is detectable in tests.
         """
-        ctx = make_context(landscape=_make_recorder())
+        ctx = make_context(landscape=_make_factory())
 
         # Process 3 rows, each with a unique token
         tokens = []
@@ -290,7 +290,7 @@ class TestStaleTokenDetection:
         This verifies the synchronization contract: the executor sets
         ctx.token, then calls accept(), and accept() sees the updated value.
         """
-        ctx = make_context(landscape=_make_recorder())
+        ctx = make_context(landscape=_make_factory())
 
         # Initial token
         initial_token = make_token("initial")
@@ -408,7 +408,7 @@ class TestBatchTransformMixinEviction:
         4. Retry can proceed without FIFO blocking
         """
         token = make_token("row-1")
-        ctx = make_context(landscape=_make_recorder(), token=token, state_id="state-attempt-1")
+        ctx = make_context(landscape=_make_factory(), token=token, state_id="state-attempt-1")
 
         # Submit the row (will block in worker)
         blocking_transform.accept({"value": 1}, ctx)
@@ -448,7 +448,7 @@ class TestBatchTransformMixinEviction:
         token = make_token("row-1")
 
         # Original attempt
-        ctx1 = make_context(landscape=_make_recorder(), token=token, state_id="state-attempt-1")
+        ctx1 = make_context(landscape=_make_factory(), token=token, state_id="state-attempt-1")
         transform.accept({"attempt": 1}, ctx1)
 
         # Evict original (simulating timeout)
@@ -456,7 +456,7 @@ class TestBatchTransformMixinEviction:
         transform.evict_submission(token.token_id, ctx1.state_id)
 
         # Retry attempt with new state_id
-        ctx2 = make_context(landscape=_make_recorder(), token=token, state_id="state-attempt-2")
+        ctx2 = make_context(landscape=_make_factory(), token=token, state_id="state-attempt-2")
         transform.accept({"attempt": 2}, ctx2)
 
         # Flush and verify retry result is released
@@ -546,7 +546,7 @@ class TestShutdownDrainsInFlightRows:
         num_rows = 3
         for i in range(num_rows):
             token = make_token(f"row-{i}")
-            ctx = make_context(landscape=_make_recorder(), token=token, state_id=f"state-{i}")
+            ctx = make_context(landscape=_make_factory(), token=token, state_id=f"state-{i}")
             transform.accept({"idx": i}, ctx)
 
         # Shutdown while workers are still processing
@@ -582,7 +582,7 @@ class TestShutdownDrainsInFlightRows:
         num_rows = 4
         for i in range(num_rows):
             token = make_token(f"row-{i}")
-            ctx = make_context(landscape=_make_recorder(), token=token, state_id=f"state-{i}")
+            ctx = make_context(landscape=_make_factory(), token=token, state_id=f"state-{i}")
             transform.accept({"idx": i}, ctx)
 
         transform.flush_batch_processing(timeout=10.0)
@@ -643,7 +643,7 @@ class TestReleaseLoopStaleTokenDetection:
 
         try:
             token = make_token("row-0")
-            ctx = make_context(landscape=_make_recorder(), token=token, state_id="state-0")
+            ctx = make_context(landscape=_make_factory(), token=token, state_id="state-0")
             transform.accept({"data": "test"}, ctx)
 
             # Wait for release loop to process the failure and emit ExceptionResult
@@ -685,7 +685,7 @@ class TestReleaseLoopStaleTokenDetection:
             for i in range(3):
                 token = make_token(f"row-{i}")
                 tokens.append(token)
-                ctx = make_context(landscape=_make_recorder(), token=token, state_id=f"state-{i}")
+                ctx = make_context(landscape=_make_factory(), token=token, state_id=f"state-{i}")
                 transform.accept({"idx": i}, ctx)
 
             # Wait for all 3 rows to be processed and emitted
@@ -748,7 +748,7 @@ class TestReleaseLoopCrashesOnBrokenPort:
         transform._batch_initialized = True
 
         token = make_token("row-0")
-        ctx = make_context(landscape=_make_recorder(), token=token, state_id="state-0")
+        ctx = make_context(landscape=_make_factory(), token=token, state_id="state-0")
         transform.accept({"data": "test"}, ctx)
 
         # Wait for release thread to crash from FrameworkBugError
@@ -794,7 +794,7 @@ class TestShutdownRaisesOnThreadTimeout:
         transform._batch_initialized = True
 
         token = make_token("row-0")
-        ctx = make_context(landscape=_make_recorder(), token=token, state_id="state-0")
+        ctx = make_context(landscape=_make_factory(), token=token, state_id="state-0")
         transform.accept({"data": "test"}, ctx)
 
         # Wait for release thread to crash from broken port
@@ -828,7 +828,7 @@ class TestBatchTransformMixinShutdownGuard:
 
         token = make_token("row-post-shutdown")
         ctx = make_context(
-            landscape=_make_recorder(),
+            landscape=_make_factory(),
             token=token,
             state_id="state-post-shutdown",
         )
@@ -864,7 +864,7 @@ class TestFlushTimeoutRaisesTimeoutError:
     ) -> None:
         """flush_batch_processing raises TimeoutError when rows remain pending past deadline."""
         token = make_token("row-stalled")
-        ctx = make_context(landscape=_make_recorder(), token=token, state_id="state-stalled")
+        ctx = make_context(landscape=_make_factory(), token=token, state_id="state-stalled")
 
         blocking_transform.accept({"data": "stuck"}, ctx)
         blocking_transform.wait_for_processing_started()
@@ -878,7 +878,7 @@ class TestFlushTimeoutRaisesTimeoutError:
         """TimeoutError message includes the number of rows still pending."""
         tokens = [make_token(f"row-{i}") for i in range(3)]
         for i, token in enumerate(tokens):
-            ctx = make_context(landscape=_make_recorder(), token=token, state_id=f"state-{i}")
+            ctx = make_context(landscape=_make_factory(), token=token, state_id=f"state-{i}")
             blocking_transform.accept({"idx": i}, ctx)
 
         _wait_for(

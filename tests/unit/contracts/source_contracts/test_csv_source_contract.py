@@ -15,7 +15,7 @@ from elspeth.contracts import SourceRow
 from elspeth.core.canonical import CANONICAL_VERSION, stable_hash
 from elspeth.plugins.sources.csv_source import CSVSource
 from tests.fixtures.factories import make_context
-from tests.fixtures.landscape import make_landscape_db, make_recorder, make_recorder_with_run
+from tests.fixtures.landscape import make_factory, make_landscape_db, make_recorder_with_run
 
 from .test_source_protocol import SourceContractPropertyTestBase
 
@@ -64,8 +64,8 @@ class TestCSVSourceContract(SourceContractPropertyTestBase):
         )
         source.on_success = "output"
         db = make_landscape_db()
-        recorder = make_recorder(db)
-        ctx = make_context(landscape=recorder)
+        factory = make_factory(db)
+        ctx = make_context(landscape=factory)
 
         rows = list(source.load(ctx))
         assert len(rows) == 2
@@ -95,8 +95,8 @@ class TestCSVSourceContract(SourceContractPropertyTestBase):
         )
         source.on_success = "output"
         db = make_landscape_db()
-        recorder = make_recorder(db)
-        ctx = make_context(landscape=recorder)
+        factory = make_factory(db)
+        ctx = make_context(landscape=factory)
 
         # Empty file returns no rows gracefully (no error)
         rows = list(source.load(ctx))
@@ -116,8 +116,8 @@ class TestCSVSourceContract(SourceContractPropertyTestBase):
         )
         source.on_success = "output"
         db = make_landscape_db()
-        recorder = make_recorder(db)
-        ctx = make_context(landscape=recorder)
+        factory = make_factory(db)
+        ctx = make_context(landscape=factory)
 
         rows = list(source.load(ctx))
         assert rows == []
@@ -141,7 +141,7 @@ class TestCSVSourceQuarantineContract(SourceContractPropertyTestBase):
         )
         return make_context(
             run_id=setup.run_id,
-            landscape=setup.recorder,
+            landscape=setup.factory,
             node_id=setup.source_node_id,
         )
 
@@ -176,11 +176,11 @@ class TestCSVSourceQuarantineContract(SourceContractPropertyTestBase):
             source_plugin_name="csv",
             canonical_version=CANONICAL_VERSION,
         )
-        recorder, run_id = setup.recorder, setup.run_id
+        factory, run_id = setup.factory, setup.run_id
 
         ctx = make_context(
             run_id=run_id,
-            landscape=recorder,
+            landscape=factory,
             node_id=setup.source_node_id,
         )
         rows = list(source.load(ctx))
@@ -199,7 +199,7 @@ class TestCSVSourceQuarantineContract(SourceContractPropertyTestBase):
         assert q_row.quarantine_destination == "quarantine_sink"
 
         row_hash = stable_hash({"id": "not_an_int", "name": "Bob"})
-        errors = recorder.get_validation_errors_for_row(run_id, row_hash)
+        errors = factory.data_flow.get_validation_errors_for_row(run_id, row_hash)
         assert len(errors) == 1
         assert errors[0].schema_mode == "fixed"
         assert errors[0].destination == "quarantine_sink"
@@ -227,7 +227,7 @@ class TestCSVSourceDiscardContract:
             source_plugin_name="csv",
             canonical_version=CANONICAL_VERSION,
         )
-        recorder, run_id = setup.recorder, setup.run_id
+        factory, run_id = setup.factory, setup.run_id
 
         source = CSVSource(
             {
@@ -242,7 +242,7 @@ class TestCSVSourceDiscardContract:
         source.on_success = "output"
         ctx = make_context(
             run_id=run_id,
-            landscape=recorder,
+            landscape=factory,
             node_id=setup.source_node_id,
         )
 
@@ -253,7 +253,7 @@ class TestCSVSourceDiscardContract:
             assert not row.is_quarantined
 
         row_hash = stable_hash({"id": "not_an_int", "name": "Bob"})
-        errors = recorder.get_validation_errors_for_row(run_id, row_hash)
+        errors = factory.data_flow.get_validation_errors_for_row(run_id, row_hash)
         assert len(errors) == 1
         assert errors[0].schema_mode == "fixed"
         assert errors[0].destination == "discard"
@@ -273,8 +273,8 @@ class TestCSVSourceFileNotFoundContract:
         )
         source.on_success = "output"
         db = make_landscape_db()
-        recorder = make_recorder(db)
-        ctx = make_context(landscape=recorder)
+        factory = make_factory(db)
+        ctx = make_context(landscape=factory)
 
         with pytest.raises(FileNotFoundError):
             list(source.load(ctx))

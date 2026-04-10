@@ -44,7 +44,7 @@ from elspeth.core.checkpoint import CheckpointManager, RecoveryManager
 from elspeth.core.config import CheckpointSettings
 from elspeth.core.dag import ExecutionGraph
 from elspeth.core.landscape.database import LandscapeDB
-from elspeth.core.landscape.recorder import LandscapeRecorder
+from elspeth.core.landscape.factory import RecorderFactory
 from elspeth.core.landscape.schema import (
     nodes_table,
     rows_table,
@@ -64,7 +64,7 @@ from tests.fixtures.base_classes import (
     as_sink,
     as_source,
 )
-from tests.fixtures.landscape import make_recorder
+from tests.fixtures.landscape import make_factory
 
 # ---------------------------------------------------------------------------
 # Shared helpers
@@ -284,7 +284,7 @@ class TestResumeIdempotence:
         checkpoint_settings = CheckpointSettings(enabled=True, frequency="every_row")
         checkpoint_config = RuntimeCheckpointConfig.from_settings(checkpoint_settings)
         payload_store_b = FilesystemPayloadStore(tmp_path / "payloads_b")
-        recorder = LandscapeRecorder(db_b, payload_store=payload_store_b)
+        factory = RecorderFactory(db_b, payload_store=payload_store_b)
 
         # Create the source schema contract needed for resume
         source_contract = SchemaContract(
@@ -309,7 +309,7 @@ class TestResumeIdempotence:
         )
 
         # Phase 1: Create a "crashed" run with first 3 rows processed
-        run = recorder.begin_run(
+        run = factory.run_lifecycle.begin_run(
             config={"test": "resume"},
             canonical_version="sha256-rfc8785-v1",
             schema_contract=source_contract,
@@ -336,7 +336,7 @@ class TestResumeIdempotence:
             conn.commit()
 
         # Register nodes
-        recorder.register_node(
+        factory.data_flow.register_node(
             run_id=run_id,
             plugin_name="list_source",
             node_type=NodeType.SOURCE,
@@ -346,7 +346,7 @@ class TestResumeIdempotence:
             determinism=Determinism.DETERMINISTIC,
             schema_config=SchemaConfig(mode="observed", fields=None),
         )
-        recorder.register_node(
+        factory.data_flow.register_node(
             run_id=run_id,
             plugin_name="doubler",
             node_type=NodeType.TRANSFORM,
@@ -356,7 +356,7 @@ class TestResumeIdempotence:
             determinism=Determinism.DETERMINISTIC,
             schema_config=SchemaConfig(mode="observed", fields=None),
         )
-        recorder.register_node(
+        factory.data_flow.register_node(
             run_id=run_id,
             plugin_name="collect_sink",
             node_type=NodeType.SINK,
@@ -366,14 +366,14 @@ class TestResumeIdempotence:
             determinism=Determinism.IO_WRITE,
             schema_config=SchemaConfig(mode="observed", fields=None),
         )
-        recorder.register_edge(
+        factory.data_flow.register_edge(
             run_id=run_id,
             from_node_id="source",
             to_node_id="transform_0",
             label="continue",
             mode=RoutingMode.MOVE,
         )
-        recorder.register_edge(
+        factory.data_flow.register_edge(
             run_id=run_id,
             from_node_id="transform_0",
             to_node_id="sink_default",
@@ -383,20 +383,20 @@ class TestResumeIdempotence:
 
         # Contract already stored via begin_run(schema_contract=...) above.
         # Record the source node's output contract for resume.
-        recorder.update_node_output_contract(run_id, "source", source_contract)
+        factory.data_flow.update_node_output_contract(run_id, "source", source_contract)
 
         # Create all 5 rows with payloads (create_row auto-stores via payload_store_b)
         row_ids = []
         token_ids = []
         for i, row_data in enumerate(source_data):
-            row = recorder.create_row(
+            row = factory.data_flow.create_row(
                 run_id=run_id,
                 source_node_id="source",
                 row_index=i,
                 data=row_data,
             )
             row_ids.append(row.row_id)
-            token = recorder.create_token(row_id=row.row_id)
+            token = factory.data_flow.create_token(row_id=row.row_id)
             token_ids.append(token.token_id)
 
         # Build graph for checkpoint -- manual construction required because
@@ -433,7 +433,7 @@ class TestResumeIdempotence:
 
         # Record terminal outcomes for first 3 rows
         for i in range(3):
-            recorder.record_token_outcome(
+            factory.execution.record_token_outcome(
                 ref=TokenRef(token_id=token_ids[i], run_id=run_id),
                 outcome=RowOutcome.COMPLETED,
                 sink_name="default",
@@ -449,7 +449,7 @@ class TestResumeIdempotence:
         )
 
         # Mark run as failed (simulating crash)
-        recorder.complete_run(run_id, status=RunStatus.FAILED)
+        factory.run_lifecycle.complete_run(run_id, status=RunStatus.FAILED)
 
         # Phase 2: Resume and process remaining rows
         recovery_mgr = RecoveryManager(db_b, checkpoint_mgr)
@@ -910,13 +910,13 @@ class TestAggregationRecovery:
         db = LandscapeDB(f"sqlite:///{tmp_path}/test.db")
         checkpoint_mgr = CheckpointManager(db)
         recovery_mgr = RecoveryManager(db, checkpoint_mgr)
-        recorder = make_recorder(db)
+        factory = make_factory(db)
 
         return {
             "db": db,
             "checkpoint_manager": checkpoint_mgr,
             "recovery_manager": recovery_mgr,
-            "recorder": recorder,
+            "factory": factory,
             "tmp_path": tmp_path,
         }
 
@@ -960,7 +960,7 @@ class TestAggregationRecovery:
         db: LandscapeDB = test_env["db"]
         checkpoint_mgr: CheckpointManager = test_env["checkpoint_manager"]
         recovery_mgr: RecoveryManager = test_env["recovery_manager"]
-        recorder: LandscapeRecorder = test_env["recorder"]
+        factory: RecorderFactory = test_env["factory"]
 
         test_contract = SchemaContract(
             fields=(
@@ -975,7 +975,7 @@ class TestAggregationRecovery:
             mode="FIXED",
             locked=True,
         )
-        run = recorder.begin_run(
+        run = factory.run_lifecycle.begin_run(
             config={"aggregation": {"trigger": {"count": 5}}},
             canonical_version="sha256-rfc8785-v1",
             schema_contract=test_contract,
@@ -1015,13 +1015,13 @@ class TestAggregationRecovery:
         # Create 3 rows (partial aggregation -- trigger is at 5)
         tokens = []
         for i in range(3):
-            row = recorder.create_row(
+            row = factory.data_flow.create_row(
                 run_id=run.run_id,
                 source_node_id="source",
                 row_index=i,
                 data={"id": i, "value": (i + 1) * 100},
             )
-            token = recorder.create_token(row_id=row.row_id)
+            token = factory.data_flow.create_token(row_id=row.row_id)
             tokens.append(token)
 
         # Create aggregation state (buffer of 3 rows) — typed DTO
@@ -1062,7 +1062,7 @@ class TestAggregationRecovery:
         )
 
         # Simulate crash
-        recorder.complete_run(run.run_id, status=RunStatus.FAILED)
+        factory.run_lifecycle.complete_run(run.run_id, status=RunStatus.FAILED)
 
         # Verify can resume
         check = recovery_mgr.can_resume(run.run_id, mock_graph)

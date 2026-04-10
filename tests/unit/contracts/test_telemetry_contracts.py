@@ -57,7 +57,7 @@ class TestAuditedLLMClientTelemetryContract:
     """
 
     def _create_mock_recorder(self) -> MagicMock:
-        """Create a mock LandscapeRecorder."""
+        """Create a mock ExecutionRepository."""
         recorder = MagicMock()
         recorded_call = MagicMock()
         recorded_call.request_hash = "req_hash_123"
@@ -193,7 +193,7 @@ class TestAuditedHTTPClientTelemetryContract:
     """
 
     def _create_mock_recorder(self) -> MagicMock:
-        """Create a mock LandscapeRecorder."""
+        """Create a mock ExecutionRepository."""
         recorder = MagicMock()
         recorded_call = MagicMock()
         recorded_call.request_hash = "req_hash_123"

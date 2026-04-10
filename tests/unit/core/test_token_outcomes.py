@@ -4,8 +4,9 @@
 import pytest
 
 from elspeth.contracts.audit import TokenRef
-from elspeth.core.landscape import LandscapeDB, LandscapeRecorder
-from tests.fixtures.landscape import make_landscape_db, make_recorder
+from elspeth.core.landscape import LandscapeDB
+from elspeth.core.landscape.factory import RecorderFactory
+from tests.fixtures.landscape import make_factory, make_landscape_db
 
 
 @pytest.fixture
@@ -18,9 +19,9 @@ def landscape_db() -> LandscapeDB:
 
 
 @pytest.fixture
-def recorder(landscape_db: LandscapeDB) -> LandscapeRecorder:
-    """Create a LandscapeRecorder with the test database."""
-    return make_recorder(landscape_db)
+def factory(landscape_db: LandscapeDB) -> RecorderFactory:
+    """Create a RecorderFactory with the test database."""
+    return make_factory(landscape_db)
 
 
 class TestTokenOutcomeDataclass:
@@ -220,16 +221,16 @@ class TestRecordTokenOutcome:
     """Test record_token_outcome() method."""
 
     @pytest.fixture
-    def run_with_token(self, recorder):
+    def run_with_token(self, factory):
         """Create a run with a token for testing."""
         from elspeth.contracts import Determinism, NodeType
         from elspeth.contracts.schema import SchemaConfig
 
         # Begin run
-        run = recorder.begin_run(config={"test": True}, canonical_version="v1")
+        run = factory.run_lifecycle.begin_run(config={"test": True}, canonical_version="v1")
 
         # Register source node
-        recorder.register_node(
+        factory.data_flow.register_node(
             run_id=run.run_id,
             node_id="source_1",
             plugin_name="test_source",
@@ -241,24 +242,24 @@ class TestRecordTokenOutcome:
         )
 
         # Create row and token
-        row = recorder.create_row(
+        row = factory.data_flow.create_row(
             run_id=run.run_id,
             source_node_id="source_1",
             row_index=0,
             data={"id": 1},
         )
-        token = recorder.create_token(
+        token = factory.data_flow.create_token(
             row_id=row.row_id,
         )
 
         return run, token
 
-    def test_record_completed_outcome(self, recorder, run_with_token) -> None:
+    def test_record_completed_outcome(self, factory, run_with_token) -> None:
         from elspeth.contracts import RowOutcome
 
         run, token = run_with_token
 
-        outcome_id = recorder.record_token_outcome(
+        outcome_id = factory.data_flow.record_token_outcome(
             ref=TokenRef(token_id=token.token_id, run_id=run.run_id),
             outcome=RowOutcome.COMPLETED,
             sink_name="output",
@@ -267,12 +268,12 @@ class TestRecordTokenOutcome:
         assert outcome_id is not None
         assert outcome_id.startswith("out_")
 
-    def test_record_routed_outcome(self, recorder, run_with_token) -> None:
+    def test_record_routed_outcome(self, factory, run_with_token) -> None:
         from elspeth.contracts import RowOutcome
 
         run, token = run_with_token
 
-        outcome_id = recorder.record_token_outcome(
+        outcome_id = factory.data_flow.record_token_outcome(
             ref=TokenRef(token_id=token.token_id, run_id=run.run_id),
             outcome=RowOutcome.ROUTED,
             sink_name="errors",
@@ -280,7 +281,7 @@ class TestRecordTokenOutcome:
 
         assert outcome_id is not None
 
-    def test_record_buffered_then_terminal(self, recorder, run_with_token) -> None:
+    def test_record_buffered_then_terminal(self, factory, run_with_token) -> None:
         """BUFFERED followed by terminal should succeed."""
         from elspeth.contracts import Determinism, NodeType, RowOutcome
         from elspeth.contracts.schema import SchemaConfig
@@ -288,7 +289,7 @@ class TestRecordTokenOutcome:
         run, token = run_with_token
 
         # Create an aggregation node (required for batches)
-        recorder.register_node(
+        factory.data_flow.register_node(
             run_id=run.run_id,
             node_id="agg_node_1",
             plugin_name="test_aggregation",
@@ -300,20 +301,20 @@ class TestRecordTokenOutcome:
         )
 
         # Create a batch (required for batch_id FK)
-        batch = recorder.create_batch(
+        batch = factory.execution.create_batch(
             run_id=run.run_id,
             aggregation_node_id="agg_node_1",
         )
 
         # First record BUFFERED (non-terminal) with required batch_id
-        recorder.record_token_outcome(
+        factory.data_flow.record_token_outcome(
             ref=TokenRef(token_id=token.token_id, run_id=run.run_id),
             outcome=RowOutcome.BUFFERED,
             batch_id=batch.batch_id,
         )
 
         # Then record terminal outcome with same batch_id
-        outcome_id = recorder.record_token_outcome(
+        outcome_id = factory.data_flow.record_token_outcome(
             ref=TokenRef(token_id=token.token_id, run_id=run.run_id),
             outcome=RowOutcome.CONSUMED_IN_BATCH,
             batch_id=batch.batch_id,
@@ -321,7 +322,7 @@ class TestRecordTokenOutcome:
 
         assert outcome_id is not None
 
-    def test_duplicate_terminal_raises(self, recorder, run_with_token) -> None:
+    def test_duplicate_terminal_raises(self, factory, run_with_token) -> None:
         """Two terminal outcomes for same token should raise IntegrityError."""
         from sqlalchemy.exc import IntegrityError
 
@@ -330,7 +331,7 @@ class TestRecordTokenOutcome:
         run, token = run_with_token
 
         # First terminal outcome
-        recorder.record_token_outcome(
+        factory.data_flow.record_token_outcome(
             ref=TokenRef(token_id=token.token_id, run_id=run.run_id),
             outcome=RowOutcome.COMPLETED,
             sink_name="output",
@@ -338,7 +339,7 @@ class TestRecordTokenOutcome:
 
         # Second terminal outcome should fail
         with pytest.raises(IntegrityError):
-            recorder.record_token_outcome(
+            factory.data_flow.record_token_outcome(
                 ref=TokenRef(token_id=token.token_id, run_id=run.run_id),
                 outcome=RowOutcome.ROUTED,
                 sink_name="errors",
@@ -352,13 +353,13 @@ class TestOutcomeContractValidation:
     """
 
     @pytest.fixture
-    def run_with_token(self, recorder):
+    def run_with_token(self, factory):
         """Create a run with a token for testing validation."""
         from elspeth.contracts import Determinism, NodeType
         from elspeth.contracts.schema import SchemaConfig
 
-        run = recorder.begin_run(config={}, canonical_version="v1")
-        recorder.register_node(
+        run = factory.run_lifecycle.begin_run(config={}, canonical_version="v1")
+        factory.data_flow.register_node(
             run_id=run.run_id,
             node_id="src",
             plugin_name="test",
@@ -368,114 +369,114 @@ class TestOutcomeContractValidation:
             determinism=Determinism.DETERMINISTIC,
             schema_config=SchemaConfig.from_dict({"mode": "observed"}),
         )
-        row = recorder.create_row(run.run_id, "src", 0, {"x": 1})
-        token = recorder.create_token(row.row_id)
+        row = factory.data_flow.create_row(run.run_id, "src", 0, {"x": 1})
+        token = factory.data_flow.create_token(row.row_id)
         return run, token
 
-    def test_completed_requires_sink_name(self, recorder, run_with_token) -> None:
+    def test_completed_requires_sink_name(self, factory, run_with_token) -> None:
         """COMPLETED outcome must have sink_name."""
         from elspeth.contracts import RowOutcome
 
         run, token = run_with_token
 
         with pytest.raises(ValueError, match="COMPLETED outcome requires sink_name"):
-            recorder.record_token_outcome(
+            factory.data_flow.record_token_outcome(
                 ref=TokenRef(token_id=token.token_id, run_id=run.run_id),
                 outcome=RowOutcome.COMPLETED,
             )
 
-    def test_routed_requires_sink_name(self, recorder, run_with_token) -> None:
+    def test_routed_requires_sink_name(self, factory, run_with_token) -> None:
         """ROUTED outcome must have sink_name."""
         from elspeth.contracts import RowOutcome
 
         run, token = run_with_token
 
         with pytest.raises(ValueError, match="ROUTED outcome requires sink_name"):
-            recorder.record_token_outcome(
+            factory.data_flow.record_token_outcome(
                 ref=TokenRef(token_id=token.token_id, run_id=run.run_id),
                 outcome=RowOutcome.ROUTED,
             )
 
-    def test_forked_requires_fork_group_id(self, recorder, run_with_token) -> None:
+    def test_forked_requires_fork_group_id(self, factory, run_with_token) -> None:
         """FORKED outcome must have fork_group_id."""
         from elspeth.contracts import RowOutcome
 
         run, token = run_with_token
 
         with pytest.raises(ValueError, match="FORKED outcome requires fork_group_id"):
-            recorder.record_token_outcome(
+            factory.data_flow.record_token_outcome(
                 ref=TokenRef(token_id=token.token_id, run_id=run.run_id),
                 outcome=RowOutcome.FORKED,
             )
 
-    def test_failed_requires_error_hash(self, recorder, run_with_token) -> None:
+    def test_failed_requires_error_hash(self, factory, run_with_token) -> None:
         """FAILED outcome must have error_hash."""
         from elspeth.contracts import RowOutcome
 
         run, token = run_with_token
 
         with pytest.raises(ValueError, match="FAILED outcome requires error_hash"):
-            recorder.record_token_outcome(
+            factory.data_flow.record_token_outcome(
                 ref=TokenRef(token_id=token.token_id, run_id=run.run_id),
                 outcome=RowOutcome.FAILED,
             )
 
-    def test_quarantined_requires_error_hash(self, recorder, run_with_token) -> None:
+    def test_quarantined_requires_error_hash(self, factory, run_with_token) -> None:
         """QUARANTINED outcome must have error_hash."""
         from elspeth.contracts import RowOutcome
 
         run, token = run_with_token
 
         with pytest.raises(ValueError, match="QUARANTINED outcome requires error_hash"):
-            recorder.record_token_outcome(
+            factory.data_flow.record_token_outcome(
                 ref=TokenRef(token_id=token.token_id, run_id=run.run_id),
                 outcome=RowOutcome.QUARANTINED,
             )
 
-    def test_coalesced_requires_join_group_id(self, recorder, run_with_token) -> None:
+    def test_coalesced_requires_join_group_id(self, factory, run_with_token) -> None:
         """COALESCED outcome must have join_group_id."""
         from elspeth.contracts import RowOutcome
 
         run, token = run_with_token
 
         with pytest.raises(ValueError, match="COALESCED outcome requires join_group_id"):
-            recorder.record_token_outcome(
+            factory.data_flow.record_token_outcome(
                 ref=TokenRef(token_id=token.token_id, run_id=run.run_id),
                 outcome=RowOutcome.COALESCED,
             )
 
-    def test_expanded_requires_expand_group_id(self, recorder, run_with_token) -> None:
+    def test_expanded_requires_expand_group_id(self, factory, run_with_token) -> None:
         """EXPANDED outcome must have expand_group_id."""
         from elspeth.contracts import RowOutcome
 
         run, token = run_with_token
 
         with pytest.raises(ValueError, match="EXPANDED outcome requires expand_group_id"):
-            recorder.record_token_outcome(
+            factory.data_flow.record_token_outcome(
                 ref=TokenRef(token_id=token.token_id, run_id=run.run_id),
                 outcome=RowOutcome.EXPANDED,
             )
 
-    def test_buffered_requires_batch_id(self, recorder, run_with_token) -> None:
+    def test_buffered_requires_batch_id(self, factory, run_with_token) -> None:
         """BUFFERED outcome must have batch_id."""
         from elspeth.contracts import RowOutcome
 
         run, token = run_with_token
 
         with pytest.raises(ValueError, match="BUFFERED outcome requires batch_id"):
-            recorder.record_token_outcome(
+            factory.data_flow.record_token_outcome(
                 ref=TokenRef(token_id=token.token_id, run_id=run.run_id),
                 outcome=RowOutcome.BUFFERED,
             )
 
-    def test_consumed_in_batch_requires_batch_id(self, recorder, run_with_token) -> None:
+    def test_consumed_in_batch_requires_batch_id(self, factory, run_with_token) -> None:
         """CONSUMED_IN_BATCH outcome must have batch_id."""
         from elspeth.contracts import RowOutcome
 
         run, token = run_with_token
 
         with pytest.raises(ValueError, match="CONSUMED_IN_BATCH outcome requires batch_id"):
-            recorder.record_token_outcome(
+            factory.data_flow.record_token_outcome(
                 ref=TokenRef(token_id=token.token_id, run_id=run.run_id),
                 outcome=RowOutcome.CONSUMED_IN_BATCH,
             )
@@ -485,13 +486,13 @@ class TestGetTokenOutcome:
     """Test get_token_outcome() method."""
 
     @pytest.fixture
-    def run_with_outcome(self, recorder):
+    def run_with_outcome(self, factory):
         """Create run, token, and outcome for testing."""
         from elspeth.contracts import Determinism, NodeType, RowOutcome
         from elspeth.contracts.schema import SchemaConfig
 
-        run = recorder.begin_run(config={}, canonical_version="v1")
-        recorder.register_node(
+        run = factory.run_lifecycle.begin_run(config={}, canonical_version="v1")
+        factory.data_flow.register_node(
             run_id=run.run_id,
             node_id="src",
             plugin_name="test",
@@ -501,45 +502,45 @@ class TestGetTokenOutcome:
             determinism=Determinism.DETERMINISTIC,
             schema_config=SchemaConfig.from_dict({"mode": "observed"}),
         )
-        row = recorder.create_row(run.run_id, "src", 0, {"x": 1})
-        token = recorder.create_token(row.row_id)
-        outcome_id = recorder.record_token_outcome(
+        row = factory.data_flow.create_row(run.run_id, "src", 0, {"x": 1})
+        token = factory.data_flow.create_token(row.row_id)
+        outcome_id = factory.data_flow.record_token_outcome(
             ref=TokenRef(token_id=token.token_id, run_id=run.run_id), outcome=RowOutcome.COMPLETED, sink_name="out"
         )
         return run, token, outcome_id
 
-    def test_get_token_outcome_returns_dataclass(self, recorder, run_with_outcome) -> None:
+    def test_get_token_outcome_returns_dataclass(self, factory, run_with_outcome) -> None:
         from elspeth.contracts import TokenOutcome
 
         _run, token, _ = run_with_outcome
-        result = recorder.get_token_outcome(token.token_id)
+        result = factory.data_flow.get_token_outcome(token.token_id)
 
         assert isinstance(result, TokenOutcome)
         assert result.token_id == token.token_id
         assert result.outcome.value == "completed"
 
-    def test_get_token_outcome_returns_terminal_over_buffered(self, recorder, run_with_outcome) -> None:
+    def test_get_token_outcome_returns_terminal_over_buffered(self, factory, run_with_outcome) -> None:
         """Should return terminal outcome, not BUFFERED."""
         _run, token, _ = run_with_outcome
         # The fixture already recorded COMPLETED (terminal)
-        result = recorder.get_token_outcome(token.token_id)
+        result = factory.data_flow.get_token_outcome(token.token_id)
         assert result.is_terminal is True
 
-    def test_get_nonexistent_returns_none(self, recorder) -> None:
-        result = recorder.get_token_outcome("nonexistent_token")
+    def test_get_nonexistent_returns_none(self, factory) -> None:
+        result = factory.data_flow.get_token_outcome("nonexistent_token")
         assert result is None
 
 
 class TestExplainIncludesOutcome:
     """Test that explain() returns recorded outcomes."""
 
-    def test_explain_returns_outcome(self, recorder) -> None:
+    def test_explain_returns_outcome(self, factory) -> None:
         from elspeth.contracts import Determinism, NodeType, RowOutcome
         from elspeth.contracts.schema import SchemaConfig
         from elspeth.core.landscape.lineage import explain
 
-        run = recorder.begin_run(config={}, canonical_version="v1")
-        recorder.register_node(
+        run = factory.run_lifecycle.begin_run(config={}, canonical_version="v1")
+        factory.data_flow.register_node(
             run_id=run.run_id,
             node_id="src",
             plugin_name="test",
@@ -549,25 +550,25 @@ class TestExplainIncludesOutcome:
             determinism=Determinism.DETERMINISTIC,
             schema_config=SchemaConfig.from_dict({"mode": "observed"}),
         )
-        row = recorder.create_row(run.run_id, "src", 0, {"x": 1})
-        token = recorder.create_token(row.row_id)
-        recorder.record_token_outcome(
+        row = factory.data_flow.create_row(run.run_id, "src", 0, {"x": 1})
+        token = factory.data_flow.create_token(row.row_id)
+        factory.data_flow.record_token_outcome(
             ref=TokenRef(token_id=token.token_id, run_id=run.run_id), outcome=RowOutcome.COMPLETED, sink_name="out"
         )
 
-        result = explain(recorder, run.run_id, token_id=token.token_id)
+        result = explain(factory.query, factory.data_flow, run.run_id, token_id=token.token_id)
 
         assert result is not None
         assert result.outcome is not None
         assert result.outcome.outcome == RowOutcome.COMPLETED
 
-    def test_explain_returns_none_outcome_when_not_recorded(self, recorder) -> None:
+    def test_explain_returns_none_outcome_when_not_recorded(self, factory) -> None:
         from elspeth.contracts import Determinism, NodeType
         from elspeth.contracts.schema import SchemaConfig
         from elspeth.core.landscape.lineage import explain
 
-        run = recorder.begin_run(config={}, canonical_version="v1")
-        recorder.register_node(
+        run = factory.run_lifecycle.begin_run(config={}, canonical_version="v1")
+        factory.data_flow.register_node(
             run_id=run.run_id,
             node_id="src",
             plugin_name="test",
@@ -577,11 +578,11 @@ class TestExplainIncludesOutcome:
             determinism=Determinism.DETERMINISTIC,
             schema_config=SchemaConfig.from_dict({"mode": "observed"}),
         )
-        row = recorder.create_row(run.run_id, "src", 0, {"x": 1})
-        token = recorder.create_token(row.row_id)
+        row = factory.data_flow.create_row(run.run_id, "src", 0, {"x": 1})
+        token = factory.data_flow.create_token(row.row_id)
         # No outcome recorded
 
-        result = explain(recorder, run.run_id, token_id=token.token_id)
+        result = explain(factory.query, factory.data_flow, run.run_id, token_id=token.token_id)
 
         assert result is not None
         assert result.outcome is None

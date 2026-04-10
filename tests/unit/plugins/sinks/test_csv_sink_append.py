@@ -8,7 +8,7 @@ from elspeth.contracts.plugin_context import PluginContext
 from elspeth.plugins.sinks.csv_sink import CSVSink
 from tests.fixtures.base_classes import inject_write_failure
 from tests.fixtures.factories import make_context
-from tests.fixtures.landscape import make_landscape_db, make_recorder
+from tests.fixtures.landscape import make_factory
 
 # Strict schema config for tests - CSVSink requires fixed columns
 STRICT_SCHEMA = {"mode": "fixed", "fields": ["id: int", "value: str"]}
@@ -17,9 +17,8 @@ STRICT_SCHEMA = {"mode": "fixed", "fields": ["id: int", "value: str"]}
 @pytest.fixture
 def ctx() -> PluginContext:
     """Create test context."""
-    db = make_landscape_db()
-    recorder = make_recorder(db)
-    return make_context(landscape=recorder)
+    factory = make_factory()
+    return make_context(landscape=factory)
 
 
 class TestCSVSinkAppendMode:

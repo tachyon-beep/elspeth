@@ -980,7 +980,7 @@ class TestMixedErrors:
         # All rows should be processed
         assert output.total_count == 50
 
-        # Verify audit trail completeness using LandscapeRecorder API
+        # Verify audit trail completeness using ExecutionRepository API
         db_rows = recorder.get_rows(run_id)
         db_row_ids = {r.row_id for r in db_rows}
         assert set(row_ids) == db_row_ids, "Missing rows in audit trail"

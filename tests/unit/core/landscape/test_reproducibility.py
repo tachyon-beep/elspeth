@@ -19,7 +19,8 @@ import pytest
 from elspeth.contracts import CallStatus, CallType, Determinism, NodeStateStatus, NodeType
 from elspeth.contracts.errors import AuditIntegrityError
 from elspeth.contracts.schema import SchemaConfig
-from elspeth.core.landscape import LandscapeDB, LandscapeRecorder
+from elspeth.core.landscape import LandscapeDB
+from elspeth.core.landscape.factory import RecorderFactory
 from elspeth.core.landscape.reproducibility import (
     ReproducibilityGrade,
     compute_grade,
@@ -32,25 +33,25 @@ from elspeth.core.landscape.schema import (
     runs_table,
     tokens_table,
 )
-from tests.fixtures.landscape import make_landscape_db, make_recorder
+from tests.fixtures.landscape import make_factory, make_landscape_db
 
 _DYNAMIC_SCHEMA = SchemaConfig.from_dict({"mode": "observed"})
 
 
-def _setup(*, run_id: str = "run-1") -> tuple[LandscapeDB, LandscapeRecorder]:
+def _setup(*, run_id: str = "run-1") -> tuple[LandscapeDB, RecorderFactory]:
     """Create in-memory DB with a run."""
     db = make_landscape_db()
-    recorder = make_recorder(db)
-    recorder.begin_run(config={}, canonical_version="v1", run_id=run_id)
-    return db, recorder
+    factory = make_factory(db)
+    factory.run_lifecycle.begin_run(config={}, canonical_version="v1", run_id=run_id)
+    return db, factory
 
 
 class TestComputeGrade:
     """Tests for compute_grade — determines reproducibility from node determinism."""
 
     def test_all_deterministic_returns_full(self) -> None:
-        db, recorder = _setup()
-        recorder.register_node(
+        db, factory = _setup()
+        factory.data_flow.register_node(
             run_id="run-1",
             plugin_name="csv",
             node_type=NodeType.SOURCE,
@@ -63,8 +64,8 @@ class TestComputeGrade:
         assert grade == ReproducibilityGrade.FULL_REPRODUCIBLE
 
     def test_seeded_returns_full(self) -> None:
-        db, recorder = _setup()
-        recorder.register_node(
+        db, factory = _setup()
+        factory.data_flow.register_node(
             run_id="run-1",
             plugin_name="sampler",
             node_type=NodeType.TRANSFORM,
@@ -78,8 +79,8 @@ class TestComputeGrade:
         assert grade == ReproducibilityGrade.FULL_REPRODUCIBLE
 
     def test_nondeterministic_returns_replay(self) -> None:
-        db, recorder = _setup()
-        recorder.register_node(
+        db, factory = _setup()
+        factory.data_flow.register_node(
             run_id="run-1",
             plugin_name="llm",
             node_type=NodeType.TRANSFORM,
@@ -93,8 +94,8 @@ class TestComputeGrade:
         assert grade == ReproducibilityGrade.REPLAY_REPRODUCIBLE
 
     def test_external_call_returns_replay(self) -> None:
-        db, recorder = _setup()
-        recorder.register_node(
+        db, factory = _setup()
+        factory.data_flow.register_node(
             run_id="run-1",
             plugin_name="api",
             node_type=NodeType.TRANSFORM,
@@ -108,8 +109,8 @@ class TestComputeGrade:
         assert grade == ReproducibilityGrade.REPLAY_REPRODUCIBLE
 
     def test_io_read_returns_replay(self) -> None:
-        db, recorder = _setup()
-        recorder.register_node(
+        db, factory = _setup()
+        factory.data_flow.register_node(
             run_id="run-1",
             plugin_name="reader",
             node_type=NodeType.SOURCE,
@@ -123,8 +124,8 @@ class TestComputeGrade:
         assert grade == ReproducibilityGrade.REPLAY_REPRODUCIBLE
 
     def test_io_write_returns_replay(self) -> None:
-        db, recorder = _setup()
-        recorder.register_node(
+        db, factory = _setup()
+        factory.data_flow.register_node(
             run_id="run-1",
             plugin_name="writer",
             node_type=NodeType.SINK,
@@ -138,8 +139,8 @@ class TestComputeGrade:
         assert grade == ReproducibilityGrade.REPLAY_REPRODUCIBLE
 
     def test_mixed_deterministic_and_nondeterministic(self) -> None:
-        db, recorder = _setup()
-        recorder.register_node(
+        db, factory = _setup()
+        factory.data_flow.register_node(
             run_id="run-1",
             plugin_name="csv",
             node_type=NodeType.SOURCE,
@@ -149,7 +150,7 @@ class TestComputeGrade:
             schema_config=_DYNAMIC_SCHEMA,
             determinism=Determinism.DETERMINISTIC,
         )
-        recorder.register_node(
+        factory.data_flow.register_node(
             run_id="run-1",
             plugin_name="llm",
             node_type=NodeType.TRANSFORM,
@@ -163,12 +164,12 @@ class TestComputeGrade:
         assert grade == ReproducibilityGrade.REPLAY_REPRODUCIBLE
 
     def test_empty_pipeline_returns_full(self) -> None:
-        db, _recorder = _setup()
+        db, _factory = _setup()
         grade = compute_grade(db, "run-1")
         assert grade == ReproducibilityGrade.FULL_REPRODUCIBLE
 
     def test_nonexistent_run_raises(self) -> None:
-        db, _recorder = _setup()
+        db, _factory = _setup()
         with pytest.raises(AuditIntegrityError, match="does not exist"):
             compute_grade(db, "nonexistent-run")
 
@@ -181,7 +182,7 @@ def _set_grade(db: LandscapeDB, run_id: str, grade: ReproducibilityGrade) -> Non
 
 def _create_nondeterministic_call(
     db: LandscapeDB,
-    recorder: LandscapeRecorder,
+    factory: RecorderFactory,
     *,
     determinism: Determinism = Determinism.NON_DETERMINISTIC,
     response_ref: str | None = None,
@@ -191,7 +192,7 @@ def _create_nondeterministic_call(
     call_id: str = "call-1",
 ) -> None:
     """Create a node + node_state + call chain for purge testing."""
-    recorder.register_node(
+    factory.data_flow.register_node(
         run_id="run-1",
         plugin_name="llm",
         node_type=NodeType.TRANSFORM,
@@ -256,78 +257,78 @@ class TestUpdateGradeAfterPurge:
 
     def test_replay_degrades_when_nondeterministic_response_purged(self) -> None:
         """Downgrade when a nondeterministic node's response payload has been purged."""
-        db, recorder = _setup()
+        db, factory = _setup()
         # Create a nondeterministic node with a purged response
         # (response_hash set but response_ref is None = purged)
-        _create_nondeterministic_call(db, recorder, response_ref=None, response_hash="resp_hash")
+        _create_nondeterministic_call(db, factory, response_ref=None, response_hash="resp_hash")
         _set_grade(db, "run-1", ReproducibilityGrade.REPLAY_REPRODUCIBLE)
         update_grade_after_purge(db, "run-1")
-        run = recorder.get_run("run-1")
+        run = factory.run_lifecycle.get_run("run-1")
         assert run is not None
         assert run.reproducibility_grade == ReproducibilityGrade.ATTRIBUTABLE_ONLY
 
     def test_replay_unchanged_when_only_deterministic_payloads_purged(self) -> None:
         """Do NOT downgrade when only deterministic node payloads are purged."""
-        db, recorder = _setup()
+        db, factory = _setup()
         # Create a deterministic node with a purged response — not replay-critical
         _create_nondeterministic_call(
             db,
-            recorder,
+            factory,
             determinism=Determinism.DETERMINISTIC,
             response_ref=None,
             response_hash="resp_hash",
         )
         _set_grade(db, "run-1", ReproducibilityGrade.REPLAY_REPRODUCIBLE)
         update_grade_after_purge(db, "run-1")
-        run = recorder.get_run("run-1")
+        run = factory.run_lifecycle.get_run("run-1")
         assert run is not None
         assert run.reproducibility_grade == ReproducibilityGrade.REPLAY_REPRODUCIBLE
 
     def test_replay_unchanged_when_nondeterministic_response_intact(self) -> None:
         """Do NOT downgrade when nondeterministic responses are still present."""
-        db, recorder = _setup()
+        db, factory = _setup()
         # Create a nondeterministic node with response still present
-        _create_nondeterministic_call(db, recorder, response_ref="ref://still-there", response_hash="resp_hash")
+        _create_nondeterministic_call(db, factory, response_ref="ref://still-there", response_hash="resp_hash")
         _set_grade(db, "run-1", ReproducibilityGrade.REPLAY_REPRODUCIBLE)
         update_grade_after_purge(db, "run-1")
-        run = recorder.get_run("run-1")
+        run = factory.run_lifecycle.get_run("run-1")
         assert run is not None
         assert run.reproducibility_grade == ReproducibilityGrade.REPLAY_REPRODUCIBLE
 
     def test_replay_unchanged_when_no_calls_exist(self) -> None:
         """Do NOT downgrade when run has no calls at all (nothing to purge)."""
-        db, recorder = _setup()
+        db, factory = _setup()
         _set_grade(db, "run-1", ReproducibilityGrade.REPLAY_REPRODUCIBLE)
         update_grade_after_purge(db, "run-1")
-        run = recorder.get_run("run-1")
+        run = factory.run_lifecycle.get_run("run-1")
         assert run is not None
         assert run.reproducibility_grade == ReproducibilityGrade.REPLAY_REPRODUCIBLE
 
     def test_full_unchanged_after_purge(self) -> None:
-        db, recorder = _setup()
+        db, factory = _setup()
         _set_grade(db, "run-1", ReproducibilityGrade.FULL_REPRODUCIBLE)
         update_grade_after_purge(db, "run-1")
-        run = recorder.get_run("run-1")
+        run = factory.run_lifecycle.get_run("run-1")
         assert run is not None
         assert run.reproducibility_grade == ReproducibilityGrade.FULL_REPRODUCIBLE
 
     def test_attributable_unchanged_after_purge(self) -> None:
-        db, recorder = _setup()
+        db, factory = _setup()
         _set_grade(db, "run-1", ReproducibilityGrade.ATTRIBUTABLE_ONLY)
         update_grade_after_purge(db, "run-1")
-        run = recorder.get_run("run-1")
+        run = factory.run_lifecycle.get_run("run-1")
         assert run is not None
         assert run.reproducibility_grade == ReproducibilityGrade.ATTRIBUTABLE_ONLY
 
     def test_nonexistent_run_raises(self) -> None:
         """Purging a nonexistent run is a caller bug — must crash."""
-        db, _recorder = _setup()
+        db, _factory = _setup()
         with pytest.raises(AuditIntegrityError, match="does not exist"):
             update_grade_after_purge(db, "nonexistent")
 
     def test_null_grade_raises(self) -> None:
         """NULL reproducibility_grade is Tier 1 corruption — must crash."""
-        db, _recorder = _setup()
+        db, _factory = _setup()
         # begin_run doesn't set a grade by default, so it's NULL
         with pytest.raises(AuditIntegrityError, match="NULL reproducibility_grade"):
             update_grade_after_purge(db, "run-1")

@@ -12,26 +12,26 @@ import pytest
 
 from elspeth.contracts import NodeType
 from elspeth.contracts.schema import SchemaConfig
-from elspeth.core.landscape.recorder import LandscapeRecorder
+from elspeth.core.landscape.factory import RecorderFactory
 from tests.fixtures.factories import make_context
-from tests.fixtures.landscape import make_landscape_db, make_recorder
+from tests.fixtures.landscape import make_factory, make_landscape_db
 
 
 @pytest.fixture
-def recorder() -> LandscapeRecorder:
-    """Create in-memory recorder with a registered run."""
+def factory() -> RecorderFactory:
+    """Create in-memory factory with a registered run."""
     db = make_landscape_db()
-    rec = make_recorder(db)
+    fac = make_factory(db)
 
     # Create a run for foreign key constraint
-    rec.begin_run(
+    fac.run_lifecycle.begin_run(
         config={},
         canonical_version="v1",
         run_id="test-run",
     )
 
     # Register source_node to satisfy FK constraint on validation_errors
-    rec.register_node(
+    fac.data_flow.register_node(
         run_id="test-run",
         plugin_name="test_source",
         node_type=NodeType.SOURCE,
@@ -42,13 +42,13 @@ def recorder() -> LandscapeRecorder:
         sequence=0,
     )
 
-    return rec
+    return fac
 
 
 class TestValidationErrorNonCanonical:
     """Test validation error recording for non-canonical data."""
 
-    def test_primitive_int_audit_record_verified(self, recorder: LandscapeRecorder) -> None:
+    def test_primitive_int_audit_record_verified(self, factory: RecorderFactory) -> None:
         """P1: Verify persisted audit record fields for primitive int.
 
         Tests must verify all audit trail fields, not just error_id.
@@ -57,7 +57,7 @@ class TestValidationErrorNonCanonical:
 
         from elspeth.core.canonical import stable_hash
 
-        ctx = make_context(run_id="test-run", node_id="source_node", landscape=recorder)
+        ctx = make_context(run_id="test-run", node_id="source_node", landscape=factory)
 
         row_value = 42
         error_msg = "Expected dict, got int"
@@ -70,7 +70,7 @@ class TestValidationErrorNonCanonical:
         )
 
         # Query the persisted validation error record
-        records = recorder.get_validation_errors_for_run("test-run")
+        records = factory.data_flow.get_validation_errors_for_run("test-run")
         assert len(records) == 1
         record = records[0]
 
@@ -91,7 +91,7 @@ class TestValidationErrorNonCanonical:
         row_data = json.loads(record.row_data_json)
         assert row_data == row_value
 
-    def test_nan_audit_record_uses_repr_fallback(self, recorder: LandscapeRecorder) -> None:
+    def test_nan_audit_record_uses_repr_fallback(self, factory: RecorderFactory) -> None:
         """P1: Verify NaN uses repr_hash and NonCanonicalMetadata.
 
         Non-finite floats cannot be canonicalized, so:
@@ -102,7 +102,7 @@ class TestValidationErrorNonCanonical:
 
         from elspeth.contracts.hashing import repr_hash
 
-        ctx = make_context(run_id="test-run", node_id="source_node", landscape=recorder)
+        ctx = make_context(run_id="test-run", node_id="source_node", landscape=factory)
 
         row_value = {"value": float("nan")}
         error_msg = "Row contains NaN"
@@ -115,7 +115,7 @@ class TestValidationErrorNonCanonical:
         )
 
         # Query the persisted validation error record
-        records = recorder.get_validation_errors_for_run("test-run")
+        records = factory.data_flow.get_validation_errors_for_run("test-run")
         assert len(records) == 1
         record = records[0]
 
@@ -132,9 +132,9 @@ class TestValidationErrorNonCanonical:
         assert row_data["__type__"] == "dict"
         assert "nan" in row_data["__repr__"].lower()
 
-    def test_multiple_non_canonical_rows(self, recorder: LandscapeRecorder) -> None:
+    def test_multiple_non_canonical_rows(self, factory: RecorderFactory) -> None:
         """Multiple non-canonical rows should all be recorded."""
-        ctx = make_context(run_id="test-run", node_id="source_node", landscape=recorder)
+        ctx = make_context(run_id="test-run", node_id="source_node", landscape=factory)
 
         tokens = []
         test_rows = [

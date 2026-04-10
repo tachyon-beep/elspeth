@@ -32,7 +32,7 @@ from elspeth.plugins.infrastructure.clients.retrieval.connection import ChromaCo
 from elspeth.plugins.infrastructure.clients.retrieval.types import RetrievalChunk
 
 if TYPE_CHECKING:
-    from elspeth.core.landscape.recorder import LandscapeRecorder
+    from elspeth.core.landscape.execution_repository import ExecutionRepository
 
 
 class ChromaSearchProviderConfig(BaseModel):
@@ -112,12 +112,12 @@ class ChromaSearchProvider:
         self,
         config: ChromaSearchProviderConfig,
         *,
-        recorder: LandscapeRecorder,
+        execution: ExecutionRepository,
         run_id: str,
     ) -> None:
         self._config = config
         self._distance_function = config.distance_function
-        self._recorder = recorder
+        self._execution = execution
         self._run_id = run_id
         self.last_skipped_count: int = 0
         self.last_skipped_reasons: list[dict[str, Any]] = []
@@ -229,8 +229,8 @@ class ChromaSearchProvider:
         chunks.sort(key=lambda c: c.score, reverse=True)
         self.last_skipped_count = skipped
 
-        call_index = self._recorder.allocate_call_index(state_id)
-        self._recorder.record_call(
+        call_index = self._execution.allocate_call_index(state_id)
+        self._execution.record_call(
             state_id=state_id,
             call_index=call_index,
             call_type=CallType.VECTOR,
@@ -340,13 +340,13 @@ class ChromaSearchProvider:
         """Record a failed search call in the audit trail.
 
         Called from except blocks before re-raising. Uses best-effort
-        recording — if the recorder itself fails, the original search
+        recording — if the audit recording itself fails, the original search
         error takes priority (we don't mask it with an AuditIntegrityError
         here because the caller is about to raise a RetrievalError).
         """
         elapsed_ms = (time.monotonic() - start_time) * 1000
-        call_index = self._recorder.allocate_call_index(state_id)
-        self._recorder.record_call(
+        call_index = self._execution.allocate_call_index(state_id)
+        self._execution.record_call(
             state_id=state_id,
             call_index=call_index,
             call_type=CallType.VECTOR,

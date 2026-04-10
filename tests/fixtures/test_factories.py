@@ -55,17 +55,17 @@ class TestMakeContext:
         assert ctx.config == {"key": "value"}
 
     def test_mock_landscape_is_specced(self) -> None:
-        """Default mock landscape must be specced to LandscapeRecorder."""
+        """Default mock landscape must be specced to _PluginAuditWriterAdapter."""
         from unittest.mock import Mock
 
-        from elspeth.core.landscape.recorder import LandscapeRecorder
+        from elspeth.core.landscape.factory import _PluginAuditWriterAdapter
         from tests.fixtures.factories import make_context
 
         ctx = make_context()
         assert ctx.landscape is not None
         assert isinstance(ctx.landscape, Mock)
-        # spec= ensures only real LandscapeRecorder methods are accessible
-        assert isinstance(ctx.landscape, LandscapeRecorder)
+        # spec= ensures only real _PluginAuditWriterAdapter methods are accessible
+        assert isinstance(ctx.landscape, _PluginAuditWriterAdapter)
         # get_node_state must return a mock with token_id matching the token
         node_state = ctx.landscape.get_node_state("any-state-id")
         assert node_state.token_id == ctx.token.token_id
@@ -102,13 +102,13 @@ class TestMakeSourceContext:
         # Should not raise — plugin registered successfully
         assert ctx.run_id == "test-run"
 
-    def test_landscape_is_real_recorder(self) -> None:
-        """Verify delegated factory produces a real LandscapeRecorder, not a Mock."""
-        from elspeth.core.landscape.recorder import LandscapeRecorder
+    def test_landscape_is_real_adapter(self) -> None:
+        """Verify delegated factory produces a real PluginAuditWriter adapter, not a Mock."""
+        from elspeth.core.landscape.factory import _PluginAuditWriterAdapter
         from tests.fixtures.factories import make_source_context
 
         ctx = make_source_context()
-        assert isinstance(ctx.landscape, LandscapeRecorder)
+        assert isinstance(ctx.landscape, _PluginAuditWriterAdapter)
 
     def test_create_row_round_trip(self) -> None:
         """Prove FK chain is intact: run -> node -> row."""
@@ -427,15 +427,15 @@ class TestRunAuditPipeline:
         assert result.payload_store is not None
 
     def test_run_exists_in_db(self, tmp_path: Any) -> None:
-        """Run must be queryable via a recorder built from the returned DB."""
-        from elspeth.core.landscape.recorder import LandscapeRecorder
+        """Run must be queryable via a factory built from the returned DB."""
+        from elspeth.core.landscape.factory import RecorderFactory
         from tests.fixtures.pipeline import run_audit_pipeline
 
         result = run_audit_pipeline(tmp_path, [{"x": 1}])
-        # result.db is a LandscapeDB (connection manager), not a recorder.
-        # Build a recorder to query it.
-        recorder = LandscapeRecorder(result.db)
-        run = recorder.get_run(result.run_id)
+        # result.db is a LandscapeDB (connection manager), not a factory.
+        # Build a factory to query it.
+        factory = RecorderFactory(result.db)
+        run = factory.run_lifecycle.get_run(result.run_id)
         assert run is not None
 
     def test_single_row(self, tmp_path: Any) -> None:

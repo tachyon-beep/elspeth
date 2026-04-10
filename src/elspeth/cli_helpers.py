@@ -19,7 +19,7 @@ if TYPE_CHECKING:
     from elspeth.contracts.run_result import RunResult
     from elspeth.core.config import AggregationSettings, ElspethSettings, LandscapeSettings, SourceSettings
     from elspeth.core.dag import WiredTransform
-    from elspeth.core.landscape.recorder import LandscapeRecorder
+    from elspeth.core.landscape.factory import RecorderFactory
 
 
 @dataclass(frozen=True, slots=True)
@@ -191,34 +191,34 @@ def resolve_database_url(
     raise ValueError("No database specified. Provide --database or ensure settings.yaml exists with landscape.url configured.")
 
 
-def resolve_latest_run_id(recorder: "LandscapeRecorder") -> str | None:
+def resolve_latest_run_id(factory: "RecorderFactory") -> str | None:
     """Get the most recently started run ID.
 
     Args:
-        recorder: LandscapeRecorder with database connection
+        factory: RecorderFactory with database connection
 
     Returns:
         Run ID of most recent run, or None if no runs exist
     """
-    runs = recorder.list_runs()
+    runs = factory.run_lifecycle.list_runs()
     if not runs:
         return None
     # list_runs returns ordered by started_at DESC
     return runs[0].run_id
 
 
-def resolve_run_id(run_id: str, recorder: "LandscapeRecorder") -> str | None:
+def resolve_run_id(run_id: str, factory: "RecorderFactory") -> str | None:
     """Resolve run_id, handling 'latest' keyword.
 
     Args:
         run_id: Explicit run ID or 'latest'
-        recorder: LandscapeRecorder for looking up latest
+        factory: RecorderFactory for looking up latest
 
     Returns:
         Resolved run ID, or None if 'latest' requested but no runs exist
     """
     if run_id.lower() == "latest":
-        return resolve_latest_run_id(recorder)
+        return resolve_latest_run_id(factory)
     return run_id
 
 

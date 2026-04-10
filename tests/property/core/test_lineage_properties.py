@@ -52,42 +52,46 @@ class TestExplainInputValidationProperties:
         Calling explain() without any row/token identifier is a
         programming error that should fail fast.
         """
-        recorder = MagicMock()
+        query = MagicMock()
+        data_flow = MagicMock()
 
         with pytest.raises(ValueError, match="Must provide either token_id or row_id"):
-            explain(recorder, run_id)
+            explain(query, data_flow, run_id)
 
     @given(run_id=id_strings)
     @settings(max_examples=50)
     def test_none_token_and_none_row_raises(self, run_id: str) -> None:
         """Property: Explicit None values also raise ValueError."""
-        recorder = MagicMock()
+        query = MagicMock()
+        data_flow = MagicMock()
 
         with pytest.raises(ValueError, match="Must provide either token_id or row_id"):
-            explain(recorder, run_id, token_id=None, row_id=None)
+            explain(query, data_flow, run_id, token_id=None, row_id=None)
 
     @given(run_id=id_strings, token_id=id_strings)
     @settings(max_examples=50)
     def test_token_id_alone_is_valid(self, run_id: str, token_id: str) -> None:
         """Property: Providing only token_id is valid input."""
-        recorder = MagicMock()
-        recorder.get_token.return_value = None  # Token not found
+        query = MagicMock()
+        data_flow = MagicMock()
+        query.get_token.return_value = None  # Token not found
 
         # Should not raise - returns None for not found
-        result = explain(recorder, run_id, token_id=token_id)
+        result = explain(query, data_flow, run_id, token_id=token_id)
 
         assert result is None
-        recorder.get_token.assert_called_once_with(token_id)
+        query.get_token.assert_called_once_with(token_id)
 
     @given(run_id=id_strings, row_id=id_strings)
     @settings(max_examples=50)
     def test_row_id_alone_is_valid(self, run_id: str, row_id: str) -> None:
         """Property: Providing only row_id is valid input."""
-        recorder = MagicMock()
-        recorder.get_token_outcomes_for_row.return_value = []  # No outcomes
+        query = MagicMock()
+        data_flow = MagicMock()
+        data_flow.get_token_outcomes_for_row.return_value = []  # No outcomes
 
         # Should not raise - returns None for not found
-        result = explain(recorder, run_id, row_id=row_id)
+        result = explain(query, data_flow, run_id, row_id=row_id)
 
         assert result is None
 
@@ -98,16 +102,17 @@ class TestExplainInputValidationProperties:
 
         When both are provided, token_id takes precedence (more specific).
         """
-        recorder = MagicMock()
-        recorder.get_token.return_value = None  # Token not found
+        query = MagicMock()
+        data_flow = MagicMock()
+        query.get_token.return_value = None  # Token not found
 
         # Should use token_id path
-        result = explain(recorder, run_id, token_id=token_id, row_id=row_id)
+        result = explain(query, data_flow, run_id, token_id=token_id, row_id=row_id)
 
         assert result is None
         # Should have queried by token_id, not row_id
-        recorder.get_token.assert_called_once_with(token_id)
-        recorder.get_token_outcomes_for_row.assert_not_called()
+        query.get_token.assert_called_once_with(token_id)
+        data_flow.get_token_outcomes_for_row.assert_not_called()
 
 
 # =============================================================================
@@ -122,10 +127,11 @@ class TestExplainRowResolutionProperties:
     @settings(max_examples=50)
     def test_no_outcomes_returns_none(self, run_id: str, row_id: str) -> None:
         """Property: No outcomes for row_id returns None."""
-        recorder = MagicMock()
-        recorder.get_token_outcomes_for_row.return_value = []
+        query = MagicMock()
+        data_flow = MagicMock()
+        data_flow.get_token_outcomes_for_row.return_value = []
 
-        result = explain(recorder, run_id, row_id=row_id)
+        result = explain(query, data_flow, run_id, row_id=row_id)
 
         assert result is None
 
@@ -137,15 +143,16 @@ class TestExplainRowResolutionProperties:
         If all tokens are still processing (e.g., BUFFERED), there's
         no complete lineage to return yet.
         """
-        recorder = MagicMock()
+        query = MagicMock()
+        data_flow = MagicMock()
 
         # Create mock non-terminal outcome
         non_terminal = MagicMock()
         non_terminal.is_terminal = False
 
-        recorder.get_token_outcomes_for_row.return_value = [non_terminal]
+        data_flow.get_token_outcomes_for_row.return_value = [non_terminal]
 
-        result = explain(recorder, run_id, row_id=row_id)
+        result = explain(query, data_flow, run_id, row_id=row_id)
 
         assert result is None
 
@@ -153,16 +160,17 @@ class TestExplainRowResolutionProperties:
     @settings(max_examples=50)
     def test_sink_filter_no_match_returns_none(self, run_id: str, row_id: str, sink: str) -> None:
         """Property: Specified sink with no matching tokens returns None."""
-        recorder = MagicMock()
+        query = MagicMock()
+        data_flow = MagicMock()
 
         # Terminal outcome at different sink
         terminal = MagicMock()
         terminal.is_terminal = True
         terminal.sink_name = "other_sink"
 
-        recorder.get_token_outcomes_for_row.return_value = [terminal]
+        data_flow.get_token_outcomes_for_row.return_value = [terminal]
 
-        result = explain(recorder, run_id, row_id=row_id, sink=sink)
+        result = explain(query, data_flow, run_id, row_id=row_id, sink=sink)
 
         assert result is None
 
@@ -183,7 +191,8 @@ class TestExplainAmbiguityProperties:
         This is a DAG scenario - fork paths created multiple terminal
         tokens. User must specify which sink to query.
         """
-        recorder = MagicMock()
+        query = MagicMock()
+        data_flow = MagicMock()
 
         # Two terminal outcomes at different sinks
         terminal1 = MagicMock()
@@ -194,10 +203,10 @@ class TestExplainAmbiguityProperties:
         terminal2.is_terminal = True
         terminal2.sink_name = "sink_b"
 
-        recorder.get_token_outcomes_for_row.return_value = [terminal1, terminal2]
+        data_flow.get_token_outcomes_for_row.return_value = [terminal1, terminal2]
 
         with pytest.raises(ValueError, match="terminal tokens"):
-            explain(recorder, run_id, row_id=row_id)
+            explain(query, data_flow, run_id, row_id=row_id)
 
     @given(run_id=id_strings, row_id=id_strings, sink=sink_names)
     @settings(max_examples=50)
@@ -207,7 +216,8 @@ class TestExplainAmbiguityProperties:
         This indicates a pipeline configuration issue - fork paths
         should not converge to the same sink without coalescing.
         """
-        recorder = MagicMock()
+        query = MagicMock()
+        data_flow = MagicMock()
 
         # Two terminal outcomes at SAME sink
         terminal1 = MagicMock()
@@ -220,10 +230,10 @@ class TestExplainAmbiguityProperties:
         terminal2.sink_name = sink
         terminal2.token_id = "token_2"
 
-        recorder.get_token_outcomes_for_row.return_value = [terminal1, terminal2]
+        data_flow.get_token_outcomes_for_row.return_value = [terminal1, terminal2]
 
         with pytest.raises(ValueError, match="tokens at sink"):
-            explain(recorder, run_id, row_id=row_id, sink=sink)
+            explain(query, data_flow, run_id, row_id=row_id, sink=sink)
 
 
 # =============================================================================
@@ -299,27 +309,37 @@ class TestExplainTierOneTrustProperties:
         If token_parents references a non-existent parent, that's audit
         database corruption. We crash rather than silently skipping.
         """
-        recorder = MagicMock()
+        query = MagicMock()
+        data_flow = MagicMock()
 
-        # Token exists
+        # Token exists with a fork group ID (required for parent consistency)
         token = MagicMock()
         token.row_id = "row_123"
-        recorder.get_token.return_value = token
+        token.fork_group_id = "some-fork-group"
+        token.join_group_id = None
+        token.expand_group_id = None
+        query.get_token.return_value = token
 
         # Source row exists
-        recorder.explain_row.return_value = MagicMock()
+        source_row = MagicMock()
+        source_row.row_id = "row_123"
+        query.explain_row.return_value = source_row
 
         # Node states exist
-        recorder.get_node_states_for_token.return_value = []
+        query.get_node_states_for_token.return_value = []
+
+        # Routing events and calls for states
+        query.get_routing_events_for_states.return_value = []
+        query.get_calls_for_states.return_value = []
 
         # Parent reference exists but parent doesn't
         parent_ref = MagicMock()
         parent_ref.parent_token_id = "missing_parent_id"
-        recorder.get_token_parents.return_value = [parent_ref]
-        recorder.get_token.side_effect = lambda tid: token if tid == token_id else None
+        query.get_token_parents.return_value = [parent_ref]
+        query.get_token.side_effect = lambda tid: token if tid == token_id else None
 
         with pytest.raises(AuditIntegrityError, match="Audit integrity violation"):
-            explain(recorder, run_id, token_id=token_id)
+            explain(query, data_flow, run_id, token_id=token_id)
 
 
 # =============================================================================
@@ -334,10 +354,11 @@ class TestExplainReturnValueProperties:
     @settings(max_examples=30)
     def test_token_not_found_returns_none(self, run_id: str, token_id: str) -> None:
         """Property: Non-existent token returns None (not exception)."""
-        recorder = MagicMock()
-        recorder.get_token.return_value = None
+        query = MagicMock()
+        data_flow = MagicMock()
+        query.get_token.return_value = None
 
-        result = explain(recorder, run_id, token_id=token_id)
+        result = explain(query, data_flow, run_id, token_id=token_id)
 
         assert result is None
 
@@ -345,13 +366,14 @@ class TestExplainReturnValueProperties:
     @settings(max_examples=30)
     def test_source_row_not_found_raises_audit_integrity(self, run_id: str, token_id: str) -> None:
         """Property: Token exists but source row missing is Tier 1 corruption — crash."""
-        recorder = MagicMock()
+        query = MagicMock()
+        data_flow = MagicMock()
 
         token = MagicMock()
         token.row_id = "row_123"
         token.token_id = token_id
-        recorder.get_token.return_value = token
-        recorder.explain_row.return_value = None
+        query.get_token.return_value = token
+        query.explain_row.return_value = None
 
         with pytest.raises(AuditIntegrityError, match="does not exist in rows table"):
-            explain(recorder, run_id, token_id=token_id)
+            explain(query, data_flow, run_id, token_id=token_id)

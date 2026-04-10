@@ -21,7 +21,7 @@ from elspeth.plugins.infrastructure.clients.http import AuditedHTTPClient
 
 @pytest.fixture
 def mock_recorder():
-    """Create mock LandscapeRecorder."""
+    """Create mock ExecutionRepository."""
     recorder = Mock()
     recorder.record_call = Mock()
     return recorder

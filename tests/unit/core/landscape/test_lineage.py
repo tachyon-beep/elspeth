@@ -31,7 +31,7 @@ from elspeth.core.landscape.lineage import LineageResult, explain
 # ---------------------------------------------------------------------------
 
 
-def _make_recorder(
+def _make_factory(
     *,
     token: Token | None = None,
     row_lineage: RowLineage | None = None,
@@ -44,19 +44,25 @@ def _make_recorder(
     transform_errors: list[object] | None = None,
     token_outcome: TokenOutcome | None = None,
 ) -> Mock:
-    """Create a mock recorder with configurable return values."""
-    recorder = Mock()
-    recorder.get_token.return_value = token
-    recorder.explain_row.return_value = row_lineage
-    recorder.get_node_states_for_token.return_value = node_states or []
-    recorder.get_routing_events_for_states.return_value = routing_events or []
-    recorder.get_calls_for_states.return_value = calls or []
-    recorder.get_token_parents.return_value = token_parents or []
-    recorder.get_token_outcomes_for_row.return_value = token_outcomes or []
-    recorder.get_validation_errors_for_row.return_value = validation_errors or []
-    recorder.get_transform_errors_for_token.return_value = transform_errors or []
-    recorder.get_token_outcome.return_value = token_outcome
-    return recorder
+    """Create a mock factory with configurable return values."""
+    query = Mock()
+    query.get_token.return_value = token
+    query.explain_row.return_value = row_lineage
+    query.get_node_states_for_token.return_value = node_states or []
+    query.get_routing_events_for_states.return_value = routing_events or []
+    query.get_calls_for_states.return_value = calls or []
+    query.get_token_parents.return_value = token_parents or []
+    query.get_token_outcomes_for_row.return_value = token_outcomes or []
+    query.get_validation_errors_for_row.return_value = validation_errors or []
+    query.get_transform_errors_for_token.return_value = transform_errors or []
+    query.get_token_outcome.return_value = token_outcome
+
+    data_flow = Mock()
+
+    factory = Mock()
+    factory.query = query
+    factory.data_flow = data_flow
+    return factory
 
 
 def _make_token(
@@ -123,9 +129,9 @@ class TestExplainValidation:
     """Tests for explain() argument validation."""
 
     def test_raises_when_neither_token_nor_row_provided(self) -> None:
-        recorder = _make_recorder()
+        factory = _make_factory()
         with pytest.raises(ValueError, match="Must provide either token_id or row_id"):
-            explain(recorder, "run-1")
+            explain(factory.query, factory.data_flow, "run-1")
 
     def test_raises_when_multiple_terminal_tokens_without_sink(self) -> None:
         """Row with multiple terminal tokens and no sink filter raises."""
@@ -133,9 +139,9 @@ class TestExplainValidation:
             _make_outcome(token_id="tok-1", sink_name="output"),
             _make_outcome(token_id="tok-2", sink_name="errors"),
         ]
-        recorder = _make_recorder(token_outcomes=outcomes)
+        factory = _make_factory(token_outcomes=outcomes)
         with pytest.raises(ValueError, match="has 2 terminal tokens"):
-            explain(recorder, "run-1", row_id="row-1")
+            explain(factory.query, factory.data_flow, "run-1", row_id="row-1")
 
     def test_raises_when_multiple_tokens_at_same_sink(self) -> None:
         """Multiple tokens reaching same sink raises (fork ambiguity)."""
@@ -143,9 +149,9 @@ class TestExplainValidation:
             _make_outcome(token_id="tok-1", sink_name="output"),
             _make_outcome(token_id="tok-2", sink_name="output"),
         ]
-        recorder = _make_recorder(token_outcomes=outcomes)
+        factory = _make_factory(token_outcomes=outcomes)
         with pytest.raises(ValueError, match="has 2 tokens at sink"):
-            explain(recorder, "run-1", row_id="row-1", sink="output")
+            explain(factory.query, factory.data_flow, "run-1", row_id="row-1", sink="output")
 
 
 # ===========================================================================
@@ -159,24 +165,24 @@ class TestExplainByTokenId:
     def test_returns_lineage_for_known_token(self) -> None:
         token = _make_token()
         row_lineage = _make_row_lineage()
-        recorder = _make_recorder(token=token, row_lineage=row_lineage)
+        factory = _make_factory(token=token, row_lineage=row_lineage)
 
-        result = explain(recorder, "run-1", token_id="tok-1")
+        result = explain(factory.query, factory.data_flow, "run-1", token_id="tok-1")
         assert result is not None
         assert result.token.token_id == "tok-1"
         assert result.source_row.row_id == "row-1"
 
     def test_returns_none_for_unknown_token(self) -> None:
-        recorder = _make_recorder(token=None)
-        result = explain(recorder, "run-1", token_id="nonexistent")
+        factory = _make_factory(token=None)
+        result = explain(factory.query, factory.data_flow, "run-1", token_id="nonexistent")
         assert result is None
 
     def test_raises_when_row_not_found_for_known_token(self) -> None:
         """Token exists but its row_id doesn't — Tier 1 corruption."""
         token = _make_token()
-        recorder = _make_recorder(token=token, row_lineage=None)
+        factory = _make_factory(token=token, row_lineage=None)
         with pytest.raises(AuditIntegrityError, match="does not exist in rows table"):
-            explain(recorder, "run-1", token_id="tok-1")
+            explain(factory.query, factory.data_flow, "run-1", token_id="tok-1")
 
 
 # ===========================================================================
@@ -191,24 +197,24 @@ class TestExplainByRowId:
         token = _make_token()
         row_lineage = _make_row_lineage()
         outcomes = [_make_outcome(token_id="tok-1")]
-        recorder = _make_recorder(
+        factory = _make_factory(
             token=token,
             row_lineage=row_lineage,
             token_outcomes=outcomes,
         )
-        result = explain(recorder, "run-1", row_id="row-1")
+        result = explain(factory.query, factory.data_flow, "run-1", row_id="row-1")
         assert result is not None
         assert result.token.token_id == "tok-1"
 
     def test_returns_none_when_no_outcomes(self) -> None:
-        recorder = _make_recorder(token_outcomes=[])
-        result = explain(recorder, "run-1", row_id="row-1")
+        factory = _make_factory(token_outcomes=[])
+        result = explain(factory.query, factory.data_flow, "run-1", row_id="row-1")
         assert result is None
 
     def test_returns_none_when_all_non_terminal(self) -> None:
         outcomes = [_make_outcome(is_terminal=False, outcome=RowOutcome.BUFFERED)]
-        recorder = _make_recorder(token_outcomes=outcomes)
-        result = explain(recorder, "run-1", row_id="row-1")
+        factory = _make_factory(token_outcomes=outcomes)
+        result = explain(factory.query, factory.data_flow, "run-1", row_id="row-1")
         assert result is None
 
     def test_filters_by_sink(self) -> None:
@@ -218,20 +224,20 @@ class TestExplainByRowId:
             _make_outcome(token_id="tok-1", sink_name="output"),
             _make_outcome(token_id="tok-2", sink_name="errors"),
         ]
-        recorder = _make_recorder(
+        factory = _make_factory(
             token=token,
             row_lineage=row_lineage,
             token_outcomes=outcomes,
         )
-        result = explain(recorder, "run-1", row_id="row-1", sink="errors")
+        result = explain(factory.query, factory.data_flow, "run-1", row_id="row-1", sink="errors")
         assert result is not None
         # Verify get_token was called with tok-2 (the errors sink token)
-        recorder.get_token.assert_called_with("tok-2")
+        factory.query.get_token.assert_called_with("tok-2")
 
     def test_returns_none_when_sink_has_no_tokens(self) -> None:
         outcomes = [_make_outcome(token_id="tok-1", sink_name="output")]
-        recorder = _make_recorder(token_outcomes=outcomes)
-        result = explain(recorder, "run-1", row_id="row-1", sink="nonexistent")
+        factory = _make_factory(token_outcomes=outcomes)
+        result = explain(factory.query, factory.data_flow, "run-1", row_id="row-1", sink="nonexistent")
         assert result is None
 
 
@@ -246,10 +252,10 @@ class TestExplainTier1Corruption:
     def test_resolved_token_missing_raises_audit_integrity(self) -> None:
         """Token resolved from token_outcomes but missing from tokens table."""
         outcomes = [_make_outcome(token_id="tok-resolved")]
-        recorder = _make_recorder(token=None, token_outcomes=outcomes)
+        factory = _make_factory(token=None, token_outcomes=outcomes)
 
         with pytest.raises(AuditIntegrityError, match="resolved from token_outcomes"):
-            explain(recorder, "run-1", row_id="row-1")
+            explain(factory.query, factory.data_flow, "run-1", row_id="row-1")
 
     def test_lineage_result_row_id_mismatch_raises_audit_integrity(self) -> None:
         """LineageResult rejects mismatched token/row IDs as corruption."""
@@ -280,29 +286,29 @@ class TestExplainParentIntegrity:
         """Token with fork_group_id but no parents is audit corruption."""
         token = _make_token(fork_group_id="fg-1")
         row_lineage = _make_row_lineage()
-        recorder = _make_recorder(
+        factory = _make_factory(
             token=token,
             row_lineage=row_lineage,
             token_parents=[],
         )
         with pytest.raises(AuditIntegrityError, match="Audit integrity violation"):
-            explain(recorder, "run-1", token_id="tok-1")
+            explain(factory.query, factory.data_flow, "run-1", token_id="tok-1")
 
     def test_parent_token_not_found_raises(self) -> None:
         """Missing parent token is audit corruption."""
         token = _make_token(fork_group_id="fork-group-1")
         row_lineage = _make_row_lineage()
         parent_ref = TokenParent(token_id="tok-1", parent_token_id="missing-parent", ordinal=0)
-        recorder = _make_recorder(
+        factory = _make_factory(
             token=token,
             row_lineage=row_lineage,
             token_parents=[parent_ref],
         )
         # get_token returns the main token for tok-1, None for missing-parent
-        recorder.get_token.side_effect = lambda tid: token if tid == "tok-1" else None
+        factory.query.get_token.side_effect = lambda tid: token if tid == "tok-1" else None
 
         with pytest.raises(AuditIntegrityError, match=r"parent token.*not found"):
-            explain(recorder, "run-1", token_id="tok-1")
+            explain(factory.query, factory.data_flow, "run-1", token_id="tok-1")
 
     def test_parent_from_different_run_raises(self) -> None:
         """Parent token from a different run is audit corruption.
@@ -320,37 +326,37 @@ class TestExplainParentIntegrity:
         )
         row_lineage = _make_row_lineage()
         parent_ref = TokenParent(token_id="child-1", parent_token_id="parent-1", ordinal=0)
-        recorder = _make_recorder(
+        factory = _make_factory(
             token=child_token,
             row_lineage=row_lineage,
             token_parents=[parent_ref],
         )
-        recorder.get_token.side_effect = lambda tid: child_token if tid == "child-1" else parent_token
+        factory.query.get_token.side_effect = lambda tid: child_token if tid == "child-1" else parent_token
 
         with pytest.raises(AuditIntegrityError, match="Cross-run parent lineage"):
-            explain(recorder, "run-1", token_id="child-1")
+            explain(factory.query, factory.data_flow, "run-1", token_id="child-1")
 
     def test_join_token_without_parents_raises(self) -> None:
         """Token with join_group_id but no parents is audit corruption."""
         token = _make_token(join_group_id="jg-1")
-        recorder = _make_recorder(
+        factory = _make_factory(
             token=token,
             row_lineage=_make_row_lineage(),
             token_parents=[],
         )
         with pytest.raises(AuditIntegrityError, match=r"join_group_id.*no parent"):
-            explain(recorder, "run-1", token_id="tok-1")
+            explain(factory.query, factory.data_flow, "run-1", token_id="tok-1")
 
     def test_expand_token_without_parents_raises(self) -> None:
         """Token with expand_group_id but no parents is audit corruption."""
         token = _make_token(expand_group_id="eg-1")
-        recorder = _make_recorder(
+        factory = _make_factory(
             token=token,
             row_lineage=_make_row_lineage(),
             token_parents=[],
         )
         with pytest.raises(AuditIntegrityError, match=r"expand_group_id.*no parent"):
-            explain(recorder, "run-1", token_id="tok-1")
+            explain(factory.query, factory.data_flow, "run-1", token_id="tok-1")
 
     def test_parents_without_any_group_id_raises(self) -> None:
         """Token with parent records but no group ID is audit corruption.
@@ -361,13 +367,13 @@ class TestExplainParentIntegrity:
         """
         token = _make_token()  # All group IDs are None
         parent_ref = TokenParent(token_id="tok-1", parent_token_id="parent-1", ordinal=0)
-        recorder = _make_recorder(
+        factory = _make_factory(
             token=token,
             row_lineage=_make_row_lineage(),
             token_parents=[parent_ref],
         )
         with pytest.raises(AuditIntegrityError, match=r"parent relationships.*but no group ID"):
-            explain(recorder, "run-1", token_id="tok-1")
+            explain(factory.query, factory.data_flow, "run-1", token_id="tok-1")
 
 
 # ===========================================================================
@@ -415,41 +421,41 @@ class TestExplainGroupIdValidation:
     def test_empty_fork_group_id_raises(self) -> None:
         """Token with fork_group_id='' is audit corruption — must raise."""
         token = _make_token(fork_group_id="")
-        recorder = _make_recorder(
+        factory = _make_factory(
             token=token,
             row_lineage=_make_row_lineage(),
         )
         with pytest.raises(AuditIntegrityError, match=r"empty.*fork_group_id"):
-            explain(recorder, "run-1", token_id="tok-1")
+            explain(factory.query, factory.data_flow, "run-1", token_id="tok-1")
 
     def test_empty_join_group_id_raises(self) -> None:
         """Token with join_group_id='' is audit corruption — must raise."""
         token = _make_token(join_group_id="")
-        recorder = _make_recorder(
+        factory = _make_factory(
             token=token,
             row_lineage=_make_row_lineage(),
         )
         with pytest.raises(AuditIntegrityError, match=r"empty.*join_group_id"):
-            explain(recorder, "run-1", token_id="tok-1")
+            explain(factory.query, factory.data_flow, "run-1", token_id="tok-1")
 
     def test_empty_expand_group_id_raises(self) -> None:
         """Token with expand_group_id='' is audit corruption — must raise."""
         token = _make_token(expand_group_id="")
-        recorder = _make_recorder(
+        factory = _make_factory(
             token=token,
             row_lineage=_make_row_lineage(),
         )
         with pytest.raises(AuditIntegrityError, match=r"empty.*expand_group_id"):
-            explain(recorder, "run-1", token_id="tok-1")
+            explain(factory.query, factory.data_flow, "run-1", token_id="tok-1")
 
     def test_none_group_ids_accepted(self) -> None:
         """Token with all group IDs as None is valid (no fork/join/expand)."""
         token = _make_token()  # All group IDs default to None
-        recorder = _make_recorder(
+        factory = _make_factory(
             token=token,
             row_lineage=_make_row_lineage(),
         )
-        result = explain(recorder, "run-1", token_id="tok-1")
+        result = explain(factory.query, factory.data_flow, "run-1", token_id="tok-1")
         assert result is not None
         assert result.token.token_id == "tok-1"
 
@@ -460,12 +466,12 @@ class TestExplainGroupIdValidation:
         With ``> 2``, exactly 2 group IDs set would slip through without raising.
         """
         token = _make_token(fork_group_id="fg-1", join_group_id="jg-1")
-        recorder = _make_recorder(
+        factory = _make_factory(
             token=token,
             row_lineage=_make_row_lineage(),
         )
         with pytest.raises(AuditIntegrityError, match=r"multiple group IDs"):
-            explain(recorder, "run-1", token_id="tok-1")
+            explain(factory.query, factory.data_flow, "run-1", token_id="tok-1")
 
 
 # ===========================================================================
@@ -501,13 +507,13 @@ class TestExplainSinkFilterEquality:
 
         token = _make_token(token_id="tok-1")
         outcomes = [_make_outcome(token_id="tok-1", sink_name=sink_name_in_outcome)]
-        recorder = _make_recorder(
+        factory = _make_factory(
             token=token,
             row_lineage=_make_row_lineage(),
             token_outcomes=outcomes,
         )
 
-        result = explain(recorder, "run-1", row_id="row-1", sink=sink_name_for_query)
+        result = explain(factory.query, factory.data_flow, "run-1", row_id="row-1", sink=sink_name_for_query)
         assert result is not None
         assert result.token.token_id == "tok-1"
 
@@ -524,7 +530,7 @@ class TestExplainSinkFilterEquality:
             _make_outcome(token_id="tok-alpha", sink_name="alpha_sink"),
             _make_outcome(token_id="tok-beta", sink_name="beta_sink"),
         ]
-        recorder = _make_recorder(
+        factory = _make_factory(
             token=token_beta,
             row_lineage=_make_row_lineage(),
             token_outcomes=outcomes,
@@ -532,9 +538,9 @@ class TestExplainSinkFilterEquality:
 
         # With ==: only "beta_sink" matches → resolves tok-beta → success
         # With <=: "alpha_sink" <= "beta_sink" also matches → 2 results → raises ValueError
-        result = explain(recorder, "run-1", row_id="row-1", sink="beta_sink")
+        result = explain(factory.query, factory.data_flow, "run-1", row_id="row-1", sink="beta_sink")
         assert result is not None
-        recorder.get_token.assert_called_with("tok-beta")
+        factory.query.get_token.assert_called_with("tok-beta")
 
     def test_terminal_filter_excludes_non_terminal(self) -> None:
         """Verify non-terminal outcomes are excluded when mixed with terminal.
@@ -548,12 +554,12 @@ class TestExplainSinkFilterEquality:
             _make_outcome(token_id="tok-buffered", is_terminal=False, outcome=RowOutcome.BUFFERED),
             _make_outcome(token_id="tok-terminal", is_terminal=True, outcome=RowOutcome.COMPLETED),
         ]
-        recorder = _make_recorder(
+        factory = _make_factory(
             token=token,
             row_lineage=_make_row_lineage(),
             token_outcomes=outcomes,
         )
 
-        result = explain(recorder, "run-1", row_id="row-1")
+        result = explain(factory.query, factory.data_flow, "run-1", row_id="row-1")
         assert result is not None
-        recorder.get_token.assert_called_with("tok-terminal")
+        factory.query.get_token.assert_called_with("tok-terminal")

@@ -1,4 +1,4 @@
-"""Tests for LandscapeRecorder explain functionality and graceful degradation."""
+"""Tests for RecorderFactory explain functionality and graceful degradation."""
 
 from __future__ import annotations
 
@@ -20,16 +20,16 @@ class TestExplainGracefulDegradation:
     def test_explain_with_missing_row_payload(self, tmp_path: Path, payload_store) -> None:
         """explain_row() succeeds even when row payload is purged."""
         from elspeth.core.landscape.database import LandscapeDB
-        from elspeth.core.landscape.recorder import LandscapeRecorder
+        from elspeth.core.landscape.factory import RecorderFactory
         from elspeth.core.payload_store import FilesystemPayloadStore
 
         # Set up with payload store
         db = LandscapeDB.in_memory()
         payload_store = FilesystemPayloadStore(tmp_path / "payloads")
-        recorder = LandscapeRecorder(db, payload_store=payload_store)
+        factory = RecorderFactory(db, payload_store=payload_store)
 
-        run = recorder.begin_run(config={}, canonical_version="v1")
-        source = recorder.register_node(
+        run = factory.run_lifecycle.begin_run(config={}, canonical_version="v1")
+        source = factory.data_flow.register_node(
             run_id=run.run_id,
             plugin_name="csv_source",
             node_type=NodeType.SOURCE,
@@ -41,7 +41,7 @@ class TestExplainGracefulDegradation:
         # create_row auto-stores payload via configured payload_store
         row_data = {"name": "test", "value": 42}
 
-        row = recorder.create_row(
+        row = factory.data_flow.create_row(
             run_id=run.run_id,
             source_node_id=source.node_id,
             row_index=0,
@@ -52,7 +52,7 @@ class TestExplainGracefulDegradation:
         payload_store.delete(row.source_data_ref)
 
         # explain_row should still work
-        lineage = recorder.explain_row(
+        lineage = factory.query.explain_row(
             run_id=run.run_id,
             row_id=row.row_id,
         )
@@ -65,16 +65,16 @@ class TestExplainGracefulDegradation:
     def test_explain_reports_payload_status(self, tmp_path: Path, payload_store) -> None:
         """explain_row() explicitly reports payload availability."""
         from elspeth.core.landscape.database import LandscapeDB
-        from elspeth.core.landscape.recorder import LandscapeRecorder
+        from elspeth.core.landscape.factory import RecorderFactory
         from elspeth.core.payload_store import FilesystemPayloadStore
 
         # Set up with payload store
         db = LandscapeDB.in_memory()
         payload_store = FilesystemPayloadStore(tmp_path / "payloads")
-        recorder = LandscapeRecorder(db, payload_store=payload_store)
+        factory = RecorderFactory(db, payload_store=payload_store)
 
-        run = recorder.begin_run(config={}, canonical_version="v1")
-        source = recorder.register_node(
+        run = factory.run_lifecycle.begin_run(config={}, canonical_version="v1")
+        source = factory.data_flow.register_node(
             run_id=run.run_id,
             plugin_name="csv_source",
             node_type=NodeType.SOURCE,
@@ -86,7 +86,7 @@ class TestExplainGracefulDegradation:
         # create_row auto-stores payload via configured payload_store
         row_data = {"name": "test"}
 
-        row = recorder.create_row(
+        row = factory.data_flow.create_row(
             run_id=run.run_id,
             source_node_id=source.node_id,
             row_index=0,
@@ -97,7 +97,7 @@ class TestExplainGracefulDegradation:
         payload_store.delete(row.source_data_ref)
 
         # Check payload_available attribute
-        lineage = recorder.explain_row(
+        lineage = factory.query.explain_row(
             run_id=run.run_id,
             row_id=row.row_id,
         )
@@ -108,16 +108,16 @@ class TestExplainGracefulDegradation:
     def test_explain_with_available_payload(self, tmp_path: Path, payload_store) -> None:
         """explain_row() returns payload when available."""
         from elspeth.core.landscape.database import LandscapeDB
-        from elspeth.core.landscape.recorder import LandscapeRecorder
+        from elspeth.core.landscape.factory import RecorderFactory
         from elspeth.core.payload_store import FilesystemPayloadStore
 
         # Set up with payload store
         db = LandscapeDB.in_memory()
         payload_store = FilesystemPayloadStore(tmp_path / "payloads")
-        recorder = LandscapeRecorder(db, payload_store=payload_store)
+        factory = RecorderFactory(db, payload_store=payload_store)
 
-        run = recorder.begin_run(config={}, canonical_version="v1")
-        source = recorder.register_node(
+        run = factory.run_lifecycle.begin_run(config={}, canonical_version="v1")
+        source = factory.data_flow.register_node(
             run_id=run.run_id,
             plugin_name="csv_source",
             node_type=NodeType.SOURCE,
@@ -129,7 +129,7 @@ class TestExplainGracefulDegradation:
         # create_row auto-stores payload via configured payload_store
         row_data = {"name": "test", "value": 123}
 
-        row = recorder.create_row(
+        row = factory.data_flow.create_row(
             run_id=run.run_id,
             source_node_id=source.node_id,
             row_index=0,
@@ -137,7 +137,7 @@ class TestExplainGracefulDegradation:
         )
 
         # Payload NOT purged
-        lineage = recorder.explain_row(
+        lineage = factory.query.explain_row(
             run_id=run.run_id,
             row_id=row.row_id,
         )
@@ -150,14 +150,14 @@ class TestExplainGracefulDegradation:
     def test_explain_row_not_found(self) -> None:
         """explain_row() returns None when row doesn't exist."""
         from elspeth.core.landscape.database import LandscapeDB
-        from elspeth.core.landscape.recorder import LandscapeRecorder
+        from elspeth.core.landscape.factory import RecorderFactory
 
         db = LandscapeDB.in_memory()
-        recorder = LandscapeRecorder(db)
+        factory = RecorderFactory(db)
 
-        run = recorder.begin_run(config={}, canonical_version="v1")
+        run = factory.run_lifecycle.begin_run(config={}, canonical_version="v1")
 
-        lineage = recorder.explain_row(
+        lineage = factory.query.explain_row(
             run_id=run.run_id,
             row_id="nonexistent",
         )
@@ -167,13 +167,13 @@ class TestExplainGracefulDegradation:
     def test_explain_row_without_payload_store(self) -> None:
         """explain_row() works when no payload store is configured."""
         from elspeth.core.landscape.database import LandscapeDB
-        from elspeth.core.landscape.recorder import LandscapeRecorder
+        from elspeth.core.landscape.factory import RecorderFactory
 
         db = LandscapeDB.in_memory()
-        recorder = LandscapeRecorder(db)  # No payload store
+        factory = RecorderFactory(db)  # No payload store
 
-        run = recorder.begin_run(config={}, canonical_version="v1")
-        source = recorder.register_node(
+        run = factory.run_lifecycle.begin_run(config={}, canonical_version="v1")
+        source = factory.data_flow.register_node(
             run_id=run.run_id,
             plugin_name="csv_source",
             node_type=NodeType.SOURCE,
@@ -182,14 +182,14 @@ class TestExplainGracefulDegradation:
             schema_config=DYNAMIC_SCHEMA,
         )
 
-        row = recorder.create_row(
+        row = factory.data_flow.create_row(
             run_id=run.run_id,
             source_node_id=source.node_id,
             row_index=0,
             data={"name": "test"},
         )
 
-        lineage = recorder.explain_row(
+        lineage = factory.query.explain_row(
             run_id=run.run_id,
             row_id=row.row_id,
         )
@@ -202,18 +202,18 @@ class TestExplainGracefulDegradation:
     def test_explain_row_with_no_payload_ref(self, tmp_path: Path) -> None:
         """explain_row() handles rows when no payload_store is configured.
 
-        When LandscapeRecorder is created without a payload_store, rows are
+        When RecorderFactory is created without a payload_store, rows are
         created without payload storage (payload_ref is None).
         """
         from elspeth.core.landscape.database import LandscapeDB
-        from elspeth.core.landscape.recorder import LandscapeRecorder
+        from elspeth.core.landscape.factory import RecorderFactory
 
         db = LandscapeDB.in_memory()
         # No payload_store configured - payloads won't be stored
-        recorder = LandscapeRecorder(db, payload_store=None)
+        factory = RecorderFactory(db, payload_store=None)
 
-        run = recorder.begin_run(config={}, canonical_version="v1")
-        source = recorder.register_node(
+        run = factory.run_lifecycle.begin_run(config={}, canonical_version="v1")
+        source = factory.data_flow.register_node(
             run_id=run.run_id,
             plugin_name="csv_source",
             node_type=NodeType.SOURCE,
@@ -223,14 +223,14 @@ class TestExplainGracefulDegradation:
         )
 
         # Create row — no payload_store configured, so source_data_ref will be None
-        row = recorder.create_row(
+        row = factory.data_flow.create_row(
             run_id=run.run_id,
             source_node_id=source.node_id,
             row_index=0,
             data={"name": "test"},
         )
 
-        lineage = recorder.explain_row(
+        lineage = factory.query.explain_row(
             run_id=run.run_id,
             row_id=row.row_id,
         )
@@ -243,15 +243,15 @@ class TestExplainGracefulDegradation:
     def test_explain_row_with_corrupted_payload(self, tmp_path: Path, payload_store) -> None:
         """explain_row() crashes on corrupted payload — Tier 1 integrity violation."""
         from elspeth.core.landscape.database import LandscapeDB
-        from elspeth.core.landscape.recorder import LandscapeRecorder
+        from elspeth.core.landscape.factory import RecorderFactory
         from elspeth.core.payload_store import FilesystemPayloadStore
 
         db = LandscapeDB.in_memory()
         payload_store = FilesystemPayloadStore(tmp_path / "payloads")
-        recorder = LandscapeRecorder(db, payload_store=payload_store)
+        factory = RecorderFactory(db, payload_store=payload_store)
 
-        run = recorder.begin_run(config={}, canonical_version="v1")
-        source = recorder.register_node(
+        run = factory.run_lifecycle.begin_run(config={}, canonical_version="v1")
+        source = factory.data_flow.register_node(
             run_id=run.run_id,
             plugin_name="csv_source",
             node_type=NodeType.SOURCE,
@@ -261,7 +261,7 @@ class TestExplainGracefulDegradation:
         )
 
         # create_row auto-stores valid canonical JSON via payload_store
-        row = recorder.create_row(
+        row = factory.data_flow.create_row(
             run_id=run.run_id,
             source_node_id=source.node_id,
             row_index=0,
@@ -280,7 +280,7 @@ class TestExplainGracefulDegradation:
 
         # Tier 1 violation: corrupted payload store data is OUR data — must crash
         with pytest.raises(AuditIntegrityError, match="Corrupt payload"):
-            recorder.explain_row(
+            factory.query.explain_row(
                 run_id=run.run_id,
                 row_id=row.row_id,
             )
@@ -290,15 +290,15 @@ class TestExplainGracefulDegradation:
         import json
 
         from elspeth.core.landscape.database import LandscapeDB
-        from elspeth.core.landscape.recorder import LandscapeRecorder
+        from elspeth.core.landscape.factory import RecorderFactory
         from elspeth.core.payload_store import FilesystemPayloadStore
 
         db = LandscapeDB.in_memory()
         payload_store = FilesystemPayloadStore(tmp_path / "payloads")
-        recorder = LandscapeRecorder(db, payload_store=payload_store)
+        factory = RecorderFactory(db, payload_store=payload_store)
 
-        run = recorder.begin_run(config={}, canonical_version="v1")
-        source = recorder.register_node(
+        run = factory.run_lifecycle.begin_run(config={}, canonical_version="v1")
+        source = factory.data_flow.register_node(
             run_id=run.run_id,
             plugin_name="csv_source",
             node_type=NodeType.SOURCE,
@@ -308,7 +308,7 @@ class TestExplainGracefulDegradation:
         )
 
         # create_row auto-stores valid canonical JSON via payload_store
-        row = recorder.create_row(
+        row = factory.data_flow.create_row(
             run_id=run.run_id,
             source_node_id=source.node_id,
             row_index=0,
@@ -326,7 +326,7 @@ class TestExplainGracefulDegradation:
             conn.commit()
 
         with pytest.raises(AuditIntegrityError, match="expected JSON object"):
-            recorder.explain_row(
+            factory.query.explain_row(
                 run_id=run.run_id,
                 row_id=row.row_id,
             )
@@ -334,18 +334,18 @@ class TestExplainGracefulDegradation:
     def test_explain_row_rejects_run_id_mismatch(self, tmp_path: Path, payload_store) -> None:
         """explain_row() raises ValueError when row belongs to different run."""
         from elspeth.core.landscape.database import LandscapeDB
-        from elspeth.core.landscape.recorder import LandscapeRecorder
+        from elspeth.core.landscape.factory import RecorderFactory
         from elspeth.core.payload_store import FilesystemPayloadStore
 
         db = LandscapeDB.in_memory()
         payload_store = FilesystemPayloadStore(tmp_path / "payloads")
-        recorder = LandscapeRecorder(db, payload_store=payload_store)
+        factory = RecorderFactory(db, payload_store=payload_store)
 
         # Create two runs
-        run1 = recorder.begin_run(config={}, canonical_version="v1")
-        run2 = recorder.begin_run(config={}, canonical_version="v1")
+        run1 = factory.run_lifecycle.begin_run(config={}, canonical_version="v1")
+        run2 = factory.run_lifecycle.begin_run(config={}, canonical_version="v1")
 
-        source = recorder.register_node(
+        source = factory.data_flow.register_node(
             run_id=run1.run_id,
             plugin_name="csv_source",
             node_type=NodeType.SOURCE,
@@ -356,7 +356,7 @@ class TestExplainGracefulDegradation:
 
         # Create row in run1 (create_row auto-stores payload)
         row_data = {"name": "test"}
-        row = recorder.create_row(
+        row = factory.data_flow.create_row(
             run_id=run1.run_id,
             source_node_id=source.node_id,
             row_index=0,
@@ -365,13 +365,13 @@ class TestExplainGracefulDegradation:
 
         # Try to explain using run2's ID — cross-run mismatch raises AuditIntegrityError
         with pytest.raises(AuditIntegrityError, match=f"Row {row.row_id} belongs to run {run1.run_id}, not {run2.run_id}"):
-            recorder.explain_row(
+            factory.query.explain_row(
                 run_id=run2.run_id,  # Wrong run!
                 row_id=row.row_id,
             )
 
         # Same row with correct run_id should work
-        lineage_correct = recorder.explain_row(
+        lineage_correct = factory.query.explain_row(
             run_id=run1.run_id,
             row_id=row.row_id,
         )

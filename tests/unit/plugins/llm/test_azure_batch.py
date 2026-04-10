@@ -16,22 +16,22 @@ from elspeth.contracts.schema import SchemaConfig
 from elspeth.plugins.infrastructure.config_base import PluginConfigError
 from elspeth.plugins.transforms.llm.azure_batch import AzureBatchConfig, AzureBatchLLMTransform
 from elspeth.testing import make_pipeline_row
-from tests.fixtures.landscape import make_landscape_db, make_recorder
+from tests.fixtures.landscape import make_factory, make_landscape_db
 
 # Common schema config for dynamic field handling
 DYNAMIC_SCHEMA = {"mode": "observed"}
 
 
 def _make_batch_ctx(*, run_id: str = "test-run") -> PluginContext:
-    """Create a PluginContext with full recorder chain for batch transform tests.
+    """Create a PluginContext with full factory chain for batch transform tests.
 
     Sets up: run → source node → transform node → row → token → node_state,
     satisfying all FK constraints for record_call().
     """
     db = make_landscape_db()
-    recorder = make_recorder(db)
-    run = recorder.begin_run(config={}, canonical_version="test", run_id=run_id)
-    recorder.register_node(
+    factory = make_factory(db)
+    run = factory.run_lifecycle.begin_run(config={}, canonical_version="test", run_id=run_id)
+    factory.data_flow.register_node(
         run_id=run.run_id,
         plugin_name="csv",
         node_type=NodeType.SOURCE,
@@ -41,7 +41,7 @@ def _make_batch_ctx(*, run_id: str = "test-run") -> PluginContext:
         node_id="source-0",
         sequence=0,
     )
-    recorder.register_node(
+    factory.data_flow.register_node(
         run_id=run.run_id,
         plugin_name="azure_batch_llm",
         node_type=NodeType.TRANSFORM,
@@ -51,9 +51,9 @@ def _make_batch_ctx(*, run_id: str = "test-run") -> PluginContext:
         node_id="azure-batch-node",
         sequence=1,
     )
-    recorder.create_row(run.run_id, "source-0", 0, {"text": "test"}, row_id="test-row")
-    recorder.create_token("test-row", token_id="test-token")
-    state = recorder.begin_node_state(
+    factory.data_flow.create_row(run.run_id, "source-0", 0, {"text": "test"}, row_id="test-row")
+    factory.data_flow.create_token("test-row", token_id="test-token")
+    state = factory.execution.begin_node_state(
         "test-token",
         "azure-batch-node",
         run.run_id,
@@ -63,7 +63,7 @@ def _make_batch_ctx(*, run_id: str = "test-run") -> PluginContext:
     return PluginContext(
         run_id=run_id,
         config={},
-        landscape=recorder,
+        landscape=factory.plugin_audit_writer,
         node_id="azure-batch-node",
         state_id=state.state_id,
     )
@@ -471,7 +471,7 @@ class TestAzureBatchLLMTransformSubmit:
 
     @pytest.fixture
     def ctx(self) -> PluginContext:
-        """Create plugin context with full recorder chain for batch submission."""
+        """Create plugin context with full factory chain for batch submission."""
         return _make_batch_ctx()
 
     @pytest.fixture
@@ -680,7 +680,7 @@ class TestAzureBatchLLMTransformTemplateErrors:
 
     @pytest.fixture
     def ctx(self) -> PluginContext:
-        """Create plugin context with full recorder chain for batch submission."""
+        """Create plugin context with full factory chain for batch submission."""
         return _make_batch_ctx()
 
     def test_all_templates_fail_returns_error(self, ctx: PluginContext) -> None:

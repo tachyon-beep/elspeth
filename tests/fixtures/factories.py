@@ -148,7 +148,7 @@ def make_source_context(
         run_id=setup.run_id,
         node_id=setup.source_node_id,
         config={},
-        landscape=setup.recorder,
+        landscape=setup.factory.plugin_audit_writer(),
     )
 
 
@@ -192,7 +192,7 @@ def make_operation_context(
         # then register the actual node type needed
         setup = make_recorder_with_run(run_id=run_id)
         register_test_node(
-            setup.recorder,
+            setup.data_flow,
             setup.run_id,
             node_id,
             node_type=NodeType[node_type],
@@ -200,12 +200,12 @@ def make_operation_context(
         )
         actual_node_id = node_id
 
-    op = setup.recorder.begin_operation(setup.run_id, actual_node_id, operation_type)
+    op = setup.execution.begin_operation(setup.run_id, actual_node_id, operation_type)
     return PluginContext(
         run_id=setup.run_id,
         node_id=actual_node_id,
         config={},
-        landscape=setup.recorder,
+        landscape=setup.factory.plugin_audit_writer(),
         operation_id=op.operation_id,
     )
 

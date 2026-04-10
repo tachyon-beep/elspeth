@@ -11,7 +11,7 @@ from elspeth.engine.processor import DAGTraversalContext
 from elspeth.engine.spans import SpanFactory
 from elspeth.testing import make_field, make_row, make_source_row
 from tests.fixtures.factories import make_context
-from tests.fixtures.landscape import make_landscape_db, make_recorder
+from tests.fixtures.landscape import make_factory, make_landscape_db
 
 
 def _make_contract() -> SchemaContract:
@@ -31,12 +31,12 @@ def _make_contract() -> SchemaContract:
     )
 
 
-def _make_mock_recorder() -> MagicMock:
-    """Create a mock LandscapeRecorder."""
-    recorder = MagicMock()
-    recorder.create_row.return_value = Mock(row_id="row_001")
-    recorder.create_token.return_value = Mock(token_id="token_001")
-    return recorder
+def _make_mock_factory() -> MagicMock:
+    """Create a mock RecorderFactory."""
+    factory = MagicMock()
+    factory.execution.create_row.return_value = Mock(row_id="row_001")
+    factory.data_flow.create_token.return_value = Mock(token_id="token_001")
+    return factory
 
 
 def _make_mock_span_factory() -> SpanFactory:
@@ -63,11 +63,12 @@ class TestRowProcessorPipelineRow:
         from elspeth.engine.processor import RowProcessor
 
         contract = _make_contract()
-        recorder = _make_mock_recorder()
+        factory = _make_mock_factory()
         span_factory = _make_mock_span_factory()
 
         processor = RowProcessor(
-            recorder=recorder,
+            execution=factory.execution,
+            data_flow=factory.data_flow,
             span_factory=span_factory,
             run_id="run_001",
             source_node_id=NodeID("source_001"),
@@ -77,8 +78,8 @@ class TestRowProcessorPipelineRow:
 
         source_row = make_source_row({"amount": 100}, contract=contract)
         landscape_db = make_landscape_db()
-        landscape_recorder = make_recorder(landscape_db)
-        ctx = make_context(run_id="run_001", landscape=landscape_recorder)
+        landscape_factory = make_factory(landscape_db)
+        ctx = make_context(run_id="run_001", landscape=landscape_factory)
 
         # No transforms - token should be created and completed immediately
         processor.process_row(
@@ -88,20 +89,21 @@ class TestRowProcessorPipelineRow:
             ctx=ctx,
         )
 
-        # Should have created a row and token via recorder
-        recorder.create_row.assert_called_once()
-        recorder.create_token.assert_called_once()
+        # Should have created a row and token via factory repositories
+        factory.execution.create_row.assert_called_once()
+        factory.data_flow.create_token.assert_called_once()
 
     def test_process_row_creates_pipeline_row(self) -> None:
         """process_row should create token with PipelineRow containing contract."""
         from elspeth.engine.processor import RowProcessor
 
         contract = _make_contract()
-        recorder = _make_mock_recorder()
+        factory = _make_mock_factory()
         span_factory = _make_mock_span_factory()
 
         processor = RowProcessor(
-            recorder=recorder,
+            execution=factory.execution,
+            data_flow=factory.data_flow,
             span_factory=span_factory,
             run_id="run_001",
             source_node_id=NodeID("source_001"),
@@ -111,8 +113,8 @@ class TestRowProcessorPipelineRow:
 
         source_row = make_source_row({"amount": 100}, contract=contract)
         landscape_db = make_landscape_db()
-        landscape_recorder = make_recorder(landscape_db)
-        ctx = make_context(run_id="run_001", landscape=landscape_recorder)
+        landscape_factory = make_factory(landscape_db)
+        ctx = make_context(run_id="run_001", landscape=landscape_factory)
 
         results = processor.process_row(
             row_index=0,
@@ -136,11 +138,12 @@ class TestRowProcessorPipelineRow:
         """
         from elspeth.engine.processor import RowProcessor
 
-        recorder = _make_mock_recorder()
+        factory = _make_mock_factory()
         span_factory = _make_mock_span_factory()
 
         RowProcessor(
-            recorder=recorder,
+            execution=factory.execution,
+            data_flow=factory.data_flow,
             span_factory=span_factory,
             run_id="run_001",
             source_node_id=NodeID("source_001"),
@@ -165,11 +168,12 @@ class TestRowProcessorExistingRow:
         from elspeth.engine.processor import RowProcessor
 
         contract = _make_contract()
-        recorder = _make_mock_recorder()
+        factory = _make_mock_factory()
         span_factory = _make_mock_span_factory()
 
         processor = RowProcessor(
-            recorder=recorder,
+            execution=factory.execution,
+            data_flow=factory.data_flow,
             span_factory=span_factory,
             run_id="run_001",
             source_node_id=NodeID("source_001"),
@@ -180,8 +184,8 @@ class TestRowProcessorExistingRow:
         # PipelineRow for resume (row already exists in database)
         row_data = make_row({"amount": 100}, contract=contract)
         landscape_db = make_landscape_db()
-        landscape_recorder = make_recorder(landscape_db)
-        ctx = make_context(run_id="run_001", landscape=landscape_recorder)
+        landscape_factory = make_factory(landscape_db)
+        ctx = make_context(run_id="run_001", landscape=landscape_factory)
 
         results = processor.process_existing_row(
             row_id="existing_row_001",
@@ -191,8 +195,8 @@ class TestRowProcessorExistingRow:
         )
 
         # Should create token for existing row (NOT create_row)
-        recorder.create_token.assert_called_once()
-        recorder.create_row.assert_not_called()
+        factory.data_flow.create_token.assert_called_once()
+        factory.execution.create_row.assert_not_called()
 
         # Result should have token with PipelineRow
         assert len(results) >= 1

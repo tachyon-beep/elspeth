@@ -3,7 +3,7 @@
 Functions: list_runs, get_run, list_rows, list_nodes, list_tokens,
 list_operations, get_operation_calls, get_node_states, get_calls, query.
 
-All functions accept (db, recorder) as their first two parameters.
+All functions accept (db, factory) as their first two parameters.
 """
 
 from __future__ import annotations
@@ -13,8 +13,8 @@ import re
 from typing import Any, cast
 
 from elspeth.core.landscape.database import LandscapeDB
+from elspeth.core.landscape.factory import RecorderFactory
 from elspeth.core.landscape.formatters import dataclass_to_dict, serialize_datetime
-from elspeth.core.landscape.recorder import LandscapeRecorder
 from elspeth.mcp.types import (
     CallDetail,
     NodeDetail,
@@ -31,12 +31,12 @@ _serialize_datetime = serialize_datetime
 _dataclass_to_dict = dataclass_to_dict
 
 
-def list_runs(db: LandscapeDB, recorder: LandscapeRecorder, limit: int = 50, status: str | None = None) -> list[RunRecord]:
+def list_runs(db: LandscapeDB, factory: RecorderFactory, limit: int = 50, status: str | None = None) -> list[RunRecord]:
     """List pipeline runs.
 
     Args:
         db: Database connection
-        recorder: Landscape recorder
+        factory: Recorder factory
         limit: Maximum number of runs to return (default 50)
         status: Filter by status (PENDING, RUNNING, COMPLETED, FAILED)
 
@@ -75,29 +75,29 @@ def list_runs(db: LandscapeDB, recorder: LandscapeRecorder, limit: int = 50, sta
     ]
 
 
-def get_run(db: LandscapeDB, recorder: LandscapeRecorder, run_id: str) -> RunDetail | None:
+def get_run(db: LandscapeDB, factory: RecorderFactory, run_id: str) -> RunDetail | None:
     """Get details of a specific run.
 
     Args:
         db: Database connection
-        recorder: Landscape recorder
+        factory: Recorder factory
         run_id: The run ID to retrieve
 
     Returns:
         Run record or None if not found
     """
-    run = recorder.get_run(run_id)
+    run = factory.run_lifecycle.get_run(run_id)
     if run is None:
         return None
     return cast(RunDetail, _dataclass_to_dict(run))
 
 
-def list_rows(db: LandscapeDB, recorder: LandscapeRecorder, run_id: str, limit: int = 100, offset: int = 0) -> list[RowRecord]:
+def list_rows(db: LandscapeDB, factory: RecorderFactory, run_id: str, limit: int = 100, offset: int = 0) -> list[RowRecord]:
     """List source rows for a run.
 
     Args:
         db: Database connection
-        recorder: Landscape recorder
+        factory: Recorder factory
         run_id: Run ID to query
         limit: Maximum rows to return (default 100)
         offset: Number of rows to skip (default 0)
@@ -127,24 +127,24 @@ def list_rows(db: LandscapeDB, recorder: LandscapeRecorder, run_id: str, limit: 
     ]
 
 
-def list_nodes(db: LandscapeDB, recorder: LandscapeRecorder, run_id: str) -> list[NodeDetail]:
+def list_nodes(db: LandscapeDB, factory: RecorderFactory, run_id: str) -> list[NodeDetail]:
     """List all nodes (plugin instances) for a run.
 
     Args:
         db: Database connection
-        recorder: Landscape recorder
+        factory: Recorder factory
         run_id: Run ID to query
 
     Returns:
         List of node records with plugin info
     """
-    nodes = recorder.get_nodes(run_id)
+    nodes = factory.data_flow.get_nodes(run_id)
     return [_dataclass_to_dict(node) for node in nodes]
 
 
 def list_tokens(
     db: LandscapeDB,
-    recorder: LandscapeRecorder,
+    factory: RecorderFactory,
     run_id: str,
     row_id: str | None = None,
     limit: int = 100,
@@ -153,7 +153,7 @@ def list_tokens(
 
     Args:
         db: Database connection
-        recorder: Landscape recorder
+        factory: Recorder factory
         run_id: Run ID to query
         row_id: Optional row ID to filter by
         limit: Maximum tokens to return
@@ -190,7 +190,7 @@ def list_tokens(
 
 def list_operations(
     db: LandscapeDB,
-    recorder: LandscapeRecorder,
+    factory: RecorderFactory,
     run_id: str,
     operation_type: str | None = None,
     status: str | None = None,
@@ -205,7 +205,7 @@ def list_operations(
 
     Args:
         db: Database connection
-        recorder: Landscape recorder
+        factory: Recorder factory
         run_id: Run ID to query
         operation_type: Filter by type ('source_load' or 'sink_write')
         status: Filter by status ('open', 'completed', 'failed', 'pending')
@@ -271,7 +271,7 @@ def list_operations(
     ]
 
 
-def get_operation_calls(db: LandscapeDB, recorder: LandscapeRecorder, operation_id: str) -> list[OperationCallRecord]:
+def get_operation_calls(db: LandscapeDB, factory: RecorderFactory, operation_id: str) -> list[OperationCallRecord]:
     """Get external calls for a source/sink operation.
 
     Unlike get_calls() which takes a state_id for transform calls, this
@@ -279,7 +279,7 @@ def get_operation_calls(db: LandscapeDB, recorder: LandscapeRecorder, operation_
 
     Args:
         db: Database connection
-        recorder: Landscape recorder
+        factory: Recorder factory
         operation_id: Operation ID to query
 
     Returns:
@@ -311,7 +311,7 @@ def get_operation_calls(db: LandscapeDB, recorder: LandscapeRecorder, operation_
 
 def explain_token(
     db: LandscapeDB,
-    recorder: LandscapeRecorder,
+    factory: RecorderFactory,
     run_id: str,
     token_id: str | None = None,
     row_id: str | None = None,
@@ -321,7 +321,7 @@ def explain_token(
 
     Args:
         db: Database connection
-        recorder: Landscape recorder
+        factory: Recorder factory
         run_id: Run ID to query
         token_id: Token ID for precise lineage (preferred for DAGs with forks)
         row_id: Row ID (requires disambiguation if multiple terminal tokens)
@@ -333,7 +333,7 @@ def explain_token(
     """
     from elspeth.core.landscape.lineage import explain
 
-    result = explain(recorder, run_id, token_id=token_id, row_id=row_id, sink=sink)
+    result = explain(factory.query, factory.data_flow, run_id, token_id=token_id, row_id=row_id, sink=sink)
     if result is None:
         return None
     result_dict = cast(dict[str, Any], _dataclass_to_dict(result))
@@ -347,7 +347,7 @@ def explain_token(
 
     if divert_events:
         divert_event = divert_events[-1]  # Last divert event is the terminal one
-        edge = recorder.get_edge(divert_event["edge_id"])
+        edge = factory.data_flow.get_edge(divert_event["edge_id"])
         result_dict["divert_summary"] = {
             "diverted": True,
             "divert_type": "quarantine" if "__quarantine__" in edge.label else "error",
@@ -364,7 +364,7 @@ def explain_token(
 
 def get_errors(
     db: LandscapeDB,
-    recorder: LandscapeRecorder,
+    factory: RecorderFactory,
     run_id: str,
     error_type: str = "all",
     limit: int = 100,
@@ -373,7 +373,7 @@ def get_errors(
 
     Args:
         db: Database connection
-        recorder: Landscape recorder
+        factory: Recorder factory
         run_id: Run ID to query
         error_type: "validation", "transform", or "all" (default)
         limit: Maximum errors to return per type
@@ -440,7 +440,7 @@ def get_errors(
 
 def get_node_states(
     db: LandscapeDB,
-    recorder: LandscapeRecorder,
+    factory: RecorderFactory,
     run_id: str,
     node_id: str | None = None,
     status: str | None = None,
@@ -450,7 +450,7 @@ def get_node_states(
 
     Args:
         db: Database connection
-        recorder: Landscape recorder
+        factory: Recorder factory
         run_id: Run ID to query
         node_id: Optional filter by node ID
         status: Optional filter by status (PENDING, RUNNING, COMPLETED, FAILED)
@@ -503,18 +503,18 @@ def get_node_states(
     ]
 
 
-def get_calls(db: LandscapeDB, recorder: LandscapeRecorder, state_id: str) -> list[CallDetail]:
+def get_calls(db: LandscapeDB, factory: RecorderFactory, state_id: str) -> list[CallDetail]:
     """Get external calls for a node state.
 
     Args:
         db: Database connection
-        recorder: Landscape recorder
+        factory: Recorder factory
         state_id: Node state ID to query
 
     Returns:
         List of call records (LLM calls, HTTP requests, etc.)
     """
-    calls = recorder.get_calls(state_id)
+    calls = factory.query.get_calls(state_id)
     return [_dataclass_to_dict(call) for call in calls]
 
 
@@ -741,12 +741,12 @@ def _validate_readonly_sql(sql: str) -> None:
             raise ValueError(f"Query contains forbidden keyword: {keyword}")
 
 
-def query(db: LandscapeDB, recorder: LandscapeRecorder, sql: str, params: dict[str, Any] | None = None) -> list[dict[str, Any]]:
+def query(db: LandscapeDB, factory: RecorderFactory, sql: str, params: dict[str, Any] | None = None) -> list[dict[str, Any]]:
     """Execute a read-only SQL query.
 
     Args:
         db: Database connection
-        recorder: Landscape recorder
+        factory: Recorder factory
         sql: SQL query (must be a single SELECT or WITH...SELECT)
         params: Optional query parameters
 

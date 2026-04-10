@@ -7,7 +7,7 @@ Priority coverage:
   3. get_run_summary — basic summary with real DB data
 
 All tests use in-memory SQLite with pre-populated audit data via the
-real LandscapeRecorder (no mocks for DB interaction).
+real RecorderFactory (no mocks for DB interaction).
 
 Bug focus: nodes table has composite PK (node_id, run_id). Queries joining
 through nodes must use BOTH keys to avoid cross-run contamination.
@@ -66,25 +66,25 @@ def _build_linear_pipeline(
 ) -> dict[str, Any]:
     """Build a simple source -> transform -> sink pipeline with one row.
 
-    Returns a dict with db, recorder, run_id, and all entity IDs.
+    Returns a dict with db, factory, run_id, and all entity IDs.
     """
     setup = make_recorder_with_run(
         run_id=run_id,
         source_node_id=source_node_id,
     )
     db = setup.db
-    recorder = setup.recorder
+    factory = setup.factory
 
     # Register transform and sink nodes
     register_test_node(
-        recorder,
+        factory.data_flow,
         run_id,
         transform_node_id,
         node_type=NodeType.TRANSFORM,
         plugin_name="field_mapper",
     )
     register_test_node(
-        recorder,
+        factory.data_flow,
         run_id,
         sink_node_id,
         node_type=NodeType.SINK,
@@ -92,33 +92,33 @@ def _build_linear_pipeline(
     )
 
     # Register edges
-    edge_1 = recorder.register_edge(run_id, source_node_id, transform_node_id, "continue", RoutingMode.MOVE)
-    edge_2 = recorder.register_edge(run_id, transform_node_id, sink_node_id, "on_success", RoutingMode.MOVE)
+    edge_1 = factory.data_flow.register_edge(run_id, source_node_id, transform_node_id, "continue", RoutingMode.MOVE)
+    edge_2 = factory.data_flow.register_edge(run_id, transform_node_id, sink_node_id, "on_success", RoutingMode.MOVE)
 
     # Create row and token
     data = row_data or {"name": "Alice", "amount": 100}
-    row = recorder.create_row(run_id, source_node_id, row_index=0, data=data)
-    token = recorder.create_token(row.row_id)
+    row = factory.data_flow.create_row(run_id, source_node_id, row_index=0, data=data)
+    token = factory.data_flow.create_token(row.row_id)
 
     # Process through transform
-    ns = recorder.begin_node_state(token.token_id, transform_node_id, run_id, step_index=1, input_data=data)
+    ns = factory.execution.begin_node_state(token.token_id, transform_node_id, run_id, step_index=1, input_data=data)
 
     if fail_transform:
-        recorder.complete_node_state(
+        factory.execution.complete_node_state(
             ns.state_id,
             NodeStateStatus.FAILED,
             duration_ms=50.0,
             error=ExecutionError(exception="deliberately failed", exception_type="TestFailure"),
         )
     else:
-        recorder.complete_node_state(
+        factory.execution.complete_node_state(
             ns.state_id,
             NodeStateStatus.COMPLETED,
             output_data=data,
             duration_ms=50.0,
         )
         # Record routing event for the transform->sink edge
-        recorder.record_routing_event(
+        factory.execution.record_routing_event(
             ns.state_id,
             edge_2.edge_id,
             RoutingMode.MOVE,
@@ -126,7 +126,7 @@ def _build_linear_pipeline(
 
     if complete_token:
         outcome = RowOutcome.FAILED if fail_transform else RowOutcome.COMPLETED
-        recorder.record_token_outcome(
+        factory.data_flow.record_token_outcome(
             ref=TokenRef(token_id=token.token_id, run_id=run_id),
             outcome=outcome,
             sink_name=None if fail_transform else "csv_sink",
@@ -135,11 +135,11 @@ def _build_linear_pipeline(
 
     if complete_run:
         status = RunStatus.FAILED if fail_transform else RunStatus.COMPLETED
-        recorder.complete_run(run_id, status)
+        factory.run_lifecycle.complete_run(run_id, status)
 
     return {
         "db": db,
-        "recorder": recorder,
+        "factory": factory,
         "run_id": run_id,
         "source_node_id": source_node_id,
         "transform_node_id": transform_node_id,
@@ -172,7 +172,7 @@ class TestExplainTokenLineage:
     def test_explain_by_token_id_returns_lineage(self) -> None:
         """explain() returns LineageResult with correct token and source row."""
         p = _build_linear_pipeline()
-        result = explain(p["recorder"], p["run_id"], token_id=p["token"].token_id)
+        result = explain(p["factory"].query, p["factory"].data_flow, p["run_id"], token_id=p["token"].token_id)
 
         assert result is not None
         assert result.token.token_id == p["token"].token_id
@@ -185,7 +185,7 @@ class TestExplainTokenLineage:
     def test_explain_by_row_id_resolves_token(self) -> None:
         """explain() resolves token from row_id when one terminal token exists."""
         p = _build_linear_pipeline()
-        result = explain(p["recorder"], p["run_id"], row_id=p["row"].row_id)
+        result = explain(p["factory"].query, p["factory"].data_flow, p["run_id"], row_id=p["row"].row_id)
 
         assert result is not None
         assert result.token.token_id == p["token"].token_id
@@ -193,21 +193,21 @@ class TestExplainTokenLineage:
     def test_explain_returns_none_for_nonexistent_token(self) -> None:
         """explain() returns None for a token_id that does not exist."""
         p = _build_linear_pipeline()
-        result = explain(p["recorder"], p["run_id"], token_id="nonexistent-token")
+        result = explain(p["factory"].query, p["factory"].data_flow, p["run_id"], token_id="nonexistent-token")
 
         assert result is None
 
     def test_explain_returns_none_for_nonexistent_row(self) -> None:
         """explain() returns None for a row_id with no outcomes."""
         p = _build_linear_pipeline()
-        result = explain(p["recorder"], p["run_id"], row_id="nonexistent-row")
+        result = explain(p["factory"].query, p["factory"].data_flow, p["run_id"], row_id="nonexistent-row")
 
         assert result is None
 
     def test_explain_includes_routing_events(self) -> None:
         """explain() includes routing events for the token."""
         p = _build_linear_pipeline()
-        result = explain(p["recorder"], p["run_id"], token_id=p["token"].token_id)
+        result = explain(p["factory"].query, p["factory"].data_flow, p["run_id"], token_id=p["token"].token_id)
 
         assert result is not None
         assert len(result.routing_events) == 1
@@ -218,8 +218,8 @@ class TestExplainTokenLineage:
         p = _build_linear_pipeline()
         state_id = p["node_state"].state_id
 
-        call_index = p["recorder"].allocate_call_index(state_id)
-        p["recorder"].record_call(
+        call_index = p["factory"].execution.allocate_call_index(state_id)
+        p["factory"].execution.record_call(
             state_id,
             call_index,
             CallType.LLM,
@@ -229,7 +229,7 @@ class TestExplainTokenLineage:
             latency_ms=100.0,
         )
 
-        result = explain(p["recorder"], p["run_id"], token_id=p["token"].token_id)
+        result = explain(p["factory"].query, p["factory"].data_flow, p["run_id"], token_id=p["token"].token_id)
 
         assert result is not None
         assert len(result.calls) == 1
@@ -239,30 +239,30 @@ class TestExplainTokenLineage:
     def test_explain_includes_transform_errors(self) -> None:
         """explain() includes transform errors for the token."""
         setup = make_recorder_with_run(run_id="run-terr", source_node_id="src")
-        recorder, run_id = setup.recorder, setup.run_id
+        factory, run_id = setup.factory, setup.run_id
 
-        register_test_node(recorder, run_id, "xform", node_type=NodeType.TRANSFORM, plugin_name="mapper")
+        register_test_node(factory.data_flow, run_id, "xform", node_type=NodeType.TRANSFORM, plugin_name="mapper")
 
-        row = recorder.create_row(run_id, "src", row_index=0, data={"x": 1})
-        token = recorder.create_token(row.row_id)
+        row = factory.data_flow.create_row(run_id, "src", row_index=0, data={"x": 1})
+        token = factory.data_flow.create_token(row.row_id)
 
-        ns = recorder.begin_node_state(token.token_id, "xform", run_id, step_index=1, input_data={"x": 1})
+        ns = factory.execution.begin_node_state(token.token_id, "xform", run_id, step_index=1, input_data={"x": 1})
         error_reason: TransformErrorReason = {"reason": "validation_failed", "message": "division by zero"}
-        recorder.complete_node_state(ns.state_id, NodeStateStatus.FAILED, error=error_reason, duration_ms=5.0)
+        factory.execution.complete_node_state(ns.state_id, NodeStateStatus.FAILED, error=error_reason, duration_ms=5.0)
 
-        recorder.record_transform_error(
+        factory.data_flow.record_transform_error(
             ref=TokenRef(token_id=token.token_id, run_id=run_id),
             transform_id="xform",
             row_data={"x": 1},
             error_details=error_reason,
             destination="quarantine",
         )
-        recorder.record_token_outcome(
+        factory.data_flow.record_token_outcome(
             ref=TokenRef(token_id=token.token_id, run_id=run_id), outcome=RowOutcome.QUARANTINED, error_hash="b" * 64
         )
-        recorder.complete_run(run_id, RunStatus.FAILED)
+        factory.run_lifecycle.complete_run(run_id, RunStatus.FAILED)
 
-        result = explain(recorder, run_id, token_id=token.token_id)
+        result = explain(factory.query, factory.data_flow, run_id, token_id=token.token_id)
 
         assert result is not None
         assert len(result.transform_errors) == 1
@@ -272,7 +272,7 @@ class TestExplainTokenLineage:
         """explain() raises ValueError when neither token_id nor row_id given."""
         p = _build_linear_pipeline()
         with pytest.raises(ValueError, match="Must provide either token_id or row_id"):
-            explain(p["recorder"], p["run_id"])
+            explain(p["factory"].query, p["factory"].data_flow, p["run_id"])
 
 
 class TestExplainTokenMCPWrapper:
@@ -287,21 +287,21 @@ class TestExplainTokenMCPWrapper:
     def test_explain_token_returns_none_for_nonexistent_token(self) -> None:
         """explain_token returns None when token does not exist (no conversion)."""
         p = _build_linear_pipeline()
-        result = explain_token(p["db"], p["recorder"], p["run_id"], token_id="nonexistent")
+        result = explain_token(p["db"], p["factory"], p["run_id"], token_id="nonexistent")
 
         assert result is None
 
     def test_explain_token_returns_none_for_nonexistent_row(self) -> None:
         """explain_token returns None when row has no outcomes."""
         p = _build_linear_pipeline()
-        result = explain_token(p["db"], p["recorder"], p["run_id"], row_id="nonexistent")
+        result = explain_token(p["db"], p["factory"], p["run_id"], row_id="nonexistent")
 
         assert result is None
 
     def test_explain_token_with_routing_events(self) -> None:
         """explain_token converts tuple[RoutingEvent, ...] to list of dicts."""
         p = _build_linear_pipeline()
-        result = explain_token(p["db"], p["recorder"], p["run_id"], token_id=p["token"].token_id)
+        result = explain_token(p["db"], p["factory"], p["run_id"], token_id=p["token"].token_id)
 
         assert result is not None
         assert isinstance(result["routing_events"], list)
@@ -314,7 +314,7 @@ class TestExplainTokenMCPWrapper:
         """
         # Build pipeline where transform fails (no routing event recorded)
         p = _build_linear_pipeline(run_id="no-route-run", fail_transform=True)
-        result = explain_token(p["db"], p["recorder"], "no-route-run", token_id=p["token"].token_id)
+        result = explain_token(p["db"], p["factory"], "no-route-run", token_id=p["token"].token_id)
 
         assert result is not None
         assert result["divert_summary"] is None
@@ -331,7 +331,7 @@ class TestGetFailureContext:
     def test_returns_error_for_nonexistent_run(self) -> None:
         """get_failure_context returns error dict for unknown run_id."""
         setup = make_recorder_with_run(run_id="existing-run")
-        result = get_failure_context(setup.db, setup.recorder, "nonexistent-run")
+        result = get_failure_context(setup.db, setup.factory, "nonexistent-run")
 
         assert "error" in result
         error_result = cast(ErrorResult, result)
@@ -340,7 +340,7 @@ class TestGetFailureContext:
     def test_empty_failure_context_for_clean_run(self) -> None:
         """get_failure_context returns empty lists when run has no failures."""
         p = _build_linear_pipeline(run_id="clean-run")
-        result = get_failure_context(p["db"], p["recorder"], "clean-run")
+        result = get_failure_context(p["db"], p["factory"], "clean-run")
 
         assert "error" not in result
         assert result["run_id"] == "clean-run"
@@ -354,7 +354,7 @@ class TestGetFailureContext:
     def test_failure_context_with_failed_node_states(self) -> None:
         """get_failure_context returns failed node states with plugin info."""
         p = _build_linear_pipeline(run_id="fail-run", fail_transform=True)
-        result = get_failure_context(p["db"], p["recorder"], "fail-run")
+        result = get_failure_context(p["db"], p["factory"], "fail-run")
 
         assert "error" not in result
         assert result["run_status"] == "failed"
@@ -369,30 +369,30 @@ class TestGetFailureContext:
     def test_failure_context_with_transform_errors(self) -> None:
         """get_failure_context includes transform error details with plugin name."""
         setup = make_recorder_with_run(run_id="terr-run", source_node_id="src")
-        db, recorder = setup.db, setup.recorder
+        db, factory = setup.db, setup.factory
 
-        register_test_node(recorder, "terr-run", "xform", node_type=NodeType.TRANSFORM, plugin_name="llm_classifier")
+        register_test_node(factory.data_flow, "terr-run", "xform", node_type=NodeType.TRANSFORM, plugin_name="llm_classifier")
 
-        row = recorder.create_row("terr-run", "src", row_index=0, data={"text": "hello"})
-        token = recorder.create_token(row.row_id)
+        row = factory.data_flow.create_row("terr-run", "src", row_index=0, data={"text": "hello"})
+        token = factory.data_flow.create_token(row.row_id)
 
-        ns = recorder.begin_node_state(token.token_id, "xform", "terr-run", step_index=1, input_data={"text": "hello"})
+        ns = factory.execution.begin_node_state(token.token_id, "xform", "terr-run", step_index=1, input_data={"text": "hello"})
         error_reason: TransformErrorReason = {"reason": "llm_call_failed", "error": "timeout"}
-        recorder.complete_node_state(ns.state_id, NodeStateStatus.FAILED, error=error_reason, duration_ms=5000.0)
+        factory.execution.complete_node_state(ns.state_id, NodeStateStatus.FAILED, error=error_reason, duration_ms=5000.0)
 
-        recorder.record_transform_error(
+        factory.data_flow.record_transform_error(
             ref=TokenRef(token_id=token.token_id, run_id="terr-run"),
             transform_id="xform",
             row_data={"text": "hello"},
             error_details=error_reason,
             destination="quarantine",
         )
-        recorder.record_token_outcome(
+        factory.data_flow.record_token_outcome(
             ref=TokenRef(token_id=token.token_id, run_id="terr-run"), outcome=RowOutcome.QUARANTINED, error_hash="c" * 64
         )
-        recorder.complete_run("terr-run", RunStatus.FAILED)
+        factory.run_lifecycle.complete_run("terr-run", RunStatus.FAILED)
 
-        result = get_failure_context(db, recorder, "terr-run")
+        result = get_failure_context(db, factory, "terr-run")
 
         assert "error" not in result
         assert len(result["transform_errors"]) == 1
@@ -405,9 +405,9 @@ class TestGetFailureContext:
     def test_failure_context_with_validation_errors(self) -> None:
         """get_failure_context includes validation errors with plugin name."""
         setup = make_recorder_with_run(run_id="verr-run", source_node_id="src")
-        db, recorder = setup.db, setup.recorder
+        db, factory = setup.db, setup.factory
 
-        recorder.record_validation_error(
+        factory.data_flow.record_validation_error(
             "verr-run",
             "src",
             {"bad_field": None},
@@ -415,9 +415,9 @@ class TestGetFailureContext:
             "observed",
             "quarantine",
         )
-        recorder.complete_run("verr-run", RunStatus.COMPLETED)
+        factory.run_lifecycle.complete_run("verr-run", RunStatus.COMPLETED)
 
-        result = get_failure_context(db, recorder, "verr-run")
+        result = get_failure_context(db, factory, "verr-run")
 
         assert "error" not in result
         assert len(result["validation_errors"]) == 1
@@ -429,16 +429,16 @@ class TestGetFailureContext:
     def test_failure_context_detects_retries(self) -> None:
         """get_failure_context sets has_retries=True when any attempt > 0."""
         setup = make_recorder_with_run(run_id="retry-run", source_node_id="src")
-        db, recorder = setup.db, setup.recorder
+        db, factory = setup.db, setup.factory
 
-        register_test_node(recorder, "retry-run", "xform", node_type=NodeType.TRANSFORM, plugin_name="flaky")
+        register_test_node(factory.data_flow, "retry-run", "xform", node_type=NodeType.TRANSFORM, plugin_name="flaky")
 
-        row = recorder.create_row("retry-run", "src", row_index=0, data={"x": 1})
-        token = recorder.create_token(row.row_id)
+        row = factory.data_flow.create_row("retry-run", "src", row_index=0, data={"x": 1})
+        token = factory.data_flow.create_token(row.row_id)
 
         # Attempt 0: failed (initial)
-        ns0 = recorder.begin_node_state(token.token_id, "xform", "retry-run", step_index=1, input_data={"x": 1}, attempt=0)
-        recorder.complete_node_state(
+        ns0 = factory.execution.begin_node_state(token.token_id, "xform", "retry-run", step_index=1, input_data={"x": 1}, attempt=0)
+        factory.execution.complete_node_state(
             ns0.state_id,
             NodeStateStatus.FAILED,
             duration_ms=10.0,
@@ -446,8 +446,8 @@ class TestGetFailureContext:
         )
 
         # Attempt 1: failed (first retry)
-        ns1 = recorder.begin_node_state(token.token_id, "xform", "retry-run", step_index=1, input_data={"x": 1}, attempt=1)
-        recorder.complete_node_state(
+        ns1 = factory.execution.begin_node_state(token.token_id, "xform", "retry-run", step_index=1, input_data={"x": 1}, attempt=1)
+        factory.execution.complete_node_state(
             ns1.state_id,
             NodeStateStatus.FAILED,
             duration_ms=10.0,
@@ -455,20 +455,20 @@ class TestGetFailureContext:
         )
 
         # Attempt 2: failed (second retry — triggers has_retries detection)
-        ns2 = recorder.begin_node_state(token.token_id, "xform", "retry-run", step_index=1, input_data={"x": 1}, attempt=2)
-        recorder.complete_node_state(
+        ns2 = factory.execution.begin_node_state(token.token_id, "xform", "retry-run", step_index=1, input_data={"x": 1}, attempt=2)
+        factory.execution.complete_node_state(
             ns2.state_id,
             NodeStateStatus.FAILED,
             duration_ms=10.0,
             error=ExecutionError(exception="test_failure", exception_type="TestFailure"),
         )
 
-        recorder.record_token_outcome(
+        factory.data_flow.record_token_outcome(
             ref=TokenRef(token_id=token.token_id, run_id="retry-run"), outcome=RowOutcome.FAILED, error_hash="d" * 64
         )
-        recorder.complete_run("retry-run", RunStatus.FAILED)
+        factory.run_lifecycle.complete_run("retry-run", RunStatus.FAILED)
 
-        result = get_failure_context(db, recorder, "retry-run")
+        result = get_failure_context(db, factory, "retry-run")
 
         assert "error" not in result
         assert len(result["failed_node_states"]) == 3  # FailureContextReport variant
@@ -478,16 +478,16 @@ class TestGetFailureContext:
     def test_failure_context_detects_first_retry(self) -> None:
         """has_retries is True when only the first retry (attempt=1) exists."""
         setup = make_recorder_with_run(run_id="first-retry-run", source_node_id="src")
-        db, recorder = setup.db, setup.recorder
+        db, factory = setup.db, setup.factory
 
-        register_test_node(recorder, "first-retry-run", "xform", node_type=NodeType.TRANSFORM, plugin_name="flaky")
+        register_test_node(factory.data_flow, "first-retry-run", "xform", node_type=NodeType.TRANSFORM, plugin_name="flaky")
 
-        row = recorder.create_row("first-retry-run", "src", row_index=0, data={"x": 1})
-        token = recorder.create_token(row.row_id)
+        row = factory.data_flow.create_row("first-retry-run", "src", row_index=0, data={"x": 1})
+        token = factory.data_flow.create_token(row.row_id)
 
         # Attempt 0: initial try
-        ns0 = recorder.begin_node_state(token.token_id, "xform", "first-retry-run", step_index=1, input_data={"x": 1}, attempt=0)
-        recorder.complete_node_state(
+        ns0 = factory.execution.begin_node_state(token.token_id, "xform", "first-retry-run", step_index=1, input_data={"x": 1}, attempt=0)
+        factory.execution.complete_node_state(
             ns0.state_id,
             NodeStateStatus.FAILED,
             duration_ms=10.0,
@@ -495,27 +495,27 @@ class TestGetFailureContext:
         )
 
         # Attempt 1: first retry — this alone should trigger has_retries
-        ns1 = recorder.begin_node_state(token.token_id, "xform", "first-retry-run", step_index=1, input_data={"x": 1}, attempt=1)
-        recorder.complete_node_state(
+        ns1 = factory.execution.begin_node_state(token.token_id, "xform", "first-retry-run", step_index=1, input_data={"x": 1}, attempt=1)
+        factory.execution.complete_node_state(
             ns1.state_id,
             NodeStateStatus.FAILED,
             duration_ms=10.0,
             error=ExecutionError(exception="test_failure", exception_type="TestFailure"),
         )
 
-        recorder.record_token_outcome(
+        factory.data_flow.record_token_outcome(
             ref=TokenRef(token_id=token.token_id, run_id="first-retry-run"), outcome=RowOutcome.FAILED, error_hash="e" * 64
         )
-        recorder.complete_run("first-retry-run", RunStatus.FAILED)
+        factory.run_lifecycle.complete_run("first-retry-run", RunStatus.FAILED)
 
-        result = get_failure_context(db, recorder, "first-retry-run")
+        result = get_failure_context(db, factory, "first-retry-run")
 
         assert result["patterns"]["has_retries"] is True  # type: ignore[typeddict-item]  # FailureContextReport variant
 
     def test_failure_context_has_retries_false_for_single_attempt(self) -> None:
         """has_retries is False when all failures are attempt 0 (no retries)."""
         p = _build_linear_pipeline(run_id="no-retry-run", fail_transform=True)
-        result = get_failure_context(p["db"], p["recorder"], "no-retry-run")
+        result = get_failure_context(p["db"], p["factory"], "no-retry-run")
 
         assert "error" not in result
         assert result["patterns"]["has_retries"] is False
@@ -529,55 +529,55 @@ class TestGetFailureContext:
         """
         # Create a shared DB with two runs
         setup = make_recorder_with_run(run_id="run-X", source_node_id="src")
-        db, recorder = setup.db, setup.recorder
+        db, factory = setup.db, setup.factory
 
         # Run X: xform is "llm_classifier"
-        register_test_node(recorder, "run-X", "xform", node_type=NodeType.TRANSFORM, plugin_name="llm_classifier")
+        register_test_node(factory.data_flow, "run-X", "xform", node_type=NodeType.TRANSFORM, plugin_name="llm_classifier")
 
-        row_x = recorder.create_row("run-X", "src", row_index=0, data={"x": 1})
-        token_x = recorder.create_token(row_x.row_id)
+        row_x = factory.data_flow.create_row("run-X", "src", row_index=0, data={"x": 1})
+        token_x = factory.data_flow.create_token(row_x.row_id)
 
-        ns_x = recorder.begin_node_state(token_x.token_id, "xform", "run-X", step_index=1, input_data={"x": 1})
-        recorder.complete_node_state(
+        ns_x = factory.execution.begin_node_state(token_x.token_id, "xform", "run-X", step_index=1, input_data={"x": 1})
+        factory.execution.complete_node_state(
             ns_x.state_id,
             NodeStateStatus.FAILED,
             duration_ms=10.0,
             error=ExecutionError(exception="test_failure", exception_type="TestFailure"),
         )
-        recorder.record_token_outcome(
+        factory.data_flow.record_token_outcome(
             ref=TokenRef(token_id=token_x.token_id, run_id="run-X"), outcome=RowOutcome.FAILED, error_hash="e" * 64
         )
-        recorder.complete_run("run-X", RunStatus.FAILED)
+        factory.run_lifecycle.complete_run("run-X", RunStatus.FAILED)
 
         # Run Y: same node_id "xform" but different plugin "field_mapper"
-        recorder.begin_run(config={}, canonical_version="v1", run_id="run-Y")
-        register_test_node(recorder, "run-Y", "src", node_type=NodeType.SOURCE, plugin_name="source")
-        register_test_node(recorder, "run-Y", "xform", node_type=NodeType.TRANSFORM, plugin_name="field_mapper")
+        factory.run_lifecycle.begin_run(config={}, canonical_version="v1", run_id="run-Y")
+        register_test_node(factory.data_flow, "run-Y", "src", node_type=NodeType.SOURCE, plugin_name="source")
+        register_test_node(factory.data_flow, "run-Y", "xform", node_type=NodeType.TRANSFORM, plugin_name="field_mapper")
 
-        row_y = recorder.create_row("run-Y", "src", row_index=0, data={"y": 2})
-        token_y = recorder.create_token(row_y.row_id)
+        row_y = factory.data_flow.create_row("run-Y", "src", row_index=0, data={"y": 2})
+        token_y = factory.data_flow.create_token(row_y.row_id)
 
-        ns_y = recorder.begin_node_state(token_y.token_id, "xform", "run-Y", step_index=1, input_data={"y": 2})
-        recorder.complete_node_state(
+        ns_y = factory.execution.begin_node_state(token_y.token_id, "xform", "run-Y", step_index=1, input_data={"y": 2})
+        factory.execution.complete_node_state(
             ns_y.state_id,
             NodeStateStatus.FAILED,
             duration_ms=20.0,
             error=ExecutionError(exception="test_failure", exception_type="TestFailure"),
         )
-        recorder.record_token_outcome(
+        factory.data_flow.record_token_outcome(
             ref=TokenRef(token_id=token_y.token_id, run_id="run-Y"), outcome=RowOutcome.FAILED, error_hash="f" * 64
         )
-        recorder.complete_run("run-Y", RunStatus.FAILED)
+        factory.run_lifecycle.complete_run("run-Y", RunStatus.FAILED)
 
         # Query run-X failure context
-        result_x = get_failure_context(db, recorder, "run-X")
+        result_x = get_failure_context(db, factory, "run-X")
         assert "error" not in result_x
         assert len(result_x["failed_node_states"]) == 1
         # The plugin name MUST be from run-X, not run-Y
         assert result_x["failed_node_states"][0]["plugin"] == "llm_classifier"
 
         # Query run-Y failure context
-        result_y = get_failure_context(db, recorder, "run-Y")
+        result_y = get_failure_context(db, factory, "run-Y")
         assert "error" not in result_y
         assert len(result_y["failed_node_states"]) == 1
         assert result_y["failed_node_states"][0]["plugin"] == "field_mapper"
@@ -589,77 +589,77 @@ class TestGetFailureContext:
         the transform_errors -> nodes outerjoin uses both keys.
         """
         setup = make_recorder_with_run(run_id="run-P", source_node_id="src")
-        db, recorder = setup.db, setup.recorder
+        db, factory = setup.db, setup.factory
 
         # Run P: xform is "slow_transform"
-        register_test_node(recorder, "run-P", "xform", node_type=NodeType.TRANSFORM, plugin_name="slow_transform")
-        row_p = recorder.create_row("run-P", "src", row_index=0, data={"p": 1})
-        token_p = recorder.create_token(row_p.row_id)
+        register_test_node(factory.data_flow, "run-P", "xform", node_type=NodeType.TRANSFORM, plugin_name="slow_transform")
+        row_p = factory.data_flow.create_row("run-P", "src", row_index=0, data={"p": 1})
+        token_p = factory.data_flow.create_token(row_p.row_id)
         error_reason: TransformErrorReason = {"reason": "retry_timeout"}
-        recorder.record_transform_error(
+        factory.data_flow.record_transform_error(
             ref=TokenRef(token_id=token_p.token_id, run_id="run-P"),
             transform_id="xform",
             row_data={"p": 1},
             error_details=error_reason,
             destination="quarantine",
         )
-        recorder.record_token_outcome(
+        factory.data_flow.record_token_outcome(
             ref=TokenRef(token_id=token_p.token_id, run_id="run-P"), outcome=RowOutcome.QUARANTINED, error_hash="a" * 64
         )
-        recorder.complete_run("run-P", RunStatus.FAILED)
+        factory.run_lifecycle.complete_run("run-P", RunStatus.FAILED)
 
         # Run Q: same node_id "xform" but "fast_transform"
-        recorder.begin_run(config={}, canonical_version="v1", run_id="run-Q")
-        register_test_node(recorder, "run-Q", "src", node_type=NodeType.SOURCE, plugin_name="source")
-        register_test_node(recorder, "run-Q", "xform", node_type=NodeType.TRANSFORM, plugin_name="fast_transform")
-        row_q = recorder.create_row("run-Q", "src", row_index=0, data={"q": 2})
-        token_q = recorder.create_token(row_q.row_id)
+        factory.run_lifecycle.begin_run(config={}, canonical_version="v1", run_id="run-Q")
+        register_test_node(factory.data_flow, "run-Q", "src", node_type=NodeType.SOURCE, plugin_name="source")
+        register_test_node(factory.data_flow, "run-Q", "xform", node_type=NodeType.TRANSFORM, plugin_name="fast_transform")
+        row_q = factory.data_flow.create_row("run-Q", "src", row_index=0, data={"q": 2})
+        token_q = factory.data_flow.create_token(row_q.row_id)
         error_reason_q: TransformErrorReason = {"reason": "invalid_input"}
-        recorder.record_transform_error(
+        factory.data_flow.record_transform_error(
             ref=TokenRef(token_id=token_q.token_id, run_id="run-Q"),
             transform_id="xform",
             row_data={"q": 2},
             error_details=error_reason_q,
             destination="quarantine",
         )
-        recorder.record_token_outcome(
+        factory.data_flow.record_token_outcome(
             ref=TokenRef(token_id=token_q.token_id, run_id="run-Q"), outcome=RowOutcome.QUARANTINED, error_hash="b" * 64
         )
-        recorder.complete_run("run-Q", RunStatus.FAILED)
+        factory.run_lifecycle.complete_run("run-Q", RunStatus.FAILED)
 
-        result_p = get_failure_context(db, recorder, "run-P")
+        result_p = get_failure_context(db, factory, "run-P")
         assert len(result_p["transform_errors"]) == 1  # type: ignore[typeddict-item]  # FailureContextReport variant
         assert result_p["transform_errors"][0]["plugin"] == "slow_transform"  # type: ignore[typeddict-item]  # FailureContextReport variant
 
-        result_q = get_failure_context(db, recorder, "run-Q")
+        result_q = get_failure_context(db, factory, "run-Q")
         assert len(result_q["transform_errors"]) == 1  # type: ignore[typeddict-item]  # FailureContextReport variant
         assert result_q["transform_errors"][0]["plugin"] == "fast_transform"  # type: ignore[typeddict-item]  # FailureContextReport variant
 
     def test_failure_context_limit_parameter(self) -> None:
         """get_failure_context respects the limit parameter."""
         setup = make_recorder_with_run(run_id="limit-run", source_node_id="src")
-        db, recorder = setup.db, setup.recorder
+        db, factory = setup.db, setup.factory
 
-        register_test_node(recorder, "limit-run", "xform", node_type=NodeType.TRANSFORM, plugin_name="mapper")
+        register_test_node(factory.data_flow, "limit-run", "xform", node_type=NodeType.TRANSFORM, plugin_name="mapper")
 
         # Create 5 rows, all failing
         for i in range(5):
-            row = recorder.create_row("limit-run", "src", row_index=i, data={"i": i})
-            token = recorder.create_token(row.row_id)
-            ns = recorder.begin_node_state(token.token_id, "xform", "limit-run", step_index=1, input_data={"i": i})
-            recorder.complete_node_state(
+            row = factory.data_flow.create_row("limit-run", "src", row_index=i, data={"i": i})
+            token = factory.data_flow.create_token(row.row_id)
+            ns = factory.execution.begin_node_state(token.token_id, "xform", "limit-run", step_index=1, input_data={"i": i})
+            factory.execution.complete_node_state(
                 ns.state_id,
                 NodeStateStatus.FAILED,
                 duration_ms=10.0,
                 error=ExecutionError(exception="test_failure", exception_type="TestFailure"),
             )
-            recorder.record_token_outcome(
+            factory.data_flow.record_token_outcome(
                 ref=TokenRef(token_id=token.token_id, run_id="limit-run"), outcome=RowOutcome.FAILED, error_hash="a" * 64
             )
 
-        recorder.complete_run("limit-run", RunStatus.FAILED)
+        factory.run_lifecycle.complete_run("limit-run", RunStatus.FAILED)
 
-        result = get_failure_context(db, recorder, "limit-run", limit=2)
+        result = get_failure_context(db, factory, "limit-run", limit=2)
 
         assert "error" not in result
         assert len(result["failed_node_states"]) == 2
@@ -668,42 +668,42 @@ class TestGetFailureContext:
     def test_failure_context_plugins_failing_pattern(self) -> None:
         """get_failure_context identifies which plugins are failing."""
         setup = make_recorder_with_run(run_id="pattern-run", source_node_id="src")
-        db, recorder = setup.db, setup.recorder
+        db, factory = setup.db, setup.factory
 
-        register_test_node(recorder, "pattern-run", "xform-a", node_type=NodeType.TRANSFORM, plugin_name="mapper")
-        register_test_node(recorder, "pattern-run", "xform-b", node_type=NodeType.TRANSFORM, plugin_name="classifier")
+        register_test_node(factory.data_flow, "pattern-run", "xform-a", node_type=NodeType.TRANSFORM, plugin_name="mapper")
+        register_test_node(factory.data_flow, "pattern-run", "xform-b", node_type=NodeType.TRANSFORM, plugin_name="classifier")
 
         # Fail in xform-a
-        row0 = recorder.create_row("pattern-run", "src", row_index=0, data={"i": 0})
-        token0 = recorder.create_token(row0.row_id)
-        ns0 = recorder.begin_node_state(token0.token_id, "xform-a", "pattern-run", step_index=1, input_data={"i": 0})
-        recorder.complete_node_state(
+        row0 = factory.data_flow.create_row("pattern-run", "src", row_index=0, data={"i": 0})
+        token0 = factory.data_flow.create_token(row0.row_id)
+        ns0 = factory.execution.begin_node_state(token0.token_id, "xform-a", "pattern-run", step_index=1, input_data={"i": 0})
+        factory.execution.complete_node_state(
             ns0.state_id,
             NodeStateStatus.FAILED,
             duration_ms=10.0,
             error=ExecutionError(exception="test_failure", exception_type="TestFailure"),
         )
-        recorder.record_token_outcome(
+        factory.data_flow.record_token_outcome(
             ref=TokenRef(token_id=token0.token_id, run_id="pattern-run"), outcome=RowOutcome.FAILED, error_hash="a" * 64
         )
 
         # Fail in xform-b
-        row1 = recorder.create_row("pattern-run", "src", row_index=1, data={"i": 1})
-        token1 = recorder.create_token(row1.row_id)
-        ns1 = recorder.begin_node_state(token1.token_id, "xform-b", "pattern-run", step_index=2, input_data={"i": 1})
-        recorder.complete_node_state(
+        row1 = factory.data_flow.create_row("pattern-run", "src", row_index=1, data={"i": 1})
+        token1 = factory.data_flow.create_token(row1.row_id)
+        ns1 = factory.execution.begin_node_state(token1.token_id, "xform-b", "pattern-run", step_index=2, input_data={"i": 1})
+        factory.execution.complete_node_state(
             ns1.state_id,
             NodeStateStatus.FAILED,
             duration_ms=10.0,
             error=ExecutionError(exception="test_failure", exception_type="TestFailure"),
         )
-        recorder.record_token_outcome(
+        factory.data_flow.record_token_outcome(
             ref=TokenRef(token_id=token1.token_id, run_id="pattern-run"), outcome=RowOutcome.FAILED, error_hash="b" * 64
         )
 
-        recorder.complete_run("pattern-run", RunStatus.FAILED)
+        factory.run_lifecycle.complete_run("pattern-run", RunStatus.FAILED)
 
-        result = get_failure_context(db, recorder, "pattern-run")
+        result = get_failure_context(db, factory, "pattern-run")
 
         assert "error" not in result
         assert result["patterns"]["failure_count"] == 2
@@ -722,7 +722,7 @@ class TestGetRunSummary:
     def test_summary_for_completed_run(self) -> None:
         """get_run_summary returns correct counts for a completed run."""
         p = _build_linear_pipeline(run_id="summary-run")
-        result = get_run_summary(p["db"], p["recorder"], "summary-run")
+        result = get_run_summary(p["db"], p["factory"], "summary-run")
 
         assert "error" not in result
         assert result["run_id"] == "summary-run"
@@ -739,37 +739,37 @@ class TestGetRunSummary:
     def test_summary_for_nonexistent_run(self) -> None:
         """get_run_summary returns error for unknown run_id."""
         setup = make_recorder_with_run()
-        result = get_run_summary(setup.db, setup.recorder, "nonexistent")
+        result = get_run_summary(setup.db, setup.factory, "nonexistent")
 
         assert "error" in result
 
     def test_summary_counts_errors_correctly(self) -> None:
         """get_run_summary counts both validation and transform errors."""
         setup = make_recorder_with_run(run_id="err-run", source_node_id="src")
-        db, recorder = setup.db, setup.recorder
+        db, factory = setup.db, setup.factory
 
-        register_test_node(recorder, "err-run", "xform", node_type=NodeType.TRANSFORM, plugin_name="mapper")
+        register_test_node(factory.data_flow, "err-run", "xform", node_type=NodeType.TRANSFORM, plugin_name="mapper")
 
         # Record a validation error
-        recorder.record_validation_error("err-run", "src", {"bad": "data"}, "missing field", "observed", "quarantine")
+        factory.data_flow.record_validation_error("err-run", "src", {"bad": "data"}, "missing field", "observed", "quarantine")
 
         # Record a transform error
-        row = recorder.create_row("err-run", "src", row_index=0, data={"x": 1})
-        token = recorder.create_token(row.row_id)
+        row = factory.data_flow.create_row("err-run", "src", row_index=0, data={"x": 1})
+        token = factory.data_flow.create_token(row.row_id)
         error_reason: TransformErrorReason = {"reason": "api_error"}
-        recorder.record_transform_error(
+        factory.data_flow.record_transform_error(
             ref=TokenRef(token_id=token.token_id, run_id="err-run"),
             transform_id="xform",
             row_data={"x": 1},
             error_details=error_reason,
             destination="quarantine",
         )
-        recorder.record_token_outcome(
+        factory.data_flow.record_token_outcome(
             ref=TokenRef(token_id=token.token_id, run_id="err-run"), outcome=RowOutcome.QUARANTINED, error_hash="a" * 64
         )
-        recorder.complete_run("err-run", RunStatus.COMPLETED)
+        factory.run_lifecycle.complete_run("err-run", RunStatus.COMPLETED)
 
-        result = get_run_summary(db, recorder, "err-run")
+        result = get_run_summary(db, factory, "err-run")
 
         assert "error" not in result
         assert result["errors"]["validation"] == 1
@@ -779,35 +779,35 @@ class TestGetRunSummary:
     def test_summary_outcome_distribution(self) -> None:
         """get_run_summary returns correct outcome distribution for mixed outcomes."""
         setup = make_recorder_with_run(run_id="dist-run", source_node_id="src")
-        db, recorder = setup.db, setup.recorder
+        db, factory = setup.db, setup.factory
 
-        register_test_node(recorder, "dist-run", "xform", node_type=NodeType.TRANSFORM, plugin_name="mapper")
-        register_test_node(recorder, "dist-run", "sink", node_type=NodeType.SINK, plugin_name="csv_sink")
+        register_test_node(factory.data_flow, "dist-run", "xform", node_type=NodeType.TRANSFORM, plugin_name="mapper")
+        register_test_node(factory.data_flow, "dist-run", "sink", node_type=NodeType.SINK, plugin_name="csv_sink")
 
         # Row 0: completed
-        row0 = recorder.create_row("dist-run", "src", row_index=0, data={"i": 0})
-        token0 = recorder.create_token(row0.row_id)
-        recorder.record_token_outcome(
+        row0 = factory.data_flow.create_row("dist-run", "src", row_index=0, data={"i": 0})
+        token0 = factory.data_flow.create_token(row0.row_id)
+        factory.data_flow.record_token_outcome(
             ref=TokenRef(token_id=token0.token_id, run_id="dist-run"), outcome=RowOutcome.COMPLETED, sink_name="csv_sink"
         )
 
         # Row 1: quarantined
-        row1 = recorder.create_row("dist-run", "src", row_index=1, data={"i": 1})
-        token1 = recorder.create_token(row1.row_id)
-        recorder.record_token_outcome(
+        row1 = factory.data_flow.create_row("dist-run", "src", row_index=1, data={"i": 1})
+        token1 = factory.data_flow.create_token(row1.row_id)
+        factory.data_flow.record_token_outcome(
             ref=TokenRef(token_id=token1.token_id, run_id="dist-run"), outcome=RowOutcome.QUARANTINED, error_hash="b" * 64
         )
 
         # Row 2: completed
-        row2 = recorder.create_row("dist-run", "src", row_index=2, data={"i": 2})
-        token2 = recorder.create_token(row2.row_id)
-        recorder.record_token_outcome(
+        row2 = factory.data_flow.create_row("dist-run", "src", row_index=2, data={"i": 2})
+        token2 = factory.data_flow.create_token(row2.row_id)
+        factory.data_flow.record_token_outcome(
             ref=TokenRef(token_id=token2.token_id, run_id="dist-run"), outcome=RowOutcome.COMPLETED, sink_name="csv_sink"
         )
 
-        recorder.complete_run("dist-run", RunStatus.COMPLETED)
+        factory.run_lifecycle.complete_run("dist-run", RunStatus.COMPLETED)
 
-        result = get_run_summary(db, recorder, "dist-run")
+        result = get_run_summary(db, factory, "dist-run")
 
         assert "error" not in result
         assert result["outcome_distribution"]["completed"] == 2
@@ -816,7 +816,7 @@ class TestGetRunSummary:
     def test_summary_avg_state_duration(self) -> None:
         """get_run_summary returns average node state duration."""
         p = _build_linear_pipeline(run_id="dur-run")
-        result = get_run_summary(p["db"], p["recorder"], "dur-run")
+        result = get_run_summary(p["db"], p["factory"], "dur-run")
 
         assert "error" not in result
         # Pipeline has one node state with duration_ms=50.0
@@ -834,10 +834,10 @@ class TestListRuns:
     def test_list_runs_returns_all(self) -> None:
         """list_runs returns runs in the database."""
         setup = make_recorder_with_run(run_id="list-run-1")
-        recorder = setup.recorder
-        recorder.complete_run("list-run-1", RunStatus.COMPLETED)
+        factory = setup.factory
+        factory.run_lifecycle.complete_run("list-run-1", RunStatus.COMPLETED)
 
-        result = list_runs(setup.db, recorder)
+        result = list_runs(setup.db, factory)
 
         assert len(result) == 1
         assert result[0]["run_id"] == "list-run-1"
@@ -846,15 +846,15 @@ class TestListRuns:
     def test_list_runs_filters_by_status(self) -> None:
         """list_runs filters by status when provided."""
         setup = make_recorder_with_run(run_id="filter-run")
-        recorder = setup.recorder
-        recorder.complete_run("filter-run", RunStatus.FAILED)
+        factory = setup.factory
+        factory.run_lifecycle.complete_run("filter-run", RunStatus.FAILED)
 
         # Should find it with "failed" filter
-        result = list_runs(setup.db, recorder, status="failed")
+        result = list_runs(setup.db, factory, status="failed")
         assert len(result) == 1
 
         # Should not find it with "completed" filter
-        result = list_runs(setup.db, recorder, status="completed")
+        result = list_runs(setup.db, factory, status="completed")
         assert len(result) == 0
 
     def test_list_runs_invalid_status_raises(self) -> None:
@@ -862,7 +862,7 @@ class TestListRuns:
         setup = make_recorder_with_run()
 
         with pytest.raises(ValueError, match="Invalid status"):
-            list_runs(setup.db, setup.recorder, status="bogus")
+            list_runs(setup.db, setup.factory, status="bogus")
 
 
 # ===========================================================================
@@ -899,52 +899,52 @@ class TestFailureContextCorruptionGuards:
         _delete_node(p["db"], "corrupt-ns", p["transform_node_id"])
 
         with pytest.raises(AuditIntegrityError, match=r"Tier-1 corruption.*node_states"):
-            get_failure_context(p["db"], p["recorder"], "corrupt-ns")
+            get_failure_context(p["db"], p["factory"], "corrupt-ns")
 
     def test_missing_node_for_transform_error_raises(self) -> None:
         """Transform error referencing a deleted node must raise, not emit plugin=None."""
         setup = make_recorder_with_run(run_id="corrupt-te", source_node_id="src")
-        db, recorder = setup.db, setup.recorder
+        db, factory = setup.db, setup.factory
 
-        register_test_node(recorder, "corrupt-te", "xform", node_type=NodeType.TRANSFORM, plugin_name="mapper")
+        register_test_node(factory.data_flow, "corrupt-te", "xform", node_type=NodeType.TRANSFORM, plugin_name="mapper")
 
-        row = recorder.create_row("corrupt-te", "src", row_index=0, data={"x": 1})
-        token = recorder.create_token(row.row_id)
+        row = factory.data_flow.create_row("corrupt-te", "src", row_index=0, data={"x": 1})
+        token = factory.data_flow.create_token(row.row_id)
         error_reason: TransformErrorReason = {"reason": "test_error"}
-        recorder.record_transform_error(
+        factory.data_flow.record_transform_error(
             ref=TokenRef(token_id=token.token_id, run_id="corrupt-te"),
             transform_id="xform",
             row_data={"x": 1},
             error_details=error_reason,
             destination="quarantine",
         )
-        recorder.record_token_outcome(
+        factory.data_flow.record_token_outcome(
             ref=TokenRef(token_id=token.token_id, run_id="corrupt-te"), outcome=RowOutcome.QUARANTINED, error_hash="a" * 64
         )
-        recorder.complete_run("corrupt-te", RunStatus.FAILED)
+        factory.run_lifecycle.complete_run("corrupt-te", RunStatus.FAILED)
 
         _delete_node(db, "corrupt-te", "xform")
 
         with pytest.raises(AuditIntegrityError, match=r"Tier-1 corruption.*transform_errors"):
-            get_failure_context(db, recorder, "corrupt-te")
+            get_failure_context(db, factory, "corrupt-te")
 
     def test_missing_node_for_validation_error_raises(self) -> None:
         """Validation error with node_id but deleted node must raise."""
         setup = make_recorder_with_run(run_id="corrupt-ve", source_node_id="src")
-        db, recorder = setup.db, setup.recorder
+        db, factory = setup.db, setup.factory
 
-        recorder.record_validation_error("corrupt-ve", "src", {"bad": "data"}, "missing field", "observed", "quarantine")
-        recorder.complete_run("corrupt-ve", RunStatus.COMPLETED)
+        factory.data_flow.record_validation_error("corrupt-ve", "src", {"bad": "data"}, "missing field", "observed", "quarantine")
+        factory.run_lifecycle.complete_run("corrupt-ve", RunStatus.COMPLETED)
 
         _delete_node(db, "corrupt-ve", "src")
 
         with pytest.raises(AuditIntegrityError, match=r"Tier-1 corruption.*validation_errors"):
-            get_failure_context(db, recorder, "corrupt-ve")
+            get_failure_context(db, factory, "corrupt-ve")
 
     def test_clean_run_still_works(self) -> None:
         """Corruption guards don't break normal operation."""
         p = _build_linear_pipeline(run_id="clean-guard", fail_transform=True)
-        result = get_failure_context(p["db"], p["recorder"], "clean-guard")
+        result = get_failure_context(p["db"], p["factory"], "clean-guard")
 
         assert "error" not in result
         assert result["patterns"]["failure_count"] == 1
@@ -960,53 +960,53 @@ class TestErrorAnalysisCorruptionGuard:
     def test_missing_node_for_transform_error_raises(self) -> None:
         """Transform error grouped with plugin=None must raise, not emit None bucket."""
         setup = make_recorder_with_run(run_id="corrupt-ea", source_node_id="src")
-        db, recorder = setup.db, setup.recorder
+        db, factory = setup.db, setup.factory
 
-        register_test_node(recorder, "corrupt-ea", "xform", node_type=NodeType.TRANSFORM, plugin_name="mapper")
+        register_test_node(factory.data_flow, "corrupt-ea", "xform", node_type=NodeType.TRANSFORM, plugin_name="mapper")
 
-        row = recorder.create_row("corrupt-ea", "src", row_index=0, data={"x": 1})
-        token = recorder.create_token(row.row_id)
+        row = factory.data_flow.create_row("corrupt-ea", "src", row_index=0, data={"x": 1})
+        token = factory.data_flow.create_token(row.row_id)
         error_reason: TransformErrorReason = {"reason": "test_error"}
-        recorder.record_transform_error(
+        factory.data_flow.record_transform_error(
             ref=TokenRef(token_id=token.token_id, run_id="corrupt-ea"),
             transform_id="xform",
             row_data={"x": 1},
             error_details=error_reason,
             destination="quarantine",
         )
-        recorder.record_token_outcome(
+        factory.data_flow.record_token_outcome(
             ref=TokenRef(token_id=token.token_id, run_id="corrupt-ea"), outcome=RowOutcome.QUARANTINED, error_hash="a" * 64
         )
-        recorder.complete_run("corrupt-ea", RunStatus.FAILED)
+        factory.run_lifecycle.complete_run("corrupt-ea", RunStatus.FAILED)
 
         _delete_node(db, "corrupt-ea", "xform")
 
         with pytest.raises(AuditIntegrityError, match=r"Tier-1 corruption.*transform_errors"):
-            get_error_analysis(db, recorder, "corrupt-ea")
+            get_error_analysis(db, factory, "corrupt-ea")
 
     def test_clean_error_analysis_still_works(self) -> None:
         """Corruption guard doesn't break normal error analysis."""
         setup = make_recorder_with_run(run_id="clean-ea", source_node_id="src")
-        db, recorder = setup.db, setup.recorder
+        db, factory = setup.db, setup.factory
 
-        register_test_node(recorder, "clean-ea", "xform", node_type=NodeType.TRANSFORM, plugin_name="mapper")
+        register_test_node(factory.data_flow, "clean-ea", "xform", node_type=NodeType.TRANSFORM, plugin_name="mapper")
 
-        row = recorder.create_row("clean-ea", "src", row_index=0, data={"x": 1})
-        token = recorder.create_token(row.row_id)
+        row = factory.data_flow.create_row("clean-ea", "src", row_index=0, data={"x": 1})
+        token = factory.data_flow.create_token(row.row_id)
         error_reason: TransformErrorReason = {"reason": "test_error"}
-        recorder.record_transform_error(
+        factory.data_flow.record_transform_error(
             ref=TokenRef(token_id=token.token_id, run_id="clean-ea"),
             transform_id="xform",
             row_data={"x": 1},
             error_details=error_reason,
             destination="quarantine",
         )
-        recorder.record_token_outcome(
+        factory.data_flow.record_token_outcome(
             ref=TokenRef(token_id=token.token_id, run_id="clean-ea"), outcome=RowOutcome.QUARANTINED, error_hash="a" * 64
         )
-        recorder.complete_run("clean-ea", RunStatus.FAILED)
+        factory.run_lifecycle.complete_run("clean-ea", RunStatus.FAILED)
 
-        result = get_error_analysis(db, recorder, "clean-ea")
+        result = get_error_analysis(db, factory, "clean-ea")
 
         assert "error" not in result
         assert result["transform_errors"]["total"] == 1
@@ -1022,13 +1022,13 @@ class TestExplainTokenErrorHandling:
     def test_neither_token_nor_row_returns_error(self) -> None:
         """explain_token returns ErrorResult when neither token_id nor row_id given."""
         setup = make_recorder_with_run(run_id="et-err")
-        recorder = setup.recorder
-        recorder.complete_run("et-err", RunStatus.COMPLETED)
+        factory = setup.factory
+        factory.run_lifecycle.complete_run("et-err", RunStatus.COMPLETED)
 
         # Use the analyzer facade directly (not the underlying function)
         analyzer = LandscapeAnalyzer.__new__(LandscapeAnalyzer)
         analyzer._db = setup.db
-        analyzer._recorder = recorder
+        analyzer._factory = factory
 
         result = analyzer.explain_token("et-err")
 
@@ -1039,25 +1039,25 @@ class TestExplainTokenErrorHandling:
     def test_ambiguous_row_returns_error(self) -> None:
         """explain_token returns ErrorResult for row with multiple terminal tokens."""
         setup = make_recorder_with_run(run_id="et-ambig", source_node_id="src")
-        db, recorder = setup.db, setup.recorder
+        db, factory = setup.db, setup.factory
 
-        register_test_node(recorder, "et-ambig", "sink-a", node_type=NodeType.SINK, plugin_name="sink_a")
-        register_test_node(recorder, "et-ambig", "sink-b", node_type=NodeType.SINK, plugin_name="sink_b")
+        register_test_node(factory.data_flow, "et-ambig", "sink-a", node_type=NodeType.SINK, plugin_name="sink_a")
+        register_test_node(factory.data_flow, "et-ambig", "sink-b", node_type=NodeType.SINK, plugin_name="sink_b")
 
-        row = recorder.create_row("et-ambig", "src", row_index=0, data={"x": 1})
-        token_a = recorder.create_token(row.row_id)
-        token_b = recorder.create_token(row.row_id)
-        recorder.record_token_outcome(
+        row = factory.data_flow.create_row("et-ambig", "src", row_index=0, data={"x": 1})
+        token_a = factory.data_flow.create_token(row.row_id)
+        token_b = factory.data_flow.create_token(row.row_id)
+        factory.data_flow.record_token_outcome(
             ref=TokenRef(token_id=token_a.token_id, run_id="et-ambig"), outcome=RowOutcome.COMPLETED, sink_name="sink_a"
         )
-        recorder.record_token_outcome(
+        factory.data_flow.record_token_outcome(
             ref=TokenRef(token_id=token_b.token_id, run_id="et-ambig"), outcome=RowOutcome.COMPLETED, sink_name="sink_b"
         )
-        recorder.complete_run("et-ambig", RunStatus.COMPLETED)
+        factory.run_lifecycle.complete_run("et-ambig", RunStatus.COMPLETED)
 
         analyzer = LandscapeAnalyzer.__new__(LandscapeAnalyzer)
         analyzer._db = db
-        analyzer._recorder = recorder
+        analyzer._factory = factory
 
         result = analyzer.explain_token("et-ambig", row_id=row.row_id)
 
@@ -1076,25 +1076,25 @@ class TestQueryDuplicateColumns:
         from elspeth.mcp.analyzers.queries import query
 
         setup = make_recorder_with_run(run_id="dup-col")
-        recorder = setup.recorder
-        recorder.complete_run("dup-col", RunStatus.COMPLETED)
+        factory = setup.factory
+        factory.run_lifecycle.complete_run("dup-col", RunStatus.COMPLETED)
 
         # Self-join produces duplicate column names (e.g., run_id, run_id)
         sql = "SELECT a.run_id, b.run_id FROM runs a, runs b WHERE a.run_id = b.run_id"
 
         with pytest.raises(ValueError, match="duplicate column names"):
-            query(setup.db, recorder, sql)
+            query(setup.db, factory, sql)
 
     def test_aliased_columns_work(self) -> None:
         """Aliased columns (no duplicates) should work fine."""
         from elspeth.mcp.analyzers.queries import query
 
         setup = make_recorder_with_run(run_id="alias-col")
-        recorder = setup.recorder
-        recorder.complete_run("alias-col", RunStatus.COMPLETED)
+        factory = setup.factory
+        factory.run_lifecycle.complete_run("alias-col", RunStatus.COMPLETED)
 
         sql = "SELECT a.run_id AS a_run_id, b.run_id AS b_run_id FROM runs a, runs b WHERE a.run_id = b.run_id"
-        results = query(setup.db, recorder, sql)
+        results = query(setup.db, factory, sql)
         assert len(results) == 1
         assert "a_run_id" in results[0]
         assert "b_run_id" in results[0]

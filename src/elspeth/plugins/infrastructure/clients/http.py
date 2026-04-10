@@ -41,7 +41,7 @@ logger = structlog.get_logger(__name__)
 
 if TYPE_CHECKING:
     from elspeth.contracts import Call
-    from elspeth.core.landscape.recorder import LandscapeRecorder
+    from elspeth.core.landscape.execution_repository import ExecutionRepository
     from elspeth.core.rate_limit import NoOpLimiter
     from elspeth.core.rate_limit.limiter import RateLimiter
 
@@ -60,7 +60,7 @@ class AuditedHTTPClient(AuditedClientBase):
 
     Example:
         client = AuditedHTTPClient(
-            recorder=recorder,
+            execution=execution,
             state_id=state_id,
             run_id=run_id,
             telemetry_emit=telemetry_emit,
@@ -75,7 +75,7 @@ class AuditedHTTPClient(AuditedClientBase):
 
     def __init__(
         self,
-        recorder: LandscapeRecorder,
+        execution: ExecutionRepository,
         state_id: str,
         run_id: str,
         telemetry_emit: TelemetryEmitCallback,
@@ -89,7 +89,7 @@ class AuditedHTTPClient(AuditedClientBase):
         """Initialize audited HTTP client.
 
         Args:
-            recorder: LandscapeRecorder for audit trail storage
+            execution: ExecutionRepository for audit trail storage
             state_id: Node state ID to associate calls with
             run_id: Pipeline run ID for telemetry correlation
             telemetry_emit: Callback to emit telemetry events
@@ -99,7 +99,7 @@ class AuditedHTTPClient(AuditedClientBase):
             limiter: Optional rate limiter for throttling requests
             token_id: Optional token identity for telemetry correlation
         """
-        super().__init__(recorder, state_id, run_id, telemetry_emit, limiter=limiter, token_id=token_id)
+        super().__init__(execution, state_id, run_id, telemetry_emit, limiter=limiter, token_id=token_id)
         self._timeout = timeout
         self._base_url = base_url
         self._default_headers = headers or {}
@@ -209,7 +209,7 @@ class AuditedHTTPClient(AuditedClientBase):
         Returns:
             Call object from Landscape recording (contains request_ref and response_ref blob hashes).
         """
-        call = self._recorder.record_call(
+        call = self._execution.record_call(
             state_id=self._state_id,
             call_index=call_index,
             call_type=CallType.HTTP,
@@ -599,7 +599,7 @@ class AuditedHTTPClient(AuditedClientBase):
                     status_code=response.status_code,
                 )
 
-            call = self._recorder.record_call(
+            call = self._execution.record_call(
                 state_id=self._state_id,
                 call_index=call_index,
                 call_type=CallType.HTTP,
@@ -652,7 +652,7 @@ class AuditedHTTPClient(AuditedClientBase):
         except Exception as e:
             latency_ms = (time.perf_counter() - start) * 1000
 
-            _ = self._recorder.record_call(
+            _ = self._execution.record_call(
                 state_id=self._state_id,
                 call_index=call_index,
                 call_type=CallType.HTTP,
@@ -805,7 +805,7 @@ class AuditedHTTPClient(AuditedClientBase):
             except Exception as hop_err:
                 hop_latency_ms = (time.perf_counter() - hop_start) * 1000
                 # Record the failed hop in the audit trail so lineage is complete
-                self._recorder.record_call(
+                self._execution.record_call(
                     state_id=self._state_id,
                     call_index=hop_call_index,
                     call_type=CallType.HTTP_REDIRECT,
@@ -828,7 +828,7 @@ class AuditedHTTPClient(AuditedClientBase):
                 headers=self._filter_response_headers(dict(response.headers)),
             )
 
-            self._recorder.record_call(
+            self._execution.record_call(
                 state_id=self._state_id,
                 call_index=hop_call_index,
                 call_type=CallType.HTTP_REDIRECT,

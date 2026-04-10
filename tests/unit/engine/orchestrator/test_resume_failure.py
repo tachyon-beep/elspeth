@@ -14,8 +14,8 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from elspeth.contracts import RunStatus
-from elspeth.core.landscape import LandscapeRecorder
 from elspeth.core.landscape.database import LandscapeDB
+from elspeth.core.landscape.factory import RecorderFactory
 from elspeth.engine.orchestrator.core import Orchestrator
 from tests.fixtures.landscape import make_landscape_db
 
@@ -58,10 +58,10 @@ class TestResumeFinalizesAsFailed:
         payload_store = MagicMock()
         settings = MagicMock()
 
-        # Mock recorder to capture finalize_run calls
-        mock_recorder = MagicMock(spec=LandscapeRecorder)
-        mock_recorder.get_source_schema.return_value = '{"mode": "observed"}'
-        mock_recorder.get_run_contract.return_value = MagicMock()
+        # Mock factory to capture finalize_run calls
+        mock_factory = MagicMock(spec=RecorderFactory)
+        mock_factory.run_lifecycle.get_source_schema.return_value = '{"mode": "observed"}'
+        mock_factory.run_lifecycle.get_run_contract.return_value = MagicMock()
 
         # Mock RecoveryManager
         mock_recovery = MagicMock()
@@ -72,7 +72,7 @@ class TestResumeFinalizesAsFailed:
         # Make _process_resumed_rows raise a RuntimeError (non-shutdown)
         with (
             patch.object(orch, "_process_resumed_rows", side_effect=RuntimeError("test failure")),
-            patch("elspeth.engine.orchestrator.core.LandscapeRecorder", return_value=mock_recorder),
+            patch("elspeth.engine.orchestrator.core.RecorderFactory", return_value=mock_factory),
             patch("elspeth.engine.orchestrator.core.reconstruct_schema_from_json", return_value=MagicMock()),
             patch("elspeth.core.checkpoint.RecoveryManager", return_value=mock_recovery),
             patch.object(orch, "_emit_telemetry"),
@@ -88,7 +88,7 @@ class TestResumeFinalizesAsFailed:
 
         # Verify finalize_run was called with FAILED status
         # finalize_run(run_id, status) — status can be positional or keyword
-        finalize_calls = mock_recorder.finalize_run.call_args_list
+        finalize_calls = mock_factory.run_lifecycle.finalize_run.call_args_list
         found_failed = False
         for call in finalize_calls:
             args, kwargs = call

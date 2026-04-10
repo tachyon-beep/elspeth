@@ -17,7 +17,7 @@ from elspeth.contracts.errors import OrchestrationInvariantError
 from elspeth.plugins.infrastructure.base import BaseTransform
 from elspeth.testing import make_pipeline_row, make_source_row
 from tests.fixtures.base_classes import _TestSchema, _TestSourceBase, as_sink, as_source, as_transform
-from tests.fixtures.landscape import make_recorder
+from tests.fixtures.landscape import make_factory
 from tests.fixtures.pipeline import build_production_graph
 from tests.fixtures.plugins import CollectSink, ListSource, PassTransform
 
@@ -167,8 +167,8 @@ class TestOrchestrator:
         assert len(default_sink.results) == 1
         assert len(quarantine_sink.results) == 1
 
-        recorder = make_recorder(landscape_db)
-        errors = recorder.get_validation_errors_for_run(run_result.run_id)
+        factory = make_factory(landscape_db)
+        errors = factory.data_flow.get_validation_errors_for_run(run_result.run_id)
         assert len(errors) == 1
         assert errors[0].node_id == source.node_id
         assert errors[0].node_id != transform.node_id
@@ -450,8 +450,8 @@ class TestOrchestratorEmptyPipeline:
         assert len(default_sink.results) == 0
         assert len(quarantine_sink.results) == 2
 
-        recorder = make_recorder(landscape_db)
-        contract = recorder.get_run_contract(run_result.run_id)
+        factory = make_factory(landscape_db)
+        contract = factory.run_lifecycle.get_run_contract(run_result.run_id)
         assert contract is not None
         assert contract.mode == "FLEXIBLE"
         assert contract.locked is True

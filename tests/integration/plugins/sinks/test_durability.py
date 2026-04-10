@@ -24,7 +24,7 @@ from elspeth.engine.spans import SpanFactory
 from elspeth.plugins.sinks.csv_sink import CSVSink
 from tests.fixtures.base_classes import create_observed_contract, inject_write_failure
 from tests.fixtures.factories import make_context
-from tests.fixtures.landscape import make_recorder
+from tests.fixtures.landscape import make_factory
 
 
 class TestSinkDurability:
@@ -77,13 +77,13 @@ class TestSinkDurability:
         db = LandscapeDB(f"sqlite:///{tmp_path}/test.db")
         payload_store = FilesystemPayloadStore(tmp_path / "payloads")
         checkpoint_mgr = CheckpointManager(db)
-        recorder = make_recorder(db)
+        factory = make_factory(db)
 
         return {
             "db": db,
             "payload_store": payload_store,
             "checkpoint_manager": checkpoint_mgr,
-            "recorder": recorder,
+            "factory": factory,
             "tmp_path": tmp_path,
         }
 
@@ -132,30 +132,31 @@ class TestSinkDurability:
         This is Bug #2: checkpoint MUST NOT be created if flush fails,
         because the data is not durable.
         """
-        recorder = test_env["recorder"]
+        factory = test_env["factory"]
         checkpoint_mgr = test_env["checkpoint_manager"]
         db = test_env["db"]
 
         # Create run and register nodes
-        run = recorder.begin_run(config={}, canonical_version="v1")
+        run = factory.run_lifecycle.begin_run(config={}, canonical_version="v1")
         self._register_nodes_raw(db, run.run_id)
 
         # Create sink executor with correct run_id
         sink_executor = SinkExecutor(
-            recorder=recorder,
+            execution=factory.execution,
+            data_flow=factory.data_flow,
             span_factory=SpanFactory(),
             run_id=run.run_id,
         )
 
         # Create row and token in database
         row_data = {"id": 1, "value": "test"}
-        row = recorder.create_row(
+        row = factory.data_flow.create_row(
             run_id=run.run_id,
             source_node_id="source",
             row_index=0,
             data=row_data,
         )
-        db_token = recorder.create_token(row_id=row.row_id)
+        db_token = factory.data_flow.create_token(row_id=row.row_id)
 
         # Create TokenInfo for executor (includes PipelineRow)
         from elspeth.contracts.schema_contract import PipelineRow
@@ -226,29 +227,30 @@ class TestSinkDurability:
         but no checkpoint record was created. Silently continuing would cause
         duplicate writes on resume — crashing is the correct response.
         """
-        recorder = test_env["recorder"]
+        factory = test_env["factory"]
         db = test_env["db"]
 
         # Create run and register nodes
-        run = recorder.begin_run(config={}, canonical_version="v1")
+        run = factory.run_lifecycle.begin_run(config={}, canonical_version="v1")
         self._register_nodes_raw(db, run.run_id)
 
         # Create sink executor with correct run_id
         sink_executor = SinkExecutor(
-            recorder=recorder,
+            execution=factory.execution,
+            data_flow=factory.data_flow,
             span_factory=SpanFactory(),
             run_id=run.run_id,
         )
 
         # Create row and token in database
         row_data = {"id": 1, "value": "test"}
-        row = recorder.create_row(
+        row = factory.data_flow.create_row(
             run_id=run.run_id,
             source_node_id="source",
             row_index=0,
             data=row_data,
         )
-        db_token = recorder.create_token(row_id=row.row_id)
+        db_token = factory.data_flow.create_token(row_id=row.row_id)
 
         # Create TokenInfo for executor (includes PipelineRow)
         from elspeth.contracts.schema_contract import PipelineRow
@@ -293,30 +295,31 @@ class TestSinkDurability:
         2. flush() - data is now durable
         3. checkpoint callback - safe to checkpoint
         """
-        recorder = test_env["recorder"]
+        factory = test_env["factory"]
         checkpoint_mgr = test_env["checkpoint_manager"]
         db = test_env["db"]
 
         # Create run and register nodes
-        run = recorder.begin_run(config={}, canonical_version="v1")
+        run = factory.run_lifecycle.begin_run(config={}, canonical_version="v1")
         self._register_nodes_raw(db, run.run_id)
 
         # Create sink executor with correct run_id
         sink_executor = SinkExecutor(
-            recorder=recorder,
+            execution=factory.execution,
+            data_flow=factory.data_flow,
             span_factory=SpanFactory(),
             run_id=run.run_id,
         )
 
         # Create row and token in database
         row_data = {"id": 1, "value": "test"}
-        row = recorder.create_row(
+        row = factory.data_flow.create_row(
             run_id=run.run_id,
             source_node_id="source",
             row_index=0,
             data=row_data,
         )
-        db_token = recorder.create_token(row_id=row.row_id)
+        db_token = factory.data_flow.create_token(row_id=row.row_id)
 
         # Create TokenInfo for executor (includes PipelineRow)
         from elspeth.contracts.schema_contract import PipelineRow

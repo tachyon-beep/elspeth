@@ -1,9 +1,8 @@
 # tests/unit/core/landscape/test_run_lifecycle_repository.py
 """Direct unit tests for RunLifecycleRepository.
 
-These tests exercise RunLifecycleRepository directly (not through the
-LandscapeRecorder facade) to pin its contract and verify Tier 1 crash
-paths that indirect facade tests miss.
+These tests exercise RunLifecycleRepository directly to pin its contract
+and verify Tier 1 crash paths.
 
 Covers 4 untested branch clusters identified in review:
 1. get_source_schema — non-string type rejection
@@ -26,7 +25,7 @@ from elspeth.core.landscape.database import LandscapeDB
 from elspeth.core.landscape.model_loaders import RunLoader
 from elspeth.core.landscape.run_lifecycle_repository import RunLifecycleRepository
 from elspeth.core.landscape.schema import runs_table
-from tests.fixtures.landscape import make_landscape_db, make_recorder
+from tests.fixtures.landscape import make_factory, make_landscape_db
 
 
 def _make_repo(*, run_id: str = "run-1") -> tuple[LandscapeDB, RunLifecycleRepository]:
@@ -745,9 +744,9 @@ class TestFinalizeRunEdgeCases:
         repo = RunLifecycleRepository(db, ops, RunLoader())
         repo.begin_run(config={}, canonical_version="v1", run_id="nd-run")
 
-        # Register a nondeterministic node via the recorder (need DataFlowRepository)
-        recorder = make_recorder(db)
-        recorder.register_node(
+        # Register a nondeterministic node via the factory (need DataFlowRepository)
+        factory = make_factory(db)
+        factory.data_flow.register_node(
             run_id="nd-run",
             plugin_name="llm_transform",
             node_type=NodeType.TRANSFORM,

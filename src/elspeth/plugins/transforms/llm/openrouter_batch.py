@@ -529,7 +529,7 @@ class OpenRouterBatchLLMTransform(BaseTransform):
                 if self._recorder is None:
                     raise RuntimeError("_recorder not initialized — _get_http_client called before begin_run()")
                 self._http_clients[state_id] = AuditedHTTPClient(
-                    recorder=self._recorder,  # type: ignore[arg-type]  # Task 6: AuditedHTTPClient will accept PluginAuditWriter
+                    execution=self._recorder,  # type: ignore[arg-type]  # PluginAuditWriter structurally satisfies ExecutionRepository for client methods
                     state_id=state_id,
                     run_id=self._run_id,
                     telemetry_emit=self._telemetry_emit,

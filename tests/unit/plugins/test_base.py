@@ -8,7 +8,7 @@ import pytest
 from elspeth.contracts import PipelineRow
 from elspeth.testing import make_contract, make_pipeline_row
 from tests.fixtures.factories import make_context
-from tests.fixtures.landscape import make_recorder
+from tests.fixtures.landscape import make_factory
 
 
 class TestBaseTransform:
@@ -68,8 +68,8 @@ class TestBaseTransform:
             output_schema = None  # type: ignore[assignment]
 
         transform = IncompleteTransform({})
-        recorder = make_recorder()
-        ctx = make_context(landscape=recorder)
+        factory = make_factory()
+        ctx = make_context(landscape=factory)
         row = make_pipeline_row({"x": 1})
 
         # Calling process() should raise NotImplementedError
@@ -108,8 +108,8 @@ class TestBaseTransform:
                 )
 
         transform = DoubleTransform({"some": "config"})
-        recorder = make_recorder()
-        ctx = make_context(landscape=recorder)
+        factory = make_factory()
+        ctx = make_context(landscape=factory)
 
         result = transform.process(make_pipeline_row({"x": 21}), ctx)
         assert result.row is not None
@@ -139,8 +139,8 @@ class TestBaseTransform:
         transform = SimpleTransform({})
         assert transform._on_start_called is False
 
-        recorder = make_recorder()
-        ctx = make_context(landscape=recorder)
+        factory = make_factory()
+        ctx = make_context(landscape=factory)
         transform.on_start(ctx)
 
         assert transform._on_start_called is True
@@ -195,8 +195,8 @@ class TestBaseSink:
                 pass
 
         sink = MemorySink({})
-        recorder = make_recorder()
-        ctx = make_context(landscape=recorder)
+        factory = make_factory()
+        ctx = make_context(landscape=factory)
 
         result = sink.write([{"value": 1}, {"value": 2}], ctx)
 
@@ -253,8 +253,8 @@ class TestBaseSink:
                 pass
 
         sink = BatchMemorySink({})
-        recorder = make_recorder()
-        ctx = make_context(landscape=recorder)
+        factory = make_factory()
+        ctx = make_context(landscape=factory)
 
         result = sink.write([{"value": 1}, {"value": 2}, {"value": 3}], ctx)
 
@@ -299,8 +299,8 @@ class TestBaseSource:
                 pass
 
         source = ListSource({"data": [{"value": 1}, {"value": 2}]})
-        recorder = make_recorder()
-        ctx = make_context(landscape=recorder)
+        factory = make_factory()
+        ctx = make_context(landscape=factory)
 
         rows = list(source.load(ctx))
         assert len(rows) == 2

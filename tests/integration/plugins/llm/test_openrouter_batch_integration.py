@@ -2,10 +2,10 @@
 """Integration tests for OpenRouter batch LLM transform.
 
 These tests exercise gaps that unit tests cannot cover because they use
-Mock() contexts. Integration tests use real LandscapeRecorder, real
+Mock() contexts. Integration tests use real RecorderFactory, real
 PluginContext, and real AuditedHTTPClient instances to verify:
 
-1. Thread safety: concurrent workers sharing a real recorder
+1. Thread safety: concurrent workers sharing a real factory
 2. httpx.StreamError: batch-level exception handling + audit recording
 3. Rate limiter wiring: on_start() passes limiter to AuditedHTTPClient
 4. Content-filtered None: null content in JSON response
@@ -26,11 +26,11 @@ from elspeth.contracts import CallStatus, CallType, NodeType
 from elspeth.contracts.plugin_context import PluginContext
 from elspeth.contracts.schema import SchemaConfig
 from elspeth.core.landscape.database import LandscapeDB
-from elspeth.core.landscape.recorder import LandscapeRecorder
+from elspeth.core.landscape.factory import RecorderFactory
 from elspeth.core.landscape.schema import calls_table
 from elspeth.plugins.transforms.llm.openrouter_batch import OpenRouterBatchLLMTransform
 from elspeth.testing import make_pipeline_row
-from tests.fixtures.landscape import make_recorder
+from tests.fixtures.landscape import make_factory
 from tests.unit.plugins.llm.conftest import chaosllm_openrouter_http_responses
 
 # Common schema config for dynamic field handling
@@ -51,8 +51,8 @@ def _make_valid_config(overrides: dict[str, Any] | None = None) -> dict[str, Any
     return config
 
 
-def _setup_recorder_state(
-    recorder: LandscapeRecorder,
+def _setup_factory_state(
+    factory: RecorderFactory,
 ) -> tuple[str, str, str]:
     """Set up a full run/node/row/token/state chain for integration tests.
 
@@ -60,8 +60,8 @@ def _setup_recorder_state(
         Tuple of (run_id, node_id, state_id)
     """
     schema = SchemaConfig.from_dict({"mode": "observed"})
-    run = recorder.begin_run(config={"test": True}, canonical_version="v1")
-    node = recorder.register_node(
+    run = factory.run_lifecycle.begin_run(config={"test": True}, canonical_version="v1")
+    node = factory.data_flow.register_node(
         run_id=run.run_id,
         plugin_name="openrouter_batch_llm",
         node_type=NodeType.TRANSFORM,
@@ -69,14 +69,14 @@ def _setup_recorder_state(
         config={"model": "openai/gpt-4o-mini"},
         schema_config=schema,
     )
-    row = recorder.create_row(
+    row = factory.data_flow.create_row(
         run_id=run.run_id,
         source_node_id=node.node_id,
         row_index=0,
         data={"text": "setup"},
     )
-    token = recorder.create_token(row_id=row.row_id)
-    state = recorder.begin_node_state(
+    token = factory.data_flow.create_token(row_id=row.row_id)
+    state = factory.execution.begin_node_state(
         token_id=token.token_id,
         node_id=node.node_id,
         run_id=run.run_id,
@@ -87,17 +87,17 @@ def _setup_recorder_state(
 
 
 def _make_real_context(
-    recorder: LandscapeRecorder,
+    factory: RecorderFactory,
     run_id: str,
     state_id: str,
     *,
     rate_limit_registry: Any = None,
 ) -> PluginContext:
-    """Create a real PluginContext backed by a real recorder."""
+    """Create a real PluginContext backed by a real factory."""
     return PluginContext(
         run_id=run_id,
         config={},
-        landscape=recorder,
+        landscape=factory.plugin_audit_writer(),
         state_id=state_id,
         rate_limit_registry=rate_limit_registry,
     )
@@ -135,7 +135,7 @@ def _create_mock_response(
 # TestThreadSafetyConcurrentWorkers
 # ===================================================================
 class TestThreadSafetyConcurrentWorkers:
-    """Verify thread safety when concurrent workers share a real LandscapeRecorder.
+    """Verify thread safety when concurrent workers share a real RecorderFactory.
 
     The key invariant: allocate_call_index() uses a lock to ensure
     UNIQUE(state_id, call_index) across all concurrent workers. These tests
@@ -148,17 +148,17 @@ class TestThreadSafetyConcurrentWorkers:
         return LandscapeDB.from_url(f"sqlite:///{tmp_path / 'audit.db'}")
 
     @pytest.fixture
-    def recorder(self, db: LandscapeDB) -> LandscapeRecorder:
-        return make_recorder(db)
+    def factory(self, db: LandscapeDB) -> RecorderFactory:
+        return make_factory(db)
 
-    def test_concurrent_workers_produce_unique_call_indices(self, chaosllm_server, recorder: LandscapeRecorder) -> None:
+    def test_concurrent_workers_produce_unique_call_indices(self, chaosllm_server, db: LandscapeDB, factory: RecorderFactory) -> None:
         """Multiple workers sharing one recorder produce unique call indices.
 
         Invariant: UNIQUE(state_id, call_index) must hold even when
         pool_size > 1 and all workers allocate indices concurrently.
         """
-        run_id, _node_id, state_id = _setup_recorder_state(recorder)
-        ctx = _make_real_context(recorder, run_id, state_id)
+        run_id, _node_id, state_id = _setup_factory_state(factory)
+        ctx = _make_real_context(factory, run_id, state_id)
 
         batch_size = 8
         pool_size = 4
@@ -180,7 +180,7 @@ class TestThreadSafetyConcurrentWorkers:
         # Verify call indices are unique in the database
         from sqlalchemy import select
 
-        with recorder._db.engine.connect() as conn:
+        with db.engine.connect() as conn:
             rows_db = conn.execute(
                 select(calls_table.c.call_index, calls_table.c.state_id).where(calls_table.c.state_id == state_id)
             ).fetchall()
@@ -191,14 +191,14 @@ class TestThreadSafetyConcurrentWorkers:
 
         transform.close()
 
-    def test_concurrent_workers_all_calls_recorded(self, chaosllm_server, recorder: LandscapeRecorder) -> None:
+    def test_concurrent_workers_all_calls_recorded(self, chaosllm_server, factory: RecorderFactory) -> None:
         """Every row in a concurrent batch produces exactly one audit call record.
 
         This verifies that no calls are lost under concurrency — the audit
         trail must account for every row processed.
         """
-        run_id, _node_id, state_id = _setup_recorder_state(recorder)
-        ctx = _make_real_context(recorder, run_id, state_id)
+        run_id, _node_id, state_id = _setup_factory_state(factory)
+        ctx = _make_real_context(factory, run_id, state_id)
 
         batch_size = 6
         transform = OpenRouterBatchLLMTransform(_make_valid_config({"pool_size": 3}))
@@ -215,7 +215,7 @@ class TestThreadSafetyConcurrentWorkers:
         assert result.status == "success"
 
         # Every row should have a corresponding call in the audit trail
-        calls = recorder.get_calls(state_id)
+        calls = factory.query.get_calls(state_id)
         assert len(calls) == batch_size, f"Expected {batch_size} audit calls, got {len(calls)}. Some calls were lost under concurrency."
 
         # All should be HTTP calls (via AuditedHTTPClient)
@@ -242,17 +242,17 @@ class TestStreamErrorBatchHandling:
         return LandscapeDB.from_url(f"sqlite:///{tmp_path / 'audit.db'}")
 
     @pytest.fixture
-    def recorder(self, db: LandscapeDB) -> LandscapeRecorder:
-        return make_recorder(db)
+    def factory(self, db: LandscapeDB) -> RecorderFactory:
+        return make_factory(db)
 
-    def test_stream_error_produces_error_marker_not_crash(self, chaosllm_server, recorder: LandscapeRecorder) -> None:
+    def test_stream_error_produces_error_marker_not_crash(self, chaosllm_server, factory: RecorderFactory) -> None:
         """StreamError during response streaming produces per-row error marker.
 
         The batch does NOT crash — the affected row gets an error marker
         and other rows can still succeed.
         """
-        run_id, _, state_id = _setup_recorder_state(recorder)
-        ctx = _make_real_context(recorder, run_id, state_id)
+        run_id, _, state_id = _setup_factory_state(factory)
+        ctx = _make_real_context(factory, run_id, state_id)
 
         transform = OpenRouterBatchLLMTransform(_make_valid_config({"pool_size": 1}))
         transform.on_start(ctx)
@@ -279,15 +279,15 @@ class TestStreamErrorBatchHandling:
 
         transform.close()
 
-    def test_stream_error_recorded_in_audit_trail(self, chaosllm_server, recorder: LandscapeRecorder) -> None:
+    def test_stream_error_recorded_in_audit_trail(self, chaosllm_server, factory: RecorderFactory) -> None:
         """StreamError is recorded to audit trail via ctx.record_call().
 
         Even though AuditedHTTPClient didn't get to record (the error
         occurs after the HTTP layer), _process_batch records it manually
         so the failure is attributable.
         """
-        run_id, _, state_id = _setup_recorder_state(recorder)
-        ctx = _make_real_context(recorder, run_id, state_id)
+        run_id, _, state_id = _setup_factory_state(factory)
+        ctx = _make_real_context(factory, run_id, state_id)
 
         transform = OpenRouterBatchLLMTransform(_make_valid_config({"pool_size": 1}))
         transform.on_start(ctx)
@@ -302,7 +302,7 @@ class TestStreamErrorBatchHandling:
             transform.process(rows, ctx)
 
         # Audit trail should have the transport error recorded
-        calls = recorder.get_calls(state_id)
+        calls = factory.query.get_calls(state_id)
         assert len(calls) >= 1
 
         transport_calls = [c for c in calls if c.error_json is not None and "transport_exception" in c.error_json]
@@ -310,14 +310,14 @@ class TestStreamErrorBatchHandling:
 
         transform.close()
 
-    def test_stream_error_mixed_with_success(self, chaosllm_server, recorder: LandscapeRecorder) -> None:
+    def test_stream_error_mixed_with_success(self, chaosllm_server, factory: RecorderFactory) -> None:
         """Batch with mix of StreamError and success: both recorded correctly.
 
         One row succeeds, one hits StreamError — both produce output rows
         and both are recorded in the audit trail.
         """
-        run_id, _, state_id = _setup_recorder_state(recorder)
-        ctx = _make_real_context(recorder, run_id, state_id)
+        run_id, _, state_id = _setup_factory_state(factory)
+        ctx = _make_real_context(factory, run_id, state_id)
 
         transform = OpenRouterBatchLLMTransform(
             _make_valid_config({"pool_size": 1})  # pool_size=1 to control ordering
@@ -382,17 +382,17 @@ class TestContentFilteredNoneResponse:
         return LandscapeDB.from_url(f"sqlite:///{tmp_path / 'audit.db'}")
 
     @pytest.fixture
-    def recorder(self, db: LandscapeDB) -> LandscapeRecorder:
-        return make_recorder(db)
+    def factory(self, db: LandscapeDB) -> RecorderFactory:
+        return make_factory(db)
 
-    def test_null_content_detected_as_content_filtered(self, chaosllm_server, recorder: LandscapeRecorder) -> None:
+    def test_null_content_detected_as_content_filtered(self, chaosllm_server, factory: RecorderFactory) -> None:
         """Content-filtered response with null content produces error row.
 
         This validates that the plugin detects null content (content filtering)
         and records it as an error rather than silently passing None through.
         """
-        run_id, _, state_id = _setup_recorder_state(recorder)
-        ctx = _make_real_context(recorder, run_id, state_id)
+        run_id, _, state_id = _setup_factory_state(factory)
+        ctx = _make_real_context(factory, run_id, state_id)
 
         transform = OpenRouterBatchLLMTransform(_make_valid_config())
         transform.on_start(ctx)
@@ -428,10 +428,10 @@ class TestContentFilteredNoneResponse:
 
         transform.close()
 
-    def test_null_content_audit_trail_records_success(self, chaosllm_server, recorder: LandscapeRecorder) -> None:
+    def test_null_content_audit_trail_records_success(self, chaosllm_server, factory: RecorderFactory) -> None:
         """Null-content response is recorded as successful call in audit trail."""
-        run_id, _, state_id = _setup_recorder_state(recorder)
-        ctx = _make_real_context(recorder, run_id, state_id)
+        run_id, _, state_id = _setup_factory_state(factory)
+        ctx = _make_real_context(factory, run_id, state_id)
 
         transform = OpenRouterBatchLLMTransform(_make_valid_config())
         transform.on_start(ctx)
@@ -455,7 +455,7 @@ class TestContentFilteredNoneResponse:
             transform.process(rows, ctx)
 
         # The HTTP call itself succeeded — audit trail should show SUCCESS
-        calls = recorder.get_calls(state_id)
+        calls = factory.query.get_calls(state_id)
         assert len(calls) == 1
         assert calls[0].status == CallStatus.SUCCESS
 
@@ -478,10 +478,10 @@ class TestRateLimiterWiring:
         return LandscapeDB.from_url(f"sqlite:///{tmp_path / 'audit.db'}")
 
     @pytest.fixture
-    def recorder(self, db: LandscapeDB) -> LandscapeRecorder:
-        return make_recorder(db)
+    def factory(self, db: LandscapeDB) -> RecorderFactory:
+        return make_factory(db)
 
-    def test_rate_limiter_invoked_during_processing(self, chaosllm_server, recorder: LandscapeRecorder) -> None:
+    def test_rate_limiter_invoked_during_processing(self, chaosllm_server, factory: RecorderFactory) -> None:
         """Rate limiter from registry is invoked when processing rows.
 
         Proves the full wiring chain: ctx.rate_limit_registry.get_limiter("openrouter")
@@ -489,7 +489,7 @@ class TestRateLimiterWiring:
         """
         from unittest.mock import Mock
 
-        run_id, _, state_id = _setup_recorder_state(recorder)
+        run_id, _, state_id = _setup_factory_state(factory)
 
         mock_limiter = Mock()
         mock_limiter.acquire = Mock(return_value=None)
@@ -497,7 +497,7 @@ class TestRateLimiterWiring:
         mock_registry.get_limiter = Mock(return_value=mock_limiter)
 
         ctx = _make_real_context(
-            recorder,
+            factory,
             run_id,
             state_id,
             rate_limit_registry=mock_registry,
@@ -522,10 +522,10 @@ class TestRateLimiterWiring:
 
         transform.close()
 
-    def test_processing_succeeds_without_rate_limiter(self, chaosllm_server, recorder: LandscapeRecorder) -> None:
+    def test_processing_succeeds_without_rate_limiter(self, chaosllm_server, factory: RecorderFactory) -> None:
         """When rate_limit_registry is None, processing works without throttling."""
-        run_id, _, state_id = _setup_recorder_state(recorder)
-        ctx = _make_real_context(recorder, run_id, state_id)
+        run_id, _, state_id = _setup_factory_state(factory)
+        ctx = _make_real_context(factory, run_id, state_id)
 
         transform = OpenRouterBatchLLMTransform(_make_valid_config())
         transform.on_start(ctx)
@@ -559,16 +559,16 @@ class TestOnStartWiring:
         return LandscapeDB.from_url(f"sqlite:///{tmp_path / 'audit.db'}")
 
     @pytest.fixture
-    def recorder(self, db: LandscapeDB) -> LandscapeRecorder:
-        return make_recorder(db)
+    def factory(self, db: LandscapeDB) -> RecorderFactory:
+        return make_factory(db)
 
-    def test_on_start_wires_recorder_for_audit_recording(self, chaosllm_server, recorder: LandscapeRecorder) -> None:
-        """After on_start + process, recorder receives call records.
+    def test_on_start_wires_factory_for_audit_recording(self, chaosllm_server, factory: RecorderFactory) -> None:
+        """After on_start + process, factory receives call records.
 
-        Proves recorder was captured and used, not just assigned.
+        Proves factory was captured and used, not just assigned.
         """
-        run_id, _, state_id = _setup_recorder_state(recorder)
-        ctx = _make_real_context(recorder, run_id, state_id)
+        run_id, _, state_id = _setup_factory_state(factory)
+        ctx = _make_real_context(factory, run_id, state_id)
 
         transform = OpenRouterBatchLLMTransform(_make_valid_config())
         transform.on_start(ctx)
@@ -581,22 +581,22 @@ class TestOnStartWiring:
 
         assert result.status == "success"
 
-        # Behavioral: recorder received call records (proving it was wired)
-        calls = recorder.get_calls(state_id)
-        assert len(calls) >= 1, "Recorder must receive call records after processing"
+        # Behavioral: factory received call records (proving it was wired)
+        calls = factory.query.get_calls(state_id)
+        assert len(calls) >= 1, "Factory must receive call records after processing"
 
         transform.close()
 
-    def test_on_start_wires_telemetry_for_event_emission(self, chaosllm_server, recorder: LandscapeRecorder) -> None:
+    def test_on_start_wires_telemetry_for_event_emission(self, chaosllm_server, factory: RecorderFactory) -> None:
         """After on_start + process, telemetry_emit receives ExternalCallCompleted.
 
         Proves telemetry_emit was captured and invoked, not just assigned.
         """
         from elspeth.contracts.events import ExternalCallCompleted
 
-        run_id, _, state_id = _setup_recorder_state(recorder)
+        run_id, _, state_id = _setup_factory_state(factory)
         events: list[Any] = []
-        ctx = _make_real_context(recorder, run_id, state_id)
+        ctx = _make_real_context(factory, run_id, state_id)
         ctx.telemetry_emit = events.append
 
         transform = OpenRouterBatchLLMTransform(_make_valid_config())
@@ -615,14 +615,14 @@ class TestOnStartWiring:
 
         transform.close()
 
-    def test_process_without_on_start_raises(self, recorder: LandscapeRecorder) -> None:
+    def test_process_without_on_start_raises(self, factory: RecorderFactory) -> None:
         """Processing without on_start() raises RuntimeError.
 
         Verifies the lifecycle protocol: on_start() must be called before
-        process(). Without it, the recorder is None and client creation fails.
+        process(). Without it, the factory is None and client creation fails.
         """
-        run_id, _, state_id = _setup_recorder_state(recorder)
-        ctx = _make_real_context(recorder, run_id, state_id)
+        run_id, _, state_id = _setup_factory_state(factory)
+        ctx = _make_real_context(factory, run_id, state_id)
 
         transform = OpenRouterBatchLLMTransform(_make_valid_config())
         # Deliberately skip on_start()
@@ -651,10 +651,10 @@ class TestBatchOrderPreservation:
         return LandscapeDB.from_url(f"sqlite:///{tmp_path / 'audit.db'}")
 
     @pytest.fixture
-    def recorder(self, db: LandscapeDB) -> LandscapeRecorder:
-        return make_recorder(db)
+    def factory(self, db: LandscapeDB) -> RecorderFactory:
+        return make_factory(db)
 
-    def test_output_order_matches_input_order_with_delays(self, chaosllm_server, recorder: LandscapeRecorder) -> None:
+    def test_output_order_matches_input_order_with_delays(self, chaosllm_server, factory: RecorderFactory) -> None:
         """Results reassembled in input order even when workers finish out-of-order.
 
         Row 0 gets a slow response, Row 1 gets a fast response.
@@ -662,8 +662,8 @@ class TestBatchOrderPreservation:
         """
         import time
 
-        run_id, _, state_id = _setup_recorder_state(recorder)
-        ctx = _make_real_context(recorder, run_id, state_id)
+        run_id, _, state_id = _setup_factory_state(factory)
+        ctx = _make_real_context(factory, run_id, state_id)
 
         transform = OpenRouterBatchLLMTransform(_make_valid_config({"pool_size": 2}))
         transform.on_start(ctx)

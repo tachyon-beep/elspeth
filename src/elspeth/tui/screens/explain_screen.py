@@ -11,7 +11,7 @@ from sqlalchemy.exc import DatabaseError, OperationalError
 
 from elspeth.contracts import NodeType
 from elspeth.core.landscape import LandscapeDB
-from elspeth.core.landscape.recorder import LandscapeRecorder
+from elspeth.core.landscape.factory import RecorderFactory
 from elspeth.tui.types import LineageData, NodeStateInfo
 from elspeth.tui.widgets.lineage_tree import LineageTree
 from elspeth.tui.widgets.node_detail import NodeDetailPanel
@@ -148,8 +148,8 @@ class ExplainScreen:
             LoadedState on success, LoadingFailedState on failure.
         """
         try:
-            recorder = LandscapeRecorder(db)
-            nodes = recorder.get_nodes(run_id)
+            factory = RecorderFactory(db)
+            nodes = factory.data_flow.get_nodes(run_id)
 
             # Organize nodes by type
             source_nodes = [n for n in nodes if n.node_type == NodeType.SOURCE]
@@ -237,9 +237,9 @@ class ExplainScreen:
             NodeStateInfo with at minimum node_id, plugin_name, node_type,
             or None if node not found
         """
-        recorder = LandscapeRecorder(db)
+        factory = RecorderFactory(db)
         # Query by composite PK (node_id, run_id) - no post-hoc validation needed
-        node = recorder.get_node(node_id, run_id)
+        node = factory.data_flow.get_node(node_id, run_id)
 
         if node is None:
             return None

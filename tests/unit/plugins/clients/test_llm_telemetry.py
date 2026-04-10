@@ -21,7 +21,7 @@ class TestLLMClientTelemetry:
     """Tests for telemetry emission from AuditedLLMClient."""
 
     def _create_mock_recorder(self) -> MagicMock:
-        """Create a mock LandscapeRecorder that returns recorded calls."""
+        """Create a mock ExecutionRepository that returns recorded calls."""
         recorder = MagicMock()
         counter = itertools.count()
         recorder.allocate_call_index.side_effect = lambda _: next(counter)

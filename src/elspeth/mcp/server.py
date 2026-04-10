@@ -1,7 +1,7 @@
 """MCP server for ELSPETH Landscape audit database analysis.
 
 A lightweight read-only server that exposes tools for querying
-the audit trail. Uses the existing LandscapeDB and LandscapeRecorder
+the audit trail. Uses the existing LandscapeDB and RecorderFactory
 infrastructure.
 
 Usage:

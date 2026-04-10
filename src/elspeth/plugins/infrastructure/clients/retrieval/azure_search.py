@@ -15,7 +15,7 @@ from elspeth.plugins.infrastructure.clients.retrieval.base import RetrievalError
 from elspeth.plugins.infrastructure.clients.retrieval.types import RetrievalChunk
 
 if TYPE_CHECKING:
-    from elspeth.core.landscape.recorder import LandscapeRecorder
+    from elspeth.core.landscape.execution_repository import ExecutionRepository
     from elspeth.core.rate_limit.limiter import RateLimiter
     from elspeth.core.rate_limit.registry import NoOpLimiter
     from elspeth.plugins.infrastructure.clients.base import TelemetryEmitCallback
@@ -112,7 +112,7 @@ class AzureSearchProvider:
         self,
         config: AzureSearchProviderConfig,
         *,
-        recorder: LandscapeRecorder,
+        execution: ExecutionRepository,
         run_id: str,
         telemetry_emit: TelemetryEmitCallback,
         limiter: RateLimiter | NoOpLimiter | None = None,
@@ -120,7 +120,7 @@ class AzureSearchProvider:
         from elspeth.plugins.infrastructure.clients.http import AuditedHTTPClient
 
         self._config = config
-        self._recorder = recorder
+        self._execution = execution
         self._run_id = run_id
         self._telemetry_emit = telemetry_emit
         self._limiter = limiter
@@ -139,7 +139,7 @@ class AzureSearchProvider:
         if self._config.api_key:
             headers["api-key"] = self._config.api_key
         self._http_client = AuditedHTTPClient(
-            recorder=self._recorder,
+            execution=self._execution,
             state_id="__init__",  # Updated per-call in _execute_search
             run_id=self._run_id,
             telemetry_emit=self._telemetry_emit,

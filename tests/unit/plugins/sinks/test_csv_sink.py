@@ -9,7 +9,7 @@ import pytest
 from elspeth.contracts.plugin_context import PluginContext
 from tests.fixtures.base_classes import inject_write_failure
 from tests.fixtures.factories import make_context
-from tests.fixtures.landscape import make_recorder
+from tests.fixtures.landscape import make_factory
 
 # Strict schema config for tests - PathConfig now requires schema
 # CSVSink requires fixed-column structure, so we use strict mode
@@ -23,8 +23,8 @@ class TestCSVSink:
     @pytest.fixture
     def ctx(self) -> PluginContext:
         """Create a minimal plugin context."""
-        recorder = make_recorder()
-        return make_context(landscape=recorder)
+        factory = make_factory()
+        return make_context(landscape=factory)
 
     def test_write_creates_file(self, tmp_path: Path, ctx: PluginContext) -> None:
         """write() creates CSV file with headers."""
@@ -414,8 +414,8 @@ class TestCSVSinkSchemaValidation:
         """Dynamic schema uses first row's keys as column headers."""
         from elspeth.plugins.sinks.csv_sink import CSVSink
 
-        recorder = make_recorder()
-        ctx = make_context(landscape=recorder)
+        factory = make_factory()
+        ctx = make_context(landscape=factory)
         sink = inject_write_failure(
             CSVSink(
                 {
@@ -438,8 +438,8 @@ class TestCSVSinkSchemaValidation:
         """After first write, new fields are rejected (infer-and-lock)."""
         from elspeth.plugins.sinks.csv_sink import CSVSink
 
-        recorder = make_recorder()
-        ctx = make_context(landscape=recorder)
+        factory = make_factory()
+        ctx = make_context(landscape=factory)
         sink = inject_write_failure(
             CSVSink(
                 {
@@ -466,8 +466,8 @@ class TestCSVSinkSchemaValidation:
         """
         from elspeth.plugins.sinks.csv_sink import CSVSink
 
-        recorder = make_recorder()
-        ctx = make_context(landscape=recorder)
+        factory = make_factory()
+        ctx = make_context(landscape=factory)
         # Schema declares only 'id', but first row has 'id', 'name', 'extra'
         flexible_schema = {"mode": "flexible", "fields": ["id: int"]}
         sink = inject_write_failure(
@@ -504,8 +504,8 @@ class TestCSVSinkSchemaValidation:
         """Flexible mode should place declared fields before extras for predictability."""
         from elspeth.plugins.sinks.csv_sink import CSVSink
 
-        recorder = make_recorder()
-        ctx = make_context(landscape=recorder)
+        factory = make_factory()
+        ctx = make_context(landscape=factory)
         # Schema declares 'id' and 'name'
         flexible_schema = {"mode": "flexible", "fields": ["id: int", "name: str"]}
         sink = inject_write_failure(

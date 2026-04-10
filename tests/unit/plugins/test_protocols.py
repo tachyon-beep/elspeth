@@ -8,7 +8,7 @@ from elspeth.contracts import PipelineRow, SourceRow
 from elspeth.contracts.schema import SchemaConfig
 from elspeth.testing import make_contract, make_pipeline_row
 from tests.fixtures.factories import make_context
-from tests.fixtures.landscape import make_recorder
+from tests.fixtures.landscape import make_factory
 
 
 class TestSourceProtocol:
@@ -69,8 +69,8 @@ class TestSourceProtocol:
         _conforms = isinstance(source, SourceProtocol)
         assert _conforms, "Source must conform to SourceProtocol"
 
-        recorder = make_recorder()
-        ctx = make_context(landscape=recorder)
+        factory = make_factory()
+        ctx = make_context(landscape=factory)
 
         source_rows = list(source.load(ctx))
         assert len(source_rows) == 3
@@ -201,8 +201,8 @@ class TestTransformProtocol:
         _conforms = isinstance(transform, TransformProtocol)
         assert _conforms, "Must conform to TransformProtocol"
 
-        recorder = make_recorder()
-        ctx = make_context(landscape=recorder)
+        factory = make_factory()
+        ctx = make_context(landscape=factory)
 
         result = transform.process(make_pipeline_row({"value": 21}), ctx)
         assert result.status == "success"
@@ -234,8 +234,8 @@ class TestTransformBatchSupport:
                 return TransformResult.success(make_pipeline_row({"processed": row["value"]}), success_reason={"action": "test"})
 
         transform = SingleTransform({})
-        recorder = make_recorder()
-        ctx = make_context(landscape=recorder)
+        factory = make_factory()
+        ctx = make_context(landscape=factory)
         result = transform.process(make_pipeline_row({"value": 1}), ctx)
         assert result.row is not None
         assert result.row.to_dict() == {"processed": 1}
@@ -269,8 +269,8 @@ class TestTransformBatchSupport:
                 return TransformResult.success(make_pipeline_row({"value": row["value"]}), success_reason={"action": "test"})
 
         transform = BatchTransform({})
-        recorder = make_recorder()
-        ctx = make_context(landscape=recorder)
+        factory = make_factory()
+        ctx = make_context(landscape=factory)
 
         # Batch mode
         result = transform.process([make_pipeline_row({"value": 1}), make_pipeline_row({"value": 2}), make_pipeline_row({"value": 3})], ctx)
@@ -478,8 +478,8 @@ class TestSinkProtocol:
         _conforms = isinstance(sink, SinkProtocol)
         assert _conforms, "Must conform to SinkProtocol"
 
-        recorder = make_recorder()
-        ctx = make_context(landscape=recorder)
+        factory = make_factory()
+        ctx = make_context(landscape=factory)
         result = sink.write([{"value": 1}, {"value": 2}], ctx)
 
         assert isinstance(result.artifact, ArtifactDescriptor)
@@ -560,8 +560,8 @@ class TestSinkProtocol:
         _conforms = isinstance(sink, SinkProtocol)
         assert _conforms, "Must conform to SinkProtocol"
 
-        recorder = make_recorder()
-        ctx = make_context(landscape=recorder)
+        factory = make_factory()
+        ctx = make_context(landscape=factory)
 
         # Batch write
         result = sink.write([{"value": 1}, {"value": 2}], ctx)

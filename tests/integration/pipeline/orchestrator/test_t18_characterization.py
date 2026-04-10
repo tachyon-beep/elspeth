@@ -29,7 +29,7 @@ from elspeth.contracts.schema_contract import FieldContract, SchemaContract
 from elspeth.core.config import AggregationSettings, SourceSettings, TriggerConfig
 from elspeth.core.dag import ExecutionGraph
 from elspeth.core.landscape import LandscapeDB
-from elspeth.core.landscape.recorder import LandscapeRecorder
+from elspeth.core.landscape.factory import RecorderFactory
 from elspeth.engine.orchestrator import Orchestrator, PipelineConfig
 from elspeth.plugins.infrastructure.base import BaseTransform
 from elspeth.plugins.infrastructure.results import TransformResult
@@ -102,22 +102,22 @@ class DoubleValueTransform(_TestTransformBase):
 
 
 # ---------------------------------------------------------------------------
-# Helper: set up recorder + run_id for direct _execute_run() calls
+# Helper: set up factory + run_id for direct _execute_run() calls
 # ---------------------------------------------------------------------------
 
 
-def _begin_test_run(db: LandscapeDB) -> tuple[LandscapeRecorder, str, MockPayloadStore]:
-    """Create a recorder and begin a run for testing.
+def _begin_test_run(db: LandscapeDB) -> tuple[RecorderFactory, str, MockPayloadStore]:
+    """Create a factory and begin a run for testing.
 
-    Returns (recorder, run_id, payload_store).
+    Returns (factory, run_id, payload_store).
     """
     payload_store = MockPayloadStore()
-    recorder = LandscapeRecorder(db, payload_store=payload_store)
-    run = recorder.begin_run(
+    factory = RecorderFactory(db, payload_store=payload_store)
+    run = factory.run_lifecycle.begin_run(
         config={},
         canonical_version="sha256-rfc8785-v1",
     )
-    return recorder, run.run_id, payload_store
+    return factory, run.run_id, payload_store
 
 
 # ---------------------------------------------------------------------------
@@ -181,10 +181,10 @@ class TestT18CharacterizationExecuteRun:
         orchestrator = Orchestrator(db)
 
         graph = build_production_graph(config)
-        recorder, run_id, payload_store = _begin_test_run(db)
+        factory, run_id, payload_store = _begin_test_run(db)
 
         result = orchestrator._execute_run(
-            recorder=recorder,
+            factory=factory,
             run_id=run_id,
             config=config,
             graph=graph,
@@ -207,10 +207,10 @@ class TestT18CharacterizationExecuteRun:
         orchestrator = Orchestrator(db)
 
         graph = build_production_graph(config)
-        recorder, run_id, payload_store = _begin_test_run(db)
+        factory, run_id, payload_store = _begin_test_run(db)
 
         orchestrator._execute_run(
-            recorder=recorder,
+            factory=factory,
             run_id=run_id,
             config=config,
             graph=graph,
@@ -234,7 +234,7 @@ class TestT18CharacterizationExecuteRun:
         orchestrator = Orchestrator(db)
 
         graph = build_production_graph(config)
-        recorder, run_id, payload_store = _begin_test_run(db)
+        factory, run_id, payload_store = _begin_test_run(db)
 
         captured_operation_ids: list[str | None] = []
         original_process = transform.process
@@ -245,7 +245,7 @@ class TestT18CharacterizationExecuteRun:
 
         with patch.object(transform, "process", side_effect=spy_process):
             orchestrator._execute_run(
-                recorder=recorder,
+                factory=factory,
                 run_id=run_id,
                 config=config,
                 graph=graph,
@@ -271,10 +271,10 @@ class TestT18CharacterizationExecuteRun:
         orchestrator = Orchestrator(db)
 
         graph = build_production_graph(config)
-        recorder, run_id, payload_store = _begin_test_run(db)
+        factory, run_id, payload_store = _begin_test_run(db)
 
         orchestrator._execute_run(
-            recorder=recorder,
+            factory=factory,
             run_id=run_id,
             config=config,
             graph=graph,
@@ -304,10 +304,10 @@ class TestT18CharacterizationExecuteRun:
         orchestrator = Orchestrator(db)
 
         graph = build_production_graph(config)
-        recorder, run_id, payload_store = _begin_test_run(db)
+        factory, run_id, payload_store = _begin_test_run(db)
 
         orchestrator._execute_run(
-            recorder=recorder,
+            factory=factory,
             run_id=run_id,
             config=config,
             graph=graph,
@@ -366,11 +366,11 @@ class TestT18CharacterizationExecuteRun:
         )
 
         graph = build_production_graph(config)
-        recorder, run_id, payload_store = _begin_test_run(db)
+        factory, run_id, payload_store = _begin_test_run(db)
 
         with pytest.raises(RuntimeError, match="deliberate error"):
             orchestrator._execute_run(
-                recorder=recorder,
+                factory=factory,
                 run_id=run_id,
                 config=config,
                 graph=graph,
@@ -433,11 +433,11 @@ class TestT18CharacterizationResumePath:
         )
 
         graph = build_production_graph(config)
-        recorder, run_id, payload_store = _begin_test_run(db)
+        factory, run_id, payload_store = _begin_test_run(db)
 
         # First: run the full pipeline to populate DB with rows, nodes, edges
         orchestrator._execute_run(
-            recorder=recorder,
+            factory=factory,
             run_id=run_id,
             config=config,
             graph=graph,
@@ -474,7 +474,7 @@ class TestT18CharacterizationResumePath:
 
         # Resume with the real row_id from the original run
         orchestrator._process_resumed_rows(
-            recorder=recorder,
+            factory=factory,
             run_id=run_id,
             config=config,
             graph=graph,
@@ -543,11 +543,11 @@ class TestT18CharacterizationResumePath:
         )
 
         graph = build_production_graph(config)
-        recorder, run_id, payload_store = _begin_test_run(db)
+        factory, run_id, payload_store = _begin_test_run(db)
 
         # First: run the full pipeline to populate DB with nodes, edges, etc.
         orchestrator._execute_run(
-            recorder=recorder,
+            factory=factory,
             run_id=run_id,
             config=config,
             graph=graph,
@@ -584,7 +584,7 @@ class TestT18CharacterizationResumePath:
         # Call _process_resumed_rows directly with empty rows
         with patch.object(output_sink, "on_start", side_effect=tracking_sink_on_start):
             result = orchestrator._process_resumed_rows(
-                recorder=recorder,
+                factory=factory,
                 run_id=run_id,
                 config=config,
                 graph=graph,
@@ -717,10 +717,10 @@ class TestT18CharacterizationAggregation:
         _source, _transform, output_sink, config, graph = _build_aggregation_pipeline()
         db = make_landscape_db()
         orchestrator = Orchestrator(db)
-        recorder, run_id, payload_store = _begin_test_run(db)
+        factory, run_id, payload_store = _begin_test_run(db)
 
         result = orchestrator._execute_run(
-            recorder=recorder,
+            factory=factory,
             run_id=run_id,
             config=config,
             graph=graph,
@@ -739,10 +739,10 @@ class TestT18CharacterizationAggregation:
         _source, _transform, output_sink, config, graph = _build_aggregation_pipeline()
         db = make_landscape_db()
         orchestrator = Orchestrator(db)
-        recorder, run_id, payload_store = _begin_test_run(db)
+        factory, run_id, payload_store = _begin_test_run(db)
 
         orchestrator._execute_run(
-            recorder=recorder,
+            factory=factory,
             run_id=run_id,
             config=config,
             graph=graph,
@@ -770,10 +770,10 @@ class TestT18CharacterizationAggregation:
         _source, _transform, output_sink, config, graph = _build_aggregation_pipeline()
         db = make_landscape_db()
         orchestrator = Orchestrator(db)
-        recorder, run_id, payload_store = _begin_test_run(db)
+        factory, run_id, payload_store = _begin_test_run(db)
 
         orchestrator._execute_run(
-            recorder=recorder,
+            factory=factory,
             run_id=run_id,
             config=config,
             graph=graph,

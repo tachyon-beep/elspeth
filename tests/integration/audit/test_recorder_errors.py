@@ -1,4 +1,4 @@
-"""Tests for LandscapeRecorder error recording and status enum coercion."""
+"""Tests for Landscape error recording and status enum coercion."""
 
 from __future__ import annotations
 
@@ -9,7 +9,8 @@ from elspeth.contracts.audit import TokenRef
 from elspeth.contracts.schema import SchemaConfig
 
 if TYPE_CHECKING:
-    from elspeth.core.landscape.recorder import LandscapeRecorder
+    from elspeth.core.landscape.data_flow_repository import DataFlowRepository
+    from elspeth.core.landscape.database import LandscapeDB
 
 # Dynamic schema for tests that don't care about specific fields
 DYNAMIC_SCHEMA = SchemaConfig.from_dict({"mode": "observed"})
@@ -19,7 +20,9 @@ class TestTransformErrorRecording:
     """Tests for transform error recording in landscape."""
 
     @staticmethod
-    def _create_token_with_dependencies(recorder: LandscapeRecorder, run_id: str, token_id: str, transform_id: str) -> None:
+    def _create_token_with_dependencies(
+        data_flow: DataFlowRepository, db: LandscapeDB, run_id: str, token_id: str, transform_id: str
+    ) -> None:
         """Helper to create token with dependencies for FK constraints.
 
         Bug fix: P2-2026-01-19-error-tables-missing-foreign-keys
@@ -29,7 +32,7 @@ class TestTransformErrorRecording:
         from elspeth.contracts.schema import SchemaConfig
 
         # Create source node
-        recorder.register_node(
+        data_flow.register_node(
             run_id=run_id,
             plugin_name="test_source",
             node_type=NodeType.SOURCE,
@@ -40,7 +43,7 @@ class TestTransformErrorRecording:
             sequence=0,
         )
         # Create row
-        row = recorder.create_row(
+        row = data_flow.create_row(
             run_id=run_id,
             source_node_id="source_test",
             row_index=1,
@@ -51,7 +54,7 @@ class TestTransformErrorRecording:
 
         from elspeth.core.landscape.schema import tokens_table
 
-        with recorder._db.connection() as conn:
+        with db.connection() as conn:
             conn.execute(
                 tokens_table.insert().values(
                     token_id=token_id,
@@ -63,7 +66,7 @@ class TestTransformErrorRecording:
             )
             conn.commit()
         # Create transform node for transform_id FK
-        recorder.register_node(
+        data_flow.register_node(
             run_id=run_id,
             plugin_name="test_transform",
             node_type=NodeType.TRANSFORM,
@@ -77,17 +80,17 @@ class TestTransformErrorRecording:
     def test_record_transform_error_returns_error_id(self) -> None:
         """record_transform_error returns an error_id."""
         from elspeth.core.landscape.database import LandscapeDB
-        from elspeth.core.landscape.recorder import LandscapeRecorder
+        from elspeth.core.landscape.factory import RecorderFactory
 
         db = LandscapeDB.in_memory()
-        recorder = LandscapeRecorder(db)
+        factory = RecorderFactory(db)
 
-        run = recorder.begin_run(config={}, canonical_version="v1")
+        run = factory.run_lifecycle.begin_run(config={}, canonical_version="v1")
 
         # Create token and node for FK constraints
-        self._create_token_with_dependencies(recorder, run.run_id, "tok_123", "field_mapper")
+        self._create_token_with_dependencies(factory.data_flow, db, run.run_id, "tok_123", "field_mapper")
 
-        error_id = recorder.record_transform_error(
+        error_id = factory.data_flow.record_transform_error(
             ref=TokenRef(token_id="tok_123", run_id=run.run_id),
             transform_id="field_mapper",
             row_data={"id": 42, "value": "bad"},
@@ -103,18 +106,18 @@ class TestTransformErrorRecording:
         from sqlalchemy import select
 
         from elspeth.core.landscape.database import LandscapeDB
-        from elspeth.core.landscape.recorder import LandscapeRecorder
+        from elspeth.core.landscape.factory import RecorderFactory
         from elspeth.core.landscape.schema import transform_errors_table
 
         db = LandscapeDB.in_memory()
-        recorder = LandscapeRecorder(db)
+        factory = RecorderFactory(db)
 
-        run = recorder.begin_run(config={}, canonical_version="v1")
+        run = factory.run_lifecycle.begin_run(config={}, canonical_version="v1")
 
         # Create token and node for FK constraints
-        self._create_token_with_dependencies(recorder, run.run_id, "tok_456", "field_mapper")
+        self._create_token_with_dependencies(factory.data_flow, db, run.run_id, "tok_456", "field_mapper")
 
-        error_id = recorder.record_transform_error(
+        error_id = factory.data_flow.record_transform_error(
             ref=TokenRef(token_id="tok_456", run_id=run.run_id),
             transform_id="field_mapper",
             row_data={"id": 42, "value": "bad"},
@@ -143,21 +146,21 @@ class TestTransformErrorRecording:
 
         from elspeth.core.canonical import stable_hash
         from elspeth.core.landscape.database import LandscapeDB
-        from elspeth.core.landscape.recorder import LandscapeRecorder
+        from elspeth.core.landscape.factory import RecorderFactory
         from elspeth.core.landscape.schema import transform_errors_table
 
         db = LandscapeDB.in_memory()
-        recorder = LandscapeRecorder(db)
+        factory = RecorderFactory(db)
 
-        run = recorder.begin_run(config={}, canonical_version="v1")
+        run = factory.run_lifecycle.begin_run(config={}, canonical_version="v1")
 
         # Create token and node for FK constraints
-        self._create_token_with_dependencies(recorder, run.run_id, "tok_789", "processor")
+        self._create_token_with_dependencies(factory.data_flow, db, run.run_id, "tok_789", "processor")
 
         row_data = {"id": 42, "value": "bad"}
         expected_hash = stable_hash(row_data)
 
-        error_id = recorder.record_transform_error(
+        error_id = factory.data_flow.record_transform_error(
             ref=TokenRef(token_id="tok_789", run_id=run.run_id),
             transform_id="processor",
             row_data=row_data,
@@ -177,18 +180,18 @@ class TestTransformErrorRecording:
         from sqlalchemy import select
 
         from elspeth.core.landscape.database import LandscapeDB
-        from elspeth.core.landscape.recorder import LandscapeRecorder
+        from elspeth.core.landscape.factory import RecorderFactory
         from elspeth.core.landscape.schema import transform_errors_table
 
         db = LandscapeDB.in_memory()
-        recorder = LandscapeRecorder(db)
+        factory = RecorderFactory(db)
 
-        run = recorder.begin_run(config={}, canonical_version="v1")
+        run = factory.run_lifecycle.begin_run(config={}, canonical_version="v1")
 
         # Create token and node for FK constraints
-        self._create_token_with_dependencies(recorder, run.run_id, "tok_999", "gate")
+        self._create_token_with_dependencies(factory.data_flow, db, run.run_id, "tok_999", "gate")
 
-        error_id = recorder.record_transform_error(
+        error_id = factory.data_flow.record_transform_error(
             ref=TokenRef(token_id="tok_999", run_id=run.run_id),
             transform_id="gate",
             row_data={"id": 1},
@@ -214,21 +217,21 @@ class TestTransformErrorRecording:
         from sqlalchemy import select
 
         from elspeth.core.landscape.database import LandscapeDB
-        from elspeth.core.landscape.recorder import LandscapeRecorder
+        from elspeth.core.landscape.factory import RecorderFactory
         from elspeth.core.landscape.schema import transform_errors_table
 
         db = LandscapeDB.in_memory()
-        recorder = LandscapeRecorder(db)
+        factory = RecorderFactory(db)
 
-        run = recorder.begin_run(config={}, canonical_version="v1")
+        run = factory.run_lifecycle.begin_run(config={}, canonical_version="v1")
 
-        self._create_token_with_dependencies(recorder, run.run_id, "tok_nan", "processor")
+        self._create_token_with_dependencies(factory.data_flow, db, run.run_id, "tok_nan", "processor")
 
         # Row with NaN — valid float, passes source validation, but
         # canonical_json rejects it (RFC 8785 forbids NaN/Infinity)
         row_data = {"id": 42, "score": float("nan"), "label": "test"}
 
-        error_id = recorder.record_transform_error(
+        error_id = factory.data_flow.record_transform_error(
             ref=TokenRef(token_id="tok_nan", run_id=run.run_id),
             transform_id="processor",
             row_data=row_data,
@@ -257,19 +260,19 @@ class TestTransformErrorRecording:
         from sqlalchemy import select
 
         from elspeth.core.landscape.database import LandscapeDB
-        from elspeth.core.landscape.recorder import LandscapeRecorder
+        from elspeth.core.landscape.factory import RecorderFactory
         from elspeth.core.landscape.schema import transform_errors_table
 
         db = LandscapeDB.in_memory()
-        recorder = LandscapeRecorder(db)
+        factory = RecorderFactory(db)
 
-        run = recorder.begin_run(config={}, canonical_version="v1")
+        run = factory.run_lifecycle.begin_run(config={}, canonical_version="v1")
 
-        self._create_token_with_dependencies(recorder, run.run_id, "tok_inf", "processor")
+        self._create_token_with_dependencies(factory.data_flow, db, run.run_id, "tok_inf", "processor")
 
         row_data = {"id": 1, "value": float("inf")}
 
-        error_id = recorder.record_transform_error(
+        error_id = factory.data_flow.record_transform_error(
             ref=TokenRef(token_id="tok_inf", run_id=run.run_id),
             transform_id="processor",
             row_data=row_data,
@@ -299,15 +302,15 @@ class TestExportStatusEnumCoercion:
         """get_run() returns ExportStatus enum, not raw string."""
         from elspeth.contracts import ExportStatus
         from elspeth.core.landscape.database import LandscapeDB
-        from elspeth.core.landscape.recorder import LandscapeRecorder
+        from elspeth.core.landscape.factory import RecorderFactory
 
         db = LandscapeDB.in_memory()
-        recorder = LandscapeRecorder(db)
+        factory = RecorderFactory(db)
 
-        run = recorder.begin_run(config={}, canonical_version="v1")
-        recorder.set_export_status(run.run_id, ExportStatus.COMPLETED)
+        run = factory.run_lifecycle.begin_run(config={}, canonical_version="v1")
+        factory.run_lifecycle.set_export_status(run.run_id, ExportStatus.COMPLETED)
 
-        loaded = recorder.get_run(run.run_id)
+        loaded = factory.run_lifecycle.get_run(run.run_id)
 
         assert loaded is not None
         assert loaded.export_status is not None
@@ -320,15 +323,15 @@ class TestExportStatusEnumCoercion:
         """list_runs() returns ExportStatus enum, not raw string."""
         from elspeth.contracts import ExportStatus
         from elspeth.core.landscape.database import LandscapeDB
-        from elspeth.core.landscape.recorder import LandscapeRecorder
+        from elspeth.core.landscape.factory import RecorderFactory
 
         db = LandscapeDB.in_memory()
-        recorder = LandscapeRecorder(db)
+        factory = RecorderFactory(db)
 
-        run = recorder.begin_run(config={}, canonical_version="v1")
-        recorder.set_export_status(run.run_id, ExportStatus.PENDING)
+        run = factory.run_lifecycle.begin_run(config={}, canonical_version="v1")
+        factory.run_lifecycle.set_export_status(run.run_id, ExportStatus.PENDING)
 
-        runs = recorder.list_runs()
+        runs = factory.run_lifecycle.list_runs()
 
         assert len(runs) == 1
         assert isinstance(runs[0].export_status, ExportStatus), (
@@ -339,22 +342,22 @@ class TestExportStatusEnumCoercion:
         """Transitioning from failed to completed clears export_error."""
         from elspeth.contracts import ExportStatus
         from elspeth.core.landscape.database import LandscapeDB
-        from elspeth.core.landscape.recorder import LandscapeRecorder
+        from elspeth.core.landscape.factory import RecorderFactory
 
         db = LandscapeDB.in_memory()
-        recorder = LandscapeRecorder(db)
+        factory = RecorderFactory(db)
 
-        run = recorder.begin_run(config={}, canonical_version="v1")
+        run = factory.run_lifecycle.begin_run(config={}, canonical_version="v1")
 
         # First fail with an error
-        recorder.set_export_status(run.run_id, ExportStatus.FAILED, error="export failed")
-        r1 = recorder.get_run(run.run_id)
+        factory.run_lifecycle.set_export_status(run.run_id, ExportStatus.FAILED, error="export failed")
+        r1 = factory.run_lifecycle.get_run(run.run_id)
         assert r1 is not None
         assert r1.export_error == "export failed"
 
         # Now complete - error should be cleared
-        recorder.set_export_status(run.run_id, ExportStatus.COMPLETED)
-        r2 = recorder.get_run(run.run_id)
+        factory.run_lifecycle.set_export_status(run.run_id, ExportStatus.COMPLETED)
+        r2 = factory.run_lifecycle.get_run(run.run_id)
         assert r2 is not None
         assert r2.export_error is None, f"export_error should be cleared on completed, got {r2.export_error!r}"
 
@@ -362,19 +365,19 @@ class TestExportStatusEnumCoercion:
         """Transitioning from failed to pending clears export_error."""
         from elspeth.contracts import ExportStatus
         from elspeth.core.landscape.database import LandscapeDB
-        from elspeth.core.landscape.recorder import LandscapeRecorder
+        from elspeth.core.landscape.factory import RecorderFactory
 
         db = LandscapeDB.in_memory()
-        recorder = LandscapeRecorder(db)
+        factory = RecorderFactory(db)
 
-        run = recorder.begin_run(config={}, canonical_version="v1")
+        run = factory.run_lifecycle.begin_run(config={}, canonical_version="v1")
 
         # First fail with an error
-        recorder.set_export_status(run.run_id, ExportStatus.FAILED, error="export failed")
+        factory.run_lifecycle.set_export_status(run.run_id, ExportStatus.FAILED, error="export failed")
 
         # Now set to pending - error should be cleared
-        recorder.set_export_status(run.run_id, ExportStatus.PENDING)
-        r = recorder.get_run(run.run_id)
+        factory.run_lifecycle.set_export_status(run.run_id, ExportStatus.PENDING)
+        r = factory.run_lifecycle.get_run(run.run_id)
         assert r is not None
         assert r.export_error is None
 
@@ -382,16 +385,16 @@ class TestExportStatusEnumCoercion:
         """set_export_status() accepts ExportStatus enum as well as string."""
         from elspeth.contracts import ExportStatus
         from elspeth.core.landscape.database import LandscapeDB
-        from elspeth.core.landscape.recorder import LandscapeRecorder
+        from elspeth.core.landscape.factory import RecorderFactory
 
         db = LandscapeDB.in_memory()
-        recorder = LandscapeRecorder(db)
+        factory = RecorderFactory(db)
 
-        run = recorder.begin_run(config={}, canonical_version="v1")
+        run = factory.run_lifecycle.begin_run(config={}, canonical_version="v1")
 
         # Pass enum directly
-        recorder.set_export_status(run.run_id, ExportStatus.COMPLETED)
+        factory.run_lifecycle.set_export_status(run.run_id, ExportStatus.COMPLETED)
 
-        r = recorder.get_run(run.run_id)
+        r = factory.run_lifecycle.get_run(run.run_id)
         assert r is not None
         assert r.export_status == ExportStatus.COMPLETED

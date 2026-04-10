@@ -33,7 +33,7 @@ from elspeth.core.checkpoint.compatibility import CheckpointCompatibilityValidat
 from elspeth.core.checkpoint.manager import CheckpointCorruptionError, CheckpointManager, IncompatibleCheckpointError
 from elspeth.core.checkpoint.serialization import checkpoint_loads
 from elspeth.core.landscape.database import LandscapeDB
-from elspeth.core.landscape.recorder import LandscapeRecorder
+from elspeth.core.landscape.factory import RecorderFactory
 from elspeth.core.landscape.schema import (
     rows_table,
     runs_table,
@@ -526,10 +526,10 @@ class RecoveryManager:
                 Per CLAUDE.md Tier-1 trust model: "Bad data in the audit trail = crash immediately"
                 Missing contract is treated as corruption - NO backward compatibility.
         """
-        recorder = LandscapeRecorder(self._db)
+        factory = RecorderFactory(self._db)
 
         try:
-            contract = recorder.get_run_contract(run_id)
+            contract = factory.run_lifecycle.get_run_contract(run_id)
         except AuditIntegrityError as e:
             # get_run_contract raises AuditIntegrityError for hash verification failures
             # and run-not-found. Convert to CheckpointCorruptionError for checkpoint-specific context.

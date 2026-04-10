@@ -9,7 +9,7 @@ Example:
 
     # Create audited LLM client
     llm_client = AuditedLLMClient(
-        recorder=recorder,
+        execution=execution,
         state_id=state_id,
         run_id=run_id,
         telemetry_emit=telemetry_emit,
@@ -27,14 +27,14 @@ For replay mode, use CallReplayer to return recorded responses:
 
     from elspeth.plugins.infrastructure.clients import CallReplayer, ReplayMissError
 
-    replayer = CallReplayer(recorder, source_run_id="run-abc123")
+    replayer = CallReplayer(execution, source_run_id="run-abc123")
     result = replayer.replay(call_type="llm", request_data={...})
 
 For verify mode, use CallVerifier to compare live responses to recorded:
 
     from elspeth.plugins.infrastructure.clients import CallVerifier
 
-    verifier = CallVerifier(recorder, source_run_id="run-abc123")
+    verifier = CallVerifier(execution, source_run_id="run-abc123")
     result = verifier.verify(
         call_type="llm",
         request_data={...},

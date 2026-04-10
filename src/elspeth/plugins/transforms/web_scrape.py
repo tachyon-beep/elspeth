@@ -264,6 +264,7 @@ class WebScrapeTransform(BaseTransform):
         if ctx.rate_limit_registry is None:
             raise RuntimeError("WebScrapeTransform requires rate_limit_registry")
         self._recorder = ctx.landscape
+        self._payload_store = ctx.payload_store
         self._limiter = ctx.rate_limit_registry
         self._telemetry_emit = ctx.telemetry_emit
 
@@ -341,14 +342,19 @@ class WebScrapeTransform(BaseTransform):
         if call.request_ref is None or call.response_ref is None:
             raise FrameworkBugError(
                 "AuditedHTTPClient returned a Call with no request_ref/response_ref — "
-                "LandscapeRecorder must be configured with a payload_store for "
+                "PayloadStore must be configured for "
                 "hash-based audit provenance in WebScrapeTransform."
             )
         request_hash = call.request_ref
         response_raw_hash = call.response_ref
 
-        # Store processed content via recorder (transform-produced artifact)
-        response_processed_hash = self._recorder.store_payload(content.encode(), purpose="processed_content")  # type: ignore[attr-defined]  # Task 6: store_payload will be on PluginAuditWriter or separate protocol
+        # Store processed content via PayloadStore (transform-produced artifact)
+        if self._payload_store is None:
+            raise FrameworkBugError(
+                "PayloadStore required but PluginContext has no payload_store. "
+                "Orchestrator must configure payload_store for web-scrape transforms."
+            )
+        response_processed_hash = self._payload_store.store(content.encode())
 
         # Enrich row with scraped data — operational fields only
         # Use explicit to_dict() conversion (PipelineRow guaranteed by engine)
@@ -401,7 +407,7 @@ class WebScrapeTransform(BaseTransform):
 
         # Create audited client (records to Landscape)
         client = AuditedHTTPClient(
-            recorder=self._recorder,  # type: ignore[arg-type]  # Task 6: AuditedHTTPClient will accept PluginAuditWriter
+            execution=self._recorder,  # type: ignore[arg-type]  # PluginAuditWriter structurally matches ExecutionRepository for client methods
             state_id=ctx.state_id,
             run_id=ctx.run_id,
             telemetry_emit=self._telemetry_emit,

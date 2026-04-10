@@ -385,7 +385,7 @@ def test_web_scrape_payload_storage(mock_ctx):
 def test_web_scrape_framework_bug_error_when_call_refs_none(mock_ctx):
     """FrameworkBugError raised when Call.request_ref or response_ref is None.
 
-    This guards against a misconfigured LandscapeRecorder (no payload_store),
+    This guards against a misconfigured PayloadStore (no payload_store),
     which would produce Calls with None refs and silently lose audit provenance.
     """
     from elspeth.contracts.errors import FrameworkBugError

@@ -30,7 +30,7 @@ def _make_contract(fields: list[Any] | None = None) -> SchemaContract:
 
 
 def _make_mock_recorder() -> MagicMock:
-    """Create a mock LandscapeRecorder."""
+    """Create a mock ExecutionRepository."""
     recorder = MagicMock()
     recorder.create_row.return_value = Mock(row_id="row_001")
     recorder.create_token.return_value = Mock(token_id="token_001")
