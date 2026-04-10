@@ -121,7 +121,7 @@ class TestProcessorRejectsDuckTypedPlugins:
             traversal=_single_node_traversal(duck_node_id, duck),
         )
 
-        ctx = make_context(run_id=run_id, landscape=factory)
+        ctx = make_context(run_id=run_id, landscape=factory.plugin_audit_writer())
 
         with pytest.raises(TypeError, match="Unknown transform type"):
             processor.process_row(

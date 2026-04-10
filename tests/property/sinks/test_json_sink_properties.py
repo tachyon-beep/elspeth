@@ -69,7 +69,7 @@ class TestJSONSinkProperties:
             )
             db = make_landscape_db()
             factory = make_factory(db)
-            ctx = make_context(landscape=factory)
+            ctx = make_context(landscape=factory.plugin_audit_writer())
 
             result = sink.write(rows, ctx)
             sink.close()
@@ -95,7 +95,7 @@ class TestJSONSinkProperties:
             )
             db = make_landscape_db()
             factory = make_factory(db)
-            ctx = make_context(landscape=factory)
+            ctx = make_context(landscape=factory.plugin_audit_writer())
 
             result = sink.write(rows, ctx)
             sink.close()

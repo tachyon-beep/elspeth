@@ -65,7 +65,7 @@ class TestCSVSourceContract(SourceContractPropertyTestBase):
         source.on_success = "output"
         db = make_landscape_db()
         factory = make_factory(db)
-        ctx = make_context(landscape=factory)
+        ctx = make_context(landscape=factory.plugin_audit_writer())
 
         rows = list(source.load(ctx))
         assert len(rows) == 2
@@ -96,7 +96,7 @@ class TestCSVSourceContract(SourceContractPropertyTestBase):
         source.on_success = "output"
         db = make_landscape_db()
         factory = make_factory(db)
-        ctx = make_context(landscape=factory)
+        ctx = make_context(landscape=factory.plugin_audit_writer())
 
         # Empty file returns no rows gracefully (no error)
         rows = list(source.load(ctx))
@@ -117,7 +117,7 @@ class TestCSVSourceContract(SourceContractPropertyTestBase):
         source.on_success = "output"
         db = make_landscape_db()
         factory = make_factory(db)
-        ctx = make_context(landscape=factory)
+        ctx = make_context(landscape=factory.plugin_audit_writer())
 
         rows = list(source.load(ctx))
         assert rows == []
@@ -141,7 +141,7 @@ class TestCSVSourceQuarantineContract(SourceContractPropertyTestBase):
         )
         return make_context(
             run_id=setup.run_id,
-            landscape=setup.factory,
+            landscape=setup.factory.plugin_audit_writer(),
             node_id=setup.source_node_id,
         )
 
@@ -180,7 +180,7 @@ class TestCSVSourceQuarantineContract(SourceContractPropertyTestBase):
 
         ctx = make_context(
             run_id=run_id,
-            landscape=factory,
+            landscape=factory.plugin_audit_writer(),
             node_id=setup.source_node_id,
         )
         rows = list(source.load(ctx))
@@ -242,7 +242,7 @@ class TestCSVSourceDiscardContract:
         source.on_success = "output"
         ctx = make_context(
             run_id=run_id,
-            landscape=factory,
+            landscape=factory.plugin_audit_writer(),
             node_id=setup.source_node_id,
         )
 
@@ -274,7 +274,7 @@ class TestCSVSourceFileNotFoundContract:
         source.on_success = "output"
         db = make_landscape_db()
         factory = make_factory(db)
-        ctx = make_context(landscape=factory)
+        ctx = make_context(landscape=factory.plugin_audit_writer())
 
         with pytest.raises(FileNotFoundError):
             list(source.load(ctx))

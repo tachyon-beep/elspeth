@@ -95,7 +95,7 @@ class TestCSVSinkHashVerification:
         csv_path = tmp_path / "hash_verify.csv"
         db = make_landscape_db()
         factory = make_factory(db)
-        ctx = make_context(landscape=factory)
+        ctx = make_context(landscape=factory.plugin_audit_writer())
 
         rows = [{"id": 1, "name": "Alice"}, {"id": 2, "name": "Bob"}]
         sink = inject_write_failure(CSVSink({"path": str(csv_path), "schema": {"mode": "fixed", "fields": ["id: int", "name: str"]}}))
@@ -112,7 +112,7 @@ class TestCSVSinkHashVerification:
         csv_path = tmp_path / "size_verify.csv"
         db = make_landscape_db()
         factory = make_factory(db)
-        ctx = make_context(landscape=factory)
+        ctx = make_context(landscape=factory.plugin_audit_writer())
 
         rows = [{"id": 1, "name": "Alice"}, {"id": 2, "name": "Bob"}]
         sink = inject_write_failure(CSVSink({"path": str(csv_path), "schema": {"mode": "fixed", "fields": ["id: int", "name: str"]}}))
@@ -133,7 +133,7 @@ class TestCSVSinkAppendMode:
         csv_path = tmp_path / "append_test.csv"
         db = make_landscape_db()
         factory = make_factory(db)
-        ctx = make_context(landscape=factory)
+        ctx = make_context(landscape=factory.plugin_audit_writer())
 
         sink1 = inject_write_failure(
             CSVSink(
@@ -171,7 +171,7 @@ class TestCSVSinkAppendMode:
         csv_path = tmp_path / "new_file.csv"
         db = make_landscape_db()
         factory = make_factory(db)
-        ctx = make_context(landscape=factory)
+        ctx = make_context(landscape=factory.plugin_audit_writer())
 
         assert not csv_path.exists()
 
@@ -229,7 +229,7 @@ class TestCSVSinkPropertyBased:
         )
         db = make_landscape_db()
         factory = make_factory(db)
-        ctx = make_context(landscape=factory)
+        ctx = make_context(landscape=factory.plugin_audit_writer())
 
         result = sink.write(rows, ctx)
         sink.close()
@@ -257,7 +257,7 @@ class TestCSVSinkPropertyBased:
 
         db = make_landscape_db()
         factory = make_factory(db)
-        ctx = make_context(landscape=factory)
+        ctx = make_context(landscape=factory.plugin_audit_writer())
 
         path1 = tmp_path / f"test1_{uuid.uuid4().hex[:8]}.csv"
         path2 = tmp_path / f"test2_{uuid.uuid4().hex[:8]}.csv"
@@ -283,7 +283,7 @@ class TestCSVSinkQuotingCharacters:
         csv_path = tmp_path / "quoting_commas.csv"
         db = make_landscape_db()
         factory = make_factory(db)
-        ctx = make_context(landscape=factory)
+        ctx = make_context(landscape=factory.plugin_audit_writer())
 
         rows = [{"id": 1, "data": "value with, comma"}]
         sink = inject_write_failure(CSVSink({"path": str(csv_path), "schema": {"mode": "fixed", "fields": ["id: int", "data: str"]}}))
@@ -304,7 +304,7 @@ class TestCSVSinkQuotingCharacters:
         csv_path = tmp_path / "quoting_quotes.csv"
         db = make_landscape_db()
         factory = make_factory(db)
-        ctx = make_context(landscape=factory)
+        ctx = make_context(landscape=factory.plugin_audit_writer())
 
         rows = [{"id": 1, "data": 'value with "quotes"'}]
         sink = inject_write_failure(CSVSink({"path": str(csv_path), "schema": {"mode": "fixed", "fields": ["id: int", "data: str"]}}))
@@ -325,7 +325,7 @@ class TestCSVSinkQuotingCharacters:
         csv_path = tmp_path / "quoting_newlines.csv"
         db = make_landscape_db()
         factory = make_factory(db)
-        ctx = make_context(landscape=factory)
+        ctx = make_context(landscape=factory.plugin_audit_writer())
 
         rows = [{"id": 1, "data": "value with\nnewline"}]
         sink = inject_write_failure(CSVSink({"path": str(csv_path), "schema": {"mode": "fixed", "fields": ["id: int", "data: str"]}}))
@@ -346,7 +346,7 @@ class TestCSVSinkQuotingCharacters:
         csv_path = tmp_path / "quoting_all.csv"
         db = make_landscape_db()
         factory = make_factory(db)
-        ctx = make_context(landscape=factory)
+        ctx = make_context(landscape=factory.plugin_audit_writer())
 
         rows = [{"id": 1, "data": 'value with "quotes" and, commas\nand newlines'}]
         sink = inject_write_failure(CSVSink({"path": str(csv_path), "schema": {"mode": "fixed", "fields": ["id: int", "data: str"]}}))
@@ -364,7 +364,7 @@ class TestCSVSinkQuotingCharacters:
         """CSVSink MUST produce deterministic output with special characters."""
         db = make_landscape_db()
         factory = make_factory(db)
-        ctx = make_context(landscape=factory)
+        ctx = make_context(landscape=factory.plugin_audit_writer())
 
         rows = [
             {"id": 1, "data": 'complex "value", with\nspecial chars'},

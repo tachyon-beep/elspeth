@@ -433,7 +433,7 @@ class TestResumeIdempotence:
 
         # Record terminal outcomes for first 3 rows
         for i in range(3):
-            factory.execution.record_token_outcome(
+            factory.data_flow.record_token_outcome(
                 ref=TokenRef(token_id=token_ids[i], run_id=run_id),
                 outcome=RowOutcome.COMPLETED,
                 sink_name="default",

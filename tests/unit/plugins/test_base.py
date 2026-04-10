@@ -69,7 +69,7 @@ class TestBaseTransform:
 
         transform = IncompleteTransform({})
         factory = make_factory()
-        ctx = make_context(landscape=factory)
+        ctx = make_context(landscape=factory.plugin_audit_writer())
         row = make_pipeline_row({"x": 1})
 
         # Calling process() should raise NotImplementedError
@@ -109,7 +109,7 @@ class TestBaseTransform:
 
         transform = DoubleTransform({"some": "config"})
         factory = make_factory()
-        ctx = make_context(landscape=factory)
+        ctx = make_context(landscape=factory.plugin_audit_writer())
 
         result = transform.process(make_pipeline_row({"x": 21}), ctx)
         assert result.row is not None
@@ -140,7 +140,7 @@ class TestBaseTransform:
         assert transform._on_start_called is False
 
         factory = make_factory()
-        ctx = make_context(landscape=factory)
+        ctx = make_context(landscape=factory.plugin_audit_writer())
         transform.on_start(ctx)
 
         assert transform._on_start_called is True
@@ -196,7 +196,7 @@ class TestBaseSink:
 
         sink = MemorySink({})
         factory = make_factory()
-        ctx = make_context(landscape=factory)
+        ctx = make_context(landscape=factory.plugin_audit_writer())
 
         result = sink.write([{"value": 1}, {"value": 2}], ctx)
 
@@ -254,7 +254,7 @@ class TestBaseSink:
 
         sink = BatchMemorySink({})
         factory = make_factory()
-        ctx = make_context(landscape=factory)
+        ctx = make_context(landscape=factory.plugin_audit_writer())
 
         result = sink.write([{"value": 1}, {"value": 2}, {"value": 3}], ctx)
 
@@ -300,7 +300,7 @@ class TestBaseSource:
 
         source = ListSource({"data": [{"value": 1}, {"value": 2}]})
         factory = make_factory()
-        ctx = make_context(landscape=factory)
+        ctx = make_context(landscape=factory.plugin_audit_writer())
 
         rows = list(source.load(ctx))
         assert len(rows) == 2

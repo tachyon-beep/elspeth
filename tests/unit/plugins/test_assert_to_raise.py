@@ -181,7 +181,7 @@ class TestAssertToRaiseConversions:
                 )
             )
             factory = make_factory()
-            ctx = make_context(run_id="test-run", landscape=factory)
+            ctx = make_context(run_id="test-run", landscape=factory.plugin_audit_writer())
 
             # Patch _open_file so it opens _file but leaves _writer as None.
             # This simulates partial initialisation — the exact state the guard
@@ -237,7 +237,7 @@ class TestAssertToRaiseConversions:
                 )
             )
             factory = make_factory()
-            ctx = make_context(run_id="test-run", landscape=factory)
+            ctx = make_context(run_id="test-run", landscape=factory.plugin_audit_writer())
 
             mock_writer = MagicMock()
 

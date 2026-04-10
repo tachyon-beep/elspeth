@@ -569,7 +569,7 @@ class TestAtomicTokenOperations:
         )
 
         # Verify parent has FORKED outcome recorded atomically
-        outcome = factory.query.get_token_outcome(parent_token.token_id)
+        outcome = factory.data_flow.get_token_outcome(parent_token.token_id)
         assert outcome is not None, "Parent token should have FORKED outcome"
         assert outcome.outcome == RowOutcome.FORKED
         assert outcome.fork_group_id == fork_group_id
@@ -606,7 +606,7 @@ class TestAtomicTokenOperations:
         )
 
         # Verify expected_branches_json is stored correctly
-        outcome = factory.query.get_token_outcome(parent_token.token_id)
+        outcome = factory.data_flow.get_token_outcome(parent_token.token_id)
         assert outcome is not None
         assert outcome.expected_branches_json is not None
         expected = json.loads(outcome.expected_branches_json)
@@ -650,7 +650,7 @@ class TestAtomicTokenOperations:
         )
 
         # Verify parent has EXPANDED outcome recorded atomically
-        outcome = factory.query.get_token_outcome(parent_token.token_id)
+        outcome = factory.data_flow.get_token_outcome(parent_token.token_id)
         assert outcome is not None, "Parent token should have EXPANDED outcome"
         assert outcome.outcome == RowOutcome.EXPANDED
         assert outcome.expand_group_id == expand_group_id
@@ -689,7 +689,7 @@ class TestAtomicTokenOperations:
         )
 
         # Verify expected_branches_json stores count
-        outcome = factory.query.get_token_outcome(parent_token.token_id)
+        outcome = factory.data_flow.get_token_outcome(parent_token.token_id)
         assert outcome is not None
         assert outcome.expected_branches_json is not None
         expected = json.loads(outcome.expected_branches_json)
@@ -793,7 +793,7 @@ class TestAtomicTokenOperations:
 
         # Verify each parent has COALESCED outcome with correct join_group_id
         for child in children:
-            outcome = factory.query.get_token_outcome(child.token_id)
+            outcome = factory.data_flow.get_token_outcome(child.token_id)
             assert outcome is not None, f"Parent {child.token_id} should have COALESCED outcome"
             assert outcome.outcome == RowOutcome.COALESCED
             assert outcome.join_group_id == merged.join_group_id
@@ -925,5 +925,5 @@ class TestAtomicTokenOperations:
         assert len(children) == 2
 
         # But parent should NOT have an outcome yet
-        outcome = factory.query.get_token_outcome(parent_token.token_id)
+        outcome = factory.data_flow.get_token_outcome(parent_token.token_id)
         assert outcome is None, "Parent should not have outcome when record_parent_outcome=False"

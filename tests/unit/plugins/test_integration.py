@@ -107,7 +107,7 @@ class TestPluginSystemIntegration:
 
         # Create instances and process
         factory = make_factory()
-        ctx = make_context(run_id="test-001", landscape=factory)
+        ctx = make_context(run_id="test-001", landscape=factory.plugin_audit_writer())
 
         source_cls = manager.get_source_by_name("list")
         transform_cls = manager.get_transform_by_name("double")

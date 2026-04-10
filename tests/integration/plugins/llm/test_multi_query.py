@@ -337,7 +337,7 @@ class TestMultiQueryIntegration:
 
             ctx = make_context(
                 run_id=run_id,
-                landscape=factory,
+                landscape=factory.plugin_audit_writer(),
             )
             transform.on_start(ctx)
 
@@ -459,7 +459,7 @@ class TestMultiQueryIntegration:
 
             ctx = make_context(
                 run_id=run_id,
-                landscape=factory,
+                landscape=factory.plugin_audit_writer(),
             )
             transform.on_start(ctx)
 

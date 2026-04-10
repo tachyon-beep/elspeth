@@ -239,7 +239,7 @@ class TestLLMTransformAzureInit:
         """process() raises NotImplementedError directing to accept()."""
         transform = LLMTransform(_make_azure_config(template="{{ row.text }}"))
         factory = make_factory()
-        ctx = make_context(landscape=factory)
+        ctx = make_context(landscape=factory.plugin_audit_writer())
 
         with pytest.raises(NotImplementedError, match="row-level pipelining"):
             transform.process(make_pipeline_row({"text": "hello"}), ctx)
@@ -587,7 +587,7 @@ class TestLLMTransformAzurePipelining:
         token = make_token("row-1")
         factory = make_factory()
         ctx = make_context(
-            landscape=factory,
+            landscape=factory.plugin_audit_writer(),
             state_id="test-state-id",
             token=token,
         )

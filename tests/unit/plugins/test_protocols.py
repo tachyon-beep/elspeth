@@ -70,7 +70,7 @@ class TestSourceProtocol:
         assert _conforms, "Source must conform to SourceProtocol"
 
         factory = make_factory()
-        ctx = make_context(landscape=factory)
+        ctx = make_context(landscape=factory.plugin_audit_writer())
 
         source_rows = list(source.load(ctx))
         assert len(source_rows) == 3
@@ -202,7 +202,7 @@ class TestTransformProtocol:
         assert _conforms, "Must conform to TransformProtocol"
 
         factory = make_factory()
-        ctx = make_context(landscape=factory)
+        ctx = make_context(landscape=factory.plugin_audit_writer())
 
         result = transform.process(make_pipeline_row({"value": 21}), ctx)
         assert result.status == "success"
@@ -235,7 +235,7 @@ class TestTransformBatchSupport:
 
         transform = SingleTransform({})
         factory = make_factory()
-        ctx = make_context(landscape=factory)
+        ctx = make_context(landscape=factory.plugin_audit_writer())
         result = transform.process(make_pipeline_row({"value": 1}), ctx)
         assert result.row is not None
         assert result.row.to_dict() == {"processed": 1}
@@ -270,7 +270,7 @@ class TestTransformBatchSupport:
 
         transform = BatchTransform({})
         factory = make_factory()
-        ctx = make_context(landscape=factory)
+        ctx = make_context(landscape=factory.plugin_audit_writer())
 
         # Batch mode
         result = transform.process([make_pipeline_row({"value": 1}), make_pipeline_row({"value": 2}), make_pipeline_row({"value": 3})], ctx)
@@ -479,7 +479,7 @@ class TestSinkProtocol:
         assert _conforms, "Must conform to SinkProtocol"
 
         factory = make_factory()
-        ctx = make_context(landscape=factory)
+        ctx = make_context(landscape=factory.plugin_audit_writer())
         result = sink.write([{"value": 1}, {"value": 2}], ctx)
 
         assert isinstance(result.artifact, ArtifactDescriptor)
@@ -561,7 +561,7 @@ class TestSinkProtocol:
         assert _conforms, "Must conform to SinkProtocol"
 
         factory = make_factory()
-        ctx = make_context(landscape=factory)
+        ctx = make_context(landscape=factory.plugin_audit_writer())
 
         # Batch write
         result = sink.write([{"value": 1}, {"value": 2}], ctx)

@@ -46,7 +46,7 @@ class TestCSVSinkContractSupport:
     def ctx(self) -> PluginContext:
         """Create a minimal plugin context."""
         factory = make_factory()
-        return make_context(landscape=factory)
+        return make_context(landscape=factory.plugin_audit_writer())
 
     def test_set_output_contract(self, output_path: Path, sample_contract: SchemaContract) -> None:
         """set_output_contract stores contract for header resolution."""
@@ -117,7 +117,7 @@ class TestCSVSinkHeaderModes:
     def ctx(self) -> PluginContext:
         """Create a minimal plugin context."""
         factory = make_factory()
-        return make_context(landscape=factory)
+        return make_context(landscape=factory.plugin_audit_writer())
 
     def test_normalized_headers_default(self, output_path: Path, ctx: PluginContext) -> None:
         """Default mode uses normalized (Python identifier) headers."""
@@ -275,7 +275,7 @@ class TestCSVSinkHeaderModeInteraction:
     def ctx(self) -> PluginContext:
         """Create a minimal plugin context."""
         factory = make_factory()
-        return make_context(landscape=factory)
+        return make_context(landscape=factory.plugin_audit_writer())
 
     def test_headers_mode_attribute_stored(self, output_path: Path) -> None:
         """CSVSink stores headers_mode from config."""

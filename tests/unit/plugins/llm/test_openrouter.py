@@ -269,7 +269,7 @@ class TestLLMTransformOpenRouterInit:
         """process() raises NotImplementedError directing to accept()."""
         transform = LLMTransform(_openrouter_config(template="{{ row.text }}"))
         factory = make_factory()
-        ctx = make_context(run_id="test-run", landscape=factory)
+        ctx = make_context(run_id="test-run", landscape=factory.plugin_audit_writer())
 
         with pytest.raises(NotImplementedError, match="row-level pipelining"):
             transform.process(make_pipeline_row({"text": "hello"}), ctx)

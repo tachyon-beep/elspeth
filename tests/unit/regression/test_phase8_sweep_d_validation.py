@@ -110,7 +110,7 @@ class TestBatchStatsAggregateOverwrite:
         transform = BatchStats({"schema": DYNAMIC_SCHEMA, "value_field": "amount", "group_by": "category"})
         db = make_landscape_db()
         factory = make_factory(db)
-        ctx = make_context(run_id="test", landscape=factory)
+        ctx = make_context(run_id="test", landscape=factory.plugin_audit_writer())
         rows = [_make_row({"amount": 10, "category": "A"})]
         result = transform.process(rows, ctx)
         assert result.status == "success"
@@ -146,7 +146,7 @@ class TestBatchReplicateMaxCopies:
         transform = BatchReplicate({"schema": DYNAMIC_SCHEMA, "max_copies": 5})
         db = make_landscape_db()
         factory = make_factory(db)
-        ctx = make_context(run_id="test", landscape=factory)
+        ctx = make_context(run_id="test", landscape=factory.plugin_audit_writer())
         # Single row exceeding max_copies — all rows quarantined → error result
         rows = [_make_row({"copies": 10, "data": "value"})]
         result = transform.process(rows, ctx)
@@ -291,7 +291,7 @@ class TestBoolExcludedFromInt:
         transform = BatchStats({"schema": DYNAMIC_SCHEMA, "value_field": "flag"})
         db = make_landscape_db()
         factory = make_factory(db)
-        ctx = make_context(run_id="test", landscape=factory)
+        ctx = make_context(run_id="test", landscape=factory.plugin_audit_writer())
         rows = [_make_row({"flag": True})]
 
         with pytest.raises(TypeError, match="must be numeric"):
@@ -304,7 +304,7 @@ class TestBoolExcludedFromInt:
         transform = BatchStats({"schema": DYNAMIC_SCHEMA, "value_field": "amount"})
         db = make_landscape_db()
         factory = make_factory(db)
-        ctx = make_context(run_id="test", landscape=factory)
+        ctx = make_context(run_id="test", landscape=factory.plugin_audit_writer())
         rows = [_make_row({"amount": 42})]
         result = transform.process(rows, ctx)
         assert result.status == "success"

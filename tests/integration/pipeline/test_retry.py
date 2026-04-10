@@ -226,7 +226,7 @@ class TestRetryAuditTrail:
 
         # Create transform executor
         step_resolver = lambda node_id: 1  # noqa: E731
-        transform_executor = TransformExecutor(factory.execution, span_factory, step_resolver)
+        transform_executor = TransformExecutor(factory.execution, span_factory, step_resolver, data_flow=factory.data_flow)
 
         # Create retry manager with 3 attempts (enough to succeed)
         retry_manager = RetryManager(RuntimeRetryConfig(max_attempts=3, base_delay=0.01, max_delay=60.0, jitter=0.0, exponential_base=2.0))
@@ -327,7 +327,7 @@ class TestRetryAuditTrail:
 
         # Create transform executor
         step_resolver = lambda node_id: 1  # noqa: E731
-        transform_executor = TransformExecutor(factory.execution, span_factory, step_resolver)
+        transform_executor = TransformExecutor(factory.execution, span_factory, step_resolver, data_flow=factory.data_flow)
 
         # Create retry manager with only 2 attempts
         retry_manager = RetryManager(RuntimeRetryConfig(max_attempts=2, base_delay=0.01, max_delay=60.0, jitter=0.0, exponential_base=2.0))
@@ -431,7 +431,7 @@ class TestRetryAuditTrail:
 
         # Create transform executor
         step_resolver = lambda node_id: 1  # noqa: E731
-        transform_executor = TransformExecutor(factory.execution, span_factory, step_resolver)
+        transform_executor = TransformExecutor(factory.execution, span_factory, step_resolver, data_flow=factory.data_flow)
 
         ctx = make_context(run_id=run_id, landscape=factory.plugin_audit_writer())
         transform.on_start(ctx)

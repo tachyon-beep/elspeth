@@ -24,7 +24,7 @@ class TestCSVSink:
     def ctx(self) -> PluginContext:
         """Create a minimal plugin context."""
         factory = make_factory()
-        return make_context(landscape=factory)
+        return make_context(landscape=factory.plugin_audit_writer())
 
     def test_write_creates_file(self, tmp_path: Path, ctx: PluginContext) -> None:
         """write() creates CSV file with headers."""
@@ -415,7 +415,7 @@ class TestCSVSinkSchemaValidation:
         from elspeth.plugins.sinks.csv_sink import CSVSink
 
         factory = make_factory()
-        ctx = make_context(landscape=factory)
+        ctx = make_context(landscape=factory.plugin_audit_writer())
         sink = inject_write_failure(
             CSVSink(
                 {
@@ -439,7 +439,7 @@ class TestCSVSinkSchemaValidation:
         from elspeth.plugins.sinks.csv_sink import CSVSink
 
         factory = make_factory()
-        ctx = make_context(landscape=factory)
+        ctx = make_context(landscape=factory.plugin_audit_writer())
         sink = inject_write_failure(
             CSVSink(
                 {
@@ -467,7 +467,7 @@ class TestCSVSinkSchemaValidation:
         from elspeth.plugins.sinks.csv_sink import CSVSink
 
         factory = make_factory()
-        ctx = make_context(landscape=factory)
+        ctx = make_context(landscape=factory.plugin_audit_writer())
         # Schema declares only 'id', but first row has 'id', 'name', 'extra'
         flexible_schema = {"mode": "flexible", "fields": ["id: int"]}
         sink = inject_write_failure(
@@ -505,7 +505,7 @@ class TestCSVSinkSchemaValidation:
         from elspeth.plugins.sinks.csv_sink import CSVSink
 
         factory = make_factory()
-        ctx = make_context(landscape=factory)
+        ctx = make_context(landscape=factory.plugin_audit_writer())
         # Schema declares 'id' and 'name'
         flexible_schema = {"mode": "flexible", "fields": ["id: int", "name: str"]}
         sink = inject_write_failure(

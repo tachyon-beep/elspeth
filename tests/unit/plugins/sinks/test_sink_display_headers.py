@@ -24,7 +24,7 @@ class TestCSVSinkHeaders:
     def ctx(self) -> PluginContext:
         """Create a minimal plugin context."""
         factory = make_factory()
-        return make_context(landscape=factory)
+        return make_context(landscape=factory.plugin_audit_writer())
 
     def test_explicit_custom_headers(self, tmp_path: Path, ctx: PluginContext) -> None:
         """headers dict maps normalized names to display names in CSV header."""
@@ -251,7 +251,7 @@ class TestJSONSinkHeaders:
     def ctx(self) -> PluginContext:
         """Create a minimal plugin context."""
         factory = make_factory()
-        return make_context(landscape=factory)
+        return make_context(landscape=factory.plugin_audit_writer())
 
     def test_explicit_custom_headers_jsonl(self, tmp_path: Path, ctx: PluginContext) -> None:
         """headers dict maps normalized names to display names in JSONL keys."""
@@ -376,7 +376,7 @@ class TestCSVCustomHeadersAppendMode:
     def ctx(self) -> PluginContext:
         """Create a minimal plugin context."""
         factory = make_factory()
-        return make_context(landscape=factory)
+        return make_context(landscape=factory.plugin_audit_writer())
 
     def test_append_with_custom_headers(self, tmp_path: Path, ctx: PluginContext) -> None:
         """Append mode correctly validates and appends when custom headers match."""
@@ -431,7 +431,7 @@ class TestCSVCustomHeadersSpecialCharacters:
     def ctx(self) -> PluginContext:
         """Create a minimal plugin context."""
         factory = make_factory()
-        return make_context(landscape=factory)
+        return make_context(landscape=factory.plugin_audit_writer())
 
     def test_header_with_comma(self, tmp_path: Path, ctx: PluginContext) -> None:
         """Custom headers containing commas are properly quoted in CSV."""
@@ -525,7 +525,7 @@ class TestJSONLCustomHeadersAppendMode:
     def ctx(self) -> PluginContext:
         """Create a minimal plugin context."""
         factory = make_factory()
-        return make_context(landscape=factory)
+        return make_context(landscape=factory.plugin_audit_writer())
 
     def test_append_with_custom_headers(self, tmp_path: Path, ctx: PluginContext) -> None:
         """Append mode correctly validates and appends when custom headers match."""

@@ -17,7 +17,7 @@ def ctx() -> PluginContext:
     """Create test context."""
     db = make_landscape_db()
     factory = make_factory(db)
-    return make_context(landscape=factory)
+    return make_context(landscape=factory.plugin_audit_writer())
 
 
 class TestJSONSinkResumeCapability:

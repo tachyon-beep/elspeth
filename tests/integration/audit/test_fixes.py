@@ -119,7 +119,7 @@ class TestIntegrationAuditFixes:
 
         ctx = make_context(
             run_id=run.run_id,
-            landscape=factory,
+            landscape=factory.plugin_audit_writer(),
         )
 
         # Verify recording works through the context's factory
@@ -228,7 +228,7 @@ class TestIntegrationAuditFixes:
         # Create context with factory
         ctx = make_context(
             run_id=run.run_id,
-            landscape=factory,
+            landscape=factory.plugin_audit_writer(),
         )
 
         # Complete the run through the factory's run_lifecycle repo

@@ -165,7 +165,7 @@ class TestBatchTokenIdentity:
             traversal=_single_node_traversal(NodeID(agg_node_id), transform),
             aggregation_settings=aggregation_settings,
         )
-        ctx = make_context(run_id=run_id, landscape=factory)
+        ctx = make_context(run_id=run_id, landscape=factory.plugin_audit_writer())
 
         # Process 3 rows to trigger batch flush
         all_results = []
@@ -245,7 +245,7 @@ class TestBatchTokenIdentity:
             traversal=_single_node_traversal(NodeID(agg_node_id), transform),
             aggregation_settings=aggregation_settings,
         )
-        ctx = make_context(run_id=run_id, landscape=factory)
+        ctx = make_context(run_id=run_id, landscape=factory.plugin_audit_writer())
 
         # Process row 0 - buffered, returns BUFFERED (T26: non-terminal at buffer time)
         pipeline_row_0 = make_pipeline_row({"value": 10})
@@ -325,7 +325,7 @@ class TestBatchTokenIdentity:
             traversal=_single_node_traversal(NodeID(agg_node_id), transform),
             aggregation_settings=aggregation_settings,
         )
-        ctx = make_context(run_id=run_id, landscape=factory)
+        ctx = make_context(run_id=run_id, landscape=factory.plugin_audit_writer())
 
         # Process 3 rows to trigger batch flush
         all_results = []

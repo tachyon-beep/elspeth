@@ -57,7 +57,7 @@ class TestValidationErrorNonCanonical:
 
         from elspeth.core.canonical import stable_hash
 
-        ctx = make_context(run_id="test-run", node_id="source_node", landscape=factory)
+        ctx = make_context(run_id="test-run", node_id="source_node", landscape=factory.plugin_audit_writer())
 
         row_value = 42
         error_msg = "Expected dict, got int"
@@ -102,7 +102,7 @@ class TestValidationErrorNonCanonical:
 
         from elspeth.contracts.hashing import repr_hash
 
-        ctx = make_context(run_id="test-run", node_id="source_node", landscape=factory)
+        ctx = make_context(run_id="test-run", node_id="source_node", landscape=factory.plugin_audit_writer())
 
         row_value = {"value": float("nan")}
         error_msg = "Row contains NaN"
@@ -134,7 +134,7 @@ class TestValidationErrorNonCanonical:
 
     def test_multiple_non_canonical_rows(self, factory: RecorderFactory) -> None:
         """Multiple non-canonical rows should all be recorded."""
-        ctx = make_context(run_id="test-run", node_id="source_node", landscape=factory)
+        ctx = make_context(run_id="test-run", node_id="source_node", landscape=factory.plugin_audit_writer())
 
         tokens = []
         test_rows = [

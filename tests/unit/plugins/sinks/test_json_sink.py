@@ -26,7 +26,7 @@ class TestJSONSink:
         """Create a minimal plugin context."""
         db = make_landscape_db()
         factory = make_factory(db)
-        return make_context(landscape=factory)
+        return make_context(landscape=factory.plugin_audit_writer())
 
     def test_write_json_array(self, tmp_path: Path, ctx: PluginContext) -> None:
         """Write rows as JSON array."""
@@ -359,7 +359,7 @@ class TestJSONSinkNonFiniteRejection:
     def ctx(self) -> PluginContext:
         db = make_landscape_db()
         factory = make_factory(db)
-        return make_context(landscape=factory)
+        return make_context(landscape=factory.plugin_audit_writer())
 
     @pytest.mark.parametrize("bad_value", [float("nan"), float("inf"), float("-inf")], ids=["nan", "inf", "neg_inf"])
     def test_jsonl_rejects_non_finite_float(self, tmp_path: Path, ctx: PluginContext, bad_value: float) -> None:

@@ -18,7 +18,7 @@ STRICT_SCHEMA = {"mode": "fixed", "fields": ["id: int", "value: str"]}
 def ctx() -> PluginContext:
     """Create test context."""
     factory = make_factory()
-    return make_context(landscape=factory)
+    return make_context(landscape=factory.plugin_audit_writer())
 
 
 class TestCSVSinkAppendMode:
