@@ -15,7 +15,6 @@ from __future__ import annotations
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any, Literal
 from unittest.mock import Mock
-from uuid import uuid4
 
 from elspeth.contracts.coalesce_enums import CoalescePolicy, MergeStrategy
 from elspeth.contracts.coalesce_metadata import CoalesceMetadata
@@ -370,28 +369,6 @@ def wire_transforms(
 # Run/Landscape Setup — Eliminate begin_run()/complete_run() boilerplate
 # =============================================================================
 
-
-def make_run_id() -> str:
-    """Generate a unique run ID for test isolation."""
-    return f"test-run-{uuid4().hex[:12]}"
-
-
-def make_run_record(
-    recorder: Any,
-    *,
-    config: dict[str, Any] | None = None,
-    canonical_version: str = "sha256-rfc8785-v1",
-) -> Any:
-    """Begin a run and return the RunRecord.
-
-    Usage:
-        run = make_run_record(recorder)
-        assert run.run_id is not None
-    """
-    return recorder.begin_run(
-        config=config or {},
-        canonical_version=canonical_version,
-    )
 
 
 # =============================================================================

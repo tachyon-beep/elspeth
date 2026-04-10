@@ -45,7 +45,7 @@ class TransformExecutor:
     it as FAILED.  This prevents orphan OPEN states in the audit trail.
 
     Example:
-        executor = TransformExecutor(recorder, span_factory, step_resolver)
+        executor = TransformExecutor(execution, span_factory, step_resolver)
         result, updated_token, error_sink = executor.execute_transform(
             transform=my_transform,
             token=token,

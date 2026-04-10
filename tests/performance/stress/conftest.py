@@ -684,7 +684,7 @@ def make_plugin_context(
 
     return make_context(
         run_id=run_id,
-        landscape=factory.plugin_audit_writer,
+        landscape=factory.plugin_audit_writer(),
         state_id=state_id,
         token=token,
     )

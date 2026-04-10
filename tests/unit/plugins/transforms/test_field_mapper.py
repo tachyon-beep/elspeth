@@ -553,7 +553,7 @@ class TestFieldMapperContractPropagation:
         sink_ctx = PluginContext(
             run_id="test-run",
             config={},
-            landscape=factory.plugin_audit_writer,
+            landscape=factory.plugin_audit_writer(),
             contract=result.row.contract,
         )
         sink.write([result.row.to_dict()], sink_ctx)

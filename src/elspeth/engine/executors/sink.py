@@ -60,7 +60,7 @@ class SinkExecutor:
     exist after all processing nodes and have a fixed, deterministic step position.
 
     Example:
-        executor = SinkExecutor(recorder, span_factory, run_id)
+        executor = SinkExecutor(execution, data_flow, span_factory, run_id)
         artifact, diversion_count = executor.write(
             sink=my_sink,
             tokens=tokens_to_write,

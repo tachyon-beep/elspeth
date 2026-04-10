@@ -108,6 +108,138 @@ class TestNodeStateRoutesToExecution:
         execution.get_node_state.assert_called_once_with("state-1")
 
 
+class TestOperationCallRoutesToExecution:
+    """Verify record_operation_call delegates to ExecutionRepository."""
+
+    def test_record_operation_call_routes_to_execution(
+        self,
+        writer: _PluginAuditWriterAdapter,
+        repos: tuple[MagicMock, MagicMock, MagicMock],
+    ) -> None:
+        execution, _data_flow, _run_lifecycle = repos
+        execution.record_operation_call.return_value = sentinel.call
+
+        payload = MagicMock()
+        result = writer.record_operation_call("op-1", CallType.HTTP, CallStatus.SUCCESS, payload)
+
+        assert result is sentinel.call
+        execution.record_operation_call.assert_called_once()
+        assert execution.record_operation_call.call_args[0][0] == "op-1"
+
+
+class TestRoutingEventRoutesToExecution:
+    """Verify routing event methods delegate to ExecutionRepository."""
+
+    def test_record_routing_event_routes_to_execution(
+        self,
+        writer: _PluginAuditWriterAdapter,
+        repos: tuple[MagicMock, MagicMock, MagicMock],
+    ) -> None:
+        from elspeth.contracts import RoutingMode
+
+        execution, _data_flow, _run_lifecycle = repos
+        execution.record_routing_event.return_value = sentinel.event
+
+        result = writer.record_routing_event("state-1", "edge-1", RoutingMode.MOVE)
+
+        assert result is sentinel.event
+        execution.record_routing_event.assert_called_once()
+        assert execution.record_routing_event.call_args[0][0] == "state-1"
+
+    def test_record_routing_events_routes_to_execution(
+        self,
+        writer: _PluginAuditWriterAdapter,
+        repos: tuple[MagicMock, MagicMock, MagicMock],
+    ) -> None:
+        execution, _data_flow, _run_lifecycle = repos
+        execution.record_routing_events.return_value = [sentinel.event]
+
+        result = writer.record_routing_events("state-1", [])
+
+        assert result == [sentinel.event]
+        execution.record_routing_events.assert_called_once()
+
+
+class TestTransformErrorRoutesToDataFlow:
+    """Verify record_transform_error delegates to DataFlowRepository."""
+
+    def test_record_transform_error_routes_to_data_flow(
+        self,
+        writer: _PluginAuditWriterAdapter,
+        repos: tuple[MagicMock, MagicMock, MagicMock],
+    ) -> None:
+        from elspeth.contracts.audit import TokenRef
+        from elspeth.contracts.errors import TransformErrorReason
+
+        _execution, data_flow, _run_lifecycle = repos
+        data_flow.record_transform_error.return_value = "err-1"
+
+        ref = TokenRef(token_id="tok-1", run_id="run-1")
+        reason = TransformErrorReason(error_type="ValueError", message="bad", retryable=False)
+        result = writer.record_transform_error(ref, "xform-1", {"field": "val"}, reason, "sink-1")
+
+        assert result == "err-1"
+        data_flow.record_transform_error.assert_called_once()
+
+
+class TestContractMethodsRouteToDataFlow:
+    """Verify contract-related methods delegate to DataFlowRepository."""
+
+    def test_update_node_output_contract_routes_to_data_flow(
+        self,
+        writer: _PluginAuditWriterAdapter,
+        repos: tuple[MagicMock, MagicMock, MagicMock],
+    ) -> None:
+        _execution, data_flow, _run_lifecycle = repos
+
+        mock_contract = MagicMock()
+        writer.update_node_output_contract("run-1", "node-1", mock_contract)
+
+        data_flow.update_node_output_contract.assert_called_once_with("run-1", "node-1", mock_contract)
+
+    def test_get_node_contracts_routes_to_data_flow(
+        self,
+        writer: _PluginAuditWriterAdapter,
+        repos: tuple[MagicMock, MagicMock, MagicMock],
+    ) -> None:
+        _execution, data_flow, _run_lifecycle = repos
+        data_flow.get_node_contracts.return_value = (sentinel.input, sentinel.output)
+
+        result = writer.get_node_contracts("run-1", "node-1")
+
+        assert result == (sentinel.input, sentinel.output)
+        data_flow.get_node_contracts.assert_called_once()
+
+
+class TestReadinessCheckRoutesToRunLifecycle:
+    """Verify record_readiness_check delegates to RunLifecycleRepository."""
+
+    def test_record_readiness_check_routes_to_run_lifecycle(
+        self,
+        writer: _PluginAuditWriterAdapter,
+        repos: tuple[MagicMock, MagicMock, MagicMock],
+    ) -> None:
+        _execution, _data_flow, run_lifecycle = repos
+
+        writer.record_readiness_check(
+            "run-1",
+            name="chroma",
+            collection="docs",
+            reachable=True,
+            count=42,
+            message="OK",
+        )
+
+        run_lifecycle.record_readiness_check.assert_called_once_with(
+            "run-1",
+            name="chroma",
+            collection="docs",
+            reachable=True,
+            count=42,
+            message="OK",
+        )
+
+
 class TestRunLifecycleRoutesToRunLifecycle:
     """Verify run lifecycle methods delegate to RunLifecycleRepository."""
 

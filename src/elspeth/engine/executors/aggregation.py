@@ -88,7 +88,7 @@ class AggregationExecutor:
     NOT stored in node_states.status (which is always "completed" for successful accepts).
 
     Example:
-        executor = AggregationExecutor(recorder, span_factory, step_resolver, run_id)
+        executor = AggregationExecutor(execution, span_factory, step_resolver, run_id)
 
         # Accept rows into batch
         result = executor.buffer_row(node_id, token)

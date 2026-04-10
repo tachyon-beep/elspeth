@@ -91,7 +91,7 @@ def _feed_rows(
 
         ctx = make_context(
             run_id=run_id,
-            landscape=factory.plugin_audit_writer,  # type: ignore[attr-defined]
+            landscape=factory.plugin_audit_writer(),  # type: ignore[attr-defined]
             state_id=state.state_id,
             token=token,
         )
@@ -135,7 +135,7 @@ class TestAzureLLMStress:
         output = CollectingOutputPort()
         transform.connect_output(output, max_pending=30)
 
-        start_ctx = make_context(run_id=run_id, landscape=factory.plugin_audit_writer)
+        start_ctx = make_context(run_id=run_id, landscape=factory.plugin_audit_writer())
         transform.on_start(start_ctx)
 
         rows = generate_test_rows(100)
@@ -178,7 +178,7 @@ class TestAzureLLMStress:
         output = CollectingOutputPort()
         transform.connect_output(output, max_pending=20)
 
-        start_ctx = make_context(run_id=run_id, landscape=factory.plugin_audit_writer)
+        start_ctx = make_context(run_id=run_id, landscape=factory.plugin_audit_writer())
         transform.on_start(start_ctx)
 
         rows = generate_test_rows(50)
@@ -223,7 +223,7 @@ class TestAzureLLMStress:
         output = CollectingOutputPort()
         transform.connect_output(output, max_pending=15)
 
-        start_ctx = make_context(run_id=run_id, landscape=factory.plugin_audit_writer)
+        start_ctx = make_context(run_id=run_id, landscape=factory.plugin_audit_writer())
         transform.on_start(start_ctx)
 
         rows = generate_test_rows(75)
@@ -263,7 +263,7 @@ class TestAzureLLMStress:
         output = CollectingOutputPort()
         transform.connect_output(output, max_pending=32)
 
-        start_ctx = make_context(run_id=run_id, landscape=factory.plugin_audit_writer)
+        start_ctx = make_context(run_id=run_id, landscape=factory.plugin_audit_writer())
         transform.on_start(start_ctx)
 
         rows = generate_test_rows(100)
@@ -329,7 +329,7 @@ class TestAzureMultiQueryStress:
         output = CollectingOutputPort()
         transform.connect_output(output, max_pending=20)
 
-        start_ctx = make_context(run_id=run_id, landscape=factory.plugin_audit_writer)
+        start_ctx = make_context(run_id=run_id, landscape=factory.plugin_audit_writer())
         transform.on_start(start_ctx)
 
         rows = generate_multi_query_rows(50)
@@ -385,7 +385,7 @@ class TestAzureMultiQueryStress:
         output = CollectingOutputPort()
         transform.connect_output(output, max_pending=20)
 
-        start_ctx = make_context(run_id=run_id, landscape=factory.plugin_audit_writer)
+        start_ctx = make_context(run_id=run_id, landscape=factory.plugin_audit_writer())
         transform.on_start(start_ctx)
 
         rows = generate_multi_query_rows(30)
@@ -435,7 +435,7 @@ class TestAzureMultiQueryStress:
         output = CollectingOutputPort()
         transform.connect_output(output, max_pending=20)
 
-        start_ctx = make_context(run_id=run_id, landscape=factory.plugin_audit_writer)
+        start_ctx = make_context(run_id=run_id, landscape=factory.plugin_audit_writer())
         transform.on_start(start_ctx)
 
         rows = generate_multi_query_rows(50)
@@ -489,7 +489,7 @@ class TestOpenRouterLLMStress:
         output = CollectingOutputPort()
         transform.connect_output(output, max_pending=30)
 
-        start_ctx = make_context(run_id=run_id, landscape=factory.plugin_audit_writer)
+        start_ctx = make_context(run_id=run_id, landscape=factory.plugin_audit_writer())
         transform.on_start(start_ctx)
 
         rows = generate_test_rows(100)
@@ -535,7 +535,7 @@ class TestOpenRouterLLMStress:
         output = CollectingOutputPort()
         transform.connect_output(output, max_pending=20)
 
-        start_ctx = make_context(run_id=run_id, landscape=factory.plugin_audit_writer)
+        start_ctx = make_context(run_id=run_id, landscape=factory.plugin_audit_writer())
         transform.on_start(start_ctx)
 
         rows = generate_test_rows(50)
@@ -577,7 +577,7 @@ class TestOpenRouterLLMStress:
         output = CollectingOutputPort()
         transform.connect_output(output, max_pending=20)
 
-        start_ctx = make_context(run_id=run_id, landscape=factory.plugin_audit_writer)
+        start_ctx = make_context(run_id=run_id, landscape=factory.plugin_audit_writer())
         transform.on_start(start_ctx)
 
         rows = generate_test_rows(75)
@@ -632,7 +632,7 @@ class TestOpenRouterMultiQueryStress:
         output = CollectingOutputPort()
         transform.connect_output(output, max_pending=20)
 
-        start_ctx = make_context(run_id=run_id, landscape=factory.plugin_audit_writer)
+        start_ctx = make_context(run_id=run_id, landscape=factory.plugin_audit_writer())
         transform.on_start(start_ctx)
 
         rows = generate_multi_query_rows(50)
@@ -684,7 +684,7 @@ class TestOpenRouterMultiQueryStress:
         output = CollectingOutputPort()
         transform.connect_output(output, max_pending=20)
 
-        start_ctx = make_context(run_id=run_id, landscape=factory.plugin_audit_writer)
+        start_ctx = make_context(run_id=run_id, landscape=factory.plugin_audit_writer())
         transform.on_start(start_ctx)
 
         rows = generate_multi_query_rows(30)
@@ -732,7 +732,7 @@ class TestOpenRouterMultiQueryStress:
         output = CollectingOutputPort()
         transform.connect_output(output, max_pending=20)
 
-        start_ctx = make_context(run_id=run_id, landscape=factory.plugin_audit_writer)
+        start_ctx = make_context(run_id=run_id, landscape=factory.plugin_audit_writer())
         transform.on_start(start_ctx)
 
         rows = generate_multi_query_rows(50)
@@ -774,7 +774,7 @@ class TestOpenRouterMultiQueryStress:
         output = CollectingOutputPort()
         transform.connect_output(output, max_pending=20)
 
-        start_ctx = make_context(run_id=run_id, landscape=factory.plugin_audit_writer)
+        start_ctx = make_context(run_id=run_id, landscape=factory.plugin_audit_writer())
         transform.on_start(start_ctx)
 
         rows = generate_multi_query_rows(50)
@@ -838,7 +838,7 @@ class TestMixedErrors:
         output = CollectingOutputPort()
         transform.connect_output(output, max_pending=30)
 
-        start_ctx = make_context(run_id=run_id, landscape=factory.plugin_audit_writer)
+        start_ctx = make_context(run_id=run_id, landscape=factory.plugin_audit_writer())
         transform.on_start(start_ctx)
 
         rows = generate_test_rows(100)
@@ -888,7 +888,7 @@ class TestMixedErrors:
         output = CollectingOutputPort()
         transform.connect_output(output, max_pending=30)
 
-        start_ctx = make_context(run_id=run_id, landscape=factory.plugin_audit_writer)
+        start_ctx = make_context(run_id=run_id, landscape=factory.plugin_audit_writer())
         transform.on_start(start_ctx)
 
         rows = generate_test_rows(100)
@@ -938,7 +938,7 @@ class TestMixedErrors:
         output = CollectingOutputPort()
         transform.connect_output(output, max_pending=20)
 
-        start_ctx = make_context(run_id=run_id, landscape=factory.plugin_audit_writer)
+        start_ctx = make_context(run_id=run_id, landscape=factory.plugin_audit_writer())
         transform.on_start(start_ctx)
 
         rows = generate_test_rows(50)
@@ -968,7 +968,7 @@ class TestMixedErrors:
 
             ctx = make_context(
                 run_id=run_id,
-                landscape=factory.plugin_audit_writer,
+                landscape=factory.plugin_audit_writer(),
                 state_id=state.state_id,
                 token=token,
             )
@@ -1020,7 +1020,7 @@ class TestMixedErrors:
         output = CollectingOutputPort()
         transform.connect_output(output, max_pending=20)
 
-        start_ctx = make_context(run_id=run_id, landscape=factory.plugin_audit_writer)
+        start_ctx = make_context(run_id=run_id, landscape=factory.plugin_audit_writer())
         transform.on_start(start_ctx)
 
         rows = generate_test_rows(100)
@@ -1055,7 +1055,7 @@ class TestMixedErrors:
 
             ctx = make_context(
                 run_id=run_id,
-                landscape=factory.plugin_audit_writer,
+                landscape=factory.plugin_audit_writer(),
                 state_id=state.state_id,
                 token=token,
             )
@@ -1095,7 +1095,7 @@ class TestMixedErrors:
         output = CollectingOutputPort()
         transform.connect_output(output, max_pending=20)
 
-        start_ctx = make_context(run_id=run_id, landscape=factory.plugin_audit_writer)
+        start_ctx = make_context(run_id=run_id, landscape=factory.plugin_audit_writer())
         transform.on_start(start_ctx)
 
         rows = generate_test_rows(75)

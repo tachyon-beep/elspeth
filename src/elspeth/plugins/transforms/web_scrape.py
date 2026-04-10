@@ -260,9 +260,17 @@ class WebScrapeTransform(BaseTransform):
         """Capture infrastructure dependencies at pipeline start."""
         super().on_start(ctx)
         if ctx.landscape is None:
-            raise RuntimeError("WebScrapeTransform requires landscape for audited HTTP calls")
+            raise FrameworkBugError(
+                "WebScrapeTransform requires landscape — orchestrator must inject it before on_start()."
+            )
         if ctx.rate_limit_registry is None:
-            raise RuntimeError("WebScrapeTransform requires rate_limit_registry")
+            raise FrameworkBugError(
+                "WebScrapeTransform requires rate_limit_registry — orchestrator must inject it before on_start()."
+            )
+        if ctx.payload_store is None:
+            raise FrameworkBugError(
+                "WebScrapeTransform requires payload_store — orchestrator must configure it before on_start()."
+            )
         self._recorder = ctx.landscape
         self._payload_store = ctx.payload_store
         self._limiter = ctx.rate_limit_registry
@@ -348,12 +356,8 @@ class WebScrapeTransform(BaseTransform):
         request_hash = call.request_ref
         response_raw_hash = call.response_ref
 
-        # Store processed content via PayloadStore (transform-produced artifact)
-        if self._payload_store is None:
-            raise FrameworkBugError(
-                "PayloadStore required but PluginContext has no payload_store. "
-                "Orchestrator must configure payload_store for web-scrape transforms."
-            )
+        # Store processed content via PayloadStore (transform-produced artifact).
+        # payload_store is guaranteed non-None by on_start() validation.
         response_processed_hash = self._payload_store.store(content.encode())
 
         # Enrich row with scraped data — operational fields only
@@ -402,7 +406,7 @@ class WebScrapeTransform(BaseTransform):
         """
         # Infrastructure captured in on_start()
         if ctx.state_id is None:
-            raise RuntimeError("ctx.state_id not set by executor")
+            raise FrameworkBugError("ctx.state_id not set by executor — executor must set state_id before calling process().")
         limiter = self._limiter.get_limiter("web_scrape")
 
         # Create audited client (records to Landscape)

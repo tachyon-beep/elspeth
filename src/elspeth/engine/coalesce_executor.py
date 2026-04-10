@@ -107,7 +107,7 @@ class CoalesceExecutor:
     - Records audit trail via ExecutionRepository
 
     Example:
-        executor = CoalesceExecutor(recorder, span_factory, token_manager, run_id, step_resolver)
+        executor = CoalesceExecutor(execution, span_factory, token_manager, run_id, step_resolver)
 
         # Configure coalesce point
         executor.register_coalesce(settings, node_id)

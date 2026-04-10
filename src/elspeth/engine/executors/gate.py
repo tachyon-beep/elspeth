@@ -80,7 +80,7 @@ class GateExecutor:
     NOT stored in node_states.status.
 
     Example:
-        executor = GateExecutor(recorder, span_factory, step_resolver, edge_map)
+        executor = GateExecutor(execution, span_factory, step_resolver, edge_map)
         outcome = executor.execute_config_gate(
             gate_config=gate_settings,
             node_id=node_id,
