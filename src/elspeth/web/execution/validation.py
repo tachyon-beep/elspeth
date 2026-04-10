@@ -29,6 +29,9 @@ from elspeth.core.config import load_settings
 from elspeth.core.dag.graph import ExecutionGraph
 from elspeth.core.dag.models import GraphValidationError
 from elspeth.plugins.infrastructure.manager import PluginNotFoundError
+from elspeth.web.composer.state import CompositionState
+from elspeth.web.config import WebSettings
+from elspeth.web.execution.protocol import YamlGenerator
 from elspeth.web.execution.schemas import (
     ValidationCheck,
     ValidationError,
@@ -110,9 +113,9 @@ def _collect_secret_refs(obj: Any) -> list[str]:
 
 
 def validate_pipeline(
-    state: Any,
-    settings: Any,
-    yaml_generator: Any,
+    state: CompositionState,
+    settings: WebSettings,
+    yaml_generator: YamlGenerator,
     *,
     secret_service: WebSecretResolver | None = None,
     user_id: str | None = None,

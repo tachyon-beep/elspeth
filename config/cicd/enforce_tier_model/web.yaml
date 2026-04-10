@@ -194,12 +194,12 @@ allow_hits:
   reason: False positive — @router.get() is FastAPI HTTP route decorator, not dict.get()
   safety: No dict access involved
   expires: null
-- key: web/execution/routes.py:R1:create_execution_router:get_run_status:fp=d08d1e4253439ed0
+- key: web/execution/routes.py:R1:create_execution_router:get_run_status:fp=329fbbace42b1e55
   owner: web-execution
   reason: False positive — @router.get() is FastAPI HTTP route decorator, not dict.get()
   safety: No dict access involved
   expires: null
-- key: web/execution/routes.py:R1:create_execution_router:get_run_results:fp=f7d5bcef727d0b7d
+- key: web/execution/routes.py:R1:create_execution_router:get_run_results:fp=d47d6bfbaecbd0aa
   owner: web-execution
   reason: False positive — @router.get() is FastAPI HTTP route decorator, not dict.get()
   safety: No dict access involved
@@ -316,12 +316,12 @@ allow_hits:
   reason: list_models gracefully handles missing litellm — returns empty model list
   safety: ImportError/AttributeError returns empty list; no data fabrication
   expires: null
-- key: web/execution/validation.py:R1:validate_pipeline:fp=886a70cfc6748254
+- key: web/execution/validation.py:R1:validate_pipeline:fp=06ac41f797c829ef
   owner: web-execution
   reason: Validation checks optional source path/file keys supplied by composition state
   safety: Absent keys are treated honestly as 'no path provided' and the check is recorded as skipped/passed
   expires: null
-- key: web/execution/validation.py:R1:validate_pipeline:fp=e727722440667e5d
+- key: web/execution/validation.py:R1:validate_pipeline:fp=ce10014d671ac83f
   owner: web-execution
   reason: Validation checks optional output path/file keys supplied by composition state
   safety: Absent keys treated as 'no path provided'; check recorded as skipped/passed
@@ -356,17 +356,17 @@ allow_hits:
   reason: False positive — @router.get() is FastAPI HTTP route decorator, not dict.get()
   safety: No dict access involved
   expires: null
-- key: web/execution/validation.py:R5:_collect_secret_refs:fp=bd529a5229f55b45
+- key: web/execution/validation.py:R5:_collect_secret_refs:fp=2fd9a6d2ad02843a
   owner: web-execution
   reason: Tree-walk — isinstance() dispatches dict/list/scalar branches in recursive config traversal
   safety: No contract masking; structural dispatch on deserialized YAML (Tier 3 data)
   expires: null
-- key: web/execution/validation.py:R5:_collect_secret_refs:fp=51136358f34fc167
+- key: web/execution/validation.py:R5:_collect_secret_refs:fp=d6e0cb4ecbe3b083
   owner: web-execution
   reason: Tree-walk — isinstance(ref, str) validates secret_ref marker value type
   safety: Non-string ref is silently skipped (malformed marker); no crash masking
   expires: null
-- key: web/execution/validation.py:R5:_collect_secret_refs:fp=1f56da585599eee0
+- key: web/execution/validation.py:R5:_collect_secret_refs:fp=99c2c0044b696b0b
   owner: web-execution
   reason: Tree-walk — isinstance() dispatches list/tuple branch in recursive config traversal
   safety: No contract masking; structural dispatch on deserialized YAML (Tier 3 data)
@@ -426,87 +426,87 @@ allow_hits:
   reason: IntegrityError on duplicate active state is expected race condition
   safety: Upsert-or-skip
   expires: null
-- key: web/execution/service.py:R8:ExecutionServiceImpl:execute:fp=6614bfb1de71dac6
+- key: web/execution/service.py:R8:ExecutionServiceImpl:execute:fp=6b73361a8ac5d0a2
   owner: web-execution
   reason: Session lock map creates per-session lock lazily on first execution
   safety: Mutation is thread-safe; setdefault is atomic for dict
   expires: null
-- key: web/execution/service.py:R1:ExecutionServiceImpl:_execute_locked:fp=14fd3f21644fdb4c
+- key: web/execution/service.py:R1:ExecutionServiceImpl:_execute_locked:fp=d0ed57b8b677c903
   owner: web-execution
   reason: Optional keys in user-authored config — source options key may be absent
   safety: Returns None; validation handles absence
   expires: null
-- key: web/execution/service.py:R1:ExecutionServiceImpl:_execute_locked:fp=2d80b6b1acdc2bbc
+- key: web/execution/service.py:R1:ExecutionServiceImpl:_execute_locked:fp=e3f68e58c027c03e
   owner: web-execution
   reason: Optional keys in user-authored config — output options key may be absent
   safety: Returns None; validation handles absence
   expires: null
-- key: web/execution/service.py:R1:ExecutionServiceImpl:_execute_locked:fp=2cff252b1d7f3486
+- key: web/execution/service.py:R1:ExecutionServiceImpl:_execute_locked:fp=7f6ddb6f6886747d
   owner: web-execution
   reason: Optional keys in user-authored config — blob_ref is optional in source options
   safety: Returns None; blob link skipped
   expires: null
-- key: web/execution/service.py:R9:ExecutionServiceImpl:_execute_locked:fp=4f94383c54b37b26
+- key: web/execution/service.py:R9:ExecutionServiceImpl:_execute_locked:fp=a9830a0576541b9d
   owner: web-execution
   reason: Idempotent shutdown-event cleanup on failure path
   safety: Pop is idempotent; except BaseException handler cleans up before re-raise
   expires: null
-- key: web/execution/service.py:R4:ExecutionServiceImpl:_execute_locked:fp=696adaf615a95379
+- key: web/execution/service.py:R4:ExecutionServiceImpl:_execute_locked:fp=bf664da424295be0
   owner: web-execution
   reason: Best-effort run status cleanup on setup failure — must not mask original exception
   safety: Logged with slog.error; original exception always re-raised
   expires: null
-- key: web/execution/service.py:R1:ExecutionServiceImpl:cancel:fp=6b2fd83431284736
+- key: web/execution/service.py:R1:ExecutionServiceImpl:cancel:fp=4b333dbe70c09e93
   owner: web-execution
   reason: Check for live shutdown event before fallback handling
   safety: Returns None if absent; no silent default
   expires: null
-- key: web/execution/service.py:R5:ExecutionServiceImpl:_run_pipeline:fp=c5127d7a73a42bc0
+- key: web/execution/service.py:R5:ExecutionServiceImpl:_run_pipeline:fp=dbc9d6d3935f722e
   owner: web-execution
   reason: Tier 3 — config from YAML deserialization may be non-dict
   safety: Raises TypeError if not dict; no silent default
   expires: null
-- key: web/execution/service.py:R1:ExecutionServiceImpl:_run_pipeline:fp=80c06e8dd955d5c7
+- key: web/execution/service.py:R1:ExecutionServiceImpl:_run_pipeline:fp=8972b28590f4e022
   owner: web-execution
   reason: Scope-to-audit-source mapping — .get() on explicit mapping dict with crash-on-unknown guard
   safety: Unknown scope raises ValueError immediately; no silent default
   expires: null
-- key: web/execution/service.py:R4:ExecutionServiceImpl:_run_pipeline:_safe_broadcast:fp=11f51d1ad723aa1a
+- key: web/execution/service.py:R4:ExecutionServiceImpl:_run_pipeline:_safe_broadcast:fp=cfe10809a8cb49f8
   owner: web-execution
   reason: Progress broadcasting may fail with transport exceptions
   safety: Logged; pipeline continues
   expires: null
-- key: web/execution/service.py:R6:ExecutionServiceImpl:_run_pipeline:fp=e0e82d73ae663cfc
+- key: web/execution/service.py:R6:ExecutionServiceImpl:_run_pipeline:fp=e0dfd4c767eae067
   owner: web-execution
   reason: GracefulShutdownError is an expected control-flow signal from orchestrator cancellation
   safety: Classified as cancelled; separated from BaseException failure path
   expires: null
-- key: web/execution/service.py:R5:ExecutionServiceImpl:_run_pipeline:fp=9b3ba7e7742cd1c6
+- key: web/execution/service.py:R5:ExecutionServiceImpl:_run_pipeline:fp=817598b5bb6a432b
   owner: web-execution
   reason: Error classification — SecretResolutionError triggers safe message
   safety: Secret names not leaked to client
   expires: null
-- key: web/execution/service.py:R5:ExecutionServiceImpl:_run_pipeline:fp=3cb12744000c899a
+- key: web/execution/service.py:R5:ExecutionServiceImpl:_run_pipeline:fp=78ff43a9a8d4a714
   owner: web-execution
   reason: BaseException split for process-termination vs ordinary failures
   safety: Control flow distinction, not type masking
   expires: null
-- key: web/execution/service.py:R4:ExecutionServiceImpl:_run_pipeline:fp=3d6295a7362ec748
+- key: web/execution/service.py:R4:ExecutionServiceImpl:_run_pipeline:fp=e712f11c338bbe09
   owner: web-execution
   reason: Status update after pipeline failure — must not mask original exception
   safety: Logged; original exception re-raised
   expires: null
-- key: web/execution/service.py:R9:ExecutionServiceImpl:_run_pipeline:fp=f68573380a302ad4
+- key: web/execution/service.py:R9:ExecutionServiceImpl:_run_pipeline:fp=2b3f141b2b19ea44
   owner: web-execution
   reason: Final shutdown-event cleanup is intentionally idempotent
   safety: Pop is idempotent
   expires: null
-- key: web/execution/service.py:R6:ExecutionServiceImpl:_finalize_output_blobs:fp=3b8acd195d884da2
+- key: web/execution/service.py:R6:ExecutionServiceImpl:_finalize_output_blobs:fp=29b0fcc2401c800f
   owner: web-execution
   reason: Blob finalization after terminal status — failure must not mask run outcome
   safety: Narrowed to (OSError, SQLAlchemyError); logged with slog.error; run status preserved
   expires: null
-- key: web/execution/service.py:R5:ExecutionServiceImpl:_on_pipeline_done:fp=048f3f8ddb34424b
+- key: web/execution/service.py:R5:ExecutionServiceImpl:_on_pipeline_done:fp=8e6114e3efa3098c
   owner: web-execution
   reason: Error classification for sanitized client messaging
   safety: SecretResolutionError triggers safe message
@@ -526,47 +526,47 @@ allow_hits:
   reason: Quota exceeded during finalization marks blob as error instead of crashing run
   safety: Over-quota file deleted; blob marked error; run still finalized
   expires: null
-- key: web/execution/routes.py:R1:create_execution_router:websocket_run_progress:fp=bc8a7694b3f292bb
+- key: web/execution/routes.py:R1:create_execution_router:websocket_run_progress:fp=6c0b765eeb7a2af4
   owner: web-execution
   reason: False positive — asyncio.Queue.get() is an async queue method, not dict.get()
   safety: No dict access involved
   expires: null
-- key: web/execution/routes.py:R6:create_execution_router:websocket_run_progress:fp=4e9aaa61567318d2
+- key: web/execution/routes.py:R6:create_execution_router:websocket_run_progress:fp=457b5aa453b2f1fc
   owner: web-execution
   reason: Heartbeat timeout is an expected idle path, not an error swallow
   safety: Sends heartbeat to keep connection alive
   expires: null
-- key: web/execution/routes.py:R6:create_execution_router:websocket_run_progress:fp=e074cd9da84a5900
+- key: web/execution/routes.py:R6:create_execution_router:websocket_run_progress:fp=a4809e0f4225d466
   owner: web-execution
   reason: Narrowed heartbeat disconnect catch to (WebSocketDisconnect, ConnectionError, OSError)
   safety: Breaks out of loop; falls through to unsubscribe
   expires: null
-- key: web/execution/routes.py:R6:create_execution_router:websocket_run_progress:fp=f70460a861072998
+- key: web/execution/routes.py:R6:create_execution_router:websocket_run_progress:fp=60be3c5861bd7ad4
   owner: web-execution
   reason: WebSocketDisconnect is the expected disconnect control-flow path
   safety: Falls through to unsubscribe cleanup
   expires: null
-- key: web/execution/routes.py:R6:create_execution_router:websocket_run_progress:fp=9204dc8517c09e56
+- key: web/execution/routes.py:R6:create_execution_router:websocket_run_progress:fp=332cc8c57af982d8
   owner: web-execution
   reason: Narrowed outer handler to (ConnectionError, OSError) — programming errors now propagate
   safety: Logged with slog.error; clean 1011 close sent to client
   expires: null
-- key: web/execution/routes.py:R6:create_execution_router:websocket_run_progress:fp=07ae007e90551cd1
+- key: web/execution/routes.py:R6:create_execution_router:websocket_run_progress:fp=fe6475f1d3cdedea
   owner: web-execution
   reason: Narrowed close catch to (WebSocketDisconnect, ConnectionError, OSError)
   safety: Logged; already in error path
   expires: null
-- key: web/execution/routes.py:R6:create_execution_router:websocket_run_progress:fp=0717a723027c2e78
+- key: web/execution/routes.py:R6:create_execution_router:websocket_run_progress:fp=320fb385560e6214
   owner: web-execution
   reason: WebSocket auth — narrowed from except (AuthenticationError, Exception) to except AuthenticationError only
   safety: Only auth failures close with 4001; infrastructure errors propagate to outer handler
   expires: null
-- key: web/execution/routes.py:R6:create_execution_router:websocket_run_progress:fp=e26ebed511a767cd
+- key: web/execution/routes.py:R6:create_execution_router:websocket_run_progress:fp=22328521a378f729
   owner: web-execution
   reason: Run-ownership IDOR gate — narrowed from except Exception to except ValueError
   safety: Only not-found errors return 4004; infrastructure errors propagate to outer handler
   expires: null
-- key: web/execution/routes.py:R6:create_execution_router:websocket_run_progress:fp=8ff7d75c24b0f480
+- key: web/execution/routes.py:R6:create_execution_router:websocket_run_progress:fp=c348716c2cbe1830
   owner: web-execution
   reason: TOCTOU guard — run may be deleted between verify_run_ownership and get_status
   safety: Only not-found errors close with 4004; returns immediately

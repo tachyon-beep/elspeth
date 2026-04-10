@@ -23,6 +23,9 @@ from fastapi import APIRouter, Depends, HTTPException, Request, WebSocket, WebSo
 
 from elspeth.web.auth.middleware import get_current_user
 from elspeth.web.auth.models import AuthenticationError, UserIdentity
+from elspeth.web.auth.protocol import AuthProvider
+from elspeth.web.config import WebSettings
+from elspeth.web.execution.progress import ProgressBroadcaster
 from elspeth.web.execution.protocol import ExecutionService
 from elspeth.web.execution.schemas import RunResultsResponse, RunStatusResponse, ValidationResult
 from elspeth.web.sessions.protocol import SessionServiceProtocol
@@ -51,7 +54,7 @@ async def _verify_session_ownership(session_id: UUID, user: UserIdentity, reques
     Matches the pattern in sessions/routes.py.
     """
     session_service: SessionServiceProtocol = request.app.state.session_service
-    settings = request.app.state.settings
+    settings: WebSettings = request.app.state.settings
     try:
         session = await session_service.get_session(session_id)
     except ValueError:
@@ -68,7 +71,7 @@ async def _verify_run_ownership(run_id: UUID, user: UserIdentity, request: Reque
     Returns 404 (not 403) to avoid leaking run existence (IDOR).
     """
     session_service: SessionServiceProtocol = request.app.state.session_service
-    settings = request.app.state.settings
+    settings: WebSettings = request.app.state.settings
     try:
         run = await session_service.get_run(run_id)
     except ValueError:
@@ -202,8 +205,8 @@ def create_execution_router() -> APIRouter:
         Close code 4001 on auth failure — client MUST NOT auto-reconnect
         on 4001 (token must be refreshed or user must re-authenticate).
         """
-        broadcaster = websocket.app.state.broadcaster
-        auth_provider = websocket.app.state.auth_provider
+        broadcaster: ProgressBroadcaster = websocket.app.state.broadcaster
+        auth_provider: AuthProvider = websocket.app.state.auth_provider
         service: ExecutionService = websocket.app.state.execution_service
 
         # Auth: validate JWT from query parameter

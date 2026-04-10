@@ -6,7 +6,19 @@ from typing import Protocol
 from uuid import UUID
 
 from elspeth.web.auth.models import UserIdentity
+from elspeth.web.composer.state import CompositionState
 from elspeth.web.execution.schemas import RunStatusResponse, ValidationResult
+
+
+class YamlGenerator(Protocol):
+    """Protocol for objects that generate YAML from CompositionState.
+
+    The production implementation is the ``elspeth.web.composer.yaml_generator``
+    module, which satisfies this protocol via its module-level ``generate_yaml``
+    function. Injected as a dependency so tests can substitute a stub.
+    """
+
+    def generate_yaml(self, state: CompositionState) -> str: ...
 
 
 class ExecutionService(Protocol):

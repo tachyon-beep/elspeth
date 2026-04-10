@@ -31,6 +31,7 @@ from elspeth.cli_helpers import instantiate_plugins_from_config
 from elspeth.contracts.audit import SecretResolutionInput
 from elspeth.contracts.cli import ProgressEvent
 from elspeth.contracts.errors import GracefulShutdownError
+from elspeth.contracts.secrets import WebSecretResolver
 from elspeth.core.config import load_settings_from_yaml_string
 from elspeth.core.dag.graph import ExecutionGraph
 from elspeth.core.events import EventBus
@@ -40,7 +41,10 @@ from elspeth.core.secrets import SecretResolutionError
 from elspeth.engine.orchestrator.core import Orchestrator
 from elspeth.engine.orchestrator.types import PipelineConfig
 from elspeth.web.auth.models import UserIdentity
+from elspeth.web.blobs.protocol import BlobServiceProtocol
+from elspeth.web.config import WebSettings
 from elspeth.web.execution.progress import ProgressBroadcaster
+from elspeth.web.execution.protocol import YamlGenerator
 from elspeth.web.execution.schemas import (
     RunEvent,
     RunStatusResponse,
@@ -85,11 +89,11 @@ class ExecutionServiceImpl:
         *,
         loop: asyncio.AbstractEventLoop,
         broadcaster: ProgressBroadcaster,
-        settings: Any,  # WebSettings
+        settings: WebSettings,
         session_service: SessionServiceProtocol,
-        yaml_generator: Any,  # YamlGenerator — injected, not module-level
-        blob_service: Any = None,  # BlobServiceImpl — optional for blob linkage
-        secret_service: Any = None,  # WebSecretService — optional for secret resolution
+        yaml_generator: YamlGenerator,
+        blob_service: BlobServiceProtocol | None = None,
+        secret_service: WebSecretResolver | None = None,
     ) -> None:
         self._loop = loop
         self._broadcaster = broadcaster
@@ -255,7 +259,7 @@ class ExecutionServiceImpl:
 
         try:
             # Record blob-to-run linkage for input blobs
-            if parsed_blob_id is not None:
+            if parsed_blob_id is not None and self._blob_service is not None:
                 await self._blob_service.link_blob_to_run(
                     blob_id=parsed_blob_id,
                     run_id=run_id,
