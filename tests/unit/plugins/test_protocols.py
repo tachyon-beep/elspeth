@@ -17,7 +17,7 @@ class TestSourceProtocol:
     def test_source_protocol_definition(self) -> None:
         from elspeth.contracts import SourceProtocol
 
-        # Should be a Protocol (runtime_checkable protocols have this attribute)
+        # Should be a Protocol (all Protocols have this attribute)
         assert hasattr(SourceProtocol, "__protocol_attrs__")
 
     def test_source_implementation(self) -> None:
@@ -62,12 +62,9 @@ class TestSourceProtocol:
 
         source = MySource({"path": "test.csv"})
 
-        # IMPORTANT: Verify protocol conformance at runtime.
-        # This is why we use @runtime_checkable. Assign to a variable to
-        # prevent mypy from narrowing `source` to Never (which would make
-        # all subsequent code unreachable).
-        _conforms = isinstance(source, SourceProtocol)
-        assert _conforms, "Source must conform to SourceProtocol"
+        # Protocol conformance is verified by mypy, not isinstance() —
+        # SourceProtocol is not @runtime_checkable.
+        _source: SourceProtocol = source  # type: ignore[assignment]
 
         factory = make_factory()
         ctx = make_context(landscape=factory.plugin_audit_writer())
@@ -134,8 +131,9 @@ class TestSourceProtocol:
                 return None  # No schema contract
 
         source = MetadataSource({})
-        assert isinstance(source, SourceProtocol)  # type: ignore[unreachable]
-        assert source.determinism == Determinism.IO_READ  # type: ignore[unreachable]
+        # Protocol conformance verified by mypy, not isinstance().
+        _source: SourceProtocol = source  # type: ignore[assignment]
+        assert source.determinism == Determinism.IO_READ
         assert source.plugin_version == "1.0.0"
 
 
@@ -474,9 +472,8 @@ class TestSinkProtocol:
                 return False
 
         sink = BatchMemorySink({})
-        # Verify protocol conformance at runtime (see test_source_protocol_conformance).
-        _conforms = isinstance(sink, SinkProtocol)
-        assert _conforms, "Must conform to SinkProtocol"
+        # Protocol conformance verified by mypy, not isinstance().
+        _sink: SinkProtocol = sink  # type: ignore[assignment]
 
         factory = make_factory()
         ctx = make_context(landscape=factory.plugin_audit_writer())
@@ -556,9 +553,8 @@ class TestSinkProtocol:
 
         sink = MemorySink({})
 
-        # IMPORTANT: Verify protocol conformance at runtime (see test_source_protocol_conformance).
-        _conforms = isinstance(sink, SinkProtocol)
-        assert _conforms, "Must conform to SinkProtocol"
+        # Protocol conformance verified by mypy, not isinstance().
+        _sink: SinkProtocol = sink  # type: ignore[assignment]
 
         factory = make_factory()
         ctx = make_context(landscape=factory.plugin_audit_writer())

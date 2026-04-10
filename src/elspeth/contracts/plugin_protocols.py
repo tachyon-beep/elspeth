@@ -1,7 +1,10 @@
 """Plugin protocols — structural contracts for Source, Transform, Sink plugins.
 
 These protocols define what methods plugins must implement.
-They're used for type checking, not runtime enforcement (that's pluggy's job).
+They're primarily used for type checking (that's pluggy's job for runtime
+enforcement), with one exception: TransformProtocol is @runtime_checkable
+because the engine uses isinstance() to discriminate transforms from gates
+and coalesce nodes during DAG traversal.
 
 Plugin Types:
 - Source: Loads data into the system (one per run)
@@ -25,9 +28,8 @@ if TYPE_CHECKING:
     from elspeth.contracts.sink import OutputValidationResult
 
 
-@runtime_checkable
 class SourceProtocol(Protocol):
-    """Protocol for source plugins.
+    """Protocol for source plugins — type-checking only, not @runtime_checkable.
 
     Sources load data into the system. There is exactly one source per run.
 
@@ -267,9 +269,8 @@ class TransformProtocol(Protocol):
         ...
 
 
-@runtime_checkable
 class BatchTransformProtocol(Protocol):
-    """Protocol for batch-aware transforms.
+    """Protocol for batch-aware transforms — type-checking only, not @runtime_checkable.
 
     Batch transforms receive lists of rows and emit results. Used in aggregation
     nodes where the engine buffers rows until trigger fires.
@@ -374,9 +375,8 @@ class BatchTransformProtocol(Protocol):
         ...
 
 
-@runtime_checkable
 class SinkProtocol(Protocol):
-    """Protocol for sink plugins.
+    """Protocol for sink plugins — type-checking only, not @runtime_checkable.
 
     Sinks output data to external destinations.
     There can be multiple sinks per run.

@@ -558,8 +558,11 @@ def scan_directory(
     findings: list[Finding] = []
 
     for py_file in root.rglob("*.py"):
-        # Check exclusions
         relative = py_file.relative_to(root)
+        # Skip vendored/third-party directories
+        if any(part in _ALWAYS_EXCLUDED_DIRS for part in relative.parts):
+            continue
+        # Check user-specified exclusions
         skip = False
         for pattern in exclude_patterns:
             if relative.match(pattern) or str(relative).startswith(pattern.rstrip("*/")):
@@ -675,6 +678,10 @@ def scan_layer_imports_directory(
 
     for py_file in root.rglob("*.py"):
         relative = py_file.relative_to(root)
+        # Skip vendored/third-party directories
+        if any(part in _ALWAYS_EXCLUDED_DIRS for part in relative.parts):
+            continue
+        # Check user-specified exclusions
         skip = False
         for pattern in exclude_patterns:
             if relative.match(pattern) or str(relative).startswith(pattern.rstrip("*/")):
@@ -697,6 +704,10 @@ def scan_layer_imports_directory(
 
 _BANNED_RULES = frozenset(rule_id for rule_id, rule_def in RULES.items() if rule_def.get("banned"))
 _ALL_RULE_IDS = frozenset(RULES.keys())
+
+# Directories that are always excluded from scanning — vendored/third-party code
+# that happens to contain .py files but is not part of the ELSPETH codebase.
+_ALWAYS_EXCLUDED_DIRS = ("node_modules",)
 
 
 def _parse_allow_hits(data: dict[str, Any], source_file: str = "") -> list[AllowlistEntry]:
