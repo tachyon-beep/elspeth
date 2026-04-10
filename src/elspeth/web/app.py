@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import asyncio
+import contextlib
 import json
 import os
 import sys
@@ -38,6 +40,37 @@ from elspeth.web.sessions.routes import create_session_router
 from elspeth.web.sessions.service import SessionServiceImpl
 
 
+async def _periodic_orphan_cleanup(
+    session_service: SessionServiceImpl,
+    *,
+    interval_seconds: int,
+    max_age_seconds: int,
+) -> None:
+    """Background task that periodically cancels orphaned runs.
+
+    Runs orphaned by SIGKILL, OOM, or other unclean termination leave
+    sessions permanently blocked (partial unique index on active runs).
+    Startup cleanup handles the bulk case, but if the server runs for
+    days/weeks without restart, this catches runs orphaned mid-uptime.
+
+    Uses max_age_seconds (not None) because a run younger than the
+    threshold may still be legitimately executing in a background thread.
+    """
+    import structlog
+
+    slog = structlog.get_logger()
+    while True:
+        await asyncio.sleep(interval_seconds)
+        try:
+            cancelled = await session_service.cancel_all_orphaned_runs(
+                max_age_seconds=max_age_seconds,
+            )
+            if cancelled:
+                slog.info("periodic_orphan_cleanup", cancelled=cancelled)
+        except Exception:
+            slog.error("periodic_orphan_cleanup_failed", exc_info=True)
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     """Async lifespan context manager for the FastAPI application.
@@ -47,8 +80,6 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     captures asyncio.get_running_loop() and the ExecutionServiceImpl
     depends on both the broadcaster and the loop.
     """
-    import asyncio
-
     import structlog
 
     slog = structlog.get_logger()
@@ -105,7 +136,23 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     )
     app.state.execution_service = execution_service
 
+    # Periodic orphan cleanup — catches runs orphaned by SIGKILL/OOM
+    # between restarts. Startup cleanup (above) handles the bulk case;
+    # this catches runs orphaned while the server is still running.
+    orphan_task = asyncio.create_task(
+        _periodic_orphan_cleanup(
+            session_service,
+            interval_seconds=settings.orphan_run_check_interval_seconds,
+            max_age_seconds=settings.orphan_run_max_age_seconds,
+        )
+    )
+
     yield
+
+    # Cancel periodic cleanup before shutting down the executor
+    orphan_task.cancel()
+    with contextlib.suppress(asyncio.CancelledError):
+        await orphan_task
 
     # Shutdown execution service thread pool
     execution_service.shutdown()

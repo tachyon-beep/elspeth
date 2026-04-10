@@ -46,6 +46,7 @@ class WebSettings(BaseModel):
         "AZURE_API_KEY",
     )
     orphan_run_max_age_seconds: int = Field(default=3600, ge=60)
+    orphan_run_check_interval_seconds: int = Field(default=300, ge=30)
 
     # Execution infrastructure — defaults derive from data_dir when not explicitly set
     landscape_url: str | None = None

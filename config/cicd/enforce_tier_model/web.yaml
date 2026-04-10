@@ -169,12 +169,12 @@ allow_hits:
   reason: False positive — @router.get() is FastAPI HTTP route decorator, not dict.get()
   safety: No dict access involved; decorator syntax triggers text-based pattern match
   expires: null
-- key: web/app.py:R5:_settings_from_env:fp=bb118a9028ce2eff
+- key: web/app.py:R5:_settings_from_env:fp=3543b5388bbd89c8
   owner: web-app
   reason: Tier 3 boundary — JSON-parsed env var may be a list; isinstance check classifies for tuple conversion
   safety: isinstance used only for type dispatch; no contract masking
   expires: null
-- key: web/app.py:R6:_settings_from_env:fp=4bd0041b827e4b56
+- key: web/app.py:R6:_settings_from_env:fp=e0121f43a0f71805
   owner: web-app
   reason: Tier 3 boundary — env var value that isn't valid JSON is treated as plain string (the common case)
   safety: JSONDecodeError caught only to fall back to raw string; no silent data loss
@@ -371,37 +371,37 @@ allow_hits:
   reason: Tree-walk — isinstance() dispatches list/tuple branch in recursive config traversal
   safety: No contract masking; structural dispatch on deserialized YAML (Tier 3 data)
   expires: null
-- key: web/app.py:R1:create_app:fp=c6b4a1556ba16eff
+- key: web/app.py:R1:create_app:fp=9a9986b798142b46
   owner: web-app
   reason: Tier 3 — os.environ.get() for optional WEB_CONCURRENCY env var
   safety: Defaults to "1" when absent
   expires: null
-- key: web/app.py:R1:create_app:health:fp=5ff5ede43a797786
+- key: web/app.py:R1:create_app:health:fp=8da713f03ffb9e37
   owner: web-app
   reason: False positive — @router.get() is FastAPI route decorator
   safety: No dict access involved
   expires: null
-- key: web/app.py:R1:create_app:system_status:fp=7ef81fc3dc583870
+- key: web/app.py:R1:create_app:system_status:fp=469963c11bebb9c7
   owner: web-app
   reason: False positive — @router.get() is FastAPI route decorator
   safety: No dict access involved
   expires: null
-- key: web/app.py:R6:create_app:fp=73efbecfe9b8c578
+- key: web/app.py:R6:create_app:fp=0c136ddff17c147d
   owner: web-app
   reason: ValueError from int() on non-numeric WEB_CONCURRENCY
   safety: Defaults to single worker
   expires: null
-- key: web/app.py:R6:create_app:fp=8e7047a09f6ffd00
+- key: web/app.py:R6:create_app:fp=3cc82995d5cccf16
   owner: web-app
   reason: ValueError from int() on non-numeric --workers arg
   safety: Skips this argv entry
   expires: null
-- key: web/app.py:R6:create_app:fp=aac7f37fb11ae116
+- key: web/app.py:R6:create_app:fp=ada7cbb80ca41e8a
   owner: web-app
   reason: ValueError from int() on non-numeric --workers=N
   safety: Skips this argv entry
   expires: null
-- key: web/app.py:R6:create_app:fp=04f9ccd82cb8c338
+- key: web/app.py:R6:create_app:fp=80275bf75517b7c1
   owner: web-app
   reason: ValueError from int() on non-numeric -w arg
   safety: Skips this argv entry
@@ -511,7 +511,7 @@ allow_hits:
   reason: Error classification for sanitized client messaging
   safety: SecretResolutionError triggers safe message
   expires: null
-- key: web/app.py:R1:create_app:fp=9a4e11f687906168
+- key: web/app.py:R1:create_app:fp=cfb13d8719047b82
   owner: web-app
   reason: Tier 3 — os.environ.get() for optional ELSPETH_ENV
   safety: Returns None when absent; only used for test guard
@@ -571,10 +571,21 @@ allow_hits:
   reason: TOCTOU guard — run may be deleted between verify_run_ownership and get_status
   safety: Only not-found errors close with 4004; returns immediately
   expires: null
-- key: web/app.py:R1:lifespan:fp=f74df10b8a73da45
+- key: web/app.py:R1:lifespan:fp=7317e899dc6e7cef
   owner: web-app
   reason: False positive — httpx.AsyncClient.get() is an HTTP GET request, not dict.get()
   safety: HTTP errors caught by raise_for_status(); failure now raises SystemExit
+  expires: null
+- key: web/app.py:R4:_periodic_orphan_cleanup:fp=e4768cd759483d19
+  owner: web-execution
+  reason: Periodic background task must survive transient DB errors to retry on next interval
+  safety: Logged with exc_info=True; loop continues; no silent data loss
+  expires: null
+- key: web/app.py:R7:lifespan:fp=c41afb76623eb969
+  owner: web-execution
+  reason: contextlib.suppress(CancelledError) is the expected shutdown path for the periodic orphan cleanup task
+  safety: Clean cancellation during app shutdown; no error suppression
+  expires: null
   expires: null
 - key: web/secrets/user_store.py:R1:_compute_fingerprint:fp=1c5082907e8fb795
   owner: web-secrets

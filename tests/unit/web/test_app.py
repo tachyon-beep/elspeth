@@ -2,14 +2,16 @@
 
 from __future__ import annotations
 
+import asyncio
+import contextlib
 from pathlib import Path
-from unittest.mock import patch
+from unittest.mock import AsyncMock, patch
 
 import pytest
 from fastapi import Depends
 from starlette.testclient import TestClient
 
-from elspeth.web.app import _settings_from_env, create_app
+from elspeth.web.app import _periodic_orphan_cleanup, _settings_from_env, create_app
 from elspeth.web.config import WebSettings
 from elspeth.web.dependencies import get_settings
 
@@ -236,6 +238,54 @@ class TestSettingsFromEnv:
         monkeypatch.setenv("ELSPETH_WEB__SERVER_SECRET_ALLOWLIST", '["MY_KEY"]')
         settings = _settings_from_env()
         assert settings.server_secret_allowlist == ("MY_KEY",)
+
+
+class TestPeriodicOrphanCleanup:
+    """Tests for _periodic_orphan_cleanup background task."""
+
+    @pytest.mark.asyncio
+    async def test_calls_cancel_all_with_max_age(self) -> None:
+        """Periodic cleanup passes max_age_seconds (not None) to cancel_all_orphaned_runs."""
+        mock_service = AsyncMock()
+        mock_service.cancel_all_orphaned_runs.return_value = 0
+
+        task = asyncio.create_task(_periodic_orphan_cleanup(mock_service, interval_seconds=0, max_age_seconds=900))
+        # Let the loop run long enough for at least one call
+        await asyncio.sleep(0.05)
+        task.cancel()
+        with contextlib.suppress(asyncio.CancelledError):
+            await task
+
+        mock_service.cancel_all_orphaned_runs.assert_called_with(max_age_seconds=900)
+
+    @pytest.mark.asyncio
+    async def test_continues_after_exception(self) -> None:
+        """Periodic cleanup logs errors but keeps running."""
+        mock_service = AsyncMock()
+        mock_service.cancel_all_orphaned_runs.side_effect = [
+            RuntimeError("db connection lost"),
+            2,  # recovers on second call
+        ]
+
+        task = asyncio.create_task(_periodic_orphan_cleanup(mock_service, interval_seconds=0, max_age_seconds=3600))
+        await asyncio.sleep(0.05)
+        task.cancel()
+        with contextlib.suppress(asyncio.CancelledError):
+            await task
+
+        assert mock_service.cancel_all_orphaned_runs.call_count >= 2
+
+    @pytest.mark.asyncio
+    async def test_cancellation_is_clean(self) -> None:
+        """Task cancellation doesn't raise or leave dangling state."""
+        mock_service = AsyncMock()
+        mock_service.cancel_all_orphaned_runs.return_value = 0
+
+        task = asyncio.create_task(_periodic_orphan_cleanup(mock_service, interval_seconds=10, max_age_seconds=3600))
+        await asyncio.sleep(0.01)
+        task.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await task
 
 
 class TestDataDirCreation:
