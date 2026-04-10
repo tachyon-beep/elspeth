@@ -1073,13 +1073,23 @@ class TestJSONSourceDataKeyStructuralErrors:
         # No rows yielded - structural error discarded
         assert len(results) == 0
 
-    def test_data_key_structural_error_records_validation_error(self, tmp_path: Path, ctx: PluginContext) -> None:
+    def test_data_key_structural_error_records_validation_error(self, tmp_path: Path) -> None:
         """Structural errors are recorded via ctx.record_validation_error().
 
         With a real Landscape recorder, the validation error is persisted
         to the database. This test verifies the recording path succeeds.
         """
+        from elspeth.contracts.plugin_context import PluginContext
         from elspeth.plugins.sources.json_source import JSONSource
+        from tests.fixtures.landscape import make_recorder_with_run
+
+        setup = make_recorder_with_run(source_plugin_name="json")
+        ctx = PluginContext(
+            run_id=setup.run_id,
+            node_id=setup.source_node_id,
+            config={},
+            landscape=setup.factory.plugin_audit_writer(),
+        )
 
         json_file = tmp_path / "data.json"
         json_file.write_text('{"wrong_key": [{"id": 1}]}')
@@ -1102,17 +1112,10 @@ class TestJSONSourceDataKeyStructuralErrors:
         assert results[0].quarantine_error is not None
         assert "results" in results[0].quarantine_error  # The missing data_key
 
-        # Verify validation error was recorded to Landscape
-        from sqlalchemy import select
-
-        from elspeth.core.landscape.schema import validation_errors_table
-
-        assert ctx.landscape is not None
-        with ctx.landscape._db.engine.connect() as conn:
-            rows = conn.execute(select(validation_errors_table).where(validation_errors_table.c.run_id == ctx.run_id)).fetchall()
-
-        assert len(rows) == 1
-        assert "results" in rows[0].error  # The missing data_key
+        # Verify validation error was recorded to Landscape via factory's data_flow repo
+        errors = setup.factory.data_flow.get_validation_errors_for_run(ctx.run_id)
+        assert len(errors) == 1
+        assert "results" in errors[0].error  # The missing data_key
 
     def test_data_key_structural_error_uses_parse_schema_mode(self, tmp_path: Path) -> None:
         """Structural data_key errors record contract-valid schema_mode='parse'."""

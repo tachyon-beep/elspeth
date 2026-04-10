@@ -34,8 +34,9 @@ def _make_token(token_id: str, row_data: dict[str, object] | None = None) -> Mag
     return token
 
 
-def _make_executor() -> tuple[SinkExecutor, MagicMock]:
-    recorder = MagicMock()
+def _make_executor() -> tuple[SinkExecutor, MagicMock, MagicMock]:
+    execution = MagicMock()
+    data_flow = MagicMock()
     state_counter = [0]
 
     def _begin_state(**kwargs: Any) -> MagicMock:
@@ -44,12 +45,11 @@ def _make_executor() -> tuple[SinkExecutor, MagicMock]:
         state.state_id = f"state-{state_counter[0]}"
         return state
 
-    recorder.begin_node_state.side_effect = _begin_state
-    recorder.allocate_operation_call_index = MagicMock(return_value=0)
+    execution.begin_node_state.side_effect = _begin_state
     spans = MagicMock()
     spans.sink_span.return_value.__enter__ = MagicMock(return_value=None)
     spans.sink_span.return_value.__exit__ = MagicMock(return_value=False)
-    return SinkExecutor(recorder, spans, "run-1"), recorder
+    return SinkExecutor(execution, data_flow, spans, run_id="run-1"), execution, data_flow
 
 
 def _build_scenario(batch_size: int, diverted_indices: set[int]) -> tuple[list[MagicMock], MagicMock]:
@@ -76,7 +76,7 @@ def test_partition_completeness(batch_size: int, diverted_indices_raw: list[int]
     """Every token gets exactly one outcome: COMPLETED + DIVERTED == total batch."""
     diverted_indices = {i for i in diverted_indices_raw if i < batch_size}
     tokens, sink = _build_scenario(batch_size, diverted_indices)
-    executor, recorder = _make_executor()
+    executor, execution, data_flow = _make_executor()
 
     executor.write(
         sink=sink,
@@ -87,7 +87,7 @@ def test_partition_completeness(batch_size: int, diverted_indices_raw: list[int]
         pending_outcome=PendingOutcome(RowOutcome.COMPLETED),
     )
 
-    outcome_calls = recorder.record_token_outcome.call_args_list
+    outcome_calls = data_flow.record_token_outcome.call_args_list
     completed_ids = {c.kwargs["ref"].token_id for c in outcome_calls if c.kwargs["outcome"] == RowOutcome.COMPLETED}
     diverted_ids = {c.kwargs["ref"].token_id for c in outcome_calls if c.kwargs["outcome"] == RowOutcome.DIVERTED}
 
@@ -109,7 +109,7 @@ def test_exactly_once_terminal_state(batch_size: int, diverted_indices_raw: list
     """Each token_id appears in exactly one record_token_outcome call."""
     diverted_indices = {i for i in diverted_indices_raw if i < batch_size}
     tokens, sink = _build_scenario(batch_size, diverted_indices)
-    executor, recorder = _make_executor()
+    executor, execution, data_flow = _make_executor()
 
     executor.write(
         sink=sink,
@@ -120,7 +120,7 @@ def test_exactly_once_terminal_state(batch_size: int, diverted_indices_raw: list
         pending_outcome=PendingOutcome(RowOutcome.COMPLETED),
     )
 
-    outcome_calls = recorder.record_token_outcome.call_args_list
+    outcome_calls = data_flow.record_token_outcome.call_args_list
     recorded_token_ids = [c.kwargs["ref"].token_id for c in outcome_calls]
     # No duplicates
     assert len(recorded_token_ids) == len(set(recorded_token_ids))
@@ -163,7 +163,7 @@ def test_failsink_partition_completeness(batch_size: int, diverted_indices_raw: 
     """Failsink mode: every token gets exactly one outcome (COMPLETED or DIVERTED)."""
     diverted_indices = {i for i in diverted_indices_raw if i < batch_size}
     tokens, sink, failsink = _build_failsink_scenario(batch_size, diverted_indices)
-    executor, recorder = _make_executor()
+    executor, execution, data_flow = _make_executor()
 
     executor.write(
         sink=sink,
@@ -177,7 +177,7 @@ def test_failsink_partition_completeness(batch_size: int, diverted_indices_raw: 
         failsink_edge_id="edge-failsink-1",
     )
 
-    outcome_calls = recorder.record_token_outcome.call_args_list
+    outcome_calls = data_flow.record_token_outcome.call_args_list
     completed_ids = {c.kwargs["ref"].token_id for c in outcome_calls if c.kwargs["outcome"] == RowOutcome.COMPLETED}
     diverted_ids = {c.kwargs["ref"].token_id for c in outcome_calls if c.kwargs["outcome"] == RowOutcome.DIVERTED}
 
@@ -195,7 +195,7 @@ def test_failsink_exactly_once_terminal_state(batch_size: int, diverted_indices_
     """Failsink mode: each token_id appears in exactly one record_token_outcome call."""
     diverted_indices = {i for i in diverted_indices_raw if i < batch_size}
     tokens, sink, failsink = _build_failsink_scenario(batch_size, diverted_indices)
-    executor, recorder = _make_executor()
+    executor, execution, data_flow = _make_executor()
 
     executor.write(
         sink=sink,
@@ -209,7 +209,7 @@ def test_failsink_exactly_once_terminal_state(batch_size: int, diverted_indices_
         failsink_edge_id="edge-failsink-1",
     )
 
-    outcome_calls = recorder.record_token_outcome.call_args_list
+    outcome_calls = data_flow.record_token_outcome.call_args_list
     recorded_token_ids = [c.kwargs["ref"].token_id for c in outcome_calls]
     assert len(recorded_token_ids) == len(set(recorded_token_ids))
     assert set(recorded_token_ids) == {t.token_id for t in tokens}

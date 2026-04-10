@@ -52,12 +52,12 @@ def _make_factory(
     query.get_routing_events_for_states.return_value = routing_events or []
     query.get_calls_for_states.return_value = calls or []
     query.get_token_parents.return_value = token_parents or []
-    query.get_token_outcomes_for_row.return_value = token_outcomes or []
-    query.get_validation_errors_for_row.return_value = validation_errors or []
-    query.get_transform_errors_for_token.return_value = transform_errors or []
-    query.get_token_outcome.return_value = token_outcome
 
     data_flow = Mock()
+    data_flow.get_token_outcomes_for_row.return_value = token_outcomes or []
+    data_flow.get_validation_errors_for_row.return_value = validation_errors or []
+    data_flow.get_transform_errors_for_token.return_value = transform_errors or []
+    data_flow.get_token_outcome.return_value = token_outcome
 
     factory = Mock()
     factory.query = query

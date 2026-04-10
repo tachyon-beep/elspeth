@@ -775,7 +775,7 @@ class TestFindCallByRequestHash:
             response_data=RawCallPayload({"text": "response"}),
         )
 
-        found = factory.query.find_call_by_request_hash("run-1", CallType.LLM, original.request_hash)
+        found = factory.execution.find_call_by_request_hash("run-1", CallType.LLM, original.request_hash)
 
         assert found is not None
         assert found.call_id == original.call_id
@@ -783,7 +783,7 @@ class TestFindCallByRequestHash:
     def test_returns_none_for_unknown_hash(self):
         _db, factory, _state_id = _setup()
 
-        found = factory.query.find_call_by_request_hash("run-1", CallType.LLM, "nonexistent-hash")
+        found = factory.execution.find_call_by_request_hash("run-1", CallType.LLM, "nonexistent-hash")
 
         assert found is None
 
@@ -798,7 +798,7 @@ class TestFindCallByRequestHash:
             request_data=RawCallPayload({"prompt": "typed-request"}),
         )
 
-        found = factory.query.find_call_by_request_hash("run-1", CallType.HTTP, original.request_hash)
+        found = factory.execution.find_call_by_request_hash("run-1", CallType.HTTP, original.request_hash)
 
         assert found is None
 
@@ -817,8 +817,8 @@ class TestFindCallByRequestHash:
             )
             calls.append(call)
 
-        found_0 = factory.query.find_call_by_request_hash("run-1", CallType.LLM, calls[0].request_hash, sequence_index=0)
-        found_1 = factory.query.find_call_by_request_hash("run-1", CallType.LLM, calls[0].request_hash, sequence_index=1)
+        found_0 = factory.execution.find_call_by_request_hash("run-1", CallType.LLM, calls[0].request_hash, sequence_index=0)
+        found_1 = factory.execution.find_call_by_request_hash("run-1", CallType.LLM, calls[0].request_hash, sequence_index=1)
 
         assert found_0 is not None
         assert found_1 is not None
@@ -841,7 +841,7 @@ class TestGetCallResponseData:
             response_data=RawCallPayload({"text": "world"}),
         )
 
-        result = factory.query.get_call_response_data(call.call_id)
+        result = factory.execution.get_call_response_data(call.call_id)
 
         assert isinstance(result, CallDataResult)
         assert result.state == CallDataState.HASH_ONLY
@@ -859,7 +859,7 @@ class TestGetCallResponseData:
             error=RawCallPayload({"code": "error"}),
         )
 
-        result = factory.query.get_call_response_data(call.call_id)
+        result = factory.execution.get_call_response_data(call.call_id)
 
         assert isinstance(result, CallDataResult)
         assert result.state == CallDataState.NEVER_STORED
@@ -883,7 +883,7 @@ class TestGetCallResponseData:
         assert call.response_hash is not None
         assert call.response_ref is None
 
-        result = factory.query.get_call_response_data(call.call_id)
+        result = factory.execution.get_call_response_data(call.call_id)
 
         assert isinstance(result, CallDataResult)
         assert result.state == CallDataState.HASH_ONLY
@@ -907,7 +907,7 @@ class TestGetCallResponseData:
         assert call.response_hash is None
         assert call.response_ref is None
 
-        result = factory.query.get_call_response_data(call.call_id)
+        result = factory.execution.get_call_response_data(call.call_id)
 
         assert isinstance(result, CallDataResult)
         assert result.state == CallDataState.NEVER_STORED
@@ -946,7 +946,7 @@ class TestGetCallResponseData:
         )
 
         with pytest.raises(AuditIntegrityError, match="expected JSON object"):
-            factory.query.get_call_response_data(call.call_id)
+            factory.execution.get_call_response_data(call.call_id)
 
     def test_returns_dict_response_payload_successfully(self, tmp_path):
         """Bug gxan: valid dict payload should return correctly."""
@@ -972,7 +972,7 @@ class TestGetCallResponseData:
             response_data=RawCallPayload({"text": "world"}),
         )
 
-        result = factory.query.get_call_response_data(call.call_id)
+        result = factory.execution.get_call_response_data(call.call_id)
 
         assert isinstance(result, CallDataResult)
         assert result.state == CallDataState.AVAILABLE
@@ -1010,13 +1010,13 @@ class TestGetCallResponseData:
         )
 
         with pytest.raises(AuditIntegrityError, match="Payload integrity check failed for call_id="):
-            factory.query.get_call_response_data(call.call_id)
+            factory.execution.get_call_response_data(call.call_id)
 
     def test_call_not_found_for_unknown_id(self):
         """Querying a nonexistent call_id returns CALL_NOT_FOUND."""
         _db, factory, _state_id = _setup()
 
-        result = factory.query.get_call_response_data("nonexistent-call")
+        result = factory.execution.get_call_response_data("nonexistent-call")
 
         assert isinstance(result, CallDataResult)
         assert result.state == CallDataState.CALL_NOT_FOUND
@@ -1047,7 +1047,7 @@ class TestGetCallResponseData:
         )
 
         # Verify it's AVAILABLE first
-        result = factory.query.get_call_response_data(call.call_id)
+        result = factory.execution.get_call_response_data(call.call_id)
         assert result.state == CallDataState.AVAILABLE
 
         # Simulate retention policy purge by deleting the payload file
@@ -1056,6 +1056,6 @@ class TestGetCallResponseData:
         shutil.rmtree(tmp_path / "payloads")
         (tmp_path / "payloads").mkdir()
 
-        result = factory.query.get_call_response_data(call.call_id)
+        result = factory.execution.get_call_response_data(call.call_id)
         assert result.state == CallDataState.PURGED
         assert result.data is None

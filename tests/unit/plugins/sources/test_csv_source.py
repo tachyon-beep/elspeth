@@ -969,9 +969,18 @@ class TestCSVSourceSkipRowsAudit:
         """Create a plugin context with real landscape and source node records."""
         return make_source_context(plugin_name="csv")
 
-    def test_skip_rows_exceeds_file_records_validation_error(self, tmp_path: Path, ctx: PluginContext) -> None:
+    def test_skip_rows_exceeds_file_records_validation_error(self, tmp_path: Path) -> None:
         """skip_rows > available rows records validation error, not silent empty."""
         from elspeth.plugins.sources.csv_source import CSVSource
+        from tests.fixtures.landscape import make_recorder_with_run
+
+        setup = make_recorder_with_run(source_plugin_name="csv")
+        ctx = PluginContext(
+            run_id=setup.run_id,
+            node_id=setup.source_node_id,
+            config={},
+            landscape=setup.factory.plugin_audit_writer(),
+        )
 
         csv_file = tmp_path / "small.csv"
         csv_file.write_text("id,name\n1,alice\n")  # 2 rows total
@@ -990,9 +999,8 @@ class TestCSVSourceSkipRowsAudit:
         # No data rows yielded (file exhausted during skip)
         assert len(results) == 0
 
-        # Validation error recorded in landscape DB
-        assert ctx.landscape is not None
-        errors = ctx.landscape.get_validation_errors_for_run(ctx.run_id)
+        # Validation error recorded in landscape DB via factory's data_flow repo
+        errors = setup.factory.data_flow.get_validation_errors_for_run(ctx.run_id)
         assert len(errors) >= 1
         assert "skip_rows" in errors[0].error or "exhausted" in errors[0].error
 

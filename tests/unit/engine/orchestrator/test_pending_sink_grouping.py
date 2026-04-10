@@ -334,7 +334,7 @@ class TestSinkNameValidation:
 
         with pytest.raises(OrchestrationInvariantError, match="nonexistent_sink"):
             orchestrator._write_pending_to_sinks(
-                recorder=recorder,
+                factory=recorder,
                 run_id="test-run",
                 config=config,
                 ctx=ctx,
@@ -360,7 +360,7 @@ class TestSinkNameValidation:
 
         # Should not raise — empty list triggers `continue` before sink lookup
         orchestrator._write_pending_to_sinks(
-            recorder=recorder,
+            factory=recorder,
             run_id="test-run",
             config=config,
             ctx=ctx,

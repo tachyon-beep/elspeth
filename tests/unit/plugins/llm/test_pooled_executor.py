@@ -984,7 +984,7 @@ class TestPooledExecutorBugFixes:
         config = PoolConfig(
             pool_size=1,
             min_dispatch_delay_ms=10,
-            recovery_step_ms=10,
+            recovery_step_ms=50,
             max_dispatch_delay_ms=5000,
         )
         executor = PooledExecutor(config)

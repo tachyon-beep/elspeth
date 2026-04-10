@@ -32,9 +32,9 @@ def _make_contract() -> SchemaContract:
 
 
 def _make_mock_factory() -> MagicMock:
-    """Create a mock RecorderFactory."""
+    """Create a mock RecorderFactory with execution and data_flow sub-mocks."""
     factory = MagicMock()
-    factory.execution.create_row.return_value = Mock(row_id="row_001")
+    factory.data_flow.create_row.return_value = Mock(row_id="row_001")
     factory.data_flow.create_token.return_value = Mock(token_id="token_001")
     return factory
 
@@ -89,8 +89,8 @@ class TestRowProcessorPipelineRow:
             ctx=ctx,
         )
 
-        # Should have created a row and token via factory repositories
-        factory.execution.create_row.assert_called_once()
+        # Should have created a row and token via data_flow repository
+        factory.data_flow.create_row.assert_called_once()
         factory.data_flow.create_token.assert_called_once()
 
     def test_process_row_creates_pipeline_row(self) -> None:
@@ -196,7 +196,7 @@ class TestRowProcessorExistingRow:
 
         # Should create token for existing row (NOT create_row)
         factory.data_flow.create_token.assert_called_once()
-        factory.execution.create_row.assert_not_called()
+        factory.data_flow.create_row.assert_not_called()
 
         # Result should have token with PipelineRow
         assert len(results) >= 1

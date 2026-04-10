@@ -72,16 +72,11 @@ class TestMermaidUniqueNodeIDs:
         ]
 
         db = MagicMock()
-        recorder = MagicMock()
-        recorder.get_nodes.return_value = nodes
-        recorder.get_edges.return_value = edges
-        recorder.get_run.return_value = MagicMock(
-            started_at=None,
-            completed_at=None,
-            status=MagicMock(value="completed"),
-        )
+        factory = MagicMock()
+        factory.data_flow.get_nodes.return_value = nodes
+        factory.data_flow.get_edges.return_value = edges
 
-        result = get_dag_structure(db, recorder, "run-123")
+        result = get_dag_structure(db, factory, "run-123")
 
         # Should not be an error
         assert "error" not in result
@@ -132,14 +127,14 @@ class TestPerformanceReportNodeId:
         db.connection.return_value.__enter__ = MagicMock(return_value=mock_conn)
         db.connection.return_value.__exit__ = MagicMock(return_value=False)
 
-        recorder = MagicMock()
-        recorder.get_run.return_value = MagicMock(
+        factory = MagicMock()
+        factory.run_lifecycle.get_run.return_value = MagicMock(
             started_at=None,
             completed_at=None,
             status=MagicMock(value="completed"),
         )
 
-        result = get_performance_report(db, recorder, "run-123")
+        result = get_performance_report(db, factory, "run-123")
 
         assert "error" not in result
         node_perf = result["node_performance"]
@@ -199,14 +194,14 @@ class TestOutcomeAnalysisIsTerminal:
         db.connection.return_value.__enter__ = MagicMock(return_value=mock_conn)
         db.connection.return_value.__exit__ = MagicMock(return_value=False)
 
-        recorder = MagicMock()
-        recorder.get_run.return_value = MagicMock(
+        factory = MagicMock()
+        factory.run_lifecycle.get_run.return_value = MagicMock(
             started_at=None,
             completed_at=None,
             status=MagicMock(value="completed"),
         )
 
-        result = get_outcome_analysis(db, recorder, "run-123")
+        result = get_outcome_analysis(db, factory, "run-123")
 
         assert "error" not in result
         outcomes = result["outcome_distribution"]
@@ -252,14 +247,14 @@ class TestHighVarianceZeroDuration:
         db.connection.return_value.__enter__ = MagicMock(return_value=mock_conn)
         db.connection.return_value.__exit__ = MagicMock(return_value=False)
 
-        recorder = MagicMock()
-        recorder.get_run.return_value = MagicMock(
+        factory = MagicMock()
+        factory.run_lifecycle.get_run.return_value = MagicMock(
             started_at=None,
             completed_at=None,
             status=MagicMock(value="completed"),
         )
 
-        result = get_performance_report(db, recorder, "run-123")
+        result = get_performance_report(db, factory, "run-123")
 
         assert "error" not in result
         # Before fix: high_variance was [] because `0.0 and 100.0` is falsy
@@ -290,14 +285,14 @@ class TestHighVarianceZeroDuration:
         db.connection.return_value.__enter__ = MagicMock(return_value=mock_conn)
         db.connection.return_value.__exit__ = MagicMock(return_value=False)
 
-        recorder = MagicMock()
-        recorder.get_run.return_value = MagicMock(
+        factory = MagicMock()
+        factory.run_lifecycle.get_run.return_value = MagicMock(
             started_at=None,
             completed_at=None,
             status=MagicMock(value="completed"),
         )
 
-        result = get_performance_report(db, recorder, "run-123")
+        result = get_performance_report(db, factory, "run-123")
 
         assert "error" not in result
         high_variance = result["high_variance_nodes"]
@@ -309,15 +304,15 @@ class TestHighVarianceZeroDuration:
 # ---------------------------------------------------------------------------
 
 
-def _make_db_and_recorder(run_exists: bool = True) -> tuple[MagicMock, MagicMock]:
-    """Create mock db/recorder pair for get_error_analysis tests."""
+def _make_db_and_factory(run_exists: bool = True) -> tuple[MagicMock, MagicMock]:
+    """Create mock db/factory pair for get_error_analysis tests."""
     db = MagicMock()
-    recorder = MagicMock()
+    factory = MagicMock()
     if run_exists:
-        recorder.get_run.return_value = MagicMock()
+        factory.run_lifecycle.get_run.return_value = MagicMock()
     else:
-        recorder.get_run.return_value = None
-    return db, recorder
+        factory.run_lifecycle.get_run.return_value = None
+    return db, factory
 
 
 def _wire_conn(db: MagicMock, val_rows: list, trans_rows: list, sample_val: list, sample_trans: list) -> None:
@@ -356,9 +351,9 @@ class TestErrorAnalysisRunNotFound:
     """get_error_analysis returns error dict when run_id doesn't exist."""
 
     def test_returns_error_when_run_not_found(self) -> None:
-        db, recorder = _make_db_and_recorder(run_exists=False)
+        db, factory = _make_db_and_factory(run_exists=False)
 
-        result = get_error_analysis(db, recorder, "nonexistent-run")
+        result = get_error_analysis(db, factory, "nonexistent-run")
 
         assert result == {"error": "Run 'nonexistent-run' not found"}
 
@@ -368,43 +363,43 @@ class TestErrorAnalysisCorruptionGuard:
 
     def test_none_plugin_name_raises_audit_integrity_error(self) -> None:
         """Transform errors referencing a non-existent node must crash, not silently pass."""
-        db, recorder = _make_db_and_recorder()
+        db, factory = _make_db_and_factory()
         corrupt_row = _mock_row(plugin_name=None, count=3)
         _wire_conn(db, val_rows=[], trans_rows=[corrupt_row], sample_val=[], sample_trans=[])
 
         with pytest.raises(AuditIntegrityError, match="Tier-1 corruption"):
-            get_error_analysis(db, recorder, "run-corrupt")
+            get_error_analysis(db, factory, "run-corrupt")
 
     def test_corruption_guard_includes_count_and_run_id(self) -> None:
         """Error message must include the orphan count and run_id for diagnostics."""
-        db, recorder = _make_db_and_recorder()
+        db, factory = _make_db_and_factory()
         corrupt_row = _mock_row(plugin_name=None, count=7)
         _wire_conn(db, val_rows=[], trans_rows=[corrupt_row], sample_val=[], sample_trans=[])
 
         with pytest.raises(AuditIntegrityError, match=r"7 transform_errors row.*run_id='run-abc'"):
-            get_error_analysis(db, recorder, "run-abc")
+            get_error_analysis(db, factory, "run-abc")
 
     def test_corruption_guard_fires_even_with_valid_rows_present(self) -> None:
         """A single None plugin_name row triggers the guard even alongside valid rows."""
-        db, recorder = _make_db_and_recorder()
+        db, factory = _make_db_and_factory()
         valid_row = _mock_row(plugin_name="good_transform", count=10)
         corrupt_row = _mock_row(plugin_name=None, count=1)
         _wire_conn(db, val_rows=[], trans_rows=[valid_row, corrupt_row], sample_val=[], sample_trans=[])
 
         with pytest.raises(AuditIntegrityError):
-            get_error_analysis(db, recorder, "run-mixed")
+            get_error_analysis(db, factory, "run-mixed")
 
 
 class TestErrorAnalysisValidationGrouping:
     """Validation errors are grouped by source plugin_name and schema_mode."""
 
     def test_groups_validation_errors_by_plugin_and_schema_mode(self) -> None:
-        db, recorder = _make_db_and_recorder()
+        db, factory = _make_db_and_factory()
         val_row_1 = _mock_row(plugin_name="csv_source", schema_mode="strict", count=5)
         val_row_2 = _mock_row(plugin_name="csv_source", schema_mode="coerce", count=2)
         _wire_conn(db, val_rows=[val_row_1, val_row_2], trans_rows=[], sample_val=[], sample_trans=[])
 
-        result = get_error_analysis(db, recorder, "run-val")
+        result = get_error_analysis(db, factory, "run-val")
 
         assert "error" not in result
         val_errors = result["validation_errors"]
@@ -414,10 +409,10 @@ class TestErrorAnalysisValidationGrouping:
         assert val_errors["by_source"][1] == {"source_plugin": "csv_source", "schema_mode": "coerce", "count": 2}
 
     def test_empty_validation_errors(self) -> None:
-        db, recorder = _make_db_and_recorder()
+        db, factory = _make_db_and_factory()
         _wire_conn(db, val_rows=[], trans_rows=[], sample_val=[], sample_trans=[])
 
-        result = get_error_analysis(db, recorder, "run-empty")
+        result = get_error_analysis(db, factory, "run-empty")
 
         assert result["validation_errors"]["total"] == 0
         assert result["validation_errors"]["by_source"] == []
@@ -427,12 +422,12 @@ class TestErrorAnalysisTransformGrouping:
     """Transform errors are grouped by transform plugin_name."""
 
     def test_groups_transform_errors_by_plugin(self) -> None:
-        db, recorder = _make_db_and_recorder()
+        db, factory = _make_db_and_factory()
         trans_row_1 = _mock_row(plugin_name="llm_classifier", count=3)
         trans_row_2 = _mock_row(plugin_name="field_mapper", count=1)
         _wire_conn(db, val_rows=[], trans_rows=[trans_row_1, trans_row_2], sample_val=[], sample_trans=[])
 
-        result = get_error_analysis(db, recorder, "run-trans")
+        result = get_error_analysis(db, factory, "run-trans")
 
         assert "error" not in result
         trans_errors = result["transform_errors"]
@@ -446,35 +441,35 @@ class TestErrorAnalysisSampleData:
     """Sample error data is extracted and JSON-parsed."""
 
     def test_parses_sample_validation_data(self) -> None:
-        db, recorder = _make_db_and_recorder()
+        db, factory = _make_db_and_factory()
         sample_json = json.dumps({"field": "age", "value": "not_a_number"})
         sample_row = MagicMock()
         sample_row.__getitem__ = lambda self, idx: sample_json if idx == 0 else None
         _wire_conn(db, val_rows=[], trans_rows=[], sample_val=[sample_row], sample_trans=[])
 
-        result = get_error_analysis(db, recorder, "run-sample")
+        result = get_error_analysis(db, factory, "run-sample")
 
         assert result["validation_errors"]["sample_data"] == [{"field": "age", "value": "not_a_number"}]
 
     def test_parses_sample_transform_details(self) -> None:
-        db, recorder = _make_db_and_recorder()
+        db, factory = _make_db_and_factory()
         details_json = json.dumps({"error": "division by zero", "node": "calc"})
         sample_row = MagicMock()
         sample_row.__getitem__ = lambda self, idx: details_json if idx == 0 else None
         _wire_conn(db, val_rows=[], trans_rows=[], sample_val=[], sample_trans=[sample_row])
 
-        result = get_error_analysis(db, recorder, "run-sample-trans")
+        result = get_error_analysis(db, factory, "run-sample-trans")
 
         assert result["transform_errors"]["sample_details"] == [{"error": "division by zero", "node": "calc"}]
 
     def test_none_sample_data_preserved_as_none(self) -> None:
         """When row_data_json is NULL/None, the sample entry should be None, not crash."""
-        db, recorder = _make_db_and_recorder()
+        db, factory = _make_db_and_factory()
         null_row = MagicMock()
         null_row.__getitem__ = lambda self, idx: None
         _wire_conn(db, val_rows=[], trans_rows=[], sample_val=[null_row], sample_trans=[])
 
-        result = get_error_analysis(db, recorder, "run-null-sample")
+        result = get_error_analysis(db, factory, "run-null-sample")
 
         assert result["validation_errors"]["sample_data"] == [None]
 
@@ -515,22 +510,22 @@ def _make_call_type_row(call_type: str, count: int) -> MagicMock:
     return row
 
 
-def _make_llm_db_and_recorder(
+def _make_llm_db_and_factory(
     run_exists: bool = True,
 ) -> tuple[MagicMock, MagicMock]:
-    """Create db and recorder mocks for LLM usage report tests."""
+    """Create db and factory mocks for LLM usage report tests."""
     db = MagicMock()
     mock_conn = MagicMock()
     db.connection.return_value.__enter__ = MagicMock(return_value=mock_conn)
     db.connection.return_value.__exit__ = MagicMock(return_value=False)
 
-    recorder = MagicMock()
+    factory = MagicMock()
     if run_exists:
-        recorder.get_run.return_value = MagicMock(run_id="test-run")
+        factory.run_lifecycle.get_run.return_value = MagicMock(run_id="test-run")
     else:
-        recorder.get_run.return_value = None
+        factory.run_lifecycle.get_run.return_value = None
 
-    return db, recorder
+    return db, factory
 
 
 def _wire_llm_conn(
@@ -559,9 +554,9 @@ class TestLLMUsageReportRunNotFound:
     """get_llm_usage_report returns error when run doesn't exist."""
 
     def test_returns_error_for_missing_run(self) -> None:
-        db, recorder = _make_llm_db_and_recorder(run_exists=False)
+        db, factory = _make_llm_db_and_factory(run_exists=False)
 
-        result = get_llm_usage_report(db, recorder, "nonexistent-run")
+        result = get_llm_usage_report(db, factory, "nonexistent-run")
 
         assert "error" in result
         assert "nonexistent-run" in result["error"]
@@ -571,7 +566,7 @@ class TestLLMUsageReportNoLLMCalls:
     """get_llm_usage_report handles runs with no LLM calls."""
 
     def test_returns_message_when_no_llm_calls(self) -> None:
-        db, recorder = _make_llm_db_and_recorder()
+        db, factory = _make_llm_db_and_factory()
         _wire_llm_conn(
             db,
             llm_rows=[],
@@ -581,7 +576,7 @@ class TestLLMUsageReportNoLLMCalls:
             ],
         )
 
-        result = get_llm_usage_report(db, recorder, "test-run")
+        result = get_llm_usage_report(db, factory, "test-run")
 
         assert result["message"] == "No LLM calls found in this run"
         assert result["call_types"] == {"http": 5, "database": 3}
@@ -589,10 +584,10 @@ class TestLLMUsageReportNoLLMCalls:
         assert "by_plugin" not in result
 
     def test_returns_empty_call_types_when_no_calls_at_all(self) -> None:
-        db, recorder = _make_llm_db_and_recorder()
+        db, factory = _make_llm_db_and_factory()
         _wire_llm_conn(db, llm_rows=[], call_type_rows=[])
 
-        result = get_llm_usage_report(db, recorder, "test-run")
+        result = get_llm_usage_report(db, factory, "test-run")
 
         assert result["message"] == "No LLM calls found in this run"
         assert result["call_types"] == {}
@@ -602,7 +597,7 @@ class TestLLMUsageReportSinglePlugin:
     """get_llm_usage_report aggregates correctly for a single plugin."""
 
     def test_single_plugin_success_only(self) -> None:
-        db, recorder = _make_llm_db_and_recorder()
+        db, factory = _make_llm_db_and_factory()
         _wire_llm_conn(
             db,
             llm_rows=[
@@ -622,7 +617,7 @@ class TestLLMUsageReportSinglePlugin:
             ],
         )
 
-        result = get_llm_usage_report(db, recorder, "test-run")
+        result = get_llm_usage_report(db, factory, "test-run")
 
         assert result["run_id"] == "test-run"
         assert result["call_types"] == {"llm": 10}
@@ -643,7 +638,7 @@ class TestLLMUsageReportSuccessFailureSplit:
     """get_llm_usage_report correctly splits successful and failed counts using CallStatus."""
 
     def test_success_and_failure_counts_split_correctly(self) -> None:
-        db, recorder = _make_llm_db_and_recorder()
+        db, factory = _make_llm_db_and_factory()
         _wire_llm_conn(
             db,
             llm_rows=[
@@ -673,7 +668,7 @@ class TestLLMUsageReportSuccessFailureSplit:
             ],
         )
 
-        result = get_llm_usage_report(db, recorder, "test-run")
+        result = get_llm_usage_report(db, factory, "test-run")
 
         plugin_stats = result["by_plugin"]["llm_classifier"]
         assert plugin_stats["total_calls"] == 10
@@ -686,7 +681,7 @@ class TestLLMUsageReportAverageLatency:
     """get_llm_usage_report calculates average latency as total_latency_ms / total_calls, rounded to 2dp."""
 
     def test_average_latency_calculation(self) -> None:
-        db, recorder = _make_llm_db_and_recorder()
+        db, factory = _make_llm_db_and_factory()
         _wire_llm_conn(
             db,
             llm_rows=[
@@ -704,7 +699,7 @@ class TestLLMUsageReportAverageLatency:
             call_type_rows=[_make_call_type_row("llm", 3)],
         )
 
-        result = get_llm_usage_report(db, recorder, "test-run")
+        result = get_llm_usage_report(db, factory, "test-run")
 
         plugin_stats = result["by_plugin"]["llm_summarizer"]
         # 333.33 / 3 = 111.11
@@ -713,7 +708,7 @@ class TestLLMUsageReportAverageLatency:
         assert result["llm_summary"]["avg_latency_ms"] == 111.11
 
     def test_average_latency_rounds_to_two_decimals(self) -> None:
-        db, recorder = _make_llm_db_and_recorder()
+        db, factory = _make_llm_db_and_factory()
         _wire_llm_conn(
             db,
             llm_rows=[
@@ -731,7 +726,7 @@ class TestLLMUsageReportAverageLatency:
             call_type_rows=[_make_call_type_row("llm", 7)],
         )
 
-        result = get_llm_usage_report(db, recorder, "test-run")
+        result = get_llm_usage_report(db, factory, "test-run")
 
         # 1000.0 / 7 = 142.857142... -> 142.86
         assert result["by_plugin"]["llm_router"]["avg_latency_ms"] == 142.86
@@ -742,7 +737,7 @@ class TestLLMUsageReportMultiplePlugins:
     """get_llm_usage_report aggregates correctly across multiple plugins."""
 
     def test_multiple_plugins_aggregated_independently(self) -> None:
-        db, recorder = _make_llm_db_and_recorder()
+        db, factory = _make_llm_db_and_factory()
         _wire_llm_conn(
             db,
             llm_rows=[
@@ -783,7 +778,7 @@ class TestLLMUsageReportMultiplePlugins:
             ],
         )
 
-        result = get_llm_usage_report(db, recorder, "test-run")
+        result = get_llm_usage_report(db, factory, "test-run")
 
         # Classifier: 5 success + 1 error = 6 total, 1300ms total latency
         classifier = result["by_plugin"]["llm_classifier"]

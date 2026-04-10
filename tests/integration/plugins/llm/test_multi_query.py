@@ -260,7 +260,7 @@ def executor(factory: RecorderFactory) -> TransformExecutor:
     """Create TransformExecutor for testing."""
     spans = SpanFactory()
     step_resolver = lambda node_id: 0  # noqa: E731
-    return TransformExecutor(factory.execution, spans, step_resolver)
+    return TransformExecutor(factory.execution, spans, step_resolver, data_flow=factory.data_flow)
 
 
 @pytest.fixture
