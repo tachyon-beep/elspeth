@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import Protocol
+from typing import Protocol, runtime_checkable
 from uuid import UUID
 
 from elspeth.web.auth.models import UserIdentity
@@ -21,6 +21,7 @@ class YamlGenerator(Protocol):
     def generate_yaml(self, state: CompositionState) -> str: ...
 
 
+@runtime_checkable
 class ExecutionService(Protocol):
     """Protocol for pipeline execution operations.
 

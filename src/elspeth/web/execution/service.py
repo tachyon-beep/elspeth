@@ -44,7 +44,7 @@ from elspeth.web.auth.models import UserIdentity
 from elspeth.web.blobs.protocol import BlobServiceProtocol
 from elspeth.web.config import WebSettings
 from elspeth.web.execution.progress import ProgressBroadcaster
-from elspeth.web.execution.protocol import YamlGenerator
+from elspeth.web.execution.protocol import ExecutionService, YamlGenerator
 from elspeth.web.execution.schemas import (
     RunEvent,
     RunStatusResponse,
@@ -755,3 +755,9 @@ class ExecutionServiceImpl:
                 "rows_failed": progress.rows_failed,
             },
         )
+
+
+# Protocol conformance enforcement — mypy verifies ExecutionServiceImpl
+# structurally satisfies ExecutionService at this assignment. Without this,
+# drift between protocol and impl is only caught at cast() call sites.
+_: type[ExecutionService] = ExecutionServiceImpl
