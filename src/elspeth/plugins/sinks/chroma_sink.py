@@ -106,6 +106,50 @@ class ChromaSinkConfig(DataPluginConfig):
         )
         return self
 
+    @model_validator(mode="after")
+    def validate_field_mapping_against_schema(self) -> ChromaSinkConfig:
+        """Cross-reference field_mapping field names against schema_config.
+
+        For fixed/flexible schemas, validates that referenced fields exist and
+        have compatible types. For observed schemas, fields are unknown at config
+        time so validation defers to runtime.
+        """
+        if self.schema_config.is_observed:
+            return self
+
+        fields = self.schema_config.fields
+        if fields is None:
+            return self
+
+        field_types = {f.name: f.field_type for f in fields}
+        fm = self.field_mapping
+
+        # document_field and id_field must exist and be str-compatible
+        for attr_name, label in [("document_field", "document_field"), ("id_field", "id_field")]:
+            field_name = getattr(fm, attr_name)
+            if field_name not in field_types:
+                raise ValueError(
+                    f"field_mapping.{label} references '{field_name}' which is not in the schema. Declared fields: {sorted(field_types)}"
+                )
+            ft = field_types[field_name]
+            if ft not in ("str", "any"):
+                raise ValueError(f"field_mapping.{label} references '{field_name}' which has type '{ft}' — ChromaDB requires str")
+
+        # metadata_fields must exist and have ChromaDB-compatible types
+        chroma_metadata_types = {"str", "int", "float", "bool", "any"}
+        for mf in fm.metadata_fields:
+            if mf not in field_types:
+                raise ValueError(
+                    f"field_mapping.metadata_fields references '{mf}' which is not in the schema. Declared fields: {sorted(field_types)}"
+                )
+            ft = field_types[mf]
+            if ft not in chroma_metadata_types:
+                raise ValueError(
+                    f"field_mapping.metadata_fields references '{mf}' which has type '{ft}' — ChromaDB metadata requires str/int/float/bool"
+                )
+
+        return self
+
 
 class ChromaSink(BaseSink):
     """Write pipeline rows into a ChromaDB collection.
