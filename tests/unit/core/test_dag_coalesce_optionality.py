@@ -8,9 +8,19 @@ and FieldDefinition directly — optionality is a first-class boolean field.
 
 from __future__ import annotations
 
+from typing import Any, ClassVar
+
 import pytest
 
+from elspeth.contracts import NodeType
 from elspeth.contracts.schema import FieldDefinition, SchemaConfig
+from elspeth.core.config import (
+    CoalesceSettings,
+    GateSettings,
+    SourceSettings,
+    TransformSettings,
+)
+from elspeth.core.dag import ExecutionGraph, WiredTransform
 from elspeth.core.dag.models import GraphValidationError
 
 
@@ -346,3 +356,183 @@ class TestCoalesceSinkRequiredFieldValidation:
 
         with pytest.raises(GraphValidationError, match=r"exclusive_to_a"):
             graph.validate_edge_compatibility()
+
+
+class _BuilderMockSource:
+    """Mock source plugin for builder end-to-end tests."""
+
+    name = "mock_source"
+    output_schema = None
+    config: ClassVar[dict[str, Any]] = {"schema": {"mode": "observed"}}
+    _on_validation_failure = "discard"
+    on_success = "output"
+
+
+class _BuilderMockSink:
+    """Mock sink plugin with no declared required fields."""
+
+    name = "mock_sink"
+    input_schema = None
+    config: ClassVar[dict[str, Any]] = {}
+    _on_write_failure: str = "discard"
+    declared_required_fields: ClassVar[frozenset[str]] = frozenset()
+
+    def _reset_diversion_log(self) -> None:
+        pass
+
+
+class _TransformWithTypedSchema:
+    """Mock transform that exposes a typed _output_schema_config with fields."""
+
+    input_schema = None
+    output_schema = None
+    config: ClassVar[dict[str, Any]] = {"schema": {"mode": "flexible"}}
+    on_error: str | None = None
+    on_success: str | None = "output"
+    declared_output_fields: frozenset[str] = frozenset()
+
+    def __init__(self, name: str, schema: SchemaConfig) -> None:
+        self.name = name
+        self._output_schema_config = schema
+
+
+class TestBuilderBranchExclusiveFieldDowngrade:
+    """End-to-end coverage for the builder's union-merge downgrade pass.
+
+    The tests above this class (_merge_schemas and the manually-built graph
+    with a pre-computed coalesce schema) all bypass the real builder. If the
+    downgrade pass in ``src/elspeth/core/dag/builder.py`` were deleted, those
+    tests would still pass.
+
+    These tests drive ``ExecutionGraph.from_plugin_instances`` with asymmetric
+    branch schemas and inspect the resulting coalesce node's
+    ``output_schema_config`` directly, so a regression in the builder's
+    downgrade pass will fail here loudly.
+    """
+
+    def _build_graph(
+        self,
+        *,
+        branch_a_fields: tuple[FieldDefinition, ...],
+        branch_b_fields: tuple[FieldDefinition, ...],
+    ) -> ExecutionGraph:
+        """Build: source → fork gate → [transform_a, transform_b] → coalesce → sink."""
+        source = _BuilderMockSource()
+
+        t_a = _TransformWithTypedSchema(
+            "branch_transform_a",
+            SchemaConfig(mode="flexible", fields=branch_a_fields),
+        )
+        t_b = _TransformWithTypedSchema(
+            "branch_transform_b",
+            SchemaConfig(mode="flexible", fields=branch_b_fields),
+        )
+
+        wired_a = WiredTransform(
+            plugin=t_a,  # type: ignore[arg-type]
+            settings=TransformSettings(
+                name="t_a",
+                plugin=t_a.name,
+                input="branch_a",
+                on_success="t_a_out",
+                on_error="discard",
+                options={},
+            ),
+        )
+        wired_b = WiredTransform(
+            plugin=t_b,  # type: ignore[arg-type]
+            settings=TransformSettings(
+                name="t_b",
+                plugin=t_b.name,
+                input="branch_b",
+                on_success="t_b_out",
+                on_error="discard",
+                options={},
+            ),
+        )
+
+        fork_gate = GateSettings(
+            name="splitter",
+            input="source_out",
+            condition="True",
+            routes={"true": "fork", "false": "output"},
+            fork_to=["branch_a", "branch_b"],
+        )
+
+        coalesce = CoalesceSettings(
+            name="merger",
+            branches={"branch_a": "t_a_out", "branch_b": "t_b_out"},
+            policy="require_all",
+            merge="union",
+            on_success="output",
+        )
+
+        return ExecutionGraph.from_plugin_instances(
+            source=source,  # type: ignore[arg-type]
+            source_settings=SourceSettings(plugin=source.name, on_success="source_out", options={}),
+            transforms=[wired_a, wired_b],
+            sinks={"output": _BuilderMockSink()},  # type: ignore[dict-item]
+            aggregations={},
+            gates=[fork_gate],
+            coalesce_settings=[coalesce],
+        )
+
+    def _get_field(self, schema: SchemaConfig, name: str) -> FieldDefinition:
+        assert schema.fields is not None
+        for fd in schema.fields:
+            if fd.name == name:
+                return fd
+        raise AssertionError(f"Field {name!r} not found in schema")
+
+    def test_builder_downgrades_branch_exclusive_field_to_optional(self) -> None:
+        """End-to-end: builder's union merge marks branch-exclusive fields as optional.
+
+        Drives the real build_execution_graph with asymmetric branch schemas
+        to prove the downgrade pass actually runs and produces the right result.
+        Without this test, the bug-fix code could be deleted and all other
+        tests would still pass (they use a simulation copy of the algorithm).
+        """
+        graph = self._build_graph(
+            branch_a_fields=(
+                FieldDefinition("id", "str", required=True),
+                FieldDefinition("exclusive_to_a", "int", required=True),
+            ),
+            branch_b_fields=(FieldDefinition("id", "str", required=True),),
+        )
+
+        coalesce_nodes = [n for n in graph.get_nodes() if n.node_type == NodeType.COALESCE]
+        assert len(coalesce_nodes) == 1
+        coal_schema = coalesce_nodes[0].output_schema_config
+        assert coal_schema is not None
+        assert coal_schema.fields is not None, "Expected typed schema, not observed"
+
+        # Branch-exclusive field must be downgraded to optional.
+        assert self._get_field(coal_schema, "exclusive_to_a").required is False
+        # Field present in ALL branches must stay required — downgrade is selective.
+        assert self._get_field(coal_schema, "id").required is True
+
+    def test_builder_keeps_shared_required_fields_required(self) -> None:
+        """Control case: field required in BOTH branches stays required.
+
+        Complements the branch-exclusive test — proves the downgrade is
+        keyed on branch-presence, not applied blanket to every field.
+        """
+        graph = self._build_graph(
+            branch_a_fields=(
+                FieldDefinition("id", "str", required=True),
+                FieldDefinition("shared", "int", required=True),
+            ),
+            branch_b_fields=(
+                FieldDefinition("id", "str", required=True),
+                FieldDefinition("shared", "int", required=True),
+            ),
+        )
+
+        coalesce_nodes = [n for n in graph.get_nodes() if n.node_type == NodeType.COALESCE]
+        assert len(coalesce_nodes) == 1
+        coal_schema = coalesce_nodes[0].output_schema_config
+        assert coal_schema is not None
+        assert coal_schema.fields is not None
+
+        assert self._get_field(coal_schema, "id").required is True
+        assert self._get_field(coal_schema, "shared").required is True
