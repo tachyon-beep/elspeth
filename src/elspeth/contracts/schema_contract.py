@@ -178,6 +178,11 @@ class SchemaContract:
             return self._by_normalized[normalized_name]
         return None
 
+    @property
+    def required_field_names(self) -> frozenset[str]:
+        """Normalized names of all fields with required=True."""
+        return frozenset(fc.normalized_name for fc in self.fields if fc.required)
+
     def with_locked(self) -> SchemaContract:
         """Return new contract with locked=True.
 

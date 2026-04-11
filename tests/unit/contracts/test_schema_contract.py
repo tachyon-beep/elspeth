@@ -1032,6 +1032,40 @@ class TestSchemaContractMerge:
         ]
 
 
+# --- Required Field Names Tests ---
+
+
+class TestRequiredFieldNames:
+    """Tests for SchemaContract.required_field_names property."""
+
+    def test_returns_required_fields_only(self) -> None:
+        """Property returns frozenset of names where required=True."""
+        contract = SchemaContract(
+            mode="FLEXIBLE",
+            fields=(
+                make_field("a", int, original_name="A", required=True, source="declared"),
+                make_field("b", str, original_name="B", required=False, source="declared"),
+                make_field("c", float, original_name="C", required=True, source="declared"),
+            ),
+            locked=True,
+        )
+        assert contract.required_field_names == frozenset({"a", "c"})
+
+    def test_empty_when_no_required_fields(self) -> None:
+        """Property returns empty frozenset when no fields are required."""
+        contract = SchemaContract(
+            mode="OBSERVED",
+            fields=(make_field("x", int, original_name="X", required=False, source="inferred"),),
+            locked=True,
+        )
+        assert contract.required_field_names == frozenset()
+
+    def test_empty_contract(self) -> None:
+        """Property returns empty frozenset for empty contract."""
+        contract = SchemaContract(mode="OBSERVED", fields=(), locked=True)
+        assert contract.required_field_names == frozenset()
+
+
 # --- Any Type Tests ---
 
 
