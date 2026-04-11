@@ -1465,6 +1465,12 @@ class ExecutionGraph:
         - A transform's output schema doesn't declare a field the sink requires
         - A source doesn't guarantee a field the sink requires
 
+        AGGREGATION predecessors are skipped: their output is dynamic by design
+        (e.g., BatchStats produces count/sum/mean rather than the input fields),
+        and the builder stores their `options.schema` as input-validation, not
+        output. There's no static way to validate sink requirements against an
+        aggregation's dynamic output.
+
         Runs at build time rather than failing at runtime with a generic
         PluginContractViolation.
 
@@ -1483,6 +1489,8 @@ class ExecutionGraph:
 
             for predecessor_id, _ in self._graph.in_edges(node_id):
                 predecessor_info = self.get_node_info(predecessor_id)
+                if predecessor_info.node_type == NodeType.AGGREGATION:
+                    continue  # Aggregation outputs are dynamic by design
                 schema_config = predecessor_info.output_schema_config
                 if schema_config is None or schema_config.fields is None:
                     continue  # Observed schemas — can't validate at build time

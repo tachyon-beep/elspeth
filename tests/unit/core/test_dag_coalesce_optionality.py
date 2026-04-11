@@ -492,6 +492,51 @@ class TestCoalesceSinkRequiredFieldValidation:
 
         graph.validate_edge_compatibility()  # Should not raise
 
+    def test_aggregation_predecessor_skipped(self) -> None:
+        """AGGREGATION → SINK skips required-field validation.
+
+        Aggregations have dynamic output by design (e.g., BatchStats produces
+        count/sum/mean rather than the input fields). The builder stores their
+        `options.schema` as input-validation, not output, so validating sink
+        requirements against it produces false positives. Validation must skip.
+
+        Regression test for the case where the new sink-required-fields walk
+        was firing on aggregation→sink topologies and rejecting valid configs.
+        """
+        from elspeth.contracts import RoutingMode
+        from elspeth.contracts.schema import FieldDefinition, SchemaConfig
+        from elspeth.core.dag.graph import ExecutionGraph
+        from elspeth.core.dag.models import NodeType
+
+        # Aggregation's output_schema_config carries its INPUT schema (legacy
+        # builder behavior). Without the AGGREGATION skip, the sink's required
+        # field 'total_records' would appear missing from this schema.
+        aggregation_input_schema = SchemaConfig(
+            mode="fixed",
+            fields=(FieldDefinition("value", "float", required=True),),
+        )
+
+        graph = ExecutionGraph()
+        graph.add_node("source", node_type=NodeType.SOURCE, plugin_name="csv")
+        graph.add_node(
+            "stats",
+            node_type=NodeType.AGGREGATION,
+            plugin_name="batch_stats",
+            config={"options": {"value_field": "value"}},
+            output_schema_config=aggregation_input_schema,
+        )
+        graph.add_node(
+            "sink",
+            node_type=NodeType.SINK,
+            plugin_name="csv_sink",
+            declared_required_fields=frozenset({"total_records"}),
+        )
+
+        graph.add_edge("source", "stats", label="continue", mode=RoutingMode.MOVE)
+        graph.add_edge("stats", "sink", label="continue", mode=RoutingMode.MOVE)
+
+        graph.validate_edge_compatibility()  # Should not raise
+
 
 class _BuilderMockSource:
     """Mock source plugin for builder end-to-end tests."""
