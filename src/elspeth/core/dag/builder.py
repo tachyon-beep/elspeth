@@ -206,6 +206,7 @@ def build_execution_graph(
             config=sink_config,
             input_schema=sink.input_schema,  # SinkProtocol requires this
             output_schema_config=sink_schema_config,
+            declared_required_fields=sink.declared_required_fields,
         )
 
     graph.set_sink_id_map(sink_ids)

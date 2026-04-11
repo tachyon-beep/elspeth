@@ -104,6 +104,10 @@ class NodeInfo:
     output_schema: type[PluginSchema] | None = None
     input_schema_config: SchemaConfig | None = None
     output_schema_config: SchemaConfig | None = None
+    # Populated only for SINK nodes by the builder from SinkProtocol.declared_required_fields.
+    # Used for build-time validation that upstream coalesce output guarantees the
+    # fields a sink requires. Empty frozenset for all non-sink nodes.
+    declared_required_fields: frozenset[str] = field(default_factory=frozenset)
 
     def __post_init__(self) -> None:
         if len(self.node_id) > _NODE_ID_MAX_LENGTH:

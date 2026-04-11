@@ -152,6 +152,7 @@ class ExecutionGraph:
         output_schema: type[PluginSchema] | None = None,
         input_schema_config: SchemaConfig | None = None,
         output_schema_config: SchemaConfig | None = None,
+        declared_required_fields: frozenset[str] = frozenset(),
     ) -> None:
         """Add a node to the execution graph.
 
@@ -165,6 +166,9 @@ class ExecutionGraph:
             input_schema_config: Input schema config for contract validation
             output_schema_config: Output schema config for contract validation.
                 Parsed from config["schema"] when not provided explicitly.
+            declared_required_fields: For SINK nodes only — the set of fields the
+                sink requires in its input rows. Populated by the builder from
+                SinkProtocol.declared_required_fields. Empty frozenset otherwise.
         """
         resolved_config = config or {}
 
@@ -190,6 +194,7 @@ class ExecutionGraph:
             output_schema=output_schema,
             input_schema_config=input_schema_config,
             output_schema_config=output_schema_config,
+            declared_required_fields=declared_required_fields,
         )
         self._graph.add_node(node_id, info=info)
 
@@ -959,6 +964,12 @@ class ExecutionGraph:
         for coalesce_id in coalesce_nodes:
             self._validate_coalesce_compatibility(coalesce_id, _schema_cache=schema_cache)
 
+        # Validate coalesce → sink required-field satisfaction.
+        # Catches mismatches between sink.declared_required_fields and coalesce
+        # output optionality at build time, rather than at runtime with a
+        # generic PluginContractViolation.
+        self._validate_coalesce_sink_requirements()
+
     def warn_divert_coalesce_interactions(
         self,
         coalesce_configs: dict[NodeID, CoalesceSettings],
@@ -1438,6 +1449,62 @@ class ExecutionGraph:
                         f"multiple branches: first branch has {first_name}, "
                         f"branch from '{other_id}' has {other_name}. {error_msg}"
                     )
+
+    def _validate_coalesce_sink_requirements(self) -> None:
+        """Validate coalesce output satisfies downstream sink required fields.
+
+        For each COALESCE node, check that each downstream SINK's
+        ``declared_required_fields`` is a subset of the coalesce output's
+        guaranteed (required) fields. If a sink requires a field that the
+        coalesce marks optional (branch-exclusive or AND-downgraded), fail
+        at build time rather than crashing at runtime with a generic
+        PluginContractViolation whose root cause is coalesce merge semantics.
+
+        Raises:
+            GraphValidationError: if a downstream sink requires a field that
+                the coalesce output does not guarantee.
+        """
+        for node_id, data in self._graph.nodes(data=True):
+            info = data["info"]
+            if info.node_type != NodeType.COALESCE:
+                continue
+
+            schema_config = info.output_schema_config
+            if schema_config is None or schema_config.fields is None:
+                continue  # Observed schemas — can't validate at build time
+
+            guaranteed = frozenset(fd.name for fd in schema_config.fields if fd.required)
+            all_field_names = frozenset(fd.name for fd in schema_config.fields)
+
+            for _, successor_id in self._graph.out_edges(node_id):
+                successor_info = self.get_node_info(successor_id)
+                if successor_info.node_type != NodeType.SINK:
+                    continue
+
+                sink_required = successor_info.declared_required_fields
+                if not sink_required:
+                    continue
+
+                missing = sink_required - guaranteed
+                if not missing:
+                    continue
+
+                optional_but_present = sorted(missing & all_field_names)
+                absent_entirely = sorted(missing - all_field_names)
+
+                parts: list[str] = []
+                if optional_but_present:
+                    parts.append(f"fields {optional_but_present} are optional in coalesce output (branch-exclusive or AND-downgraded)")
+                if absent_entirely:
+                    parts.append(f"fields {absent_entirely} are absent from coalesce output entirely")
+
+                raise GraphValidationError(
+                    f"Sink '{successor_info.plugin_name}' requires fields "
+                    f"{sorted(missing)} but optional in coalesce output from "
+                    f"'{node_id}': {'; '.join(parts)}. "
+                    f"Fix: ensure all branches produce the required fields, or "
+                    f"remove them from the sink's declared_required_fields."
+                )
 
     # ===== CONTRACT VALIDATION HELPERS =====
 

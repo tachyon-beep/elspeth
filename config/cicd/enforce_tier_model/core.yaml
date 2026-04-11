@@ -145,7 +145,7 @@ allow_hits:
   reason: Optional field access at trust boundary
   safety: Code reviewed - legitimate pattern
   expires: '2026-05-02'
-- key: core/dag/graph.py:R1:ExecutionGraph:get_required_fields:fp=6eb8a00ef1358596
+- key: core/dag/graph.py:R1:ExecutionGraph:get_required_fields:fp=ac84825713117b50
   owner: architecture
   reason: Optional required_input_fields key supports transforms with implicit/no required field contract
   safety: Missing key yields empty set; downstream schema checks still enforce compatibility

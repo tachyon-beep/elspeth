@@ -8,6 +8,8 @@ and FieldDefinition directly — optionality is a first-class boolean field.
 
 from __future__ import annotations
 
+import pytest
+
 from elspeth.contracts.schema import FieldDefinition, SchemaConfig
 from elspeth.core.dag.models import GraphValidationError
 
@@ -120,3 +122,147 @@ class TestUnionMergeOptionalityPreservation:
             }
         )
         assert self._get_field(result, "score").required is False
+
+
+class TestCoalesceSinkRequiredFieldValidation:
+    """Build-time validation of coalesce output vs downstream sink required fields.
+
+    When a sink's declared_required_fields references a field that the upstream
+    coalesce marks as optional (branch-exclusive or AND-downgraded), the
+    configuration is broken and should fail at build time — not crash at runtime
+    with a generic 'upstream schema bug' error.
+    """
+
+    def test_coalesce_to_sink_required_field_mismatch_raises(self) -> None:
+        """Build-time validation catches coalesce output missing a sink's required field.
+
+        Branch A guarantees field 'x'; branch B does not. Union merge marks 'x'
+        as optional (branch-exclusive). A downstream sink declares 'x' required
+        in its declared_required_fields. Validation must fail at build time.
+        """
+        from elspeth.contracts import RoutingMode
+        from elspeth.core.dag.graph import ExecutionGraph
+        from elspeth.core.dag.models import NodeType
+
+        branch_a_schema = SchemaConfig(
+            mode="flexible",
+            fields=(
+                FieldDefinition("id", "str", required=True),
+                FieldDefinition("x", "int", required=True),
+            ),
+        )
+        branch_b_schema = SchemaConfig(
+            mode="flexible",
+            fields=(FieldDefinition("id", "str", required=True),),
+        )
+        # Coalesce output: 'x' is optional because branch B doesn't guarantee it
+        coalesce_output_schema = SchemaConfig(
+            mode="flexible",
+            fields=(
+                FieldDefinition("id", "str", required=True),
+                FieldDefinition("x", "int", required=False),
+            ),
+        )
+
+        graph = ExecutionGraph()
+        graph.add_node("source", node_type=NodeType.SOURCE, plugin_name="csv")
+        graph.add_node("gate", node_type=NodeType.GATE, plugin_name="fork")
+        graph.add_node(
+            "t_a",
+            node_type=NodeType.TRANSFORM,
+            plugin_name="a",
+            output_schema_config=branch_a_schema,
+        )
+        graph.add_node(
+            "t_b",
+            node_type=NodeType.TRANSFORM,
+            plugin_name="b",
+            output_schema_config=branch_b_schema,
+        )
+        graph.add_node(
+            "coalesce",
+            node_type=NodeType.COALESCE,
+            plugin_name="coalesce:merge",
+            config={"branches": {"a": "a", "b": "b"}, "policy": "require_all", "merge": "union"},
+            output_schema_config=coalesce_output_schema,
+        )
+        graph.add_node(
+            "sink",
+            node_type=NodeType.SINK,
+            plugin_name="csv_sink",
+            declared_required_fields=frozenset({"id", "x"}),
+        )
+
+        graph.add_edge("source", "gate", label="continue", mode=RoutingMode.MOVE)
+        graph.add_edge("gate", "t_a", label="a", mode=RoutingMode.COPY)
+        graph.add_edge("gate", "t_b", label="b", mode=RoutingMode.COPY)
+        graph.add_edge("t_a", "coalesce", label="a", mode=RoutingMode.MOVE)
+        graph.add_edge("t_b", "coalesce", label="b", mode=RoutingMode.MOVE)
+        graph.add_edge("coalesce", "sink", label="continue", mode=RoutingMode.MOVE)
+
+        with pytest.raises(
+            GraphValidationError,
+            match=r"required by sink.*but optional in coalesce output|Sink '.*' requires fields.*but optional in coalesce output",
+        ):
+            graph.validate_edge_compatibility()
+
+    def test_coalesce_to_sink_validates_when_all_fields_guaranteed(self) -> None:
+        """Build-time validation passes when coalesce guarantees all sink-required fields."""
+        from elspeth.contracts import RoutingMode
+        from elspeth.core.dag.graph import ExecutionGraph
+        from elspeth.core.dag.models import NodeType
+
+        # Both branches guarantee 'x' → merged output guarantees 'x'
+        branch_schema = SchemaConfig(
+            mode="flexible",
+            fields=(
+                FieldDefinition("id", "str", required=True),
+                FieldDefinition("x", "int", required=True),
+            ),
+        )
+        coalesce_output_schema = SchemaConfig(
+            mode="flexible",
+            fields=(
+                FieldDefinition("id", "str", required=True),
+                FieldDefinition("x", "int", required=True),
+            ),
+        )
+
+        graph = ExecutionGraph()
+        graph.add_node("source", node_type=NodeType.SOURCE, plugin_name="csv")
+        graph.add_node("gate", node_type=NodeType.GATE, plugin_name="fork")
+        graph.add_node(
+            "t_a",
+            node_type=NodeType.TRANSFORM,
+            plugin_name="a",
+            output_schema_config=branch_schema,
+        )
+        graph.add_node(
+            "t_b",
+            node_type=NodeType.TRANSFORM,
+            plugin_name="b",
+            output_schema_config=branch_schema,
+        )
+        graph.add_node(
+            "coalesce",
+            node_type=NodeType.COALESCE,
+            plugin_name="coalesce:merge",
+            config={"branches": {"a": "a", "b": "b"}, "policy": "require_all", "merge": "union"},
+            output_schema_config=coalesce_output_schema,
+        )
+        graph.add_node(
+            "sink",
+            node_type=NodeType.SINK,
+            plugin_name="csv_sink",
+            declared_required_fields=frozenset({"id", "x"}),
+        )
+
+        graph.add_edge("source", "gate", label="continue", mode=RoutingMode.MOVE)
+        graph.add_edge("gate", "t_a", label="a", mode=RoutingMode.COPY)
+        graph.add_edge("gate", "t_b", label="b", mode=RoutingMode.COPY)
+        graph.add_edge("t_a", "coalesce", label="a", mode=RoutingMode.MOVE)
+        graph.add_edge("t_b", "coalesce", label="b", mode=RoutingMode.MOVE)
+        graph.add_edge("coalesce", "sink", label="continue", mode=RoutingMode.MOVE)
+
+        # Should not raise — all sink-required fields are guaranteed by coalesce output
+        graph.validate_edge_compatibility()
