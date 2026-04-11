@@ -1515,10 +1515,24 @@ class ExecutionGraph:
                     continue
                 guaranteed = self.get_effective_guaranteed_fields(predecessor_id)
                 if not guaranteed:
-                    # Predecessor declares no guarantees (observed schema or
-                    # branches that abstain). Cannot statically validate;
-                    # runtime check still applies.
-                    continue
+                    # Empty guarantees are ambiguous under the abstain-vs-empty
+                    # contract (see SchemaConfig.declares_guaranteed_fields):
+                    #   guaranteed_fields=None  → abstain — can't statically validate,
+                    #                             runtime check still applies
+                    #   guaranteed_fields=()    → explicit empty declaration — the
+                    #                             producer commits to zero guarantees,
+                    #                             so any sink requirement is a
+                    #                             statically-provable mismatch
+                    #
+                    # The coalesce union logic at get_effective_guaranteed_fields()
+                    # already distinguishes these via declares_guaranteed_fields.
+                    # Mirror the distinction here: abstain → skip, explicit empty
+                    # → fall through to the rejection path.
+                    predecessor_schema = predecessor_info.output_schema_config
+                    if predecessor_schema is None or not predecessor_schema.declares_guaranteed_fields:
+                        continue
+                    # Fall through: explicit-empty declaration. missing =
+                    # sink_required (full set) will trigger rejection below.
 
                 missing = sink_required - guaranteed
                 if not missing:

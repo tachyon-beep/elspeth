@@ -894,6 +894,95 @@ class TestCoalesceSinkRequiredFieldValidation:
             f"yields each unique source node once)."
         )
 
+    def test_predecessor_with_explicit_empty_guarantees_rejects_sink_requirement(self) -> None:
+        """Build-time validation rejects when predecessor explicitly guarantees nothing.
+
+        SchemaConfig distinguishes abstain (guaranteed_fields=None) from
+        explicit-empty (guaranteed_fields=()) — see the docstring on
+        SchemaConfig.declares_guaranteed_fields. The coalesce union logic
+        already uses this distinction.
+
+        The sink validator used to collapse both cases via
+        `if not guaranteed: continue`, skipping rejection when the predecessor
+        EXPLICITLY declared zero guarantees. A sink that requires a field in
+        that configuration has a statically-provable contract mismatch that
+        should fail at build time, not be pushed to runtime.
+
+        This test constructs the exact scenario from the P2 bug report:
+        predecessor declares fields=(x?) (x optional) AND
+        guaranteed_fields=() (explicit empty). Sink requires x. Validation
+        must reject.
+        """
+        from elspeth.contracts import RoutingMode
+        from elspeth.core.dag.graph import ExecutionGraph
+
+        predecessor_schema = SchemaConfig(
+            mode="flexible",
+            fields=(FieldDefinition("x", "int", required=False),),
+            guaranteed_fields=(),  # EXPLICIT empty — declares_guaranteed_fields=True
+        )
+
+        graph = ExecutionGraph()
+        graph.add_node("source", node_type=NodeType.SOURCE, plugin_name="csv")
+        graph.add_node(
+            "t",
+            node_type=NodeType.TRANSFORM,
+            plugin_name="t",
+            output_schema_config=predecessor_schema,
+        )
+        graph.add_node(
+            "sink",
+            node_type=NodeType.SINK,
+            plugin_name="csv_sink",
+            declared_required_fields=frozenset({"x"}),
+        )
+        graph.add_edge("source", "t", label="continue", mode=RoutingMode.MOVE)
+        graph.add_edge("t", "sink", label="continue", mode=RoutingMode.MOVE)
+
+        with pytest.raises(GraphValidationError, match=r"does not guarantee"):
+            graph._validate_sink_required_fields()
+
+    def test_predecessor_with_abstaining_guarantees_skips_validation(self) -> None:
+        """Abstaining predecessor (guaranteed_fields=None) skips validation.
+
+        Regression protection for the fix to
+        test_predecessor_with_explicit_empty_guarantees_rejects_sink_requirement:
+        the fix must NOT reject abstaining predecessors. Only explicit-empty
+        declarations should trigger rejection.
+
+        A predecessor with fields=(x?) and guaranteed_fields=None is saying
+        "I abstain from the guarantee question" — the static schema can't
+        prove whether x will be produced. The runtime check still applies.
+        """
+        from elspeth.contracts import RoutingMode
+        from elspeth.core.dag.graph import ExecutionGraph
+
+        predecessor_schema = SchemaConfig(
+            mode="flexible",
+            fields=(FieldDefinition("x", "int", required=False),),
+            guaranteed_fields=None,  # ABSTAIN — declares_guaranteed_fields=False
+        )
+
+        graph = ExecutionGraph()
+        graph.add_node("source", node_type=NodeType.SOURCE, plugin_name="csv")
+        graph.add_node(
+            "t",
+            node_type=NodeType.TRANSFORM,
+            plugin_name="t",
+            output_schema_config=predecessor_schema,
+        )
+        graph.add_node(
+            "sink",
+            node_type=NodeType.SINK,
+            plugin_name="csv_sink",
+            declared_required_fields=frozenset({"x"}),
+        )
+        graph.add_edge("source", "t", label="continue", mode=RoutingMode.MOVE)
+        graph.add_edge("t", "sink", label="continue", mode=RoutingMode.MOVE)
+
+        # Must NOT raise — predecessor abstains, can't statically validate.
+        graph._validate_sink_required_fields()
+
 
 class _BuilderMockSource:
     """Mock source plugin for builder end-to-end tests."""
@@ -1160,7 +1249,7 @@ class TestBuilderBranchExclusiveFieldDowngrade:
         coalesce = CoalesceSettings(
             name="merger",
             branches={"branch_a": "t_a_out", "branch_b": "t_b_out"},
-            policy=policy,  # type: ignore[arg-type]
+            policy=policy,
             merge="union",
             on_success="output",
             timeout_seconds=60.0,
@@ -1186,10 +1275,10 @@ class TestBuilderBranchExclusiveFieldDowngrade:
         # Build must succeed — under require_all, the sink requirement is
         # actually satisfied because branch A always arrives with the field.
         graph = ExecutionGraph.from_plugin_instances(
-            source=source,  # type: ignore[arg-type]
+            source=source,
             source_settings=SourceSettings(plugin=source.name, on_success="source_out", options={}),
             transforms=[wired_a, wired_b],
-            sinks={"output": sink_class()},  # type: ignore[dict-item]
+            sinks={"output": sink_class()},
             aggregations={},
             gates=[fork_gate],
             coalesce_settings=[coalesce],
@@ -1218,10 +1307,10 @@ class TestBuilderBranchExclusiveFieldDowngrade:
 
         with pytest.raises(GraphValidationError, match=r"exclusive_to_a"):
             ExecutionGraph.from_plugin_instances(
-                source=source,  # type: ignore[arg-type]
+                source=source,
                 source_settings=SourceSettings(plugin=source.name, on_success="source_out", options={}),
                 transforms=[wired_a, wired_b],
-                sinks={"output": sink_class()},  # type: ignore[dict-item]
+                sinks={"output": sink_class()},
                 aggregations={},
                 gates=[fork_gate],
                 coalesce_settings=[coalesce],
