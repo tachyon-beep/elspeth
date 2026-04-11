@@ -206,6 +206,7 @@ def build_execution_graph(
             config=sink_config,
             input_schema=sink.input_schema,  # SinkProtocol requires this
             output_schema_config=sink_schema_config,
+            declared_required_fields=sink.declared_required_fields,
         )
 
     graph.set_sink_id_map(sink_ids)
@@ -895,6 +896,12 @@ def build_execution_graph(
             # Union merge: require compatible types on ALL pairwise overlapping fields.
             # Tracks (type, required, first_branch) to preserve optionality markers.
             seen_types: dict[str, tuple[str, bool, str]] = {}  # field → (type, required, first_branch)
+            branches_with_field: dict[str, set[str]] = {}  # field → set of branches that produced it
+            # Branches that contribute fields to the AND-semantics denominator.
+            # A non-observed branch with fields=None abstains from the typed
+            # contract entirely; excluding it from the denominator prevents
+            # silent downgrades of every other branch's required fields.
+            contributing_branches: set[str] = set()
             all_observed = False
             for branch_name, schema_cfg in branch_to_schema.items():
                 if schema_cfg.is_observed:
@@ -902,7 +909,11 @@ def build_execution_graph(
                     break
                 if schema_cfg.fields is None:
                     continue
+                contributing_branches.add(branch_name)
                 for fd in schema_cfg.fields:
+                    if fd.name not in branches_with_field:
+                        branches_with_field[fd.name] = set()
+                    branches_with_field[fd.name].add(branch_name)
                     if fd.name in seen_types:
                         prior_type, _prior_req, prior_branch = seen_types[fd.name]
                         if prior_type != fd.field_type:
@@ -918,6 +929,19 @@ def build_execution_graph(
                             seen_types[fd.name] = (prior_type, False, prior_branch)
                     else:
                         seen_types[fd.name] = (fd.field_type, fd.required, branch_name)
+
+            # Apply AND semantics: fields not present in ALL contributing branches
+            # are optional. Rationale: for best_effort/quorum coalesces, a branch
+            # that guarantees a field may be lost. Even for require_all, the merged
+            # contract should be conservative — only guarantee fields that EVERY
+            # contributing branch produces. Matches SchemaContract.merge() runtime
+            # semantics. Branches that abstain from the typed contract (fields=None
+            # in non-observed mode) are excluded from the denominator: they neither
+            # guarantee nor deny anything.
+            for field_name in list(seen_types):
+                if branches_with_field[field_name] != contributing_branches:
+                    ftype, _, first_branch = seen_types[field_name]
+                    seen_types[field_name] = (ftype, False, first_branch)
 
             if all_observed or not seen_types:
                 merged_schema = SchemaConfig(

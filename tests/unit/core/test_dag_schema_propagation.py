@@ -79,6 +79,7 @@ class MockSink:
     input_schema = None
     config: ClassVar[dict[str, Any]] = {}
     _on_write_failure: str = "discard"
+    declared_required_fields: ClassVar[frozenset[str]] = frozenset()
 
     def _reset_diversion_log(self) -> None:
         pass
@@ -91,6 +92,7 @@ class MockSinkWithSchema:
     input_schema = None
     config: ClassVar[dict[str, Any]] = {"schema": {"mode": "observed"}}
     _on_write_failure: str = "discard"
+    declared_required_fields: ClassVar[frozenset[str]] = frozenset()
 
     def _reset_diversion_log(self) -> None:
         pass

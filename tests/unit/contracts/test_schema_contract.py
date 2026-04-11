@@ -942,8 +942,13 @@ class TestSchemaContractMerge:
         assert locked.merge(unlocked).locked is True
         assert unlocked.merge(locked).locked is True
 
-    def test_merge_required_if_either_required(self) -> None:
-        """Field is required if required in either path."""
+    def test_merge_required_only_if_both_required(self) -> None:
+        """Field is required only if required in BOTH paths (AND semantics).
+
+        Why AND: For best_effort/quorum coalesces, a branch that guarantees
+        field X might be lost. The merged output can only guarantee X if ALL
+        branches that produce X guarantee it.
+        """
         c1 = SchemaContract(
             mode="FLEXIBLE",
             fields=(make_field("x", int, original_name="X", required=True, source="declared"),),
@@ -952,6 +957,22 @@ class TestSchemaContractMerge:
         c2 = SchemaContract(
             mode="FLEXIBLE",
             fields=(make_field("x", int, original_name="X", required=False, source="inferred"),),
+            locked=True,
+        )
+        merged = c1.merge(c2)
+
+        assert merged.fields[0].required is False
+
+    def test_merge_required_when_both_branches_require(self) -> None:
+        """Field is required when required in BOTH paths."""
+        c1 = SchemaContract(
+            mode="FLEXIBLE",
+            fields=(make_field("x", int, original_name="X", required=True, source="declared"),),
+            locked=True,
+        )
+        c2 = SchemaContract(
+            mode="FLEXIBLE",
+            fields=(make_field("x", int, original_name="X", required=True, source="declared"),),
             locked=True,
         )
         merged = c1.merge(c2)
@@ -1009,6 +1030,47 @@ class TestSchemaContractMerge:
             "yankee",
             "zeta",
         ]
+        # All four fields are branch-exclusive (none appears in both contracts).
+        # Under AND semantics, branch-exclusive fields must be marked optional
+        # in the merged output. Asserting this here catches any regression to
+        # OR semantics that the ordering check alone would miss.
+        assert all(not field.required for field in merged.fields), (
+            "Branch-exclusive fields must be marked required=False after AND-semantics merge"
+        )
+
+
+# --- Required Field Names Tests ---
+
+
+class TestRequiredFieldNames:
+    """Tests for SchemaContract.required_field_names property."""
+
+    def test_returns_required_fields_only(self) -> None:
+        """Property returns frozenset of names where required=True."""
+        contract = SchemaContract(
+            mode="FLEXIBLE",
+            fields=(
+                make_field("a", int, original_name="A", required=True, source="declared"),
+                make_field("b", str, original_name="B", required=False, source="declared"),
+                make_field("c", float, original_name="C", required=True, source="declared"),
+            ),
+            locked=True,
+        )
+        assert contract.required_field_names == frozenset({"a", "c"})
+
+    def test_empty_when_no_required_fields(self) -> None:
+        """Property returns empty frozenset when no fields are required."""
+        contract = SchemaContract(
+            mode="OBSERVED",
+            fields=(make_field("x", int, original_name="X", required=False, source="inferred"),),
+            locked=True,
+        )
+        assert contract.required_field_names == frozenset()
+
+    def test_empty_contract(self) -> None:
+        """Property returns empty frozenset for empty contract."""
+        contract = SchemaContract(mode="OBSERVED", fields=(), locked=True)
+        assert contract.required_field_names == frozenset()
 
 
 # --- Any Type Tests ---

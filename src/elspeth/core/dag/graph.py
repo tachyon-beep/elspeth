@@ -55,6 +55,12 @@ if TYPE_CHECKING:
 
 _coalesce_schema_counter = itertools.count(1)
 
+# Sentinel for the empty declared_required_fields default. Sharing a single
+# frozenset instance is safe (frozensets are immutable) and avoids the bare
+# `frozenset()` literal default-argument anti-pattern, which would be unsafe
+# if the type were ever changed to a mutable container.
+_EMPTY_DECLARED_REQUIRED_FIELDS: frozenset[str] = frozenset()
+
 
 def _build_coalesce_schema(schema_config: SchemaConfig) -> type[PluginSchema]:
     """Build a PluginSchema class from a coalesce SchemaConfig.
@@ -152,6 +158,7 @@ class ExecutionGraph:
         output_schema: type[PluginSchema] | None = None,
         input_schema_config: SchemaConfig | None = None,
         output_schema_config: SchemaConfig | None = None,
+        declared_required_fields: frozenset[str] = _EMPTY_DECLARED_REQUIRED_FIELDS,
     ) -> None:
         """Add a node to the execution graph.
 
@@ -165,6 +172,9 @@ class ExecutionGraph:
             input_schema_config: Input schema config for contract validation
             output_schema_config: Output schema config for contract validation.
                 Parsed from config["schema"] when not provided explicitly.
+            declared_required_fields: For SINK nodes only — the set of fields the
+                sink requires in its input rows. Populated by the builder from
+                SinkProtocol.declared_required_fields. Empty frozenset otherwise.
         """
         resolved_config = config or {}
 
@@ -190,6 +200,7 @@ class ExecutionGraph:
             output_schema=output_schema,
             input_schema_config=input_schema_config,
             output_schema_config=output_schema_config,
+            declared_required_fields=declared_required_fields,
         )
         self._graph.add_node(node_id, info=info)
 
@@ -959,6 +970,14 @@ class ExecutionGraph:
         for coalesce_id in coalesce_nodes:
             self._validate_coalesce_compatibility(coalesce_id, _schema_cache=schema_cache)
 
+        # Validate sink required-field satisfaction against direct predecessors.
+        # Catches mismatches between sink.declared_required_fields and upstream
+        # output optionality at build time, rather than at runtime with a
+        # generic PluginContractViolation. Walking sinks backward (rather than
+        # coalesces forward) handles COALESCE → TRANSFORM → SINK topologies
+        # and any future multi-hop shape.
+        self._validate_sink_required_fields()
+
     def warn_divert_coalesce_interactions(
         self,
         coalesce_configs: dict[NodeID, CoalesceSettings],
@@ -1438,6 +1457,82 @@ class ExecutionGraph:
                         f"multiple branches: first branch has {first_name}, "
                         f"branch from '{other_id}' has {other_name}. {error_msg}"
                     )
+
+    def _validate_sink_required_fields(self) -> None:
+        """Validate each sink's declared_required_fields against upstream guarantees.
+
+        For every SINK node with a non-empty declared_required_fields, check
+        every direct predecessor's effective guaranteed fields (via the existing
+        get_effective_guaranteed_fields() API). A sink's required fields must
+        be a subset of its upstream guaranteed fields.
+
+        This catches cases where:
+        - A coalesce marks a field optional (branch-exclusive or AND-downgraded)
+          and feeds a sink that requires it (direct or through a transform)
+        - A transform's declared_output_fields don't include a field the sink requires
+        - A source doesn't guarantee a field the sink requires
+
+        Uses get_effective_guaranteed_fields() rather than reading
+        output_schema_config.fields directly. The fields tuple is unreliable
+        for shape-changing transforms that use the base _build_output_schema_config()
+        — that base method copies INPUT fields into the output config, with
+        only guaranteed_fields recomputed correctly. The effective-guarantees
+        API is the single source of truth: it handles aggregations (dynamic
+        output → no guarantees), coalesce strategies (union intersection,
+        nested branch keys, select pass-through), and the base-class
+        guaranteed_fields recomputation in one place.
+
+        Sink predecessors are visited via .predecessors() which yields each
+        unique source node once, even when the underlying MultiDiGraph has
+        parallel edges (e.g., a gate routing two labels to the same sink).
+
+        Runs at build time rather than failing at runtime with a generic
+        PluginContractViolation.
+
+        Raises:
+            GraphValidationError: if a sink's direct predecessor does not
+                guarantee a field the sink requires.
+        """
+        for node_id, data in self._graph.nodes(data=True):
+            info = data["info"]
+            if info.node_type != NodeType.SINK:
+                continue
+
+            sink_required = info.declared_required_fields
+            if not sink_required:
+                continue
+
+            for predecessor_id in self._graph.predecessors(node_id):
+                predecessor_info = self.get_node_info(predecessor_id)
+                if predecessor_info.node_type == NodeType.AGGREGATION:
+                    # Aggregations have dynamic output by design (e.g., BatchStats
+                    # produces count/sum/mean rather than the input fields). The
+                    # builder stores their `options.schema` as input-validation,
+                    # not output, so get_effective_guaranteed_fields() would
+                    # produce phantom guarantees from those input field markers.
+                    # See filigree task for the structural fix (set
+                    # output_schema_config=None for aggregations).
+                    continue
+                guaranteed = self.get_effective_guaranteed_fields(predecessor_id)
+                if not guaranteed:
+                    # Predecessor declares no guarantees (observed schema or
+                    # branches that abstain). Cannot statically validate;
+                    # runtime check still applies.
+                    continue
+
+                missing = sink_required - guaranteed
+                if not missing:
+                    continue
+
+                raise GraphValidationError(
+                    f"Sink '{info.plugin_name}' requires fields {sorted(missing)} "
+                    f"but its upstream '{predecessor_id}' does not guarantee them. "
+                    f"Likely causes: a coalesce union marked these fields optional "
+                    f"(branch-exclusive or AND-downgraded), or an upstream transform "
+                    f"did not declare them as guaranteed output. "
+                    f"Fix: ensure the upstream node guarantees these fields, "
+                    f"or remove them from the sink's declared_required_fields."
+                )
 
     # ===== CONTRACT VALIDATION HELPERS =====
 
