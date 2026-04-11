@@ -2699,6 +2699,40 @@ class TestSinkExecutor:
 
         sink.write.assert_not_called()
 
+    def test_missing_required_field_after_coalesce_shows_contract_context(self) -> None:
+        """When a required field is missing and the contract marks it optional,
+        error message includes coalesce merge context."""
+        factory = _make_factory()
+        executor = SinkExecutor(factory.execution, factory.data_flow, _make_span_factory(), run_id="test-run")
+
+        # Contract says 'name' is optional (result of coalesce merge)
+        contract = SchemaContract(
+            mode="FLEXIBLE",
+            fields=(
+                make_field("id", str, original_name="id", required=True, source="declared"),
+                make_field("name", str, original_name="name", required=False, source="declared"),
+            ),
+            locked=True,
+        )
+        token = _make_token(data={"id": "1"}, contract=contract)  # Missing 'name'
+        sink = _make_sink()
+        sink.declared_required_fields = frozenset({"id", "name"})
+        ctx = make_context()
+        pending = PendingOutcome(outcome=RowOutcome.COMPLETED)
+
+        with pytest.raises(
+            PluginContractViolation,
+            match=r"optional in the row's schema contract.*coalesce merge",
+        ):
+            executor.write(
+                sink,
+                [token],
+                ctx,
+                step_in_pipeline=5,
+                sink_name="out",
+                pending_outcome=pending,
+            )
+
     # --- Successful write ---
 
     def test_successful_write_completes_states_and_registers_artifact(self) -> None:

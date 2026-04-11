@@ -30,6 +30,7 @@ from elspeth.contracts.errors import (
 )
 from elspeth.contracts.plugin_context import PluginContext
 from elspeth.contracts.results import ArtifactDescriptor
+from elspeth.contracts.schema_contract import SchemaContract
 from elspeth.core.landscape.data_flow_repository import DataFlowRepository
 from elspeth.core.landscape.execution_repository import ExecutionRepository
 from elspeth.core.operations import track_operation
@@ -154,6 +155,7 @@ class SinkExecutor:
         rows: list[dict[str, object]],
         *,
         skip_schema: bool = False,
+        contracts: list[SchemaContract] | None = None,
     ) -> None:
         """Validate rows against a sink's input schema and required fields.
 
@@ -164,6 +166,10 @@ class SinkExecutor:
                 check required fields. Used for failsink validation where the
                 executor injects enrichment fields (__diversion_*) that are
                 outside the failsink's declared schema.
+            contracts: Optional per-row SchemaContracts for context-aware error
+                messages. When provided, a missing-field error annotates any
+                field that is optional in the row's contract, pointing at
+                coalesce merge as the likely root cause.
         """
         if not skip_schema:
             for row in rows:
@@ -178,9 +184,22 @@ class SinkExecutor:
             for row_index, row in enumerate(rows):
                 missing = sorted(f for f in sink.declared_required_fields if f not in row)
                 if missing:
+                    # If a contract is available, annotate missing fields that are
+                    # marked optional in the contract (coalesce merge artifact).
+                    contract_context = ""
+                    if contracts is not None and row_index < len(contracts):
+                        contract = contracts[row_index]
+                        contract_field_names = {fc.normalized_name for fc in contract.fields}
+                        optional_in_contract = [f for f in missing if f in contract_field_names and f not in contract.required_field_names]
+                        if optional_in_contract:
+                            contract_context = (
+                                f" Fields {optional_in_contract} are optional in the row's "
+                                f"schema contract (likely from coalesce merge). "
+                                f"Fix: ensure all branches produce these fields as required."
+                            )
                     raise PluginContractViolation(
                         f"Sink '{sink.name}' row {row_index} is missing required fields "
-                        f"{missing}. This indicates an upstream transform/schema bug."
+                        f"{missing}. This indicates an upstream transform/schema bug.{contract_context}"
                     )
 
     def write(
@@ -340,7 +359,9 @@ class SinkExecutor:
                 ):
                     # Centralized input validation (before sink.write).
                     # Wrong types at a sink boundary are upstream plugin bugs (Tier 2).
-                    self._validate_sink_input(sink, rows)
+                    # Pass per-row contracts for context-aware error messages.
+                    row_contracts = [t.row_data.contract for t in tokens]
+                    self._validate_sink_input(sink, rows, contracts=row_contracts)
 
                     # Reset diversion log and call sink.write()
                     sink._reset_diversion_log()
@@ -519,7 +540,8 @@ class SinkExecutor:
                     # a fixed-schema failsink (extra="forbid") would reject them.
                     # Required-field checking still catches missing upstream fields.
                     # Inside the try block so failures close primary divert states.
-                    self._validate_sink_input(failsink, enriched_rows, skip_schema=True)
+                    failsink_contracts = [t.row_data.contract for t, _, _ in primary_divert_states]
+                    self._validate_sink_input(failsink, enriched_rows, skip_schema=True, contracts=failsink_contracts)
                     failsink_write_result = failsink.write(enriched_rows, ctx)
                     failsink.flush()
                 except TIER_1_ERRORS:
