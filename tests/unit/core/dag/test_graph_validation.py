@@ -114,6 +114,53 @@ class TestNodeInfoNodeIdLengthValidation:
 
 
 # ---------------------------------------------------------------------------
+# Gap 3b: NodeInfo.declared_required_fields sink-only invariant
+# ---------------------------------------------------------------------------
+
+
+class TestNodeInfoDeclaredRequiredFieldsSinkOnly:
+    """NodeInfo.declared_required_fields is meaningful only for SINK nodes.
+
+    Offensive-programming invariant added during schema-contract reconciliation:
+    stray declared_required_fields on a non-sink node would sit unused until a
+    future validator widens its scope and produces mysterious errors. Catch the
+    misuse at construction time instead.
+    """
+
+    def test_node_info_sink_allows_declared_required_fields(self) -> None:
+        """SINK nodes are the legitimate consumer of declared_required_fields."""
+        info = NodeInfo(
+            node_id=NodeID("my_sink"),
+            node_type=NodeType.SINK,
+            plugin_name="csv",
+            declared_required_fields=frozenset({"id", "name"}),
+        )
+        assert info.declared_required_fields == frozenset({"id", "name"})
+
+    def test_node_info_rejects_declared_required_fields_on_non_sink(self) -> None:
+        """Offensive-programming invariant: declared_required_fields is sink-specific.
+
+        Catches the misuse at construction time rather than letting stray data
+        sit on a non-sink node until a future validator widens its scope and
+        produces mysterious errors.
+        """
+        for non_sink_type in [
+            NodeType.SOURCE,
+            NodeType.TRANSFORM,
+            NodeType.GATE,
+            NodeType.AGGREGATION,
+            NodeType.COALESCE,
+        ]:
+            with pytest.raises(GraphValidationError, match=r"only meaningful for SINK"):
+                NodeInfo(
+                    node_id=NodeID("bad_node"),
+                    node_type=non_sink_type,
+                    plugin_name="something",
+                    declared_required_fields=frozenset({"x"}),
+                )
+
+
+# ---------------------------------------------------------------------------
 # Gap 4: topological_order() cycle detection
 # ---------------------------------------------------------------------------
 

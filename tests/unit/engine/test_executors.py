@@ -2733,6 +2733,110 @@ class TestSinkExecutor:
                 pending_outcome=pending,
             )
 
+    def test_validate_sink_input_raises_when_rows_contracts_desync(self) -> None:
+        """Defensive sanity check: rows and contracts MUST be paired 1:1.
+
+        Regresses the dead bounds-check anti-pattern: previously the validator
+        silently skipped contract annotation when len(contracts) != len(rows),
+        masking a desync bug. The fix asserts the invariant loudly via
+        OrchestrationInvariantError.
+        """
+        sink = _make_sink()
+        sink.declared_required_fields = frozenset({"id", "name"})
+        rows: list[dict[str, object]] = [
+            {"id": "1", "name": "alice"},
+            {"id": "2"},  # Missing 'name' — would trigger annotation path
+        ]
+        # Only one contract for two rows — desync condition
+        contract = SchemaContract(
+            mode="FLEXIBLE",
+            fields=(
+                make_field("id", str, original_name="id", required=True, source="declared"),
+                make_field("name", str, original_name="name", required=False, source="declared"),
+            ),
+            locked=True,
+        )
+        contracts = [contract]
+
+        with pytest.raises(
+            OrchestrationInvariantError,
+            match=r"received 2 rows but 1 contracts",
+        ):
+            SinkExecutor._validate_sink_input(sink, rows, contracts=contracts)
+
+    def test_contract_annotation_handles_original_vs_normalized_name(self) -> None:
+        """Header normalization in CSVs creates field names like 'Customer ID'
+        where the contract stores original_name='Customer ID' and
+        normalized_name='customer_id'. The contract-aware error annotation
+        must use find_name() to resolve either form.
+
+        Regresses the raw-membership-check bug: previously the annotation
+        logic compared raw missing-field names against contract.required_field_names
+        (which uses normalized names), causing the annotation path to fail
+        silently when the two name namespaces differed.
+        """
+        factory = _make_factory()
+        executor = SinkExecutor(factory.execution, factory.data_flow, _make_span_factory(), run_id="test-run")
+
+        # Contract: field has distinct original ('Customer ID') and normalized
+        # ('customer_id') names, and is marked optional (coalesce merge artifact).
+        contract = SchemaContract(
+            mode="FLEXIBLE",
+            fields=(
+                make_field(
+                    "customer_id",
+                    str,
+                    original_name="Customer ID",
+                    required=False,
+                    source="declared",
+                ),
+            ),
+            locked=True,
+        )
+        token = _make_token(data={}, contract=contract)  # Missing 'customer_id'
+        sink = _make_sink()
+        sink.declared_required_fields = frozenset({"customer_id"})
+        ctx = make_context()
+        pending = PendingOutcome(outcome=RowOutcome.COMPLETED)
+
+        with pytest.raises(
+            PluginContractViolation,
+            match=r"optional in the row's schema contract.*coalesce merge",
+        ):
+            executor.write(
+                sink,
+                [token],
+                ctx,
+                step_in_pipeline=5,
+                sink_name="out",
+                pending_outcome=pending,
+            )
+
+    def test_failsink_validation_does_not_emit_coalesce_merge_annotation(self) -> None:
+        """Failsink errors should NOT carry the 'optional in the row's schema
+        contract (likely from coalesce merge)' annotation. Failsink declared
+        fields (e.g., __diversion_*) have no relationship to primary path
+        contract optionality, so the annotation would be misdirection.
+
+        Regresses the over-eager contract pass-through from the original C1
+        fix: contracts were threaded to BOTH primary and failsink validation
+        calls, producing misleading annotations on failsink errors. The fix
+        drops contracts from the failsink call site.
+        """
+        failsink = _make_sink(name="failsink_out")
+        failsink.declared_required_fields = frozenset({"__diversion_reason"})
+        rows: list[dict[str, object]] = [{"id": "1"}]  # Missing '__diversion_reason'
+
+        with pytest.raises(PluginContractViolation) as exc_info:
+            # skip_schema=True mirrors the executor's failsink call form; no
+            # contracts are passed — this is the invariant under test.
+            SinkExecutor._validate_sink_input(failsink, rows, skip_schema=True)
+
+        assert "missing required fields" in str(exc_info.value)
+        assert "__diversion_reason" in str(exc_info.value)
+        assert "coalesce merge" not in str(exc_info.value)
+        assert "optional in the row's schema contract" not in str(exc_info.value)
+
     # --- Successful write ---
 
     def test_successful_write_completes_states_and_registers_artifact(self) -> None:

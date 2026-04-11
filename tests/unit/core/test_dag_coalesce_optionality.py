@@ -147,6 +147,52 @@ class TestUnionMergeOptionalityPreservation:
         )
         assert self._get_field(result, "score").required is False
 
+    def test_abstaining_branch_does_not_downgrade_others(self) -> None:
+        """A non-observed branch with fields=None must not downgrade other branches' fields.
+
+        Regression test for a latent bomb in the builder's union merge. Before
+        the fix, a branch with ``fields=None`` would silently mark every OTHER
+        branch's required fields as optional: the post-loop pass applied AND
+        semantics by comparing each field's branch-presence set against the
+        FULL set of branches in the coalesce, not just the branches that
+        actually contributed a typed contract.
+
+        With a ``fields=None`` branch in the mix, no field could ever be
+        present in ALL branches, so every required field got silently
+        downgraded to optional — a catastrophic false negative.
+
+        The fix introduced ``contributing_branches`` to exclude abstaining
+        branches from the denominator. This test locks that behaviour in:
+        two branches both require ``id`` and ``score``, a third branch
+        abstains with ``fields=None``. Both fields must remain required.
+
+        If the ``contributing_branches`` guard is removed, this test fails
+        because ``branch_b`` is missing from ``branches_with_field[id]``
+        and ``branches_with_field[score]``, so both get downgraded to
+        ``required=False``.
+        """
+        result = self._merge_schemas(
+            {
+                "branch_a": SchemaConfig(
+                    mode="flexible",
+                    fields=(
+                        FieldDefinition("id", "str", required=True),
+                        FieldDefinition("score", "float", required=True),
+                    ),
+                ),
+                "branch_b": SchemaConfig(mode="flexible", fields=None),
+                "branch_c": SchemaConfig(
+                    mode="flexible",
+                    fields=(
+                        FieldDefinition("id", "str", required=True),
+                        FieldDefinition("score", "float", required=True),
+                    ),
+                ),
+            }
+        )
+        assert self._get_field(result, "id").required is True
+        assert self._get_field(result, "score").required is True
+
 
 class TestCoalesceSinkRequiredFieldValidation:
     """Build-time validation of coalesce output vs downstream sink required fields.
@@ -170,7 +216,6 @@ class TestCoalesceSinkRequiredFieldValidation:
         """
         from elspeth.contracts import RoutingMode
         from elspeth.core.dag.graph import ExecutionGraph
-        from elspeth.core.dag.models import NodeType
 
         branch_a_schema = SchemaConfig(
             mode="flexible",
@@ -245,7 +290,6 @@ class TestCoalesceSinkRequiredFieldValidation:
         """Build-time validation passes when coalesce guarantees all sink-required fields."""
         from elspeth.contracts import RoutingMode
         from elspeth.core.dag.graph import ExecutionGraph
-        from elspeth.core.dag.models import NodeType
 
         # Both branches guarantee 'x' → merged output guarantees 'x'
         branch_schema = SchemaConfig(
@@ -313,7 +357,6 @@ class TestCoalesceSinkRequiredFieldValidation:
         """
         from elspeth.contracts import RoutingMode
         from elspeth.core.dag.graph import ExecutionGraph
-        from elspeth.core.dag.models import NodeType
 
         branch_a_schema = SchemaConfig(
             mode="flexible",
@@ -389,7 +432,7 @@ class TestCoalesceSinkRequiredFieldValidation:
         from elspeth.contracts import RoutingMode
         from elspeth.contracts.schema import FieldDefinition, SchemaConfig
         from elspeth.core.dag.graph import ExecutionGraph
-        from elspeth.core.dag.models import GraphValidationError, NodeType
+        from elspeth.core.dag.models import GraphValidationError
 
         # Coalesce produces 'id' (required) and 'x' (optional) via union merge
         coalesce_output_schema = SchemaConfig(
@@ -462,7 +505,6 @@ class TestCoalesceSinkRequiredFieldValidation:
         from elspeth.contracts import RoutingMode
         from elspeth.contracts.schema import FieldDefinition, SchemaConfig
         from elspeth.core.dag.graph import ExecutionGraph
-        from elspeth.core.dag.models import NodeType
 
         coalesce_output_schema = SchemaConfig(
             mode="flexible",
@@ -532,7 +574,6 @@ class TestCoalesceSinkRequiredFieldValidation:
         from elspeth.contracts import RoutingMode
         from elspeth.contracts.schema import FieldDefinition, SchemaConfig
         from elspeth.core.dag.graph import ExecutionGraph
-        from elspeth.core.dag.models import NodeType
 
         # Aggregation's output_schema_config carries its INPUT schema (legacy
         # builder behavior). Without the AGGREGATION skip, the sink's required
@@ -562,6 +603,181 @@ class TestCoalesceSinkRequiredFieldValidation:
         graph.add_edge("stats", "sink", label="continue", mode=RoutingMode.MOVE)
 
         graph.validate_edge_compatibility()  # Should not raise
+
+    def test_shape_changing_transform_between_coalesce_and_sink_uses_guaranteed_fields(
+        self,
+    ) -> None:
+        """Sink validator must consult get_effective_guaranteed_fields, not fields tuple.
+
+        Regression test for the original critical bug. ``_validate_sink_required_fields``
+        was originally written to read ``output_schema_config.fields`` directly.
+        The base ``BaseTransform._build_output_schema_config()`` (see
+        ``src/elspeth/plugins/infrastructure/base.py``) copies INPUT ``fields``
+        into the output config, recomputing only ``guaranteed_fields``. For a
+        shape-changing transform (e.g., FieldMapper renaming ``id`` →
+        ``customer_id``), the output schema's ``fields`` tuple still contains
+        the pre-rename input names.
+
+        This test mirrors FieldMapper's ``_build_field_mapper_output_schema_config``
+        pattern: ``fields`` holds the input ``id`` (required=True) and
+        ``guaranteed_fields`` holds the post-rename ``customer_id``. The sink
+        requires only ``customer_id``.
+
+        If the validator is reverted to reading ``output_schema_config.fields``
+        directly, it would see ``id`` but not ``customer_id`` and falsely
+        reject this valid topology. Under the current implementation it calls
+        ``get_effective_guaranteed_fields()``, which OR's in explicit
+        ``guaranteed_fields`` and sees ``customer_id`` → passes.
+
+        Topology: source → fork → [t_a, t_b] → coalesce(union) → field_mapper → sink.
+        Both branches guarantee ``id``; the field_mapper renames ``id`` to
+        ``customer_id``; the sink requires ``customer_id``.
+        """
+        from elspeth.contracts import RoutingMode
+        from elspeth.core.dag.graph import ExecutionGraph
+
+        branch_schema = SchemaConfig(
+            mode="flexible",
+            fields=(FieldDefinition("id", "str", required=True),),
+            guaranteed_fields=("id",),
+        )
+        coalesce_output_schema = SchemaConfig(
+            mode="flexible",
+            fields=(FieldDefinition("id", "str", required=True),),
+            guaranteed_fields=("id",),
+        )
+        # Shape-changing transform schema mirroring FieldMapper's pattern:
+        # fields holds INPUT names (pre-rename), guaranteed_fields holds
+        # OUTPUT names (post-rename). A validator that reads fields directly
+        # would see "id" and falsely reject; one that uses
+        # get_effective_guaranteed_fields() sees "customer_id" via
+        # guaranteed_fields and correctly accepts.
+        field_mapper_output_schema = SchemaConfig(
+            mode="flexible",
+            fields=(FieldDefinition("id", "str", required=True),),
+            guaranteed_fields=("customer_id",),
+        )
+
+        graph = ExecutionGraph()
+        graph.add_node("source", node_type=NodeType.SOURCE, plugin_name="csv")
+        graph.add_node("gate", node_type=NodeType.GATE, plugin_name="fork")
+        graph.add_node(
+            "t_a",
+            node_type=NodeType.TRANSFORM,
+            plugin_name="a",
+            output_schema_config=branch_schema,
+        )
+        graph.add_node(
+            "t_b",
+            node_type=NodeType.TRANSFORM,
+            plugin_name="b",
+            output_schema_config=branch_schema,
+        )
+        graph.add_node(
+            "coalesce",
+            node_type=NodeType.COALESCE,
+            plugin_name="coalesce:merge",
+            config={"branches": {"a": "a", "b": "b"}, "policy": "require_all", "merge": "union"},
+            output_schema_config=coalesce_output_schema,
+        )
+        graph.add_node(
+            "field_mapper",
+            node_type=NodeType.TRANSFORM,
+            plugin_name="field_mapper",
+            output_schema_config=field_mapper_output_schema,
+        )
+        graph.add_node(
+            "sink",
+            node_type=NodeType.SINK,
+            plugin_name="csv_sink",
+            declared_required_fields=frozenset({"customer_id"}),
+        )
+
+        graph.add_edge("source", "gate", label="continue", mode=RoutingMode.MOVE)
+        graph.add_edge("gate", "t_a", label="a", mode=RoutingMode.COPY)
+        graph.add_edge("gate", "t_b", label="b", mode=RoutingMode.COPY)
+        graph.add_edge("t_a", "coalesce", label="a", mode=RoutingMode.MOVE)
+        graph.add_edge("t_b", "coalesce", label="b", mode=RoutingMode.MOVE)
+        graph.add_edge("coalesce", "field_mapper", label="continue", mode=RoutingMode.MOVE)
+        graph.add_edge("field_mapper", "sink", label="continue", mode=RoutingMode.MOVE)
+
+        # Call the sink-required-fields validator directly. We skip the full
+        # validate_edge_compatibility() walk because the mocked schemas are
+        # not meant to exercise the cross-plugin compatibility path — this
+        # test is narrowly scoped to the sink predecessor walk.
+        graph._validate_sink_required_fields()  # Should not raise
+
+    def test_multi_edge_sink_predecessor_deduped(self) -> None:
+        """Sink validator must visit each unique predecessor once, even with parallel edges.
+
+        Regression test for the multi-edge case. The original implementation
+        used ``self._graph.in_edges(node_id)`` which yields one tuple per
+        parallel edge in a ``MultiDiGraph``. A gate routing two labels (e.g.,
+        ``true`` and ``false``) to the same sink would therefore cause the
+        validator to run twice for that predecessor.
+
+        The fix switched to ``self._graph.predecessors(node_id)`` which
+        yields each unique predecessor node exactly once regardless of the
+        number of parallel edges between them.
+
+        This test builds a graph with a single gate routing to one sink via
+        two different labels ("true" and "false"). It then patches
+        ``get_effective_guaranteed_fields`` with a call counter and asserts
+        it is invoked exactly once for the gate predecessor. If the
+        implementation regresses to ``.in_edges()``, the counter reads 2
+        and the assertion fails.
+        """
+        from unittest.mock import patch
+
+        from elspeth.contracts import RoutingMode
+        from elspeth.core.dag.graph import ExecutionGraph
+
+        gate_output_schema = SchemaConfig(
+            mode="flexible",
+            fields=(FieldDefinition("id", "str", required=True),),
+            guaranteed_fields=("id",),
+        )
+
+        graph = ExecutionGraph()
+        graph.add_node("source", node_type=NodeType.SOURCE, plugin_name="csv")
+        graph.add_node(
+            "gate",
+            node_type=NodeType.GATE,
+            plugin_name="fork",
+            output_schema_config=gate_output_schema,
+        )
+        graph.add_node(
+            "sink",
+            node_type=NodeType.SINK,
+            plugin_name="csv_sink",
+            declared_required_fields=frozenset({"id"}),
+        )
+
+        graph.add_edge("source", "gate", label="continue", mode=RoutingMode.MOVE)
+        # Two parallel edges from gate to sink — different labels, same source/target.
+        graph.add_edge("gate", "sink", label="true", mode=RoutingMode.MOVE)
+        graph.add_edge("gate", "sink", label="false", mode=RoutingMode.MOVE)
+
+        # Patch the effective-guarantees API with a counter. The validator
+        # must call it exactly ONCE for the gate predecessor, regardless of
+        # how many parallel edges exist between gate and sink.
+        call_counts: dict[str, int] = {}
+        original = graph.get_effective_guaranteed_fields
+
+        def counting_wrapper(node_id: str) -> frozenset[str]:
+            call_counts[node_id] = call_counts.get(node_id, 0) + 1
+            return original(node_id)
+
+        with patch.object(graph, "get_effective_guaranteed_fields", side_effect=counting_wrapper):
+            graph._validate_sink_required_fields()  # Should not raise
+
+        assert call_counts.get("gate", 0) == 1, (
+            f"Expected gate predecessor to be visited exactly once, "
+            f"but was visited {call_counts.get('gate', 0)} times. "
+            f"This indicates the validator is iterating in_edges (which yields "
+            f"one tuple per parallel edge) instead of predecessors (which "
+            f"yields each unique source node once)."
+        )
 
 
 class _BuilderMockSource:
