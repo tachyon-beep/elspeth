@@ -1174,6 +1174,180 @@ class TestBuilderBranchExclusiveFieldDowngrade:
         assert self._get_field(coal_schema, "id").required is True
         assert self._get_field(coal_schema, "shared").required is True
 
+    def test_builder_materializes_union_for_require_all_observed_branches(self) -> None:
+        """Builder stores UNION (not intersection) on require_all coalesce output for observed branches.
+
+        Under require_all, every branch always arrives and dict.update unions
+        all branch keys into the merged row. A field guaranteed by ANY branch
+        is therefore in every merged row, so the stored
+        output_schema_config.guaranteed_fields should be the UNION of branch
+        guarantees.
+
+        Regression: builder.py used set.intersection(*guaranteed_sets)
+        unconditionally at line 887. For OBSERVED-mode branches where
+        guarantees are carried only via explicit guaranteed_fields (no typed
+        fields to derive implicit guarantees from), the stale intersection
+        was the only source of truth — and it was wrong under require_all.
+
+        Downstream consumers reading the stored schema directly (nested
+        coalesces via get_schema_config_from_node, deferred config gates via
+        _best_schema_config) would see the stale intersection and
+        under-report valid require_all guarantees.
+        """
+        source = _BuilderMockSource()
+        # Observed-mode branches: guarantees ONLY via guaranteed_fields, no
+        # typed fields to fall back to. This exposes the stale-tuple bug.
+        t_a = _TransformWithTypedSchema(
+            "t_a_plugin",
+            SchemaConfig(mode="observed", fields=None, guaranteed_fields=("id", "a_only")),
+        )
+        t_b = _TransformWithTypedSchema(
+            "t_b_plugin",
+            SchemaConfig(mode="observed", fields=None, guaranteed_fields=("id", "b_only")),
+        )
+        wired_a = WiredTransform(
+            plugin=t_a,  # type: ignore[arg-type]
+            settings=TransformSettings(
+                name="t_a",
+                plugin=t_a.name,
+                input="branch_a",
+                on_success="t_a_out",
+                on_error="discard",
+                options={},
+            ),
+        )
+        wired_b = WiredTransform(
+            plugin=t_b,  # type: ignore[arg-type]
+            settings=TransformSettings(
+                name="t_b",
+                plugin=t_b.name,
+                input="branch_b",
+                on_success="t_b_out",
+                on_error="discard",
+                options={},
+            ),
+        )
+        fork_gate = GateSettings(
+            name="splitter",
+            input="source_out",
+            condition="True",
+            routes={"true": "fork", "false": "output"},
+            fork_to=["branch_a", "branch_b"],
+        )
+        coalesce = CoalesceSettings(
+            name="merger",
+            branches={"branch_a": "t_a_out", "branch_b": "t_b_out"},
+            policy="require_all",
+            merge="union",
+            on_success="output",
+        )
+
+        graph = ExecutionGraph.from_plugin_instances(
+            source=source,  # type: ignore[arg-type]
+            source_settings=SourceSettings(plugin=source.name, on_success="source_out", options={}),
+            transforms=[wired_a, wired_b],
+            sinks={"output": _BuilderMockSink()},  # type: ignore[dict-item]
+            aggregations={},
+            gates=[fork_gate],
+            coalesce_settings=[coalesce],
+        )
+
+        coalesce_nodes = [n for n in graph.get_nodes() if n.node_type == NodeType.COALESCE]
+        assert len(coalesce_nodes) == 1
+        coal_schema = coalesce_nodes[0].output_schema_config
+        assert coal_schema is not None
+        assert coal_schema.guaranteed_fields is not None, (
+            "coalesce must materialize an explicit guaranteed_fields tuple because at least one branch declares guarantees"
+        )
+
+        # The materialized tuple must be the UNION of branch guarantees,
+        # not the intersection. Previously stored as ('id',); must now include
+        # 'a_only' and 'b_only' because under require_all both branches always
+        # arrive.
+        assert set(coal_schema.guaranteed_fields) == {"id", "a_only", "b_only"}, (
+            f"Expected materialized union {{'id', 'a_only', 'b_only'}} for "
+            f"require_all observed branches, got {set(coal_schema.guaranteed_fields)}. "
+            f"The stale-intersection materialization would produce {{'id'}} only. "
+            f"Downstream gates/nested-coalesces reading this schema would "
+            f"under-report valid require_all guarantees."
+        )
+        # And the schema's effective guarantees (what downstream consumers see
+        # when they call schema_config.get_effective_guaranteed_fields()) must
+        # match — this is the path that gates and nested coalesces take.
+        assert coal_schema.get_effective_guaranteed_fields() == frozenset({"id", "a_only", "b_only"})
+
+    def test_builder_materializes_intersection_for_best_effort_observed_branches(self) -> None:
+        """Control: best_effort materialization still uses INTERSECTION.
+
+        Under best_effort, branches may be lost, so only fields guaranteed by
+        EVERY branch survive. The materialized tuple must reflect that.
+        Protects against an over-eager fix to
+        test_builder_materializes_union_for_require_all_observed_branches
+        that would union guarantees regardless of policy.
+        """
+        source = _BuilderMockSource()
+        t_a = _TransformWithTypedSchema(
+            "t_a_plugin",
+            SchemaConfig(mode="observed", fields=None, guaranteed_fields=("id", "a_only")),
+        )
+        t_b = _TransformWithTypedSchema(
+            "t_b_plugin",
+            SchemaConfig(mode="observed", fields=None, guaranteed_fields=("id", "b_only")),
+        )
+        wired_a = WiredTransform(
+            plugin=t_a,  # type: ignore[arg-type]
+            settings=TransformSettings(
+                name="t_a",
+                plugin=t_a.name,
+                input="branch_a",
+                on_success="t_a_out",
+                on_error="discard",
+                options={},
+            ),
+        )
+        wired_b = WiredTransform(
+            plugin=t_b,  # type: ignore[arg-type]
+            settings=TransformSettings(
+                name="t_b",
+                plugin=t_b.name,
+                input="branch_b",
+                on_success="t_b_out",
+                on_error="discard",
+                options={},
+            ),
+        )
+        fork_gate = GateSettings(
+            name="splitter",
+            input="source_out",
+            condition="True",
+            routes={"true": "fork", "false": "output"},
+            fork_to=["branch_a", "branch_b"],
+        )
+        coalesce = CoalesceSettings(
+            name="merger",
+            branches={"branch_a": "t_a_out", "branch_b": "t_b_out"},
+            policy="best_effort",
+            merge="union",
+            on_success="output",
+            timeout_seconds=60.0,
+        )
+
+        graph = ExecutionGraph.from_plugin_instances(
+            source=source,  # type: ignore[arg-type]
+            source_settings=SourceSettings(plugin=source.name, on_success="source_out", options={}),
+            transforms=[wired_a, wired_b],
+            sinks={"output": _BuilderMockSink()},  # type: ignore[dict-item]
+            aggregations={},
+            gates=[fork_gate],
+            coalesce_settings=[coalesce],
+        )
+
+        coalesce_nodes = [n for n in graph.get_nodes() if n.node_type == NodeType.COALESCE]
+        coal_schema = coalesce_nodes[0].output_schema_config
+        assert coal_schema is not None
+        # Intersection: only 'id' is in both branches' guarantees.
+        assert set(coal_schema.guaranteed_fields or ()) == {"id"}
+
     def _build_end_to_end_branch_exclusive_setup(self, *, policy: str) -> tuple[Any, Any, Any, Any, Any, Any]:
         """Build the source/transforms/gate/coalesce for an asymmetric-branch sink test.
 

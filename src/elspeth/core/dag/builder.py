@@ -863,12 +863,26 @@ def build_execution_graph(
                         break
 
         # Collect contract fields from ALL branches for propagation.
-        #   guaranteed_fields = intersection of branches that declare guarantees
+        #   guaranteed_fields = policy-aware merge of branches that declare:
+        #                         require_all → UNION (every branch always
+        #                                       arrives, any branch's guarantee
+        #                                       survives dict.update in the
+        #                                       merged row)
+        #                         others      → INTERSECTION (branches may be
+        #                                       lost / only first/quorum arrives,
+        #                                       so only fields guaranteed by
+        #                                       every branch survive)
         #   audit_fields = union (any audit field from any branch)
         #
-        # Only branches that declare guarantees participate in the intersection.
-        # See SchemaConfig.declares_guaranteed_fields for the None-vs-empty
-        # contract (None = abstain, () = participate with empty set).
+        # Only branches that declare guarantees participate. See
+        # SchemaConfig.declares_guaranteed_fields for the None-vs-empty contract
+        # (None = abstain, () = participate with empty set).
+        #
+        # This stored tuple must match ExecutionGraph.get_effective_guaranteed_fields()
+        # for the same COALESCE node at runtime — consumers that read the stored
+        # schema directly (deferred config gates via _best_schema_config,
+        # nested coalesces via get_schema_config_from_node, and any non-COALESCE
+        # path through get_guaranteed_fields) rely on this equivalence.
         guaranteed_sets: list[set[str]] = []
         audit_sets: list[set[str]] = []
         for schema_cfg in branch_to_schema.values():
@@ -881,10 +895,13 @@ def build_execution_graph(
 
         # Preserve None-vs-empty-tuple semantics (see declares_guaranteed_fields):
         #   No branch declared → None (abstain: coalesce makes no claim)
-        #   Branches declared but intersection is ∅ → () (explicitly guarantees nothing)
+        #   Branches declared but merge is ∅ → () (explicitly guarantees nothing)
         # Using truthiness (``if merged``) would conflate these two cases.
         if guaranteed_sets:
-            merged_guaranteed_tuple = tuple(sorted(set.intersection(*guaranteed_sets)))
+            if coal_config.policy == "require_all":
+                merged_guaranteed_tuple = tuple(sorted(set.union(*guaranteed_sets)))
+            else:
+                merged_guaranteed_tuple = tuple(sorted(set.intersection(*guaranteed_sets)))
         else:
             merged_guaranteed_tuple = None
         if audit_sets:

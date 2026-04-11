@@ -656,7 +656,9 @@ class TestPassThroughNodesInheritComputedSchema:
 
         gate_schema = gate_nodes[0].output_schema_config
         assert gate_schema is not None
+        assert gate_schema.guaranteed_fields is not None
         assert set(gate_schema.guaranteed_fields) == {"field_a", "field_b"}
+        assert gate_schema.audit_fields is not None
         assert set(gate_schema.audit_fields) == {"field_c", "field_d"}
 
     def test_gate_inherits_raw_schema_when_no_computed(self) -> None:
@@ -750,7 +752,9 @@ class TestPassThroughNodesInheritComputedSchema:
 
         coal_schema = coalesce_nodes[0].output_schema_config
         assert coal_schema is not None
+        assert coal_schema.guaranteed_fields is not None
         assert set(coal_schema.guaranteed_fields) == {"field_a", "field_b"}
+        assert coal_schema.audit_fields is not None
         assert set(coal_schema.audit_fields) == {"field_c", "field_d"}
 
     def test_deferred_gate_after_coalesce_inherits_computed_schema(self) -> None:
@@ -811,7 +815,9 @@ class TestPassThroughNodesInheritComputedSchema:
 
         gate_schema = gate_nodes[0].output_schema_config
         assert gate_schema is not None
+        assert gate_schema.guaranteed_fields is not None
         assert set(gate_schema.guaranteed_fields) == {"field_a", "field_b"}
+        assert gate_schema.audit_fields is not None
         assert set(gate_schema.audit_fields) == {"field_c", "field_d"}
 
 
@@ -951,8 +957,18 @@ class TestCoalesceMaterializedSchemaFromBuilder:
         self,
         transform_a_guaranteed: tuple[str, ...] | None,
         transform_b_guaranteed: tuple[str, ...] | None,
+        *,
+        policy: str = "best_effort",
     ) -> ExecutionGraph:
-        """Build: source → fork → [transform_a, transform_b] → coalesce → sink."""
+        """Build: source → fork → [transform_a, transform_b] → coalesce → sink.
+
+        Default policy is best_effort because most tests in this class assert
+        the INTERSECTION contract (None-vs-empty-tuple distinction under AND
+        semantics). Under require_all, the builder uses UNION instead — those
+        assertions would not hold. Tests that specifically cover the
+        require_all union materialization live in
+        test_dag_coalesce_optionality.py::TestBuilderBranchExclusiveFieldDowngrade.
+        """
         source = MockSource()
 
         t_a = _ConfigurableTransform("branch_transform_a", transform_a_guaranteed)
@@ -989,12 +1005,15 @@ class TestCoalesceMaterializedSchemaFromBuilder:
             fork_to=["branch_a", "branch_b"],
         )
 
+        # best_effort requires timeout_seconds; require_all ignores it.
+        # Pass unconditionally so the helper supports either policy.
         coalesce = CoalesceSettings(
             name="merger",
             branches={"branch_a": "t_a_out", "branch_b": "t_b_out"},
-            policy="require_all",
+            policy=policy,
             merge="union",
             on_success="output",
+            timeout_seconds=60.0,
         )
 
         return ExecutionGraph.from_plugin_instances(
@@ -1027,6 +1046,10 @@ class TestCoalesceMaterializedSchemaFromBuilder:
         () means "explicitly guarantees nothing" (branches declared but share
         no fields). None means "abstains" (no branch made any declaration).
         The audit trail must distinguish these for IRAP traceability.
+
+        Tests the INTERSECTION materialization path (best_effort). Under
+        require_all, the same setup would materialize union = ('x', 'y')
+        because every branch always arrives.
         """
         graph = self._build_fork_coalesce_with_branch_transforms(
             transform_a_guaranteed=("x",),
@@ -1056,7 +1079,12 @@ class TestCoalesceMaterializedSchemaFromBuilder:
 
         This tests the Python API boundary: a transform that constructs
         SchemaConfig(guaranteed_fields=()) is saying "I guarantee zero fields."
-        The coalesce should materialize () (explicitly empty), not None (abstain).
+        Under best_effort, the coalesce should materialize () (explicitly
+        empty), not None (abstain) — the None-vs-empty distinction must be
+        preserved for IRAP traceability.
+
+        Under require_all, the same setup would materialize union = ('x', 'y')
+        because branch_a's guarantees survive (branch_a always arrives).
         """
         graph = self._build_fork_coalesce_with_branch_transforms(
             transform_a_guaranteed=("x", "y"),
@@ -1069,3 +1097,24 @@ class TestCoalesceMaterializedSchemaFromBuilder:
         # branch_b explicitly guarantees nothing → intersection collapses to ()
         assert coal_schema.guaranteed_fields is not None, "guaranteed_fields should be () (explicitly empty), not None (abstain)"
         assert coal_schema.guaranteed_fields == ()
+
+    def test_require_all_materializes_union_preserving_explicit_empty_semantics(self) -> None:
+        """Under require_all, materialized guarantees are UNION (not intersection).
+
+        Symmetric counterpart to test_empty_intersection_materializes_empty_tuple_not_none:
+        the same disjoint branch guarantees that produce () under best_effort
+        produce the union under require_all because every branch always
+        arrives and contributes its guarantees to the merged row.
+        """
+        graph = self._build_fork_coalesce_with_branch_transforms(
+            transform_a_guaranteed=("x",),
+            transform_b_guaranteed=("y",),
+            policy="require_all",
+        )
+        coalesce_nodes = [n for n in graph.get_nodes() if n.node_type == NodeType.COALESCE]
+        assert len(coalesce_nodes) == 1
+        coal_schema = coalesce_nodes[0].output_schema_config
+        assert coal_schema is not None
+        # Union under require_all: both branches' guarantees survive.
+        assert coal_schema.guaranteed_fields is not None
+        assert set(coal_schema.guaranteed_fields) == {"x", "y"}
