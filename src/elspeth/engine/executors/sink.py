@@ -181,26 +181,44 @@ class SinkExecutor:
                     ) from e
 
         if sink.declared_required_fields:
+            # Caller invariant: when contracts is provided, len(contracts) == len(rows).
+            # Both call sites build them from the same tokens iterable, so a desync
+            # would be a refactor bug — assert it loudly rather than silently masking.
+            if contracts is not None and len(contracts) != len(rows):
+                raise OrchestrationInvariantError(
+                    f"Sink '{sink.name}' _validate_sink_input received {len(rows)} rows "
+                    f"but {len(contracts)} contracts. These must be paired 1:1."
+                )
             for row_index, row in enumerate(rows):
                 missing = sorted(f for f in sink.declared_required_fields if f not in row)
-                if missing:
-                    # If a contract is available, annotate missing fields that are
-                    # marked optional in the contract (coalesce merge artifact).
-                    contract_context = ""
-                    if contracts is not None and row_index < len(contracts):
-                        contract = contracts[row_index]
-                        contract_field_names = {fc.normalized_name for fc in contract.fields}
-                        optional_in_contract = [f for f in missing if f in contract_field_names and f not in contract.required_field_names]
-                        if optional_in_contract:
-                            contract_context = (
-                                f" Fields {optional_in_contract} are optional in the row's "
-                                f"schema contract (likely from coalesce merge). "
-                                f"Fix: ensure all branches produce these fields as required."
-                            )
-                    raise PluginContractViolation(
-                        f"Sink '{sink.name}' row {row_index} is missing required fields "
-                        f"{missing}. This indicates an upstream transform/schema bug.{contract_context}"
-                    )
+                if not missing:
+                    continue
+                # If a contract is available, annotate missing fields that are
+                # marked optional in the contract (coalesce merge artifact).
+                contract_context = ""
+                if contracts is not None:
+                    contract = contracts[row_index]
+                    # Hoist the property out of the comprehension: it builds a
+                    # new frozenset on every access, and we need it once per row.
+                    required_in_contract = contract.required_field_names
+                    # Use find_name() to handle the original-vs-normalized name
+                    # namespace mismatch: declared_required_fields may carry raw
+                    # field names while the contract indexes by normalized names.
+                    optional_in_contract: list[str] = []
+                    for missing_name in missing:
+                        normalized = contract.find_name(missing_name)
+                        if normalized is not None and normalized not in required_in_contract:
+                            optional_in_contract.append(missing_name)
+                    if optional_in_contract:
+                        contract_context = (
+                            f" Fields {optional_in_contract} are optional in the row's "
+                            f"schema contract (likely from coalesce merge). "
+                            f"Fix: ensure all branches produce these fields as required."
+                        )
+                raise PluginContractViolation(
+                    f"Sink '{sink.name}' row {row_index} is missing required fields "
+                    f"{missing}. This indicates an upstream transform/schema bug.{contract_context}"
+                )
 
     def write(
         self,
@@ -540,8 +558,14 @@ class SinkExecutor:
                     # a fixed-schema failsink (extra="forbid") would reject them.
                     # Required-field checking still catches missing upstream fields.
                     # Inside the try block so failures close primary divert states.
-                    failsink_contracts = [t.row_data.contract for t, _, _ in primary_divert_states]
-                    self._validate_sink_input(failsink, enriched_rows, skip_schema=True, contracts=failsink_contracts)
+                    # Don't pass primary-path contracts here: the failsink's
+                    # declared_required_fields are diagnostic-shaped (e.g.,
+                    # __diversion_reason) and have no relationship to the
+                    # primary contract's field optionality. Annotating with
+                    # "optional in coalesce merge" would be misdirection —
+                    # the operator is debugging a failsink write, not a
+                    # missing primary field.
+                    self._validate_sink_input(failsink, enriched_rows, skip_schema=True)
                     failsink_write_result = failsink.write(enriched_rows, ctx)
                     failsink.flush()
                 except TIER_1_ERRORS:

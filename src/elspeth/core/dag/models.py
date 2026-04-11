@@ -113,6 +113,16 @@ class NodeInfo:
         if len(self.node_id) > _NODE_ID_MAX_LENGTH:
             msg = f"node_id exceeds {_NODE_ID_MAX_LENGTH} characters: '{self.node_id}' (length={len(self.node_id)})"
             raise GraphValidationError(msg)
+        # Offensive programming: declared_required_fields is sink-specific.
+        # Catch the misuse at construction time rather than letting stray
+        # data sit on a non-sink node until a future validator widens its
+        # scope and produces mysterious errors.
+        if self.declared_required_fields and self.node_type != NodeType.SINK:
+            raise GraphValidationError(
+                f"NodeInfo.declared_required_fields is only meaningful for SINK nodes; "
+                f"node {self.node_id!r} has type {self.node_type.name} "
+                f"with declared_required_fields={sorted(self.declared_required_fields)!r}."
+            )
         # NOTE: config is NOT frozen here because the builder mutates
         # output_schema_config on pass-through nodes (gates, coalesce) via
         # object.__setattr__ during schema propagation. Deep freeze is

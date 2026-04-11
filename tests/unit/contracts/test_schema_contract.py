@@ -1030,6 +1030,13 @@ class TestSchemaContractMerge:
             "yankee",
             "zeta",
         ]
+        # All four fields are branch-exclusive (none appears in both contracts).
+        # Under AND semantics, branch-exclusive fields must be marked optional
+        # in the merged output. Asserting this here catches any regression to
+        # OR semantics that the ordering check alone would miss.
+        assert all(not field.required for field in merged.fields), (
+            "Branch-exclusive fields must be marked required=False after AND-semantics merge"
+        )
 
 
 # --- Required Field Names Tests ---

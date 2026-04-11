@@ -38,7 +38,7 @@ class TestUnionMergeOptionalityPreservation:
         """Simulate the builder's union merge logic with SchemaConfig objects."""
         seen_types: dict[str, tuple[str, bool, str]] = {}
         branches_with_field: dict[str, set[str]] = {}
-        all_branch_names = set(branch_schemas.keys())
+        contributing_branches: set[str] = set()
         all_observed = False
         for branch_name, schema_cfg in branch_schemas.items():
             if schema_cfg.is_observed:
@@ -46,8 +46,11 @@ class TestUnionMergeOptionalityPreservation:
                 break
             if schema_cfg.fields is None:
                 continue
+            contributing_branches.add(branch_name)
             for fd in schema_cfg.fields:
-                branches_with_field.setdefault(fd.name, set()).add(branch_name)
+                if fd.name not in branches_with_field:
+                    branches_with_field[fd.name] = set()
+                branches_with_field[fd.name].add(branch_name)
                 if fd.name in seen_types:
                     prior_type, _prior_req, prior_branch = seen_types[fd.name]
                     if prior_type != fd.field_type:
@@ -57,9 +60,11 @@ class TestUnionMergeOptionalityPreservation:
                 else:
                     seen_types[fd.name] = (fd.field_type, fd.required, branch_name)
 
-        # Apply AND semantics: fields not present in ALL branches become optional.
+        # Apply AND semantics: fields not present in ALL contributing branches
+        # become optional. Branches with fields=None abstain from the typed
+        # contract and are excluded from the denominator.
         for field_name in list(seen_types):
-            if branches_with_field[field_name] != all_branch_names:
+            if branches_with_field[field_name] != contributing_branches:
                 ftype, _, first_branch = seen_types[field_name]
                 seen_types[field_name] = (ftype, False, first_branch)
 
@@ -158,6 +163,10 @@ class TestCoalesceSinkRequiredFieldValidation:
         Branch A guarantees field 'x'; branch B does not. Union merge marks 'x'
         as optional (branch-exclusive). A downstream sink declares 'x' required
         in its declared_required_fields. Validation must fail at build time.
+
+        Branch transforms set guaranteed_fields explicitly to mirror what real
+        plugin code (BaseTransform._build_output_schema_config) produces — the
+        coalesce union path skips branches that don't declare guarantees.
         """
         from elspeth.contracts import RoutingMode
         from elspeth.core.dag.graph import ExecutionGraph
@@ -169,18 +178,25 @@ class TestCoalesceSinkRequiredFieldValidation:
                 FieldDefinition("id", "str", required=True),
                 FieldDefinition("x", "int", required=True),
             ),
+            guaranteed_fields=("id", "x"),
         )
         branch_b_schema = SchemaConfig(
             mode="flexible",
             fields=(FieldDefinition("id", "str", required=True),),
+            guaranteed_fields=("id",),
         )
-        # Coalesce output: 'x' is optional because branch B doesn't guarantee it
+        # Coalesce output: 'x' is optional because branch B doesn't guarantee it.
+        # The coalesce node's own output_schema_config is unused by the union
+        # path of get_effective_guaranteed_fields — the intersection is computed
+        # from the branches' guaranteed_fields directly. Set here for parity
+        # with real builder behavior.
         coalesce_output_schema = SchemaConfig(
             mode="flexible",
             fields=(
                 FieldDefinition("id", "str", required=True),
                 FieldDefinition("x", "int", required=False),
             ),
+            guaranteed_fields=("id",),
         )
 
         graph = ExecutionGraph()
@@ -238,6 +254,7 @@ class TestCoalesceSinkRequiredFieldValidation:
                 FieldDefinition("id", "str", required=True),
                 FieldDefinition("x", "int", required=True),
             ),
+            guaranteed_fields=("id", "x"),
         )
         coalesce_output_schema = SchemaConfig(
             mode="flexible",
@@ -245,6 +262,7 @@ class TestCoalesceSinkRequiredFieldValidation:
                 FieldDefinition("id", "str", required=True),
                 FieldDefinition("x", "int", required=True),
             ),
+            guaranteed_fields=("id", "x"),
         )
 
         graph = ExecutionGraph()
@@ -303,10 +321,12 @@ class TestCoalesceSinkRequiredFieldValidation:
                 FieldDefinition("id", "str", required=True),
                 FieldDefinition("exclusive_to_a", "int", required=True),
             ),
+            guaranteed_fields=("id", "exclusive_to_a"),
         )
         branch_b_schema = SchemaConfig(
             mode="flexible",
             fields=(FieldDefinition("id", "str", required=True),),
+            guaranteed_fields=("id",),
         )
 
         # Coalesce output: 'exclusive_to_a' is optional (branch-exclusive)
@@ -316,6 +336,7 @@ class TestCoalesceSinkRequiredFieldValidation:
                 FieldDefinition("id", "str", required=True),
                 FieldDefinition("exclusive_to_a", "int", required=False),
             ),
+            guaranteed_fields=("id",),
         )
 
         graph = ExecutionGraph()
@@ -379,13 +400,16 @@ class TestCoalesceSinkRequiredFieldValidation:
             ),
         )
 
-        # Transform passes through the coalesce output (keeps 'x' optional)
+        # Transform passes through the coalesce output (keeps 'x' optional).
+        # Set guaranteed_fields explicitly to mirror what BaseTransform's
+        # _build_output_schema_config produces in production.
         transform_output_schema = SchemaConfig(
             mode="flexible",
             fields=(
                 FieldDefinition("id", "str", required=True),
                 FieldDefinition("x", "int", required=False),
             ),
+            guaranteed_fields=("id",),
         )
 
         graph = ExecutionGraph()
@@ -447,13 +471,15 @@ class TestCoalesceSinkRequiredFieldValidation:
                 FieldDefinition("x", "int", required=False),  # optional from coalesce
             ),
         )
-        # Transform commits to always producing x
+        # Transform commits to always producing x — declared via guaranteed_fields
+        # mirroring real BaseTransform._build_output_schema_config output.
         transform_output_schema = SchemaConfig(
             mode="flexible",
             fields=(
                 FieldDefinition("id", "str", required=True),
-                FieldDefinition("x", "int", required=True),  # transform guarantees it
+                FieldDefinition("x", "int", required=True),
             ),
+            guaranteed_fields=("id", "x"),
         )
 
         graph = ExecutionGraph()
@@ -716,3 +742,99 @@ class TestBuilderBranchExclusiveFieldDowngrade:
 
         assert self._get_field(coal_schema, "id").required is True
         assert self._get_field(coal_schema, "shared").required is True
+
+    def test_builder_end_to_end_sink_required_fields_branch_exclusive_rejected(self) -> None:
+        """End-to-end: builder + sink validation catch branch-exclusive sink requirement.
+
+        This is the integration test that exercises BOTH C1 (sink validation
+        walks predecessors) AND C2 (builder marks branch-exclusive fields
+        optional) together. Without this test, either fix could be regressed
+        independently and the other tests would still pass.
+
+        Setup: branch A produces 'exclusive_to_a' as required, branch B does
+        not. Sink declares 'exclusive_to_a' in declared_required_fields. The
+        builder runs the union merge and marks 'exclusive_to_a' as optional
+        in the coalesce output. The sink validator then walks predecessors,
+        sees the field is not guaranteed by the coalesce, and raises.
+        """
+
+        class _SinkRequiringExclusive:
+            name = "strict_sink"
+            input_schema = None
+            config: ClassVar[dict[str, Any]] = {}
+            _on_write_failure: str = "discard"
+            declared_required_fields: ClassVar[frozenset[str]] = frozenset({"id", "exclusive_to_a"})
+
+            def _reset_diversion_log(self) -> None:
+                pass
+
+        source = _BuilderMockSource()
+        t_a = _TransformWithTypedSchema(
+            "branch_transform_a",
+            SchemaConfig(
+                mode="flexible",
+                fields=(
+                    FieldDefinition("id", "str", required=True),
+                    FieldDefinition("exclusive_to_a", "int", required=True),
+                ),
+                guaranteed_fields=("id", "exclusive_to_a"),
+            ),
+        )
+        t_b = _TransformWithTypedSchema(
+            "branch_transform_b",
+            SchemaConfig(
+                mode="flexible",
+                fields=(FieldDefinition("id", "str", required=True),),
+                guaranteed_fields=("id",),
+            ),
+        )
+
+        wired_a = WiredTransform(
+            plugin=t_a,  # type: ignore[arg-type]
+            settings=TransformSettings(
+                name="t_a",
+                plugin=t_a.name,
+                input="branch_a",
+                on_success="t_a_out",
+                on_error="discard",
+                options={},
+            ),
+        )
+        wired_b = WiredTransform(
+            plugin=t_b,  # type: ignore[arg-type]
+            settings=TransformSettings(
+                name="t_b",
+                plugin=t_b.name,
+                input="branch_b",
+                on_success="t_b_out",
+                on_error="discard",
+                options={},
+            ),
+        )
+
+        fork_gate = GateSettings(
+            name="splitter",
+            input="source_out",
+            condition="True",
+            routes={"true": "fork", "false": "output"},
+            fork_to=["branch_a", "branch_b"],
+        )
+
+        coalesce = CoalesceSettings(
+            name="merger",
+            branches={"branch_a": "t_a_out", "branch_b": "t_b_out"},
+            policy="require_all",
+            merge="union",
+            on_success="output",
+        )
+
+        with pytest.raises(GraphValidationError, match=r"exclusive_to_a"):
+            ExecutionGraph.from_plugin_instances(
+                source=source,  # type: ignore[arg-type]
+                source_settings=SourceSettings(plugin=source.name, on_success="source_out", options={}),
+                transforms=[wired_a, wired_b],
+                sinks={"output": _SinkRequiringExclusive()},  # type: ignore[dict-item]
+                aggregations={},
+                gates=[fork_gate],
+                coalesce_settings=[coalesce],
+            )
