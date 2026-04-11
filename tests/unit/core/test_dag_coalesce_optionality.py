@@ -70,7 +70,10 @@ class TestUnionMergeOptionalityPreservation:
 
         if all_observed or not seen_types:
             return SchemaConfig(mode="observed", fields=None)
-        merged_fields = tuple(FieldDefinition(name=name, field_type=ftype, required=req) for name, (ftype, req, _) in seen_types.items())
+        merged_fields = tuple(
+            FieldDefinition(name=name, field_type=ftype, required=req)  # type: ignore[arg-type]  # ftype is Literal at runtime (from FieldDefinition.field_type), narrowed to str by tuple storage
+            for name, (ftype, req, _) in seen_types.items()
+        )
         return SchemaConfig(mode="flexible", fields=merged_fields)
 
     def _get_field(self, schema: SchemaConfig, name: str) -> FieldDefinition:
