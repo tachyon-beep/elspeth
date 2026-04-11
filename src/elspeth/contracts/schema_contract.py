@@ -440,7 +440,7 @@ class SchemaContract:
 
         Rules:
         1. Mode: Most restrictive wins (FIXED > FLEXIBLE > OBSERVED)
-        2. Fields present in both: Types must match (error if not)
+        2. Fields present in both: Types must match; required only if both require (AND)
         3. Fields in only one: Included but marked non-required
         4. Locked: True if either is locked
 
@@ -480,13 +480,15 @@ class SchemaContract:
                         type_a=self_fc.python_type.__name__,
                         type_b=other_fc.python_type.__name__,
                     )
-                # Use the one that's required if either is
+                # Required only if BOTH branches require it (AND semantics).
+                # Why: for best_effort/quorum coalesces, the branch that
+                # guarantees the field might be lost. Safe for require_all too.
                 # Use declared source if either is declared
                 merged_fields[name] = FieldContract(
                     normalized_name=name,
                     original_name=self_fc.original_name,
                     python_type=self_fc.python_type,
-                    required=self_fc.required or other_fc.required,
+                    required=self_fc.required and other_fc.required,
                     source="declared" if self_fc.source == "declared" or other_fc.source == "declared" else "inferred",
                     nullable=self_fc.nullable or other_fc.nullable,
                 )

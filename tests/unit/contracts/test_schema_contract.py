@@ -942,8 +942,13 @@ class TestSchemaContractMerge:
         assert locked.merge(unlocked).locked is True
         assert unlocked.merge(locked).locked is True
 
-    def test_merge_required_if_either_required(self) -> None:
-        """Field is required if required in either path."""
+    def test_merge_required_only_if_both_required(self) -> None:
+        """Field is required only if required in BOTH paths (AND semantics).
+
+        Why AND: For best_effort/quorum coalesces, a branch that guarantees
+        field X might be lost. The merged output can only guarantee X if ALL
+        branches that produce X guarantee it.
+        """
         c1 = SchemaContract(
             mode="FLEXIBLE",
             fields=(make_field("x", int, original_name="X", required=True, source="declared"),),
@@ -952,6 +957,22 @@ class TestSchemaContractMerge:
         c2 = SchemaContract(
             mode="FLEXIBLE",
             fields=(make_field("x", int, original_name="X", required=False, source="inferred"),),
+            locked=True,
+        )
+        merged = c1.merge(c2)
+
+        assert merged.fields[0].required is False
+
+    def test_merge_required_when_both_branches_require(self) -> None:
+        """Field is required when required in BOTH paths."""
+        c1 = SchemaContract(
+            mode="FLEXIBLE",
+            fields=(make_field("x", int, original_name="X", required=True, source="declared"),),
+            locked=True,
+        )
+        c2 = SchemaContract(
+            mode="FLEXIBLE",
+            fields=(make_field("x", int, original_name="X", required=True, source="declared"),),
             locked=True,
         )
         merged = c1.merge(c2)
