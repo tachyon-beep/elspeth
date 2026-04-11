@@ -903,6 +903,26 @@ def build_execution_graph(
             # silent downgrades of every other branch's required fields.
             contributing_branches: set[str] = set()
             all_observed = False
+
+            # Required-flag merge semantics depend on the coalesce policy:
+            #
+            # - require_all: OR semantics. _should_merge() only fires when ALL
+            #   declared branches have arrived, so every branch's required
+            #   fields are guaranteed in its actual rows, and _merge_data()'s
+            #   dict.update() preserves them in the merged row. A field is
+            #   guaranteed in the merged output if ANY branch requires it
+            #   (the requiring branch always arrives and always produces it).
+            #
+            # - best_effort / quorum / first: AND semantics. Some branches may
+            #   never arrive (best_effort/quorum) or only one branch wins
+            #   (first), so the merged spec must be conservative — only
+            #   guarantee fields that every contributing branch produces.
+            #
+            # The coalesce policy is statically known here, so the build-time
+            # spec can encode the right semantics for each policy without
+            # needing runtime information.
+            require_all = coal_config.policy == "require_all"
+
             for branch_name, schema_cfg in branch_to_schema.items():
                 if schema_cfg.is_observed:
                     all_observed = True
@@ -915,7 +935,7 @@ def build_execution_graph(
                         branches_with_field[fd.name] = set()
                     branches_with_field[fd.name].add(branch_name)
                     if fd.name in seen_types:
-                        prior_type, _prior_req, prior_branch = seen_types[fd.name]
+                        prior_type, prior_req, prior_branch = seen_types[fd.name]
                         if prior_type != fd.field_type:
                             raise GraphValidationError(
                                 f"Coalesce node '{coalesce_id}' receives incompatible "
@@ -924,24 +944,30 @@ def build_execution_graph(
                                 f"branch '{branch_name}' has {fd.field_type!r}. "
                                 "Union merge requires compatible types on shared fields."
                             )
-                        # If optional in ANY branch, optional in the merged output.
-                        if not fd.required:
-                            seen_types[fd.name] = (prior_type, False, prior_branch)
+                        if require_all:
+                            # OR: required if required in ANY branch.
+                            if fd.required and not prior_req:
+                                seen_types[fd.name] = (prior_type, True, prior_branch)
+                        else:
+                            # AND: optional if optional in ANY branch.
+                            if not fd.required:
+                                seen_types[fd.name] = (prior_type, False, prior_branch)
                     else:
                         seen_types[fd.name] = (fd.field_type, fd.required, branch_name)
 
-            # Apply AND semantics: fields not present in ALL contributing branches
-            # are optional. Rationale: for best_effort/quorum coalesces, a branch
-            # that guarantees a field may be lost. Even for require_all, the merged
-            # contract should be conservative — only guarantee fields that EVERY
-            # contributing branch produces. Matches SchemaContract.merge() runtime
-            # semantics. Branches that abstain from the typed contract (fields=None
-            # in non-observed mode) are excluded from the denominator: they neither
-            # guarantee nor deny anything.
-            for field_name in list(seen_types):
-                if branches_with_field[field_name] != contributing_branches:
-                    ftype, _, first_branch = seen_types[field_name]
-                    seen_types[field_name] = (ftype, False, first_branch)
+            # Branch-exclusive field handling (post-loop pass):
+            # - require_all: keep the source-branch required flag. The branch
+            #   that produces the field always arrives, so the field IS in the
+            #   merged row whenever the source branch's row has it. The source's
+            #   required flag is the correct merged-output flag.
+            # - other policies: force optional. The branch that produces the
+            #   field may not be in the eventual merge set (lost / not first /
+            #   not in quorum), so the merged output cannot guarantee it.
+            if not require_all:
+                for field_name in list(seen_types):
+                    if branches_with_field[field_name] != contributing_branches:
+                        ftype, _, first_branch = seen_types[field_name]
+                        seen_types[field_name] = (ftype, False, first_branch)
 
             if all_observed or not seen_types:
                 merged_schema = SchemaConfig(

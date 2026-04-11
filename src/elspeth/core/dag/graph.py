@@ -1643,7 +1643,7 @@ class ExecutionGraph:
         """
         node_info = self.get_node_info(node_id)
 
-        # Coalesce nodes: strategy-aware guaranteed fields
+        # Coalesce nodes: strategy- and policy-aware guaranteed fields
         if node_info.node_type == NodeType.COALESCE:
             merge_strategy = node_info.config["merge"]
 
@@ -1655,8 +1655,13 @@ class ExecutionGraph:
             if merge_strategy in ("nested", "select"):
                 return self.get_guaranteed_fields(node_id)
 
-            # union: intersection of branch guarantees. Only fields present in
-            # ALL declaring branches are guaranteed in the flat merged output.
+            # union: combine branch guarantees per coalesce policy.
+            # - require_all: UNION (every branch always arrives, so any field
+            #   guaranteed by any branch is in the merged row via dict.update;
+            #   matches CoalesceExecutor._should_merge gate + _merge_data union)
+            # - best_effort/quorum/first: INTERSECTION (some branches may never
+            #   arrive or only one branch wins, so the merged spec must be
+            #   conservative — only fields guaranteed by every branch survive)
             #
             # Abstain semantics: see SchemaConfig.declares_guaranteed_fields.
             #
@@ -1666,6 +1671,8 @@ class ExecutionGraph:
             # intersection into the node's output_schema_config via _assign_schema,
             # so the pre-computed answer is already on the node.  If the builder's
             # materialisation logic changes, this path must be updated to match.
+            policy = node_info.config["policy"]
+            require_all = policy == "require_all"
             incoming = list(self._graph.in_edges(node_id, keys=True, data=True))
             if not incoming:
                 return frozenset()
@@ -1677,8 +1684,12 @@ class ExecutionGraph:
             if not branch_guarantees:
                 return frozenset()
             result = branch_guarantees[0]
-            for guarantees in branch_guarantees[1:]:
-                result = result & guarantees
+            if require_all:
+                for guarantees in branch_guarantees[1:]:
+                    result = result | guarantees
+            else:
+                for guarantees in branch_guarantees[1:]:
+                    result = result & guarantees
             return result
 
         # Non-pass-through nodes return their own guarantees

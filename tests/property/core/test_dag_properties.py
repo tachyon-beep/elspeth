@@ -599,11 +599,13 @@ class TestGuaranteedFieldsProperties:
         branch_a_only: frozenset[str],
         branch_b_only: frozenset[str],
     ) -> None:
-        """Property: After coalesce, guaranteed = intersection of branch guarantees.
+        """Property: Under best_effort, coalesce guaranteed = intersection of branch guarantees.
 
-        When parallel branches rejoin at a coalesce node, only fields
-        guaranteed by ALL branches remain guaranteed. This is the
-        "lowest common denominator" of field availability.
+        When parallel branches rejoin at a coalesce node under best_effort
+        policy, branches may be lost — only fields guaranteed by ALL branches
+        remain guaranteed (the "lowest common denominator"). Under require_all
+        the result would be the union (every branch always arrives) — see
+        test_dag_coalesce_optionality.py::test_require_all_* for that path.
         """
         # Ensure disjoint branch-specific fields
         branch_a_only = branch_a_only - common_fields - branch_b_only
@@ -611,7 +613,7 @@ class TestGuaranteedFieldsProperties:
 
         branch_a_guarantees = common_fields | branch_a_only
         branch_b_guarantees = common_fields | branch_b_only
-        expected_after_coalesce = common_fields  # Only common fields survive
+        expected_after_coalesce = common_fields  # Only common fields survive intersection
 
         graph = ExecutionGraph()
 
@@ -632,8 +634,14 @@ class TestGuaranteedFieldsProperties:
             config={"schema": {"mode": "observed", "guaranteed_fields": list(branch_b_guarantees)}},
         )
 
-        # Coalesce node (merge point) — union merge uses intersection of guarantees
-        graph.add_node("coalesce", node_type=NodeType.COALESCE, plugin_name="test_coalesce", config={"merge": "union"})
+        # Coalesce node (merge point) — best_effort union merge uses intersection
+        # of guarantees because branches may be lost.
+        graph.add_node(
+            "coalesce",
+            node_type=NodeType.COALESCE,
+            plugin_name="test_coalesce",
+            config={"merge": "union", "policy": "best_effort"},
+        )
 
         # Sink
         graph.add_node("sink", node_type=NodeType.SINK, plugin_name="test_sink")
@@ -651,6 +659,90 @@ class TestGuaranteedFieldsProperties:
         assert effective == expected_after_coalesce, (
             f"Coalesce should guarantee intersection: {expected_after_coalesce}, "
             f"got {effective}. "
+            f"Branch A: {branch_a_guarantees}, Branch B: {branch_b_guarantees}"
+        )
+
+    @given(
+        common_fields=st.frozensets(
+            st.from_regex(r"[a-zA-Z_][a-zA-Z0-9_]{0,7}", fullmatch=True),
+            min_size=0,
+            max_size=3,
+        ),
+        branch_a_only=st.frozensets(
+            st.from_regex(r"[a-zA-Z_][a-zA-Z0-9_]{0,7}", fullmatch=True),
+            min_size=0,
+            max_size=2,
+        ),
+        branch_b_only=st.frozensets(
+            st.from_regex(r"[a-zA-Z_][a-zA-Z0-9_]{0,7}", fullmatch=True),
+            min_size=0,
+            max_size=2,
+        ),
+    )
+    @settings(max_examples=100)
+    def test_coalesce_require_all_union_property(
+        self,
+        common_fields: frozenset[str],
+        branch_a_only: frozenset[str],
+        branch_b_only: frozenset[str],
+    ) -> None:
+        """Property: Under require_all, coalesce guaranteed = UNION of branch guarantees.
+
+        When parallel branches rejoin under require_all, every branch always
+        arrives (CoalesceExecutor._should_merge enforces this) and _merge_data's
+        dict.update preserves every branch's keys. So a field guaranteed by
+        ANY branch is guaranteed in the merged row — the merged spec is the
+        union of branch guarantees, not the intersection.
+
+        This is the symmetric counterpart to test_coalesce_intersection_property
+        (which exercises best_effort).
+        """
+        # Ensure disjoint branch-specific fields
+        branch_a_only = branch_a_only - common_fields - branch_b_only
+        branch_b_only = branch_b_only - common_fields - branch_a_only
+
+        branch_a_guarantees = common_fields | branch_a_only
+        branch_b_guarantees = common_fields | branch_b_only
+        # Under require_all, every branch always arrives → union of guarantees.
+        expected_after_coalesce = branch_a_guarantees | branch_b_guarantees
+
+        graph = ExecutionGraph()
+        graph.add_node("source", node_type=NodeType.SOURCE, plugin_name="test_source")
+        graph.add_node(
+            "branch_a",
+            node_type=NodeType.TRANSFORM,
+            plugin_name="test_transform",
+            config={"schema": {"mode": "observed", "guaranteed_fields": list(branch_a_guarantees)}},
+        )
+        graph.add_node(
+            "branch_b",
+            node_type=NodeType.TRANSFORM,
+            plugin_name="test_transform",
+            config={"schema": {"mode": "observed", "guaranteed_fields": list(branch_b_guarantees)}},
+        )
+        graph.add_node(
+            "coalesce",
+            node_type=NodeType.COALESCE,
+            plugin_name="test_coalesce",
+            config={"merge": "union", "policy": "require_all"},
+        )
+        graph.add_node("sink", node_type=NodeType.SINK, plugin_name="test_sink")
+
+        graph.add_edge("source", "branch_a", label="path_a")
+        graph.add_edge("source", "branch_b", label="path_b")
+        graph.add_edge("branch_a", "coalesce", label="continue")
+        graph.add_edge("branch_b", "coalesce", label="continue")
+        graph.add_edge("coalesce", "sink", label="continue")
+
+        effective = graph.get_effective_guaranteed_fields("coalesce")
+
+        # Both branches' guarantees survive under require_all (union semantics).
+        # However: a branch with guaranteed_fields=None abstains and contributes
+        # nothing. With both branches having explicit (possibly empty) guarantees,
+        # we expect the union of both.
+        assert effective == expected_after_coalesce, (
+            f"Coalesce under require_all should guarantee union: "
+            f"{expected_after_coalesce}, got {effective}. "
             f"Branch A: {branch_a_guarantees}, Branch B: {branch_b_guarantees}"
         )
 

@@ -176,7 +176,13 @@ class TestEffectiveGuaranteedFields:
         assert result == frozenset({"x", "y"})
 
     def test_coalesce_returns_intersection(self) -> None:
-        """Coalesce node returns intersection of branch guarantees."""
+        """Coalesce node returns intersection of branch guarantees under best_effort.
+
+        Under best_effort policy, branches may not arrive, so the merged
+        guarantees are the intersection of branches' guaranteed_fields.
+        Under require_all this would be the union — see
+        test_dag_coalesce_optionality.py::test_require_all_* for that path.
+        """
         graph = ExecutionGraph()
 
         # Fork gate with two branches
@@ -208,13 +214,13 @@ class TestEffectiveGuaranteedFields:
             "coalesce_1",
             node_type=NodeType.COALESCE,
             plugin_name="coalesce",
-            config={"schema": {"mode": "observed"}, "merge": "union", "branches": {}, "policy": "require_all"},
+            config={"schema": {"mode": "observed"}, "merge": "union", "branches": {}, "policy": "best_effort"},
         )
 
         graph.add_edge("branch_a", "coalesce_1", label="path_a")
         graph.add_edge("branch_b", "coalesce_1", label="path_b")
 
-        # Coalesce guarantees only the intersection
+        # Coalesce guarantees only the intersection (best_effort semantics)
         result = graph.get_effective_guaranteed_fields("coalesce_1")
         assert result == frozenset({"common"})
 
@@ -698,7 +704,13 @@ class TestForkCoalesceContracts:
         graph.validate_edge_compatibility()
 
     def test_coalesce_intersection_rejects_branch_specific_requirement(self) -> None:
-        """Consumer after coalesce cannot require branch-specific fields."""
+        """Under best_effort, a consumer after coalesce cannot require branch-specific fields.
+
+        Under best_effort, the branch producing 'a_only' may be lost — the
+        merged row may be missing it, so a sink requiring 'a_only' must be
+        rejected at build time. Under require_all the same configuration
+        would be valid — see test_dag_coalesce_optionality.py for that path.
+        """
         graph = ExecutionGraph()
 
         graph.add_node(
@@ -729,7 +741,7 @@ class TestForkCoalesceContracts:
             "coalesce_1",
             node_type=NodeType.COALESCE,
             plugin_name="coalesce",
-            config={"schema": {"mode": "observed"}, "merge": "union", "branches": {}, "policy": "require_all"},
+            config={"schema": {"mode": "observed"}, "merge": "union", "branches": {}, "policy": "best_effort"},
         )
 
         # Sink requires 'a_only' - NOT guaranteed by coalesce (only 'common' is)
@@ -876,6 +888,12 @@ class TestCoalesceGuaranteedFieldsSemantics:
     distinguish between:
       None  = "observed schema, unknown fields" → abstain from intersection
       ()    = "explicitly guarantee zero fields" → participates, kills intersection
+
+    Uses best_effort policy because intersection semantics is the correct
+    merge for policies where branches can be lost (best_effort/quorum/first).
+    Under require_all every branch always arrives, so the merged guarantees
+    are the UNION (any branch's guarantee is in the merged row) — see
+    test_dag_coalesce_optionality.py::test_require_all_* for that path.
     """
 
     def _build_coalesce_graph(
@@ -899,7 +917,7 @@ class TestCoalesceGuaranteedFieldsSemantics:
             "coalesce",
             node_type=NodeType.COALESCE,
             plugin_name="coalesce",
-            config={"merge": "union", "branches": {}, "policy": "require_all"},
+            config={"merge": "union", "branches": {}, "policy": "best_effort"},
         )
         for branch_name in branch_configs:
             graph.add_edge(branch_name, "coalesce", label="continue")
@@ -985,7 +1003,7 @@ class TestCoalesceGuaranteedFieldsSemantics:
             "coalesce",
             node_type=NodeType.COALESCE,
             plugin_name="coalesce",
-            config={"merge": "union", "branches": {}, "policy": "require_all"},
+            config={"merge": "union", "branches": {}, "policy": "best_effort"},
         )
         graph.add_node("sink", node_type=NodeType.SINK, plugin_name="csv")
 
@@ -996,7 +1014,7 @@ class TestCoalesceGuaranteedFieldsSemantics:
         graph.add_edge("coalesce", "sink", label="continue")
 
         result = graph.get_effective_guaranteed_fields("coalesce")
-        # branch_b explicitly guarantees nothing → intersection is ∅
+        # branch_b explicitly guarantees nothing → intersection is ∅ (best_effort)
         assert result == frozenset()
 
     def test_three_branches_mixed_none_and_explicit(self) -> None:
@@ -1026,7 +1044,7 @@ class TestCoalesceGuaranteedFieldsSemantics:
             "coalesce",
             node_type=NodeType.COALESCE,
             plugin_name="coalesce",
-            config={"merge": "union", "branches": {}, "policy": "require_all"},
+            config={"merge": "union", "branches": {}, "policy": "best_effort"},
         )
         graph.add_node("sink", node_type=NodeType.SINK, plugin_name="csv")
 
