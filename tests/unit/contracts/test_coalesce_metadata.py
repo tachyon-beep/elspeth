@@ -3,8 +3,26 @@
 
 from types import MappingProxyType
 
+import pytest
+
 from elspeth.contracts.coalesce_enums import CoalescePolicy, MergeStrategy
-from elspeth.contracts.coalesce_metadata import CoalesceMetadata
+from elspeth.contracts.coalesce_metadata import ArrivalOrderEntry, CoalesceMetadata
+
+
+def _base_merge_metadata() -> CoalesceMetadata:
+    """Build a minimal successful-merge base instance for provenance tests."""
+    return CoalesceMetadata.for_merge(
+        policy=CoalescePolicy.REQUIRE_ALL,
+        merge_strategy=MergeStrategy.UNION,
+        expected_branches=["a", "b"],
+        branches_arrived=["a", "b"],
+        branches_lost={},
+        arrival_order=[
+            ArrivalOrderEntry(branch="a", arrival_offset_ms=0.0),
+            ArrivalOrderEntry(branch="b", arrival_offset_ms=10.0),
+        ],
+        wait_duration_ms=10.0,
+    )
 
 
 class TestForFailureTruthinessConflation:
@@ -225,3 +243,162 @@ class TestCoalesceMetadataDeepFreeze:
         assert meta.arrival_order is not None
         assert isinstance(meta.arrival_order, tuple)
         assert len(meta.arrival_order) == 1
+
+
+class TestWithUnionResult:
+    """with_union_result layers union-merge provenance onto a base instance."""
+
+    def test_with_union_result_records_origins(self) -> None:
+        base = _base_merge_metadata()
+        origins = {"field_x": "a", "field_y": "b"}
+
+        meta = CoalesceMetadata.with_union_result(base, field_origins=origins)
+
+        assert meta.union_field_origins is not None
+        assert dict(meta.union_field_origins) == {"field_x": "a", "field_y": "b"}
+
+    def test_with_union_result_records_collision_values(self) -> None:
+        base = _base_merge_metadata()
+        origins = {"field_x": "b"}
+        collisions = {"field_x": ["a", "b"]}
+        collision_values = {"field_x": [("a", 1), ("b", 2)]}
+
+        meta = CoalesceMetadata.with_union_result(
+            base,
+            field_origins=origins,
+            collisions=collisions,
+            collision_values=collision_values,
+        )
+
+        assert meta.union_field_collisions is not None
+        assert meta.union_field_collisions["field_x"] == ("a", "b")
+        assert isinstance(meta.union_field_collisions["field_x"], tuple)
+        assert meta.union_field_collision_values is not None
+        entries = meta.union_field_collision_values["field_x"]
+        assert entries == (("a", 1), ("b", 2))
+        # Deeply tuple-ified: outer is a tuple, each entry is a tuple.
+        assert isinstance(entries, tuple)
+        for entry in entries:
+            assert isinstance(entry, tuple)
+
+    def test_with_union_result_no_collisions(self) -> None:
+        base = _base_merge_metadata()
+        origins = {"field_x": "a", "field_y": "b"}
+
+        meta = CoalesceMetadata.with_union_result(base, field_origins=origins)
+
+        assert meta.union_field_origins is not None
+        assert dict(meta.union_field_origins) == origins
+        assert meta.union_field_collisions is None
+        assert meta.union_field_collision_values is None
+
+    def test_union_field_origins_is_deep_frozen(self) -> None:
+        base = _base_merge_metadata()
+        meta = CoalesceMetadata.with_union_result(base, field_origins={"field_x": "a"})
+
+        assert meta.union_field_origins is not None
+        assert isinstance(meta.union_field_origins, MappingProxyType)
+        with pytest.raises(TypeError):
+            meta.union_field_origins["field_x"] = "mutated"  # type: ignore[index]
+
+    def test_union_field_collision_values_is_deep_frozen(self) -> None:
+        base = _base_merge_metadata()
+        meta = CoalesceMetadata.with_union_result(
+            base,
+            field_origins={"field_x": "b"},
+            collisions={"field_x": ["a", "b"]},
+            collision_values={"field_x": [("a", 1), ("b", 2)]},
+        )
+
+        assert meta.union_field_collision_values is not None
+        assert isinstance(meta.union_field_collision_values, MappingProxyType)
+        with pytest.raises(TypeError):
+            meta.union_field_collision_values["field_x"] = (  # type: ignore[index]
+                ("c", 3),
+            )
+        # Inner tuple is immutable by type — verify it's actually a tuple.
+        assert isinstance(meta.union_field_collision_values["field_x"], tuple)
+
+    def test_metadata_to_dict_includes_origins_and_collision_values(self) -> None:
+        base = _base_merge_metadata()
+        meta = CoalesceMetadata.with_union_result(
+            base,
+            field_origins={"field_x": "b", "field_y": "a"},
+            collisions={"field_x": ["a", "b"]},
+            collision_values={"field_x": [("a", 1), ("b", 2)]},
+        )
+
+        d = meta.to_dict()
+
+        assert d["union_field_origins"] == {"field_x": "b", "field_y": "a"}
+        assert isinstance(d["union_field_origins"], dict)
+        assert d["union_field_collision_values"] == {
+            "field_x": [["a", 1], ["b", 2]],
+        }
+        # Inner entries must be plain lists, not tuples, for JSON shape.
+        entries = d["union_field_collision_values"]["field_x"]
+        assert isinstance(entries, list)
+        for entry in entries:
+            assert isinstance(entry, list)
+
+    def test_with_union_result_preserves_empty_collisions_dict(self) -> None:
+        """Empty ``collisions``/``collision_values`` dicts must be preserved.
+
+        Regression guard mirroring ``TestForFailureTruthinessConflation``:
+        ``{}`` means "no collisions observed" (a known state), which is
+        distinct from ``None`` (not applicable / not yet populated).
+        Truthiness predicates would conflate the two.
+        """
+        base = _base_merge_metadata()
+        meta = CoalesceMetadata.with_union_result(
+            base,
+            field_origins={"field_x": "a"},
+            collisions={},
+            collision_values={},
+        )
+
+        assert meta.union_field_collisions is not None
+        assert isinstance(meta.union_field_collisions, MappingProxyType)
+        assert dict(meta.union_field_collisions) == {}
+        assert meta.union_field_collision_values is not None
+        assert isinstance(meta.union_field_collision_values, MappingProxyType)
+        assert dict(meta.union_field_collision_values) == {}
+
+    def test_union_field_collision_values_freezes_dict_valued_entries(self) -> None:
+        """Dict-valued entries in collision_values must be deeply frozen.
+
+        The value slot is typed ``Any`` because real union merges carry
+        arbitrary row values — including dicts and lists. This test
+        exercises the ``deep_freeze`` contract for that path.
+        """
+        base = _base_merge_metadata()
+        meta = CoalesceMetadata.with_union_result(
+            base,
+            field_origins={"payload": "b"},
+            collisions={"payload": ["a", "b"]},
+            collision_values={
+                "payload": [
+                    ("a", {"nested": [1, 2]}),
+                    ("b", {"nested": [3, 4]}),
+                ]
+            },
+        )
+        assert meta.union_field_collision_values is not None
+        entries = meta.union_field_collision_values["payload"]
+
+        # Inner dict value is deep-frozen to MappingProxyType.
+        _, value_a = entries[0]
+        assert isinstance(value_a, MappingProxyType)
+        with pytest.raises(TypeError):
+            value_a["nested"] = "mutated"  # type: ignore[index]
+
+        # Nested list inside the dict is frozen to a tuple.
+        assert isinstance(value_a["nested"], tuple)
+
+    def test_metadata_to_dict_omits_origins_when_none(self) -> None:
+        base = _base_merge_metadata()
+
+        d = base.to_dict()
+
+        assert "union_field_origins" not in d
+        assert "union_field_collision_values" not in d

@@ -718,6 +718,20 @@ class CoalesceSettings(BaseModel):
         default="union",
         description="How to combine row data from branches",
     )
+    union_collision_policy: Literal["last_wins", "first_wins", "fail"] = Field(
+        default="last_wins",
+        description=(
+            "How to resolve field-level collisions during union merge. "
+            "'last_wins' (default) keeps the value from the last branch in declaration order — current behavior. "
+            "'first_wins' keeps the first branch's value. "
+            "'fail' raises CoalesceCollisionError when any field collides. "
+            "Note: 'fail' treats any field-name overlap as a collision, even if both branches produced the same value — "
+            "collision detection is name-based, not value-based. "
+            "Only meaningful when merge='union'; ignored for nested and select. "
+            "Orthogonal to 'policy' (arrival policy): this field controls field-level conflict resolution within a single merged row, "
+            "while 'policy' controls how branch-level arrival failures are handled. They are independent axes."
+        ),
+    )
     timeout_seconds: float | None = Field(
         default=None,
         gt=0,

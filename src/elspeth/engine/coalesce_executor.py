@@ -6,7 +6,7 @@ Tokens are correlated by row_id (same source row that was forked).
 
 import hashlib
 from collections import OrderedDict
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from typing import TYPE_CHECKING, Any
 
 import structlog
@@ -21,7 +21,13 @@ from elspeth.contracts.coalesce_checkpoint import (
 from elspeth.contracts.coalesce_enums import CoalescePolicy, MergeStrategy
 from elspeth.contracts.coalesce_metadata import ArrivalOrderEntry, CoalesceMetadata
 from elspeth.contracts.enums import NodeStateStatus, RowOutcome
-from elspeth.contracts.errors import AuditIntegrityError, CoalesceFailureReason, ExecutionError, OrchestrationInvariantError
+from elspeth.contracts.errors import (
+    AuditIntegrityError,
+    CoalesceCollisionError,
+    CoalesceFailureReason,
+    ExecutionError,
+    OrchestrationInvariantError,
+)
 from elspeth.contracts.freeze import deep_thaw
 from elspeth.contracts.schema_contract import FieldContract, PipelineRow, SchemaContract
 from elspeth.contracts.types import NodeID, StepResolver
@@ -96,6 +102,26 @@ class _PendingCoalesce:
     branches: dict[str, _BranchEntry]  # branch_name -> entry
     first_arrival: float  # For timeout calculation
     lost_branches: dict[str, str] = field(default_factory=dict)  # branch_name -> loss reason
+
+
+def _resolve_first_wins(
+    merged: dict[str, Any],
+    field_origins: dict[str, str],
+    collision_values: dict[str, list[tuple[str, Any]]],
+) -> tuple[dict[str, Any], dict[str, str]]:
+    """Rewrite merged + origins so collisions resolve to the first branch's value.
+
+    Non-colliding fields pass through unchanged. Only the ``collision_values``
+    entries are consulted — the first entry in each list is the first branch
+    in ``settings.branches`` order that produced that field.
+    """
+    new_merged = dict(merged)
+    new_origins = dict(field_origins)
+    for collision_field, entries in collision_values.items():
+        first_branch, first_value = entries[0]
+        new_merged[collision_field] = first_value
+        new_origins[collision_field] = first_branch
+    return new_merged, new_origins
 
 
 class CoalesceExecutor:
@@ -696,12 +722,18 @@ class CoalesceExecutor:
             )
 
         completed_state_ids: set[str] = set()
+        # Captured so the failure cleanup handler can persist collision provenance
+        # (union_field_origins, union_field_collision_values) to the audit trail
+        # when CoalesceCollisionError is raised under union_collision_policy=fail,
+        # or when any other exception happens after metadata was built. Stays None
+        # for early failures (e.g., contract merge) where no metadata exists yet.
+        metadata_for_audit: CoalesceMetadata | None = None
         try:
             # ─────────────────────────────────────────────────────────────────────
             # Merge row data according to strategy (returns dict)
             # We do this FIRST so we can derive contract from actual data shape
             # ─────────────────────────────────────────────────────────────────────
-            merged_data_dict, union_collisions = self._merge_data(settings, pending.branches)
+            merged_data_dict, union_collisions, field_origins, collision_values = self._merge_data(settings, pending.branches)
 
             # ─────────────────────────────────────────────────────────────────────
             # Build contract based on merge strategy and actual data shape
@@ -760,22 +792,10 @@ class CoalesceExecutor:
                 # Unreachable - config validation ensures merge is one of the above
                 raise RuntimeError(f"Unknown merge strategy: {settings.merge}")
 
-            # Create PipelineRow with strategy-appropriate contract
-            merged_data = PipelineRow(merged_data_dict, merged_contract)
-
-            # Get list of consumed tokens
-            consumed_tokens = tuple(e.token for e in pending.branches.values())
-
-            # Create merged token via TokenManager
-            merged_token = self._token_manager.coalesce_tokens(
-                parents=list(consumed_tokens),
-                merged_data=merged_data,
-                node_id=node_id,
-                run_id=self._run_id,
-            )
-
-            # Build audit metadata BEFORE completing node states (Bug l4h fix)
-            # This allows us to include it in context_after for each consumed token
+            # Build audit metadata BEFORE token creation so union_collision_policy
+            # enforcement can attach the full collision record to failures, and so
+            # first_wins resolution rewrites the merged data before the token is minted.
+            # (Bug l4h fix retained: metadata is still finalized before node-state completion.)
             coalesce_metadata = CoalesceMetadata.for_merge(
                 policy=CoalescePolicy(settings.policy),
                 merge_strategy=MergeStrategy(settings.merge),
@@ -792,9 +812,59 @@ class CoalesceExecutor:
                 wait_duration_ms=(now - pending.first_arrival) * 1000,
             )
 
-            # Include union merge collision info in audit trail if present
-            if union_collisions:
-                coalesce_metadata = CoalesceMetadata.with_collisions(coalesce_metadata, union_collisions)
+            # Layer union-merge provenance onto metadata. field_origins is always
+            # recorded; collisions/collision_values populate only when the union
+            # merge produced overlapping fields.
+            if settings.merge == "union":
+                coalesce_metadata = CoalesceMetadata.with_union_result(
+                    coalesce_metadata,
+                    field_origins=field_origins,
+                    collisions=union_collisions if union_collisions else None,
+                    collision_values=collision_values if collision_values else None,
+                )
+                # Capture enriched metadata for the failure handler so a subsequent
+                # CoalesceCollisionError (fail policy) can persist the full collision
+                # record to complete_node_state(context_after=...).
+                metadata_for_audit = coalesce_metadata
+
+                # Apply union_collision_policy — only meaningful when collisions occurred.
+                if union_collisions:
+                    if settings.union_collision_policy == "fail":
+                        # Metadata is captured; raise with it attached so the orchestrator's
+                        # failure path can persist the full collision record to the audit trail.
+                        raise CoalesceCollisionError(
+                            f"union merge collisions in coalesce '{coalesce_name}': {sorted(union_collisions)}",
+                            metadata=coalesce_metadata,
+                        )
+                    if settings.union_collision_policy == "first_wins":
+                        merged_data_dict, first_wins_origins = _resolve_first_wins(merged_data_dict, field_origins, collision_values)
+                        # Rebuild metadata with the updated origins; collision_values
+                        # unchanged (still records every contributing branch in order).
+                        coalesce_metadata = replace(
+                            coalesce_metadata,
+                            union_field_origins=first_wins_origins,
+                        )
+                        metadata_for_audit = coalesce_metadata
+                    # last_wins: no-op; merged_data_dict already reflects last-wins.
+            else:
+                # nested/select: capture the base metadata so any post-build failure
+                # still propagates branches_arrived/arrival_order to the audit trail.
+                metadata_for_audit = coalesce_metadata
+
+            # Create PipelineRow with strategy-appropriate contract (after any
+            # first_wins rewrite so the merged token reflects the resolved data).
+            merged_data = PipelineRow(merged_data_dict, merged_contract)
+
+            # Get list of consumed tokens
+            consumed_tokens = tuple(e.token for e in pending.branches.values())
+
+            # Create merged token via TokenManager
+            merged_token = self._token_manager.coalesce_tokens(
+                parents=list(consumed_tokens),
+                merged_data=merged_data,
+                node_id=node_id,
+                run_id=self._run_id,
+            )
 
             # Complete pending node states for consumed tokens
             # (These states were created as "pending" when tokens were held in accept())
@@ -852,6 +922,10 @@ class CoalesceExecutor:
                 if entry.state_id in completed_state_ids:
                     continue
                 try:
+                    # Pass metadata_for_audit so union_collision_policy=fail's full
+                    # collision record (field_origins + collision_values) reaches the
+                    # Landscape audit trail via context_after. None is acceptable for
+                    # early failures (e.g., contract merge) where no metadata exists.
                     self._execution.complete_node_state(
                         state_id=entry.state_id,
                         status=NodeStateStatus.FAILED,
@@ -862,6 +936,7 @@ class CoalesceExecutor:
                             exception_type=type(merge_exc).__name__,
                             phase="coalesce_merge_cleanup",
                         ),
+                        context_after=metadata_for_audit,
                     )
                 except Exception as cleanup_exc:
                     slog.error(
@@ -876,40 +951,73 @@ class CoalesceExecutor:
         self,
         settings: CoalesceSettings,
         branches: dict[str, _BranchEntry],
-    ) -> tuple[dict[str, Any], dict[str, list[str]]]:
+    ) -> tuple[
+        dict[str, Any],
+        dict[str, list[str]],
+        dict[str, str],
+        dict[str, list[tuple[str, Any]]],
+    ]:
         """Merge row data from arrived tokens based on strategy.
 
         Note: row_data is PipelineRow, so we use to_dict() to get raw dict.
 
         Returns:
-            Tuple of (merged_data, union_collisions). Collisions is non-empty only
-            for union merge strategy when field names overlap between branches.
+            Tuple of ``(merged_data, union_collisions, field_origins, collision_values)``:
+
+            * ``merged_data``: the merged dict to wrap in a PipelineRow.
+            * ``union_collisions``: field name -> list of contributing branch names,
+              populated only for union merges where field names overlap.
+            * ``field_origins``: field name -> the branch that produced the winning
+              value under ``last_wins`` semantics. Populated for every union merge;
+              empty dict for nested/select.
+            * ``collision_values``: field name -> ordered list of ``(branch, value)``
+              entries for every contributing branch. Populated only for union
+              merges that actually collided; empty dict otherwise.
         """
         if settings.merge == "union":
             # Combine all fields from all branches.
-            # On name collision, the last branch in settings.branches wins.
-            # Collisions are recorded in the audit trail (coalesce_metadata)
-            # so that overwritten values are never silently lost.
+            # On name collision, the last branch in settings.branches wins by default
+            # (union_collision_policy="last_wins"). field_origins and collision_values
+            # are always recorded so auditors can reconstruct lineage and inspect
+            # overwritten values. Policy enforcement happens at the call site.
             merged: dict[str, Any] = {}
-            field_origins: dict[str, str] = {}  # field -> branch that set it
-            collisions: dict[str, list[str]] = {}  # field -> [branch1, branch2, ...]
+            field_origins: dict[str, str] = {}
+            collisions: dict[str, list[str]] = {}
+            collision_values: dict[str, list[tuple[str, Any]]] = {}
             for branch_name in settings.branches:
                 if branch_name in branches:
                     branch_data = branches[branch_name].token.row_data.to_dict()
-                    for field in branch_data:
-                        if field in field_origins:
-                            if field not in collisions:
-                                collisions[field] = [field_origins[field]]
-                            collisions[field].append(branch_name)
-                        field_origins[field] = branch_name
-                    merged.update(branch_data)
-            return merged, collisions
+                    for merge_field, value in branch_data.items():
+                        if merge_field in field_origins:
+                            # Collision: capture the prior branch's value before overwriting.
+                            if merge_field not in collisions:
+                                prior_branch = field_origins[merge_field]
+                                prior_value = merged[merge_field]
+                                # Seed with the prior entry now; the current branch's
+                                # entry is appended immediately below. This guarantees
+                                # collision_values[merge_field] always has >= 2 entries
+                                # on first detection — an invariant that _resolve_first_wins
+                                # relies on when it unconditionally indexes entries[0].
+                                collisions[merge_field] = [prior_branch]
+                                collision_values[merge_field] = [(prior_branch, prior_value)]
+                            collisions[merge_field].append(branch_name)
+                            collision_values[merge_field].append((branch_name, value))
+                        field_origins[merge_field] = branch_name
+                        merged[merge_field] = value
+            return merged, collisions, field_origins, collision_values
 
         elif settings.merge == "nested":
             # Each branch as nested object (use to_dict() for serializable dict)
-            return {
-                branch_name: branches[branch_name].token.row_data.to_dict() for branch_name in settings.branches if branch_name in branches
-            }, {}
+            return (
+                {
+                    branch_name: branches[branch_name].token.row_data.to_dict()
+                    for branch_name in settings.branches
+                    if branch_name in branches
+                },
+                {},
+                {},
+                {},
+            )
 
         elif settings.merge == "select":
             # Take specific branch output
@@ -927,7 +1035,7 @@ class CoalesceExecutor:
                     f"This indicates a bug in _execute_merge validation (Bug 2ho fix should have caught this)."
                 )
             # Return copy of dict (to_dict() returns a copy already)
-            return branches[settings.select_branch].token.row_data.to_dict(), {}
+            return branches[settings.select_branch].token.row_data.to_dict(), {}, {}, {}
 
         else:
             raise RuntimeError(f"Unknown merge strategy: {settings.merge!r}")

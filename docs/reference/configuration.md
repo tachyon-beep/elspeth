@@ -525,6 +525,7 @@ coalesce:
 | `on_success` | string | No | Sink name or connection name for coalesce output (required when coalesce is terminal) |
 | `policy` | string | No | How to handle partial arrivals (default: `require_all`) |
 | `merge` | string | No | How to combine data (default: `union`) |
+| `union_collision_policy` | string | No | Field-level collision resolution for `merge: union` (default: `last_wins`) |
 | `timeout_seconds` | float | No | Max wait time |
 | `quorum_count` | int | No | Minimum branches required (for `quorum` policy) |
 | `select_branch` | string | No | Which branch to take (for `select` merge) |
@@ -545,6 +546,37 @@ coalesce:
 | `union` | Combine all fields from all branches | - |
 | `nested` | Each branch's data nested under branch name | - |
 | `select` | Take data from one specific branch | `select_branch` required |
+
+### Union Collision Policy
+
+When `merge: union` is used and two or more branches emit the same field name, `union_collision_policy` controls how the field-level conflict is resolved. This is **only meaningful for `merge: union`** — it is ignored for `nested` and `select`.
+
+| Value | Behavior |
+|-------|----------|
+| `last_wins` *(default)* | The last branch in declaration order wins. Matches the historical behavior of union merges. |
+| `first_wins` | The first branch in declaration order wins. |
+| `fail` | Raise `CoalesceCollisionError` the moment any field collides. No merged row is produced. The full collision record (origin of every field plus each contributing `(branch, value)` pair) is still written to the audit trail on the failed node state. |
+
+> **Note on `fail`:** Collision detection is **name-based**, not value-based. Two branches that both emit a field called `id` with the *same* value still trigger `fail` — the executor does not compare values to decide whether the overlap is "real." If your branches share trivially-identical fields (like an `id` carried unchanged through both transforms), use `last_wins` or `first_wins` instead, or rename the shared fields out of one branch.
+
+Regardless of the chosen value, every union merge records:
+
+- `union_field_origins` — a mapping from every merged field to the branch that produced the winning value. Always populated so auditors can reconstruct field-level provenance even when no collision occurred.
+- `union_field_collision_values` — a mapping from each colliding field to the ordered list of `(branch, value)` pairs. Populated only when at least one field collided.
+
+`union_collision_policy` is **orthogonal to `policy`**: `policy` governs branch-level arrival (what to do when some branches never arrive), while `union_collision_policy` governs field-level conflict within an already-assembled merge. They are independent axes and can be combined freely.
+
+```yaml
+coalesce:
+  - name: strict_merge
+    branches:
+      - sentiment_path
+      - entity_path
+    policy: require_all          # branch-level arrival policy
+    merge: union
+    union_collision_policy: fail  # field-level collision policy — abort on overlap
+    on_success: output
+```
 
 ---
 

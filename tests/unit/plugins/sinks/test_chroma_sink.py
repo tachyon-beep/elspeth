@@ -442,7 +442,17 @@ class TestChromaSinkMetadataTypeValidation:
                 "id_field": "doc_id",
                 "metadata_fields": ["s", "i", "f", "b"],
             },
-            schema={"mode": "flexible", "fields": ["doc_id: str", "text: str"]},
+            schema={
+                "mode": "flexible",
+                "fields": [
+                    "doc_id: str",
+                    "text: str",
+                    "s: str",
+                    "i: int",
+                    "f: float",
+                    "b: bool",
+                ],
+            },
         )
         sink = inject_write_failure(ChromaSink(config))
         sink._collection = mock_collection
@@ -683,7 +693,10 @@ class TestChromaSinkEmptyMetadata:
                 "id_field": "doc_id",
                 "metadata_fields": ["topic", "category"],
             },
-            schema={"mode": "flexible", "fields": ["doc_id: str", "text: str"]},
+            schema={
+                "mode": "flexible",
+                "fields": ["doc_id: str", "text: str", "topic: str", "category: str"],
+            },
         )
         sink = inject_write_failure(ChromaSink(config))
         sink._collection = mock_collection
@@ -713,7 +726,10 @@ class TestChromaSinkEmptyMetadata:
                 "id_field": "doc_id",
                 "metadata_fields": ["topic"],
             },
-            schema={"mode": "flexible", "fields": ["doc_id: str", "text: str"]},
+            schema={
+                "mode": "flexible",
+                "fields": ["doc_id: str", "text: str", "topic: str"],
+            },
         )
         sink = inject_write_failure(ChromaSink(config))
         sink._collection = mock_collection
@@ -753,7 +769,10 @@ class TestChromaSinkEmptyMetadata:
                 "metadata_fields": ["topic"],
             },
             on_duplicate="skip",
-            schema={"mode": "flexible", "fields": ["doc_id: str", "text: str"]},
+            schema={
+                "mode": "flexible",
+                "fields": ["doc_id: str", "text: str", "topic: str"],
+            },
         )
         sink = inject_write_failure(ChromaSink(config))
         sink._collection = mock_collection
@@ -780,7 +799,10 @@ class TestChromaSinkEmptyMetadata:
                 "metadata_fields": ["topic"],
             },
             on_duplicate="error",
-            schema={"mode": "flexible", "fields": ["doc_id: str", "text: str"]},
+            schema={
+                "mode": "flexible",
+                "fields": ["doc_id: str", "text: str", "topic: str"],
+            },
         )
         sink = inject_write_failure(ChromaSink(config))
         sink._collection = mock_collection
@@ -804,7 +826,10 @@ class TestChromaSinkEmptyMetadata:
                 "id_field": "doc_id",
                 "metadata_fields": ["topic", "category"],
             },
-            schema={"mode": "flexible", "fields": ["doc_id: str", "text: str"]},
+            schema={
+                "mode": "flexible",
+                "fields": ["doc_id: str", "text: str", "topic: str", "category: str"],
+            },
         )
         sink = inject_write_failure(ChromaSink(config))
         sink._collection = mock_collection

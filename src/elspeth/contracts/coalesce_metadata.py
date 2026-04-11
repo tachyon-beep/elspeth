@@ -54,6 +54,9 @@ class CoalesceMetadata:
         quorum_required: Quorum threshold (for quorum policy failures).
         timeout_seconds: Configured timeout (for timeout-triggered failures).
         union_field_collisions: Field name to contributing branches (union merge).
+        union_field_origins: Field name to originating branch (every union merge).
+        union_field_collision_values: Field name to tuple of ``(branch, value)``
+            entries in merge order (populated only when collisions occurred).
     """
 
     policy: CoalescePolicy
@@ -73,6 +76,10 @@ class CoalesceMetadata:
             fields_to_freeze.append("branches_lost")
         if self.union_field_collisions is not None:
             fields_to_freeze.append("union_field_collisions")
+        if self.union_field_origins is not None:
+            fields_to_freeze.append("union_field_origins")
+        if self.union_field_collision_values is not None:
+            fields_to_freeze.append("union_field_collision_values")
         if fields_to_freeze:
             freeze_fields(self, *fields_to_freeze)
 
@@ -96,6 +103,14 @@ class CoalesceMetadata:
 
     # Union merge collision info
     union_field_collisions: Mapping[str, tuple[str, ...]] | None = None
+
+    # Union merge provenance (populated for every union merge)
+    union_field_origins: Mapping[str, str] | None = None
+
+    # Union merge collision values (populated only when collisions occurred).
+    # Outer key: field name. Inner tuple entries: (branch_name, value) in merge order.
+    # The last entry is the winner under last_wins; first under first_wins.
+    union_field_collision_values: Mapping[str, tuple[tuple[str, Any], ...]] | None = None
 
     # ------------------------------------------------------------------
     # Serialization
@@ -130,6 +145,12 @@ class CoalesceMetadata:
             result["timeout_seconds"] = self.timeout_seconds
         if self.union_field_collisions is not None:
             result["union_field_collisions"] = {k: list(v) for k, v in self.union_field_collisions.items()}
+        if self.union_field_origins is not None:
+            result["union_field_origins"] = dict(self.union_field_origins)
+        if self.union_field_collision_values is not None:
+            result["union_field_collision_values"] = {
+                field: [list(entry) for entry in entries] for field, entries in self.union_field_collision_values.items()
+            }
         return result
 
     # ------------------------------------------------------------------
@@ -203,14 +224,25 @@ class CoalesceMetadata:
         )
 
     @classmethod
-    def with_collisions(
+    def with_union_result(
         cls,
         base: CoalesceMetadata,
-        collisions: dict[str, list[str]],
+        *,
+        field_origins: Mapping[str, str],
+        collisions: Mapping[str, Sequence[str]] | None = None,
+        collision_values: Mapping[str, Sequence[tuple[str, Any]]] | None = None,
     ) -> CoalesceMetadata:
-        """Add union field collision info to an existing metadata instance.
+        """Layer union-merge provenance onto an existing metadata instance.
 
-        Since CoalesceMetadata is frozen, this creates a new instance
-        via ``dataclasses.replace()``.
+        ``field_origins`` is always populated for union merges. ``collisions``
+        and ``collision_values`` are populated only when at least one field
+        was produced by more than one branch.
         """
-        return replace(base, union_field_collisions={k: tuple(v) for k, v in collisions.items()})
+        return replace(
+            base,
+            union_field_origins=dict(field_origins),
+            union_field_collisions=({k: tuple(v) for k, v in collisions.items()} if collisions is not None else None),
+            union_field_collision_values=(
+                {k: tuple(tuple(entry) for entry in v) for k, v in collision_values.items()} if collision_values is not None else None
+            ),
+        )

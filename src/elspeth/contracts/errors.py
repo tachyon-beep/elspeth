@@ -13,6 +13,7 @@ from elspeth.contracts.freeze import deep_freeze, freeze_fields
 
 if TYPE_CHECKING:
     from elspeth.contracts.batch_checkpoint import BatchCheckpointState
+    from elspeth.contracts.coalesce_metadata import CoalesceMetadata
 
 
 @dataclass(frozen=True, slots=True)
@@ -714,6 +715,26 @@ class AuditIntegrityError(Exception):
     """
 
     pass
+
+
+class CoalesceCollisionError(Exception):
+    """Raised when union_collision_policy=fail and a field collision occurs.
+
+    This is NOT an engine bug or audit-integrity failure — it's a config-elected
+    enforcement. The pipeline author chose to fail-fast on union merge collisions
+    rather than allow last_wins/first_wins resolution. The full CoalesceMetadata
+    is captured BEFORE raising so the orchestrator's failure path can persist
+    the complete collision record (field_origins + collision_values) to the
+    audit trail.
+
+    Attributes:
+        metadata: CoalesceMetadata with union_field_origins and
+                  union_field_collision_values populated.
+    """
+
+    def __init__(self, message: str, *, metadata: "CoalesceMetadata") -> None:
+        super().__init__(message)
+        self.metadata = metadata
 
 
 class OrchestrationInvariantError(Exception):

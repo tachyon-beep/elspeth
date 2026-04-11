@@ -1878,6 +1878,76 @@ class TestCoalesceSettings:
                 select_branch="enriched_primary",
             )
 
+    # --- union_collision_policy (Task 2 of coalesce field provenance fix) ---
+
+    def test_coalesce_settings_union_collision_policy_default(self) -> None:
+        """Omitting union_collision_policy defaults to 'last_wins' (preserves existing behavior)."""
+        from elspeth.core.config import CoalesceSettings
+
+        settings = CoalesceSettings(
+            name="merge_results",
+            branches=["path_a", "path_b"],
+            policy="require_all",
+            merge="union",
+        )
+
+        assert settings.union_collision_policy == "last_wins"
+
+    def test_coalesce_settings_union_collision_policy_explicit_last_wins(self) -> None:
+        """Explicitly setting 'last_wins' validates cleanly."""
+        from elspeth.core.config import CoalesceSettings
+
+        settings = CoalesceSettings(
+            name="merge_results",
+            branches=["path_a", "path_b"],
+            policy="require_all",
+            merge="union",
+            union_collision_policy="last_wins",
+        )
+
+        assert settings.union_collision_policy == "last_wins"
+
+    def test_coalesce_settings_union_collision_policy_first_wins(self) -> None:
+        """Setting 'first_wins' validates cleanly."""
+        from elspeth.core.config import CoalesceSettings
+
+        settings = CoalesceSettings(
+            name="merge_results",
+            branches=["path_a", "path_b"],
+            policy="require_all",
+            merge="union",
+            union_collision_policy="first_wins",
+        )
+
+        assert settings.union_collision_policy == "first_wins"
+
+    def test_coalesce_settings_union_collision_policy_fail(self) -> None:
+        """Setting 'fail' validates cleanly."""
+        from elspeth.core.config import CoalesceSettings
+
+        settings = CoalesceSettings(
+            name="merge_results",
+            branches=["path_a", "path_b"],
+            policy="require_all",
+            merge="union",
+            union_collision_policy="fail",
+        )
+
+        assert settings.union_collision_policy == "fail"
+
+    def test_coalesce_settings_union_collision_policy_invalid_raises(self) -> None:
+        """Invalid union_collision_policy values are rejected by the Literal type at parse time."""
+        from elspeth.core.config import CoalesceSettings
+
+        with pytest.raises(ValidationError):
+            CoalesceSettings(
+                name="merge_results",
+                branches=["path_a", "path_b"],
+                policy="require_all",
+                merge="union",
+                union_collision_policy="crash",
+            )
+
 
 class TestElspethSettingsWithCoalesce:
     """Tests for ElspethSettings with coalesce configuration."""

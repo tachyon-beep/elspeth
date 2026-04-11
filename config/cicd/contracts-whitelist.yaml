@@ -47,6 +47,10 @@ allowed_dict_patterns:
   # Aggregation executor - row data handling (checkpoint state now typed via AggregationCheckpointState)
   - "src/elspeth/engine/executors/aggregation.py:AggregationExecutor.get_buffered_rows:return (list)"
 
+  # Coalesce executor - merged row data is Tier 2 pipeline data (union merge resolves
+  # field-level collisions; merged dict and collision_values carry opaque row values)
+  - "src/elspeth/engine/coalesce_executor.py:_resolve_first_wins:merged"
+
   # Protocols - row data in plugin interface
   - "src/elspeth/contracts/plugin_protocols.py:SinkProtocol.write:rows (list)"
 

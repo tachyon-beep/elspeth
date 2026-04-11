@@ -18,7 +18,11 @@ import pytest
 from elspeth.contracts import TokenInfo
 from elspeth.contracts.coalesce_enums import CoalescePolicy, MergeStrategy
 from elspeth.contracts.enums import NodeStateStatus, RowOutcome
-from elspeth.contracts.errors import AuditIntegrityError, OrchestrationInvariantError
+from elspeth.contracts.errors import (
+    AuditIntegrityError,
+    CoalesceCollisionError,
+    OrchestrationInvariantError,
+)
 from elspeth.contracts.schema_contract import PipelineRow, SchemaContract
 from elspeth.contracts.types import NodeID
 from elspeth.core.config import CoalesceSettings
@@ -130,6 +134,7 @@ def _settings(
     timeout_seconds: float | None = None,
     quorum_count: int | None = None,
     select_branch: str | None = None,
+    union_collision_policy: str = "last_wins",
 ) -> CoalesceSettings:
     """Shorthand for building CoalesceSettings."""
     if branches is None:
@@ -142,6 +147,7 @@ def _settings(
         timeout_seconds=timeout_seconds,
         quorum_count=quorum_count,
         select_branch=select_branch,
+        union_collision_policy=union_collision_policy,
     )
 
 
@@ -620,6 +626,285 @@ class TestUnionMerge:
         assert "a" in collision_branches
         assert "b" in collision_branches
         assert "c" in collision_branches
+
+    # ------------------------------------------------------------------
+    # Field-level provenance: field_origins + collision_values
+    # ------------------------------------------------------------------
+
+    def test_union_merge_records_field_origins_for_all_fields(self):
+        """Every field produced by a union merge must be tagged with its origin branch."""
+        executor, _, _, _, _ = _make_executor()
+        s = _settings(branches=["a", "b", "c"], merge="union", policy="require_all")
+        executor.register_coalesce(s, "node_1")
+        t1 = _make_token(branch_name="a", token_id="t1", data={"x": 1})
+        t2 = _make_token(branch_name="b", token_id="t2", data={"y": 2})
+        t3 = _make_token(branch_name="c", token_id="t3", data={"z": 3})
+        executor.accept(t1, "merge")
+        executor.accept(t2, "merge")
+        o = executor.accept(t3, "merge")
+        origins = o.coalesce_metadata.union_field_origins
+        assert origins is not None
+        assert origins["x"] == "a"
+        assert origins["y"] == "b"
+        assert origins["z"] == "c"
+        # No collisions -> collision_values should be absent (None).
+        assert o.coalesce_metadata.union_field_collision_values is None
+
+    def test_union_merge_collision_preserves_overwritten_value(self):
+        """When two branches collide, both (branch, value) entries must be recorded."""
+        executor, _, _, _, _ = _make_executor()
+        executor.register_coalesce(_settings(branches=["a", "b"], merge="union"), "node_1")
+        t1 = _make_token(branch_name="a", token_id="t1", data={"shared": "from_a"})
+        t2 = _make_token(branch_name="b", token_id="t2", data={"shared": "from_b"})
+        executor.accept(t1, "merge")
+        o = executor.accept(t2, "merge")
+        collision_values = o.coalesce_metadata.union_field_collision_values
+        assert collision_values is not None
+        assert list(collision_values["shared"]) == [("a", "from_a"), ("b", "from_b")]
+        # Default last_wins: winner in merged data is the last branch.
+        assert o.coalesce_metadata.union_field_origins["shared"] == "b"
+
+    def test_union_merge_three_way_collision_preserves_all_values(self):
+        """Three-way collisions preserve every (branch, value) entry in declaration order."""
+        executor, _, _, _, _ = _make_executor()
+        s = _settings(branches=["a", "b", "c"], merge="union", policy="require_all")
+        executor.register_coalesce(s, "node_1")
+        t1 = _make_token(branch_name="a", token_id="t1", data={"f": "va"})
+        t2 = _make_token(branch_name="b", token_id="t2", data={"f": "vb"})
+        t3 = _make_token(branch_name="c", token_id="t3", data={"f": "vc"})
+        executor.accept(t1, "merge")
+        executor.accept(t2, "merge")
+        o = executor.accept(t3, "merge")
+        entries = list(o.coalesce_metadata.union_field_collision_values["f"])
+        assert entries == [("a", "va"), ("b", "vb"), ("c", "vc")]
+
+    def test_union_merge_field_origins_flow_to_metadata(self):
+        """field_origins returned from _merge_data must be reflected in CoalesceMetadata."""
+        executor, _, _, _, _ = _make_executor()
+        executor.register_coalesce(_settings(branches=["a", "b"], merge="union"), "node_1")
+        t1 = _make_token(branch_name="a", token_id="t1", data={"x": 1, "y": 2})
+        t2 = _make_token(branch_name="b", token_id="t2", data={"z": 3})
+        executor.accept(t1, "merge")
+        o = executor.accept(t2, "merge")
+        origins = o.coalesce_metadata.union_field_origins
+        assert origins == {"x": "a", "y": "a", "z": "b"}
+
+    # ------------------------------------------------------------------
+    # union_collision_policy=last_wins (default)
+    # ------------------------------------------------------------------
+
+    def test_union_collision_policy_last_wins_is_default(self):
+        """CoalesceSettings default union_collision_policy is last_wins."""
+        s = _settings(branches=["a", "b"], merge="union")
+        assert s.union_collision_policy == "last_wins"
+
+    def test_union_collision_policy_last_wins_explicit(self):
+        """Explicit last_wins matches default behavior."""
+        executor, _, _, tm, _ = _make_executor()
+        s = _settings(
+            branches=["a", "b"],
+            merge="union",
+            union_collision_policy="last_wins",
+        )
+        executor.register_coalesce(s, "node_1")
+        t1 = _make_token(branch_name="a", token_id="t1", data={"shared": "from_a"})
+        t2 = _make_token(branch_name="b", token_id="t2", data={"shared": "from_b"})
+        executor.accept(t1, "merge")
+        o = executor.accept(t2, "merge")
+        merged = tm.coalesce_tokens.call_args.kwargs["merged_data"].to_dict()
+        assert merged["shared"] == "from_b"
+        assert o.coalesce_metadata.union_field_origins["shared"] == "b"
+
+    # ------------------------------------------------------------------
+    # union_collision_policy=first_wins
+    # ------------------------------------------------------------------
+
+    def test_union_collision_policy_first_wins_two_way(self):
+        """first_wins: the merged row takes the first branch's value."""
+        executor, _, _, tm, _ = _make_executor()
+        s = _settings(
+            branches=["a", "b"],
+            merge="union",
+            union_collision_policy="first_wins",
+        )
+        executor.register_coalesce(s, "node_1")
+        t1 = _make_token(branch_name="a", token_id="t1", data={"shared": "from_a"})
+        t2 = _make_token(branch_name="b", token_id="t2", data={"shared": "from_b"})
+        executor.accept(t1, "merge")
+        o = executor.accept(t2, "merge")
+        merged = tm.coalesce_tokens.call_args.kwargs["merged_data"].to_dict()
+        assert merged["shared"] == "from_a"
+        # Origins reflect the winner.
+        assert o.coalesce_metadata.union_field_origins["shared"] == "a"
+        # Collision values still record every contributing branch in order.
+        entries = list(o.coalesce_metadata.union_field_collision_values["shared"])
+        assert entries == [("a", "from_a"), ("b", "from_b")]
+
+    def test_union_collision_policy_first_wins_three_way(self):
+        """first_wins: first branch in settings.branches order wins for 3-way collisions."""
+        executor, _, _, tm, _ = _make_executor()
+        s = _settings(
+            branches=["a", "b", "c"],
+            merge="union",
+            policy="require_all",
+            union_collision_policy="first_wins",
+        )
+        executor.register_coalesce(s, "node_1")
+        t1 = _make_token(branch_name="a", token_id="t1", data={"f": "va"})
+        t2 = _make_token(branch_name="b", token_id="t2", data={"f": "vb"})
+        t3 = _make_token(branch_name="c", token_id="t3", data={"f": "vc"})
+        executor.accept(t1, "merge")
+        executor.accept(t2, "merge")
+        o = executor.accept(t3, "merge")
+        merged = tm.coalesce_tokens.call_args.kwargs["merged_data"].to_dict()
+        assert merged["f"] == "va"
+        assert o.coalesce_metadata.union_field_origins["f"] == "a"
+
+    # ------------------------------------------------------------------
+    # union_collision_policy=fail
+    # ------------------------------------------------------------------
+
+    def test_union_collision_policy_fail_raises_on_collision(self):
+        """fail: CoalesceCollisionError raised with full metadata attached."""
+        executor, _, _, _, _ = _make_executor()
+        s = _settings(
+            branches=["a", "b"],
+            merge="union",
+            union_collision_policy="fail",
+        )
+        executor.register_coalesce(s, "node_1")
+        t1 = _make_token(branch_name="a", token_id="t1", data={"shared": "from_a"})
+        t2 = _make_token(branch_name="b", token_id="t2", data={"shared": "from_b"})
+        executor.accept(t1, "merge")
+        with pytest.raises(CoalesceCollisionError) as exc_info:
+            executor.accept(t2, "merge")
+        # Metadata must be attached so the orchestrator's failure path
+        # can persist the full collision record to the audit trail.
+        md = exc_info.value.metadata
+        assert md.union_field_origins is not None
+        assert md.union_field_collision_values is not None
+        entries = list(md.union_field_collision_values["shared"])
+        assert entries == [("a", "from_a"), ("b", "from_b")]
+
+    def test_union_collision_policy_fail_no_collisions_is_noop(self):
+        """fail: non-overlapping branches merge successfully without raising."""
+        executor, _, _, tm, _ = _make_executor()
+        s = _settings(
+            branches=["a", "b"],
+            merge="union",
+            union_collision_policy="fail",
+        )
+        executor.register_coalesce(s, "node_1")
+        t1 = _make_token(branch_name="a", token_id="t1", data={"x": 1})
+        t2 = _make_token(branch_name="b", token_id="t2", data={"y": 2})
+        executor.accept(t1, "merge")
+        o = executor.accept(t2, "merge")
+        merged = tm.coalesce_tokens.call_args.kwargs["merged_data"].to_dict()
+        assert merged == {"x": 1, "y": 2}
+        # No collisions: collision_values absent.
+        assert o.coalesce_metadata.union_field_collision_values is None
+        # field_origins always populated.
+        assert o.coalesce_metadata.union_field_origins == {"x": "a", "y": "b"}
+
+    def test_union_collision_policy_fail_records_metadata_to_audit(self):
+        """fail policy must propagate collision metadata to complete_node_state(context_after=...).
+
+        Without this propagation, the audit trail loses the field-level provenance
+        that union_collision_policy=fail exists to capture. The stringified exception
+        message preserves only the field name — every (branch, value) pair would be
+        lost, defeating the whole point of opting into hard-fail enforcement.
+        """
+        executor, execution, _, _, _ = _make_executor()
+        s = _settings(
+            branches=["a", "b"],
+            merge="union",
+            union_collision_policy="fail",
+        )
+        executor.register_coalesce(s, "node_1")
+        t1 = _make_token(branch_name="a", token_id="t1", data={"shared": "from_a"})
+        t2 = _make_token(branch_name="b", token_id="t2", data={"shared": "from_b"})
+        executor.accept(t1, "merge")
+        with pytest.raises(CoalesceCollisionError):
+            executor.accept(t2, "merge")
+
+        # Inspect complete_node_state calls: the failure cleanup handler must have
+        # recorded at least one FAILED node state carrying the collision metadata.
+        fail_calls = [call for call in execution.complete_node_state.call_args_list if call.kwargs.get("status") == NodeStateStatus.FAILED]
+        assert fail_calls, "expected at least one FAILED node state on union_collision_policy=fail"
+
+        metadata_calls = [
+            call
+            for call in fail_calls
+            if call.kwargs.get("context_after") is not None and call.kwargs["context_after"].union_field_collision_values is not None
+        ]
+        assert metadata_calls, (
+            "expected fail-path audit record to carry union_field_collision_values; "
+            "without this, the Landscape audit trail loses the (branch, value) pairs "
+            "that union_collision_policy=fail is specifically designed to preserve"
+        )
+
+        md = metadata_calls[0].kwargs["context_after"]
+        # Every branch's contributing value must survive into the audit record.
+        entries = list(md.union_field_collision_values["shared"])
+        assert entries == [("a", "from_a"), ("b", "from_b")]
+        # field_origins must also be present (last_wins default before the raise).
+        assert md.union_field_origins is not None
+        assert md.union_field_origins["shared"] == "b"
+
+    # ------------------------------------------------------------------
+    # Orthogonality: union_collision_policy vs arrival policy
+    # ------------------------------------------------------------------
+
+    def test_union_collision_policy_independent_of_require_all(self):
+        """union_collision_policy=fail with require_all still raises on collisions.
+
+        The two policy axes (arrival policy and collision policy) are independent:
+        require_all governs branch arrival; union_collision_policy governs
+        field-level conflict resolution within the merged row.
+        """
+        executor, _, _, _, _ = _make_executor()
+        s = _settings(
+            branches=["a", "b"],
+            merge="union",
+            policy="require_all",
+            union_collision_policy="fail",
+        )
+        executor.register_coalesce(s, "node_1")
+        t1 = _make_token(branch_name="a", token_id="t1", data={"shared": 1})
+        t2 = _make_token(branch_name="b", token_id="t2", data={"shared": 2})
+        executor.accept(t1, "merge")
+        with pytest.raises(CoalesceCollisionError):
+            executor.accept(t2, "merge")
+
+    def test_union_collision_policy_with_best_effort_records_arrived_only(self):
+        """best_effort with one lost branch: field_origins reflects arrived branches only.
+
+        Lost-branch handling under best_effort merges whatever arrived by the
+        deadline. field_origins and collision_values are still populated —
+        just scoped to the arrived subset. (Lost-branch provenance handling
+        is a separate issue out of scope here.)
+        """
+        clock = MockClock(start=100.0)
+        executor, _, _, _, _ = _make_executor(clock=clock)
+        s = _settings(
+            branches=["a", "b"],
+            merge="union",
+            policy="best_effort",
+            timeout_seconds=5.0,
+        )
+        executor.register_coalesce(s, "node_1")
+        t1 = _make_token(branch_name="a", token_id="t1", data={"x": 1})
+        executor.accept(t1, "merge")
+        # Advance clock past timeout so best_effort flushes with only `a` arrived.
+        clock.advance(10.0)
+        outcomes = executor.check_timeouts("merge")
+        assert len(outcomes) == 1
+        outcome = outcomes[0]
+        assert outcome.merged_token is not None
+        origins = outcome.coalesce_metadata.union_field_origins
+        assert origins == {"x": "a"}
+        # No collisions (only one branch contributed).
+        assert outcome.coalesce_metadata.union_field_collision_values is None
 
 
 # ===========================================================================
