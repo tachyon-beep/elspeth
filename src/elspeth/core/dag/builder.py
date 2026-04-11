@@ -896,6 +896,8 @@ def build_execution_graph(
             # Union merge: require compatible types on ALL pairwise overlapping fields.
             # Tracks (type, required, first_branch) to preserve optionality markers.
             seen_types: dict[str, tuple[str, bool, str]] = {}  # field → (type, required, first_branch)
+            branches_with_field: dict[str, set[str]] = {}  # field → set of branches that produced it
+            all_branch_names = set(branch_to_schema.keys())
             all_observed = False
             for branch_name, schema_cfg in branch_to_schema.items():
                 if schema_cfg.is_observed:
@@ -904,6 +906,9 @@ def build_execution_graph(
                 if schema_cfg.fields is None:
                     continue
                 for fd in schema_cfg.fields:
+                    if fd.name not in branches_with_field:
+                        branches_with_field[fd.name] = set()
+                    branches_with_field[fd.name].add(branch_name)
                     if fd.name in seen_types:
                         prior_type, _prior_req, prior_branch = seen_types[fd.name]
                         if prior_type != fd.field_type:
@@ -919,6 +924,16 @@ def build_execution_graph(
                             seen_types[fd.name] = (prior_type, False, prior_branch)
                     else:
                         seen_types[fd.name] = (fd.field_type, fd.required, branch_name)
+
+            # Apply AND semantics: fields not present in ALL branches are optional.
+            # Rationale: for best_effort/quorum coalesces, a branch that guarantees a
+            # field may be lost. Even for require_all, the merged contract should be
+            # conservative — only guarantee fields that EVERY branch contributes.
+            # This matches SchemaContract.merge() runtime semantics.
+            for field_name in list(seen_types):
+                if branches_with_field[field_name] != all_branch_names:
+                    ftype, _, first_branch = seen_types[field_name]
+                    seen_types[field_name] = (ftype, False, first_branch)
 
             if all_observed or not seen_types:
                 merged_schema = SchemaConfig(

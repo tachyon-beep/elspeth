@@ -27,6 +27,8 @@ class TestUnionMergeOptionalityPreservation:
     ) -> SchemaConfig:
         """Simulate the builder's union merge logic with SchemaConfig objects."""
         seen_types: dict[str, tuple[str, bool, str]] = {}
+        branches_with_field: dict[str, set[str]] = {}
+        all_branch_names = set(branch_schemas.keys())
         all_observed = False
         for branch_name, schema_cfg in branch_schemas.items():
             if schema_cfg.is_observed:
@@ -35,6 +37,7 @@ class TestUnionMergeOptionalityPreservation:
             if schema_cfg.fields is None:
                 continue
             for fd in schema_cfg.fields:
+                branches_with_field.setdefault(fd.name, set()).add(branch_name)
                 if fd.name in seen_types:
                     prior_type, _prior_req, prior_branch = seen_types[fd.name]
                     if prior_type != fd.field_type:
@@ -43,6 +46,12 @@ class TestUnionMergeOptionalityPreservation:
                         seen_types[fd.name] = (prior_type, False, prior_branch)
                 else:
                     seen_types[fd.name] = (fd.field_type, fd.required, branch_name)
+
+        # Apply AND semantics: fields not present in ALL branches become optional.
+        for field_name in list(seen_types):
+            if branches_with_field[field_name] != all_branch_names:
+                ftype, _, first_branch = seen_types[field_name]
+                seen_types[field_name] = (ftype, False, first_branch)
 
         if all_observed or not seen_types:
             return SchemaConfig(mode="observed", fields=None)
@@ -58,7 +67,7 @@ class TestUnionMergeOptionalityPreservation:
         raise AssertionError(f"Field {name!r} not found in schema")
 
     def test_optional_field_preserved(self) -> None:
-        """Optional field in one branch should remain optional in merged output."""
+        """Optional field in one branch or exclusive to one branch both remain optional in merged output."""
         result = self._merge_schemas(
             {
                 "branch_a": SchemaConfig(
@@ -71,9 +80,9 @@ class TestUnionMergeOptionalityPreservation:
                 ),
             }
         )
-        assert self._get_field(result, "score").required is False
-        assert self._get_field(result, "id").required is True
-        assert self._get_field(result, "label").required is True
+        assert self._get_field(result, "score").required is False  # explicit optional preserved
+        assert self._get_field(result, "id").required is True  # present in all branches
+        assert self._get_field(result, "label").required is False  # branch-exclusive → optional
 
     def test_mixed_required_and_optional_yields_optional(self) -> None:
         """Field required in branch A, optional in branch B → optional in output."""
@@ -266,3 +275,74 @@ class TestCoalesceSinkRequiredFieldValidation:
 
         # Should not raise — all sink-required fields are guaranteed by coalesce output
         graph.validate_edge_compatibility()
+
+    def test_coalesce_to_sink_branch_exclusive_field_caught(self) -> None:
+        """Build-time validation now catches the branch-exclusive case.
+
+        After C2 fix: if branch A has a required field that branch B lacks,
+        the merged schema marks it optional. A sink requiring that field will
+        fail validation at build time.
+        """
+        from elspeth.contracts import RoutingMode
+        from elspeth.core.dag.graph import ExecutionGraph
+        from elspeth.core.dag.models import NodeType
+
+        branch_a_schema = SchemaConfig(
+            mode="flexible",
+            fields=(
+                FieldDefinition("id", "str", required=True),
+                FieldDefinition("exclusive_to_a", "int", required=True),
+            ),
+        )
+        branch_b_schema = SchemaConfig(
+            mode="flexible",
+            fields=(FieldDefinition("id", "str", required=True),),
+        )
+
+        # Coalesce output: 'exclusive_to_a' is optional (branch-exclusive)
+        coalesce_output_schema = SchemaConfig(
+            mode="flexible",
+            fields=(
+                FieldDefinition("id", "str", required=True),
+                FieldDefinition("exclusive_to_a", "int", required=False),
+            ),
+        )
+
+        graph = ExecutionGraph()
+        graph.add_node("source", node_type=NodeType.SOURCE, plugin_name="csv")
+        graph.add_node("gate", node_type=NodeType.GATE, plugin_name="fork")
+        graph.add_node(
+            "t_a",
+            node_type=NodeType.TRANSFORM,
+            plugin_name="a",
+            output_schema_config=branch_a_schema,
+        )
+        graph.add_node(
+            "t_b",
+            node_type=NodeType.TRANSFORM,
+            plugin_name="b",
+            output_schema_config=branch_b_schema,
+        )
+        graph.add_node(
+            "coalesce",
+            node_type=NodeType.COALESCE,
+            plugin_name="coalesce:merge",
+            config={"branches": {"a": "a", "b": "b"}, "policy": "require_all", "merge": "union"},
+            output_schema_config=coalesce_output_schema,
+        )
+        graph.add_node(
+            "sink",
+            node_type=NodeType.SINK,
+            plugin_name="csv_sink",
+            declared_required_fields=frozenset({"id", "exclusive_to_a"}),
+        )
+
+        graph.add_edge("source", "gate", label="continue", mode=RoutingMode.MOVE)
+        graph.add_edge("gate", "t_a", label="a", mode=RoutingMode.COPY)
+        graph.add_edge("gate", "t_b", label="b", mode=RoutingMode.COPY)
+        graph.add_edge("t_a", "coalesce", label="a", mode=RoutingMode.MOVE)
+        graph.add_edge("t_b", "coalesce", label="b", mode=RoutingMode.MOVE)
+        graph.add_edge("coalesce", "sink", label="continue", mode=RoutingMode.MOVE)
+
+        with pytest.raises(GraphValidationError, match=r"exclusive_to_a"):
+            graph.validate_edge_compatibility()
