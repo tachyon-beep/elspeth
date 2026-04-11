@@ -964,11 +964,13 @@ class ExecutionGraph:
         for coalesce_id in coalesce_nodes:
             self._validate_coalesce_compatibility(coalesce_id, _schema_cache=schema_cache)
 
-        # Validate coalesce → sink required-field satisfaction.
-        # Catches mismatches between sink.declared_required_fields and coalesce
+        # Validate sink required-field satisfaction against direct predecessors.
+        # Catches mismatches between sink.declared_required_fields and upstream
         # output optionality at build time, rather than at runtime with a
-        # generic PluginContractViolation.
-        self._validate_coalesce_sink_requirements()
+        # generic PluginContractViolation. Walking sinks backward (rather than
+        # coalesces forward) handles COALESCE → TRANSFORM → SINK topologies
+        # and any future multi-hop shape.
+        self._validate_sink_required_fields()
 
     def warn_divert_coalesce_interactions(
         self,
@@ -1450,60 +1452,65 @@ class ExecutionGraph:
                         f"branch from '{other_id}' has {other_name}. {error_msg}"
                     )
 
-    def _validate_coalesce_sink_requirements(self) -> None:
-        """Validate coalesce output satisfies downstream sink required fields.
+    def _validate_sink_required_fields(self) -> None:
+        """Validate each sink's declared_required_fields against its direct predecessors.
 
-        For each COALESCE node, check that each downstream SINK's
-        ``declared_required_fields`` is a subset of the coalesce output's
-        guaranteed (required) fields. If a sink requires a field that the
-        coalesce marks optional (branch-exclusive or AND-downgraded), fail
-        at build time rather than crashing at runtime with a generic
-        PluginContractViolation whose root cause is coalesce merge semantics.
+        For every SINK node with a non-empty declared_required_fields, check
+        each incoming edge's source node. The source's output_schema_config
+        must guarantee (mark required=True) every field the sink requires.
+
+        This catches cases where:
+        - A coalesce marks a field optional (branch-exclusive or AND-downgraded)
+          and feeds a sink that requires it (direct or through a transform)
+        - A transform's output schema doesn't declare a field the sink requires
+        - A source doesn't guarantee a field the sink requires
+
+        Runs at build time rather than failing at runtime with a generic
+        PluginContractViolation.
 
         Raises:
-            GraphValidationError: if a downstream sink requires a field that
-                the coalesce output does not guarantee.
+            GraphValidationError: if a sink's direct predecessor does not
+                guarantee a field the sink requires.
         """
         for node_id, data in self._graph.nodes(data=True):
             info = data["info"]
-            if info.node_type != NodeType.COALESCE:
+            if info.node_type != NodeType.SINK:
                 continue
 
-            schema_config = info.output_schema_config
-            if schema_config is None or schema_config.fields is None:
-                continue  # Observed schemas — can't validate at build time
+            sink_required = info.declared_required_fields
+            if not sink_required:
+                continue
 
-            guaranteed = frozenset(fd.name for fd in schema_config.fields if fd.required)
-            all_field_names = frozenset(fd.name for fd in schema_config.fields)
+            for predecessor_id, _ in self._graph.in_edges(node_id):
+                predecessor_info = self.get_node_info(predecessor_id)
+                schema_config = predecessor_info.output_schema_config
+                if schema_config is None or schema_config.fields is None:
+                    continue  # Observed schemas — can't validate at build time
 
-            for _, successor_id in self._graph.out_edges(node_id):
-                successor_info = self.get_node_info(successor_id)
-                if successor_info.node_type != NodeType.SINK:
-                    continue
-
-                sink_required = successor_info.declared_required_fields
-                if not sink_required:
-                    continue
-
+                guaranteed = frozenset(fd.name for fd in schema_config.fields if fd.required)
                 missing = sink_required - guaranteed
                 if not missing:
                     continue
 
+                all_field_names = frozenset(fd.name for fd in schema_config.fields)
                 optional_but_present = sorted(missing & all_field_names)
                 absent_entirely = sorted(missing - all_field_names)
 
                 parts: list[str] = []
                 if optional_but_present:
-                    parts.append(f"fields {optional_but_present} are optional in coalesce output (branch-exclusive or AND-downgraded)")
+                    parts.append(
+                        f"fields {optional_but_present} are optional in upstream schema "
+                        f"(may be branch-exclusive from coalesce or not declared required by transform)"
+                    )
                 if absent_entirely:
-                    parts.append(f"fields {absent_entirely} are absent from coalesce output entirely")
+                    parts.append(f"fields {absent_entirely} are absent from upstream schema entirely")
 
                 raise GraphValidationError(
-                    f"Sink '{successor_info.plugin_name}' requires fields "
-                    f"{sorted(missing)} but optional in coalesce output from "
-                    f"'{node_id}': {'; '.join(parts)}. "
-                    f"Fix: ensure all branches produce the required fields, or "
-                    f"remove them from the sink's declared_required_fields."
+                    f"Sink '{info.plugin_name}' requires fields {sorted(missing)} "
+                    f"but its upstream '{predecessor_id}' does not guarantee them: "
+                    f"{'; '.join(parts)}. "
+                    f"Fix: ensure the upstream node guarantees these fields, "
+                    f"or remove them from the sink's declared_required_fields."
                 )
 
     # ===== CONTRACT VALIDATION HELPERS =====

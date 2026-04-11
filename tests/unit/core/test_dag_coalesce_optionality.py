@@ -221,7 +221,7 @@ class TestCoalesceSinkRequiredFieldValidation:
 
         with pytest.raises(
             GraphValidationError,
-            match=r"required by sink.*but optional in coalesce output|Sink '.*' requires fields.*but optional in coalesce output",
+            match=r"upstream.*does not guarantee",
         ):
             graph.validate_edge_compatibility()
 
@@ -356,6 +356,141 @@ class TestCoalesceSinkRequiredFieldValidation:
 
         with pytest.raises(GraphValidationError, match=r"exclusive_to_a"):
             graph.validate_edge_compatibility()
+
+    def test_transform_between_coalesce_and_sink_still_validated(self) -> None:
+        """COALESCE → TRANSFORM → SINK topology is still validated.
+
+        If a transform sits between the coalesce and sink, the sink is
+        validated against the TRANSFORM's output_schema_config (not the
+        coalesce's). If the transform's output schema doesn't guarantee a
+        field the sink requires, validation fails at build time.
+        """
+        from elspeth.contracts import RoutingMode
+        from elspeth.contracts.schema import FieldDefinition, SchemaConfig
+        from elspeth.core.dag.graph import ExecutionGraph
+        from elspeth.core.dag.models import GraphValidationError, NodeType
+
+        # Coalesce produces 'id' (required) and 'x' (optional) via union merge
+        coalesce_output_schema = SchemaConfig(
+            mode="flexible",
+            fields=(
+                FieldDefinition("id", "str", required=True),
+                FieldDefinition("x", "int", required=False),
+            ),
+        )
+
+        # Transform passes through the coalesce output (keeps 'x' optional)
+        transform_output_schema = SchemaConfig(
+            mode="flexible",
+            fields=(
+                FieldDefinition("id", "str", required=True),
+                FieldDefinition("x", "int", required=False),
+            ),
+        )
+
+        graph = ExecutionGraph()
+        graph.add_node("source", node_type=NodeType.SOURCE, plugin_name="csv")
+        graph.add_node("gate", node_type=NodeType.GATE, plugin_name="fork")
+        branch_schema = SchemaConfig(
+            mode="flexible",
+            fields=(FieldDefinition("id", "str", required=True),),
+        )
+        graph.add_node("t_a", node_type=NodeType.TRANSFORM, plugin_name="a", output_schema_config=branch_schema)
+        graph.add_node("t_b", node_type=NodeType.TRANSFORM, plugin_name="b", output_schema_config=branch_schema)
+        graph.add_node(
+            "coalesce",
+            node_type=NodeType.COALESCE,
+            plugin_name="coalesce:merge",
+            config={"branches": {"a": "a", "b": "b"}, "policy": "require_all", "merge": "union"},
+            output_schema_config=coalesce_output_schema,
+        )
+        graph.add_node(
+            "post_transform",
+            node_type=NodeType.TRANSFORM,
+            plugin_name="enrich",
+            output_schema_config=transform_output_schema,
+        )
+        graph.add_node(
+            "sink",
+            node_type=NodeType.SINK,
+            plugin_name="csv_sink",
+            declared_required_fields=frozenset({"id", "x"}),
+        )
+
+        graph.add_edge("source", "gate", label="continue", mode=RoutingMode.MOVE)
+        graph.add_edge("gate", "t_a", label="a", mode=RoutingMode.COPY)
+        graph.add_edge("gate", "t_b", label="b", mode=RoutingMode.COPY)
+        graph.add_edge("t_a", "coalesce", label="a", mode=RoutingMode.MOVE)
+        graph.add_edge("t_b", "coalesce", label="b", mode=RoutingMode.MOVE)
+        graph.add_edge("coalesce", "post_transform", label="continue", mode=RoutingMode.MOVE)
+        graph.add_edge("post_transform", "sink", label="continue", mode=RoutingMode.MOVE)
+
+        with pytest.raises(GraphValidationError, match=r"upstream 'post_transform'.*does not guarantee"):
+            graph.validate_edge_compatibility()
+
+    def test_transform_between_coalesce_and_sink_passes_when_transform_guarantees(self) -> None:
+        """COALESCE → TRANSFORM → SINK passes when the transform guarantees required fields.
+
+        Even if the coalesce marks 'x' optional, a transform that declares 'x'
+        required in its output commits to producing it. The sink's requirement
+        is satisfied by the transform's contract, not the coalesce's output.
+        """
+        from elspeth.contracts import RoutingMode
+        from elspeth.contracts.schema import FieldDefinition, SchemaConfig
+        from elspeth.core.dag.graph import ExecutionGraph
+        from elspeth.core.dag.models import NodeType
+
+        coalesce_output_schema = SchemaConfig(
+            mode="flexible",
+            fields=(
+                FieldDefinition("id", "str", required=True),
+                FieldDefinition("x", "int", required=False),  # optional from coalesce
+            ),
+        )
+        # Transform commits to always producing x
+        transform_output_schema = SchemaConfig(
+            mode="flexible",
+            fields=(
+                FieldDefinition("id", "str", required=True),
+                FieldDefinition("x", "int", required=True),  # transform guarantees it
+            ),
+        )
+
+        graph = ExecutionGraph()
+        graph.add_node("source", node_type=NodeType.SOURCE, plugin_name="csv")
+        graph.add_node("gate", node_type=NodeType.GATE, plugin_name="fork")
+        branch_schema = SchemaConfig(mode="flexible", fields=(FieldDefinition("id", "str", required=True),))
+        graph.add_node("t_a", node_type=NodeType.TRANSFORM, plugin_name="a", output_schema_config=branch_schema)
+        graph.add_node("t_b", node_type=NodeType.TRANSFORM, plugin_name="b", output_schema_config=branch_schema)
+        graph.add_node(
+            "coalesce",
+            node_type=NodeType.COALESCE,
+            plugin_name="coalesce:merge",
+            config={"branches": {"a": "a", "b": "b"}, "policy": "require_all", "merge": "union"},
+            output_schema_config=coalesce_output_schema,
+        )
+        graph.add_node(
+            "post_transform",
+            node_type=NodeType.TRANSFORM,
+            plugin_name="enrich",
+            output_schema_config=transform_output_schema,
+        )
+        graph.add_node(
+            "sink",
+            node_type=NodeType.SINK,
+            plugin_name="csv_sink",
+            declared_required_fields=frozenset({"id", "x"}),
+        )
+
+        graph.add_edge("source", "gate", label="continue", mode=RoutingMode.MOVE)
+        graph.add_edge("gate", "t_a", label="a", mode=RoutingMode.COPY)
+        graph.add_edge("gate", "t_b", label="b", mode=RoutingMode.COPY)
+        graph.add_edge("t_a", "coalesce", label="a", mode=RoutingMode.MOVE)
+        graph.add_edge("t_b", "coalesce", label="b", mode=RoutingMode.MOVE)
+        graph.add_edge("coalesce", "post_transform", label="continue", mode=RoutingMode.MOVE)
+        graph.add_edge("post_transform", "sink", label="continue", mode=RoutingMode.MOVE)
+
+        graph.validate_edge_compatibility()  # Should not raise
 
 
 class _BuilderMockSource:
