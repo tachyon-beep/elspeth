@@ -20,6 +20,7 @@ Tests for explain_token that hit this path are marked xfail.
 
 from __future__ import annotations
 
+import json
 from typing import Any, cast
 
 import pytest
@@ -1098,3 +1099,620 @@ class TestQueryDuplicateColumns:
         assert len(results) == 1
         assert "a_run_id" in results[0]
         assert "b_run_id" in results[0]
+
+
+# ===========================================================================
+# get_node_states include_context tests
+# ===========================================================================
+
+
+class TestGetNodeStatesIncludeContext:
+    """Tests for get_node_states with include_context parameter."""
+
+    def test_include_context_false_omits_json_fields(self) -> None:
+        """Default include_context=False omits context_after, error, success_reason."""
+        from elspeth.mcp.analyzers.queries import get_node_states
+
+        p = _build_linear_pipeline(run_id="ctx-false")
+        results = get_node_states(p["db"], p["factory"], "ctx-false", include_context=False)
+
+        assert len(results) > 0
+        for r in results:
+            assert "context_after" not in r
+            assert "error" not in r
+            assert "success_reason" not in r
+
+    def test_include_context_true_includes_json_fields(self) -> None:
+        """include_context=True adds context_after, error, success_reason fields."""
+        from elspeth.mcp.analyzers.queries import get_node_states
+
+        p = _build_linear_pipeline(run_id="ctx-true")
+        results = get_node_states(p["db"], p["factory"], "ctx-true", include_context=True)
+
+        assert len(results) > 0
+        # All records should have the optional fields (even if None)
+        for r in results:
+            assert "context_after" in r
+            assert "error" in r
+            assert "success_reason" in r
+
+
+# ===========================================================================
+# list_collisions tests
+# ===========================================================================
+
+
+class TestListCollisions:
+    """Tests for list_collisions — coalesce merge conflict surfacing."""
+
+    def test_returns_empty_for_run_without_collisions(self) -> None:
+        """list_collisions returns empty list when no collisions exist."""
+        from elspeth.mcp.analyzers.queries import list_collisions
+
+        # Simple linear pipeline has no coalesce node
+        p = _build_linear_pipeline(run_id="no-collisions")
+        results = list_collisions(p["db"], p["factory"], "no-collisions")
+
+        assert results == []
+
+    def test_returns_empty_for_nonexistent_run(self) -> None:
+        """list_collisions returns empty list for unknown run_id."""
+        from elspeth.mcp.analyzers.queries import list_collisions
+
+        setup = make_recorder_with_run(run_id="existing")
+        results = list_collisions(setup.db, setup.factory, "nonexistent-run")
+
+        assert results == []
+
+    def test_matches_plain_coalesce_plugin_name(self) -> None:
+        """list_collisions must find collisions with plain 'coalesce' plugin_name.
+
+        Regression: The query used plugin_name.like('coalesce:%') which only
+        matched named coalesce nodes like 'coalesce:merge_results'. Plain 'coalesce'
+        from older/manual runs was silently ignored, returning [] even when
+        context_after_json contained union_field_collision_values.
+        """
+        from sqlalchemy import text
+
+        from elspeth.mcp.analyzers.queries import list_collisions
+
+        setup = make_recorder_with_run(run_id="plain-coalesce")
+        db = setup.db
+        factory = setup.factory
+
+        # Register a coalesce node with plain 'coalesce' plugin_name
+        # (simulating older/manual runs before named coalesce was standard)
+        register_test_node(
+            factory.data_flow,
+            "plain-coalesce",
+            "coalesce-node",
+            node_type=NodeType.COALESCE,
+            plugin_name="coalesce",  # Plain name, not "coalesce:name"
+        )
+
+        # Create a row and token to satisfy FK constraints
+        row = factory.data_flow.create_row("plain-coalesce", setup.source_node_id, row_index=0, data={"x": 1})
+        token = factory.data_flow.create_token(row.row_id)
+
+        # Record a node state with collision data in context_after
+        ns = factory.execution.begin_node_state(token.token_id, "coalesce-node", "plain-coalesce", step_index=1, input_data={"x": 1})
+
+        # Use raw SQL to update context_after_json with collision data
+        # (the complete_node_state API doesn't directly support arbitrary JSON)
+        with db.connection() as conn:
+            conn.execute(
+                text(
+                    """
+                    UPDATE node_states
+                    SET status = 'COALESCED',
+                        completed_at = datetime('now'),
+                        context_after_json = :context_after
+                    WHERE state_id = :state_id
+                    """
+                ),
+                {
+                    "state_id": ns.state_id,
+                    "context_after": '{"union_field_collision_values": {"status": [["branch1", "active"], ["branch2", "inactive"]]}}',
+                },
+            )
+            conn.commit()
+
+        results = list_collisions(db, factory, "plain-coalesce")
+
+        # Should find the collision even with plain 'coalesce' plugin_name
+        assert len(results) == 1, f"Expected 1 collision record for plain 'coalesce' plugin_name, got {len(results)}"
+        assert results[0]["token_id"] == token.token_id
+
+    def test_filters_out_overlap_only_fields(self) -> None:
+        """list_collisions filters fields where all branches have identical values.
+
+        Regression: union_field_collision_values contains ALL overlapping fields,
+        even when values are the same. Without filtering, common pass-through fields
+        like 'id' drown out actual conflicts.
+        """
+        from sqlalchemy import text
+
+        from elspeth.mcp.analyzers.queries import list_collisions
+
+        setup = make_recorder_with_run(run_id="overlap-only")
+        db = setup.db
+        factory = setup.factory
+
+        register_test_node(
+            factory.data_flow,
+            "overlap-only",
+            "coalesce-node",
+            node_type=NodeType.COALESCE,
+            plugin_name="coalesce:merge",
+        )
+
+        row = factory.data_flow.create_row("overlap-only", setup.source_node_id, row_index=0, data={"x": 1})
+        token = factory.data_flow.create_token(row.row_id)
+
+        ns = factory.execution.begin_node_state(token.token_id, "coalesce-node", "overlap-only", step_index=1, input_data={"x": 1})
+
+        # Set up overlap-only collision values — all branches have same value
+        context_json = json.dumps(
+            {
+                "union_field_collision_values": {
+                    "id": [["branch1", 42], ["branch2", 42]],  # Same value — NOT a collision
+                },
+                "union_field_origins": {"id": "branch1"},
+            }
+        )
+
+        with db.connection() as conn:
+            conn.execute(
+                text(
+                    """
+                    UPDATE node_states
+                    SET status = 'COALESCED',
+                        completed_at = datetime('now'),
+                        context_after_json = :context_after
+                    WHERE state_id = :state_id
+                    """
+                ),
+                {"state_id": ns.state_id, "context_after": context_json},
+            )
+            conn.commit()
+
+        results = list_collisions(db, factory, "overlap-only")
+
+        # Should return empty — overlap-only fields are not real collisions
+        assert results == [], f"Expected no collisions for overlap-only fields, got {results}"
+
+    def test_respects_first_wins_policy(self) -> None:
+        """list_collisions uses union_field_origins to determine winner, not entry order.
+
+        Regression: The code hard-coded entries[-1] as winner, which is only correct
+        for last_wins policy. For first_wins, the actual winner is in union_field_origins.
+        """
+        from sqlalchemy import text
+
+        from elspeth.mcp.analyzers.queries import list_collisions
+
+        setup = make_recorder_with_run(run_id="first-wins")
+        db = setup.db
+        factory = setup.factory
+
+        register_test_node(
+            factory.data_flow,
+            "first-wins",
+            "coalesce-node",
+            node_type=NodeType.COALESCE,
+            plugin_name="coalesce:merge",
+        )
+
+        row = factory.data_flow.create_row("first-wins", setup.source_node_id, row_index=0, data={"x": 1})
+        token = factory.data_flow.create_token(row.row_id)
+
+        ns = factory.execution.begin_node_state(token.token_id, "coalesce-node", "first-wins", step_index=1, input_data={"x": 1})
+
+        # Simulate first_wins: branch1 wins even though branch2 comes last in merge order
+        context_json = json.dumps(
+            {
+                "union_field_collision_values": {
+                    "score": [["branch1", 10], ["branch2", 99]],  # branch1 first, branch2 last
+                },
+                "union_field_origins": {"score": "branch1"},  # first_wins → branch1 won
+            }
+        )
+
+        with db.connection() as conn:
+            conn.execute(
+                text(
+                    """
+                    UPDATE node_states
+                    SET status = 'COALESCED',
+                        completed_at = datetime('now'),
+                        context_after_json = :context_after
+                    WHERE state_id = :state_id
+                    """
+                ),
+                {"state_id": ns.state_id, "context_after": context_json},
+            )
+            conn.commit()
+
+        results = list_collisions(db, factory, "first-wins")
+
+        assert len(results) == 1
+        collision_fields = results[0]["collision_fields"]
+        assert len(collision_fields) == 1
+        score_field = collision_fields[0]
+
+        # Winner should be branch1 (from union_field_origins), NOT branch2 (last entry)
+        assert score_field["winner_branch"] == "branch1", (
+            f"Expected winner_branch='branch1' (from union_field_origins), got '{score_field['winner_branch']}'"
+        )
+        assert score_field["winner_value"] == 10, f"Expected winner_value=10 (branch1's value), got {score_field['winner_value']}"
+
+    def test_failed_merge_reports_no_winner(self) -> None:
+        """list_collisions reports no winner when merge failed (union_collision_policy='fail').
+
+        Regression: When status is 'failed' (NodeStateStatus.FAILED.value), the code
+        compared against uppercase "FAILED" which never matched. This caused failed
+        merges to incorrectly populate winner_branch/winner_value from the pre-failure
+        union_field_origins, making it appear a winner was selected when no merge happened.
+        """
+        from sqlalchemy import text
+
+        from elspeth.contracts import NodeStateStatus
+        from elspeth.mcp.analyzers.queries import list_collisions
+
+        setup = make_recorder_with_run(run_id="failed-merge")
+        db = setup.db
+        factory = setup.factory
+
+        register_test_node(
+            factory.data_flow,
+            "failed-merge",
+            "coalesce-node",
+            node_type=NodeType.COALESCE,
+            plugin_name="coalesce:strict_merge",
+        )
+
+        row = factory.data_flow.create_row("failed-merge", setup.source_node_id, row_index=0, data={"x": 1})
+        token = factory.data_flow.create_token(row.row_id)
+
+        ns = factory.execution.begin_node_state(token.token_id, "coalesce-node", "failed-merge", step_index=1, input_data={"x": 1})
+
+        # Simulate a failed merge: status='failed' but union_field_origins still
+        # contains data from before the failure. With union_collision_policy='fail',
+        # the merge aborts when ANY collision is detected, but the origins metadata
+        # may still be present from partial processing.
+        context_json = json.dumps(
+            {
+                "union_field_collision_values": {
+                    "score": [["branch1", 100], ["branch2", 200]],
+                },
+                # This would normally indicate branch1 won, but since status is 'failed',
+                # no winner should be reported — the merge was aborted.
+                "union_field_origins": {"score": "branch1"},
+            }
+        )
+
+        with db.connection() as conn:
+            conn.execute(
+                text(
+                    """
+                    UPDATE node_states
+                    SET status = :status,
+                        completed_at = datetime('now'),
+                        context_after_json = :context_after
+                    WHERE state_id = :state_id
+                    """
+                ),
+                {
+                    "state_id": ns.state_id,
+                    "status": NodeStateStatus.FAILED.value,  # lowercase 'failed'
+                    "context_after": context_json,
+                },
+            )
+            conn.commit()
+
+        results = list_collisions(db, factory, "failed-merge")
+
+        assert len(results) == 1
+        collision_fields = results[0]["collision_fields"]
+        assert len(collision_fields) == 1
+        score_field = collision_fields[0]
+
+        # Winner should be None for failed merges — no winner was selected
+        assert score_field["winner_branch"] is None, f"Expected winner_branch=None for failed merge, got '{score_field['winner_branch']}'"
+        assert score_field["winner_value"] is None, f"Expected winner_value=None for failed merge, got '{score_field['winner_value']}'"
+
+    def test_returns_separate_records_for_each_node_state(self) -> None:
+        """list_collisions returns one record per node_states row with real collisions.
+
+        Each coalesce merge creates one node_states row per consumed branch token.
+        This function intentionally does NOT deduplicate — each row is a distinct
+        event representing a token being processed. Callers who want unique collision
+        patterns can aggregate the results themselves.
+
+        This is important for production debugging: if the same collision happens
+        100 times, the caller should see 100 records to understand the frequency.
+        """
+        from sqlalchemy import text
+
+        from elspeth.mcp.analyzers.queries import list_collisions
+
+        setup = make_recorder_with_run(run_id="no-dedup-test")
+        db = setup.db
+        factory = setup.factory
+
+        register_test_node(
+            factory.data_flow,
+            "no-dedup-test",
+            "coalesce-node",
+            node_type=NodeType.COALESCE,
+            plugin_name="coalesce:merge",
+        )
+
+        # Create two rows and tokens — simulating two consumed branches
+        row1 = factory.data_flow.create_row("no-dedup-test", setup.source_node_id, row_index=0, data={"x": 1})
+        token1 = factory.data_flow.create_token(row1.row_id)
+        row2 = factory.data_flow.create_row("no-dedup-test", setup.source_node_id, row_index=1, data={"x": 2})
+        token2 = factory.data_flow.create_token(row2.row_id)
+
+        # Both tokens get node_states with identical context_after_json (same collision pattern)
+        context_json = json.dumps(
+            {
+                "union_field_collision_values": {
+                    "status": [["branch1", "active"], ["branch2", "inactive"]],
+                },
+                "union_field_origins": {"status": "branch2"},
+            }
+        )
+
+        ns1 = factory.execution.begin_node_state(token1.token_id, "coalesce-node", "no-dedup-test", step_index=1, input_data={"x": 1})
+        ns2 = factory.execution.begin_node_state(token2.token_id, "coalesce-node", "no-dedup-test", step_index=1, input_data={"x": 2})
+
+        with db.connection() as conn:
+            for ns in [ns1, ns2]:
+                conn.execute(
+                    text(
+                        """
+                        UPDATE node_states
+                        SET status = 'COALESCED',
+                            completed_at = datetime('now'),
+                            context_after_json = :context_after
+                        WHERE state_id = :state_id
+                        """
+                    ),
+                    {"state_id": ns.state_id, "context_after": context_json},
+                )
+            conn.commit()
+
+        results = list_collisions(db, factory, "no-dedup-test")
+
+        # Should return TWO records — one per node_states row (no deduplication)
+        assert len(results) == 2, f"Expected 2 collision records (no deduplication), got {len(results)}"
+        # Both should have the same collision data
+        for r in results:
+            assert len(r["collision_fields"]) == 1
+            assert r["collision_fields"][0]["field"] == "status"
+
+    def test_limit_applied_after_filtering_overlap_only(self) -> None:
+        """list_collisions applies limit AFTER filtering overlap-only rows.
+
+        Regression: If SQL LIMIT is applied before Python filters out overlap-only
+        fields, a run with many recent overlap-only merges could return fewer than
+        `limit` real collisions even when more exist in the database.
+        """
+        from sqlalchemy import text
+
+        from elspeth.mcp.analyzers.queries import list_collisions
+
+        setup = make_recorder_with_run(run_id="limit-after-filter")
+        db = setup.db
+        factory = setup.factory
+
+        register_test_node(
+            factory.data_flow,
+            "limit-after-filter",
+            "coalesce-node",
+            node_type=NodeType.COALESCE,
+            plugin_name="coalesce:merge",
+        )
+
+        # Create 3 rows: first 2 are overlap-only (same values), third is a real collision
+        rows_and_tokens = []
+        for i in range(3):
+            row = factory.data_flow.create_row("limit-after-filter", setup.source_node_id, row_index=i, data={"x": i})
+            token = factory.data_flow.create_token(row.row_id)
+            rows_and_tokens.append((row, token))
+
+        # Create node_states: first 2 with overlap-only data (more recent), third with real collision (older)
+        with db.connection() as conn:
+            for i, (_row, token) in enumerate(rows_and_tokens):
+                ns = factory.execution.begin_node_state(
+                    token.token_id, "coalesce-node", "limit-after-filter", step_index=1, input_data={"x": i}
+                )
+
+                if i < 2:
+                    # Overlap-only: same value on both branches (NOT a real collision)
+                    context = json.dumps(
+                        {
+                            "union_field_collision_values": {
+                                "id": [["branch1", 42], ["branch2", 42]],
+                            },
+                            "union_field_origins": {"id": "branch1"},
+                        }
+                    )
+                    # More recent timestamp
+                    completed_at = f"datetime('now', '+{10 - i} minutes')"
+                else:
+                    # Real collision: different values
+                    context = json.dumps(
+                        {
+                            "union_field_collision_values": {
+                                "status": [["branch1", "active"], ["branch2", "inactive"]],
+                            },
+                            "union_field_origins": {"status": "branch2"},
+                        }
+                    )
+                    # Older timestamp
+                    completed_at = "datetime('now', '-10 minutes')"
+
+                conn.execute(
+                    text(
+                        f"""
+                        UPDATE node_states
+                        SET status = 'COALESCED',
+                            completed_at = {completed_at},
+                            context_after_json = :context_after
+                        WHERE state_id = :state_id
+                        """
+                    ),
+                    {"state_id": ns.state_id, "context_after": context},
+                )
+            conn.commit()
+
+        # With limit=2, if LIMIT was in SQL, we'd only get the 2 overlap-only rows
+        # and filter them out, returning 0 results. With limit after filter, we
+        # should get the real collision even though it's older.
+        results = list_collisions(db, factory, "limit-after-filter", limit=2)
+
+        assert len(results) >= 1, (
+            f"Expected at least 1 real collision even with limit=2 and 2 newer overlap-only rows. Got {len(results)} results."
+        )
+        # Verify we got the real collision, not overlap-only
+        assert any(r["collision_fields"][0]["field"] == "status" for r in results), "Expected to find the 'status' field collision"
+
+    def test_canonical_comparison_for_nested_values(self) -> None:
+        """list_collisions uses canonical comparison for structurally equal nested values.
+
+        Regression: Using repr() for equality misclassifies structurally equal dicts
+        with different key ordering as different, creating false collision reports.
+        """
+        from sqlalchemy import text
+
+        from elspeth.mcp.analyzers.queries import list_collisions
+
+        setup = make_recorder_with_run(run_id="canonical-test")
+        db = setup.db
+        factory = setup.factory
+
+        register_test_node(
+            factory.data_flow,
+            "canonical-test",
+            "coalesce-node",
+            node_type=NodeType.COALESCE,
+            plugin_name="coalesce:merge",
+        )
+
+        row = factory.data_flow.create_row("canonical-test", setup.source_node_id, row_index=0, data={"x": 1})
+        token = factory.data_flow.create_token(row.row_id)
+
+        ns = factory.execution.begin_node_state(token.token_id, "coalesce-node", "canonical-test", step_index=1, input_data={"x": 1})
+
+        # Two dicts that are structurally equal but may have different repr()
+        # due to key ordering. They should NOT be reported as a collision.
+        # Note: In Python 3.7+ dicts preserve insertion order, but JSON
+        # serialization and deserialization may not preserve it.
+        context_json = json.dumps(
+            {
+                "union_field_collision_values": {
+                    "metadata": [
+                        ["branch1", {"name": "Alice", "age": 30}],
+                        ["branch2", {"age": 30, "name": "Alice"}],  # Same content, different key order
+                    ],
+                },
+                "union_field_origins": {"metadata": "branch1"},
+            }
+        )
+
+        with db.connection() as conn:
+            conn.execute(
+                text(
+                    """
+                    UPDATE node_states
+                    SET status = 'COALESCED',
+                        completed_at = datetime('now'),
+                        context_after_json = :context_after
+                    WHERE state_id = :state_id
+                    """
+                ),
+                {"state_id": ns.state_id, "context_after": context_json},
+            )
+            conn.commit()
+
+        results = list_collisions(db, factory, "canonical-test")
+
+        # Should return EMPTY — the dicts are structurally equal, so no real collision
+        assert results == [], f"Expected no collisions for structurally equal nested dicts, got {len(results)} records"
+
+    def test_pagination_stability_with_same_timestamp(self) -> None:
+        """Pagination must return stable results when completed_at timestamps collide.
+
+        Regression: list_collisions() used ORDER BY completed_at DESC only, without
+        a tie-breaker. When multiple rows share the same timestamp, their relative
+        order is undefined and can change between batch fetches, causing LIMIT/OFFSET
+        pagination to skip or duplicate rows.
+
+        Fix: Add state_id as a secondary sort column for deterministic ordering.
+        """
+        from sqlalchemy import text
+
+        from elspeth.mcp.analyzers.queries import list_collisions
+
+        setup = make_recorder_with_run(run_id="pagination-stability")
+        db = setup.db
+        factory = setup.factory
+
+        register_test_node(
+            factory.data_flow,
+            "pagination-stability",
+            "coalesce-node",
+            node_type=NodeType.COALESCE,
+            plugin_name="coalesce:merge",
+        )
+
+        # Create 5 collision records with IDENTICAL completed_at timestamps
+        # This triggers the instability: without a tie-breaker, ORDER BY completed_at
+        # can return these in any order between batch queries.
+        token_ids = []
+        fixed_timestamp = "2024-01-15 12:00:00"
+
+        for i in range(5):
+            row = factory.data_flow.create_row("pagination-stability", setup.source_node_id, row_index=i, data={"x": i})
+            token = factory.data_flow.create_token(row.row_id)
+            token_ids.append(token.token_id)
+            ns = factory.execution.begin_node_state(
+                token.token_id, "coalesce-node", "pagination-stability", step_index=1, input_data={"x": i}
+            )
+
+            # All records get the SAME timestamp — this is the trigger for instability
+            context_json = json.dumps(
+                {
+                    "union_field_collision_values": {
+                        "status": [["branch1", "active"], ["branch2", "inactive"]],
+                    },
+                    "union_field_origins": {"status": "branch1"},
+                }
+            )
+
+            with db.connection() as conn:
+                conn.execute(
+                    text(
+                        """
+                        UPDATE node_states
+                        SET status = 'COALESCED',
+                            completed_at = :timestamp,
+                            context_after_json = :context_after
+                        WHERE state_id = :state_id
+                        """
+                    ),
+                    {"state_id": ns.state_id, "timestamp": fixed_timestamp, "context_after": context_json},
+                )
+                conn.commit()
+
+        # Fetch with limit=5 — with unstable ordering, rows can shift between
+        # batches causing skips/duplicates when the internal batch_size kicks in
+        results = list_collisions(db, factory, "pagination-stability", limit=5)
+
+        # Verify all 5 unique token_ids are returned (no skips or duplicates)
+        result_token_ids = [r["token_id"] for r in results]
+        assert len(result_token_ids) == 5, f"Expected 5 results, got {len(result_token_ids)}"
+        assert len(set(result_token_ids)) == 5, f"Expected 5 unique token_ids, got duplicates: {result_token_ids}"
+        assert set(result_token_ids) == set(token_ids), f"Missing or extra token_ids: expected {token_ids}, got {result_token_ids}"

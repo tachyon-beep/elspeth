@@ -14,6 +14,7 @@ from elspeth.core.landscape.factory import RecorderFactory
 from elspeth.mcp.analyzers import contracts, diagnostics, queries, reports
 from elspeth.mcp.types import (
     CallDetail,
+    CollisionRecord,
     ContractViolationsReport,
     DAGStructureReport,
     DiagnosticReport,
@@ -123,11 +124,23 @@ class LandscapeAnalyzer:
         node_id: str | None = None,
         status: str | None = None,
         limit: int = 100,
+        include_context: bool = False,
     ) -> list[NodeStateRecord]:
-        return queries.get_node_states(self._db, self._factory, run_id, node_id=node_id, status=status, limit=limit)
+        return queries.get_node_states(
+            self._db,
+            self._factory,
+            run_id,
+            node_id=node_id,
+            status=status,
+            limit=limit,
+            include_context=include_context,
+        )
 
     def get_calls(self, state_id: str) -> list[CallDetail]:
         return queries.get_calls(self._db, self._factory, state_id)
+
+    def list_collisions(self, run_id: str, limit: int = 100) -> list[CollisionRecord]:
+        return queries.list_collisions(self._db, self._factory, run_id, limit=limit)
 
     def query(self, sql: str, params: dict[str, Any] | None = None) -> list[dict[str, Any]]:
         return queries.query(self._db, self._factory, sql, params=params)

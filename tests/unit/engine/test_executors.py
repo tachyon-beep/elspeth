@@ -1503,69 +1503,14 @@ class TestGateExecutor:
         assert failed_call.kwargs.get("status") == NodeStateStatus.FAILED
         assert "context_after" not in failed_call.kwargs
 
-    # --- NodeStateGuard terminality ---
-
-    def test_post_dispatch_failure_marks_state_failed_via_guard(self) -> None:
-        """Post-dispatch failure (e.g. output_hash crash) → state FAILED, not OPEN.
-
-        NodeStateGuard guarantees that any unhandled exception between
-        begin_node_state and the explicit complete() call results in auto-
-        completion as FAILED.  This test simulates a failure in stable_hash
-        (used for output_hash computation) AFTER successful gate evaluation
-        and dispatch — code that runs after all manual try/except blocks.
-        """
-        factory = _make_factory()
-        edge_map = {(NodeID("cg_1"), "true"): "edge_true"}
-        route_map = {(NodeID("cg_1"), "true"): RouteDestination.processing_node(NodeID("next_node"))}
-        executor = GateExecutor(
-            factory.execution,
-            _make_span_factory(),
-            _make_step_resolver(),
-            edge_map=edge_map,
-            route_resolution_map=route_map,
-        )
-        config = GateSettings(
-            name="my_gate",
-            input="in_conn",
-            condition="True",
-            routes={"true": "next_conn", "false": "error_sink"},
-        )
-        contract = _make_contract()
-        token = _make_token(contract=contract)
-        ctx = make_context()
-
-        # Monkey-patch stable_hash to fail on the second call (output_hash).
-        # First call is input_hash (succeeds), second is output_hash (fails).
-        from elspeth.core.canonical import stable_hash
-
-        original_stable_hash = stable_hash
-        call_count = 0
-
-        def failing_hash(data: Any) -> str:
-            nonlocal call_count
-            call_count += 1
-            if call_count == 1:
-                return original_stable_hash(data)
-            raise ValueError("Simulated output hash failure")
-
-        import elspeth.engine.executors.gate as gate_mod
-
-        original_ref = gate_mod.stable_hash  # type: ignore[attr-defined]
-        gate_mod.stable_hash = failing_hash  # type: ignore[attr-defined, assignment]
-        try:
-            with pytest.raises(ValueError, match="Simulated output hash failure"):
-                executor.execute_config_gate(config, "cg_1", token, ctx)
-        finally:
-            gate_mod.stable_hash = original_ref  # type: ignore[attr-defined]
-
-        # State must be FAILED (auto-completed by guard), not orphan OPEN
-        completed_calls = [
-            c for c in factory.execution.complete_node_state.call_args_list if c.kwargs.get("status") == NodeStateStatus.FAILED
-        ]
-        assert len(completed_calls) >= 1, (
-            "Node state should be FAILED when post-dispatch processing raises. "
-            "Without NodeStateGuard, this failure would leave the state OPEN."
-        )
+    # Note: test_post_dispatch_failure_marks_state_failed_via_guard was removed
+    # because gate.py now reuses input_hash for output_hash (gates don't modify
+    # data), eliminating the redundant stable_hash call. The failure scenario
+    # this test covered (output_hash computation failure) can no longer occur.
+    # NodeStateGuard behavior for actual gate failures is tested by:
+    # - test_config_gate_missing_token_manager_records_failed_state
+    # - test_config_gate_exception_records_failed_and_reraises
+    # - test_config_gate_runtime_error_in_dispatch_records_failed_state
 
 
 # =============================================================================

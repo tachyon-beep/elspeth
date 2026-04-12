@@ -743,12 +743,14 @@ class TestTotalExporterFailure:
             manager.close()
 
     def test_disabled_after_max_consecutive_failures_fail_on_total_false(self) -> None:
-        config = MockTelemetryConfig(fail_on_total_exporter_failure=False)
+        # When all exporters fail max_consecutive_failures times, manager disables.
+        # Circuit breaker threshold equals max_consecutive_failures, so they trip together.
+        config = MockTelemetryConfig(fail_on_total_exporter_failure=False, max_consecutive_failures=5)
         failing = FailingExporter(name="failing")
         manager = TelemetryManager(config, exporters=[failing])
         try:
-            # Send max_consecutive_failures events (10)
-            for _ in range(10):
+            # Send max_consecutive_failures events
+            for _ in range(5):
                 manager.handle_event(_lifecycle_event())
             _wait_for_processing(manager)
             assert manager._disabled is True
@@ -756,12 +758,13 @@ class TestTotalExporterFailure:
             manager.close()
 
     def test_disabled_manager_stops_accepting_events(self) -> None:
-        config = MockTelemetryConfig(fail_on_total_exporter_failure=False)
+        # Circuit breaker threshold equals max_consecutive_failures (both = 5 here)
+        config = MockTelemetryConfig(fail_on_total_exporter_failure=False, max_consecutive_failures=5)
         failing = FailingExporter(name="failing")
         manager = TelemetryManager(config, exporters=[failing])
         try:
             # Trigger disable
-            for _ in range(10):
+            for _ in range(5):
                 manager.handle_event(_lifecycle_event())
             _wait_for_processing(manager)
             assert manager._disabled is True
@@ -774,12 +777,14 @@ class TestTotalExporterFailure:
             manager.close()
 
     def test_telemetry_exporter_error_raised_on_flush_fail_on_total_true(self) -> None:
-        config = MockTelemetryConfig(fail_on_total_exporter_failure=True)
+        # Circuit breaker threshold equals max_consecutive_failures (both = 5 here)
+        config = MockTelemetryConfig(fail_on_total_exporter_failure=True, max_consecutive_failures=5)
         failing = FailingExporter(name="failing")
         manager = TelemetryManager(config, exporters=[failing])
         try:
-            for _ in range(10):
+            for _ in range(5):
                 manager.handle_event(_lifecycle_event())
+            _wait_for_processing(manager)
             # flush() will re-raise the stored exception
             with pytest.raises(TelemetryExporterError):
                 manager.flush()
@@ -787,12 +792,14 @@ class TestTotalExporterFailure:
             manager.close()
 
     def test_stored_exception_cleared_after_flush_reraise(self) -> None:
-        config = MockTelemetryConfig(fail_on_total_exporter_failure=True)
+        # Circuit breaker threshold equals max_consecutive_failures (both = 5 here)
+        config = MockTelemetryConfig(fail_on_total_exporter_failure=True, max_consecutive_failures=5)
         failing = FailingExporter(name="failing")
         manager = TelemetryManager(config, exporters=[failing])
         try:
-            for _ in range(10):
+            for _ in range(5):
                 manager.handle_event(_lifecycle_event())
+            _wait_for_processing(manager)
             with pytest.raises(TelemetryExporterError):
                 manager.flush()
             # Second flush should not raise (exception was cleared)
@@ -819,6 +826,7 @@ class TestHealthMetrics:
                 "consecutive_total_failures",
                 "queue_depth",
                 "queue_maxsize",
+                "circuit_breakers",
             }
             assert set(metrics.keys()) == expected_keys
         finally:
@@ -1018,3 +1026,114 @@ class TestClose:
         manager.close()
         # All events should have been processed before thread exited
         assert len(exporter.events) == 5
+
+
+# =============================================================================
+# Circuit Breaker Correctness
+# =============================================================================
+
+
+class TestCircuitBreakerCorrectness:
+    """Tests for circuit breaker edge cases and correctness.
+
+    Regression tests for:
+    - P1: Open-breaker skips should NOT count toward total failure threshold
+    - P2: Same-named exporter instances must have independent breakers
+    """
+
+    def test_same_named_exporters_have_independent_breakers(self) -> None:
+        """Two exporter instances with the same name must have independent circuit breakers.
+
+        Regression test: Before fix, both exporters shared a single breaker keyed by
+        exporter.name, causing failures from one to affect the other.
+
+        Real-world scenario: two OTLP endpoints (staging + prod), both named "otlp".
+        """
+        config = MockTelemetryConfig()
+
+        # Create two exporters with the SAME name (simulating two otlp endpoints)
+        exporter1 = TelemetryTestExporter(name="otlp")
+        exporter2 = TelemetryTestExporter(name="otlp")
+
+        manager = TelemetryManager(config, exporters=[exporter1, exporter2])
+        try:
+            # Verify each exporter has its own breaker
+            assert len(manager._circuit_breakers) == 2, (
+                f"Expected 2 independent breakers for 2 exporters, got {len(manager._circuit_breakers)}"
+            )
+
+            # The breakers should be keyed differently (not both "otlp")
+            breaker_keys = list(manager._circuit_breakers.keys())
+            assert breaker_keys[0] != breaker_keys[1], f"Breaker keys should be unique, but both are {breaker_keys}"
+        finally:
+            manager.close()
+
+    def test_same_named_failing_exporter_does_not_affect_healthy_same_name(self) -> None:
+        """Failures in one exporter should not trip another exporter's breaker.
+
+        Even if both exporters have the same name, their circuit breakers
+        must be independent.
+        """
+        config = MockTelemetryConfig()
+
+        # One healthy, one failing — both named "otlp"
+        healthy = TelemetryTestExporter(name="otlp")
+        failing = FailingExporter(name="otlp")
+
+        manager = TelemetryManager(config, exporters=[healthy, failing])
+        try:
+            # Emit enough events to trip the failing exporter's breaker
+            for _ in range(10):
+                manager.handle_event(_lifecycle_event())
+            _wait_for_processing(manager)
+
+            # Healthy exporter should have received all events
+            assert len(healthy.events) == 10, f"Healthy exporter should receive all events, got {len(healthy.events)}"
+
+            # The healthy exporter's breaker should still be CLOSED
+            # Find the breaker for the healthy exporter
+            for breaker in manager._circuit_breakers.values():
+                # The healthy exporter's breaker should have 0 failures
+                if breaker.failure_count == 0:
+                    assert breaker.state.name == "CLOSED"
+                    break
+            else:
+                pytest.fail("Could not find a breaker with 0 failures (healthy exporter)")
+        finally:
+            manager.close()
+
+    def test_failing_exporter_isolated_by_circuit_breaker(self) -> None:
+        """One failing exporter doesn't block healthy exporters.
+
+        Circuit breakers isolate failures: when one exporter's breaker trips,
+        events still flow to healthy exporters. This prevents one bad backend
+        from bringing down all telemetry.
+
+        Expected: After failing exporter's breaker trips, events continue to
+        succeed via the healthy exporter, and consecutive_total_failures stays 0.
+        """
+        config = MockTelemetryConfig(
+            fail_on_total_exporter_failure=True,
+            max_consecutive_failures=5,
+        )
+        failing = FailingExporter(name="failing")
+        healthy = TelemetryTestExporter(name="healthy")
+        manager = TelemetryManager(config, exporters=[failing, healthy])
+        try:
+            # Emit 10 events — failing exporter trips after 5, healthy keeps working
+            for _ in range(10):
+                manager.handle_event(_lifecycle_event())
+            _wait_for_processing(manager)
+
+            # Healthy exporter succeeded on all 10 events
+            assert healthy.event_count == 10, f"Expected 10 exports to healthy exporter, got {healthy.event_count}"
+            # Failing exporter only saw 5 before breaker tripped
+            assert failing.export_attempts == 5, f"Expected 5 exports to failing exporter (before breaker), got {failing.export_attempts}"
+            # No total failures because healthy exporter always succeeded
+            assert manager.health_metrics["consecutive_total_failures"] == 0, (
+                "Expected 0 consecutive total failures (healthy exporter saved each event)"
+            )
+            # All 10 events emitted successfully
+            assert manager.health_metrics["events_emitted"] == 10, "Expected 10 emitted events (healthy exporter succeeded)"
+        finally:
+            manager.close()

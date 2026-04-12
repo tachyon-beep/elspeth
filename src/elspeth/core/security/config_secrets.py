@@ -106,20 +106,12 @@ def load_secrets_from_config(config: SecretsConfig) -> list[SecretResolutionInpu
     except ImportError as e:
         raise SecretLoadError("Azure Key Vault packages not installed. Install with: uv pip install 'elspeth[azure]'") from e
 
-    # Create loader (has built-in caching)
-    # load_secrets_from_config() only called when config.source == "keyvault"
+    # Create loader (has built-in caching).
+    # Note: KeyVaultSecretLoader uses lazy client initialization — the constructor
+    # does no network I/O. Azure exceptions (auth, HTTP, network) are only raised
+    # during get_secret() calls, where they're caught in the loop below.
     assert config.vault_url is not None, "vault_url required when source=keyvault"
-    try:
-        loader = KeyVaultSecretLoader(vault_url=config.vault_url)
-    except ClientAuthenticationError as e:
-        raise SecretLoadError(
-            f"Failed to authenticate to Key Vault ({config.vault_url})\n"
-            f"DefaultAzureCredential could not find valid credentials.\n"
-            f"Ensure Managed Identity, Azure CLI login, or service principal env vars are configured.\n"
-            f"Error: {e}"
-        ) from e
-    except (HttpResponseError, ServiceRequestError) as e:
-        raise SecretLoadError(f"Failed to initialize Key Vault loader for {config.vault_url}\nError: {e}") from e
+    loader = KeyVaultSecretLoader(vault_url=config.vault_url)
 
     # Load each mapped secret, fingerprint immediately, collect resolution records.
     # Plaintext values are fingerprinted and discarded within this loop iteration —

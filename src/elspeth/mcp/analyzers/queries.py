@@ -12,11 +12,14 @@ import json
 import re
 from typing import Any, cast
 
+from elspeth.contracts import NodeStateStatus
 from elspeth.core.landscape.database import LandscapeDB
 from elspeth.core.landscape.factory import RecorderFactory
 from elspeth.core.landscape.formatters import dataclass_to_dict, serialize_datetime
 from elspeth.mcp.types import (
     CallDetail,
+    CollisionFieldRecord,
+    CollisionRecord,
     NodeDetail,
     NodeStateRecord,
     OperationCallRecord,
@@ -477,6 +480,7 @@ def get_node_states(
     node_id: str | None = None,
     status: str | None = None,
     limit: int = 100,
+    include_context: bool = False,
 ) -> list[NodeStateRecord]:
     """Get node states (processing records) for a run.
 
@@ -487,6 +491,8 @@ def get_node_states(
         node_id: Optional filter by node ID
         status: Optional filter by status (PENDING, RUNNING, COMPLETED, FAILED)
         limit: Maximum states to return
+        include_context: Include context_after, error, and success_reason JSON fields.
+            These are large and expensive to parse; disabled by default.
 
     Returns:
         List of node state records
@@ -496,8 +502,36 @@ def get_node_states(
     from elspeth.contracts import NodeStateStatus
     from elspeth.core.landscape.schema import node_states_table
 
+    # Core columns always needed for NodeStateRecord
+    core_columns = [
+        node_states_table.c.state_id,
+        node_states_table.c.token_id,
+        node_states_table.c.node_id,
+        node_states_table.c.step_index,
+        node_states_table.c.attempt,
+        node_states_table.c.status,
+        node_states_table.c.input_hash,
+        node_states_table.c.output_hash,
+        node_states_table.c.duration_ms,
+        node_states_table.c.started_at,
+        node_states_table.c.completed_at,
+    ]
+
+    # Context columns are large JSON blobs — only fetch when requested.
+    # This reduces I/O and memory for the common case where callers only
+    # need structural metadata, not the full context payloads.
+    if include_context:
+        columns = [
+            *core_columns,
+            node_states_table.c.context_after_json,
+            node_states_table.c.error_json,
+            node_states_table.c.success_reason_json,
+        ]
+    else:
+        columns = core_columns
+
     with db.connection() as conn:
-        query = select(node_states_table).where(node_states_table.c.run_id == run_id).limit(limit)
+        query = select(*columns).where(node_states_table.c.run_id == run_id).limit(limit)
 
         if node_id is not None:
             query = query.where(node_states_table.c.node_id == node_id)
@@ -517,8 +551,9 @@ def get_node_states(
         )
         rows = conn.execute(query).fetchall()
 
-    return [
-        {
+    results: list[NodeStateRecord] = []
+    for row in rows:
+        record: NodeStateRecord = {
             "state_id": row.state_id,
             "token_id": row.token_id,
             "node_id": row.node_id,
@@ -531,8 +566,13 @@ def get_node_states(
             "started_at": row.started_at.isoformat() if row.started_at else None,
             "completed_at": row.completed_at.isoformat() if row.completed_at else None,
         }
-        for row in rows
-    ]
+        if include_context:
+            record["context_after"] = json.loads(row.context_after_json) if row.context_after_json else None
+            record["error"] = json.loads(row.error_json) if row.error_json else None
+            record["success_reason"] = json.loads(row.success_reason_json) if row.success_reason_json else None
+        results.append(record)
+
+    return results
 
 
 def get_calls(db: LandscapeDB, factory: RecorderFactory, state_id: str) -> list[CallDetail]:
@@ -548,6 +588,200 @@ def get_calls(db: LandscapeDB, factory: RecorderFactory, state_id: str) -> list[
     """
     calls = factory.query.get_calls(state_id)
     return [_dataclass_to_dict(call) for call in calls]
+
+
+def _canonicalize_for_comparison(value: Any) -> str:
+    """Convert a value to canonical string for structural equality comparison.
+
+    Uses RFC 8785 (JCS) for deterministic JSON serialization. This ensures
+    that structurally equal dicts with different key ordering compare as equal.
+
+    Falls back to repr() for non-JSON-serializable types — these will compare
+    by identity, which is conservative (may report false collisions).
+    """
+    import rfc8785
+
+    try:
+        return rfc8785.dumps(value).decode("utf-8")
+    except (TypeError, ValueError):
+        # Non-JSON-serializable type — fall back to repr
+        return repr(value)
+
+
+def list_collisions(
+    db: LandscapeDB,
+    factory: RecorderFactory,
+    run_id: str,
+    limit: int = 100,
+) -> list[CollisionRecord]:
+    """List coalesce collision events for a run.
+
+    Finds all coalesce node states where union_field_collision_values is present,
+    indicating that fields had conflicting values from different branches.
+
+    This is essential for debugging production coalesce failures — without this,
+    operators must use raw SQL to find why a merged row has unexpected values.
+
+    Note: A single coalesce merge produces multiple node_states rows (one per
+    consumed branch token). This function returns one record per node_states row
+    that contains actual collisions (differing values). Callers who want to count
+    unique collision patterns can group by (node_id, collision_fields) themselves.
+
+    Args:
+        db: Database connection
+        factory: Recorder factory
+        run_id: Run ID to query
+        limit: Maximum collision records to return (applied AFTER filtering
+            overlap-only rows that don't contain real collisions)
+
+    Returns:
+        List of collision records with field-level details including winner/loser values.
+        Only fields with genuinely differing values are reported as collisions.
+    """
+    from sqlalchemy import or_, select
+
+    from elspeth.core.landscape.schema import node_states_table, nodes_table
+
+    # Chunked fetching: overlap-only filtering happens in Python (we can't tell
+    # in SQL whether values are structurally identical), so we can't use a simple
+    # LIMIT. Instead, fetch in batches with an over-fetch factor to bound memory
+    # while ensuring we find enough real collisions.
+    #
+    # Over-fetch factor of 3 means: if we want 10 results, fetch 30 rows at a time.
+    # Most coalesce rows that have union_field_collision_values also have real
+    # collisions (not just overlap), so this is usually sufficient in one batch.
+    batch_size = max(50, limit * 3)
+    offset = 0
+
+    # Base query without LIMIT/OFFSET — we'll add those per-batch
+    base_query = (
+        select(
+            node_states_table.c.token_id,
+            node_states_table.c.node_id,
+            node_states_table.c.status,
+            node_states_table.c.completed_at,
+            node_states_table.c.context_after_json,
+            nodes_table.c.plugin_name,
+        )
+        .select_from(
+            node_states_table.join(
+                nodes_table,
+                (node_states_table.c.node_id == nodes_table.c.node_id) & (node_states_table.c.run_id == nodes_table.c.run_id),
+            )
+        )
+        .where(node_states_table.c.run_id == run_id)
+        # Match both named coalesce nodes (coalesce:name) and plain 'coalesce'
+        # from older/manual runs. Plain 'coalesce' is valid for manually assembled
+        # pipelines or historical runs before named coalesce was standard.
+        .where(
+            or_(
+                nodes_table.c.plugin_name.like("coalesce:%"),
+                nodes_table.c.plugin_name == "coalesce",
+            )
+        )
+        .where(node_states_table.c.context_after_json.isnot(None))
+        .where(node_states_table.c.context_after_json.like("%union_field_collision_values%"))
+        # state_id as tie-breaker ensures stable LIMIT/OFFSET pagination when
+        # multiple rows share the same completed_at timestamp. Without this,
+        # row order between batches is undefined and pagination can skip/duplicate.
+        .order_by(node_states_table.c.completed_at.desc(), node_states_table.c.state_id)
+    )
+
+    results: list[CollisionRecord] = []
+
+    with db.connection() as conn:
+        while len(results) < limit:
+            # Fetch next batch
+            batch_query = base_query.limit(batch_size).offset(offset)
+            rows = conn.execute(batch_query).fetchall()
+
+            if not rows:
+                # No more rows in database — done
+                break
+
+            offset += len(rows)
+
+            for row in rows:
+                context = json.loads(row.context_after_json)
+
+                # Extract collision values: {field: [[branch, value], ...]}
+                collision_values = context.get("union_field_collision_values", {})
+                field_origins = context.get("union_field_origins", {})
+
+                collision_fields: list[CollisionFieldRecord] = []
+                for field, entries in collision_values.items():
+                    if not entries:
+                        continue
+
+                    # Filter out overlap-only fields: union_field_collision_values contains
+                    # all overlapping fields, even when values are identical. Only report
+                    # fields where at least two branches provided different values.
+                    #
+                    # Use canonical JSON serialization for structural comparison. This
+                    # ensures dicts with same key/value pairs but different insertion
+                    # order compare as equal, avoiding false collision reports.
+                    values = [e[1] for e in entries]
+                    canonical_values = {_canonicalize_for_comparison(v) for v in values}
+                    if len(canonical_values) < 2:
+                        continue
+
+                    # Determine winner from union_field_origins, not from entry order.
+                    # entry order is merge order, but the actual winner depends on
+                    # union_collision_policy (first_wins, last_wins, or fail).
+                    # union_field_origins records which branch's value was kept.
+                    #
+                    # IMPORTANT: When status is FAILED (e.g., union_collision_policy='fail'),
+                    # no winner was selected — the merge aborted. The metadata still contains
+                    # union_field_origins from the pre-failure state, but reporting those as
+                    # winners would be misleading. Set winner fields to None for failed merges.
+                    # Compare against stored value (lowercase) per NodeStateStatus StrEnum.
+                    is_failed = row.status == NodeStateStatus.FAILED.value
+                    winner_branch: str | None = None
+                    winner_value = None
+                    if not is_failed:
+                        winner_branch = field_origins.get(field)
+                        if winner_branch is not None:
+                            # Find the value from the winning branch
+                            for branch, val in entries:
+                                if branch == winner_branch:
+                                    winner_value = val
+                                    break
+
+                    collision_fields.append(
+                        {
+                            "field": field,
+                            "winner_branch": winner_branch,
+                            "winner_value": winner_value,
+                            "competing_values": [(e[0], e[1]) for e in entries],
+                        }
+                    )
+
+                # Only emit a record if there are actual collisions (differing values)
+                if not collision_fields:
+                    continue
+
+                # Check limit AFTER filtering to ensure we return up to `limit` real collisions
+                if len(results) >= limit:
+                    break
+
+                results.append(
+                    {
+                        "run_id": run_id,
+                        "token_id": row.token_id,
+                        "node_id": row.node_id,
+                        "plugin_name": row.plugin_name,
+                        "status": row.status,
+                        "completed_at": row.completed_at.isoformat() if row.completed_at else None,
+                        "collision_fields": collision_fields,
+                        "union_field_origins": field_origins,
+                    }
+                )
+
+            # If we reached the limit within this batch, stop fetching more
+            if len(results) >= limit:
+                break
+
+    return results
 
 
 def _strip_sql_comments(sql: str) -> str:

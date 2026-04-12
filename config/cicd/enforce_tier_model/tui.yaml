@@ -79,6 +79,11 @@ allow_hits:
   reason: Optional field access on NodeStateInfo (total=False TypedDict) — fields are conditionally present
   safety: Explicit None check before display, crash on required fields
   expires: '2026-05-02'
+- key: tui/widgets/lineage_tree.py:R1:LineageTree:_build_tree:fp=5e94beebd6bc46bb
+  owner: architecture
+  reason: Sparse token lookup — not all sinks have tokens attached
+  safety: Returns empty tuple on missing key; no silent coercion
+  expires: '2026-05-13'
 per_file_rules:
 - pattern: tui/screens/explain_screen.py
   rules:
@@ -90,5 +95,11 @@ per_file_rules:
   rules:
   - R5
   reason: Tier 1 audit data validation before JSON parse
+  expires: null
+  max_hits: 3
+- pattern: tui/widgets/lineage_tree.py
+  rules:
+  - R5
+  reason: Offensive isinstance checks in __post_init__ — crash on invalid type per CLAUDE.md freeze_fields pattern
   expires: null
   max_hits: 3

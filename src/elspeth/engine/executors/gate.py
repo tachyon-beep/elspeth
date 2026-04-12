@@ -310,7 +310,7 @@ class GateExecutor:
                 contract=token.row_data.contract,  # Preserve contract reference
             )
             result.input_hash = input_hash
-            result.output_hash = stable_hash(input_dict)  # Same as input (no modification)
+            result.output_hash = input_hash  # Gates don't modify data — output equals input
             result.duration_ms = duration_ms
 
             # Complete node state - always "completed" for successful execution

@@ -2001,6 +2001,7 @@ def resume(
 
 @app.command()
 def health(
+    ctx: typer.Context,
     json_output: bool = typer.Option(
         False,
         "--json",
@@ -2013,6 +2014,22 @@ def health(
         "-v",
         help="Include detailed check information.",
     ),
+    host: str | None = typer.Option(
+        None,
+        "--host",
+        help="Web server host to check. Defaults to ELSPETH_WEB__HOST or 127.0.0.1.",
+    ),
+    port: int | None = typer.Option(
+        None,
+        "--port",
+        "-p",
+        help="Web server port to check. Defaults to ELSPETH_WEB__PORT or 8451.",
+    ),
+    skip_web: bool = typer.Option(
+        True,
+        "--skip-web/--check-web",
+        help="Skip web interface check. Default: skip (batch containers). Use --check-web to probe.",
+    ),
 ) -> None:
     """Check system health for deployment verification.
 
@@ -2021,11 +2038,17 @@ def health(
 
     Examples:
 
-        # Basic health check
+        # Basic health check (batch/CLI containers — skips web by default)
         elspeth health
 
         # JSON output for automation
         elspeth health --json
+
+        # Check web server (for web containers)
+        elspeth health --check-web
+
+        # Check web server on custom port
+        elspeth health --check-web --port 9000
 
         # Verbose with details
         elspeth health --verbose
@@ -2033,6 +2056,17 @@ def health(
     import json as json_module
     import subprocess
     import sys
+
+    from click.core import ParameterSource
+
+    # Infer web checking from explicit host/port arguments.
+    # If user provides --host or --port, they likely want web checking.
+    # BUT: honor explicit --skip-web even when host/port are supplied, so
+    # wrappers can always pass host/port but conditionally suppress the check.
+    skip_web_source = ctx.get_parameter_source("skip_web")
+    skip_web_was_default = skip_web_source == ParameterSource.DEFAULT
+    if (host is not None or port is not None) and skip_web and skip_web_was_default:
+        skip_web = False
 
     # Health check results
     checks: dict[str, dict[str, str | bool]] = {}
@@ -2157,6 +2191,69 @@ def health(
             "value": str(e),
         }
         overall_healthy = False
+
+    # Check 8: Web interface reachable
+    # Priority: CLI flags > env vars > defaults
+    # Note: env vars must be set externally (e.g., docker -e) — they are NOT
+    # automatically propagated from `elspeth web` which runs in a separate process.
+    if skip_web:
+        checks["web"] = {
+            "status": "skip",
+            "value": "skipped via --skip-web",
+        }
+    else:
+        import urllib.error
+        import urllib.request
+
+        web_host_resolved = host or os.environ.get("ELSPETH_WEB__HOST", "127.0.0.1")
+        # Wildcard bind addresses (0.0.0.0, ::) are listen-all addresses, not
+        # connectable destinations. Translate to loopback for probing.
+        _wildcard_to_loopback = {"0.0.0.0": "127.0.0.1", "::": "::1"}
+        probe_host = _wildcard_to_loopback.get(web_host_resolved, web_host_resolved)
+        # RFC 3986: IPv6 literals in URIs must be bracketed to distinguish
+        # port separator from address colons. "::1" → "[::1]".
+        host_for_url = f"[{probe_host}]" if ":" in probe_host else probe_host
+        try:
+            # Parse port inside try so malformed env var produces unhealthy check,
+            # not CLI crash. Health probes must distinguish "misconfigured" from "crashed".
+            web_port_resolved = port or int(os.environ.get("ELSPETH_WEB__PORT", "8451"))
+            web_url = f"http://{host_for_url}:{web_port_resolved}/api/health"
+
+            # Bypass HTTP_PROXY/HTTPS_PROXY only for loopback self-checks.
+            # Corporate environments set proxy env vars for outbound traffic,
+            # but routing localhost probes through a proxy causes false unhealthy
+            # reports. Remote probes must still honor proxy settings.
+            is_loopback = probe_host == "localhost" or probe_host == "::1" or probe_host.startswith("127.")
+            if is_loopback:
+                opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
+            else:
+                opener = urllib.request.build_opener()  # Default: honors proxy env vars
+            with opener.open(web_url, timeout=5) as response:
+                body = response.read().decode("utf-8")
+                data = json_module.loads(body)
+                if data.get("status") == "ok":
+                    checks["web"] = {
+                        "status": "ok",
+                        "value": f"{web_host_resolved}:{web_port_resolved}",
+                    }
+                else:
+                    checks["web"] = {
+                        "status": "error",
+                        "value": f"unexpected response: {data}",
+                    }
+                    overall_healthy = False
+        except urllib.error.URLError as e:
+            checks["web"] = {
+                "status": "error",
+                "value": f"connection failed: {e.reason}",
+            }
+            overall_healthy = False
+        except Exception as e:
+            checks["web"] = {
+                "status": "error",
+                "value": str(e),
+            }
+            overall_healthy = False
 
     # Determine overall status
     status = "healthy" if overall_healthy else "unhealthy"

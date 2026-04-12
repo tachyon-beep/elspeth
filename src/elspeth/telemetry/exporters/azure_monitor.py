@@ -16,11 +16,11 @@ from typing import TYPE_CHECKING, Any
 import structlog
 
 from elspeth.telemetry.errors import TELEMETRY_TRANSPORT_ERRORS, TelemetryExporterError
-from elspeth.telemetry.exporters.otlp import (
-    _derive_trace_id,
-    _generate_span_id,
-    _serialize_event_attributes,
-    _SyntheticReadableSpan,
+from elspeth.telemetry.serialization import (
+    SyntheticReadableSpan,
+    derive_trace_id,
+    generate_span_id,
+    serialize_event_attributes,
 )
 
 if TYPE_CHECKING:
@@ -280,10 +280,10 @@ class AzureMonitorExporter:
         finally:
             self._buffer.clear()
 
-    def _event_to_span(self, event: TelemetryEvent) -> _SyntheticReadableSpan:
+    def _event_to_span(self, event: TelemetryEvent) -> SyntheticReadableSpan:
         """Convert TelemetryEvent to OpenTelemetry ReadableSpan.
 
-        Reuses the OTLP exporter's _SyntheticReadableSpan for consistency.
+        Reuses SyntheticReadableSpan from the shared serialization module.
         Adds Azure-specific attributes for better filtering in Application Insights.
 
         Args:
@@ -294,9 +294,9 @@ class AzureMonitorExporter:
         """
         from opentelemetry.trace import SpanContext, SpanKind, TraceFlags
 
-        # Derive IDs using shared functions from OTLP exporter
-        trace_id = _derive_trace_id(event.run_id)
-        span_id = _generate_span_id()
+        # Derive IDs using shared serialization functions
+        trace_id = derive_trace_id(event.run_id)
+        span_id = generate_span_id()
 
         # Convert timestamp to nanoseconds since epoch
         if event.timestamp.tzinfo is None:
@@ -321,7 +321,7 @@ class AzureMonitorExporter:
         )
 
         # Create a ReadableSpan with resource attributes for proper service identification
-        span = _SyntheticReadableSpan(
+        span = SyntheticReadableSpan(
             name=type(event).__name__,
             context=span_context,
             attributes=attributes,
@@ -336,7 +336,7 @@ class AzureMonitorExporter:
     @staticmethod
     def _serialize_event_attributes(event: TelemetryEvent) -> dict[str, Any]:
         """Serialize event fields as span attributes."""
-        return _serialize_event_attributes(event)
+        return serialize_event_attributes(event)
 
     def flush(self) -> None:
         """Flush any buffered events to Azure Monitor.

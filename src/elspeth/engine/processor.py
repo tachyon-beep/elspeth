@@ -1165,6 +1165,63 @@ class RowProcessor:
             is_retryable=is_retryable,
         )
 
+    def _record_source_and_start_traversal(
+        self,
+        token: TokenInfo,
+        input_data: dict[str, Any],
+        transforms: Sequence[Any],
+        ctx: PluginContext,
+        *,
+        coalesce_node_id: NodeID | None,
+        coalesce_name: CoalesceName | None,
+    ) -> list[RowResult]:
+        """Record source node_state and start pipeline traversal.
+
+        Shared implementation for process_row and process_existing_row.
+        Records the source node as immediately COMPLETED (duration_ms=0)
+        since source "processing" already happened in the plugin iterator.
+
+        Args:
+            token: Token for the row being processed
+            input_data: Row data dict for audit hashing (must be plain dict)
+            transforms: List of transform plugins (for invariant check)
+            ctx: Plugin context
+            coalesce_node_id: Node ID at which fork children should coalesce
+            coalesce_name: Name of the coalesce point for merging
+
+        Returns:
+            List of RowResults, one per terminal token
+        """
+        # Record source node_state (step_index=0) for audit lineage.
+        # Source "processing" already happened in the plugin iterator — we record
+        # the result immediately as COMPLETED with duration_ms=0.
+        source_state = self._execution.begin_node_state(
+            token_id=token.token_id,
+            node_id=self._source_node_id,
+            run_id=self._run_id,
+            step_index=0,
+            input_data=input_data,
+        )
+        self._execution.complete_node_state(
+            state_id=source_state.state_id,
+            status=NodeStateStatus.COMPLETED,
+            output_data=input_data,
+            duration_ms=0,
+        )
+
+        if transforms and self._first_transform_node_id is None:
+            raise OrchestrationInvariantError("Traversal context is missing first_transform_node_id for non-empty transform pipeline")
+        initial_node_id = self._first_transform_node_id if self._first_transform_node_id is not None else self._source_node_id
+        return self._drain_work_queue(
+            self._nav.create_work_item(
+                token=token,
+                current_node_id=initial_node_id,
+                coalesce_node_id=coalesce_node_id,
+                coalesce_name=coalesce_name,
+            ),
+            ctx,
+        )
+
     def process_row(
         self,
         row_index: int,
@@ -1201,36 +1258,15 @@ class RowProcessor:
             source_row=source_row,
         )
 
-        # Record source node_state (step_index=0) for audit lineage.
-        # Source "processing" already happened in the plugin iterator — we record
-        # the result immediately as COMPLETED with duration_ms=0.
         # Valid SourceRows always have dict data (SourceRow.valid() takes dict[str, Any]).
         source_input: dict[str, Any] = source_row.row
-        source_state = self._execution.begin_node_state(
-            token_id=token.token_id,
-            node_id=self._source_node_id,
-            run_id=self._run_id,
-            step_index=0,
+        return self._record_source_and_start_traversal(
+            token=token,
             input_data=source_input,
-        )
-        self._execution.complete_node_state(
-            state_id=source_state.state_id,
-            status=NodeStateStatus.COMPLETED,
-            output_data=source_input,
-            duration_ms=0,
-        )
-
-        if transforms and self._first_transform_node_id is None:
-            raise OrchestrationInvariantError("Traversal context is missing first_transform_node_id for non-empty transform pipeline")
-        initial_node_id = self._first_transform_node_id if self._first_transform_node_id is not None else self._source_node_id
-        return self._drain_work_queue(
-            self._nav.create_work_item(
-                token=token,
-                current_node_id=initial_node_id,
-                coalesce_node_id=coalesce_node_id,
-                coalesce_name=coalesce_name,
-            ),
-            ctx,
+            transforms=transforms,
+            ctx=ctx,
+            coalesce_node_id=coalesce_node_id,
+            coalesce_name=coalesce_name,
         )
 
     def process_existing_row(
@@ -1266,35 +1302,16 @@ class RowProcessor:
             row_data=row_data,
         )
 
-        # Record source node_state (step_index=0) for resumed token lineage.
         # The row already exists from the original run, but this new token
         # needs its own source state for complete audit lineage.
         resumed_input = row_data.to_dict()
-        source_state = self._execution.begin_node_state(
-            token_id=token.token_id,
-            node_id=self._source_node_id,
-            run_id=self._run_id,
-            step_index=0,
+        return self._record_source_and_start_traversal(
+            token=token,
             input_data=resumed_input,
-        )
-        self._execution.complete_node_state(
-            state_id=source_state.state_id,
-            status=NodeStateStatus.COMPLETED,
-            output_data=resumed_input,
-            duration_ms=0,
-        )
-
-        if transforms and self._first_transform_node_id is None:
-            raise OrchestrationInvariantError("Traversal context is missing first_transform_node_id for non-empty transform pipeline")
-        initial_node_id = self._first_transform_node_id if self._first_transform_node_id is not None else self._source_node_id
-        return self._drain_work_queue(
-            self._nav.create_work_item(
-                token=token,
-                current_node_id=initial_node_id,
-                coalesce_node_id=coalesce_node_id,
-                coalesce_name=coalesce_name,
-            ),
-            ctx,
+            transforms=transforms,
+            ctx=ctx,
+            coalesce_node_id=coalesce_node_id,
+            coalesce_name=coalesce_name,
         )
 
     def process_token(

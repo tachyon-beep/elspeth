@@ -53,6 +53,7 @@ class _ArgSpec:
     optional_str_defaults: tuple[tuple[str, str], ...] = ()  # (name, default)
     optional_int: tuple[tuple[str, int], ...] = ()  # (name, default)
     optional_int_min: tuple[tuple[str, int], ...] = ()  # (name, minimum) — semantic bounds
+    optional_bool: tuple[tuple[str, bool], ...] = ()  # (name, default)
     optional_dict: tuple[str, ...] = ()  # defaults to None
 
 
@@ -251,12 +252,14 @@ _TOOLS: dict[str, _ToolDef] = {
             optional_str=("node_id", "status"),
             optional_int=(("limit", 100),),
             optional_int_min=(("limit", 1),),
+            optional_bool=(("include_context", False),),
         ),
         handler=lambda a, args: a.get_node_states(
             run_id=args["run_id"],
             node_id=args["node_id"],
             status=args["status"],
             limit=args["limit"],
+            include_context=args["include_context"],
         ),
         schema_properties={
             "run_id": {"type": "string", "description": "Run ID to query"},
@@ -267,6 +270,27 @@ _TOOLS: dict[str, _ToolDef] = {
                 "enum": ["open", "pending", "completed", "failed"],
             },
             "limit": {"type": "integer", "description": "Max states (default 100)", "default": 100},
+            "include_context": {
+                "type": "boolean",
+                "description": "Include context_after, error, and success_reason JSON fields (large, expensive)",
+                "default": False,
+            },
+        },
+    ),
+    "list_collisions": _ToolDef(
+        description="List coalesce collision events — shows merge conflicts with winner/loser values",
+        args=_ArgSpec(
+            required_str=("run_id",),
+            optional_int=(("limit", 100),),
+            optional_int_min=(("limit", 1),),
+        ),
+        handler=lambda a, args: a.list_collisions(
+            run_id=args["run_id"],
+            limit=args["limit"],
+        ),
+        schema_properties={
+            "run_id": {"type": "string", "description": "Run ID to query"},
+            "limit": {"type": "integer", "description": "Max collision records (default 100)", "default": 100},
         },
     ),
     "get_calls": _ToolDef(
@@ -460,6 +484,12 @@ def _validate_tool_args(name: str, arguments: dict[str, Any]) -> dict[str, Any]:
             raise TypeError(f"'{name}': '{fname}' must be integer, got {type(val).__name__}")
         if fname in int_mins and val < int_mins[fname]:
             raise ValueError(f"'{name}': '{fname}' must be >= {int_mins[fname]}, got {val}")
+        validated[fname] = val
+
+    for fname, bool_default in spec.optional_bool:
+        val = arguments.get(fname, bool_default)
+        if not isinstance(val, bool):
+            raise TypeError(f"'{name}': '{fname}' must be boolean, got {type(val).__name__}")
         validated[fname] = val
 
     for fname in spec.optional_dict:
