@@ -1838,3 +1838,113 @@ class TestDualComputationCrossPathAssertion:
             f"Builder stored {stored_guarantees}, graph computed {computed}. "
             "quorum_count == branch_count should use union semantics like require_all."
         )
+
+
+class TestMergeUnionFieldsNullableSemantics:
+    """Tests for nullable tracking in union field merging (P1 fix).
+
+    The P1 bug: Under require_all with union_collision_policy='last_wins',
+    if branch A has `x: int` (required, non-nullable) and branch B has
+    `x: int?` (optional, nullable), the OR semantics marked `x` as required.
+    But at runtime, B can win the collision and produce `x=None`, failing
+    downstream consumers expecting `x: int`.
+
+    The fix: Track nullable explicitly. A shared field is nullable if ANY
+    branch has it nullable (because that branch can win via last_wins).
+    """
+
+    def test_require_all_mixed_nullable_shared_field_becomes_nullable(self) -> None:
+        """P1 fix: When branch A has x:int and branch B has x:int?, merged x is nullable."""
+        branch_a = SchemaConfig(
+            mode="flexible",
+            fields=(FieldDefinition(name="x", field_type="int", required=True, nullable=False),),
+        )
+        branch_b = SchemaConfig(
+            mode="flexible",
+            fields=(FieldDefinition(name="x", field_type="int", required=False, nullable=True),),
+        )
+        merged = merge_union_fields({"a": branch_a, "b": branch_b}, require_all=True)
+
+        assert merged.fields is not None
+        x_field = next(f for f in merged.fields if f.name == "x")
+        # Key assertion: even with OR semantics for required, nullable propagates
+        assert x_field.nullable is True, "Shared field with nullable branch should be nullable"
+        # OR semantics: required in merged output (required in ANY)
+        assert x_field.required is True, "OR semantics: required if required in ANY branch"
+
+    def test_require_all_all_required_non_nullable_stays_non_nullable(self) -> None:
+        """When all branches require x:int (non-nullable), merged x is non-nullable."""
+        branch_a = SchemaConfig(
+            mode="flexible",
+            fields=(FieldDefinition(name="x", field_type="int", required=True, nullable=False),),
+        )
+        branch_b = SchemaConfig(
+            mode="flexible",
+            fields=(FieldDefinition(name="x", field_type="int", required=True, nullable=False),),
+        )
+        merged = merge_union_fields({"a": branch_a, "b": branch_b}, require_all=True)
+
+        assert merged.fields is not None
+        x_field = next(f for f in merged.fields if f.name == "x")
+        assert x_field.required is True
+        assert x_field.nullable is False, "All-required non-nullable should stay non-nullable"
+
+    def test_best_effort_mixed_nullable_is_nullable_and_optional(self) -> None:
+        """Under best_effort (AND semantics), mixed nullable becomes optional+nullable."""
+        branch_a = SchemaConfig(
+            mode="flexible",
+            fields=(FieldDefinition(name="x", field_type="int", required=True, nullable=False),),
+        )
+        branch_b = SchemaConfig(
+            mode="flexible",
+            fields=(FieldDefinition(name="x", field_type="int", required=False, nullable=True),),
+        )
+        merged = merge_union_fields({"a": branch_a, "b": branch_b}, require_all=False)
+
+        assert merged.fields is not None
+        x_field = next(f for f in merged.fields if f.name == "x")
+        # AND semantics: optional if optional in ANY branch
+        assert x_field.required is False, "AND semantics: optional if optional in ANY"
+        assert x_field.nullable is True, "Nullable if nullable in ANY branch"
+
+    def test_branch_exclusive_field_inherits_nullable_under_require_all(self) -> None:
+        """Branch-exclusive fields under require_all preserve source nullable status."""
+        branch_a = SchemaConfig(
+            mode="flexible",
+            fields=(
+                FieldDefinition(name="shared", field_type="int", required=True, nullable=False),
+                FieldDefinition(name="a_only", field_type="str", required=True, nullable=False),
+            ),
+        )
+        branch_b = SchemaConfig(
+            mode="flexible",
+            fields=(FieldDefinition(name="shared", field_type="int", required=True, nullable=False),),
+        )
+        merged = merge_union_fields({"a": branch_a, "b": branch_b}, require_all=True)
+
+        assert merged.fields is not None
+        a_only = next(f for f in merged.fields if f.name == "a_only")
+        # Under require_all, branch-exclusive fields keep their required status
+        assert a_only.required is True, "Branch-exclusive required under require_all"
+        assert a_only.nullable is False, "Branch-exclusive non-nullable preserved"
+
+    def test_branch_exclusive_field_forced_nullable_under_best_effort(self) -> None:
+        """Branch-exclusive fields under best_effort become optional+nullable."""
+        branch_a = SchemaConfig(
+            mode="flexible",
+            fields=(
+                FieldDefinition(name="shared", field_type="int", required=True, nullable=False),
+                FieldDefinition(name="a_only", field_type="str", required=True, nullable=False),
+            ),
+        )
+        branch_b = SchemaConfig(
+            mode="flexible",
+            fields=(FieldDefinition(name="shared", field_type="int", required=True, nullable=False),),
+        )
+        merged = merge_union_fields({"a": branch_a, "b": branch_b}, require_all=False)
+
+        assert merged.fields is not None
+        a_only = next(f for f in merged.fields if f.name == "a_only")
+        # Under best_effort, branch-exclusive fields become optional (branch may not arrive)
+        assert a_only.required is False, "Branch-exclusive forced optional under best_effort"
+        assert a_only.nullable is True, "Branch-exclusive forced nullable (may be absent)"

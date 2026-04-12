@@ -79,6 +79,7 @@ from elspeth.contracts.events import (
 )
 from elspeth.contracts.hashing import repr_hash
 from elspeth.contracts.plugin_context import PluginContext
+from elspeth.contracts.schema_contract_factory import create_contract_from_config
 from elspeth.contracts.types import (
     AggregationName,
     BranchName,
@@ -922,7 +923,21 @@ class Orchestrator:
                         branch_name: tuple(sorted(schema.get_effective_guaranteed_fields()))
                         for branch_name, schema in branch_schema_configs.items()
                     }
-                coalesce_executor.register_coalesce(coalesce_settings_entry, coalesce_node_id, branch_schemas)
+
+                # Retrieve pre-computed output schema from DAG builder (P2 fix).
+                # This ensures runtime contracts match build-time schema computation,
+                # preserving nullable semantics from the P1 fix.
+                coalesce_node_info = graph.get_node_info(coalesce_node_id)
+                output_schema: SchemaContract | None = None
+                if coalesce_node_info.output_schema_config is not None:
+                    output_schema = create_contract_from_config(coalesce_node_info.output_schema_config)
+
+                coalesce_executor.register_coalesce(
+                    coalesce_settings_entry,
+                    coalesce_node_id,
+                    branch_schemas=branch_schemas,
+                    output_schema=output_schema,
+                )
             if restored_coalesce_state is not None:
                 coalesce_executor.restore_from_checkpoint(restored_coalesce_state)
 

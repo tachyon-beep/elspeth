@@ -67,12 +67,16 @@ class FieldDefinition:
     Attributes:
         name: Field name (must be valid Python identifier)
         field_type: One of: str, int, float, bool, any
-        required: If False, field can be missing or None
+        required: If False, field may be absent from the row
+        nullable: If True, field value may be None when present. Used by
+            coalesce merge logic to track whether a branch can produce None
+            values for this field (affecting collision policy semantics).
     """
 
     name: str
     field_type: Literal["str", "int", "float", "bool", "any"]
     required: bool = True
+    nullable: bool = False
 
     @classmethod
     def parse(cls, spec: str) -> FieldDefinition:
@@ -136,6 +140,7 @@ class FieldDefinition:
             name=name,
             field_type=typed_field,
             required=optional_marker is None,
+            nullable=optional_marker is not None,
         )
 
     def to_dict(self) -> dict[str, str | bool]:

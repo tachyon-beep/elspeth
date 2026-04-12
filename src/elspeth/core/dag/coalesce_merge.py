@@ -107,7 +107,11 @@ def merge_union_fields(
         GraphValidationError: If branches have incompatible types for the same
             field name.
     """
-    seen_types: dict[str, tuple[str, bool, str]] = {}
+    # Track (type, required, nullable, branch) for each field.
+    # The nullable flag is critical for require_all+last_wins: if ANY branch can
+    # produce None for a field, the merged field is nullable even if "required"
+    # (because that branch's None value can win the collision).
+    seen_types: dict[str, tuple[str, bool, bool, str]] = {}
     branches_with_field: dict[str, set[str]] = {}
     contributing_branches: set[str] = set()
     all_observed = False
@@ -123,8 +127,11 @@ def merge_union_fields(
             if fd.name not in branches_with_field:
                 branches_with_field[fd.name] = set()
             branches_with_field[fd.name].add(branch_name)
+
+            fd_nullable = fd.nullable
+
             if fd.name in seen_types:
-                prior_type, prior_req, prior_branch = seen_types[fd.name]
+                prior_type, prior_req, prior_nullable, prior_branch = seen_types[fd.name]
                 if prior_type != fd.field_type:
                     node_desc = f"'{coalesce_id}'" if coalesce_id else "coalesce node"
                     raise GraphValidationError(
@@ -135,24 +142,30 @@ def merge_union_fields(
                         "Union merge requires compatible types on shared fields."
                     )
                 if require_all:
-                    # OR: required if required in ANY branch.
-                    if fd.required and not prior_req:
-                        seen_types[fd.name] = (prior_type, True, prior_branch)
+                    # OR for required: required if required in ANY branch.
+                    merged_req = prior_req or fd.required
+                    # BUT: nullable if ANY branch allows None. With last_wins (default),
+                    # any branch can win the collision, so if ANY is nullable, merged is.
+                    merged_nullable = prior_nullable or fd_nullable
+                    seen_types[fd.name] = (prior_type, merged_req, merged_nullable, prior_branch)
                 else:
                     # AND: optional if optional in ANY branch.
-                    if not fd.required:
-                        seen_types[fd.name] = (prior_type, False, prior_branch)
+                    merged_req = prior_req and fd.required
+                    # nullable if ANY is nullable (same rule)
+                    merged_nullable = prior_nullable or fd_nullable
+                    seen_types[fd.name] = (prior_type, merged_req, merged_nullable, prior_branch)
             else:
-                seen_types[fd.name] = (fd.field_type, fd.required, branch_name)
+                seen_types[fd.name] = (fd.field_type, fd.required, fd_nullable, branch_name)
 
     # Branch-exclusive field handling (post-loop pass):
-    # - require_all: keep the source-branch required flag
-    # - other policies: force optional
+    # - require_all: keep the source-branch required flag (branch always arrives)
+    # - other policies: force optional (branch may not arrive)
     if not require_all:
         for field_name in list(seen_types):
             if branches_with_field[field_name] != contributing_branches:
-                ftype, _, first_branch = seen_types[field_name]
-                seen_types[field_name] = (ftype, False, first_branch)
+                ftype, _, _, first_branch = seen_types[field_name]
+                # Force optional, and nullable (since branch may not arrive)
+                seen_types[field_name] = (ftype, False, True, first_branch)
 
     if all_observed or not seen_types:
         return SchemaConfig(
@@ -163,8 +176,8 @@ def merge_union_fields(
         )
 
     merged_fields = tuple(
-        FieldDefinition(name=name, field_type=ftype, required=req)  # type: ignore[arg-type]
-        for name, (ftype, req, _) in seen_types.items()
+        FieldDefinition(name=name, field_type=ftype, required=req, nullable=is_nullable)  # type: ignore[arg-type]
+        for name, (ftype, req, is_nullable, _) in seen_types.items()
     )
     return SchemaConfig(
         mode="flexible",

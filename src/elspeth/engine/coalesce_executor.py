@@ -203,6 +203,10 @@ class CoalesceExecutor:
         # restore_from_checkpoint(). Branch schemas come from fresh graph data each run,
         # not from checkpoint — the checkpoint stores only pending tokens and lost branches.
         self._branch_expected_fields: dict[str, dict[str, tuple[str, ...]]] = {}
+        # Pre-computed output schemas: coalesce_name -> SchemaContract
+        # Used to ensure runtime contracts match DAG-computed schemas (P2 fix).
+        # When populated, _execute_merge() uses this instead of runtime merge().
+        self._output_schemas: dict[str, SchemaContract] = {}
         # Pending tokens: (coalesce_name, row_id) -> _PendingCoalesce
         self._pending: dict[tuple[str, str], _PendingCoalesce] = {}
         # Completed coalesces: tracks keys that have already merged/failed
@@ -219,6 +223,7 @@ class CoalesceExecutor:
         settings: CoalesceSettings,
         node_id: NodeID,
         branch_schemas: dict[str, tuple[str, ...]] | None = None,
+        output_schema: SchemaContract | None = None,
     ) -> None:
         """Register a coalesce point.
 
@@ -230,11 +235,16 @@ class CoalesceExecutor:
                 Keys are branch names from settings.branches; values are guaranteed
                 fields from that branch's producer schema. May be None for pipelines
                 using observed-mode schemas where no fields are declared.
+            output_schema: Optional pre-computed output schema from DAG builder.
+                When provided, used directly in union merge instead of runtime
+                SchemaContract.merge() to ensure build/runtime contract alignment.
         """
         self._settings[settings.name] = settings
         self._node_ids[settings.name] = node_id
         if branch_schemas is not None:
             self._branch_expected_fields[settings.name] = branch_schemas
+        if output_schema is not None:
+            self._output_schemas[settings.name] = output_schema
 
     def get_registered_names(self) -> list[str]:
         """Get names of all registered coalesce points.
@@ -806,24 +816,30 @@ class CoalesceExecutor:
             contracts: list[SchemaContract] = [e.token.row_data.contract for e in pending.branches.values()]
 
             if settings.merge == "union":
-                # Union: Merge all contracts (current behavior - correct)
-                merged_contract = contracts[0]
-                for c in contracts[1:]:
-                    try:
-                        merged_contract = merged_contract.merge(c)
-                    except ContractMergeError as e:
-                        # Type conflict between branches — fail this row gracefully.
-                        # This can happen legitimately when all branches use observed
-                        # schemas and runtime data produces incompatible types for the
-                        # same field. Build-time validation cannot catch this case
-                        # because observed schemas have no declared fields.
-                        # (See: elspeth-c75ac86e35)
-                        return self._fail_pending(
-                            settings=settings,
-                            key=key,
-                            step=step,
-                            failure_reason=f"contract_type_conflict: {e}",
-                        )
+                # Use pre-computed DAG schema if available (P2 fix: build/runtime alignment).
+                # This ensures runtime contracts match what the DAG builder computed,
+                # preserving nullable semantics from the P1 fix.
+                if settings.name in self._output_schemas:
+                    merged_contract = self._output_schemas[settings.name]
+                else:
+                    # Fallback to runtime merge (for backward compat / tests without DAG schema)
+                    merged_contract = contracts[0]
+                    for c in contracts[1:]:
+                        try:
+                            merged_contract = merged_contract.merge(c)
+                        except ContractMergeError as e:
+                            # Type conflict between branches — fail this row gracefully.
+                            # This can happen legitimately when all branches use observed
+                            # schemas and runtime data produces incompatible types for the
+                            # same field. Build-time validation cannot catch this case
+                            # because observed schemas have no declared fields.
+                            # (See: elspeth-c75ac86e35)
+                            return self._fail_pending(
+                                settings=settings,
+                                key=key,
+                                step=step,
+                                failure_reason=f"contract_type_conflict: {e}",
+                            )
 
             elif settings.merge == "nested":
                 # Nested: Contract declares branch keys with object type

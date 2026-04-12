@@ -3143,3 +3143,86 @@ class TestNotifyBranchLostEvaluateAfterLoss:
         assert result is not None
         assert "quorum_impossible" in result.failure_reason
         assert result.outcomes_recorded is True
+
+
+class TestPrecomputedOutputSchema:
+    """Tests for P2 fix: using pre-computed DAG schema for build/runtime alignment.
+
+    When output_schema is passed to register_coalesce(), the executor uses it
+    directly for union merge instead of calling SchemaContract.merge(). This
+    ensures runtime contracts match the DAG-computed schema, preserving the
+    nullable semantics from the P1 fix.
+    """
+
+    def test_union_merge_uses_precomputed_schema_when_provided(self):
+        """P2 fix: Runtime contract matches DAG schema when pre-computed schema provided."""
+        executor, *_ = _make_executor()
+
+        # Create a pre-computed schema with require_all OR semantics:
+        # x is required (OR: required in ANY branch) but nullable (ANY branch allows None)
+        precomputed_schema = SchemaContract(
+            mode="FLEXIBLE",
+            fields=(
+                make_field(
+                    "x",
+                    original_name="x",
+                    python_type=int,
+                    required=True,  # OR semantics: required if required in ANY branch
+                    source="declared",
+                    nullable=True,  # P1 fix: nullable because one branch allows None
+                ),
+            ),
+            locked=True,
+        )
+
+        # Register coalesce with pre-computed schema
+        s = _settings(branches=["a", "b"], policy="require_all", merge="union")
+        executor.register_coalesce(s, "node_1", output_schema=precomputed_schema)
+
+        # Create tokens with different runtime contracts (would normally merge differently)
+        contract_a = SchemaContract(
+            mode="FLEXIBLE",
+            fields=(make_field("x", original_name="x", python_type=int, required=True, source="declared", nullable=False),),
+            locked=True,
+        )
+        contract_b = SchemaContract(
+            mode="FLEXIBLE",
+            fields=(make_field("x", original_name="x", python_type=int, required=False, source="declared", nullable=True),),
+            locked=True,
+        )
+
+        token_a = _make_token(branch_name="a", token_id="t1", data={"x": 42}, contract=contract_a)
+        token_b = _make_token(branch_name="b", token_id="t2", data={"x": None}, contract=contract_b)
+
+        # Accept both tokens
+        outcome_a = executor.accept(token_a, "merge")
+        assert outcome_a.held is True  # Waiting for branch b
+
+        outcome_b = executor.accept(token_b, "merge")
+        assert outcome_b.held is False  # Merge triggered
+
+        # Verify contract matches DAG schema, not runtime merge
+        merged_contract = outcome_b.merged_token.row_data.contract
+        assert merged_contract == precomputed_schema, "Runtime contract should match pre-computed DAG schema, not runtime merge"
+
+    def test_union_merge_falls_back_to_runtime_merge_when_no_schema(self):
+        """Without pre-computed schema, runtime merge() is used (backward compat)."""
+        executor, *_ = _make_executor()
+
+        # Register coalesce WITHOUT pre-computed schema
+        s = _settings(branches=["a", "b"], policy="require_all", merge="union")
+        executor.register_coalesce(s, "node_1")  # No output_schema
+
+        # Create tokens with same contract
+        contract = _make_contract()
+        token_a = _make_token(branch_name="a", token_id="t1", data={"amount": 100}, contract=contract)
+        token_b = _make_token(branch_name="b", token_id="t2", data={"amount": 200}, contract=contract)
+
+        executor.accept(token_a, "merge")
+        outcome = executor.accept(token_b, "merge")
+
+        # Should still work (runtime merge fallback)
+        assert outcome.held is False
+        assert outcome.merged_token is not None
+        # Contract should be result of runtime merge (same as input since identical contracts)
+        assert outcome.merged_token.row_data.contract.mode == contract.mode
