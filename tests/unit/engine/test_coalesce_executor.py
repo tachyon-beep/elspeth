@@ -850,6 +850,71 @@ class TestUnionMerge:
         assert md.union_field_origins is not None
         assert md.union_field_origins["shared"] == "b"
 
+    def test_union_collision_policy_fail_records_terminal_failed_outcomes(self):
+        """union_collision_policy=fail must record terminal RowOutcome.FAILED for consumed tokens.
+
+        Bug: The exception handler in _execute_merge only calls complete_node_state(FAILED)
+        but never calls record_token_outcome(FAILED). Without terminal outcomes:
+        - Recovery treats the row as incomplete (key remains in _pending)
+        - Lineage resolution can't find a terminal token
+        """
+        executor, _, data_flow, _, _ = _make_executor()
+        s = _settings(
+            branches=["a", "b"],
+            merge="union",
+            union_collision_policy="fail",
+        )
+        executor.register_coalesce(s, "node_1")
+        t1 = _make_token(branch_name="a", token_id="t1", data={"shared": "from_a"})
+        t2 = _make_token(branch_name="b", token_id="t2", data={"shared": "from_b"})
+        executor.accept(t1, "merge")
+        with pytest.raises(CoalesceCollisionError):
+            executor.accept(t2, "merge")
+
+        # All consumed tokens must have terminal FAILED outcomes recorded
+        outcome_calls = data_flow.record_token_outcome.call_args_list
+        assert len(outcome_calls) == 2, f"expected record_token_outcome(FAILED) for both consumed tokens; got {len(outcome_calls)} calls"
+        for c in outcome_calls:
+            assert c.kwargs["outcome"] == RowOutcome.FAILED
+            assert "error_hash" in c.kwargs
+
+        token_ids = {c.kwargs["ref"].token_id for c in outcome_calls}
+        assert token_ids == {"t1", "t2"}
+
+    def test_union_collision_policy_fail_cleans_up_pending(self):
+        """union_collision_policy=fail must remove key from _pending after failure.
+
+        Bug: The exception handler doesn't call del self._pending[key] or
+        _mark_completed(key). Without cleanup:
+        - Recovery treats the row as incomplete
+        - Late arrivals aren't rejected
+        """
+        executor, _, _, _, _ = _make_executor()
+        s = _settings(
+            branches=["a", "b"],
+            merge="union",
+            union_collision_policy="fail",
+        )
+        executor.register_coalesce(s, "node_1")
+        t1 = _make_token(branch_name="a", token_id="t1", data={"shared": "from_a"})
+        t2 = _make_token(branch_name="b", token_id="t2", data={"shared": "from_b"})
+        executor.accept(t1, "merge")
+
+        # Capture the key before the failure
+        assert len(executor._pending) == 1
+        key = next(iter(executor._pending.keys()))
+
+        with pytest.raises(CoalesceCollisionError):
+            executor.accept(t2, "merge")
+
+        # After failure, _pending should be empty
+        assert key not in executor._pending, (
+            "_pending should be cleaned up after union_collision_policy=fail; leaving the key breaks recovery (treats row as incomplete)"
+        )
+
+        # Key should be in completed set (rejects late arrivals)
+        assert key in executor._completed_keys, "key should be marked completed to reject late arrivals"
+
     # ------------------------------------------------------------------
     # Orthogonality: union_collision_policy vs arrival policy
     # ------------------------------------------------------------------

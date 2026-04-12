@@ -923,9 +923,13 @@ class CoalesceExecutor:
             if isinstance(merge_exc, AuditIntegrityError):
                 raise
 
+            # Generate error_hash once for all branches (consistent audit trail).
+            error_hash = hashlib.sha256(str(merge_exc).encode()).hexdigest()[:16]
+
             for _branch, entry in pending.branches.items():
                 # Skip branches already completed in the happy path —
                 # overwriting COMPLETED with FAILED would corrupt the audit trail.
+                # (Happy path already recorded COALESCED outcome for these.)
                 if entry.state_id in completed_state_ids:
                     continue
                 try:
@@ -945,6 +949,18 @@ class CoalesceExecutor:
                         ),
                         context_after=metadata_for_audit,
                     )
+                    # Record terminal FAILED outcome for consumed token.
+                    # Without this, recovery treats the row as incomplete and
+                    # lineage resolution can't find a terminal token.
+                    if self._data_flow is None:
+                        raise OrchestrationInvariantError(
+                            "CoalesceExecutor.data_flow is None but token outcome recording requires DataFlowRepository"
+                        )
+                    self._data_flow.record_token_outcome(
+                        ref=TokenRef(token_id=entry.token.token_id, run_id=self._run_id),
+                        outcome=RowOutcome.FAILED,
+                        error_hash=error_hash,
+                    )
                 except Exception as cleanup_exc:
                     slog.error(
                         "coalesce_merge_cleanup_failed",
@@ -952,6 +968,11 @@ class CoalesceExecutor:
                         error=str(cleanup_exc),
                         exc_info=True,
                     )
+
+            # Clean up pending state so recovery doesn't treat this as incomplete.
+            del self._pending[key]
+            self._mark_completed(key)
+
             raise
 
     def _merge_data(
