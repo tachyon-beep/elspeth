@@ -483,6 +483,14 @@ class SchemaConfig:
 
         Use this property instead of raw ``guaranteed_fields is not None``
         checks to centralise the abstain-vs-empty contract.
+
+        See also:
+            has_effective_guarantees: Use in coalesce merge loops to determine
+                branch participation. Unlike this property, it also considers
+                typed fields as a source of guarantees (not just explicit
+                guaranteed_fields). For abstain-vs-empty semantic checks, use
+                THIS property; for "does this branch contribute guarantees at
+                all?", use has_effective_guarantees.
         """
         return self.guaranteed_fields is not None
 
@@ -509,6 +517,13 @@ class SchemaConfig:
         Returns:
           True if explicit guaranteed_fields is not None, OR
           True if schema has typed fields (regardless of required status).
+
+        See also:
+            declares_guaranteed_fields: Use for abstain-vs-empty semantic
+                checks (None vs empty tuple). This property answers "did the
+                schema make an explicit guarantee declaration?", while
+                has_effective_guarantees answers "does the schema contribute
+                to coalesce intersection/union at all?"
         """
         if self.guaranteed_fields is not None:
             return True

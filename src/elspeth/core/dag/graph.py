@@ -1646,7 +1646,8 @@ class ExecutionGraph:
 
         For coalesce nodes specifically, builder.py computes strategy-aware
         guarantees:
-        - **union**: intersection of branch guarantees (only fields in ALL branches)
+        - **union** with require_all: union of branch guarantees (all branches arrive)
+        - **union** with other policies: intersection (only fields in ALL branches)
         - **nested**: the node's own guarantees (branch names, not inner fields)
         - **select**: the node's own guarantees (selected branch's schema)
 

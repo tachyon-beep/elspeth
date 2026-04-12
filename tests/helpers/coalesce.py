@@ -1,8 +1,8 @@
 # tests/helpers/coalesce.py
 """Coalesce schema computation helpers for DAG tests.
 
-These functions mirror builder.py logic for tests that construct graphs directly,
-computing merged schemas for coalesce nodes from their predecessor branch schemas.
+These helpers use production merge functions from elspeth.core.dag.coalesce_merge
+to ensure tests exercise the same logic as builder.py.
 """
 
 from __future__ import annotations
@@ -11,7 +11,7 @@ from typing import Any
 
 from elspeth.contracts import NodeType
 from elspeth.contracts.schema import SchemaConfig
-from elspeth.core.dag import ExecutionGraph
+from elspeth.core.dag import ExecutionGraph, merge_guaranteed_fields
 
 
 def _compute_coalesce_schema(
@@ -21,9 +21,8 @@ def _compute_coalesce_schema(
 ) -> SchemaConfig:
     """Compute merged schema for a coalesce node from branch schemas.
 
-    Mirrors builder.py logic for tests that construct graphs directly.
-    Must be called BEFORE adding the coalesce node to the graph (because
-    NodeInfo is frozen and can't be modified after creation).
+    Uses the production merge_guaranteed_fields() function from builder.py
+    to ensure tests exercise the same logic as runtime.
 
     Args:
         branch_schemas: Map of branch_name -> SchemaConfig for each branch
@@ -32,22 +31,15 @@ def _compute_coalesce_schema(
     Returns:
         SchemaConfig with computed guaranteed_fields for the coalesce node
     """
-    guaranteed_sets: list[set[str]] = []
-    for schema in branch_schemas.values():
-        if schema is not None and schema.has_effective_guarantees:
-            guaranteed_sets.append(set(schema.get_effective_guaranteed_fields()))
+    # Filter out None values before calling production function
+    valid_schemas = {k: v for k, v in branch_schemas.items() if v is not None}
 
-    if not guaranteed_sets:
-        return SchemaConfig(mode="observed", fields=None, guaranteed_fields=None)
+    merged_guaranteed_tuple = merge_guaranteed_fields(
+        valid_schemas,
+        require_all=(policy == "require_all"),
+    )
 
-    # Policy determines union vs intersection
-    if policy == "require_all":
-        merged = set.union(*guaranteed_sets)
-    else:
-        merged = set.intersection(*guaranteed_sets)
-
-    merged_tuple = tuple(sorted(merged)) if merged else ()
-    return SchemaConfig(mode="observed", fields=None, guaranteed_fields=merged_tuple)
+    return SchemaConfig(mode="observed", fields=None, guaranteed_fields=merged_guaranteed_tuple)
 
 
 def _add_coalesce_with_computed_schema(

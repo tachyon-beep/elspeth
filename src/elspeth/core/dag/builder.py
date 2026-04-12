@@ -30,6 +30,10 @@ from elspeth.contracts.types import (
     SinkName,
 )
 from elspeth.core.canonical import canonical_json
+from elspeth.core.dag.coalesce_merge import (
+    merge_guaranteed_fields,
+    merge_union_fields,
+)
 from elspeth.core.dag.models import (
     _NODE_ID_MAX_LENGTH,
     BranchInfo,
@@ -883,135 +887,30 @@ def build_execution_graph(
         # schema directly (deferred config gates via _best_schema_config,
         # nested coalesces via get_schema_config_from_node, and any non-COALESCE
         # path through get_guaranteed_fields) rely on this equivalence.
-        guaranteed_sets: list[set[str]] = []
+        # Use extracted merge function for guaranteed_fields
+        merged_guaranteed_tuple = merge_guaranteed_fields(
+            branch_to_schema,
+            require_all=coal_config.has_all_branch_semantics,
+        )
+
+        # Audit fields always use union (any audit field from any branch)
         audit_sets: list[set[str]] = []
         for schema_cfg in branch_to_schema.values():
-            # Use has_effective_guarantees to include typed required fields,
-            # not just explicit guaranteed_fields. A branch with mode="fixed",
-            # fields=(id, x) required but guaranteed_fields=None still guarantees
-            # {id, x} via the type system. Must match the condition in
-            # ExecutionGraph.get_effective_guaranteed_fields() for coalesces.
-            if schema_cfg.has_effective_guarantees:
-                guaranteed_sets.append(set(schema_cfg.get_effective_guaranteed_fields()))
             af = schema_cfg.audit_fields
             if af is not None:
                 audit_sets.append(set(af))
-
-        # Preserve None-vs-empty-tuple semantics (see has_effective_guarantees):
-        #   No branch has effective guarantees → None (abstain: coalesce makes no claim)
-        #   Branches have guarantees but merge is ∅ → () (explicitly guarantees nothing)
-        # Using truthiness (``if merged``) would conflate these two cases.
-        if guaranteed_sets:
-            if coal_config.has_all_branch_semantics:
-                merged_guaranteed_tuple = tuple(sorted(set.union(*guaranteed_sets)))
-            else:
-                merged_guaranteed_tuple = tuple(sorted(set.intersection(*guaranteed_sets)))
-        else:
-            merged_guaranteed_tuple = None
-        if audit_sets:
-            merged_audit_tuple = tuple(sorted(set.union(*audit_sets)))
-        else:
-            merged_audit_tuple = None
+        merged_audit_tuple = tuple(sorted(set.union(*audit_sets))) if audit_sets else None
 
         if coal_config.merge == "union":
-            # Union merge: require compatible types on ALL pairwise overlapping fields.
-            # Tracks (type, required, first_branch) to preserve optionality markers.
-            seen_types: dict[str, tuple[str, bool, str]] = {}  # field → (type, required, first_branch)
-            branches_with_field: dict[str, set[str]] = {}  # field → set of branches that produced it
-            # Branches that contribute fields to the AND-semantics denominator.
-            # A non-observed branch with fields=None abstains from the typed
-            # contract entirely; excluding it from the denominator prevents
-            # silent downgrades of every other branch's required fields.
-            contributing_branches: set[str] = set()
-            all_observed = False
-
-            # Required-flag merge semantics depend on the coalesce policy:
-            #
-            # - require_all: OR semantics. _should_merge() only fires when ALL
-            #   declared branches have arrived, so every branch's required
-            #   fields are guaranteed in its actual rows, and _merge_data()'s
-            #   dict.update() preserves them in the merged row. A field is
-            #   guaranteed in the merged output if ANY branch requires it
-            #   (the requiring branch always arrives and always produces it).
-            #
-            # - best_effort / quorum / first: AND semantics. Some branches may
-            #   never arrive (best_effort/quorum) or only one branch wins
-            #   (first), so the merged spec must be conservative — only
-            #   guarantee fields that every contributing branch produces.
-            #
-            # The coalesce policy is statically known here, so the build-time
-            # spec can encode the right semantics for each policy without
-            # needing runtime information.
-            #
-            # has_all_branch_semantics includes quorum=N where N == branch_count,
-            # which is runtime-equivalent to require_all. Use it instead of a
-            # strict policy == "require_all" check to avoid validation divergence.
-            require_all = coal_config.has_all_branch_semantics
-
-            for branch_name, schema_cfg in branch_to_schema.items():
-                if schema_cfg.is_observed:
-                    all_observed = True
-                    break
-                if schema_cfg.fields is None:
-                    continue
-                contributing_branches.add(branch_name)
-                for fd in schema_cfg.fields:
-                    if fd.name not in branches_with_field:
-                        branches_with_field[fd.name] = set()
-                    branches_with_field[fd.name].add(branch_name)
-                    if fd.name in seen_types:
-                        prior_type, prior_req, prior_branch = seen_types[fd.name]
-                        if prior_type != fd.field_type:
-                            raise GraphValidationError(
-                                f"Coalesce node '{coalesce_id}' receives incompatible "
-                                f"types for field '{fd.name}' in union merge: "
-                                f"branch '{prior_branch}' has {prior_type!r}, "
-                                f"branch '{branch_name}' has {fd.field_type!r}. "
-                                "Union merge requires compatible types on shared fields."
-                            )
-                        if require_all:
-                            # OR: required if required in ANY branch.
-                            if fd.required and not prior_req:
-                                seen_types[fd.name] = (prior_type, True, prior_branch)
-                        else:
-                            # AND: optional if optional in ANY branch.
-                            if not fd.required:
-                                seen_types[fd.name] = (prior_type, False, prior_branch)
-                    else:
-                        seen_types[fd.name] = (fd.field_type, fd.required, branch_name)
-
-            # Branch-exclusive field handling (post-loop pass):
-            # - require_all: keep the source-branch required flag. The branch
-            #   that produces the field always arrives, so the field IS in the
-            #   merged row whenever the source branch's row has it. The source's
-            #   required flag is the correct merged-output flag.
-            # - other policies: force optional. The branch that produces the
-            #   field may not be in the eventual merge set (lost / not first /
-            #   not in quorum), so the merged output cannot guarantee it.
-            if not require_all:
-                for field_name in list(seen_types):
-                    if branches_with_field[field_name] != contributing_branches:
-                        ftype, _, first_branch = seen_types[field_name]
-                        seen_types[field_name] = (ftype, False, first_branch)
-
-            if all_observed or not seen_types:
-                merged_schema = SchemaConfig(
-                    mode="observed",
-                    fields=None,
-                    guaranteed_fields=merged_guaranteed_tuple,
-                    audit_fields=merged_audit_tuple,
-                )
-            else:
-                merged_fields = tuple(
-                    FieldDefinition(name=name, field_type=ftype, required=req)  # type: ignore[arg-type]  # ftype is Literal at runtime (from FieldDefinition.field_type)
-                    for name, (ftype, req, _) in seen_types.items()
-                )
-                merged_schema = SchemaConfig(
-                    mode="flexible",
-                    fields=merged_fields,
-                    guaranteed_fields=merged_guaranteed_tuple,
-                    audit_fields=merged_audit_tuple,
-                )
+            # Union merge: use extracted merge function for field-level logic
+            # See merge_union_fields() docstring for OR/AND semantics explanation
+            merged_schema = merge_union_fields(
+                branch_to_schema,
+                require_all=coal_config.has_all_branch_semantics,
+                coalesce_id=coalesce_id,
+                guaranteed_fields=merged_guaranteed_tuple,
+                audit_fields=merged_audit_tuple,
+            )
             _assign_schema(coalesce_id, merged_schema)
         elif coal_config.merge == "select":
             # Select merge: use selected branch's schema directly.

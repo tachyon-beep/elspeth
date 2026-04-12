@@ -20,7 +20,7 @@ from elspeth.core.config import (
     SourceSettings,
     TransformSettings,
 )
-from elspeth.core.dag import ExecutionGraph, WiredTransform
+from elspeth.core.dag import ExecutionGraph, WiredTransform, merge_union_fields
 from elspeth.core.dag.models import GraphValidationError
 from tests.helpers.coalesce import _add_coalesce_with_computed_schema
 
@@ -28,92 +28,35 @@ from tests.helpers.coalesce import _add_coalesce_with_computed_schema
 class TestUnionMergeOptionalityPreservation:
     """Tests for optionality in union merge using SchemaConfig objects.
 
-    IMPORTANT: This class tests EXPECTED SEMANTICS of union merge optionality
-    using a local reimplementation of the merge logic. It does NOT provide
-    regression coverage for the production builder.py code.
+    This class tests the production merge_union_fields() function directly,
+    providing both semantic verification AND regression coverage for the
+    builder.py union merge logic.
 
-    These tests verify that the POLICY is correct (e.g., "branch-exclusive
-    fields should become optional under AND semantics"). If the production
-    builder.py implementation were removed or broken, these tests would
-    still pass because they exercise the test-local _merge_schemas helper.
-
-    For actual builder.py regression coverage, see the
-    TestBuilderBranchExclusiveFieldDowngrade class which uses the real
-    graph builder infrastructure.
+    Changes to builder.py will be reflected here because _merge_schemas
+    delegates to the production merge_union_fields() function.
     """
 
-    # -------------------------------------------------------------------------
-    # Test-local reimplementation of builder.py union merge logic.
-    # This helper is NOT production code -- it mirrors the expected policy
-    # so we can test semantics in isolation. Changes to builder.py will not
-    # be reflected here automatically.
-    # -------------------------------------------------------------------------
     def _merge_schemas(
         self,
         branch_schemas: dict[str, SchemaConfig],
         *,
         policy: str = "best_effort",
     ) -> SchemaConfig:
-        """Simulate the builder's union merge logic with SchemaConfig objects.
+        """Delegate to production merge_union_fields() function.
 
-        Mirrors the policy-aware logic in src/elspeth/core/dag/builder.py:
+        This thin wrapper calls the same production function that builder.py
+        uses, ensuring tests exercise real logic rather than a reimplementation.
+
         - require_all: OR semantics (a field is required if ANY branch
           requires it; branch-exclusive fields keep their source flag)
         - all others (best_effort/quorum/first): AND semantics (a field is
           required only if every contributing branch requires it; branch-
           exclusive fields are forced optional)
-
-        The default `policy="best_effort"` exercises the AND path because
-        the historical tests in this class were written assuming AND.
-        Tests for the OR path explicitly pass `policy="require_all"`.
         """
-        require_all = policy == "require_all"
-        seen_types: dict[str, tuple[str, bool, str]] = {}
-        branches_with_field: dict[str, set[str]] = {}
-        contributing_branches: set[str] = set()
-        all_observed = False
-        for branch_name, schema_cfg in branch_schemas.items():
-            if schema_cfg.is_observed:
-                all_observed = True
-                break
-            if schema_cfg.fields is None:
-                continue
-            contributing_branches.add(branch_name)
-            for fd in schema_cfg.fields:
-                if fd.name not in branches_with_field:
-                    branches_with_field[fd.name] = set()
-                branches_with_field[fd.name].add(branch_name)
-                if fd.name in seen_types:
-                    prior_type, prior_req, prior_branch = seen_types[fd.name]
-                    if prior_type != fd.field_type:
-                        raise GraphValidationError(f"Type mismatch for {fd.name}")
-                    if require_all:
-                        # OR: required if required in ANY branch.
-                        if fd.required and not prior_req:
-                            seen_types[fd.name] = (prior_type, True, prior_branch)
-                    else:
-                        # AND: optional if optional in ANY branch.
-                        if not fd.required:
-                            seen_types[fd.name] = (prior_type, False, prior_branch)
-                else:
-                    seen_types[fd.name] = (fd.field_type, fd.required, branch_name)
-
-        # Branch-exclusive fields: under require_all the source-branch flag
-        # is preserved (the source branch always arrives and produces it).
-        # Under other policies, force optional (the source may not arrive).
-        if not require_all:
-            for field_name in list(seen_types):
-                if branches_with_field[field_name] != contributing_branches:
-                    ftype, _, first_branch = seen_types[field_name]
-                    seen_types[field_name] = (ftype, False, first_branch)
-
-        if all_observed or not seen_types:
-            return SchemaConfig(mode="observed", fields=None)
-        merged_fields = tuple(
-            FieldDefinition(name=name, field_type=ftype, required=req)  # type: ignore[arg-type]  # ftype is Literal at runtime (from FieldDefinition.field_type), narrowed to str by tuple storage
-            for name, (ftype, req, _) in seen_types.items()
+        return merge_union_fields(
+            branch_schemas,
+            require_all=(policy == "require_all"),
         )
-        return SchemaConfig(mode="flexible", fields=merged_fields)
 
     def _get_field(self, schema: SchemaConfig, name: str) -> FieldDefinition:
         """Get a FieldDefinition by name from a SchemaConfig."""

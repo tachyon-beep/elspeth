@@ -118,7 +118,12 @@ def _resolve_first_wins(
     new_merged = dict(merged)
     new_origins = dict(field_origins)
     for collision_field, entries in collision_values.items():
-        assert len(entries) >= 2, f"_resolve_first_wins: collision_values[{collision_field!r}] has {len(entries)} entries; expected >=2"
+        if len(entries) < 2:
+            raise OrchestrationInvariantError(
+                f"_resolve_first_wins: collision_values[{collision_field!r}] has "
+                f"{len(entries)} entries; expected >=2. This indicates a bug in "
+                "_merge_data collision seeding."
+            )
         first_branch, first_value = entries[0]
         new_merged[collision_field] = first_value
         new_origins[collision_field] = first_branch
