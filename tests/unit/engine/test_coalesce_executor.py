@@ -906,6 +906,60 @@ class TestUnionMerge:
         # No collisions (only one branch contributed).
         assert outcome.coalesce_metadata.union_field_collision_values is None
 
+    def test_union_collision_policy_first_wins_with_timeout(self):
+        """first_wins with timeout: collision resolution uses settings.branches order, not arrival.
+
+        When best_effort triggers via timeout and multiple branches have arrived
+        with colliding fields, first_wins must resolve to the branch that appears
+        first in the configured `settings.branches` list — regardless of which
+        branch's token arrived first. This test verifies that branch-order, not
+        arrival-order, determines the winner.
+        """
+        clock = MockClock(start=100.0)
+        executor, _, _, tm, _ = _make_executor(clock=clock)
+        # Branches ordered ["a", "b", "c"] — under first_wins, "a" wins collisions.
+        s = _settings(
+            branches=["a", "b", "c"],
+            merge="union",
+            policy="best_effort",
+            timeout_seconds=5.0,
+            union_collision_policy="first_wins",
+        )
+        executor.register_coalesce(s, "node_1")
+
+        # Submit b first, then a — intentionally reversed from branch order.
+        # Branch c never arrives (simulates lost/slow branch).
+        t_b = _make_token(branch_name="b", token_id="t_b", data={"shared": "from_b", "only_b": 10})
+        t_a = _make_token(branch_name="a", token_id="t_a", data={"shared": "from_a", "only_a": 20})
+        executor.accept(t_b, "merge")
+        executor.accept(t_a, "merge")
+
+        # Advance past timeout — triggers best_effort flush with a and b arrived.
+        clock.advance(10.0)
+        outcomes = executor.check_timeouts("merge")
+        assert len(outcomes) == 1
+        outcome = outcomes[0]
+        assert outcome.merged_token is not None
+
+        # Merged data: first_wins means "a" wins the collision on "shared".
+        merged = tm.coalesce_tokens.call_args.kwargs["merged_data"].to_dict()
+        assert merged["shared"] == "from_a"  # first_wins: "a" wins over "b"
+        assert merged["only_a"] == 20
+        assert merged["only_b"] == 10
+
+        # field_origins: "shared" attributed to "a" (first in branches order).
+        origins = outcome.coalesce_metadata.union_field_origins
+        assert origins["shared"] == "a"
+        assert origins["only_a"] == "a"
+        assert origins["only_b"] == "b"
+
+        # collision_values: records both contributing branches for "shared".
+        collision_values = outcome.coalesce_metadata.union_field_collision_values
+        assert collision_values is not None
+        entries = list(collision_values["shared"])
+        # Order in collision_values is branch order, not arrival order.
+        assert entries == [("a", "from_a"), ("b", "from_b")]
+
 
 # ===========================================================================
 # nested merge

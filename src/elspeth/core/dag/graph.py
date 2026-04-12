@@ -1640,14 +1640,18 @@ class ExecutionGraph:
     def get_effective_guaranteed_fields(self, node_id: str) -> frozenset[str]:
         """Get effective output guarantees for a node.
 
-        Gates and other non-coalesce nodes return their own guarantees directly
-        (the builder sets output_schema_config on gates via _assign_schema, so
-        computed guarantees are already available).
+        All nodes (including coalesce) return their pre-computed guarantees
+        directly. The builder materialises policy-aware guarantees into
+        output_schema_config via _assign_schema (see builder.py).
 
-        Coalesce nodes are strategy-aware:
+        For coalesce nodes specifically, builder.py computes strategy-aware
+        guarantees:
         - **union**: intersection of branch guarantees (only fields in ALL branches)
         - **nested**: the node's own guarantees (branch names, not inner fields)
         - **select**: the node's own guarantees (selected branch's schema)
+
+        Tests that construct graphs directly must set output_schema_config
+        on nodes to match what the builder would compute.
 
         Args:
             node_id: Node to get effective guarantees for
@@ -1655,18 +1659,4 @@ class ExecutionGraph:
         Returns:
             Frozenset of field names effectively guaranteed at this point
         """
-        node_info = self.get_node_info(node_id)
-
-        # Coalesce nodes: read pre-computed guaranteed fields from output_schema_config
-        if node_info.node_type == NodeType.COALESCE:
-            # All coalesce merge strategies read the pre-computed value stored by
-            # the builder. The builder materialises policy-aware union/intersection
-            # guarantees into output_schema_config via _assign_schema (builder.py).
-            #
-            # This collapses dual computation to a single site (builder.py).
-            # Tests that construct graphs directly must set output_schema_config
-            # on coalesce nodes to match what the builder would compute.
-            return self.get_guaranteed_fields(node_id)
-
-        # Non-pass-through nodes return their own guarantees
         return self.get_guaranteed_fields(node_id)

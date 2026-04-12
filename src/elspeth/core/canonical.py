@@ -21,9 +21,10 @@ import base64
 import hashlib
 import math
 from collections.abc import Mapping
-from datetime import UTC, datetime
+from datetime import UTC, date, datetime, time
 from decimal import Decimal
 from typing import TYPE_CHECKING, Any
+from uuid import UUID
 
 import networkx as nx
 import numpy as np
@@ -129,6 +130,15 @@ def _normalize_value(obj: Any) -> Any:
         if obj.tzinfo is None:
             obj = obj.replace(tzinfo=UTC)
         return obj.astimezone(UTC).isoformat()
+
+    if isinstance(obj, date):
+        return obj.isoformat()
+
+    if isinstance(obj, time):
+        return obj.isoformat()
+
+    if isinstance(obj, UUID):
+        return str(obj)
 
     if isinstance(obj, bytes):
         return {"__bytes__": base64.b64encode(obj).decode("ascii")}

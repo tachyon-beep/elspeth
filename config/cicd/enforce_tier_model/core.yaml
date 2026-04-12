@@ -39,7 +39,7 @@ per_file_rules:
   - R5
   reason: Type dispatch for numpy/pandas normalization and NaN rejection
   expires: null
-  max_hits: 20
+  max_hits: 23
 - pattern: core/checkpoint/serialization.py
   rules:
   - R5
@@ -120,7 +120,7 @@ allow_hits:
 - key: core/landscape/query_repository.py:R6:QueryRepository:explain_row:fp=60bbaf31e9f6472d
   owner: architecture
   reason: PayloadNotFoundError from PayloadStore when payload purged by retention policy — expected, not corruption
-- key: core/canonical.py:R6:_normalize_value:fp=b132c8b99f3017ce
+- key: core/canonical.py:R6:_normalize_value:fp=b26d50562c16f852
   owner: architecture
   reason: TypeError from np.isnan/isinf on non-numeric dtypes is expected — non-numeric arrays can't contain NaN
   safety: Only catches TypeError from np.isnan/isinf, lets all other exceptions propagate

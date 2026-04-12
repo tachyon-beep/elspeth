@@ -723,3 +723,78 @@ class TestSchemaConfigFromDictTypeGuard:
 
         result = SchemaConfig.from_dict({"mode": "observed"})
         assert result.mode == "observed"
+
+
+class TestHasEffectiveGuarantees:
+    """Tests for has_effective_guarantees property.
+
+    Bug: Optional-only schemas were incorrectly excluded from coalesce intersections.
+
+    A schema with fields defined but all optional should participate in guarantee
+    intersections with an empty set {}, not be skipped entirely. The distinction:
+    - fields=None: Abstains from intersection (branch is skipped)
+    - fields=(all optional): Participates with empty set (intersection collapses to {})
+    """
+
+    def test_all_optional_fields_has_effective_guarantees_true(self) -> None:
+        """Schema with fields but all optional has effective guarantees (empty set)."""
+        from elspeth.contracts.schema import FieldDefinition, SchemaConfig
+
+        schema = SchemaConfig(
+            mode="flexible",
+            fields=(FieldDefinition("x", "str", required=False),),
+        )
+        assert schema.has_effective_guarantees is True
+
+    def test_all_optional_fields_effective_guaranteed_is_empty(self) -> None:
+        """Schema with all optional fields has effective guaranteed = empty frozenset."""
+        from elspeth.contracts.schema import FieldDefinition, SchemaConfig
+
+        schema = SchemaConfig(
+            mode="flexible",
+            fields=(FieldDefinition("x", "str", required=False),),
+        )
+        assert schema.get_effective_guaranteed_fields() == frozenset()
+
+    def test_no_fields_has_effective_guarantees_false(self) -> None:
+        """Schema with no fields abstains from guarantee intersection."""
+        from elspeth.contracts.schema import SchemaConfig
+
+        schema = SchemaConfig(mode="observed", fields=None)
+        assert schema.has_effective_guarantees is False
+
+    def test_required_fields_has_effective_guarantees_true(self) -> None:
+        """Schema with required fields has effective guarantees."""
+        from elspeth.contracts.schema import FieldDefinition, SchemaConfig
+
+        schema = SchemaConfig(
+            mode="fixed",
+            fields=(FieldDefinition("id", "int", required=True),),
+        )
+        assert schema.has_effective_guarantees is True
+        assert schema.get_effective_guaranteed_fields() == frozenset({"id"})
+
+    def test_explicit_guaranteed_fields_has_effective_guarantees_true(self) -> None:
+        """Schema with explicit guaranteed_fields has effective guarantees."""
+        from elspeth.contracts.schema import SchemaConfig
+
+        schema = SchemaConfig(
+            mode="observed",
+            fields=None,
+            guaranteed_fields=("response",),
+        )
+        assert schema.has_effective_guarantees is True
+
+    def test_mixed_required_optional_has_effective_guarantees_true(self) -> None:
+        """Schema with mix of required and optional fields has effective guarantees."""
+        from elspeth.contracts.schema import FieldDefinition, SchemaConfig
+
+        schema = SchemaConfig(
+            mode="flexible",
+            fields=(
+                FieldDefinition("id", "int", required=True),
+                FieldDefinition("score", "float", required=False),
+            ),
+        )
+        assert schema.has_effective_guarantees is True
+        assert schema.get_effective_guaranteed_fields() == frozenset({"id"})

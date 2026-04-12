@@ -118,6 +118,7 @@ def _resolve_first_wins(
     new_merged = dict(merged)
     new_origins = dict(field_origins)
     for collision_field, entries in collision_values.items():
+        assert len(entries) >= 2, f"_resolve_first_wins: collision_values[{collision_field!r}] has {len(entries)} entries; expected >=2"
         first_branch, first_value = entries[0]
         new_merged[collision_field] = first_value
         new_origins[collision_field] = first_branch
@@ -706,6 +707,8 @@ class CoalesceExecutor:
         # Validate select_branch is present for select merge strategy
         # (Bug 2ho fix: reject instead of silent fallback)
         if settings.merge == "select" and settings.select_branch not in pending.branches:
+            # CoalesceSettings model validator ensures select_branch is non-None for merge="select"
+            assert settings.select_branch is not None
             return self._fail_pending(
                 settings,
                 key,
@@ -715,8 +718,7 @@ class CoalesceExecutor:
                 metadata=CoalesceMetadata.for_select_not_arrived(
                     policy=CoalescePolicy(settings.policy),
                     merge_strategy=MergeStrategy(settings.merge),
-                    # select_branch is validated non-None by CoalesceSettings for merge="select"
-                    select_branch=settings.select_branch,  # type: ignore[arg-type]
+                    select_branch=settings.select_branch,
                     branches_arrived=tuple(pending.branches.keys()),
                 ),
             )

@@ -491,25 +491,29 @@ class SchemaConfig:
         """Whether this schema has any source of field guarantees.
 
         Unlike declares_guaranteed_fields (which only checks explicit
-        guaranteed_fields), this property also considers typed required fields
+        guaranteed_fields), this property also considers typed fields
         as a source of guarantees. A schema with mode="fixed", fields=(id, x)
         where both are required, but guaranteed_fields=None, still guarantees
         {id, x} via the type system.
 
+        A schema with fields defined but all optional (no required fields) still
+        participates in coalesce intersections — it has effective guarantees of
+        the EMPTY SET. This is distinct from a schema with fields=None which
+        abstains entirely from the intersection.
+
         Use this property in coalesce merge loops to determine if a branch
         should participate in the guarantee union/intersection. A branch with
         has_effective_guarantees=False is truly abstaining — no explicit
-        declaration AND no typed required fields.
+        declaration AND no typed fields at all.
 
         Returns:
           True if explicit guaranteed_fields is not None, OR
-          True if schema has typed fields with at least one required field.
+          True if schema has typed fields (regardless of required status).
         """
         if self.guaranteed_fields is not None:
             return True
-        if self.fields is not None:
-            return any(f.required for f in self.fields)
-        return False
+        # Fields defined = participates (even if all optional → contributes empty set)
+        return self.fields is not None
 
     @property
     def allows_extra_fields(self) -> bool:

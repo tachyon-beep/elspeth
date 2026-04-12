@@ -3,8 +3,9 @@
 
 import base64
 import hashlib
-from datetime import UTC, datetime
+from datetime import UTC, date, datetime, time
 from decimal import Decimal
+from uuid import UUID
 
 import numpy as np
 import pandas as pd
@@ -217,6 +218,98 @@ class TestSpecialTypeConversion:
         assert result == "123.456789012345"
         assert type(result) is str
 
+    def test_date_to_iso_string(self) -> None:
+        """date objects convert to ISO 8601 date strings."""
+        from elspeth.core.canonical import _normalize_value
+
+        result = _normalize_value(date(2024, 1, 15))
+        assert result == "2024-01-15"
+        assert type(result) is str
+
+    def test_time_to_iso_string(self) -> None:
+        """time objects convert to ISO 8601 time strings."""
+        from elspeth.core.canonical import _normalize_value
+
+        # Without microseconds
+        result = _normalize_value(time(14, 30, 0))
+        assert result == "14:30:00"
+        assert type(result) is str
+
+        # With microseconds
+        result_micro = _normalize_value(time(14, 30, 0, 123456))
+        assert result_micro == "14:30:00.123456"
+
+    def test_uuid_to_string(self) -> None:
+        """UUID objects convert to their string representation."""
+        from elspeth.core.canonical import _normalize_value
+
+        u = UUID("12345678-1234-5678-1234-567812345678")
+        result = _normalize_value(u)
+        assert result == "12345678-1234-5678-1234-567812345678"
+        assert type(result) is str
+
+
+class TestDateTimeUuidCanonicalJson:
+    """Regression tests for date, time, and UUID canonical JSON serialization.
+
+    Bug fix: These types were not handled by _normalize_value, causing
+    CanonicalizationError when they appeared in coalesce collision values.
+    """
+
+    def test_canonical_json_handles_date(self) -> None:
+        """date objects serialize correctly in canonical JSON."""
+        from elspeth.core.canonical import canonical_json
+
+        result = canonical_json({"d": date(2024, 1, 15)})
+        assert result == '{"d":"2024-01-15"}'
+
+    def test_canonical_json_handles_time(self) -> None:
+        """time objects serialize correctly in canonical JSON."""
+        from elspeth.core.canonical import canonical_json
+
+        result = canonical_json({"t": time(14, 30, 0)})
+        assert '"t":"14:30:00"' in result
+
+    def test_canonical_json_handles_time_with_microseconds(self) -> None:
+        """time objects with microseconds serialize correctly."""
+        from elspeth.core.canonical import canonical_json
+
+        result = canonical_json({"t": time(14, 30, 0, 123456)})
+        assert '"t":"14:30:00.123456"' in result
+
+    def test_canonical_json_handles_uuid(self) -> None:
+        """UUID objects serialize correctly in canonical JSON."""
+        from elspeth.core.canonical import canonical_json
+
+        u = UUID("12345678-1234-5678-1234-567812345678")
+        result = canonical_json({"id": u})
+        assert result == '{"id":"12345678-1234-5678-1234-567812345678"}'
+
+    def test_stable_hash_date_deterministic(self) -> None:
+        """date values produce deterministic hashes."""
+        from elspeth.core.canonical import stable_hash
+
+        hash1 = stable_hash({"d": date(2024, 1, 15)})
+        hash2 = stable_hash({"d": date(2024, 1, 15)})
+        assert hash1 == hash2
+
+    def test_stable_hash_time_deterministic(self) -> None:
+        """time values produce deterministic hashes."""
+        from elspeth.core.canonical import stable_hash
+
+        hash1 = stable_hash({"t": time(14, 30, 0)})
+        hash2 = stable_hash({"t": time(14, 30, 0)})
+        assert hash1 == hash2
+
+    def test_stable_hash_uuid_deterministic(self) -> None:
+        """UUID values produce deterministic hashes."""
+        from elspeth.core.canonical import stable_hash
+
+        u = UUID("12345678-1234-5678-1234-567812345678")
+        hash1 = stable_hash({"id": u})
+        hash2 = stable_hash({"id": u})
+        assert hash1 == hash2
+
 
 class TestUnsupportedTypeRejection:
     """Unsupported types must be rejected during canonical serialization.
@@ -226,19 +319,18 @@ class TestUnsupportedTypeRejection:
     This is defense-in-depth - external system data must be validated at ingress.
     """
 
-    def test_uuid_rejected_during_serialization(self) -> None:
-        """UUID objects are not JSON-serializable and must fail at serialization boundary."""
-        from uuid import UUID
+    def test_uuid_now_serializable(self) -> None:
+        """UUID objects are now normalized to strings and serialize correctly.
 
-        import rfc8785
-
+        NOTE: This test was updated when UUID support was added. Previously,
+        UUIDs would pass through _normalize_value unchanged and fail at
+        rfc8785.dumps(). Now they are converted to strings during normalization.
+        """
         from elspeth.core.canonical import canonical_json
 
         obj = {"id": UUID("550e8400-e29b-41d4-a716-446655440000")}
-
-        # UUID passes through _normalize_value but fails at rfc8785.dumps()
-        with pytest.raises(rfc8785.CanonicalizationError, match="unsupported type"):
-            canonical_json(obj)
+        result = canonical_json(obj)
+        assert result == '{"id":"550e8400-e29b-41d4-a716-446655440000"}'
 
     def test_custom_class_instance_rejected(self) -> None:
         """Custom class instances must fail canonical serialization.
