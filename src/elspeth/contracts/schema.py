@@ -487,6 +487,31 @@ class SchemaConfig:
         return self.guaranteed_fields is not None
 
     @property
+    def has_effective_guarantees(self) -> bool:
+        """Whether this schema has any source of field guarantees.
+
+        Unlike declares_guaranteed_fields (which only checks explicit
+        guaranteed_fields), this property also considers typed required fields
+        as a source of guarantees. A schema with mode="fixed", fields=(id, x)
+        where both are required, but guaranteed_fields=None, still guarantees
+        {id, x} via the type system.
+
+        Use this property in coalesce merge loops to determine if a branch
+        should participate in the guarantee union/intersection. A branch with
+        has_effective_guarantees=False is truly abstaining — no explicit
+        declaration AND no typed required fields.
+
+        Returns:
+          True if explicit guaranteed_fields is not None, OR
+          True if schema has typed fields with at least one required field.
+        """
+        if self.guaranteed_fields is not None:
+            return True
+        if self.fields is not None:
+            return any(f.required for f in self.fields)
+        return False
+
+    @property
     def allows_extra_fields(self) -> bool:
         """Whether extra fields beyond schema are allowed."""
         return self.is_observed or self.mode == "flexible"

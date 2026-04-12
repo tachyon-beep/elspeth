@@ -1657,54 +1657,16 @@ class ExecutionGraph:
         """
         node_info = self.get_node_info(node_id)
 
-        # Coalesce nodes: strategy- and policy-aware guaranteed fields
+        # Coalesce nodes: read pre-computed guaranteed fields from output_schema_config
         if node_info.node_type == NodeType.COALESCE:
-            merge_strategy = node_info.config["merge"]
-
-            # nested/select: use the node's own config schema (set by builder).
-            # - Nested output is {branch_a: data, branch_b: data} — guarantees
-            #   are the branch names, NOT the inner field names.
-            # - Select output is the selected branch's data — its schema was
-            #   copied by the builder into this node's config.
-            if merge_strategy in ("nested", "select"):
-                return self.get_guaranteed_fields(node_id)
-
-            # union: combine branch guarantees per coalesce policy.
-            # - require_all: UNION (every branch always arrives, so any field
-            #   guaranteed by any branch is in the merged row via dict.update;
-            #   matches CoalesceExecutor._should_merge gate + _merge_data union)
-            # - best_effort/quorum/first: INTERSECTION (some branches may never
-            #   arrive or only one branch wins, so the merged spec must be
-            #   conservative — only fields guaranteed by every branch survive)
+            # All coalesce merge strategies read the pre-computed value stored by
+            # the builder. The builder materialises policy-aware union/intersection
+            # guarantees into output_schema_config via _assign_schema (builder.py).
             #
-            # Abstain semantics: see SchemaConfig.declares_guaranteed_fields.
-            #
-            # COUPLING NOTE: This reads each predecessor's output_schema_config
-            # directly rather than recursing through get_effective_guaranteed_fields.
-            # For coalesce predecessors, the builder materialises the computed
-            # intersection into the node's output_schema_config via _assign_schema,
-            # so the pre-computed answer is already on the node.  If the builder's
-            # materialisation logic changes, this path must be updated to match.
-            policy = node_info.config["policy"]
-            require_all = policy == "require_all"
-            incoming = list(self._graph.in_edges(node_id, keys=True, data=True))
-            if not incoming:
-                return frozenset()
-            branch_guarantees: list[frozenset[str]] = []
-            for from_id, _, _key, _ in incoming:
-                schema_config = self.get_schema_config_from_node(from_id)
-                if schema_config is not None and schema_config.declares_guaranteed_fields:
-                    branch_guarantees.append(schema_config.get_effective_guaranteed_fields())
-            if not branch_guarantees:
-                return frozenset()
-            result = branch_guarantees[0]
-            if require_all:
-                for guarantees in branch_guarantees[1:]:
-                    result = result | guarantees
-            else:
-                for guarantees in branch_guarantees[1:]:
-                    result = result & guarantees
-            return result
+            # This collapses dual computation to a single site (builder.py).
+            # Tests that construct graphs directly must set output_schema_config
+            # on coalesce nodes to match what the builder would compute.
+            return self.get_guaranteed_fields(node_id)
 
         # Non-pass-through nodes return their own guarantees
         return self.get_guaranteed_fields(node_id)

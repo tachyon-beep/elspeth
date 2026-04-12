@@ -770,3 +770,89 @@ class TestUnionMergeFieldProvenance:
         score_entries = ctx["union_field_collision_values"]["score"]
         assert len(score_entries) == 2
         assert {entry[0] for entry in score_entries} == {"path_a", "path_b"}
+
+    def test_first_wins_collision_policy_surfaces_provenance_via_explain(self, payload_store) -> None:
+        """first_wins policy: first branch value wins, audit trail captures collision.
+
+        QA review identified that first_wins lacked E2E integration coverage through
+        the Orchestrator -> audit trail path. This test verifies:
+
+          * The first branch's collision value wins (path_a's score=10)
+          * union_field_origins records path_a as the winner for 'score'
+          * union_field_collision_values still captures BOTH branches' values
+
+        This is the symmetric counterpart to test_union_merge_surfaces_field_provenance_via_explain
+        which covers last_wins (the default).
+        """
+        db = make_landscape_db()
+        gate = GateSettings(
+            name="fork_gate",
+            input="gate_in",
+            condition="True",
+            routes={"true": "fork", "false": "output"},
+            fork_to=["path_a", "path_b"],
+        )
+        coalesce = CoalesceSettings(
+            name="merge_scores_first",
+            branches={"path_a": "done_a", "path_b": "done_b"},
+            policy="require_all",
+            merge="union",
+            union_collision_policy="first_wins",
+            on_success="output",
+        )
+        output_sink = CollectSink("output")
+
+        config, graph, settings = _build_branch_pipeline(
+            source_data=[{"value": 1}],
+            branch_transforms={
+                "path_a": [_ScoreATransform()],
+                "path_b": [_ScoreBTransform()],
+            },
+            coalesce=coalesce,
+            gate=gate,
+            sinks={"output": output_sink},
+        )
+
+        orchestrator = Orchestrator(db)
+        run_result = orchestrator.run(
+            config,
+            graph=graph,
+            settings=settings,
+            payload_store=payload_store,
+        )
+
+        # Pipeline completed; sink received the merged row
+        assert len(output_sink.results) == 1
+        merged = output_sink.results[0]
+        # first_wins: 'path_a' is first in branches ordering => score=10 wins
+        assert merged["score"] == 10, f"first_wins should select path_a's score=10, got {merged['score']}"
+        assert merged["field_a"] == "from_a"
+        assert merged["field_b"] == "from_b"
+
+        # Inspect the audit trail directly
+        states = _load_coalesce_context_after(db, run_result.run_id, "merge_scores_first")
+        assert states, "expected coalesce node_states to be recorded"
+
+        contexts_with_origins = [s["context"] for s in states if s["context"] is not None and "union_field_origins" in s["context"]]
+        assert contexts_with_origins, f"no coalesce node_state recorded union_field_origins; got: {states}"
+
+        ctx = contexts_with_origins[0]
+
+        # field_origins: first_wins means path_a wins for 'score'
+        origins = ctx["union_field_origins"]
+        assert origins["score"] == "path_a", f"first_wins should record path_a as winner, got {origins['score']}"
+        assert origins["field_a"] == "path_a"
+        assert origins["field_b"] == "path_b"
+
+        # collision_values still records BOTH branches in declared order
+        assert "union_field_collision_values" in ctx
+        collision_values = ctx["union_field_collision_values"]
+        assert "score" in collision_values
+        score_entries = collision_values["score"]
+        assert len(score_entries) == 2
+        assert score_entries[0][0] == "path_a" and score_entries[0][1] == 10
+        assert score_entries[1][0] == "path_b" and score_entries[1][1] == 99
+
+        # Base merge metadata
+        assert ctx["policy"] == "require_all"
+        assert ctx["merge_strategy"] == "union"

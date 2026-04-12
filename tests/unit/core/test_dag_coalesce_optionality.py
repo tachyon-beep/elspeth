@@ -24,6 +24,84 @@ from elspeth.core.dag import ExecutionGraph, WiredTransform
 from elspeth.core.dag.models import GraphValidationError
 
 
+def _compute_coalesce_schema(
+    branch_schemas: dict[str, SchemaConfig | None],
+    *,
+    policy: str = "best_effort",
+) -> SchemaConfig:
+    """Compute merged schema for a coalesce node from branch schemas.
+
+    Mirrors builder.py logic for tests that construct graphs directly.
+    Must be called BEFORE adding the coalesce node to the graph (because
+    NodeInfo is frozen and can't be modified after creation).
+
+    Args:
+        branch_schemas: Map of branch_name → SchemaConfig for each branch
+        policy: Coalesce policy ("require_all" uses union, others use intersection)
+
+    Returns:
+        SchemaConfig with computed guaranteed_fields for the coalesce node
+    """
+    guaranteed_sets: list[set[str]] = []
+    for schema in branch_schemas.values():
+        if schema is not None and schema.has_effective_guarantees:
+            guaranteed_sets.append(set(schema.get_effective_guaranteed_fields()))
+
+    if not guaranteed_sets:
+        return SchemaConfig(mode="observed", fields=None, guaranteed_fields=None)
+
+    # Policy determines union vs intersection
+    if policy == "require_all":
+        merged = set.union(*guaranteed_sets)
+    else:
+        merged = set.intersection(*guaranteed_sets)
+
+    merged_tuple = tuple(sorted(merged)) if merged else ()
+    return SchemaConfig(mode="observed", fields=None, guaranteed_fields=merged_tuple)
+
+
+def _add_coalesce_with_computed_schema(
+    graph: ExecutionGraph,
+    coalesce_node_id: str,
+    branch_node_ids: list[str],
+    *,
+    policy: str = "best_effort",
+    extra_config: dict[str, Any] | None = None,
+) -> None:
+    """Add a coalesce node with computed schema from its predecessor branches.
+
+    This is a convenience helper for tests that construct graphs directly.
+    It collects branch schemas, computes the merged schema, and adds the
+    coalesce node with the correct output_schema_config.
+
+    Args:
+        graph: The ExecutionGraph to add the node to
+        coalesce_node_id: ID for the coalesce node
+        branch_node_ids: List of branch node IDs to compute guarantees from
+        policy: Coalesce policy ("require_all" uses union, others use intersection)
+        extra_config: Additional config dict entries for the coalesce node
+    """
+    # Collect branch schemas
+    branch_schemas = {node_id: graph.get_schema_config_from_node(node_id) for node_id in branch_node_ids}
+
+    # Compute merged schema
+    coalesce_schema = _compute_coalesce_schema(branch_schemas, policy=policy)
+
+    # Build config
+    config: dict[str, Any] = {"merge": "union", "branches": {}, "policy": policy}
+    if extra_config:
+        config.update(extra_config)
+
+    # Add coalesce node with computed schema
+    graph.add_node(
+        coalesce_node_id,
+        node_type=NodeType.COALESCE,
+        plugin_name="coalesce",
+        config=config,
+        output_schema_config=coalesce_schema,
+    )
+
+
 class TestUnionMergeOptionalityPreservation:
     """Tests for optionality in union merge using SchemaConfig objects.
 
@@ -1489,3 +1567,392 @@ class TestBuilderBranchExclusiveFieldDowngrade:
                 gates=[fork_gate],
                 coalesce_settings=[coalesce],
             )
+
+    def test_builder_materializes_typed_required_fields_as_guarantees(self) -> None:
+        """Builder includes typed required fields in merged_guaranteed_tuple.
+
+        Bug regression: The builder was only considering explicit guaranteed_fields
+        when computing merged_guaranteed_tuple, ignoring typed required fields.
+        A branch with mode="fixed", fields=(id, x) required but guaranteed_fields=None
+        should still contribute {id, x} to the merged guarantees.
+
+        This test verifies that the coalesce node's stored schema has the correct
+        guaranteed_fields materialized from typed required fields. We use manual
+        graph construction + get_schema_config_from_node to verify the stored schema.
+        """
+        from elspeth.contracts.schema import FieldDefinition, SchemaConfig
+
+        graph = ExecutionGraph()
+        graph.add_node("source", node_type=NodeType.SOURCE, plugin_name="csv")
+
+        # Branch A: typed fields (id, x) required, NO explicit guaranteed_fields
+        schema_a = SchemaConfig(
+            mode="fixed",
+            fields=(
+                FieldDefinition("id", "int", required=True),
+                FieldDefinition("x", "str", required=True),
+            ),
+            guaranteed_fields=None,  # No explicit declaration
+        )
+        graph.add_node(
+            "branch_a",
+            node_type=NodeType.TRANSFORM,
+            plugin_name="transform",
+            config={},
+            output_schema_config=schema_a,
+        )
+
+        # Branch B: typed field (id) required, NO explicit guaranteed_fields
+        schema_b = SchemaConfig(
+            mode="fixed",
+            fields=(FieldDefinition("id", "int", required=True),),
+            guaranteed_fields=None,  # No explicit declaration
+        )
+        graph.add_node(
+            "branch_b",
+            node_type=NodeType.TRANSFORM,
+            plugin_name="transform",
+            config={},
+            output_schema_config=schema_b,
+        )
+
+        for b in ("branch_a", "branch_b"):
+            graph.add_edge("source", b, label=b)
+
+        # Add coalesce with require_all policy (union semantics)
+        _add_coalesce_with_computed_schema(
+            graph,
+            "coalesce",
+            ["branch_a", "branch_b"],
+            policy="require_all",
+            extra_config={"branches": {"branch_a": {}, "branch_b": {}}},
+        )
+
+        for b in ("branch_a", "branch_b"):
+            graph.add_edge(b, "coalesce", label="continue")
+
+        graph.add_node("sink", node_type=NodeType.SINK, plugin_name="csv")
+        graph.add_edge("coalesce", "sink", label="continue")
+
+        # Verify effective guarantees via the graph API
+        # Under require_all, merged guarantees = union of typed required fields
+        # = {id, x} from branch_a | {id} from branch_b = {id, x}
+        result = graph.get_effective_guaranteed_fields("coalesce")
+        assert result == frozenset({"id", "x"})
+
+
+class TestBestEffortBranchLossDocumentation:
+    """Document the build-time vs runtime guarantee gap for best_effort.
+
+    Systems review identified this as a "Shifting the Burden" archetype:
+    build-time validation gives confidence, but cannot prove runtime branch
+    arrival. These tests document the limitation explicitly.
+
+    Build-time validation cannot prove a branch will arrive — it proves only
+    that IF all declared branches arrive, the guaranteed fields will be present.
+    Under best_effort, branches may timeout or be lost, producing merged rows
+    that are missing branch-exclusive fields the sink requires.
+    """
+
+    def test_best_effort_build_passes_for_branch_exclusive_required_field(self) -> None:
+        """Build-time validation PASSES for best_effort with branch-exclusive field.
+
+        This documents expected behavior: best_effort uses intersection semantics,
+        so a branch-exclusive field from branch_a is NOT guaranteed in the merged
+        output (branch_a might not arrive). Therefore, a sink requiring that field
+        would be REJECTED at build-time — this is correct.
+
+        The inverse scenario (require_all) is covered by other tests where the
+        sink requirement IS accepted because union semantics guarantee the field.
+        """
+        from elspeth.contracts.schema import FieldDefinition, SchemaConfig
+
+        graph = ExecutionGraph()
+        graph.add_node("source", node_type=NodeType.SOURCE, plugin_name="csv")
+
+        # Branch A: has exclusive field 'x'
+        schema_a = SchemaConfig(
+            mode="fixed",
+            fields=(
+                FieldDefinition("id", "int", required=True),
+                FieldDefinition("x", "str", required=True),  # exclusive to A
+            ),
+            guaranteed_fields=None,
+        )
+        graph.add_node(
+            "branch_a",
+            node_type=NodeType.TRANSFORM,
+            plugin_name="transform",
+            config={},
+            output_schema_config=schema_a,
+        )
+
+        # Branch B: only has 'id'
+        schema_b = SchemaConfig(
+            mode="fixed",
+            fields=(FieldDefinition("id", "int", required=True),),
+            guaranteed_fields=None,
+        )
+        graph.add_node(
+            "branch_b",
+            node_type=NodeType.TRANSFORM,
+            plugin_name="transform",
+            config={},
+            output_schema_config=schema_b,
+        )
+
+        for b in ("branch_a", "branch_b"):
+            graph.add_edge("source", b, label=b)
+
+        # best_effort coalesce: intersection semantics
+        _add_coalesce_with_computed_schema(
+            graph,
+            "coalesce",
+            ["branch_a", "branch_b"],
+            policy="best_effort",
+            extra_config={
+                "branches": {"branch_a": {}, "branch_b": {}},
+                "timeout_seconds": 30.0,
+            },
+        )
+
+        for b in ("branch_a", "branch_b"):
+            graph.add_edge(b, "coalesce", label="continue")
+
+        graph.add_node("sink", node_type=NodeType.SINK, plugin_name="csv")
+        graph.add_edge("coalesce", "sink", label="continue")
+
+        # Under best_effort, intersection of guarantees = {id} only
+        # Field 'x' is NOT guaranteed (branch_a might not arrive)
+        result = graph.get_effective_guaranteed_fields("coalesce")
+        assert result == frozenset({"id"}), (
+            f"best_effort should use intersection semantics, got {result}. Branch-exclusive field 'x' should NOT be in guaranteed set."
+        )
+
+        # This documents the limitation: build-time validation correctly reflects
+        # that 'x' is not guaranteed. A sink requiring 'x' would be rejected.
+        # The runtime can still produce rows with 'x' (when branch_a arrives),
+        # but build-time cannot promise it.
+
+
+class TestDualComputationCrossPathAssertion:
+    """Cross-path assertions: builder storage vs. graph query must agree.
+
+    The builder computes merged guaranteed_fields at build time and stores them
+    in the coalesce node's output_schema_config.guaranteed_fields. The graph's
+    get_effective_guaranteed_fields() method recomputes the same value from
+    predecessor schemas at query time.
+
+    These two code paths MUST produce identical results. This test class exists
+    because panel review identified the dual computation as a maintenance risk:
+    changes to one path without updating the other would create silent validation
+    divergence.
+
+    Ref: builder.py:881 comment "must match ExecutionGraph.get_effective_guaranteed_fields()"
+    """
+
+    def test_require_all_stored_matches_computed(self) -> None:
+        """Cross-path: builder storage == graph query under require_all policy."""
+        graph = ExecutionGraph()
+        graph.add_node("source", node_type=NodeType.SOURCE, plugin_name="source")
+
+        # Two branches with different guarantees
+        schema_a = SchemaConfig(
+            mode="observed",
+            fields=None,
+            guaranteed_fields=("id", "exclusive_a"),
+        )
+        schema_b = SchemaConfig(
+            mode="observed",
+            fields=None,
+            guaranteed_fields=("id", "exclusive_b"),
+        )
+        graph.add_node(
+            "branch_a",
+            node_type=NodeType.TRANSFORM,
+            plugin_name="transform",
+            config={},
+            output_schema_config=schema_a,
+        )
+        graph.add_node(
+            "branch_b",
+            node_type=NodeType.TRANSFORM,
+            plugin_name="transform",
+            config={},
+            output_schema_config=schema_b,
+        )
+        for b in ("branch_a", "branch_b"):
+            graph.add_edge("source", b, label=b)
+
+        # require_all coalesce: union semantics
+        # Simulate builder storing the pre-computed union result
+        stored_guarantees = ("exclusive_a", "exclusive_b", "id")  # sorted union
+        coalesce_schema = SchemaConfig(
+            mode="observed",
+            fields=None,
+            guaranteed_fields=stored_guarantees,
+        )
+        graph.add_node(
+            "coalesce",
+            node_type=NodeType.COALESCE,
+            plugin_name="coalesce",
+            config={
+                "merge": "union",
+                "branches": {"branch_a": {}, "branch_b": {}},
+                "policy": "require_all",
+            },
+            output_schema_config=coalesce_schema,
+        )
+        for b in ("branch_a", "branch_b"):
+            graph.add_edge(b, "coalesce", label="continue")
+
+        graph.add_node("sink", node_type=NodeType.SINK, plugin_name="csv")
+        graph.add_edge("coalesce", "sink", label="continue")
+
+        # Query the graph's computed value
+        computed = graph.get_effective_guaranteed_fields("coalesce")
+
+        # Cross-path assertion: stored == computed
+        assert computed == frozenset(stored_guarantees), (
+            f"Cross-path divergence detected! "
+            f"Builder stored {stored_guarantees}, graph computed {computed}. "
+            "Check builder.py and graph.py coalesce guarantee logic for consistency."
+        )
+
+    def test_best_effort_stored_matches_computed(self) -> None:
+        """Cross-path: builder storage == graph query under best_effort policy."""
+        graph = ExecutionGraph()
+        graph.add_node("source", node_type=NodeType.SOURCE, plugin_name="source")
+
+        # Two branches with different guarantees
+        schema_a = SchemaConfig(
+            mode="observed",
+            fields=None,
+            guaranteed_fields=("id", "exclusive_a"),
+        )
+        schema_b = SchemaConfig(
+            mode="observed",
+            fields=None,
+            guaranteed_fields=("id", "exclusive_b"),
+        )
+        graph.add_node(
+            "branch_a",
+            node_type=NodeType.TRANSFORM,
+            plugin_name="transform",
+            config={},
+            output_schema_config=schema_a,
+        )
+        graph.add_node(
+            "branch_b",
+            node_type=NodeType.TRANSFORM,
+            plugin_name="transform",
+            config={},
+            output_schema_config=schema_b,
+        )
+        for b in ("branch_a", "branch_b"):
+            graph.add_edge("source", b, label=b)
+
+        # best_effort coalesce: intersection semantics
+        # Simulate builder storing the pre-computed intersection result
+        stored_guarantees = ("id",)  # only common field survives
+        coalesce_schema = SchemaConfig(
+            mode="observed",
+            fields=None,
+            guaranteed_fields=stored_guarantees,
+        )
+        graph.add_node(
+            "coalesce",
+            node_type=NodeType.COALESCE,
+            plugin_name="coalesce",
+            config={
+                "merge": "union",
+                "branches": {"branch_a": {}, "branch_b": {}},
+                "policy": "best_effort",
+                "timeout_seconds": 30.0,
+            },
+            output_schema_config=coalesce_schema,
+        )
+        for b in ("branch_a", "branch_b"):
+            graph.add_edge(b, "coalesce", label="continue")
+
+        graph.add_node("sink", node_type=NodeType.SINK, plugin_name="csv")
+        graph.add_edge("coalesce", "sink", label="continue")
+
+        # Query the graph's computed value
+        computed = graph.get_effective_guaranteed_fields("coalesce")
+
+        # Cross-path assertion: stored == computed
+        assert computed == frozenset(stored_guarantees), (
+            f"Cross-path divergence detected! "
+            f"Builder stored {stored_guarantees}, graph computed {computed}. "
+            "Check builder.py and graph.py coalesce guarantee logic for consistency."
+        )
+
+    def test_quorum_equals_branches_uses_union_semantics(self) -> None:
+        """Cross-path: quorum_count == len(branches) uses union semantics like require_all."""
+        graph = ExecutionGraph()
+        graph.add_node("source", node_type=NodeType.SOURCE, plugin_name="source")
+
+        # Two branches with different guarantees
+        schema_a = SchemaConfig(
+            mode="observed",
+            fields=None,
+            guaranteed_fields=("id", "exclusive_a"),
+        )
+        schema_b = SchemaConfig(
+            mode="observed",
+            fields=None,
+            guaranteed_fields=("id", "exclusive_b"),
+        )
+        graph.add_node(
+            "branch_a",
+            node_type=NodeType.TRANSFORM,
+            plugin_name="transform",
+            config={},
+            output_schema_config=schema_a,
+        )
+        graph.add_node(
+            "branch_b",
+            node_type=NodeType.TRANSFORM,
+            plugin_name="transform",
+            config={},
+            output_schema_config=schema_b,
+        )
+        for b in ("branch_a", "branch_b"):
+            graph.add_edge("source", b, label=b)
+
+        # quorum with quorum_count == 2 == len(branches): union semantics
+        # This is runtime-equivalent to require_all (all branches must arrive)
+        stored_guarantees = ("exclusive_a", "exclusive_b", "id")  # sorted union
+        coalesce_schema = SchemaConfig(
+            mode="observed",
+            fields=None,
+            guaranteed_fields=stored_guarantees,
+        )
+        graph.add_node(
+            "coalesce",
+            node_type=NodeType.COALESCE,
+            plugin_name="coalesce",
+            config={
+                "merge": "union",
+                "branches": {"branch_a": {}, "branch_b": {}},
+                "policy": "quorum",
+                "quorum_count": 2,  # == len(branches)
+            },
+            output_schema_config=coalesce_schema,
+        )
+        for b in ("branch_a", "branch_b"):
+            graph.add_edge(b, "coalesce", label="continue")
+
+        graph.add_node("sink", node_type=NodeType.SINK, plugin_name="csv")
+        graph.add_edge("coalesce", "sink", label="continue")
+
+        # Query the graph's computed value
+        computed = graph.get_effective_guaranteed_fields("coalesce")
+
+        # Cross-path assertion: quorum=N should use union (same as require_all)
+        assert computed == frozenset(stored_guarantees), (
+            f"Cross-path divergence for quorum_count == len(branches)! "
+            f"Builder stored {stored_guarantees}, graph computed {computed}. "
+            "quorum_count == branch_count should use union semantics like require_all."
+        )

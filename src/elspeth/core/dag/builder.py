@@ -886,19 +886,23 @@ def build_execution_graph(
         guaranteed_sets: list[set[str]] = []
         audit_sets: list[set[str]] = []
         for schema_cfg in branch_to_schema.values():
-            gf = schema_cfg.guaranteed_fields
-            if gf is not None:  # See SchemaConfig.declares_guaranteed_fields for semantics
-                guaranteed_sets.append(set(gf))
+            # Use has_effective_guarantees to include typed required fields,
+            # not just explicit guaranteed_fields. A branch with mode="fixed",
+            # fields=(id, x) required but guaranteed_fields=None still guarantees
+            # {id, x} via the type system. Must match the condition in
+            # ExecutionGraph.get_effective_guaranteed_fields() for coalesces.
+            if schema_cfg.has_effective_guarantees:
+                guaranteed_sets.append(set(schema_cfg.get_effective_guaranteed_fields()))
             af = schema_cfg.audit_fields
             if af is not None:
                 audit_sets.append(set(af))
 
-        # Preserve None-vs-empty-tuple semantics (see declares_guaranteed_fields):
-        #   No branch declared → None (abstain: coalesce makes no claim)
-        #   Branches declared but merge is ∅ → () (explicitly guarantees nothing)
+        # Preserve None-vs-empty-tuple semantics (see has_effective_guarantees):
+        #   No branch has effective guarantees → None (abstain: coalesce makes no claim)
+        #   Branches have guarantees but merge is ∅ → () (explicitly guarantees nothing)
         # Using truthiness (``if merged``) would conflate these two cases.
         if guaranteed_sets:
-            if coal_config.policy == "require_all":
+            if coal_config.has_all_branch_semantics:
                 merged_guaranteed_tuple = tuple(sorted(set.union(*guaranteed_sets)))
             else:
                 merged_guaranteed_tuple = tuple(sorted(set.intersection(*guaranteed_sets)))
@@ -938,7 +942,11 @@ def build_execution_graph(
             # The coalesce policy is statically known here, so the build-time
             # spec can encode the right semantics for each policy without
             # needing runtime information.
-            require_all = coal_config.policy == "require_all"
+            #
+            # has_all_branch_semantics includes quorum=N where N == branch_count,
+            # which is runtime-equivalent to require_all. Use it instead of a
+            # strict policy == "require_all" check to avoid validation divergence.
+            require_all = coal_config.has_all_branch_semantics
 
             for branch_name, schema_cfg in branch_to_schema.items():
                 if schema_cfg.is_observed:
@@ -1023,7 +1031,7 @@ def build_execution_graph(
             # system only supports flat types, declare branch fields as "any".
             # For partial-arrival policies, branch fields are optional since not
             # all branches may arrive at runtime.
-            optional = coal_config.policy != "require_all"
+            optional = not coal_config.has_all_branch_semantics
             nested_fields = tuple(FieldDefinition(name=branch, field_type="any", required=not optional) for branch in branch_to_schema)
             nested_schema = SchemaConfig(
                 mode="flexible",

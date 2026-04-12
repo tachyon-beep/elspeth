@@ -12,13 +12,95 @@ would cause transforms to execute out of order or produce corrupt audit trails.
 
 from __future__ import annotations
 
+from typing import Any
+
 import networkx as nx
-from hypothesis import given, settings
+from hypothesis import assume, given, settings
 from hypothesis import strategies as st
 
 from elspeth.contracts.enums import NodeType
+from elspeth.contracts.schema import SchemaConfig
 from elspeth.contracts.types import NodeID
 from elspeth.core.dag import ExecutionGraph, GraphValidationError
+
+
+def _compute_coalesce_schema(
+    branch_schemas: dict[str, SchemaConfig | None],
+    *,
+    policy: str = "best_effort",
+) -> SchemaConfig:
+    """Compute merged schema for a coalesce node from branch schemas.
+
+    Mirrors builder.py logic for tests that construct graphs directly.
+    Must be called BEFORE adding the coalesce node to the graph (because
+    NodeInfo is frozen and can't be modified after creation).
+
+    Args:
+        branch_schemas: Map of branch_name → SchemaConfig for each branch
+        policy: Coalesce policy ("require_all" uses union, others use intersection)
+
+    Returns:
+        SchemaConfig with computed guaranteed_fields for the coalesce node
+    """
+    guaranteed_sets: list[set[str]] = []
+    for schema in branch_schemas.values():
+        if schema is not None and schema.has_effective_guarantees:
+            guaranteed_sets.append(set(schema.get_effective_guaranteed_fields()))
+
+    if not guaranteed_sets:
+        return SchemaConfig(mode="observed", fields=None, guaranteed_fields=None)
+
+    # Policy determines union vs intersection
+    if policy == "require_all":
+        merged = set.union(*guaranteed_sets)
+    else:
+        merged = set.intersection(*guaranteed_sets)
+
+    merged_tuple = tuple(sorted(merged)) if merged else ()
+    return SchemaConfig(mode="observed", fields=None, guaranteed_fields=merged_tuple)
+
+
+def _add_coalesce_with_computed_schema(
+    graph: ExecutionGraph,
+    coalesce_node_id: str,
+    branch_node_ids: list[str],
+    *,
+    policy: str = "best_effort",
+    extra_config: dict[str, Any] | None = None,
+) -> None:
+    """Add a coalesce node with computed schema from its predecessor branches.
+
+    This is a convenience helper for tests that construct graphs directly.
+    It collects branch schemas, computes the merged schema, and adds the
+    coalesce node with the correct output_schema_config.
+
+    Args:
+        graph: The ExecutionGraph to add the node to
+        coalesce_node_id: ID for the coalesce node
+        branch_node_ids: List of branch node IDs to compute guarantees from
+        policy: Coalesce policy ("require_all" uses union, others use intersection)
+        extra_config: Additional config dict entries for the coalesce node
+    """
+    # Collect branch schemas
+    branch_schemas = {node_id: graph.get_schema_config_from_node(node_id) for node_id in branch_node_ids}
+
+    # Compute merged schema
+    coalesce_schema = _compute_coalesce_schema(branch_schemas, policy=policy)
+
+    # Build config
+    config = {"merge": "union", "branches": {}, "policy": policy}
+    if extra_config:
+        config.update(extra_config)
+
+    # Add coalesce node with computed schema
+    graph.add_node(
+        coalesce_node_id,
+        node_type=NodeType.COALESCE,
+        plugin_name="test_coalesce",
+        config=config,
+        output_schema_config=coalesce_schema,
+    )
+
 
 # =============================================================================
 # Strategies for generating valid DAG structures
@@ -634,13 +716,13 @@ class TestGuaranteedFieldsProperties:
             config={"schema": {"mode": "observed", "guaranteed_fields": list(branch_b_guarantees)}},
         )
 
-        # Coalesce node (merge point) — best_effort union merge uses intersection
-        # of guarantees because branches may be lost.
-        graph.add_node(
+        # Coalesce node (merge point) — best_effort uses intersection of guarantees
+        _add_coalesce_with_computed_schema(
+            graph,
             "coalesce",
-            node_type=NodeType.COALESCE,
-            plugin_name="test_coalesce",
-            config={"merge": "union", "policy": "best_effort"},
+            ["branch_a", "branch_b"],
+            policy="best_effort",
+            extra_config={"branches": {"branch_a": {}, "branch_b": {}}},
         )
 
         # Sink
@@ -701,6 +783,11 @@ class TestGuaranteedFieldsProperties:
         branch_a_only = branch_a_only - common_fields - branch_b_only
         branch_b_only = branch_b_only - common_fields - branch_a_only
 
+        # The union property is only observable when at least one branch has
+        # exclusive fields. Without this, union == intersection == common_fields,
+        # making the test degenerate. QA review identified this gap.
+        assume(branch_a_only or branch_b_only)
+
         branch_a_guarantees = common_fields | branch_a_only
         branch_b_guarantees = common_fields | branch_b_only
         # Under require_all, every branch always arrives → union of guarantees.
@@ -720,12 +807,16 @@ class TestGuaranteedFieldsProperties:
             plugin_name="test_transform",
             config={"schema": {"mode": "observed", "guaranteed_fields": list(branch_b_guarantees)}},
         )
-        graph.add_node(
+
+        # Coalesce node — require_all uses union of guarantees (every branch arrives)
+        _add_coalesce_with_computed_schema(
+            graph,
             "coalesce",
-            node_type=NodeType.COALESCE,
-            plugin_name="test_coalesce",
-            config={"merge": "union", "policy": "require_all"},
+            ["branch_a", "branch_b"],
+            policy="require_all",
+            extra_config={"branches": {"branch_a": {}, "branch_b": {}}},
         )
+
         graph.add_node("sink", node_type=NodeType.SINK, plugin_name="test_sink")
 
         graph.add_edge("source", "branch_a", label="path_a")

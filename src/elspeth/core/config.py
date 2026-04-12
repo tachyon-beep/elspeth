@@ -7,6 +7,7 @@ Settings are frozen (immutable) after construction.
 
 import ast
 import re
+import warnings
 from pathlib import Path
 from typing import Any, Literal
 from urllib.parse import urlparse
@@ -792,6 +793,17 @@ class CoalesceSettings(BaseModel):
             raise ValueError(
                 f"Coalesce '{self.name}': quorum_count ({self.quorum_count}) cannot exceed number of branches ({len(self.branches)})"
             )
+        # Warn when quorum_count == len(branches) — this is runtime-equivalent to
+        # require_all but may confuse users expecting quorum semantics. The warning
+        # helps surface the equivalence at config time rather than runtime.
+        if self.policy == "quorum" and self.quorum_count is not None and self.quorum_count == len(self.branches):
+            warnings.warn(
+                f"Coalesce '{self.name}': quorum_count ({self.quorum_count}) equals branch count — "
+                f"this is equivalent to policy='require_all'. Consider using require_all "
+                f"for clearer intent.",
+                UserWarning,
+                stacklevel=2,
+            )
         if self.policy == "best_effort" and self.timeout_seconds is None:
             raise ValueError(f"Coalesce '{self.name}': best_effort policy requires timeout_seconds")
         return self
@@ -817,6 +829,24 @@ class CoalesceSettings(BaseModel):
             return None
         value = v.strip()
         return _validate_connection_or_sink_name(value, field_label="Coalesce on_success sink name")
+
+    @property
+    def has_all_branch_semantics(self) -> bool:
+        """Whether this coalesce requires all branches to arrive for successful merge.
+
+        Returns True for:
+        - policy='require_all' (explicit all-branch requirement)
+        - policy='quorum' with quorum_count == len(branches) (implicit all-branch)
+
+        This property determines which merge semantics to use:
+        - True → OR/union semantics (any branch's guarantee is in merged row)
+        - False → AND/intersection semantics (only common guarantees survive)
+
+        The quorum=N case is runtime-equivalent to require_all when N == branch_count:
+        _should_merge() waits for all branches, _evaluate_after_loss() fails on any loss.
+        Build-time validation must use the same semantics for equivalent configs.
+        """
+        return self.policy == "require_all" or (self.policy == "quorum" and self.quorum_count == len(self.branches))
 
 
 class SourceSettings(BaseModel):
