@@ -38,6 +38,7 @@ allowed_dict_patterns:
   - "src/elspeth/engine/tokens.py:TokenManager.expand_token:expanded_rows (list)"
   - "src/elspeth/core/expression_parser.py:_ExpressionEvaluator.__init__:context"
   - "src/elspeth/core/expression_parser.py:ExpressionParser.evaluate:context"
+  - "src/elspeth/engine/processor.py:RowProcessor._record_source_and_start_traversal:input_data"
 
 
   # Node state guard - row data is Tier 2 pipeline data
@@ -341,8 +342,6 @@ allowed_dict_patterns:
   # ═══════════════════════════════════════════════════════════════════════════
   # TUI - Display of dynamic audit data
   # ═══════════════════════════════════════════════════════════════════════════
-  - "src/elspeth/tui/widgets/lineage_tree.py:LineageTree.get_tree_nodes:return (list)"
-  - "src/elspeth/tui/widgets/lineage_tree.py:LineageTree._flatten_tree:result (list)"
 
   # Node detail panel - validation of JSON-parsed audit data (Tier 1 trust boundary)
   # These functions receive raw dicts from json.loads() and validate them into TypedDicts.
@@ -357,10 +356,10 @@ allowed_dict_patterns:
   # Exporter serialization returns dict[str, Any] by design for OTLP/JSON payloads.
   # ═══════════════════════════════════════════════════════════════════════════
   - "src/elspeth/telemetry/exporters/azure_monitor.py:AzureMonitorExporter._serialize_event_attributes:return"
-  - "src/elspeth/telemetry/exporters/otlp.py:_serialize_event_attributes:return"
   - "src/elspeth/telemetry/exporters/otlp.py:OTLPExporter._serialize_event_attributes:return"
-  - "src/elspeth/telemetry/exporters/otlp.py:_SyntheticReadableSpan.__init__:attributes"
   - "src/elspeth/telemetry/exporters/console.py:ConsoleExporter._serialize_event:return"
+  - "src/elspeth/telemetry/serialization.py:serialize_event_attributes:return"
+  - "src/elspeth/telemetry/serialization.py:SyntheticReadableSpan.__init__:attributes"
 
   # ═══════════════════════════════════════════════════════════════════════════
   # SPAN FACTORY - OTel attribute bag

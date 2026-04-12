@@ -298,6 +298,7 @@ class TierModelVisitor(ast.NodeVisitor):
         self.findings: list[Finding] = []
         self.symbol_stack: list[str] = []
         self.path_stack: list[str] = []
+        self._decorator_lines: set[int] = set()  # Track lines that are decorators
 
     def _get_code_snippet(self, lineno: int) -> str:
         """Get the source line for a given line number."""
@@ -341,12 +342,18 @@ class TierModelVisitor(ast.NodeVisitor):
 
     def visit_FunctionDef(self, node: ast.FunctionDef) -> None:
         """Track function context."""
+        # Collect decorator lines — .get() calls here are not dict access
+        for decorator in node.decorator_list:
+            self._decorator_lines.add(decorator.lineno)
         self.symbol_stack.append(node.name)
         self.generic_visit(node)
         self.symbol_stack.pop()
 
     def visit_AsyncFunctionDef(self, node: ast.AsyncFunctionDef) -> None:
         """Track async function context."""
+        # Collect decorator lines — .get() calls here are not dict access
+        for decorator in node.decorator_list:
+            self._decorator_lines.add(decorator.lineno)
         self.symbol_stack.append(node.name)
         self.generic_visit(node)
         self.symbol_stack.pop()
@@ -377,12 +384,42 @@ class TierModelVisitor(ast.NodeVisitor):
         # No raise, no return: likely swallow (even if logging).
         return True
 
+    def _is_likely_non_dict_get(self, node: ast.Call) -> bool:
+        """Return True if this .get() call is likely NOT a dict.get().
+
+        Heuristics (conservative — only skip when confident):
+        1. Decorator context: @router.get("/path") is a route decorator
+        2. URL-like first arg: client.get("https://...") is an HTTP method
+        3. ChromaDB keywords: collection.get(ids=[...]) is SDK retrieval
+
+        Note: f-string URLs (client.get(f"/api/{id}")) are NOT filtered
+        because we cannot statically determine their runtime value.
+        These must be allowlisted if they are legitimate HTTP calls.
+        """
+        # Heuristic 1: Decorator context
+        if node.lineno in self._decorator_lines:
+            return True
+
+        # Heuristic 2: URL-like first argument
+        if node.args:
+            first_arg = node.args[0]
+            if isinstance(first_arg, ast.Constant) and isinstance(first_arg.value, str):
+                val = first_arg.value
+                if val.startswith(("/", "http://", "https://")):
+                    return True
+
+        # Heuristic 3: ChromaDB-specific keywords
+        # IMPORTANT: Only include keywords that are unambiguous to ChromaDB/vector DBs.
+        # Generic pagination keywords (limit, offset) are NOT included because they
+        # collide with SQLAlchemy, Django ORM, and other common patterns.
+        chromadb_keywords = {"ids", "include", "where"}
+        call_keywords = {kw.arg for kw in node.keywords if kw.arg is not None}
+        return bool(call_keywords & chromadb_keywords)
+
     def visit_Call(self, node: ast.Call) -> None:
         """Detect R1 (dict.get), R2 (getattr), R3 (hasattr), R5 (isinstance), R8/R9 defaults."""
         # R1: dict.get() - Call(func=Attribute(attr="get"))
-        if isinstance(node.func, ast.Attribute) and node.func.attr == "get":
-            # This catches any .get() call - we can't know types statically
-            # but dict.get() is the common bug-hiding case
+        if isinstance(node.func, ast.Attribute) and node.func.attr == "get" and not self._is_likely_non_dict_get(node):
             self._add_finding(
                 "R1",
                 node,

@@ -1,24 +1,4 @@
 allow_hits:
-- key: web/catalog/routes.py:R1:list_sources:fp=ccdc6bb55bdef578
-  owner: web-catalog
-  reason: False positive — @catalog_router.get() is FastAPI route decorator, not dict.get()
-  safety: No dict access involved
-  expires: null
-- key: web/catalog/routes.py:R1:list_transforms:fp=2c4051cabdd7abc4
-  owner: web-catalog
-  reason: False positive — @catalog_router.get() is FastAPI route decorator, not dict.get()
-  safety: No dict access involved
-  expires: null
-- key: web/catalog/routes.py:R1:list_sinks:fp=2f3c4211eedd8864
-  owner: web-catalog
-  reason: False positive — @catalog_router.get() is FastAPI route decorator, not dict.get()
-  safety: No dict access involved
-  expires: null
-- key: web/catalog/routes.py:R1:get_schema:fp=bfaf3a79a383cb6f
-  owner: web-catalog
-  reason: False positive — @catalog_router.get() is FastAPI route decorator, not dict.get()
-  safety: No dict access involved
-  expires: null
 - key: web/catalog/routes.py:R1:get_schema:fp=bc80b0854f0cb34e
   owner: web-catalog
   reason: Tier 3 boundary — plugin_type from URL path parameter, lookup in constant dict
@@ -164,11 +144,6 @@ allow_hits:
   reason: Tier 3 boundary — preferred_username fallback in display_name chain
   safety: Falls back to None (honest absence) when IdP provides neither name nor preferred_username
   expires: null
-- key: web/auth/routes.py:R1:create_auth_router:me:fp=152bae4dff3f14f0
-  owner: web-auth
-  reason: False positive — @router.get() is FastAPI HTTP route decorator, not dict.get()
-  safety: No dict access involved; decorator syntax triggers text-based pattern match
-  expires: null
 - key: web/app.py:R5:_settings_from_env:fp=3543b5388bbd89c8
   owner: web-app
   reason: Tier 3 boundary — JSON-parsed env var may be a list; isinstance check classifies for tuple conversion
@@ -178,31 +153,6 @@ allow_hits:
   owner: web-app
   reason: Tier 3 boundary — env var value that isn't valid JSON is treated as plain string (the common case)
   safety: JSONDecodeError caught only to fall back to raw string; no silent data loss
-  expires: null
-- key: web/blobs/routes.py:R1:create_blobs_router:list_blobs:fp=be5f3aed9b28c617
-  owner: web-blobs
-  reason: False positive — @router.get() is FastAPI HTTP route decorator, not dict.get()
-  safety: No dict access involved
-  expires: null
-- key: web/blobs/routes.py:R1:create_blobs_router:get_blob_metadata:fp=3aec9f34241a470a
-  owner: web-blobs
-  reason: False positive — @router.get() is FastAPI HTTP route decorator, not dict.get()
-  safety: No dict access involved
-  expires: null
-- key: web/blobs/routes.py:R1:create_blobs_router:download_blob_content:fp=abed53a4daf5b523
-  owner: web-blobs
-  reason: False positive — @router.get() is FastAPI HTTP route decorator, not dict.get()
-  safety: No dict access involved
-  expires: null
-- key: web/execution/routes.py:R1:create_execution_router:get_run_status:fp=329fbbace42b1e55
-  owner: web-execution
-  reason: False positive — @router.get() is FastAPI HTTP route decorator, not dict.get()
-  safety: No dict access involved
-  expires: null
-- key: web/execution/routes.py:R1:create_execution_router:get_run_results:fp=d47d6bfbaecbd0aa
-  owner: web-execution
-  reason: False positive — @router.get() is FastAPI HTTP route decorator, not dict.get()
-  safety: No dict access involved
   expires: null
 - key: web/execution/progress.py:R8:ProgressBroadcaster:subscribe:fp=e8ef5588226d0270
   owner: web-execution
@@ -351,11 +301,6 @@ allow_hits:
   reason: Chained resolution — server store miss returns None; SecretNotFoundError is the expected miss signal
   safety: Only SecretNotFoundError is caught; caller receives None for genuine absence
   expires: null
-- key: web/secrets/routes.py:R1:create_secrets_router:list_secrets:fp=5618b82e58dad600
-  owner: web-secrets
-  reason: False positive — @router.get() is FastAPI HTTP route decorator, not dict.get()
-  safety: No dict access involved
-  expires: null
 - key: web/execution/validation.py:R5:_collect_secret_refs:fp=2fd9a6d2ad02843a
   owner: web-execution
   reason: Tree-walk — isinstance() dispatches dict/list/scalar branches in recursive config traversal
@@ -375,16 +320,6 @@ allow_hits:
   owner: web-app
   reason: Tier 3 — os.environ.get() for optional WEB_CONCURRENCY env var
   safety: Defaults to "1" when absent
-  expires: null
-- key: web/app.py:R1:create_app:health:fp=8da713f03ffb9e37
-  owner: web-app
-  reason: False positive — @router.get() is FastAPI route decorator
-  safety: No dict access involved
-  expires: null
-- key: web/app.py:R1:create_app:system_status:fp=469963c11bebb9c7
-  owner: web-app
-  reason: False positive — @router.get() is FastAPI route decorator
-  safety: No dict access involved
   expires: null
 - key: web/app.py:R6:create_app:fp=0c136ddff17c147d
   owner: web-app
@@ -516,11 +451,6 @@ allow_hits:
   reason: Tier 3 — os.environ.get() for optional ELSPETH_ENV
   safety: Returns None when absent; only used for test guard
   expires: null
-- key: web/auth/routes.py:R1:create_auth_router:auth_config:fp=d7eff6bc7a44a392
-  owner: web-auth
-  reason: False positive — @router.get() is FastAPI route decorator
-  safety: No dict access involved
-  expires: null
 - key: web/blobs/service.py:R6:BlobServiceImpl:finalize_run_output_blobs:_sync:fp=c09366e02831de24
   owner: web-blobs
   reason: Quota exceeded during finalization marks blob as error instead of crashing run
@@ -601,41 +531,6 @@ allow_hits:
   owner: web-sessions
   reason: Convergence partial-state save may fail — narrowed to data-shape and DB integrity errors
   safety: Returns 422 with structured error, does not swallow
-  expires: null
-- key: web/sessions/routes.py:R1:create_session_router:list_sessions:fp=60d9bd145263a299
-  owner: web-sessions
-  reason: False positive — @router.get() is FastAPI HTTP route decorator, not dict.get()
-  safety: No dict access involved
-  expires: null
-- key: web/sessions/routes.py:R1:create_session_router:get_session:fp=71d385ab0bc7d9aa
-  owner: web-sessions
-  reason: False positive — @router.get() is FastAPI HTTP route decorator, not dict.get()
-  safety: No dict access involved
-  expires: null
-- key: web/sessions/routes.py:R1:create_session_router:get_messages:fp=1783be04c8760b2e
-  owner: web-sessions
-  reason: False positive — @router.get() is FastAPI HTTP route decorator, not dict.get()
-  safety: No dict access involved
-  expires: null
-- key: web/sessions/routes.py:R1:create_session_router:list_session_runs:fp=143ddde837bf9e7b
-  owner: web-sessions
-  reason: False positive — @router.get() is FastAPI HTTP route decorator, not dict.get()
-  safety: No dict access involved
-  expires: null
-- key: web/sessions/routes.py:R1:create_session_router:get_current_state:fp=4266fe51e1fbe28d
-  owner: web-sessions
-  reason: False positive — @router.get() is FastAPI HTTP route decorator, not dict.get()
-  safety: No dict access involved
-  expires: null
-- key: web/sessions/routes.py:R1:create_session_router:get_state_versions:fp=46c0aa464be5aaa3
-  owner: web-sessions
-  reason: False positive — @router.get() is FastAPI HTTP route decorator, not dict.get()
-  safety: No dict access involved
-  expires: null
-- key: web/sessions/routes.py:R1:create_session_router:get_state_yaml:fp=c9ea890c53e0e5b6
-  owner: web-sessions
-  reason: False positive — @router.get() is FastAPI HTTP route decorator, not dict.get()
-  safety: No dict access involved
   expires: null
 - key: web/sessions/routes.py:R5:create_session_router:fork_from_message:fp=13ea430f169d87ca
   owner: web-sessions
