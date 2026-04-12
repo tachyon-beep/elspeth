@@ -913,7 +913,16 @@ class Orchestrator:
 
             for coalesce_settings_entry in settings.coalesce:
                 coalesce_node_id = coalesce_id_map[CoalesceName(coalesce_settings_entry.name)]
-                coalesce_executor.register_coalesce(coalesce_settings_entry, coalesce_node_id)
+                # Extract guaranteed fields from branch schemas for lost-branch audit trail.
+                # Returns dict[branch_name, SchemaConfig]; we extract guaranteed fields.
+                branch_schema_configs = graph.get_coalesce_branch_schemas(CoalesceName(coalesce_settings_entry.name))
+                branch_schemas: dict[str, tuple[str, ...]] | None = None
+                if branch_schema_configs:
+                    branch_schemas = {
+                        branch_name: tuple(sorted(schema.get_effective_guaranteed_fields()))
+                        for branch_name, schema in branch_schema_configs.items()
+                    }
+                coalesce_executor.register_coalesce(coalesce_settings_entry, coalesce_node_id, branch_schemas)
             if restored_coalesce_state is not None:
                 coalesce_executor.restore_from_checkpoint(restored_coalesce_state)
 

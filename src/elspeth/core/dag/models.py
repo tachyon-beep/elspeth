@@ -52,10 +52,16 @@ class BranchInfo:
     Consolidates two parallel dicts that were both keyed by BranchName:
     - branch_to_coalesce (BranchName -> CoalesceName)
     - branch_gate_map (BranchName -> NodeID)
+
+    The optional ``schema`` field stores the branch's producer schema,
+    enabling runtime tracking of which fields would have been contributed
+    by a branch that was lost (diverted to error sink). This supports
+    audit trail queries like "what fields were expected from lost branch X?"
     """
 
     coalesce_name: CoalesceName
     gate_node_id: NodeID
+    schema: SchemaConfig | None = None
 
     def __post_init__(self) -> None:
         if not self.coalesce_name:

@@ -80,6 +80,8 @@ class CoalesceMetadata:
             fields_to_freeze.append("union_field_origins")
         if self.union_field_collision_values is not None:
             fields_to_freeze.append("union_field_collision_values")
+        if self.lost_branch_expected_fields is not None:
+            fields_to_freeze.append("lost_branch_expected_fields")
         if fields_to_freeze:
             freeze_fields(self, *fields_to_freeze)
 
@@ -111,6 +113,12 @@ class CoalesceMetadata:
     # Outer key: field name. Inner tuple entries: (branch_name, value) in merge order.
     # The last entry is the winner under last_wins; first under first_wins.
     union_field_collision_values: Mapping[str, tuple[tuple[str, Any], ...]] | None = None
+
+    # Lost branch expected fields (populated when branches_lost is non-empty).
+    # Outer key: branch name. Value: tuple of field names that branch would have
+    # contributed. This enables audit queries like "what fields were expected
+    # from lost branch X?" without requiring DAG traversal.
+    lost_branch_expected_fields: Mapping[str, tuple[str, ...]] | None = None
 
     # ------------------------------------------------------------------
     # Serialization
@@ -151,6 +159,8 @@ class CoalesceMetadata:
             result["union_field_collision_values"] = {
                 field: [list(entry) for entry in entries] for field, entries in self.union_field_collision_values.items()
             }
+        if self.lost_branch_expected_fields is not None:
+            result["lost_branch_expected_fields"] = {k: list(v) for k, v in self.lost_branch_expected_fields.items()}
         return result
 
     # ------------------------------------------------------------------
@@ -170,6 +180,7 @@ class CoalesceMetadata:
         expected_branches: Sequence[str],
         branches_arrived: Sequence[str],
         branches_lost: dict[str, str] | None = None,
+        lost_branch_expected_fields: dict[str, tuple[str, ...]] | None = None,
         quorum_required: int | None = None,
         timeout_seconds: float | None = None,
     ) -> CoalesceMetadata:
@@ -179,6 +190,7 @@ class CoalesceMetadata:
             expected_branches=tuple(expected_branches),
             branches_arrived=tuple(branches_arrived),
             branches_lost=branches_lost,
+            lost_branch_expected_fields=lost_branch_expected_fields,
             quorum_required=quorum_required,
             timeout_seconds=timeout_seconds,
         )
@@ -209,6 +221,7 @@ class CoalesceMetadata:
         expected_branches: Sequence[str],
         branches_arrived: Sequence[str],
         branches_lost: dict[str, str],
+        lost_branch_expected_fields: dict[str, tuple[str, ...]] | None = None,
         arrival_order: Sequence[ArrivalOrderEntry],
         wait_duration_ms: float,
     ) -> CoalesceMetadata:
@@ -219,6 +232,7 @@ class CoalesceMetadata:
             expected_branches=tuple(expected_branches),
             branches_arrived=tuple(branches_arrived),
             branches_lost=branches_lost,
+            lost_branch_expected_fields=lost_branch_expected_fields,
             arrival_order=tuple(arrival_order),
             wait_duration_ms=wait_duration_ms,
         )

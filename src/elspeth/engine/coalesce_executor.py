@@ -196,6 +196,13 @@ class CoalesceExecutor:
         self._settings: dict[str, CoalesceSettings] = {}
         # Node IDs: coalesce_name -> node_id
         self._node_ids: dict[str, NodeID] = {}
+        # Branch schemas: coalesce_name -> branch_name -> guaranteed fields tuple
+        # Used to record expected fields when a branch is lost (diverted to error sink).
+        # This enables audit queries like "what fields were expected from lost branch X?"
+        # NOTE: Populated by register_coalesce(), which the orchestrator calls BEFORE
+        # restore_from_checkpoint(). Branch schemas come from fresh graph data each run,
+        # not from checkpoint — the checkpoint stores only pending tokens and lost branches.
+        self._branch_expected_fields: dict[str, dict[str, tuple[str, ...]]] = {}
         # Pending tokens: (coalesce_name, row_id) -> _PendingCoalesce
         self._pending: dict[tuple[str, str], _PendingCoalesce] = {}
         # Completed coalesces: tracks keys that have already merged/failed
@@ -211,15 +218,23 @@ class CoalesceExecutor:
         self,
         settings: CoalesceSettings,
         node_id: NodeID,
+        branch_schemas: dict[str, tuple[str, ...]] | None = None,
     ) -> None:
         """Register a coalesce point.
 
         Args:
             settings: Coalesce configuration
             node_id: Node ID assigned by orchestrator
+            branch_schemas: Optional mapping of branch name to tuple of guaranteed
+                field names. Used to record expected fields when a branch is lost.
+                Keys are branch names from settings.branches; values are guaranteed
+                fields from that branch's producer schema. May be None for pipelines
+                using observed-mode schemas where no fields are declared.
         """
         self._settings[settings.name] = settings
         self._node_ids[settings.name] = node_id
+        if branch_schemas is not None:
+            self._branch_expected_fields[settings.name] = branch_schemas
 
     def get_registered_names(self) -> list[str]:
         """Get names of all registered coalesce points.
@@ -598,6 +613,47 @@ class CoalesceExecutor:
         else:
             raise RuntimeError(f"Unknown coalesce policy: {settings.policy!r}")
 
+    def _get_lost_branch_expected_fields(
+        self,
+        coalesce_name: str,
+        lost_branches: dict[str, str],
+    ) -> dict[str, tuple[str, ...]] | None:
+        """Look up expected fields for lost branches.
+
+        Returns a mapping of branch name to the tuple of guaranteed field names
+        that branch would have contributed, or None in cases where field
+        information is unavailable.
+
+        Semantics of None:
+        - Branch schemas were not registered for this coalesce point (observed-mode)
+        - No branches were lost (nothing to report)
+        - Lost branches exist but none had registered schemas
+
+        An empty dict is never returned — it collapses to None for simpler
+        downstream handling (callers only need to check ``is not None``).
+
+        Args:
+            coalesce_name: Name of the coalesce configuration
+            lost_branches: Mapping of branch name to loss reason
+
+        Returns:
+            Mapping of lost branch name to its expected fields, or None if
+            field information is unavailable (see semantics above).
+        """
+        if coalesce_name not in self._branch_expected_fields:
+            return None
+        if not lost_branches:
+            return None
+
+        branch_fields = self._branch_expected_fields[coalesce_name]
+        result: dict[str, tuple[str, ...]] = {}
+        for branch_name in lost_branches:
+            if branch_name in branch_fields:
+                result[branch_name] = branch_fields[branch_name]
+            # If branch_name not in branch_fields, the branch used observed-mode
+            # schema with no declared fields — omit from result rather than crash.
+        return result if result else None
+
     def _fail_pending(
         self,
         settings: CoalesceSettings,
@@ -672,6 +728,7 @@ class CoalesceExecutor:
                 expected_branches=tuple(settings.branches),
                 branches_arrived=tuple(pending.branches.keys()),
                 branches_lost=pending.lost_branches,
+                lost_branch_expected_fields=self._get_lost_branch_expected_fields(coalesce_name, pending.lost_branches),
                 quorum_required=settings.quorum_count,
                 timeout_seconds=settings.timeout_seconds,
             )
@@ -817,6 +874,7 @@ class CoalesceExecutor:
                 expected_branches=tuple(settings.branches),
                 branches_arrived=tuple(pending.branches.keys()),
                 branches_lost=pending.lost_branches,
+                lost_branch_expected_fields=self._get_lost_branch_expected_fields(coalesce_name, pending.lost_branches),
                 arrival_order=[
                     ArrivalOrderEntry(
                         branch=branch,

@@ -12,6 +12,7 @@ from __future__ import annotations
 import hashlib
 from collections import Counter, defaultdict
 from collections.abc import Mapping, Sequence
+from dataclasses import replace
 from typing import TYPE_CHECKING, Any
 
 import networkx as nx
@@ -866,6 +867,15 @@ def build_execution_graph(
                         branch_to_schema[branch_name] = schema
                         break
 
+        # Update branch_info with schema information for runtime tracking of
+        # lost branch fields. When a branch is diverted at runtime, the coalesce
+        # executor can report which fields were expected from that lost branch.
+        for branch_name_str, schema in branch_to_schema.items():
+            branch_key = BranchName(branch_name_str)
+            if branch_key in branch_info:
+                # Use replace() to preserve any future BranchInfo fields automatically
+                branch_info[branch_key] = replace(branch_info[branch_key], schema=schema)
+
         # Collect contract fields from ALL branches for propagation.
         #   guaranteed_fields = policy-aware merge of branches that declare:
         #                         require_all → UNION (every branch always
@@ -937,6 +947,13 @@ def build_execution_graph(
                 fields=nested_fields,
             )
             _assign_schema(coalesce_id, nested_schema)
+
+    # Update branch_info on the graph now that schemas are populated.
+    # The initial set_branch_info (line ~821) stored entries without schemas.
+    # This call overwrites with schema-enriched entries for runtime lost-branch
+    # field tracking.
+    if branch_info:
+        graph.set_branch_info(branch_info)
 
     # Config gate schema resolution (pass 2): resolve gates that were deferred
     # because their upstream producer (e.g., coalesce) didn't have schema yet.

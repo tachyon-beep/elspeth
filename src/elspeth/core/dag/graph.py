@@ -743,6 +743,35 @@ class ExecutionGraph:
         """
         return {name: info.coalesce_name for name, info in self._branch_info.items()}
 
+    def get_coalesce_branch_schemas(
+        self,
+        coalesce_name: CoalesceName,
+    ) -> dict[str, SchemaConfig]:
+        """Get per-branch schemas for a specific coalesce.
+
+        Returns a mapping of branch name to the SchemaConfig that branch
+        produces. This enables runtime tracking of which fields would have
+        been contributed by a branch that was lost (diverted to error sink).
+
+        Schema source: Branch schemas are computed by ``builder.py`` during
+        DAG construction (see ``build_execution_graph`` coalesce loop around
+        line 848) and stored in ``BranchInfo.schema``. This method reads from
+        that authoritative source — it does not re-derive schemas from nodes.
+
+        Args:
+            coalesce_name: The coalesce to get branch schemas for.
+
+        Returns:
+            Dict mapping branch name (str) to SchemaConfig.
+            Branches without schema info (observed mode or not in _branch_info)
+            are omitted.
+        """
+        result: dict[str, SchemaConfig] = {}
+        for branch_name, info in self._branch_info.items():
+            if info.coalesce_name == coalesce_name and info.schema is not None:
+                result[branch_name] = info.schema
+        return result
+
     def get_branch_first_nodes(self) -> dict[str, NodeID]:
         """Get mapping of branch names to their first processing node.
 
@@ -978,26 +1007,78 @@ class ExecutionGraph:
         # and any future multi-hop shape.
         self._validate_sink_required_fields()
 
+    def _find_divert_transforms_in_chain(
+        self,
+        start_node: NodeID,
+        divert_transforms: set[NodeID],
+    ) -> set[NodeID]:
+        """Find DIVERT transforms by walking backwards from a node.
+
+        Walks backwards through MOVE edges from the start node, collecting
+        any transforms that have DIVERT edges. Stops when hitting a non-TRANSFORM
+        node (gate/source).
+
+        Args:
+            start_node: The node to start walking backwards from
+            divert_transforms: Pre-computed set of transforms with DIVERT edges
+
+        Returns:
+            Set of transform node IDs in the chain that have DIVERT edges.
+        """
+        found: set[NodeID] = set()
+        current = start_node
+        visited: set[NodeID] = set()
+
+        while current not in visited:
+            visited.add(current)
+            current_info = self.get_node_info(current)
+            if current_info.node_type != NodeType.TRANSFORM:
+                break
+
+            if current in divert_transforms:
+                found.add(current)
+
+            # Walk backwards via MOVE edge (skip DIVERT edges to stay on main chain)
+            predecessor: NodeID | None = None
+            for pred_from, _pred_to, _pred_key, pred_data in self._graph.in_edges(current, keys=True, data=True):
+                if pred_data["mode"] == RoutingMode.DIVERT:
+                    continue
+                if pred_data["mode"] == RoutingMode.MOVE:
+                    predecessor = NodeID(pred_from)
+                    break
+
+            if predecessor is None:
+                break
+            current = predecessor
+
+        return found
+
     def warn_divert_coalesce_interactions(
         self,
         coalesce_configs: dict[NodeID, CoalesceSettings],
     ) -> list[GraphValidationWarning]:
-        """Detect transforms with DIVERT edges that feed require_all coalesces.
+        """Detect DIVERT edges that feed coalesces with audit/data implications.
 
-        When a branch transform has ``on_error`` routing (DIVERT edge), rows that
-        hit the error path are diverted to an error sink and never reach the
-        coalesce. If the coalesce uses ``require_all`` policy, it will wait
-        indefinitely for the missing branch, holding the other branches' tokens
-        in memory until end-of-source flush.
+        Emits two types of warnings:
+
+        1. ``DIVERT_COALESCE_REQUIRE_ALL``: A transform with on_error routing
+           feeds a ``require_all`` coalesce. Diverted rows cause other branches
+           to wait indefinitely until end-of-source flush.
+
+        2. ``DIVERT_COALESCE_EXCLUSIVE_FIELDS``: A transform with on_error routing
+           is in a branch that carries fields not guaranteed by any other branch.
+           If a row is diverted, those fields are silently lost from the merged
+           output — the audit trail won't record what fields were expected but
+           absent. This warning applies to ALL policies, not just ``require_all``.
 
         This is a build-time warning, not an error — the configuration is valid
-        but likely to cause operational surprises.
+        but likely to cause operational or audit surprises.
 
         Algorithm:
           1. Pre-compute set of transform node IDs that have outgoing DIVERT edges.
-          2. For each ``require_all`` coalesce, walk backwards from each incoming
-             MOVE edge (transform branch) to check if any transform in the chain
-             has a DIVERT edge.
+          2. For each ``require_all`` coalesce, warn about DIVERT timing issues.
+          3. For ALL coalesces with DIVERT-bearing branches, check for exclusive
+             fields that would be lost if the branch is diverted.
 
         Args:
             coalesce_configs: Mapping of coalesce node IDs to their settings.
@@ -1022,65 +1103,132 @@ class ExecutionGraph:
 
         warnings: list[GraphValidationWarning] = []
 
-        # Step 2: check each require_all coalesce
+        # Step 2: check each coalesce for DIVERT interactions
         for coalesce_nid, coal_config in coalesce_configs.items():
-            if coal_config.policy != "require_all":
-                continue
+            # Track incoming edges and whether their chains have DIVERT transforms
+            # Maps: from_node → (edge_label, edge_mode, divert_transforms_in_chain)
+            incoming_divert_map: dict[NodeID, tuple[str, RoutingMode, set[NodeID]]] = {}
 
             for from_id, _to_id, _key, data in self._graph.in_edges(coalesce_nid, keys=True, data=True):
                 edge_mode = data["mode"]
+                edge_label = data["label"]
+                from_nid = NodeID(from_id)
 
                 # Identity branches (COPY from gate) have no transforms — skip
                 if edge_mode == RoutingMode.COPY:
                     continue
 
-                # Transform branch (MOVE edge from last transform in chain).
-                # Walk backwards through predecessor transforms.
-                if edge_mode != RoutingMode.MOVE:
-                    continue
+                # Transform branch: walk backwards to find DIVERT transforms
+                if edge_mode == RoutingMode.MOVE:
+                    chain_diverts = self._find_divert_transforms_in_chain(from_nid, divert_transforms)
+                    if chain_diverts:
+                        incoming_divert_map[from_nid] = (edge_label, edge_mode, chain_diverts)
 
-                current = NodeID(from_id)
-                visited: set[NodeID] = set()
+            if not incoming_divert_map:
+                continue  # No DIVERT risk for this coalesce
 
-                while current not in visited:
-                    visited.add(current)
-                    current_info = self.get_node_info(current)
-                    if current_info.node_type != NodeType.TRANSFORM:
-                        break  # Hit gate/source — stop walking
-
-                    if current in divert_transforms:
+            # Step 2a: DIVERT_COALESCE_REQUIRE_ALL for require_all policy
+            if coal_config.policy == "require_all":
+                for _from_nid, (_edge_label, _mode, chain_diverts) in incoming_divert_map.items():
+                    for transform_nid in chain_diverts:
                         warning = GraphValidationWarning(
                             code="DIVERT_COALESCE_REQUIRE_ALL",
                             message=(
-                                f"Transform '{current}' has on_error routing (DIVERT edge) "
+                                f"Transform '{transform_nid}' has on_error routing (DIVERT edge) "
                                 f"and feeds require_all coalesce '{coalesce_nid}'. "
                                 f"Rows diverted on error will never reach the coalesce, "
                                 f"causing other branches to wait until end-of-source flush."
                             ),
-                            node_ids=(str(current), str(coalesce_nid)),
+                            node_ids=(str(transform_nid), str(coalesce_nid)),
                         )
                         warnings.append(warning)
                         log.warning(
                             "divert_coalesce_interaction",
                             code=warning.code,
-                            transform=str(current),
+                            transform=str(transform_nid),
                             coalesce=str(coalesce_nid),
                             message=warning.message,
                         )
                         break  # One warning per branch is enough
 
-                    # Walk backwards: find incoming MOVE edge (stay on main chain)
-                    predecessor: NodeID | None = None
-                    for pred_from, _pred_to, _pred_key, pred_data in self._graph.in_edges(current, keys=True, data=True):
-                        if pred_data["mode"] == RoutingMode.DIVERT:
-                            continue  # Skip DIVERT edges — stay on main chain
-                        if pred_data["mode"] == RoutingMode.MOVE:
-                            predecessor = NodeID(pred_from)
-                            break
+            # Step 2b: DIVERT_COALESCE_EXCLUSIVE_FIELDS for exclusive field loss
+            # Only relevant for union merge (nested/select don't lose fields the same way)
+            if coal_config.merge != "union":
+                continue
 
-                    if predecessor is None:
-                        break
-                    current = predecessor
+            # Use authoritative branch schemas from _branch_info (populated by builder)
+            # rather than re-deriving with weaker heuristics.
+            branch_schemas = self.get_coalesce_branch_schemas(CoalesceName(coal_config.name))
+
+            # Match incoming edges with DIVERT to branch names
+            for from_nid, (edge_label, _mode, chain_diverts) in incoming_divert_map.items():
+                # Try to find which branch this edge belongs to
+                matched_branch: str | None = None
+
+                # First, check if edge_label matches a branch name directly
+                if edge_label in coal_config.branches:
+                    matched_branch = edge_label
+                else:
+                    # For transform branches with "continue" edges, match via producer node
+                    for branch_name, _input_conn in coal_config.branches.items():
+                        if branch_name in branch_schemas:
+                            # Try tracing to match this producer
+                            try:
+                                _first, last = self._trace_branch_endpoints(coalesce_nid, branch_name)
+                                if from_nid == last:
+                                    matched_branch = branch_name
+                                    break
+                            except (KeyError, GraphValidationError):
+                                # _branch_info not populated — can't trace, skip
+                                pass
+
+                if matched_branch is None or matched_branch not in branch_schemas:
+                    continue
+
+                branch_schema = branch_schemas[matched_branch]
+
+                # Get guaranteed fields from this branch
+                branch_fields = branch_schema.get_effective_guaranteed_fields()
+                if not branch_fields:
+                    continue  # No guaranteed fields — nothing to lose
+
+                # Get union of guaranteed fields from ALL OTHER branches
+                other_fields: set[str] = set()
+                for other_name, other_schema in branch_schemas.items():
+                    if other_name == matched_branch:
+                        continue
+                    other_fields.update(other_schema.get_effective_guaranteed_fields())
+
+                # Fields exclusive to this branch (not in any other branch)
+                exclusive_fields = branch_fields - other_fields
+
+                if not exclusive_fields:
+                    continue  # No exclusive fields — loss is covered by other branches
+
+                # Emit warning for exclusive field loss
+                transform_str = ", ".join(str(t) for t in sorted(chain_diverts))
+                fields_str = ", ".join(sorted(exclusive_fields))
+                warning = GraphValidationWarning(
+                    code="DIVERT_COALESCE_EXCLUSIVE_FIELDS",
+                    message=(
+                        f"Branch '{matched_branch}' has transforms with on_error routing "
+                        f"({transform_str}) and carries fields exclusive to this branch: "
+                        f"[{fields_str}]. If a row is diverted, these fields will be "
+                        f"silently absent from the coalesce '{coalesce_nid}' merged output. "
+                        f"The audit trail won't record which fields were expected but missing."
+                    ),
+                    node_ids=(str(coalesce_nid), matched_branch),
+                )
+                warnings.append(warning)
+                log.warning(
+                    "divert_coalesce_exclusive_fields",
+                    code=warning.code,
+                    branch=matched_branch,
+                    coalesce=str(coalesce_nid),
+                    exclusive_fields=sorted(exclusive_fields),
+                    divert_transforms=[str(t) for t in chain_diverts],
+                    message=warning.message,
+                )
 
         return warnings
 

@@ -1985,6 +1985,192 @@ class TestFailPendingDetails:
 
 
 # ===========================================================================
+# Lost branch expected fields — audit trail for diverted branch field impact
+# ===========================================================================
+
+
+class TestLostBranchExpectedFields:
+    """Tests for lost_branch_expected_fields in CoalesceMetadata.
+
+    When a branch is diverted to an error sink (lost), the coalesce metadata
+    should record which fields that branch would have contributed. This enables
+    audit queries like "what fields were expected from lost branch X?" without
+    requiring DAG traversal at query time.
+    """
+
+    def test_failure_metadata_includes_lost_branch_expected_fields_when_registered(self):
+        """When branch schemas are registered, lost_branch_expected_fields is populated."""
+        executor, *_ = _make_executor()
+        s = _settings(branches=["a", "b"], policy="require_all")
+        branch_schemas = {
+            "a": ("field_x", "field_y"),
+            "b": ("field_z",),
+        }
+        executor.register_coalesce(s, "node_1", branch_schemas)
+
+        # Loss of b triggers require_all failure
+        result = executor.notify_branch_lost("merge", "row_1", "b", "upstream_fail")
+
+        assert result.coalesce_metadata.lost_branch_expected_fields is not None
+        assert result.coalesce_metadata.lost_branch_expected_fields == {"b": ("field_z",)}
+
+    def test_failure_metadata_lost_branch_expected_fields_none_when_not_registered(self):
+        """When no branch schemas are registered, lost_branch_expected_fields is None."""
+        executor, *_ = _make_executor()
+        s = _settings(branches=["a", "b"], policy="require_all")
+        # No branch schemas passed to register_coalesce
+        executor.register_coalesce(s, "node_1")
+
+        # Loss of b triggers require_all failure
+        result = executor.notify_branch_lost("merge", "row_1", "b", "upstream_fail")
+
+        assert result.coalesce_metadata.lost_branch_expected_fields is None
+
+    def test_failure_metadata_multiple_lost_branches_expected_fields(self):
+        """When multiple branches are lost, all their expected fields are recorded."""
+        executor, *_ = _make_executor()
+        # Use best_effort with 3 branches so we can lose 2 and still merge
+        s = _settings(branches=["a", "b", "c"], policy="best_effort", timeout_seconds=1.0)
+        branch_schemas = {
+            "a": ("field_1",),
+            "b": ("field_2", "field_3"),
+            "c": ("field_4",),
+        }
+        executor.register_coalesce(s, "node_1", branch_schemas)
+
+        # Let c arrive first
+        executor.accept(_make_token(branch_name="c", token_id="t1"), "merge")
+
+        # Lose branch a (no merge yet — still waiting)
+        result = executor.notify_branch_lost("merge", "row_1", "a", "error_a")
+        assert result is None  # best_effort waits for all branches to be accounted for
+
+        # Lose branch b — now all branches accounted for (1 arrived, 2 lost) -> merge
+        result = executor.notify_branch_lost("merge", "row_1", "b", "error_b")
+        assert result is not None
+        assert result.merged_token is not None
+
+        # Both lost branches should appear in lost_branch_expected_fields
+        expected_fields = result.coalesce_metadata.lost_branch_expected_fields
+        assert expected_fields is not None
+        assert set(expected_fields.keys()) == {"a", "b"}
+        assert expected_fields["a"] == ("field_1",)
+        assert expected_fields["b"] == ("field_2", "field_3")
+
+    def test_merge_metadata_includes_lost_branch_expected_fields_for_best_effort(self):
+        """When best_effort merge completes with lost branches, expected fields are recorded."""
+        executor, *_ = _make_executor()
+        s = _settings(branches=["a", "b"], policy="best_effort", timeout_seconds=1.0)
+        branch_schemas = {
+            "a": ("field_x",),
+            "b": ("field_y", "field_z"),
+        }
+        executor.register_coalesce(s, "node_1", branch_schemas)
+
+        # Branch a arrives
+        executor.accept(_make_token(branch_name="a", token_id="t1"), "merge")
+        # Branch b is lost
+        result = executor.notify_branch_lost("merge", "row_1", "b", "diverted")
+
+        # best_effort should merge after loss notification
+        assert result is not None
+        assert result.merged_token is not None
+        assert result.coalesce_metadata.lost_branch_expected_fields == {"b": ("field_y", "field_z")}
+
+    def test_merge_metadata_no_lost_branches_has_none_expected_fields(self):
+        """When no branches are lost, lost_branch_expected_fields is None."""
+        executor, *_ = _make_executor()
+        s = _settings(branches=["a", "b"], policy="require_all")
+        branch_schemas = {
+            "a": ("field_x",),
+            "b": ("field_y",),
+        }
+        executor.register_coalesce(s, "node_1", branch_schemas)
+
+        # Both branches arrive
+        executor.accept(_make_token(branch_name="a", token_id="t1"), "merge")
+        result = executor.accept(_make_token(branch_name="b", token_id="t2"), "merge")
+
+        # Successful merge with no lost branches
+        assert result.merged_token is not None
+        assert result.coalesce_metadata.lost_branch_expected_fields is None
+
+    def test_failure_serialization_includes_lost_branch_expected_fields(self):
+        """to_dict() serializes lost_branch_expected_fields correctly."""
+        executor, *_ = _make_executor()
+        s = _settings(branches=["a", "b"], policy="require_all")
+        branch_schemas = {
+            "a": ("field_x", "field_y"),
+            "b": ("field_z",),
+        }
+        executor.register_coalesce(s, "node_1", branch_schemas)
+
+        result = executor.notify_branch_lost("merge", "row_1", "b", "upstream_fail")
+
+        serialized = result.coalesce_metadata.to_dict()
+        assert "lost_branch_expected_fields" in serialized
+        assert serialized["lost_branch_expected_fields"] == {"b": ["field_z"]}
+
+    def test_check_timeouts_includes_lost_branch_expected_fields(self):
+        """check_timeouts path records lost_branch_expected_fields in merge metadata."""
+        executor, _, _, _, clock = _make_executor()
+        # Use 3 branches so losing one doesn't immediately trigger merge
+        # (best_effort merges when all branches accounted for OR on timeout)
+        s = _settings(branches=["a", "b", "c"], policy="best_effort", timeout_seconds=5.0)
+        branch_schemas = {
+            "a": ("field_x",),
+            "b": ("field_y", "field_z"),
+            "c": ("field_w",),
+        }
+        executor.register_coalesce(s, "node_1", branch_schemas)
+
+        # Branch a arrives
+        executor.accept(_make_token(branch_name="a", token_id="t1"), "merge")
+        # Branch b is lost (accounted = 2, expected = 3, so no immediate merge)
+        result = executor.notify_branch_lost("merge", "row_1", "b", "diverted")
+        assert result is None  # Not all accounted yet
+
+        # Advance past timeout — this triggers merge via check_timeouts
+        # (c never arrived, but best_effort merges with whatever we have)
+        clock.advance(6.0)
+        results = executor.check_timeouts("merge")
+
+        # Should have one result with lost_branch_expected_fields
+        assert len(results) == 1
+        result = results[0]
+        assert result.merged_token is not None
+        assert result.coalesce_metadata.lost_branch_expected_fields == {"b": ("field_y", "field_z")}
+
+    def test_flush_pending_includes_lost_branch_expected_fields(self):
+        """flush_pending path records lost_branch_expected_fields in merge metadata."""
+        executor, *_ = _make_executor()
+        # Use best_effort so loss doesn't trigger immediate fail, and flush will merge
+        # Long timeout ensures it won't fire before flush_pending
+        s = _settings(branches=["a", "b", "c"], policy="best_effort", timeout_seconds=3600.0)
+        branch_schemas = {
+            "a": ("field_1",),
+            "b": ("field_2",),
+            "c": ("field_3",),
+        }
+        executor.register_coalesce(s, "node_1", branch_schemas)
+
+        # Only branch a arrives
+        executor.accept(_make_token(branch_name="a", token_id="t1"), "merge")
+        # Branch b is lost (accounted = 2/3, not all yet)
+        result = executor.notify_branch_lost("merge", "row_1", "b", "error")
+        assert result is None  # Not all accounted yet
+
+        # Flush at end-of-source — best_effort merges with whatever we have
+        results = executor.flush_pending()
+
+        # Should have one merge result with lost_branch_expected_fields for b
+        assert len(results) == 1
+        result = results[0]
+        assert result.merged_token is not None
+        assert result.coalesce_metadata.lost_branch_expected_fields == {"b": ("field_2",)}
+
+
+# ===========================================================================
 # Bug D3-2: best_effort timeout with zero arrivals
 # ===========================================================================
 
