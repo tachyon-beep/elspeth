@@ -1575,8 +1575,15 @@ class TestContractHandling:
         merged_data = tm.coalesce_tokens.call_args.kwargs["merged_data"]
         assert merged_data.contract is c_a
 
-    def test_conflicting_contracts_raise_orchestration_error(self):
-        """Union merge with conflicting field types raises OrchestrationInvariantError."""
+    def test_conflicting_contracts_fail_gracefully(self):
+        """Union merge with conflicting field types fails row gracefully.
+
+        Type conflicts are detected at merge time when contracts from different
+        branches have incompatible types for the same field. For observed schemas,
+        this can't be caught at build time, so we fail gracefully instead of
+        crashing — the audit trail must remain complete.
+        (See: elspeth-c75ac86e35)
+        """
         executor, _, _, _, _ = _make_executor()
         executor.register_coalesce(_settings(merge="union"), "node_1")
         c_a = _make_contract(
@@ -1592,8 +1599,56 @@ class TestContractHandling:
         t1 = _make_token(branch_name="a", token_id="t1", data={"value": 1}, contract=c_a)
         t2 = _make_token(branch_name="b", token_id="t2", data={"value": "x"}, contract=c_b)
         executor.accept(t1, "merge")
-        with pytest.raises(OrchestrationInvariantError, match="Contract merge failed"):
-            executor.accept(t2, "merge")
+        # Second accept triggers merge, which fails due to type conflict
+        outcome = executor.accept(t2, "merge")
+
+        # Outcome indicates failure, not held or merged
+        assert outcome.failure_reason is not None
+        assert "contract_type_conflict" in outcome.failure_reason
+        assert outcome.held is False
+        assert outcome.merged_token is None
+        assert outcome.outcomes_recorded is True  # Tokens properly terminated
+
+    def test_observed_schema_type_conflict_fails_gracefully(self):
+        """Observed schemas with runtime type conflicts fail gracefully.
+
+        This is the primary scenario for elspeth-c75ac86e35: branches with
+        OBSERVED schemas (no declared fields) can produce incompatible types
+        at runtime. Build-time validation can't catch this because observed
+        schemas have no fields until data flows. The fix ensures graceful
+        failure at merge time instead of crashing.
+        """
+        executor, _, _, _, _ = _make_executor()
+        executor.register_coalesce(_settings(merge="union"), "node_1")
+
+        # Both contracts are OBSERVED (runtime-inferred via _make_contract),
+        # simulating the bug scenario where build-time validation passes but
+        # runtime types conflict
+        c_a = _make_contract(
+            fields=[
+                make_field("count", python_type=int, required=True, source="inferred"),
+            ]
+        )
+        c_b = _make_contract(
+            fields=[
+                make_field("count", python_type=str, required=True, source="inferred"),
+            ]
+        )
+
+        t1 = _make_token(branch_name="a", token_id="t1", data={"count": 42}, contract=c_a)
+        t2 = _make_token(branch_name="b", token_id="t2", data={"count": "forty-two"}, contract=c_b)
+
+        executor.accept(t1, "merge")
+        outcome = executor.accept(t2, "merge")
+
+        # Graceful failure, not a crash
+        assert outcome.failure_reason is not None
+        assert "contract_type_conflict" in outcome.failure_reason
+        # Error message should include helpful details about the conflict
+        assert "count" in outcome.failure_reason  # Field name
+        assert "int" in outcome.failure_reason  # Type info
+        assert "str" in outcome.failure_reason  # Type info
+        assert outcome.outcomes_recorded is True
 
 
 # ===========================================================================

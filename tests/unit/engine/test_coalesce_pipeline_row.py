@@ -230,11 +230,13 @@ class TestCoalesceExecutorPipelineRow:
         with pytest.raises(OrchestrationInvariantError, match="has no contract"):
             executor.accept(token_b, "merge_point")
 
-    def test_coalesce_merge_failure_raises_orchestration_error(self) -> None:
-        """Contract merge failure should raise OrchestrationInvariantError.
+    def test_coalesce_merge_failure_returns_graceful_failure(self) -> None:
+        """Contract merge failure should return graceful failure outcome.
 
         When contracts have conflicting types for the same field,
-        merge() raises ContractMergeError, which should be wrapped.
+        merge() raises ContractMergeError. For observed schemas, this
+        can't be caught at build time, so we fail gracefully to preserve
+        audit trail integrity. (See: elspeth-c75ac86e35)
         """
         from elspeth.engine.coalesce_executor import CoalesceExecutor
 
@@ -301,8 +303,15 @@ class TestCoalesceExecutorPipelineRow:
 
         executor.accept(token_a, "merge_point")
 
-        with pytest.raises(OrchestrationInvariantError, match="Contract merge failed"):
-            executor.accept(token_b, "merge_point")
+        # Second accept triggers merge, which fails due to type conflict
+        outcome = executor.accept(token_b, "merge_point")
+
+        # Outcome indicates failure, not held or merged
+        assert outcome.failure_reason is not None
+        assert "contract_type_conflict" in outcome.failure_reason
+        assert outcome.held is False
+        assert outcome.merged_token is None
+        assert outcome.outcomes_recorded is True  # Tokens properly terminated
 
     def test_first_policy_merges_immediately(self) -> None:
         """Coalesce with "first" policy should merge on first arrival.

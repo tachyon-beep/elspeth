@@ -25,6 +25,7 @@ from elspeth.contracts.errors import (
     AuditIntegrityError,
     CoalesceCollisionError,
     CoalesceFailureReason,
+    ContractMergeError,
     ExecutionError,
     OrchestrationInvariantError,
 )
@@ -753,12 +754,19 @@ class CoalesceExecutor:
                 for c in contracts[1:]:
                     try:
                         merged_contract = merged_contract.merge(c)
-                    except Exception as e:
-                        # Contract merge failure is an orchestration invariant violation
-                        # Contracts with conflicting types cannot be merged
-                        raise OrchestrationInvariantError(
-                            f"Contract merge failed at coalesce point '{coalesce_name}'. Branches: {list(pending.branches.keys())}. Error: {e}"
-                        ) from e
+                    except ContractMergeError as e:
+                        # Type conflict between branches — fail this row gracefully.
+                        # This can happen legitimately when all branches use observed
+                        # schemas and runtime data produces incompatible types for the
+                        # same field. Build-time validation cannot catch this case
+                        # because observed schemas have no declared fields.
+                        # (See: elspeth-c75ac86e35)
+                        return self._fail_pending(
+                            settings=settings,
+                            key=key,
+                            step=step,
+                            failure_reason=f"contract_type_conflict: {e}",
+                        )
 
             elif settings.merge == "nested":
                 # Nested: Contract declares branch keys with object type
