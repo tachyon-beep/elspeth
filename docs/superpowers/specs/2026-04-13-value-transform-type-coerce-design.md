@@ -23,6 +23,11 @@ These plugins provide deterministic alternatives to LLM-based transforms for sim
 4. **No fabrication** — Missing fields are errors, not defaults
 5. **Strict by default** — No silent truncation, no Python truthiness surprises
 
+## Terminology
+
+- **`schema`**: The YAML config key for schema configuration (matches existing plugins)
+- **Schema modes**: `observed` (infer from data), `fixed` (exact fields), `flexible` (at least these fields)
+
 ## Plugin 1: `value_transform`
 
 ### Purpose
@@ -49,7 +54,7 @@ Apply expressions to compute new or modified field values using the existing sec
 
 | Field | Type | Required | Description |
 |-------|------|----------|-------------|
-| `schema` | object | Yes | Schema configuration (mode: observed/strict) |
+| `schema` | object | Yes | Schema configuration (mode: observed/fixed/flexible) |
 | `operations` | list | Yes | List of operations to apply |
 | `operations[].target` | string | Yes | Output field name (valid identifier) |
 | `operations[].expression` | string | Yes | Expression to evaluate via ExpressionParser |
@@ -96,17 +101,22 @@ The `ExpressionParser` supports (no modifications needed):
 - Arbitrary function calls
 - Attribute access (except `.get`)
 
+**Note on `row.get()`:** If `row.get('field')` returns `None` and the surrounding expression cannot operate on `None` (e.g., `row.get('discount') * 2`), evaluation fails and the row errors. Use ternary expressions for explicit null handling: `row.get('discount') * 2 if row.get('discount') is not None else 0`.
+
 ### Validation (Config Time)
 
 - Each operation requires `target` (valid identifier) and `expression` (non-empty)
 - All expressions parsed via `ExpressionParser` at construction
 - Syntax/security errors fail config validation immediately
-- Duplicate targets allowed (warning optional)
+- Duplicate targets allowed (no warning — sequential rewrites are legitimate)
+- Field existence validated at runtime only; config validation checks syntax and permitted constructs
 
 ### Contract Propagation
 
 - `declared_output_fields` = deduplicated set of all `target` values
-- Input contract narrowed to output via `narrow_contract_to_output()` with field additions tracked
+- Output contract derived from input contract plus declared output fields
+- Existing target fields retain their names; new target fields are added to output contract
+- If result types cannot be determined statically, output field types remain `any` until runtime
 
 ### Audit Trail
 
@@ -170,7 +180,7 @@ Perform explicit, strict, per-field type normalization on existing row fields.
 
 | Field | Type | Required | Description |
 |-------|------|----------|-------------|
-| `schema` | object | Yes | Schema configuration (mode: observed/strict) |
+| `schema` | object | Yes | Schema configuration (mode: observed/fixed/flexible) |
 | `conversions` | list | Yes | List of type conversions to apply |
 | `conversions[].field` | string | Yes | Field name to convert |
 | `conversions[].to` | string | Yes | Target type: `int`, `float`, `bool`, `str` |
@@ -198,14 +208,17 @@ Perform explicit, strict, per-field type normalization on existing row fields.
 
 | Input | Result |
 |-------|--------|
-| `float` | Unchanged |
+| `float` | Unchanged (must be finite) |
 | `int` | Converted to float |
 | Numeric string after trim (`"12.5"`, `" -3.14 "`) | Parsed float |
 | Scientific notation (`"1e3"`, `"2.5e-4"`) | Allowed |
 | Signed strings (`"+3.14"`, `"-2.5"`) | Allowed |
+| `"nan"`, `"inf"`, `"-inf"` | **Error** (non-finite values rejected) |
 | Empty/whitespace string | **Error** |
 | `bool` | **Error** |
 | `None` | **Error** |
+
+**Safety note:** Parsed float values must be finite; `NaN`, `inf`, and `-inf` are rejected to prevent downstream issues in JSON, databases, and aggregations.
 
 #### `to: bool`
 
@@ -222,6 +235,8 @@ Perform explicit, strict, per-field type normalization on existing row fields.
 | `None` | **Error** |
 
 **Rationale:** Python truthiness (`bool("false") == True`) creates silent data corruption. Explicit mapping is safer.
+
+**Scope:** Boolean string mapping is English-only and fixed in V1. Localized variants (e.g., `oui`/`non`) are not supported.
 
 #### `to: str`
 
@@ -265,9 +280,11 @@ Perform explicit, strict, per-field type normalization on existing row fields.
 }
 ```
 
-- `fields_coerced`: Fields where value was actually converted
+- `fields_coerced`: Fields where value was actually converted (in operation order)
 - `fields_unchanged`: Fields where rule was evaluated but value was already target type
 - `rules_evaluated`: Total conversion rules processed
+
+**Note:** Audit lists preserve operation order rather than sorting alphabetically, for easier reconciliation with config.
 
 ### Example
 
@@ -292,6 +309,32 @@ conversions:
 **Output:**
 ```json
 {"price": 12.5, "quantity": 3, "is_active": false, "user_id": "42"}
+```
+
+## Error Metadata
+
+When a row errors, the error metadata should identify the failing operation for debugging:
+
+**`value_transform` error:**
+```json
+{
+  "action": "error",
+  "plugin": "value_transform",
+  "target": "total",
+  "expression": "row['price'] * row['quantity']",
+  "reason": "Missing field 'quantity'"
+}
+```
+
+**`type_coerce` error:**
+```json
+{
+  "action": "error",
+  "plugin": "type_coerce",
+  "field": "is_active",
+  "target_type": "bool",
+  "reason": "Value 'maybe' is not a valid boolean"
+}
 ```
 
 ## Typical Pipeline Pattern
@@ -373,3 +416,7 @@ src/elspeth/plugins/transforms/
 | No int truncation | Silent data loss is unacceptable |
 | Null → error | No fabrication principle |
 | Trim whitespace for parsing | Practical without being ambiguous |
+| Reject NaN/inf for float | Non-finite values cause downstream issues in JSON, DBs, aggregations |
+| English-only bool strings | Prevents scope creep; localization is a V2 concern |
+| No warning for duplicate targets | Sequential rewrites are legitimate; warnings would be noisy |
+| Preserve operation order in audit | Easier to reconcile with config order for debugging |

@@ -74,6 +74,7 @@ function makeEdge(overrides: Partial<EdgeSpec> = {}): EdgeSpec {
 
 function makeState(overrides: Partial<CompositionState> = {}): CompositionState {
   return {
+    id: "test-session",
     version: 1,
     source: null,
     nodes: [],

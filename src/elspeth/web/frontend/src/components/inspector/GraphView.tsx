@@ -90,13 +90,15 @@ export function GraphView() {
 
     // All nodes with errors
     for (const err of validationResult.errors) {
-      map[err.component_id] = "error";
+      if (err.component_id) {
+        map[err.component_id] = "error";
+      }
     }
 
     // All nodes with warnings (only if not already error)
     if (validationResult.warnings) {
       for (const warn of validationResult.warnings) {
-        if (!map[warn.component_id]) {
+        if (warn.component_id && !map[warn.component_id]) {
           map[warn.component_id] = "warning";
         }
       }

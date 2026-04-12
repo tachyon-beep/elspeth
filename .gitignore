@@ -1,9 +1,6 @@
 # Superpowers brainstorming artifacts
 .superpowers/
 
-# Staging area for pre-built components
-.staging/
-
 # Composer MCP scratch folder (session state, test configs)
 .scratch/*
 !.scratch/.gitkeep
