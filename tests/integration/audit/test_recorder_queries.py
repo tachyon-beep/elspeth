@@ -131,6 +131,83 @@ class TestRecorderFactoryQueryMethods:
         assert parents[0].ordinal == 0
         assert parents[1].ordinal == 1
 
+    def test_get_token_children_for_consumed_parent(self) -> None:
+        """Test forward lineage: find what a parent token merged into."""
+        from elspeth.core.landscape.database import LandscapeDB
+        from elspeth.core.landscape.factory import RecorderFactory
+
+        db = LandscapeDB.in_memory()
+        factory = RecorderFactory(db)
+        run = factory.run_lifecycle.begin_run(config={}, canonical_version="v1")
+        source = factory.data_flow.register_node(
+            run_id=run.run_id,
+            plugin_name="csv_source",
+            node_type=NodeType.SOURCE,
+            plugin_version="1.0",
+            config={},
+            schema_config=DYNAMIC_SCHEMA,
+        )
+        row = factory.data_flow.create_row(
+            run_id=run.run_id,
+            source_node_id=source.node_id,
+            row_index=0,
+            data={},
+        )
+
+        # Create parent token and fork into branches
+        parent = factory.data_flow.create_token(row_id=row.row_id)
+        forked_children, _fork_group_id = factory.data_flow.fork_token(
+            parent_ref=TokenRef(token_id=parent.token_id, run_id=run.run_id),
+            row_id=row.row_id,
+            branches=["a", "b"],
+        )
+
+        # Coalesce the forked children back together
+        coalesced = factory.data_flow.coalesce_tokens(
+            parent_refs=[TokenRef(token_id=c.token_id, run_id=run.run_id) for c in forked_children],
+            row_id=row.row_id,
+        )
+
+        # Forward lineage: given a consumed parent, find what it merged into
+        # forked_children[0] was consumed in the coalesce → should find coalesced token
+        children_of_first = factory.query.get_token_children(forked_children[0].token_id)
+        assert len(children_of_first) == 1
+        assert children_of_first[0].token_id == coalesced.token_id
+        assert children_of_first[0].parent_token_id == forked_children[0].token_id
+
+        # The second forked child should also point to the same coalesced token
+        children_of_second = factory.query.get_token_children(forked_children[1].token_id)
+        assert len(children_of_second) == 1
+        assert children_of_second[0].token_id == coalesced.token_id
+
+    def test_get_token_children_empty_for_terminal(self) -> None:
+        """Tokens that never became parents return empty list."""
+        from elspeth.core.landscape.database import LandscapeDB
+        from elspeth.core.landscape.factory import RecorderFactory
+
+        db = LandscapeDB.in_memory()
+        factory = RecorderFactory(db)
+        run = factory.run_lifecycle.begin_run(config={}, canonical_version="v1")
+        source = factory.data_flow.register_node(
+            run_id=run.run_id,
+            plugin_name="csv_source",
+            node_type=NodeType.SOURCE,
+            plugin_version="1.0",
+            config={},
+            schema_config=DYNAMIC_SCHEMA,
+        )
+        row = factory.data_flow.create_row(
+            run_id=run.run_id,
+            source_node_id=source.node_id,
+            row_index=0,
+            data={},
+        )
+        token = factory.data_flow.create_token(row_id=row.row_id)
+
+        # A fresh token has no children
+        children = factory.query.get_token_children(token.token_id)
+        assert children == []
+
     def test_get_routing_events(self) -> None:
         from elspeth.core.landscape.database import LandscapeDB
         from elspeth.core.landscape.factory import RecorderFactory

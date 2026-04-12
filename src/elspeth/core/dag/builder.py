@@ -258,20 +258,30 @@ def build_execution_graph(
     aggregation_ids: dict[AggregationName, NodeID] = {}
     for agg_name, (transform, agg_config) in aggregations.items():
         transform_config = transform.config
+        # Use "input_schema" (not "schema") so add_node() doesn't auto-populate
+        # output_schema_config. Aggregations have dynamic output by design —
+        # BatchStats produces count/sum/mean, not the input fields. The key is
+        # preserved for audit/hashing but doesn't trigger output schema inference.
+        # See elspeth-c3a98c358c.
         agg_node_config = {
             "trigger": agg_config.trigger.model_dump(),
             "output_mode": agg_config.output_mode,
             "options": dict(agg_config.options),
-            "schema": transform_config["schema"],
+            "input_schema": transform_config["schema"],  # Input validation, not output
         }
         aid = node_id("aggregation", agg_name, agg_node_config)
         aggregation_ids[AggregationName(agg_name)] = aid
 
-        # Same validation for aggregation transforms.
-        _validate_output_schema_contract(transform)
+        # Aggregations have dynamic output by design — BatchStats produces
+        # count/sum/mean, not the input fields. But _output_schema_config IS
+        # correct: _build_output_schema_config() merges declared_output_fields
+        # into guaranteed_fields and preserves required_fields (for derived
+        # input requirements like group_by). Downstream pass-through nodes
+        # (gates, coalesce branches) need output_schema_config for _best_schema_config().
+        #
+        # Fallback to config["schema"] for test fixtures that don't compute
+        # _output_schema_config (same pattern as transforms at line 242).
         agg_output_schema_config = transform._output_schema_config
-
-        # Aggregation transforms without _output_schema_config: parse from config.
         if agg_output_schema_config is None and "schema" in transform_config:
             agg_output_schema_config = SchemaConfig.from_dict(transform_config["schema"])
 
@@ -280,8 +290,8 @@ def build_execution_graph(
             node_type=NodeType.AGGREGATION,
             plugin_name=agg_config.plugin,
             config=agg_node_config,
-            input_schema=transform.input_schema,  # TransformProtocol requires this (aggregations use transforms)
-            output_schema=transform.output_schema,  # TransformProtocol requires this (aggregations use transforms)
+            input_schema=transform.input_schema,
+            output_schema=transform.output_schema,
             output_schema_config=agg_output_schema_config,
         )
 
@@ -917,6 +927,8 @@ def build_execution_graph(
             merged_schema = merge_union_fields(
                 branch_to_schema,
                 require_all=coal_config.has_all_branch_semantics,
+                collision_policy=coal_config.union_collision_policy,
+                branch_order=tuple(coal_config.branches.keys()),
                 coalesce_id=coalesce_id,
                 guaranteed_fields=merged_guaranteed_tuple,
                 audit_fields=merged_audit_tuple,

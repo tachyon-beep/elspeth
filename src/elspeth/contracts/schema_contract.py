@@ -486,8 +486,12 @@ class SchemaContract:
                         type_b=other_fc.python_type.__name__,
                     )
                 # Required only if BOTH branches require it (AND semantics).
-                # Why: for best_effort/quorum coalesces, the branch that
-                # guarantees the field might be lost. Safe for require_all too.
+                # NOTE: This is only correct for best_effort/quorum coalesces.
+                # For require_all coalesces, OR semantics should apply (field is
+                # required if required in ANY branch, since all branches arrive).
+                # However, this fallback path is never reached in production —
+                # the precomputed schema from merge_union_fields() is used instead.
+                # See D2 investigation for details.
                 # Use declared source if either is declared
                 merged_fields[name] = FieldContract(
                     normalized_name=name,
@@ -498,7 +502,9 @@ class SchemaContract:
                     nullable=self_fc.nullable or other_fc.nullable,
                 )
             elif in_self:
-                # Only in self - include but mark non-required
+                # Only in self - include but mark non-required and nullable.
+                # The source branch may not arrive (e.g., timeout under best_effort),
+                # so the merged row would have None for this field. (D3 fix)
                 fc = self._by_normalized[name]
                 merged_fields[name] = FieldContract(
                     normalized_name=fc.normalized_name,
@@ -506,10 +512,11 @@ class SchemaContract:
                     python_type=fc.python_type,
                     required=False,  # Can't require field from only one path
                     source=fc.source,
-                    nullable=fc.nullable,
+                    nullable=True,  # Branch may not arrive — field may be None
                 )
             else:
-                # Only in other (in_other must be True since name came from union)
+                # Only in other (in_other must be True since name came from union).
+                # Same reasoning: source branch may not arrive. (D3 fix)
                 fc = other._by_normalized[name]
                 merged_fields[name] = FieldContract(
                     normalized_name=fc.normalized_name,
@@ -517,7 +524,7 @@ class SchemaContract:
                     python_type=fc.python_type,
                     required=False,  # Can't require field from only one path
                     source=fc.source,
-                    nullable=fc.nullable,
+                    nullable=True,  # Branch may not arrive — field may be None
                 )
 
         return SchemaContract(

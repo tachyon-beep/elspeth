@@ -216,3 +216,18 @@ allow_hits:
   reason: Optional edge_id lookup - edge map may not have all node combinations during routing
   safety: Falls back to generating edge_id when not in prebuilt map
   expires: '2026-05-13'
+- key: engine/coalesce_executor.py:R1:CoalesceExecutor:_merge_with_original_names:fp=30128c9248e78bd6
+  owner: architecture
+  reason: Optional collision lookup - field_origins only contains fields that had collisions, None means no collision
+  safety: Explicit None check triggers first-seen fallback path; no silent coercion
+  expires: '2026-05-12'
+- key: engine/coalesce_executor.py:R1:CoalesceExecutor:_merge_with_original_names:fp=8107fa6b3e882ecd
+  owner: architecture
+  reason: Defensive fallback for branch original name - map may be incomplete in edge cases
+  safety: Falls back to normalized_name with comment explaining this shouldn't happen
+  expires: '2026-05-12'
+- key: engine/coalesce_executor.py:R1:CoalesceExecutor:_merge_with_original_names:fp=4fc905549bb6ef1f
+  owner: architecture
+  reason: First-seen original name fallback - not all fields have explicit mapping in fallback dict
+  safety: Falls back to normalized_name when original name unknown
+  expires: '2026-05-12'

@@ -24,6 +24,7 @@ from elspeth.mcp.types import (
     RowRecord,
     RunDetail,
     RunRecord,
+    TokenChildRecord,
     TokenRecord,
 )
 
@@ -185,6 +186,37 @@ def list_tokens(
             "created_at": row.created_at.isoformat() if row.created_at else None,
         }
         for row in rows
+    ]
+
+
+def get_token_children(
+    db: LandscapeDB,
+    factory: RecorderFactory,
+    parent_token_id: str,
+) -> list[TokenChildRecord]:
+    """Get child tokens created from a parent (forward lineage).
+
+    This closes the audit trail gap for COALESCED tokens: given a token
+    that was consumed in a coalesce operation, find what it merged into.
+
+    Args:
+        db: Database connection
+        factory: Recorder factory
+        parent_token_id: Token ID to find children for
+
+    Returns:
+        List of TokenChildRecord entries. Each record shows a child token
+        that was created from this parent (via coalesce), along with the
+        parent's ordinal position in that child's parent list.
+    """
+    children = factory.query.get_token_children(parent_token_id)
+    return [
+        {
+            "child_token_id": c.token_id,
+            "parent_token_id": c.parent_token_id,
+            "ordinal": c.ordinal,
+        }
+        for c in children
     ]
 
 

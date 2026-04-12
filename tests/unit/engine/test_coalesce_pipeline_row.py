@@ -12,6 +12,7 @@ from elspeth.contracts.schema_contract import PipelineRow, SchemaContract
 from elspeth.contracts.types import NodeID
 from elspeth.core.config import CoalesceSettings
 from elspeth.testing import make_field, make_row
+from tests.unit.engine.conftest import MockCoalesceExecutor
 
 
 def _make_contract(fields: list[Any] | None = None) -> SchemaContract:
@@ -69,8 +70,6 @@ class TestCoalesceExecutorPipelineRow:
 
     def test_coalesce_merges_contracts(self) -> None:
         """Coalesce should merge contracts from all branches."""
-        from elspeth.engine.coalesce_executor import CoalesceExecutor
-
         # Create contracts for each branch
         contract_a = _make_contract(
             fields=[
@@ -114,7 +113,7 @@ class TestCoalesceExecutorPipelineRow:
         span_factory = _make_mock_span_factory()
         token_manager = _make_mock_token_manager(execution)
 
-        executor = CoalesceExecutor(
+        executor = MockCoalesceExecutor(
             execution=execution,
             span_factory=span_factory,
             token_manager=token_manager,
@@ -175,15 +174,13 @@ class TestCoalesceExecutorPipelineRow:
         Per CLAUDE.md: "Bad data in the audit trail = crash immediately"
         A token with None contract is a bug in upstream code.
         """
-        from elspeth.engine.coalesce_executor import CoalesceExecutor
-
         contract = _make_contract()
         execution = _make_mock_recorder()
         data_flow = MagicMock()
         span_factory = _make_mock_span_factory()
         token_manager = _make_mock_token_manager(execution)
 
-        executor = CoalesceExecutor(
+        executor = MockCoalesceExecutor(
             execution=execution,
             span_factory=span_factory,
             token_manager=token_manager,
@@ -238,8 +235,6 @@ class TestCoalesceExecutorPipelineRow:
         can't be caught at build time, so we fail gracefully to preserve
         audit trail integrity. (See: elspeth-c75ac86e35)
         """
-        from elspeth.engine.coalesce_executor import CoalesceExecutor
-
         # Create contracts with conflicting types for same field
         contract_a = _make_contract(
             fields=[
@@ -269,7 +264,7 @@ class TestCoalesceExecutorPipelineRow:
         span_factory = _make_mock_span_factory()
         token_manager = _make_mock_token_manager(execution)
 
-        executor = CoalesceExecutor(
+        executor = MockCoalesceExecutor(
             execution=execution,
             span_factory=span_factory,
             token_manager=token_manager,
@@ -320,15 +315,13 @@ class TestCoalesceExecutorPipelineRow:
         CoalesceSettings requires at least 2 branches, but "first" policy
         allows merge as soon as any single branch arrives.
         """
-        from elspeth.engine.coalesce_executor import CoalesceExecutor
-
         contract = _make_contract()
         execution = _make_mock_recorder()
         data_flow = MagicMock()
         span_factory = _make_mock_span_factory()
         token_manager = _make_mock_token_manager(execution)
 
-        executor = CoalesceExecutor(
+        executor = MockCoalesceExecutor(
             execution=execution,
             span_factory=span_factory,
             token_manager=token_manager,
@@ -366,15 +359,13 @@ class TestCoalesceExecutorPipelineRow:
 
     def test_coalesce_preserves_row_data_correctly(self) -> None:
         """Coalesce should preserve row data according to merge strategy."""
-        from elspeth.engine.coalesce_executor import CoalesceExecutor
-
         contract = _make_contract()
         execution = _make_mock_recorder()
         data_flow = MagicMock()
         span_factory = _make_mock_span_factory()
         token_manager = _make_mock_token_manager(execution)
 
-        executor = CoalesceExecutor(
+        executor = MockCoalesceExecutor(
             execution=execution,
             span_factory=span_factory,
             token_manager=token_manager,

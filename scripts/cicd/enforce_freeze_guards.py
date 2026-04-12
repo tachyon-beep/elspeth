@@ -39,12 +39,36 @@ RULES: dict[str, dict[str, str]] = {
         "description": "isinstance() type guard used to conditionally skip freezing in __post_init__",
         "remediation": "Use deep_freeze() which is idempotent on already-frozen values — no guard needed",
     },
+    "FG3": {
+        "name": "missing-freeze-guard",
+        "description": "Frozen dataclass with container-typed fields lacks freeze_fields/deep_freeze in __post_init__",
+        "remediation": "Add __post_init__ with freeze_fields(self, 'field1', 'field2', ...) for container fields",
+    },
 }
 
 _ALL_RULE_IDS = frozenset(RULES.keys())
 
 # Types that indicate a freeze guard when used with isinstance in __post_init__
 _FREEZE_GUARD_TYPES = {"dict", "tuple", "MappingProxyType", "frozenset", "Mapping"}
+
+# Container types that require freeze_fields/deep_freeze in __post_init__.
+# Includes both runtime names (dict, list) and typing module names (Dict, List, Mapping).
+_CONTAINER_TYPES = frozenset(
+    {
+        # Runtime types
+        "dict",
+        "list",
+        "set",
+        # typing module generics (PEP 585 style also uses lowercase)
+        "Dict",
+        "List",
+        "Set",
+        "Mapping",
+        "MutableMapping",
+        "Sequence",
+        "MutableSequence",
+    }
+)
 
 
 @dataclass(frozen=True)
@@ -150,11 +174,130 @@ class FreezeGuardVisitor(ast.NodeVisitor):
             )
         )
 
+    # -------------------------------------------------------------------------
+    # FG3: Missing freeze guard detection helpers
+    # -------------------------------------------------------------------------
+
+    def _is_frozen_dataclass(self, node: ast.ClassDef) -> bool:
+        """Check if class has @dataclass(frozen=True) decorator."""
+        for decorator in node.decorator_list:
+            # @dataclass(frozen=True) or @dataclass(frozen=True, slots=True)
+            if isinstance(decorator, ast.Call):
+                func = decorator.func
+                func_name = None
+                if isinstance(func, ast.Name):
+                    func_name = func.id
+                elif isinstance(func, ast.Attribute):
+                    func_name = func.attr
+
+                if func_name == "dataclass":
+                    for keyword in decorator.keywords:
+                        if keyword.arg == "frozen":
+                            # frozen=True
+                            if isinstance(keyword.value, ast.Constant) and keyword.value.value is True:
+                                return True
+                            # frozen=True as a Name (unlikely but possible)
+                            if isinstance(keyword.value, ast.Name) and keyword.value.id == "True":
+                                return True
+        return False
+
+    def _annotation_contains_container(self, annotation: ast.expr | None) -> bool:
+        """Check if a type annotation contains a container type.
+
+        Handles: Name (dict), Subscript (Dict[str, int], list[str]),
+        BinOp (dict | None), and Constant (string annotations).
+        """
+        if annotation is None:
+            return False
+
+        # Simple name: dict, list, Mapping, etc.
+        if isinstance(annotation, ast.Name):
+            return annotation.id in _CONTAINER_TYPES
+
+        # Subscripted generic: Dict[str, int], list[str], Mapping[K, V]
+        if isinstance(annotation, ast.Subscript):
+            if isinstance(annotation.value, ast.Name):
+                return annotation.value.id in _CONTAINER_TYPES
+            if isinstance(annotation.value, ast.Attribute):
+                return annotation.value.attr in _CONTAINER_TYPES
+
+        # Union type: dict | None (Python 3.10+)
+        if isinstance(annotation, ast.BinOp) and isinstance(annotation.op, ast.BitOr):
+            return self._annotation_contains_container(annotation.left) or self._annotation_contains_container(annotation.right)
+
+        # String annotation: "dict[str, int]" - check if any container type name appears
+        if isinstance(annotation, ast.Constant) and isinstance(annotation.value, str):
+            # Simple heuristic: check if container type names appear in the string
+            for container_type in _CONTAINER_TYPES:
+                if container_type in annotation.value:
+                    return True
+
+        return False
+
+    def _get_container_fields(self, node: ast.ClassDef) -> list[str]:
+        """Extract field names that have container type annotations."""
+        container_fields: list[str] = []
+        for item in node.body:
+            # Annotated field: name: type or name: type = default
+            if (
+                isinstance(item, ast.AnnAssign)
+                and isinstance(item.target, ast.Name)
+                and self._annotation_contains_container(item.annotation)
+            ):
+                container_fields.append(item.target.id)
+        return container_fields
+
+    def _find_post_init(self, node: ast.ClassDef) -> ast.FunctionDef | None:
+        """Find __post_init__ method in class body, if present."""
+        for item in node.body:
+            if isinstance(item, (ast.FunctionDef, ast.AsyncFunctionDef)) and item.name == "__post_init__":
+                return item
+        return None
+
+    def _post_init_has_freeze_calls(self, post_init: ast.FunctionDef) -> bool:
+        """Check if __post_init__ contains freeze_fields(), deep_freeze(), or MappingProxyType calls.
+
+        MappingProxyType is included because it IS a freeze mechanism (albeit shallow).
+        FG1 catches inappropriate MappingProxyType usage; FG3 catches NO freeze at all.
+        This prevents double-flagging cases already covered by FG1/allowlist.
+        """
+        for child in ast.walk(post_init):
+            if isinstance(child, ast.Call):
+                func = child.func
+                # freeze_fields(self, ...) or deep_freeze(...) or MappingProxyType(...)
+                if isinstance(func, ast.Name) and func.id in ("freeze_fields", "deep_freeze", "MappingProxyType"):
+                    return True
+                # module.freeze_fields(...), types.MappingProxyType(...), etc.
+                if isinstance(func, ast.Attribute) and func.attr in ("freeze_fields", "deep_freeze", "MappingProxyType"):
+                    return True
+        return False
+
     def visit_ClassDef(self, node: ast.ClassDef) -> None:
         self.symbol_stack.append(node.name)
         self._scope_is_class.append(True)
         was_in_post_init = self._in_post_init
         self._in_post_init = False  # New class scope — not in any __post_init__
+
+        # FG3: Check for frozen dataclass with container fields missing freeze guards
+        if self._is_frozen_dataclass(node):
+            container_fields = self._get_container_fields(node)
+            if container_fields:
+                post_init = self._find_post_init(node)
+                if post_init is None:
+                    # No __post_init__ at all
+                    self._add_finding(
+                        "FG3",
+                        node,
+                        f"Frozen dataclass '{node.name}' has container fields {container_fields} but no __post_init__",
+                    )
+                elif not self._post_init_has_freeze_calls(post_init):
+                    # __post_init__ exists but no freeze calls
+                    self._add_finding(
+                        "FG3",
+                        post_init,
+                        f"Frozen dataclass '{node.name}' has container fields {container_fields} but __post_init__ lacks freeze_fields/deep_freeze",
+                    )
+
         self.generic_visit(node)
         self._in_post_init = was_in_post_init
         self._scope_is_class.pop()

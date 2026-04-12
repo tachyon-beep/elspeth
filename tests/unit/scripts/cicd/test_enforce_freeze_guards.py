@@ -275,6 +275,344 @@ class TestScopeHandling:
 
 
 # =============================================================================
+# FG3: Missing freeze guard detection
+# =============================================================================
+
+
+class TestFG3Detection:
+    """FG3 detects frozen dataclasses with container fields lacking freeze guards."""
+
+    # -------------------------------------------------------------------------
+    # Basic detection: no __post_init__
+    # -------------------------------------------------------------------------
+
+    def test_no_post_init_at_all(self) -> None:
+        """Frozen dataclass with container field and no __post_init__ is flagged."""
+        findings = _scan("""
+            @dataclass(frozen=True)
+            class Bad:
+                data: dict
+        """)
+        assert len(findings) == 1
+        assert findings[0].rule_id == "FG3"
+        assert "no __post_init__" in findings[0].message
+        assert "['data']" in findings[0].message
+
+    def test_multiple_container_fields_no_post_init(self) -> None:
+        """All container fields are listed when __post_init__ is missing."""
+        findings = _scan("""
+            @dataclass(frozen=True)
+            class Bad:
+                data: dict
+                items: list
+                keys: set
+        """)
+        assert len(findings) == 1
+        assert findings[0].rule_id == "FG3"
+        assert "data" in findings[0].message
+        assert "items" in findings[0].message
+        assert "keys" in findings[0].message
+
+    # -------------------------------------------------------------------------
+    # Basic detection: __post_init__ without freeze calls
+    # -------------------------------------------------------------------------
+
+    def test_post_init_without_freeze_call(self) -> None:
+        """__post_init__ that doesn't call freeze_fields/deep_freeze is flagged."""
+        findings = _scan("""
+            @dataclass(frozen=True)
+            class Bad:
+                data: dict
+                def __post_init__(self):
+                    if not self.data:
+                        raise ValueError("data required")
+        """)
+        assert len(findings) == 1
+        assert findings[0].rule_id == "FG3"
+        assert "lacks freeze_fields/deep_freeze" in findings[0].message
+
+    def test_post_init_with_unrelated_calls(self) -> None:
+        """__post_init__ with other calls but no freeze calls is flagged."""
+        findings = _scan("""
+            @dataclass(frozen=True)
+            class Bad:
+                data: dict
+                def __post_init__(self):
+                    print(self.data)
+                    validate(self.data)
+        """)
+        assert len(findings) == 1
+        assert findings[0].rule_id == "FG3"
+
+    # -------------------------------------------------------------------------
+    # Container type variations
+    # -------------------------------------------------------------------------
+
+    def test_list_annotation(self) -> None:
+        """list annotation triggers FG3."""
+        findings = _scan("""
+            @dataclass(frozen=True)
+            class Bad:
+                items: list
+        """)
+        assert len(findings) == 1
+        assert findings[0].rule_id == "FG3"
+
+    def test_set_annotation(self) -> None:
+        """set annotation triggers FG3."""
+        findings = _scan("""
+            @dataclass(frozen=True)
+            class Bad:
+                tags: set
+        """)
+        assert len(findings) == 1
+        assert findings[0].rule_id == "FG3"
+
+    def test_generic_dict_annotation(self) -> None:
+        """Dict[str, int] generic annotation triggers FG3."""
+        findings = _scan("""
+            @dataclass(frozen=True)
+            class Bad:
+                data: Dict[str, int]
+        """)
+        assert len(findings) == 1
+        assert findings[0].rule_id == "FG3"
+
+    def test_generic_list_annotation(self) -> None:
+        """List[str] generic annotation triggers FG3."""
+        findings = _scan("""
+            @dataclass(frozen=True)
+            class Bad:
+                items: List[str]
+        """)
+        assert len(findings) == 1
+        assert findings[0].rule_id == "FG3"
+
+    def test_mapping_annotation(self) -> None:
+        """Mapping[str, Any] annotation triggers FG3."""
+        findings = _scan("""
+            @dataclass(frozen=True)
+            class Bad:
+                data: Mapping[str, Any]
+        """)
+        assert len(findings) == 1
+        assert findings[0].rule_id == "FG3"
+
+    def test_sequence_annotation(self) -> None:
+        """Sequence[str] annotation triggers FG3."""
+        findings = _scan("""
+            @dataclass(frozen=True)
+            class Bad:
+                items: Sequence[str]
+        """)
+        assert len(findings) == 1
+        assert findings[0].rule_id == "FG3"
+
+    def test_lowercase_generic_annotation(self) -> None:
+        """PEP 585 style dict[str, int] annotation triggers FG3."""
+        findings = _scan("""
+            @dataclass(frozen=True)
+            class Bad:
+                data: dict[str, int]
+        """)
+        assert len(findings) == 1
+        assert findings[0].rule_id == "FG3"
+
+    def test_union_with_none_annotation(self) -> None:
+        """dict | None union annotation triggers FG3."""
+        findings = _scan("""
+            @dataclass(frozen=True)
+            class Bad:
+                data: dict | None
+        """)
+        assert len(findings) == 1
+        assert findings[0].rule_id == "FG3"
+
+    def test_string_annotation(self) -> None:
+        """String forward reference annotation triggers FG3."""
+        findings = _scan("""
+            @dataclass(frozen=True)
+            class Bad:
+                data: "dict[str, int]"
+        """)
+        assert len(findings) == 1
+        assert findings[0].rule_id == "FG3"
+
+    # -------------------------------------------------------------------------
+    # Correct patterns that should NOT be flagged
+    # -------------------------------------------------------------------------
+
+    def test_freeze_fields_not_flagged(self) -> None:
+        """Frozen dataclass with freeze_fields() is not flagged."""
+        findings = _scan("""
+            @dataclass(frozen=True)
+            class Good:
+                data: dict
+                def __post_init__(self):
+                    freeze_fields(self, "data")
+        """)
+        assert len(findings) == 0
+
+    def test_deep_freeze_not_flagged(self) -> None:
+        """Frozen dataclass with deep_freeze() is not flagged."""
+        findings = _scan("""
+            @dataclass(frozen=True)
+            class Good:
+                data: dict
+                def __post_init__(self):
+                    object.__setattr__(self, "data", deep_freeze(self.data))
+        """)
+        assert len(findings) == 0
+
+    def test_module_qualified_freeze_fields(self) -> None:
+        """freeze.freeze_fields() qualified call is recognized."""
+        findings = _scan("""
+            @dataclass(frozen=True)
+            class Good:
+                data: dict
+                def __post_init__(self):
+                    freeze.freeze_fields(self, "data")
+        """)
+        assert len(findings) == 0
+
+    def test_scalar_only_not_flagged(self) -> None:
+        """Frozen dataclass with only scalar fields is not flagged."""
+        findings = _scan("""
+            @dataclass(frozen=True)
+            class Good:
+                name: str
+                count: int
+                active: bool
+                ratio: float
+        """)
+        assert len(findings) == 0
+
+    def test_non_frozen_dataclass_not_flagged(self) -> None:
+        """Non-frozen dataclass with containers is not flagged."""
+        findings = _scan("""
+            @dataclass
+            class Good:
+                data: dict
+        """)
+        assert len(findings) == 0
+
+    def test_frozen_false_not_flagged(self) -> None:
+        """@dataclass(frozen=False) with containers is not flagged."""
+        findings = _scan("""
+            @dataclass(frozen=False)
+            class Good:
+                data: dict
+        """)
+        assert len(findings) == 0
+
+    def test_non_dataclass_class_not_flagged(self) -> None:
+        """Regular class (not dataclass) with container fields is not flagged."""
+        findings = _scan("""
+            class Good:
+                data: dict
+        """)
+        assert len(findings) == 0
+
+    # -------------------------------------------------------------------------
+    # Edge cases and decorator variations
+    # -------------------------------------------------------------------------
+
+    def test_dataclass_with_slots(self) -> None:
+        """@dataclass(frozen=True, slots=True) triggers FG3."""
+        findings = _scan("""
+            @dataclass(frozen=True, slots=True)
+            class Bad:
+                data: dict
+        """)
+        assert len(findings) == 1
+        assert findings[0].rule_id == "FG3"
+
+    def test_multiple_decorators(self) -> None:
+        """Class with multiple decorators including frozen dataclass is flagged."""
+        findings = _scan("""
+            @some_decorator
+            @dataclass(frozen=True)
+            @another_decorator
+            class Bad:
+                data: dict
+        """)
+        assert len(findings) == 1
+        assert findings[0].rule_id == "FG3"
+
+    def test_dataclasses_module_form(self) -> None:
+        """dataclasses.dataclass(frozen=True) form is detected."""
+        findings = _scan("""
+            @dataclasses.dataclass(frozen=True)
+            class Bad:
+                data: dict
+        """)
+        assert len(findings) == 1
+        assert findings[0].rule_id == "FG3"
+
+    def test_nested_class_independent(self) -> None:
+        """Nested frozen dataclass is checked independently."""
+        findings = _scan("""
+            @dataclass(frozen=True)
+            class Outer:
+                name: str
+
+                @dataclass(frozen=True)
+                class Inner:
+                    data: dict
+        """)
+        # Only Inner has container field without freeze guard
+        assert len(findings) == 1
+        assert "Inner" in findings[0].message
+
+    def test_async_post_init(self) -> None:
+        """async def __post_init__ with freeze_fields is recognized."""
+        findings = _scan("""
+            @dataclass(frozen=True)
+            class Good:
+                data: dict
+                async def __post_init__(self):
+                    freeze_fields(self, "data")
+        """)
+        assert len(findings) == 0
+
+    def test_symbol_context_in_finding(self) -> None:
+        """Finding includes class name in symbol_context."""
+        findings = _scan("""
+            @dataclass(frozen=True)
+            class MyDataClass:
+                data: dict
+        """)
+        assert len(findings) == 1
+        assert findings[0].symbol_context == ("MyDataClass",)
+
+    def test_mapping_proxy_type_recognized_as_freeze(self) -> None:
+        """MappingProxyType calls are recognized as a freeze mechanism (FG1 handles misuse)."""
+        findings = _scan("""
+            @dataclass(frozen=True)
+            class Good:
+                data: dict
+                def __post_init__(self):
+                    object.__setattr__(self, "data", MappingProxyType(dict(self.data)))
+        """)
+        # FG3 should NOT fire — MappingProxyType IS a freeze mechanism.
+        # FG1 will flag the shallow wrap separately if inappropriate.
+        fg3_findings = [f for f in findings if f.rule_id == "FG3"]
+        assert len(fg3_findings) == 0
+
+    def test_module_qualified_mapping_proxy_recognized(self) -> None:
+        """types.MappingProxyType is also recognized as a freeze mechanism."""
+        findings = _scan("""
+            @dataclass(frozen=True)
+            class Good:
+                data: dict
+                def __post_init__(self):
+                    object.__setattr__(self, "data", types.MappingProxyType(dict(self.data)))
+        """)
+        fg3_findings = [f for f in findings if f.rule_id == "FG3"]
+        assert len(fg3_findings) == 0
+
+
+# =============================================================================
 # Allowlist
 # =============================================================================
 

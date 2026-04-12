@@ -73,6 +73,53 @@ class TestFieldDefinition:
         with pytest.raises(ValueError, match="cannot start with a digit"):
             FieldDefinition.parse("123field: int")
 
+    # Dict-form identifier validation tests (Bug: P1-RC5-dict-identifier)
+    # The dict format must enforce the same identifier rules as string format.
+
+    def test_parse_dict_hyphenated_field_name_raises(self) -> None:
+        """Dict-form field names with hyphens raise helpful error."""
+        from elspeth.contracts.schema import FieldDefinition
+
+        with pytest.raises(ValueError, match=r"user_id.*instead"):
+            FieldDefinition.parse({"name": "user-id", "type": "int", "required": True, "nullable": False})
+
+    def test_parse_dict_dotted_field_name_raises(self) -> None:
+        """Dict-form field names with dots raise helpful error."""
+        from elspeth.contracts.schema import FieldDefinition
+
+        with pytest.raises(ValueError, match=r"data_field.*instead"):
+            FieldDefinition.parse({"name": "data.field", "type": "str", "required": True, "nullable": False})
+
+    def test_parse_dict_numeric_prefix_raises(self) -> None:
+        """Dict-form field names starting with digits raise error."""
+        from elspeth.contracts.schema import FieldDefinition
+
+        with pytest.raises(ValueError, match="cannot start with a digit"):
+            FieldDefinition.parse({"name": "123field", "type": "int", "required": True, "nullable": False})
+
+    def test_to_dict_includes_nullable(self) -> None:
+        """to_dict() must include nullable for audit trail completeness (D4 fix).
+
+        The audit trail records schema field definitions. Without nullable,
+        queries cannot determine whether a field could have None values —
+        violating the principle that schema semantics must be traceable.
+        """
+        from elspeth.contracts.schema import FieldDefinition
+
+        # required=True, nullable=True is a valid combination (e.g., post-coalesce)
+        fd = FieldDefinition(name="x", field_type="int", required=True, nullable=True)
+        serialized = fd.to_dict()
+
+        assert "nullable" in serialized, "to_dict must include nullable key"
+        assert serialized["nullable"] is True, "nullable value must be preserved"
+
+        # Also test non-nullable case
+        fd_non_null = FieldDefinition(name="y", field_type="str", required=True, nullable=False)
+        serialized_non_null = fd_non_null.to_dict()
+
+        assert "nullable" in serialized_non_null, "to_dict must include nullable key"
+        assert serialized_non_null["nullable"] is False, "nullable value must be preserved"
+
 
 class TestSchemaConfig:
     """Tests for SchemaConfig parsing."""
@@ -314,9 +361,11 @@ class TestSchemaConfigSerialization:
         serialized = config.to_dict()
         assert serialized["mode"] == "fixed"
         assert len(serialized["fields"]) == 3
-        assert serialized["fields"][0] == {"name": "id", "type": "int", "required": True}
-        assert serialized["fields"][1] == {"name": "name", "type": "str", "required": True}
-        assert serialized["fields"][2] == {"name": "score", "type": "float", "required": False}
+        # D4 fix: to_dict now includes nullable for audit trail completeness
+        assert serialized["fields"][0] == {"name": "id", "type": "int", "required": True, "nullable": False}
+        assert serialized["fields"][1] == {"name": "name", "type": "str", "required": True, "nullable": False}
+        # score: float? → required=False, nullable=True (via parse())
+        assert serialized["fields"][2] == {"name": "score", "type": "float", "required": False, "nullable": True}
 
     def test_fixed_schema_roundtrip(self) -> None:
         """Fixed schema survives serialization round-trip via dict-form fields."""
@@ -637,7 +686,7 @@ class TestSchemaConfigRequiredBoolValidation:
         config = SchemaConfig.from_dict(
             {
                 "mode": "fixed",
-                "fields": [{"name": "score", "type": "float", "required": True}],
+                "fields": [{"name": "score", "type": "float", "required": True, "nullable": False}],
             }
         )
         assert config.fields is not None
@@ -650,7 +699,7 @@ class TestSchemaConfigRequiredBoolValidation:
         config = SchemaConfig.from_dict(
             {
                 "mode": "fixed",
-                "fields": [{"name": "score", "type": "float", "required": False}],
+                "fields": [{"name": "score", "type": "float", "required": False, "nullable": True}],
             }
         )
         assert config.fields is not None
@@ -798,3 +847,58 @@ class TestHasEffectiveGuarantees:
         )
         assert schema.has_effective_guarantees is True
         assert schema.get_effective_guaranteed_fields() == frozenset({"id"})
+
+
+class TestNullableRoundTripRegression:
+    """Regression tests for nullable field round-trip.
+
+    Bug: P2-RC5-nullable-roundtrip
+
+    The combination required=True, nullable=True is valid for post-coalesce
+    fields (field must be present, but value can be None). This state must
+    survive serialization round-trip through to_dict/from_dict.
+
+    Prior bug: _normalize_field_spec used only `required` to generate the `?`
+    marker, ignoring `nullable`. Fields with required=True, nullable=True
+    would round-trip as nullable=False, corrupting schema contracts.
+    """
+
+    def test_required_true_nullable_true_roundtrip(self) -> None:
+        """required=True, nullable=True must survive round-trip."""
+        from elspeth.contracts.schema import FieldDefinition, SchemaConfig
+
+        # This combination is valid for post-coalesce fields
+        fd = FieldDefinition(name="x", field_type="int", required=True, nullable=True)
+
+        schema = SchemaConfig(mode="fixed", fields=(fd,))
+        serialized = schema.to_dict()
+        roundtrip = SchemaConfig.from_dict(serialized)
+
+        assert roundtrip.fields is not None
+        assert len(roundtrip.fields) == 1
+        rt_field = roundtrip.fields[0]
+
+        assert rt_field.required is True, "required=True was lost in round-trip"
+        assert rt_field.nullable is True, "nullable=True was lost in round-trip"
+
+    def test_all_four_states_roundtrip(self) -> None:
+        """All four (required, nullable) combinations must survive round-trip."""
+        from elspeth.contracts.schema import FieldDefinition, SchemaConfig
+
+        fields = (
+            FieldDefinition(name="a", field_type="str", required=True, nullable=False),
+            FieldDefinition(name="b", field_type="str", required=True, nullable=True),
+            FieldDefinition(name="c", field_type="str", required=False, nullable=False),
+            FieldDefinition(name="d", field_type="str", required=False, nullable=True),
+        )
+        schema = SchemaConfig(mode="fixed", fields=fields)
+        roundtrip = SchemaConfig.from_dict(schema.to_dict())
+
+        assert roundtrip.fields is not None
+        rt_map = {f.name: f for f in roundtrip.fields}
+
+        # Check each combination
+        assert rt_map["a"].required is True and rt_map["a"].nullable is False
+        assert rt_map["b"].required is True and rt_map["b"].nullable is True
+        assert rt_map["c"].required is False and rt_map["c"].nullable is False
+        assert rt_map["d"].required is False and rt_map["d"].nullable is True

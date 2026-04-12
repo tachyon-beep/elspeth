@@ -928,9 +928,13 @@ class Orchestrator:
                 # This ensures runtime contracts match build-time schema computation,
                 # preserving nullable semantics from the P1 fix.
                 coalesce_node_info = graph.get_node_info(coalesce_node_id)
-                output_schema: SchemaContract | None = None
-                if coalesce_node_info.output_schema_config is not None:
-                    output_schema = create_contract_from_config(coalesce_node_info.output_schema_config)
+                if coalesce_node_info.output_schema_config is None:
+                    raise FrameworkBugError(
+                        f"Coalesce node '{coalesce_node_id}' has no output_schema_config. "
+                        f"The DAG builder must populate output_schema_config for all coalesce "
+                        f"nodes via _assign_schema(). This indicates a builder bug."
+                    )
+                output_schema = create_contract_from_config(coalesce_node_info.output_schema_config)
 
                 coalesce_executor.register_coalesce(
                     coalesce_settings_entry,

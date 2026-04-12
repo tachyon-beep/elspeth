@@ -647,17 +647,12 @@ class TestCoalesceSinkRequiredFieldValidation:
         was firing on aggregation→sink topologies and rejecting valid configs.
         """
         from elspeth.contracts import RoutingMode
-        from elspeth.contracts.schema import FieldDefinition, SchemaConfig
         from elspeth.core.dag.graph import ExecutionGraph
 
-        # Aggregation's output_schema_config carries its INPUT schema (legacy
-        # builder behavior). Without the AGGREGATION skip, the sink's required
-        # field 'total_records' would appear missing from this schema.
-        aggregation_input_schema = SchemaConfig(
-            mode="fixed",
-            fields=(FieldDefinition("value", "float", required=True),),
-        )
-
+        # Aggregations have output_schema_config=None (dynamic output by design).
+        # The validation skips them via the `predecessor_schema is None` path.
+        # See elspeth-c3a98c358c for the fix that eliminated the explicit
+        # AGGREGATION skip in favor of this semantic approach.
         graph = ExecutionGraph()
         graph.add_node("source", node_type=NodeType.SOURCE, plugin_name="csv")
         graph.add_node(
@@ -665,7 +660,7 @@ class TestCoalesceSinkRequiredFieldValidation:
             node_type=NodeType.AGGREGATION,
             plugin_name="batch_stats",
             config={"options": {"value_field": "value"}},
-            output_schema_config=aggregation_input_schema,
+            output_schema_config=None,  # Dynamic output — no static guarantees
         )
         graph.add_node(
             "sink",
@@ -1948,3 +1943,455 @@ class TestMergeUnionFieldsNullableSemantics:
         # Under best_effort, branch-exclusive fields become optional (branch may not arrive)
         assert a_only.required is False, "Branch-exclusive forced optional under best_effort"
         assert a_only.nullable is True, "Branch-exclusive forced nullable (may be absent)"
+
+
+class TestCollisionPolicyNullableSemantics:
+    """Tests for D5 fix: collision_policy-aware nullable for shared fields.
+
+    The previous OR logic ("nullable if ANY branch is nullable") was designed
+    for "any branch can win" semantics. But first_wins/last_wins are deterministic:
+    - first_wins: first branch (in declaration order) always wins collisions
+    - last_wins: last branch (in declaration order) always wins collisions
+
+    The schema should reflect which branch's value actually appears at runtime.
+    """
+
+    def test_first_wins_uses_first_branch_nullable(self) -> None:
+        """With first_wins, shared field nullable comes from FIRST branch only."""
+        # Branch A (first): non-nullable
+        # Branch B (second): nullable
+        # With first_wins, A always wins → output is non-nullable
+        branch_a = SchemaConfig(
+            mode="flexible",
+            fields=(FieldDefinition(name="x", field_type="int", required=True, nullable=False),),
+        )
+        branch_b = SchemaConfig(
+            mode="flexible",
+            fields=(FieldDefinition(name="x", field_type="int", required=True, nullable=True),),
+        )
+        merged = merge_union_fields(
+            {"a": branch_a, "b": branch_b},
+            require_all=True,
+            collision_policy="first_wins",
+            branch_order=["a", "b"],
+        )
+
+        assert merged.fields is not None
+        x_field = next(f for f in merged.fields if f.name == "x")
+        assert x_field.nullable is False, "first_wins: use first branch's nullable (False)"
+
+    def test_first_wins_nullable_first_branch(self) -> None:
+        """With first_wins, if first branch is nullable, merged is nullable."""
+        # Branch A (first): nullable
+        # Branch B (second): non-nullable
+        # With first_wins, A always wins → output is nullable
+        branch_a = SchemaConfig(
+            mode="flexible",
+            fields=(FieldDefinition(name="x", field_type="int", required=True, nullable=True),),
+        )
+        branch_b = SchemaConfig(
+            mode="flexible",
+            fields=(FieldDefinition(name="x", field_type="int", required=True, nullable=False),),
+        )
+        merged = merge_union_fields(
+            {"a": branch_a, "b": branch_b},
+            require_all=True,
+            collision_policy="first_wins",
+            branch_order=["a", "b"],
+        )
+
+        assert merged.fields is not None
+        x_field = next(f for f in merged.fields if f.name == "x")
+        assert x_field.nullable is True, "first_wins: use first branch's nullable (True)"
+
+    def test_last_wins_uses_last_branch_nullable(self) -> None:
+        """With last_wins, shared field nullable comes from LAST branch only."""
+        # Branch A (first): nullable
+        # Branch B (second): non-nullable
+        # With last_wins, B always wins → output is non-nullable
+        branch_a = SchemaConfig(
+            mode="flexible",
+            fields=(FieldDefinition(name="x", field_type="int", required=True, nullable=True),),
+        )
+        branch_b = SchemaConfig(
+            mode="flexible",
+            fields=(FieldDefinition(name="x", field_type="int", required=True, nullable=False),),
+        )
+        merged = merge_union_fields(
+            {"a": branch_a, "b": branch_b},
+            require_all=True,
+            collision_policy="last_wins",
+            branch_order=["a", "b"],
+        )
+
+        assert merged.fields is not None
+        x_field = next(f for f in merged.fields if f.name == "x")
+        assert x_field.nullable is False, "last_wins: use last branch's nullable (False)"
+
+    def test_last_wins_nullable_last_branch(self) -> None:
+        """With last_wins, if last branch is nullable, merged is nullable."""
+        # Branch A (first): non-nullable
+        # Branch B (second): nullable
+        # With last_wins, B always wins → output is nullable
+        branch_a = SchemaConfig(
+            mode="flexible",
+            fields=(FieldDefinition(name="x", field_type="int", required=True, nullable=False),),
+        )
+        branch_b = SchemaConfig(
+            mode="flexible",
+            fields=(FieldDefinition(name="x", field_type="int", required=True, nullable=True),),
+        )
+        merged = merge_union_fields(
+            {"a": branch_a, "b": branch_b},
+            require_all=True,
+            collision_policy="last_wins",
+            branch_order=["a", "b"],
+        )
+
+        assert merged.fields is not None
+        x_field = next(f for f in merged.fields if f.name == "x")
+        assert x_field.nullable is True, "last_wins: use last branch's nullable (True)"
+
+    def test_fail_policy_uses_or_logic(self) -> None:
+        """With fail policy, use OR logic (conservative; collisions fail at runtime)."""
+        # Branch A: non-nullable
+        # Branch B: nullable
+        # With fail, collisions fail at runtime, so OR is conservative fallback
+        branch_a = SchemaConfig(
+            mode="flexible",
+            fields=(FieldDefinition(name="x", field_type="int", required=True, nullable=False),),
+        )
+        branch_b = SchemaConfig(
+            mode="flexible",
+            fields=(FieldDefinition(name="x", field_type="int", required=True, nullable=True),),
+        )
+        merged = merge_union_fields(
+            {"a": branch_a, "b": branch_b},
+            require_all=True,
+            collision_policy="fail",
+            branch_order=["a", "b"],
+        )
+
+        assert merged.fields is not None
+        x_field = next(f for f in merged.fields if f.name == "x")
+        assert x_field.nullable is True, "fail policy: OR logic (conservative)"
+
+    def test_branch_order_determines_first_last(self) -> None:
+        """branch_order controls which branch is 'first' or 'last'."""
+        branch_a = SchemaConfig(
+            mode="flexible",
+            fields=(FieldDefinition(name="x", field_type="int", required=True, nullable=True),),
+        )
+        branch_b = SchemaConfig(
+            mode="flexible",
+            fields=(FieldDefinition(name="x", field_type="int", required=True, nullable=False),),
+        )
+
+        # With branch_order=["a", "b"], A is first
+        merged_a_first = merge_union_fields(
+            {"a": branch_a, "b": branch_b},
+            require_all=True,
+            collision_policy="first_wins",
+            branch_order=["a", "b"],
+        )
+        x_a_first = next(f for f in merged_a_first.fields if f.name == "x")
+        assert x_a_first.nullable is True, "A is first, A is nullable"
+
+        # With branch_order=["b", "a"], B is first
+        merged_b_first = merge_union_fields(
+            {"a": branch_a, "b": branch_b},
+            require_all=True,
+            collision_policy="first_wins",
+            branch_order=["b", "a"],
+        )
+        x_b_first = next(f for f in merged_b_first.fields if f.name == "x")
+        assert x_b_first.nullable is False, "B is first, B is non-nullable"
+
+
+class TestBuildCoalesceSchemaHandlesNullable:
+    """Tests for _build_coalesce_schema() nullable flag handling.
+
+    Fix: _build_coalesce_schema() was ignoring the nullable flag when building
+    Pydantic field definitions. A field with required=True, nullable=True should
+    produce (int | None, ...) not (int, ...), so that downstream type validation
+    correctly rejects consumers expecting non-nullable fields.
+
+    This completes the P1 fix — merge_union_fields() now tracks nullable, and
+    _build_coalesce_schema() propagates it to the Pydantic schema used for DAG
+    validation.
+    """
+
+    def test_required_nullable_produces_optional_pydantic_type(self) -> None:
+        """A required+nullable field should produce `int | None` type (with required marker)."""
+        from types import UnionType
+        from typing import get_args, get_origin
+
+        from elspeth.core.dag.graph import _build_coalesce_schema
+
+        schema_config = SchemaConfig(
+            mode="flexible",
+            fields=(FieldDefinition(name="x", field_type="int", required=True, nullable=True),),
+        )
+        pydantic_schema = _build_coalesce_schema(schema_config)
+
+        # Check field annotation includes None
+        field_info = pydantic_schema.model_fields["x"]
+        annotation = field_info.annotation
+
+        # Should be a Union type (int | None)
+        origin = get_origin(annotation)
+        assert origin is UnionType or annotation is type(int | None), f"Expected union type for nullable field, got {annotation}"
+
+        # Should include both int and None
+        args = get_args(annotation)
+        assert int in args, f"Expected int in union, got {args}"
+        assert type(None) in args, f"Expected NoneType in union, got {args}"
+
+        # Should still be required (no default)
+        assert field_info.is_required(), "Nullable but required field should have no default"
+
+    def test_required_non_nullable_produces_strict_pydantic_type(self) -> None:
+        """A required+non-nullable field should produce strict `int` type."""
+        from elspeth.core.dag.graph import _build_coalesce_schema
+
+        schema_config = SchemaConfig(
+            mode="flexible",
+            fields=(FieldDefinition(name="x", field_type="int", required=True, nullable=False),),
+        )
+        pydantic_schema = _build_coalesce_schema(schema_config)
+
+        field_info = pydantic_schema.model_fields["x"]
+
+        # Should be plain int, not a union
+        assert field_info.annotation is int, f"Expected int, got {field_info.annotation}"
+
+        # Should be required
+        assert field_info.is_required(), "Required non-nullable field should have no default"
+
+    def test_optional_field_produces_optional_pydantic_type(self) -> None:
+        """An optional field should produce `int | None` with default None."""
+        from types import UnionType
+        from typing import get_origin
+
+        from elspeth.core.dag.graph import _build_coalesce_schema
+
+        schema_config = SchemaConfig(
+            mode="flexible",
+            fields=(FieldDefinition(name="x", field_type="int", required=False, nullable=False),),
+        )
+        pydantic_schema = _build_coalesce_schema(schema_config)
+
+        field_info = pydantic_schema.model_fields["x"]
+        annotation = field_info.annotation
+
+        # Should be a Union type (int | None) since optional means may be absent
+        origin = get_origin(annotation)
+        assert origin is UnionType or annotation is type(int | None), f"Expected union type for optional field, got {annotation}"
+
+        # Should have default None (not required)
+        assert not field_info.is_required(), "Optional field should have default"
+        assert field_info.default is None, "Optional field should default to None"
+
+
+class TestMixedObservedExplicitBranches:
+    """Tests for D1 fix: mixed observed/explicit branches must not silently discard fields.
+
+    Bug: The loop in merge_union_fields() used `all_observed = True; break` on the
+    FIRST observed branch, silently discarding typed fields from subsequent branches.
+
+    Fix: Check `all(schema_cfg.is_observed for ...)` BEFORE the loop, then `continue`
+    (not break) for observed branches during processing.
+    """
+
+    def test_mixed_observed_explicit_preserves_explicit_fields(self) -> None:
+        """When one branch is observed and another has fields, fields must be preserved.
+
+        Prior bug: breaks on first observed branch, returns observed schema, silently
+        discarding branch B's typed fields.
+        """
+        # Branch A: observed (no fields)
+        branch_a = SchemaConfig(mode="observed", fields=None)
+
+        # Branch B: flexible with typed fields
+        branch_b = SchemaConfig(
+            mode="flexible",
+            fields=(FieldDefinition(name="x", field_type="int", required=True),),
+        )
+
+        result = merge_union_fields(
+            {"a": branch_a, "b": branch_b},
+            require_all=True,
+        )
+
+        # Per docstring: "If all branches are observed-mode or no branches contribute
+        # fields, returns an observed-mode schema."
+        # Since NOT all branches are observed (branch_b is flexible), result should
+        # preserve branch_b's fields.
+        assert not result.is_observed, (
+            f"Only branch_a is observed, branch_b has fields. "
+            f"Result should preserve branch_b's fields, not return observed. "
+            f"Got mode={result.mode}"
+        )
+        assert result.fields is not None, "Should have fields from branch_b"
+        field_names = {fd.name for fd in result.fields}
+        assert "x" in field_names, "Field 'x' from branch_b should be preserved"
+
+    def test_all_observed_returns_observed(self) -> None:
+        """When ALL branches are observed, result should be observed."""
+        branch_a = SchemaConfig(mode="observed", fields=None)
+        branch_b = SchemaConfig(mode="observed", fields=None)
+
+        result = merge_union_fields(
+            {"a": branch_a, "b": branch_b},
+            require_all=True,
+        )
+
+        assert result.is_observed, "All branches observed -> result should be observed"
+
+    def test_observed_first_explicit_second_preserves_fields(self) -> None:
+        """Order independence: observed branch first, explicit branch second."""
+        # Explicitly test dict ordering to ensure the fix works regardless of
+        # iteration order (which caused the original bug when observed was first)
+        from collections import OrderedDict
+
+        branches: dict[str, SchemaConfig] = OrderedDict()
+        branches["observed_first"] = SchemaConfig(mode="observed", fields=None)
+        branches["explicit_second"] = SchemaConfig(
+            mode="flexible",
+            fields=(FieldDefinition(name="y", field_type="str", required=False),),
+        )
+
+        result = merge_union_fields(branches, require_all=True)
+
+        assert not result.is_observed, "Mixed branches should not return observed"
+        assert result.fields is not None
+        field_names = {fd.name for fd in result.fields}
+        assert "y" in field_names, "Field 'y' from explicit branch should be preserved"
+
+    def test_explicit_first_observed_second_preserves_fields(self) -> None:
+        """Order independence: explicit branch first, observed branch second."""
+        from collections import OrderedDict
+
+        branches: dict[str, SchemaConfig] = OrderedDict()
+        branches["explicit_first"] = SchemaConfig(
+            mode="flexible",
+            fields=(FieldDefinition(name="z", field_type="float", required=True),),
+        )
+        branches["observed_second"] = SchemaConfig(mode="observed", fields=None)
+
+        result = merge_union_fields(branches, require_all=True)
+
+        assert not result.is_observed, "Mixed branches should not return observed"
+        assert result.fields is not None
+        field_names = {fd.name for fd in result.fields}
+        assert "z" in field_names, "Field 'z' from explicit branch should be preserved"
+
+
+class TestPartialArrivalNullableSoundness:
+    """Tests for nullable soundness under partial-arrival scenarios.
+
+    Under best_effort/quorum policies, branches may timeout. The schema must be
+    sound for ALL possible arrival combinations, not just the collision_policy
+    winner. If ANY branch that might arrive can produce None, the merged schema
+    must be nullable.
+
+    Bug scenario (P1):
+    - Branch a: x: int? (nullable=True, processed first)
+    - Branch b: x: int (nullable=False, processed last)
+    - policy=best_effort, collision_policy=last_wins
+    - Current code synthesizes x as non-nullable (uses b's nullable flag)
+    - But if b times out, a delivers x=None — downstream schema is unsound!
+    """
+
+    def test_best_effort_last_wins_nullable_first_must_be_nullable(self) -> None:
+        """Under best_effort, even if last branch is non-nullable, any branch might arrive.
+
+        With last_wins, if the 'winning' last branch times out, the nullable
+        first branch delivers the value. The schema must allow None.
+        """
+        # Branch a (first): nullable=True
+        # Branch b (last): nullable=False
+        # Under best_effort, either might arrive. Schema must be nullable.
+        branch_a = SchemaConfig(
+            mode="flexible",
+            fields=(FieldDefinition(name="x", field_type="int", required=True, nullable=True),),
+        )
+        branch_b = SchemaConfig(
+            mode="flexible",
+            fields=(FieldDefinition(name="x", field_type="int", required=True, nullable=False),),
+        )
+        merged = merge_union_fields(
+            {"a": branch_a, "b": branch_b},
+            require_all=False,  # best_effort: branches may not arrive
+            collision_policy="last_wins",
+            branch_order=["a", "b"],  # a is first, b is last
+        )
+
+        assert merged.fields is not None
+        x_field = next(f for f in merged.fields if f.name == "x")
+        # Under partial-arrival, ANY branch might be the one that delivers.
+        # If a delivers (b timed out), x can be None. Schema must reflect this.
+        assert x_field.nullable is True, (
+            "Under best_effort with last_wins, if nullable branch might arrive, "
+            "merged schema must be nullable regardless of 'winner' declaration"
+        )
+
+    def test_best_effort_first_wins_nullable_last_must_be_nullable(self) -> None:
+        """Under best_effort, even if first branch is non-nullable, any branch might arrive.
+
+        With first_wins, if the 'winning' first branch times out, the nullable
+        last branch delivers the value. The schema must allow None.
+        """
+        # Branch a (first): nullable=False
+        # Branch b (last): nullable=True
+        # Under best_effort, either might arrive. Schema must be nullable.
+        branch_a = SchemaConfig(
+            mode="flexible",
+            fields=(FieldDefinition(name="x", field_type="int", required=True, nullable=False),),
+        )
+        branch_b = SchemaConfig(
+            mode="flexible",
+            fields=(FieldDefinition(name="x", field_type="int", required=True, nullable=True),),
+        )
+        merged = merge_union_fields(
+            {"a": branch_a, "b": branch_b},
+            require_all=False,  # best_effort: branches may not arrive
+            collision_policy="first_wins",
+            branch_order=["a", "b"],  # a is first, b is last
+        )
+
+        assert merged.fields is not None
+        x_field = next(f for f in merged.fields if f.name == "x")
+        # Under partial-arrival, ANY branch might be the one that delivers.
+        # If b delivers (a timed out), x can be None. Schema must reflect this.
+        assert x_field.nullable is True, (
+            "Under best_effort with first_wins, if nullable branch might arrive, "
+            "merged schema must be nullable regardless of 'winner' declaration"
+        )
+
+    def test_require_all_collision_policy_still_applies(self) -> None:
+        """Under require_all, collision_policy correctly determines nullable.
+
+        This is the existing correct behavior: all branches always arrive,
+        so the configured winner is deterministic. first_wins/last_wins
+        should use the winner's nullable flag.
+        """
+        branch_a = SchemaConfig(
+            mode="flexible",
+            fields=(FieldDefinition(name="x", field_type="int", required=True, nullable=True),),
+        )
+        branch_b = SchemaConfig(
+            mode="flexible",
+            fields=(FieldDefinition(name="x", field_type="int", required=True, nullable=False),),
+        )
+
+        # With require_all + last_wins, b always wins, so non-nullable
+        merged = merge_union_fields(
+            {"a": branch_a, "b": branch_b},
+            require_all=True,
+            collision_policy="last_wins",
+            branch_order=["a", "b"],
+        )
+        assert merged.fields is not None
+        x_field = next(f for f in merged.fields if f.name == "x")
+        assert x_field.nullable is False, "Under require_all with last_wins, last branch always wins"

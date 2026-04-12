@@ -18,7 +18,8 @@ be called directly by tests to verify semantics without reimplementing logic.
 
 from __future__ import annotations
 
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
+from typing import Literal
 
 from elspeth.contracts.schema import FieldDefinition, SchemaConfig
 from elspeth.core.dag.models import GraphValidationError
@@ -70,6 +71,8 @@ def merge_union_fields(
     branch_schemas: Mapping[str, SchemaConfig],
     *,
     require_all: bool,
+    collision_policy: Literal["last_wins", "first_wins", "fail"] = "last_wins",
+    branch_order: Sequence[str] | None = None,
     coalesce_id: str | None = None,
     guaranteed_fields: tuple[str, ...] | None = None,
     audit_fields: tuple[str, ...] | None = None,
@@ -91,9 +94,19 @@ def merge_union_fields(
     - require_all: Preserve source branch's required flag (branch always arrives)
     - other policies: Force optional (branch may not arrive)
 
+    Nullable semantics for shared fields depend on collision_policy (D5 fix):
+    - first_wins: Use first branch's nullable (first branch's value always wins)
+    - last_wins: Use last branch's nullable (last branch's value always wins)
+    - fail: Use OR of all branches (conservative; collisions fail at runtime)
+
     Args:
         branch_schemas: Map of branch name to SchemaConfig
         require_all: If True, use OR semantics for required; if False, use AND
+        collision_policy: How to resolve field-level collisions in union merge.
+            Affects nullable computation for shared fields.
+        branch_order: Declaration order of branches. If provided, branches are
+            processed in this order for deterministic first/last semantics.
+            If None, uses dict iteration order (insertion order in Python 3.7+).
         coalesce_id: Optional node ID for error messages (default: generic)
         guaranteed_fields: Pre-computed guaranteed_fields to include in result
         audit_fields: Pre-computed audit_fields to include in result
@@ -108,18 +121,46 @@ def merge_union_fields(
             field name.
     """
     # Track (type, required, nullable, branch) for each field.
-    # The nullable flag is critical for require_all+last_wins: if ANY branch can
-    # produce None for a field, the merged field is nullable even if "required"
-    # (because that branch's None value can win the collision).
+    # For shared fields, nullable depends on collision_policy:
+    # - first_wins: first branch's value wins, so use first branch's nullable
+    # - last_wins: last branch's value wins, so use last branch's nullable
+    # - fail: collisions fail at runtime, use OR as conservative fallback
     seen_types: dict[str, tuple[str, bool, bool, str]] = {}
     branches_with_field: dict[str, set[str]] = {}
     contributing_branches: set[str] = set()
-    all_observed = False
 
-    for branch_name, schema_cfg in branch_schemas.items():
+    # Check if ALL branches are observed BEFORE processing. Only return observed
+    # mode if every branch is observed - otherwise process the typed branches.
+    # Previous bug: the loop would break on the FIRST observed branch, silently
+    # discarding typed fields from subsequent branches.
+    all_observed = all(schema_cfg.is_observed for schema_cfg in branch_schemas.values())
+    if all_observed:
+        # Early return: all branches are observed, no typed fields to merge
+        return SchemaConfig(
+            mode="observed",
+            fields=None,
+            guaranteed_fields=guaranteed_fields,
+            audit_fields=audit_fields,
+        )
+
+    # Determine branch iteration order. Use branch_order if provided (declaration
+    # order from config), otherwise fall back to dict iteration order. This is
+    # critical for first_wins/last_wins nullable semantics — the first/last branch
+    # in declaration order determines the winning value.
+    branch_names = branch_order if branch_order is not None else list(branch_schemas.keys())
+
+    for branch_name in branch_names:
+        if branch_name not in branch_schemas:
+            # branch_order may include branches not in branch_schemas (e.g., if
+            # some branches haven't been wired up yet). Skip missing branches.
+            continue
+        schema_cfg = branch_schemas[branch_name]
         if schema_cfg.is_observed:
-            all_observed = True
-            break
+            # Skip observed branches - they contribute no typed fields.
+            # Mixed observed/explicit is handled by processing only the explicit branches.
+            # Note: upstream validation (validate_edge_compatibility) may reject
+            # mixed schemas at a higher level; here we process what we can.
+            continue
         if schema_cfg.fields is None:
             continue
         contributing_branches.add(branch_name)
@@ -144,14 +185,25 @@ def merge_union_fields(
                 if require_all:
                     # OR for required: required if required in ANY branch.
                     merged_req = prior_req or fd.required
-                    # BUT: nullable if ANY branch allows None. With last_wins (default),
-                    # any branch can win the collision, so if ANY is nullable, merged is.
-                    merged_nullable = prior_nullable or fd_nullable
+                    # Nullable depends on collision_policy (D5 fix):
+                    # - first_wins: keep first branch's nullable (prior_nullable)
+                    # - last_wins: use current branch's nullable (fd_nullable)
+                    # - fail: OR of all (conservative; collisions fail at runtime)
+                    if collision_policy == "first_wins":
+                        merged_nullable = prior_nullable  # First seen wins
+                    elif collision_policy == "last_wins":
+                        merged_nullable = fd_nullable  # Last seen wins
+                    else:  # "fail" — conservative OR
+                        merged_nullable = prior_nullable or fd_nullable
                     seen_types[fd.name] = (prior_type, merged_req, merged_nullable, prior_branch)
                 else:
                     # AND: optional if optional in ANY branch.
                     merged_req = prior_req and fd.required
-                    # nullable if ANY is nullable (same rule)
+                    # Under partial-arrival (non-require_all), any branch might be
+                    # the one that arrives. The collision_policy determines VALUE
+                    # resolution if multiple arrive, but the SCHEMA must be sound
+                    # for all arrival combinations. If ANY branch can produce None,
+                    # the merged schema must be nullable. (P1 soundness fix)
                     merged_nullable = prior_nullable or fd_nullable
                     seen_types[fd.name] = (prior_type, merged_req, merged_nullable, prior_branch)
             else:
@@ -167,7 +219,9 @@ def merge_union_fields(
                 # Force optional, and nullable (since branch may not arrive)
                 seen_types[field_name] = (ftype, False, True, first_branch)
 
-    if all_observed or not seen_types:
+    if not seen_types:
+        # No typed fields from any branch (all branches had fields=None or were
+        # observed and skipped). Return observed mode.
         return SchemaConfig(
             mode="observed",
             fields=None,

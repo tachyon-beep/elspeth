@@ -156,6 +156,14 @@ _TOOLS: dict[str, _ToolDef] = {
             "limit": {"type": "integer", "description": "Max tokens (default 100)", "default": 100},
         },
     ),
+    "get_token_children": _ToolDef(
+        description="Get child tokens created from a parent (forward lineage) — trace what a COALESCED token merged into",
+        args=_ArgSpec(required_str=("parent_token_id",)),
+        handler=lambda a, args: a.get_token_children(args["parent_token_id"]),
+        schema_properties={
+            "parent_token_id": {"type": "string", "description": "Token ID to find children for"},
+        },
+    ),
     "list_operations": _ToolDef(
         description="List source/sink operations for a run (blob downloads, file writes, database inserts)",
         args=_ArgSpec(

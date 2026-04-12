@@ -84,10 +84,17 @@ def _build_coalesce_schema(schema_config: SchemaConfig) -> type[PluginSchema]:
     field_definitions: dict[str, Any] = {}
     for fd in schema_config.fields:
         python_type = FIELD_TYPE_MAP[fd.field_type]
+        # Pydantic type must include None if the field can ever be None at runtime.
+        # This happens when:
+        #   - fd.nullable=True: field explicitly allows None values (e.g., from
+        #     coalesce where a nullable branch can win via last_wins collision)
+        #   - fd.required=False: field may be absent (Pydantic defaults absent to None)
+        can_be_none = fd.nullable or not fd.required
+        field_type = python_type | None if can_be_none else python_type
         if fd.required:
-            field_definitions[fd.name] = (python_type, ...)
+            field_definitions[fd.name] = (field_type, ...)
         else:
-            field_definitions[fd.name] = (python_type | None, None)
+            field_definitions[fd.name] = (field_type, None)
 
     extra_mode: Literal["allow", "ignore", "forbid"] = "allow" if schema_config.mode == "flexible" else "forbid"
 
@@ -1652,15 +1659,6 @@ class ExecutionGraph:
 
             for predecessor_id in self._graph.predecessors(node_id):
                 predecessor_info = self.get_node_info(predecessor_id)
-                if predecessor_info.node_type == NodeType.AGGREGATION:
-                    # Aggregations have dynamic output by design (e.g., BatchStats
-                    # produces count/sum/mean rather than the input fields). The
-                    # builder stores their `options.schema` as input-validation,
-                    # not output, so get_effective_guaranteed_fields() would
-                    # produce phantom guarantees from those input field markers.
-                    # See filigree task for the structural fix (set
-                    # output_schema_config=None for aggregations).
-                    continue
                 guaranteed = self.get_effective_guaranteed_fields(predecessor_id)
                 if not guaranteed:
                     # Empty guarantees are ambiguous under the abstain-vs-empty

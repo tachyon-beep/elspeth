@@ -117,9 +117,10 @@ allow_hits:
   reason: Idempotent delete — FileNotFoundError means content already deleted (retention purge or duplicate call)
   safety: Returns False on missing file — caller informed, no silent data loss
   expires: null
-- key: core/landscape/query_repository.py:R6:QueryRepository:explain_row:fp=60bbaf31e9f6472d
+- key: core/landscape/query_repository.py:R6:QueryRepository:explain_row:fp=5b5158345e746330
   owner: architecture
   reason: PayloadNotFoundError from PayloadStore when payload purged by retention policy — expected, not corruption
+  safety: Logs debug message and continues with source_data=None; payload_available flag set to False
 - key: core/canonical.py:R6:_normalize_value:fp=b26d50562c16f852
   owner: architecture
   reason: TypeError from np.isnan/isinf on non-numeric dtypes is expected — non-numeric arrays can't contain NaN

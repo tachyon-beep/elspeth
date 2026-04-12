@@ -38,6 +38,7 @@ from elspeth.mcp.types import (
     RunRecord,
     RunSummaryReport,
     SchemaDescription,
+    TokenChildRecord,
     TokenRecord,
 )
 
@@ -80,6 +81,9 @@ class LandscapeAnalyzer:
 
     def list_tokens(self, run_id: str, row_id: str | None = None, limit: int = 100) -> list[TokenRecord]:
         return queries.list_tokens(self._db, self._factory, run_id, row_id=row_id, limit=limit)
+
+    def get_token_children(self, parent_token_id: str) -> list[TokenChildRecord]:
+        return queries.get_token_children(self._db, self._factory, parent_token_id)
 
     def list_operations(
         self,

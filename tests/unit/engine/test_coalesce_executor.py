@@ -10,7 +10,7 @@ and audit trail recording.
 from __future__ import annotations
 
 import itertools
-from typing import Any
+from typing import Any, Literal
 from unittest.mock import MagicMock, Mock
 from uuid import uuid4
 
@@ -37,6 +37,31 @@ from elspeth.testing import make_field, make_row
 # Helpers
 # ---------------------------------------------------------------------------
 
+
+class _TestCoalesceExecutor(CoalesceExecutor):
+    """Test wrapper that auto-provides output_schema for union merge.
+
+    Production code computes output_schema via the DAG builder's merge_union_fields().
+    Tests bypass the DAG builder, so this wrapper provides an OBSERVED-mode schema
+    by default, matching the contract mode used by test fixtures.
+
+    This eliminates the need for the fallback path in CoalesceExecutor._execute_merge().
+    """
+
+    def register_coalesce(
+        self,
+        settings: CoalesceSettings,
+        node_id: NodeID,
+        branch_schemas: dict[str, tuple[str, ...]] | None = None,
+        output_schema: SchemaContract | None = None,
+    ) -> None:
+        # Auto-provide OBSERVED schema for union merge if not specified.
+        # OBSERVED mode = "infer schema from data" — matches test fixture contracts.
+        if output_schema is None and settings.merge == "union":
+            output_schema = SchemaContract(mode="OBSERVED", fields=(), locked=False)
+        super().register_coalesce(settings, node_id, branch_schemas, output_schema)
+
+
 _state_counter = itertools.count(1)
 
 
@@ -44,8 +69,17 @@ def _next_state_id() -> str:
     return f"state_{next(_state_counter):04d}"
 
 
-def _make_contract(fields: list[Any] | None = None) -> SchemaContract:
-    """Create an OBSERVED contract for testing."""
+def _make_contract(
+    fields: list[Any] | None = None,
+    *,
+    mode: Literal["FIXED", "FLEXIBLE", "OBSERVED"],
+) -> SchemaContract:
+    """Create a schema contract for testing with explicit mode.
+
+    Args:
+        fields: List of FieldContract instances. Defaults to a single 'amount' field.
+        mode: Schema enforcement mode (required, no default).
+    """
     if fields is None:
         fields = [
             make_field(
@@ -56,7 +90,7 @@ def _make_contract(fields: list[Any] | None = None) -> SchemaContract:
                 source="declared",
             ),
         ]
-    return SchemaContract(fields=tuple(fields), mode="OBSERVED", locked=True)
+    return SchemaContract(fields=tuple(fields), mode=mode, locked=True)
 
 
 def _make_token(
@@ -70,7 +104,7 @@ def _make_token(
     if data is None:
         data = {"amount": 100}
     if contract is None:
-        contract = _make_contract()
+        contract = _make_contract(mode="FLEXIBLE")
     row_data = make_row(data, contract=contract)
     return TokenInfo(
         row_id=row_id,
@@ -112,7 +146,7 @@ def _make_executor(
     def step_resolver(node_id: str) -> int:
         return 5
 
-    executor = CoalesceExecutor(
+    executor = _TestCoalesceExecutor(
         execution,
         span_factory,
         token_manager,
@@ -1501,7 +1535,7 @@ class TestContractHandling:
         """Merge crashes if any token has None contract (upstream bug)."""
         executor, _, _, _, _ = _make_executor()
         executor.register_coalesce(_settings(), "node_1")
-        contract = _make_contract()
+        contract = _make_contract(mode="FLEXIBLE")
         t1 = _make_token(branch_name="a", token_id="t1", data={"amount": 1}, contract=contract)
         # Simulate a bug: token with None contract
         bad_row = MagicMock(spec=PipelineRow)
@@ -1519,12 +1553,14 @@ class TestContractHandling:
         c_a = _make_contract(
             fields=[
                 make_field("x", python_type=int, required=True, source="declared"),
-            ]
+            ],
+            mode="FLEXIBLE",
         )
         c_b = _make_contract(
             fields=[
                 make_field("y", python_type=str, required=True, source="declared"),
-            ]
+            ],
+            mode="FLEXIBLE",
         )
         t1 = _make_token(branch_name="a", token_id="t1", data={"x": 1}, contract=c_a)
         t2 = _make_token(branch_name="b", token_id="t2", data={"y": "hi"}, contract=c_b)
@@ -1561,12 +1597,14 @@ class TestContractHandling:
         c_a = _make_contract(
             fields=[
                 make_field("chosen", python_type=str, required=True, source="declared"),
-            ]
+            ],
+            mode="FLEXIBLE",
         )
         c_b = _make_contract(
             fields=[
                 make_field("ignored", python_type=int, required=True, source="declared"),
-            ]
+            ],
+            mode="FLEXIBLE",
         )
         t1 = _make_token(branch_name="a", token_id="t1", data={"chosen": "yes"}, contract=c_a)
         t2 = _make_token(branch_name="b", token_id="t2", data={"ignored": 0}, contract=c_b)
@@ -1589,12 +1627,14 @@ class TestContractHandling:
         c_a = _make_contract(
             fields=[
                 make_field("value", python_type=int, required=True, source="declared"),
-            ]
+            ],
+            mode="FLEXIBLE",
         )
         c_b = _make_contract(
             fields=[
                 make_field("value", python_type=str, required=True, source="declared"),
-            ]
+            ],
+            mode="FLEXIBLE",
         )
         t1 = _make_token(branch_name="a", token_id="t1", data={"value": 1}, contract=c_a)
         t2 = _make_token(branch_name="b", token_id="t2", data={"value": "x"}, contract=c_b)
@@ -1627,12 +1667,14 @@ class TestContractHandling:
         c_a = _make_contract(
             fields=[
                 make_field("count", python_type=int, required=True, source="inferred"),
-            ]
+            ],
+            mode="OBSERVED",
         )
         c_b = _make_contract(
             fields=[
                 make_field("count", python_type=str, required=True, source="inferred"),
-            ]
+            ],
+            mode="OBSERVED",
         )
 
         t1 = _make_token(branch_name="a", token_id="t1", data={"count": 42}, contract=c_a)
@@ -2492,7 +2534,7 @@ class TestRestoreFromCheckpoint:
         executor, *_ = _make_executor()
         executor.register_coalesce(_settings(name="merge"), "node_1")
 
-        contract = _make_contract()
+        contract = _make_contract(mode="FLEXIBLE")
         token_cp = CoalesceTokenCheckpoint(
             token_id="tok_1",
             row_id="row_1",
@@ -2842,7 +2884,8 @@ class TestCheckpointRestoreRoundTrip:
             [
                 make_field("amount", original_name="amount", python_type=int, required=True, source="declared"),
                 make_field("label", original_name="label", python_type=str, required=False, source="declared"),
-            ]
+            ],
+            mode="FLEXIBLE",
         )
         executor, *_ = _make_executor()
         s = _settings(branches=["a", "b"], policy="require_all")
@@ -3214,7 +3257,7 @@ class TestPrecomputedOutputSchema:
         executor.register_coalesce(s, "node_1")  # No output_schema
 
         # Create tokens with same contract
-        contract = _make_contract()
+        contract = _make_contract(mode="FLEXIBLE")
         token_a = _make_token(branch_name="a", token_id="t1", data={"amount": 100}, contract=contract)
         token_b = _make_token(branch_name="b", token_id="t2", data={"amount": 200}, contract=contract)
 
@@ -3226,3 +3269,206 @@ class TestPrecomputedOutputSchema:
         assert outcome.merged_token is not None
         # Contract should be result of runtime merge (same as input since identical contracts)
         assert outcome.merged_token.row_data.contract.mode == contract.mode
+
+
+class TestOriginalNamePreservation:
+    """Regression tests for preserving original_name in coalesce contracts.
+
+    Bug: P2-RC5-original-name-loss
+
+    The orchestrator rebuilds coalesce contracts from output_schema_config,
+    which only has normalized names. Branch contracts carry the actual
+    original→normalized mapping from the source. The merged contract must
+    preserve original names for sinks using `headers: original`.
+
+    Prior bug: create_contract_from_config() was called without field_resolution,
+    so all field contracts got original_name == normalized_name, breaking
+    header resolution for downstream sinks.
+    """
+
+    def test_union_merge_preserves_branch_original_names(self):
+        """Union merge should preserve original_name from branch contracts."""
+        executor, *_ = _make_executor()
+
+        # Pre-computed schema with normalized names only (simulates DAG builder)
+        precomputed = SchemaContract(
+            mode="FLEXIBLE",
+            fields=(
+                make_field("customer_id", original_name="customer_id", python_type=str, required=True, source="declared"),
+                make_field("amount", original_name="amount", python_type=float, required=True, source="declared"),
+            ),
+            locked=True,
+        )
+
+        s = _settings(branches=["a", "b"], policy="require_all", merge="union")
+        executor.register_coalesce(s, "node_1", output_schema=precomputed)
+
+        # Branch contracts have DIFFERENT original names (from source headers)
+        contract_a = SchemaContract(
+            mode="FLEXIBLE",
+            fields=(
+                make_field("customer_id", original_name="Customer ID", python_type=str, required=True, source="declared"),
+                make_field("amount", original_name="Transaction Amount", python_type=float, required=True, source="declared"),
+            ),
+            locked=True,
+        )
+        contract_b = SchemaContract(
+            mode="FLEXIBLE",
+            fields=(
+                make_field("customer_id", original_name="Customer ID", python_type=str, required=True, source="declared"),
+                make_field("amount", original_name="Transaction Amount", python_type=float, required=True, source="declared"),
+            ),
+            locked=True,
+        )
+
+        token_a = _make_token(branch_name="a", token_id="t1", data={"customer_id": "C1", "amount": 100.0}, contract=contract_a)
+        token_b = _make_token(branch_name="b", token_id="t2", data={"customer_id": "C1", "amount": 200.0}, contract=contract_b)
+
+        executor.accept(token_a, "merge")
+        outcome = executor.accept(token_b, "merge")
+
+        # Merged contract should preserve original names from branches
+        merged = outcome.merged_token.row_data.contract
+        customer_id_field = next(f for f in merged.fields if f.normalized_name == "customer_id")
+        amount_field = next(f for f in merged.fields if f.normalized_name == "amount")
+
+        assert customer_id_field.original_name == "Customer ID", (
+            f"original_name was lost: expected 'Customer ID', got '{customer_id_field.original_name}'"
+        )
+        assert amount_field.original_name == "Transaction Amount", (
+            f"original_name was lost: expected 'Transaction Amount', got '{amount_field.original_name}'"
+        )
+
+    def test_union_merge_original_name_follows_policy_not_arrival(self):
+        """original_name must match the winning branch per coalesce policy, not arrival order.
+
+        Bug: P2-RC5-original-name-arrival-order
+
+        When two branches normalize different source headers to the same field:
+        - Branch A: "Customer ID" -> customer_id
+        - Branch B: "customer-ID" -> customer_id (different original)
+
+        With last_wins policy, the merged contract should use B's original_name
+        when B's value wins, even if A arrived first. Otherwise, a downstream
+        sink using `headers: original` labels B's value with A's header.
+        """
+        executor, *_ = _make_executor()
+
+        # Pre-computed schema with normalized names only
+        precomputed = SchemaContract(
+            mode="FLEXIBLE",
+            fields=(make_field("customer_id", original_name="customer_id", python_type=str, required=True, source="declared"),),
+            locked=True,
+        )
+
+        # settings.branches = ["a", "b"] means B's value wins under last_wins
+        s = _settings(branches=["a", "b"], policy="require_all", merge="union")
+        executor.register_coalesce(s, "node_1", output_schema=precomputed)
+
+        # Branch contracts have DIFFERENT original names for the same normalized field
+        contract_a = SchemaContract(
+            mode="FLEXIBLE",
+            fields=(make_field("customer_id", original_name="Customer ID", python_type=str, required=True, source="declared"),),
+            locked=True,
+        )
+        contract_b = SchemaContract(
+            mode="FLEXIBLE",
+            fields=(make_field("customer_id", original_name="customer-ID", python_type=str, required=True, source="declared"),),
+            locked=True,
+        )
+
+        # A arrives FIRST, but B's value should win (last_wins default)
+        token_a = _make_token(branch_name="a", token_id="t1", data={"customer_id": "A_VALUE"}, contract=contract_a)
+        token_b = _make_token(branch_name="b", token_id="t2", data={"customer_id": "B_VALUE"}, contract=contract_b)
+
+        executor.accept(token_a, "merge")
+        outcome = executor.accept(token_b, "merge")
+
+        # Value should be B's (last_wins)
+        assert outcome.merged_token.row_data["customer_id"] == "B_VALUE"
+
+        # original_name must be B's header, not A's (the bug: A arrives first -> A's header)
+        merged = outcome.merged_token.row_data.contract
+        customer_id_field = next(f for f in merged.fields if f.normalized_name == "customer_id")
+
+        assert customer_id_field.original_name == "customer-ID", (
+            f"original_name should match winning branch B's header 'customer-ID', "
+            f"but got '{customer_id_field.original_name}' (likely from first-arrived branch A)"
+        )
+
+
+class TestObservedUnionCoalesce:
+    """Regression tests for OBSERVED union coalesce handling.
+
+    Bug: P1-RC5-observed-union-contracts
+
+    For OBSERVED schemas, the precomputed contract is empty (fields=()) since
+    types are inferred at runtime. The executor should skip precomputed and
+    merge branch contracts directly.
+
+    Prior bug: The guard required output_schema for ALL union merges, but
+    OBSERVED unions don't need precomputed — they should use branch contracts.
+    """
+
+    def test_observed_union_merges_branch_contracts_directly(self):
+        """OBSERVED union should merge branch contracts, not use empty precomputed."""
+        executor, *_ = _make_executor()
+
+        # Pre-computed OBSERVED schema (empty fields, as DAG builder would produce)
+        precomputed = SchemaContract(
+            mode="OBSERVED",
+            fields=(),
+            locked=False,
+        )
+
+        s = _settings(branches=["a", "b"], policy="require_all", merge="union")
+        executor.register_coalesce(s, "node_1", output_schema=precomputed)
+
+        # Branch contracts have fields (observed from data)
+        contract_a = SchemaContract(
+            mode="OBSERVED",
+            fields=(make_field("x", original_name="x", python_type=int, required=True, source="inferred"),),
+            locked=True,
+        )
+        contract_b = SchemaContract(
+            mode="OBSERVED",
+            fields=(make_field("x", original_name="x", python_type=int, required=True, source="inferred"),),
+            locked=True,
+        )
+
+        token_a = _make_token(branch_name="a", token_id="t1", data={"x": 1}, contract=contract_a)
+        token_b = _make_token(branch_name="b", token_id="t2", data={"x": 2}, contract=contract_b)
+
+        executor.accept(token_a, "merge")
+        outcome = executor.accept(token_b, "merge")
+
+        # Merged contract should have fields from branches, not empty precomputed
+        merged = outcome.merged_token.row_data.contract
+        assert len(merged.fields) > 0, "OBSERVED union dropped all fields (using empty precomputed)"
+        assert any(f.normalized_name == "x" for f in merged.fields), "Field 'x' missing from merged contract"
+
+    def test_observed_union_without_precomputed_falls_back_gracefully(self):
+        """OBSERVED union without precomputed should fall back to runtime merge."""
+        executor, *_ = _make_executor()
+
+        # Register WITHOUT pre-computed schema (all branches OBSERVED)
+        s = _settings(branches=["a", "b"], policy="require_all", merge="union")
+        executor.register_coalesce(s, "node_1")  # No output_schema
+
+        # Both branch contracts are OBSERVED
+        contract = SchemaContract(
+            mode="OBSERVED",
+            fields=(make_field("y", original_name="y", python_type=str, required=True, source="inferred"),),
+            locked=True,
+        )
+
+        token_a = _make_token(branch_name="a", token_id="t1", data={"y": "hello"}, contract=contract)
+        token_b = _make_token(branch_name="b", token_id="t2", data={"y": "world"}, contract=contract)
+
+        executor.accept(token_a, "merge")
+        outcome = executor.accept(token_b, "merge")
+
+        # Should work (OBSERVED branches don't require precomputed)
+        assert outcome.held is False
+        assert outcome.merged_token is not None
+        assert any(f.normalized_name == "y" for f in outcome.merged_token.row_data.contract.fields)

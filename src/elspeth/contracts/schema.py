@@ -79,11 +79,18 @@ class FieldDefinition:
     nullable: bool = False
 
     @classmethod
-    def parse(cls, spec: str) -> FieldDefinition:
-        """Parse a field specification string.
+    def parse(cls, spec: str | Mapping[str, Any]) -> FieldDefinition:
+        """Parse a field specification string or dict.
+
+        Accepts two formats:
+        - String: "name: str" or "score: float?"
+        - Dict (round-trip format): {"name": "x", "type": "str", "required": True, "nullable": False}
+
+        The dict format preserves all four states of (required, nullable) without loss,
+        unlike the string format where `?` conflates nullable=True with required=False.
 
         Args:
-            spec: Field spec like "name: str" or "score: float?"
+            spec: Field spec string or dict from to_dict() round-trip
 
         Returns:
             FieldDefinition instance
@@ -91,6 +98,53 @@ class FieldDefinition:
         Raises:
             ValueError: If spec is malformed or type is unknown
         """
+        # Handle dict format (round-trip from to_dict)
+        if isinstance(spec, Mapping):
+            if "name" not in spec or "type" not in spec:
+                raise ValueError(f"Dict field spec must have 'name' and 'type' keys, got {sorted(spec.keys())}")
+            name = spec["name"]
+            field_type = spec["type"]
+            if not isinstance(name, str) or not isinstance(field_type, str):
+                raise ValueError("Dict field spec 'name' and 'type' must be strings")
+            # Identifier validation: must match string-format rules for Python/Jinja/SQL safety
+            if not name.isidentifier():
+                # Provide helpful suggestion for common fixable cases
+                if name and name[0].isdigit():
+                    raise ValueError(
+                        f"Invalid field name '{name}' in dict field spec. "
+                        f"Field names must be valid Python identifiers "
+                        f"(cannot start with a digit)."
+                    )
+                suggested = name.replace("-", "_").replace(".", "_")
+                raise ValueError(
+                    f"Invalid field name '{name}' in dict field spec. "
+                    f"Field names must be valid Python identifiers "
+                    f"(letters, digits, underscores only). "
+                    f"Use '{suggested}' instead."
+                )
+            if field_type not in SUPPORTED_TYPES:
+                raise ValueError(f"Unknown type '{field_type}' in dict field spec. Supported types: {', '.join(sorted(SUPPORTED_TYPES))}")
+            # Required and nullable are mandatory for round-trip format.
+            # Missing keys are Tier 1 data corruption — crash, don't default.
+            if "required" not in spec:
+                raise ValueError("Dict field spec must have 'required' key for round-trip format")
+            if type(spec["required"]) is not bool:
+                raise ValueError(f"Dict field spec 'required' must be bool, got {type(spec['required']).__name__}")
+            if "nullable" not in spec:
+                raise ValueError("Dict field spec must have 'nullable' key for round-trip format")
+            nullable = spec["nullable"]
+            if type(nullable) is not bool:
+                raise ValueError(f"Dict field spec 'nullable' must be bool, got {type(nullable).__name__}")
+            # Type narrowing for mypy
+            dict_typed_field: Literal["str", "int", "float", "bool", "any"] = field_type  # type: ignore[assignment]
+            return cls(
+                name=name,
+                field_type=dict_typed_field,
+                required=spec["required"],
+                nullable=nullable,
+            )
+
+        # Handle string format
         spec = spec.strip()
         match = FIELD_PATTERN.match(spec)
 
@@ -144,11 +198,17 @@ class FieldDefinition:
         )
 
     def to_dict(self) -> dict[str, str | bool]:
-        """Convert to dictionary for serialization."""
+        """Convert to dictionary for serialization.
+
+        Includes all semantic fields for audit trail completeness (D4 fix).
+        The nullable flag affects coalesce merge behavior and must be
+        traceable in the audit record.
+        """
         return {
             "name": self.name,
             "type": self.field_type,
             "required": self.required,
+            "nullable": self.nullable,
         }
 
 
@@ -228,19 +288,24 @@ def _validate_contract_fields_subset(
         )
 
 
-def _normalize_field_spec(spec: Any, *, index: int) -> str:
-    """Normalize a field spec to string form.
+def _normalize_field_spec(spec: Any, *, index: int) -> str | Mapping[str, Any]:
+    """Normalize a field spec for parsing.
 
     Accepts:
     - String: "field_name: type" or "field_name: type?"
     - Dict (from YAML): {"field_name": "type"} or {"field_name": "type?"}
+    - Dict (round-trip): {"name": "x", "type": "str", "required": True, "nullable": False}
+
+    For round-trip dict format (with "name" and "type" keys), returns the dict
+    directly to preserve all fields including nullable. FieldDefinition.parse()
+    handles both string and dict inputs.
 
     Args:
-        spec: Field specification (string or single-key dict)
+        spec: Field specification (string or dict)
         index: Index in fields list (for error messages)
 
     Returns:
-        Normalized string spec like "field_name: type"
+        Normalized spec (string for YAML format, dict for round-trip format)
 
     Raises:
         ValueError: If spec format is invalid
@@ -249,8 +314,8 @@ def _normalize_field_spec(spec: Any, *, index: int) -> str:
         return spec
 
     if isinstance(spec, Mapping):
-        # Handle to_dict() round-trip format: {"name": "x", "type": "str", "required": true}
-        # This enables SchemaConfig.from_dict(schema_config.to_dict()) to work.
+        # Handle to_dict() round-trip format: {"name": "x", "type": "str", "required": true, "nullable": false}
+        # Return the dict directly so FieldDefinition.parse() can preserve all fields.
         if "name" in spec and "type" in spec:
             name = spec["name"]
             type_spec = spec["type"]
@@ -269,8 +334,21 @@ def _normalize_field_spec(spec: Any, *, index: int) -> str:
                     f"got {type(spec['required']).__name__} ({spec['required']!r}). "
                     f"Use true/false (YAML) or True/False (Python), not strings."
                 )
-            optional = spec["required"] is False
-            return f"{name}: {type_spec}{'?' if optional else ''}"
+            # Require nullable for round-trip format (P2 soundness fix).
+            # Missing nullable is Tier 1 data corruption — crash, don't default.
+            if "nullable" not in spec:
+                raise ValueError(
+                    f"Field spec at index {index}: 'nullable' key is missing. "
+                    f"Round-trip dict format requires 'name', 'type', 'required', and 'nullable' keys."
+                )
+            if type(spec["nullable"]) is not bool:
+                raise ValueError(
+                    f"Field spec at index {index}: 'nullable' must be a bool, "
+                    f"got {type(spec['nullable']).__name__} ({spec['nullable']!r}). "
+                    f"Use true/false (YAML) or True/False (Python), not strings."
+                )
+            # Return dict directly - FieldDefinition.parse() handles dict input
+            return spec
 
         # YAML `- id: int` parses as {"id": "int"}
         if len(spec) != 1:

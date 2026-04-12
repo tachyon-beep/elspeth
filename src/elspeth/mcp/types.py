@@ -56,6 +56,24 @@ class TokenRecord(TypedDict):
     created_at: str | None
 
 
+class TokenChildRecord(TypedDict):
+    """Forward lineage record: what child tokens were created from a parent.
+
+    Used by ``get_token_children`` to trace what a COALESCED parent merged into.
+    The child_token_id is the merged token; ordinal is this parent's position
+    in the merge (0-indexed).
+    """
+
+    child_token_id: str
+    """The token created from this parent (e.g., the coalesced result)."""
+
+    parent_token_id: str
+    """The parent token being queried."""
+
+    ordinal: int
+    """This parent's position in the child's parent list (0-indexed)."""
+
+
 class OperationRecord(TypedDict):
     """A source/sink operation record as returned by ``list_operations``."""
 

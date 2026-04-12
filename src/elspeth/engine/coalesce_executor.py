@@ -813,27 +813,55 @@ class CoalesceExecutor:
             # ─────────────────────────────────────────────────────────────────────
             # Build contract based on merge strategy and actual data shape
             # ─────────────────────────────────────────────────────────────────────
-            contracts: list[SchemaContract] = [e.token.row_data.contract for e in pending.branches.values()]
+            # Keyed by branch name so _merge_with_original_names can look up winning branch
+            branch_contracts: dict[str, SchemaContract] = {
+                branch_name: e.token.row_data.contract for branch_name, e in pending.branches.items()
+            }
+            contracts: list[SchemaContract] = list(branch_contracts.values())
 
             if settings.merge == "union":
-                # Use pre-computed DAG schema if available (P2 fix: build/runtime alignment).
-                # This ensures runtime contracts match what the DAG builder computed,
-                # preserving nullable semantics from the P1 fix.
+                # For typed schemas, the DAG builder's merge_union_fields() computes
+                # correct policy-aware semantics (OR for require_all, AND otherwise).
+                # Runtime SchemaContract.merge() uses incorrect AND-only semantics,
+                # so precomputed is REQUIRED for typed schemas.
+                #
+                # For OBSERVED schemas, precomputed is empty (fields=()) since types
+                # are inferred at runtime. Skip precomputed entirely and merge branch
+                # contracts directly. (P1 fix: skip precomputed for observed unions)
+                all_branches_observed = all(c.mode == "OBSERVED" for c in contracts)
+
                 if settings.name in self._output_schemas:
-                    merged_contract = self._output_schemas[settings.name]
+                    precomputed = self._output_schemas[settings.name]
+                    # Use precomputed only for typed schemas (mode != OBSERVED)
+                    use_precomputed = precomputed.mode != "OBSERVED"
                 else:
-                    # Fallback to runtime merge (for backward compat / tests without DAG schema)
+                    # No precomputed registered. Only allowed for all-OBSERVED branches.
+                    if not all_branches_observed:
+                        raise OrchestrationInvariantError(
+                            f"Coalesce '{settings.name}' has typed branch contracts but no "
+                            f"output_schema for union merge. The DAG builder must provide "
+                            f"output_schema via register_coalesce(). "
+                            f"If this is a test, use TestCoalesceExecutor from conftest."
+                        )
+                    use_precomputed = False
+
+                if use_precomputed:
+                    # Typed schemas: use precomputed semantics (required/nullable/type) but
+                    # preserve original_name from branch contracts. The precomputed contract
+                    # only has normalized names (from config); branch contracts carry the
+                    # original headers from the source.
+                    # P2 fix: use field_origins to pick original_name from winning branch,
+                    # not first-arrived branch.
+                    merged_contract = self._merge_with_original_names(precomputed, branch_contracts, field_origins)
+                else:
+                    # OBSERVED or no precomputed: merge branch contracts directly.
+                    # Type conflicts are still possible when types are inferred from data.
                     merged_contract = contracts[0]
                     for c in contracts[1:]:
                         try:
                             merged_contract = merged_contract.merge(c)
                         except ContractMergeError as e:
                             # Type conflict between branches — fail this row gracefully.
-                            # This can happen legitimately when all branches use observed
-                            # schemas and runtime data produces incompatible types for the
-                            # same field. Build-time validation cannot catch this case
-                            # because observed schemas have no declared fields.
-                            # (See: elspeth-c75ac86e35)
                             return self._fail_pending(
                                 settings=settings,
                                 key=key,
@@ -927,6 +955,12 @@ class CoalesceExecutor:
                         )
                     if settings.union_collision_policy == "first_wins":
                         merged_data_dict, first_wins_origins = _resolve_first_wins(merged_data_dict, field_origins, collision_values)
+                        # Rebuild contract with first_wins origins so original_name
+                        # mapping matches the winning branch, not last-wins default.
+                        # (P2 fix: _merge_with_original_names was called with field_origins
+                        # before _resolve_first_wins computed the correct origins.)
+                        if use_precomputed:
+                            merged_contract = self._merge_with_original_names(precomputed, branch_contracts, first_wins_origins)
                         # Rebuild metadata with the updated origins; collision_values
                         # unchanged (still records every contributing branch in order).
                         coalesce_metadata = replace(
@@ -1056,6 +1090,77 @@ class CoalesceExecutor:
             self._mark_completed(key)
 
             raise
+
+    def _merge_with_original_names(
+        self,
+        precomputed: SchemaContract,
+        branch_contracts: dict[str, SchemaContract],
+        field_origins: dict[str, str],
+    ) -> SchemaContract:
+        """Merge precomputed schema semantics with original names from branch contracts.
+
+        The precomputed contract has correct required/nullable/type semantics from
+        build-time analysis, but only has normalized names (original_name == normalized_name).
+        Branch contracts carry the actual original→normalized mapping from the source.
+
+        This method creates a new contract that preserves:
+        - Field definitions (type, required, nullable, source) from precomputed
+        - original_name from the winning branch per field_origins (policy-aware)
+
+        Args:
+            precomputed: Contract from create_contract_from_config() with build-time semantics
+            branch_contracts: Map of branch_name -> contract from branch tokens
+            field_origins: Map of field_name -> winning branch_name (from _merge_data)
+
+        Returns:
+            Merged contract with preserved original names
+        """
+        # Build lookup of (normalized_name, branch_name) -> original_name from all branches
+        # This allows us to retrieve original_name from the winning branch per field
+        branch_original_names: dict[tuple[str, str], str] = {}
+        for branch_name, contract in branch_contracts.items():
+            for fc in contract.fields:
+                branch_original_names[(fc.normalized_name, branch_name)] = fc.original_name
+
+        # Fallback lookup for fields not in field_origins (e.g., non-colliding fields)
+        # Uses first-seen semantics across all branches
+        fallback_original_names: dict[str, str] = {}
+        for contract in branch_contracts.values():
+            for fc in contract.fields:
+                if fc.normalized_name not in fallback_original_names:
+                    fallback_original_names[fc.normalized_name] = fc.original_name
+
+        # Rebuild precomputed fields with original names from winning branches
+        merged_fields: list[FieldContract] = []
+        for fc in precomputed.fields:
+            # Use original_name from winning branch if field had collision,
+            # otherwise fall back to first-seen semantics
+            winning_branch = field_origins.get(fc.normalized_name)
+            if winning_branch is not None:
+                # Field had collision: use winning branch's original_name
+                original_name = branch_original_names.get(
+                    (fc.normalized_name, winning_branch),
+                    fc.normalized_name,  # Defensive fallback (shouldn't happen)
+                )
+            else:
+                # No collision: use fallback (first-seen)
+                original_name = fallback_original_names.get(fc.normalized_name, fc.normalized_name)
+            merged_fields.append(
+                FieldContract(
+                    normalized_name=fc.normalized_name,
+                    original_name=original_name,
+                    python_type=fc.python_type,
+                    required=fc.required,
+                    source=fc.source,
+                    nullable=fc.nullable,
+                )
+            )
+
+        return SchemaContract(
+            mode=precomputed.mode,
+            fields=tuple(merged_fields),
+            locked=precomputed.locked,
+        )
 
     def _merge_data(
         self,

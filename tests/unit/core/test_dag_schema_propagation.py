@@ -439,10 +439,22 @@ class MockAggregationTransform:
 
 
 class TestAggregationSchemaConfigPropagation:
-    """Tests for _output_schema_config propagation from aggregation transforms."""
+    """Tests for aggregation node schema handling.
 
-    def test_aggregation_schema_config_propagates(self) -> None:
-        """Verify aggregation transform's _output_schema_config is stored in NodeInfo."""
+    Aggregations have dynamic output by design (e.g., BatchStats produces
+    count/sum/mean rather than the input fields). The builder propagates
+    the aggregation's _output_schema_config to NodeInfo so:
+    1. Downstream pass-through nodes (gates, coalesce branches) can inherit
+       the schema via _best_schema_config()
+    2. Derived input requirements (like group_by → required_fields) are
+       preserved for DAG validation
+
+    The _output_schema_config IS correct for output: _build_output_schema_config()
+    merges declared_output_fields into guaranteed_fields, not input fields.
+    """
+
+    def test_aggregation_output_schema_config_propagates(self) -> None:
+        """Verify aggregation nodes have output_schema_config from transform."""
         transform = MockAggregationTransform()
         trigger = TriggerConfig(count=10)
         agg_settings = AggregationSettings(
@@ -472,7 +484,9 @@ class TestAggregationSchemaConfigPropagation:
 
         node_info = agg_nodes[0]
 
-        # Verify schema config was propagated
+        # Aggregation's output_schema_config is propagated from the transform.
+        # This enables downstream pass-through nodes to inherit via _best_schema_config()
+        # and preserves derived input requirements for DAG validation.
         assert node_info.output_schema_config is not None
         assert node_info.output_schema_config.guaranteed_fields == ("batch_result",)
         assert node_info.output_schema_config.audit_fields == ("batch_hash",)

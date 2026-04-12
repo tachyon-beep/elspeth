@@ -233,15 +233,39 @@ class QueryRepository:
         return self._token_loader.load(r)
 
     def get_token_parents(self, token_id: str) -> list[TokenParent]:
-        """Get parent relationships for a token.
+        """Get parent relationships for a token (backward lineage).
 
         Args:
-            token_id: Token ID
+            token_id: Token ID (the child)
 
         Returns:
             List of TokenParent models (ordered by ordinal)
         """
         query = select(token_parents_table).where(token_parents_table.c.token_id == token_id).order_by(token_parents_table.c.ordinal)
+        db_rows = self._ops.execute_fetchall(query)
+        return [self._token_parent_loader.load(r) for r in db_rows]
+
+    def get_token_children(self, parent_token_id: str) -> list[TokenParent]:
+        """Get child relationships for a token (forward lineage).
+
+        Enables forward lineage queries: "what tokens were created from this parent?"
+        This closes the audit trail gap where COALESCED tokens store join_group_id
+        but forward traversal required reading node state output_data.
+
+        Args:
+            parent_token_id: Token ID (the parent)
+
+        Returns:
+            List of TokenParent models where this token is the parent.
+            Ordered by child token_id for deterministic results.
+            Note: ordinal represents the parent's position in the child's merge,
+            not a child ordering (which doesn't exist semantically).
+        """
+        query = (
+            select(token_parents_table)
+            .where(token_parents_table.c.parent_token_id == parent_token_id)
+            .order_by(token_parents_table.c.token_id)
+        )
         db_rows = self._ops.execute_fetchall(query)
         return [self._token_parent_loader.load(r) for r in db_rows]
 
