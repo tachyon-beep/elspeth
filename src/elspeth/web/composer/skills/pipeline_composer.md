@@ -171,6 +171,8 @@ If the user's intent matches a known pattern, use its safe defaults and build im
 | `azure_batch_llm` | Azure OpenAI batch processing | no | yes | yes | Adds response field (batch mode) |
 | `openrouter_batch_llm` | OpenRouter batch processing | no | yes | yes | Adds response field (batch mode) |
 | `rag_retrieval` | Retrieve similar documents from vector store | no | yes | depends | Adds retrieval results field |
+| `type_coerce` | Convert field types (str→int/float/bool, *→str) | no | no | no | Coerces specified fields in-place |
+| `value_transform` | Compute new/modified fields via expressions | no | no | no | Adds or modifies fields per expression |
 
 ### Sinks
 
@@ -229,6 +231,18 @@ Gotchas:
 
 **field_mapper** — Rename fields in each row.
 Minimal config: `{"mapping": {"old_name": "new_name"}}`
+
+**type_coerce** — Convert field types (str→int, str→float, str→bool, *→str).
+Minimal config: `{"conversions": [{"field": "price", "to": "float"}]}`
+Gotchas:
+- Strict coercion only — "3.5" won't coerce to int, bool only accepts 0/1/true/false strings.
+- Use before `value_transform` when source data has string types that need numeric operations.
+
+**value_transform** — Compute new or modified field values using expressions.
+Minimal config: `{"operations": [{"target": "total", "expression": "row['price'] * row['quantity']"}]}`
+Gotchas:
+- Operations run sequentially — later operations can reference fields computed by earlier ones.
+- Only safe expressions allowed (no function calls like `round()`, `len()`, etc.).
 
 ### Sinks
 
