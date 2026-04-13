@@ -1697,8 +1697,11 @@ def _execute_create_blob(
                     status="ready",
                 )
             )
-    except BaseException:
-        # Clean up file on any DB failure
+    except Exception:
+        # Clean up file on any DB failure.  Exception (not BaseException)
+        # because SQLAlchemy errors are Exception subclasses; catching
+        # KeyboardInterrupt/SystemExit here is unnecessary and the unlink
+        # cleanup is safe but the broader catch is not justified.
         storage_path.unlink(missing_ok=True)
         raise
 
@@ -1753,8 +1756,11 @@ def _execute_update_blob(
                     content_hash=file_hash,
                 )
             )
-    except BaseException:
-        # Restore old content so file matches DB metadata
+    except Exception:
+        # Restore old content so file matches DB metadata.  Exception
+        # (not BaseException) because write_bytes() is not atomic — under
+        # KeyboardInterrupt the rollback write could truncate the file,
+        # leaving it inconsistent with both old and new DB state.
         storage_path.write_bytes(old_content)
         raise
 

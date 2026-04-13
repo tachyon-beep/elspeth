@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from pathlib import Path
 from types import MappingProxyType
 from typing import Any
 from unittest.mock import MagicMock
@@ -2136,6 +2137,118 @@ class TestBlobTools:
         delta_fresh = result_fresh.to_dict()["validation_delta"]
         delta_threaded = result_threaded.to_dict()["validation_delta"]
         assert delta_fresh == delta_threaded
+
+    def test_create_blob_cleans_file_on_db_failure(self, tmp_path: Path) -> None:
+        """DB failure during create_blob must delete the orphaned storage file."""
+        from unittest.mock import patch
+
+        state = _empty_state()
+        catalog = _mock_catalog()
+        data_dir = str(tmp_path)
+
+        # Patch _check_blob_quota to raise inside the DB transaction
+        with (
+            patch(
+                "elspeth.web.composer.tools._check_blob_quota",
+                side_effect=RuntimeError("simulated DB failure"),
+            ),
+            pytest.raises(RuntimeError, match="simulated DB failure"),
+        ):
+            execute_tool(
+                "create_blob",
+                {"filename": "test.csv", "mime_type": "text/csv", "content": "a,b\n1,2"},
+                state,
+                catalog,
+                data_dir=data_dir,
+                session_engine=self.engine,
+                session_id=self.session_id,
+            )
+
+        # Storage file must have been cleaned up
+        blob_dir = tmp_path / "blobs" / self.session_id
+        remaining = list(blob_dir.glob("*")) if blob_dir.exists() else []
+        assert remaining == [], f"Orphaned files after DB failure: {remaining}"
+
+    def test_update_blob_restores_old_content_on_db_failure(self, tmp_path: Path) -> None:
+        """DB failure during update_blob must restore the original file content."""
+        from datetime import UTC, datetime
+        from unittest.mock import patch
+        from uuid import uuid4
+
+        from elspeth.web.sessions.models import blobs_table
+
+        state = _empty_state()
+        catalog = _mock_catalog()
+
+        # Create a real blob on disk with known content
+        blob_id = str(uuid4())
+        storage_dir = tmp_path / "blobs" / self.session_id
+        storage_dir.mkdir(parents=True)
+        storage_path = storage_dir / f"{blob_id}_test.csv"
+        original_content = b"original,content\n1,2"
+        storage_path.write_bytes(original_content)
+
+        now = datetime.now(UTC)
+        with self.engine.begin() as conn:
+            conn.execute(
+                blobs_table.insert().values(
+                    id=blob_id,
+                    session_id=self.session_id,
+                    filename="test.csv",
+                    mime_type="text/csv",
+                    size_bytes=len(original_content),
+                    content_hash="old_hash",
+                    storage_path=str(storage_path),
+                    created_at=now,
+                    created_by="user",
+                    source_description=None,
+                    status="ready",
+                )
+            )
+
+        # Patch session_engine.begin() to raise AFTER the file is overwritten.
+        # The update function reads old content, writes new content, THEN enters
+        # the DB transaction.  We need the DB part to fail.
+        with (
+            patch.object(
+                self.engine,
+                "begin",
+                side_effect=RuntimeError("simulated DB failure"),
+            ),
+            pytest.raises(RuntimeError, match="simulated DB failure"),
+        ):
+            execute_tool(
+                "update_blob",
+                {"blob_id": blob_id, "content": "new,content\n3,4"},
+                state,
+                catalog,
+                session_engine=self.engine,
+                session_id=self.session_id,
+            )
+
+        # File must contain the ORIGINAL content after rollback
+        assert storage_path.read_bytes() == original_content
+
+    def test_blob_rollback_does_not_catch_keyboard_interrupt(self, tmp_path: Path) -> None:
+        """Blob exception handlers must catch Exception, not BaseException.
+
+        Catching BaseException intercepts KeyboardInterrupt/SystemExit.
+        Under KeyboardInterrupt, write_bytes() rollback (update_blob) could
+        truncate the file, leaving it inconsistent with DB state.
+        """
+        import ast
+        import inspect
+
+        from elspeth.web.composer.tools import _execute_create_blob, _execute_update_blob
+
+        for func in (_execute_create_blob, _execute_update_blob):
+            source = inspect.getsource(func)
+            tree = ast.parse(source)
+            for node in ast.walk(tree):
+                if isinstance(node, ast.ExceptHandler) and node.type is not None and isinstance(node.type, ast.Name):
+                    assert node.type.id != "BaseException", (
+                        f"{func.__name__} catches BaseException — must use Exception to avoid intercepting KeyboardInterrupt/SystemExit"
+                    )
 
 
 # ---------------------------------------------------------------------------
