@@ -303,30 +303,37 @@ class TypeCoerce(BaseTransform):
         fields_unchanged: list[str] = []
 
         for spec in self._conversions:
-            field_name = spec.field
+            config_field = spec.field  # Field name from config (may be original header)
             target_type_name = spec.to
 
-            # Check field exists
-            if field_name not in row:
+            # Check field exists (PipelineRow resolves both original and normalized names)
+            if config_field not in row:
                 return TransformResult.error(
                     {
                         "reason": "missing_field",
-                        "field": field_name,
-                        "message": f"Field '{field_name}' not found in row",
+                        "field": config_field,
+                        "message": f"Field '{config_field}' not found in row",
                     }
                 )
 
-            value = row[field_name]
+            # Resolve to normalized key for output dict (handles original header names)
+            normalized_key = row.contract.find_name(config_field)
+            if normalized_key is None:
+                # Field exists in row but not in contract — use config name as-is
+                # (shouldn't happen for valid rows, but defensive for edge cases)
+                normalized_key = config_field
+
+            value = row[config_field]
 
             # Check for None
             if value is None:
                 return TransformResult.error(
                     {
                         "reason": "type_mismatch",
-                        "field": field_name,
+                        "field": config_field,
                         "expected": target_type_name,
                         "actual": "None",
-                        "message": f"Field '{field_name}' is None",
+                        "message": f"Field '{config_field}' is None",
                     }
                 )
 
@@ -334,7 +341,7 @@ class TypeCoerce(BaseTransform):
             target_type = _TARGET_TYPES[target_type_name]
             # Use type() not isinstance() to avoid bool matching int
             if type(value) is target_type:
-                fields_unchanged.append(field_name)
+                fields_unchanged.append(normalized_key)
                 continue
 
             # Apply conversion
@@ -345,15 +352,15 @@ class TypeCoerce(BaseTransform):
                 return TransformResult.error(
                     {
                         "reason": "type_mismatch",
-                        "field": field_name,
+                        "field": config_field,
                         "expected": target_type_name,
                         "actual": type(value).__name__,
                         "message": e.reason,
                     }
                 )
 
-            output[field_name] = converted
-            fields_coerced.append(field_name)
+            output[normalized_key] = converted
+            fields_coerced.append(normalized_key)
 
         return TransformResult.success(
             PipelineRow(output, row.contract),

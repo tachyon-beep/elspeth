@@ -118,10 +118,12 @@ class ValueTransform(BaseTransform):
         self._operations = cfg.operations
         self._schema_config = cfg.schema_config
 
-        # declared_output_fields for contract propagation
-        self.declared_output_fields = frozenset(op.target for op in cfg.operations)
+        # declared_output_fields intentionally empty — we can't statically know which
+        # targets are new vs overwrites, and overwrites are an intentional feature.
+        # The executor's field collision check only runs when this is non-empty.
+        self.declared_output_fields: frozenset[str] = frozenset()
 
-        # Build output schema config for DAG contract validation
+        # Output schema passes through input guarantees since we can't declare new fields
         self._output_schema_config = self._build_output_schema_config(cfg.schema_config)
 
         self.input_schema, self.output_schema = self._create_schemas(
@@ -150,8 +152,12 @@ class ValueTransform(BaseTransform):
             target = op.target
             parser = op.get_parser()
 
+            # Create PipelineRow for evaluation to preserve dual-name access
+            # (expressions can use original headers like row['Price USD'])
+            working_row = PipelineRow(working_data, row.contract)
+
             try:
-                result = parser.evaluate(working_data)
+                result = parser.evaluate(working_row)
             except ExpressionEvaluationError as e:
                 return TransformResult.error(
                     {

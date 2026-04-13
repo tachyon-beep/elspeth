@@ -440,7 +440,7 @@ allow_hits:
   reason: Optional extras (e.g. chromadb for [rag]) are external dependencies — ImportError is expected when not installed
   safety: Only catches ImportError/ModuleNotFoundError; logs warning with file name and error; SyntaxError and other bugs still crash
   expires: null
-- key: plugins/transforms/value_transform.py:R4:ValueTransform:process:fp=2f6c1a12d7d35734
+- key: plugins/transforms/value_transform.py:R4:ValueTransform:process:fp=3e8908e176fbca49
   owner: feature
   reason: User-provided expressions are Tier 3-like boundary — catch-all ensures unexpected evaluation errors produce TransformResult.error not pipeline crash
   safety: Converts to structured error result with type and message; row enters quarantine path, not silent drop
