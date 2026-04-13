@@ -269,6 +269,39 @@ class TestDiscoverAllPlugins:
             f"Found: {[cls.name for cls in discovered['sinks']]}"  # type: ignore[attr-defined]
         )
 
+    def test_all_plugins_have_config_model(self) -> None:
+        """Every registered plugin must declare a config_model (via ClassVar or get_config_model).
+
+        A plugin that inherits config_model = None from the base class
+        silently bypasses pre-validation in validation.py — invalid user
+        config passes through with no error.  NullSource is the only
+        intentional exception (resume-only, no config).
+        """
+        from elspeth.plugins.infrastructure.discovery import discover_all_plugins
+
+        # Plugins intentionally exempt from config_model.
+        # Each entry needs a justification comment.
+        EXEMPT = {
+            "null",  # NullSource: resume-only source, requires no config
+        }
+
+        discovered = discover_all_plugins()
+
+        missing: list[str] = []
+        for plugin_type, plugins in discovered.items():
+            for cls in plugins:
+                plugin_name: str = cls.name  # type: ignore[attr-defined]
+                if plugin_name in EXEMPT:
+                    continue
+                model = cls.get_config_model()
+                if model is None:
+                    missing.append(f"{plugin_type}/{plugin_name} ({cls.__qualname__})")
+
+        assert not missing, (
+            "Plugins without config_model silently bypass pre-validation. "
+            "Either add a config_model ClassVar or add to EXEMPT with justification:\n" + "\n".join(f"  - {m}" for m in missing)
+        )
+
 
 class TestGetPluginDescription:
     """Test docstring extraction for plugin descriptions."""
