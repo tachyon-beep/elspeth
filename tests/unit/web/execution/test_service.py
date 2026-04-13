@@ -715,6 +715,74 @@ class TestCompletionPathExternalCancellation:
     @patch("elspeth.web.execution.service.load_settings_from_yaml_string")
     @patch("elspeth.web.execution.service.LandscapeDB")
     @patch("elspeth.web.execution.service.FilesystemPayloadStore")
+    def test_cancelled_compensating_event_broadcast_on_external_cancel(
+        self,
+        mock_payload: MagicMock,
+        mock_landscape: MagicMock,
+        mock_load: MagicMock,
+        mock_instantiate: MagicMock,
+        mock_graph_cls: MagicMock,
+        mock_orch_cls: MagicMock,
+        service: ExecutionServiceImpl,
+        mock_session_service: MagicMock,
+    ) -> None:
+        """When pipeline completes but DB says 'cancelled', a compensating
+        'cancelled' event must be broadcast after the 'completed' event so
+        WebSocket clients converge with the database state."""
+        mock_bundle = MagicMock()
+        mock_bundle.aggregations = {}
+        mock_instantiate.return_value = mock_bundle
+        mock_graph_cls.from_plugin_instances.return_value = MagicMock()
+        mock_orch = MagicMock()
+        mock_orch_cls.return_value = mock_orch
+        mock_result = MagicMock()
+        mock_result.rows_processed = 100
+        mock_result.rows_succeeded = 95
+        mock_result.rows_failed = 5
+        mock_result.rows_quarantined = 0
+        mock_result.run_id = "landscape-run-789"
+        mock_orch.run.return_value = mock_result
+
+        run_id = str(uuid4())
+
+        call_count = 0
+
+        async def status_side_effect(*args: Any, **kwargs: Any) -> None:
+            nonlocal call_count
+            call_count += 1
+            if call_count == 2:
+                raise ValueError("Illegal run transition: 'cancelled' → 'completed'. Allowed: []")
+
+        mock_session_service.update_run_status = AsyncMock(side_effect=status_side_effect)
+        mock_session_service.get_run.return_value = MagicMock(status="cancelled")
+
+        # Spy on broadcaster to capture broadcast calls
+        broadcast_calls: list[tuple[str, Any]] = []
+        original_broadcast = service._broadcaster.broadcast
+
+        def spy_broadcast(rid: str, event: Any) -> None:
+            broadcast_calls.append((rid, event))
+            original_broadcast(rid, event)
+
+        service._broadcaster.broadcast = spy_broadcast  # type: ignore[assignment]
+
+        service._run_pipeline(run_id, "source:\n  plugin: csv", threading.Event())
+
+        # Extract event types in order
+        event_types = [call[1].event_type for call in broadcast_calls]
+        # Must see "completed" followed by "cancelled" (compensating event)
+        assert "completed" in event_types, f"Expected 'completed' event, got: {event_types}"
+        assert "cancelled" in event_types, f"Expected compensating 'cancelled' event, got: {event_types}"
+        completed_idx = event_types.index("completed")
+        cancelled_idx = event_types.index("cancelled")
+        assert cancelled_idx > completed_idx, f"'cancelled' must come after 'completed': {event_types}"
+
+    @patch("elspeth.web.execution.service.Orchestrator")
+    @patch("elspeth.web.execution.service.ExecutionGraph")
+    @patch("elspeth.web.execution.service.instantiate_plugins_from_config")
+    @patch("elspeth.web.execution.service.load_settings_from_yaml_string")
+    @patch("elspeth.web.execution.service.LandscapeDB")
+    @patch("elspeth.web.execution.service.FilesystemPayloadStore")
     def test_completion_guard_reraises_for_non_cancelled_status(
         self,
         mock_payload: MagicMock,
@@ -783,6 +851,23 @@ class TestGetLiveRunIds:
             service._shutdown_events["run-abc"] = event
             service._shutdown_events["run-def"] = event
         assert service.get_live_run_ids() == frozenset({"run-abc", "run-def"})
+
+    def test_excludes_signalled_events(
+        self,
+        service: ExecutionServiceImpl,
+    ) -> None:
+        """Runs whose shutdown event is set are not considered live.
+
+        A set event means the run is shutting down or wedged — orphan
+        cleanup must be allowed to act on it.
+        """
+        live_event = threading.Event()
+        signalled_event = threading.Event()
+        signalled_event.set()
+        with service._shutdown_events_lock:
+            service._shutdown_events["run-live"] = live_event
+            service._shutdown_events["run-signalled"] = signalled_event
+        assert service.get_live_run_ids() == frozenset({"run-live"})
 
     def test_returns_snapshot_not_live_reference(
         self,

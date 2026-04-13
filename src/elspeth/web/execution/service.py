@@ -128,18 +128,23 @@ class ExecutionServiceImpl:
         return future.result(timeout=30.0)
 
     def get_live_run_ids(self) -> frozenset[str]:
-        """Return run IDs with active executor threads.
+        """Return run IDs with active, non-signalled executor threads.
 
         A run ID is present in _shutdown_events from the moment it is
         registered in _execute_locked (before thread pool submission)
-        until the _run_pipeline finally block removes it. Presence means
-        the executor thread is alive or has not yet cleaned up — the run
-        is NOT orphaned.
+        until the _run_pipeline finally block removes it.
+
+        Only IDs whose shutdown event is NOT set are returned. Once the
+        event is set, the pipeline is either shutting down or wedged —
+        orphan cleanup should be allowed to act on it. Without this
+        filter, a wedged thread (or queued work behind it) keeps the
+        run in _shutdown_events forever, and orphan cleanup never
+        recovers the session.
 
         Thread-safe: reads under the lock.
         """
         with self._shutdown_events_lock:
-            return frozenset(self._shutdown_events.keys())
+            return frozenset(run_id for run_id, event in self._shutdown_events.items() if not event.is_set())
 
     def shutdown(self) -> None:
         """Shut down the thread pool. Called during app shutdown.
@@ -640,6 +645,19 @@ class ExecutionServiceImpl:
                         landscape_run_id=result.run_id,
                         rows_processed=result.rows_processed,
                         rows_failed=result.rows_failed,
+                    )
+                    # Compensating event: the "completed" event was already
+                    # broadcast (line above), but the DB says "cancelled".
+                    # Send a "cancelled" event so WebSocket clients converge
+                    # with the database state.
+                    self._broadcaster.broadcast(
+                        run_id,
+                        RunEvent(
+                            run_id=run_id,
+                            timestamp=datetime.now(tz=UTC),
+                            event_type="cancelled",
+                            data={},
+                        ),
                     )
                     self._finalize_output_blobs(run_id, success=False)
                     return  # Graceful exit — finally block still runs
