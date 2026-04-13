@@ -115,6 +115,8 @@ allowed_dict_patterns:
   - "src/elspeth/plugins/transforms/keyword_filter.py:KeywordFilter.__init__:config"
   - "src/elspeth/plugins/transforms/truncate.py:Truncate.__init__:config"
   - "src/elspeth/plugins/transforms/json_explode.py:JSONExplode.__init__:config"
+  - "src/elspeth/plugins/transforms/type_coerce.py:TypeCoerce.__init__:config"
+  - "src/elspeth/plugins/transforms/value_transform.py:ValueTransform.__init__:config"
   - "src/elspeth/plugins/transforms/web_scrape.py:WebScrapeTransform.__init__:options"
   - "src/elspeth/plugins/sources/json_source.py:JSONSource.__init__:config"
   - "src/elspeth/plugins/sources/csv_source.py:CSVSource.__init__:config"
