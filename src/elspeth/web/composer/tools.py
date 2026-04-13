@@ -30,6 +30,7 @@ from elspeth.web.composer.state import (
     PipelineMetadata,
     SourceSpec,
     ValidationSummary,
+    _validate_gate_expression,
 )
 from elspeth.web.paths import allowed_sink_directories, allowed_source_directories
 from elspeth.web.sessions.models import blobs_table
@@ -1300,6 +1301,14 @@ def _execute_upsert_node(
         if prevalidation_error is not None:
             return _failure_result(state, prevalidation_error)
 
+    # Validate gate condition expression at composition time.
+    # Gives the LLM immediate feedback on syntax/security errors.
+    condition = args.get("condition")
+    if node_type == "gate" and condition is not None:
+        expr_error = _validate_gate_expression(condition)
+        if expr_error is not None:
+            return _failure_result(state, f"Node '{args['id']}': {expr_error}")
+
     fork_to = args.get("fork_to")
     if fork_to is not None:
         fork_to = tuple(fork_to)
@@ -2001,6 +2010,13 @@ def _execute_set_pipeline(
             node_prevalidation = _prevalidate_transform(node_plugin, node_options)
             if node_prevalidation is not None:
                 return _failure_result(state, f"Node '{node_id}': {node_prevalidation}")
+
+        # Validate gate condition expression at composition time.
+        node_condition = node_args.get("condition")
+        if node_type == "gate" and node_condition is not None:
+            expr_error = _validate_gate_expression(node_condition)
+            if expr_error is not None:
+                return _failure_result(state, f"Node '{node_id}': {expr_error}")
 
     # 3. Validate output plugins and options
     for out_args in args["outputs"]:

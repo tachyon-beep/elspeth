@@ -234,28 +234,28 @@ allow_hits:
   reason: Optional fields — to_dict() conditionally omits None fields; from_dict() defaults to None
   safety: Missing = None; matches dataclass field default; round-trip invariant tested
   expires: null
-- key: web/composer/state.py:R1:CompositionState:with_metadata:fp=a8f0b96bce299fdf
+- key: web/composer/state.py:R1:CompositionState:with_metadata:fp=e61ea3d1dfeedd9c
   owner: web-composer
   reason: Partial patch API — only provided fields are updated, others preserved
   safety: Defaults are the current field values; no fabrication, no loss
   expires: null
-- key: web/composer/state.py:R1:CompositionState:with_metadata:fp=2d4031f247c92dc6
+- key: web/composer/state.py:R1:CompositionState:with_metadata:fp=e09a6df12536a05a
   owner: web-composer
   reason: Partial patch API — only provided fields are updated, others preserved
   safety: Defaults are the current field values; no fabrication, no loss
   expires: null
-- key: web/composer/state.py:R1:CompositionState:validate:fp=6cb18dd0446c78ca
+- key: web/composer/state.py:R1:CompositionState:validate:fp=806834f0ab7d840f
   owner: web-composer
   reason: W4 extension check — output.options is a Mapping of user-authored config; path key is optional and may not exist
   safety: Missing path key returns None; no warning emitted; no fabrication
   expires: null
-- key: web/composer/state.py:R5:CompositionState:validate:fp=6929d49d5781f6a7
+- key: web/composer/state.py:R5:CompositionState:validate:fp=ae024a9f01ffea2e
   owner: web-composer
   reason: W4 extension check — path_val from options Mapping may be any type; isinstance guards against non-string values
     before PurePosixPath parsing
   safety: Non-string path_val is skipped; no warning emitted; no type coercion
   expires: null
-- key: web/composer/state.py:R1:CompositionState:validate:fp=bca627d045a71325
+- key: web/composer/state.py:R1:CompositionState:validate:fp=5f771c39ccd2ecc0
   owner: web-composer
   reason: W4 extension check — _plugin_exts lookup for plugins not in the map; unknown plugins are silently skipped (no warning
     emitted)
@@ -602,12 +602,12 @@ allow_hits:
   safety: Falls back to unredacted source_data (less privacy, not less safety)
   expires: null
 # Group F: CompositionState.validate() — checking user-provided pipeline config options
-- key: web/composer/state.py:R1:CompositionState:validate:fp=846f14aa57a3d83c
+- key: web/composer/state.py:R1:CompositionState:validate:fp=1c75371880191f77
   owner: web-composer
   reason: Tier 3 boundary — user-provided pipeline node options; checking if required option value is empty after confirming key exists
   safety: Returns validation warning to user; does not affect execution
   expires: null
-- key: web/composer/state.py:R1:CompositionState:validate:fp=33c51d2ddcf08740
+- key: web/composer/state.py:R1:CompositionState:validate:fp=54c98b967f0e9e5f
   owner: web-composer
   reason: Tier 3 boundary — user-provided sink output options; checking if path is empty after confirming key exists
   safety: Returns validation warning to user; does not affect execution

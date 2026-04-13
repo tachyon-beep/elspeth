@@ -807,6 +807,158 @@ class TestStage1Validation:
         assert not result.is_valid
         assert any("condition" in e.message for e in result.errors)
 
+    def test_gate_malformed_condition_syntax_error(self) -> None:
+        """validate() catches condition with invalid Python syntax."""
+        gate = NodeSpec(
+            id="g1",
+            node_type="gate",
+            plugin=None,
+            input="in",
+            on_success=None,
+            on_error=None,
+            options={},
+            condition="row['x'] >== 5",
+            routes={"true": "s1", "false": "s2"},
+            fork_to=None,
+            branches=None,
+            policy=None,
+            merge=None,
+        )
+        state = self._empty_state().with_source(self._make_source())
+        state = state.with_output(self._make_output())
+        state = state.with_node(gate)
+        state = state.with_edge(self._make_edge("e1", "source", "g1"))
+        result = state.validate()
+        assert not result.is_valid
+        assert any("Invalid gate condition syntax" in e.message for e in result.errors)
+
+    def test_gate_injection_condition_security_error(self) -> None:
+        """validate() catches injection attempts in conditions."""
+        gate = NodeSpec(
+            id="g1",
+            node_type="gate",
+            plugin=None,
+            input="in",
+            on_success=None,
+            on_error=None,
+            options={},
+            condition="__import__('os').system('rm -rf /')",
+            routes={"true": "s1", "false": "s2"},
+            fork_to=None,
+            branches=None,
+            policy=None,
+            merge=None,
+        )
+        state = self._empty_state().with_source(self._make_source())
+        state = state.with_output(self._make_output())
+        state = state.with_node(gate)
+        state = state.with_edge(self._make_edge("e1", "source", "g1"))
+        result = state.validate()
+        assert not result.is_valid
+        assert any("Forbidden construct in gate condition" in e.message for e in result.errors)
+
+    def test_gate_forbidden_function_call_condition(self) -> None:
+        """validate() catches forbidden function calls (eval, exec, etc.)."""
+        gate = NodeSpec(
+            id="g1",
+            node_type="gate",
+            plugin=None,
+            input="in",
+            on_success=None,
+            on_error=None,
+            options={},
+            condition="eval('1+1')",
+            routes={"true": "s1", "false": "s2"},
+            fork_to=None,
+            branches=None,
+            policy=None,
+            merge=None,
+        )
+        state = self._empty_state().with_source(self._make_source())
+        state = state.with_output(self._make_output())
+        state = state.with_node(gate)
+        state = state.with_edge(self._make_edge("e1", "source", "g1"))
+        result = state.validate()
+        assert not result.is_valid
+        assert any("Forbidden construct in gate condition" in e.message for e in result.errors)
+
+    def test_gate_valid_condition_passes_validation(self) -> None:
+        """validate() accepts well-formed gate conditions."""
+        gate = NodeSpec(
+            id="g1",
+            node_type="gate",
+            plugin=None,
+            input="in",
+            on_success=None,
+            on_error=None,
+            options={},
+            condition="row['score'] >= 0.85",
+            routes={"true": "s1", "false": "s2"},
+            fork_to=None,
+            branches=None,
+            policy=None,
+            merge=None,
+        )
+        state = self._empty_state().with_source(self._make_source())
+        state = state.with_output(self._make_output())
+        state = state.with_node(gate)
+        state = state.with_edge(self._make_edge("e1", "source", "g1"))
+        result = state.validate()
+        # Only structural errors may remain (connection completeness etc.),
+        # but no expression-related errors
+        expr_errors = [e for e in result.errors if "gate condition" in e.message.lower()]
+        assert expr_errors == []
+
+    def test_gate_lambda_condition_rejected(self) -> None:
+        """validate() catches lambda expressions in conditions."""
+        gate = NodeSpec(
+            id="g1",
+            node_type="gate",
+            plugin=None,
+            input="in",
+            on_success=None,
+            on_error=None,
+            options={},
+            condition="lambda: True",
+            routes={"true": "s1", "false": "s2"},
+            fork_to=None,
+            branches=None,
+            policy=None,
+            merge=None,
+        )
+        state = self._empty_state().with_source(self._make_source())
+        state = state.with_output(self._make_output())
+        state = state.with_node(gate)
+        state = state.with_edge(self._make_edge("e1", "source", "g1"))
+        result = state.validate()
+        assert not result.is_valid
+        assert any("Forbidden construct in gate condition" in e.message for e in result.errors)
+
+    def test_gate_comprehension_condition_rejected(self) -> None:
+        """validate() catches list comprehensions in conditions."""
+        gate = NodeSpec(
+            id="g1",
+            node_type="gate",
+            plugin=None,
+            input="in",
+            on_success=None,
+            on_error=None,
+            options={},
+            condition="[x for x in range(10)]",
+            routes={"true": "s1", "false": "s2"},
+            fork_to=None,
+            branches=None,
+            policy=None,
+            merge=None,
+        )
+        state = self._empty_state().with_source(self._make_source())
+        state = state.with_output(self._make_output())
+        state = state.with_node(gate)
+        state = state.with_edge(self._make_edge("e1", "source", "g1"))
+        result = state.validate()
+        assert not result.is_valid
+        assert any("Forbidden construct in gate condition" in e.message for e in result.errors)
+
     def test_gate_missing_routes(self) -> None:
         gate = NodeSpec(
             id="g1",

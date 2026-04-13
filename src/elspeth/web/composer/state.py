@@ -229,6 +229,30 @@ class ValidationSummary:
     suggestions: tuple[ValidationEntry, ...] = ()
 
 
+def _validate_gate_expression(condition: str) -> str | None:
+    """Validate a gate condition expression at composition time.
+
+    Returns an error message if the expression is syntactically invalid or
+    contains forbidden constructs, or None if valid.
+
+    Uses a deferred import to keep state.py's module-level imports minimal
+    (only contracts.freeze). The import is L3→L1, which is layer-legal.
+    """
+    from elspeth.core.expression_parser import (
+        ExpressionParser,
+        ExpressionSecurityError,
+        ExpressionSyntaxError,
+    )
+
+    try:
+        ExpressionParser(condition)
+    except ExpressionSyntaxError as e:
+        return f"Invalid gate condition syntax: {e}"
+    except ExpressionSecurityError as e:
+        return f"Forbidden construct in gate condition: {e}"
+    return None
+
+
 @dataclass(frozen=True, slots=True)
 class CompositionState:
     """Immutable, versioned snapshot of a pipeline under construction.
@@ -487,6 +511,13 @@ class CompositionState:
             if node.node_type == "gate":
                 if node.condition is None:
                     errors.append(_err(f"node:{node.id}", f"Gate '{node.id}' is missing required field 'condition'.", "high"))
+                else:
+                    # Validate expression content — defense-in-depth catches
+                    # malformed conditions from any entry path (including
+                    # session deserialization).
+                    expr_error = _validate_gate_expression(node.condition)
+                    if expr_error is not None:
+                        errors.append(_err(f"node:{node.id}", f"Gate '{node.id}': {expr_error}", "high"))
                 if node.routes is None:
                     errors.append(_err(f"node:{node.id}", f"Gate '{node.id}' is missing required field 'routes'.", "high"))
             elif node.node_type == "transform":

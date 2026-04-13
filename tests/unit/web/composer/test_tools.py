@@ -303,6 +303,147 @@ class TestUpsertNode:
         assert result.success is False
         assert result.updated_state.version == 1  # unchanged
 
+    def test_gate_injection_condition_rejected(self) -> None:
+        """upsert_node rejects gate with injection attempt in condition."""
+        state = _empty_state()
+        catalog = _mock_catalog()
+        result = execute_tool(
+            "upsert_node",
+            {
+                "id": "g1",
+                "node_type": "gate",
+                "plugin": None,
+                "input": "in",
+                "on_success": None,
+                "options": {},
+                "condition": "__import__('os').system('rm -rf /')",
+                "routes": {"true": "s1", "false": "s2"},
+            },
+            state,
+            catalog,
+        )
+        assert result.success is False
+        assert "Forbidden construct" in result.data["error"]
+        assert result.updated_state.version == 1  # unchanged
+
+    def test_gate_malformed_condition_rejected(self) -> None:
+        """upsert_node rejects gate with syntactically invalid condition."""
+        state = _empty_state()
+        catalog = _mock_catalog()
+        result = execute_tool(
+            "upsert_node",
+            {
+                "id": "g1",
+                "node_type": "gate",
+                "plugin": None,
+                "input": "in",
+                "on_success": None,
+                "options": {},
+                "condition": "row['x'] >== 5",
+                "routes": {"true": "s1", "false": "s2"},
+            },
+            state,
+            catalog,
+        )
+        assert result.success is False
+        assert "Invalid gate condition syntax" in result.data["error"]
+        assert result.updated_state.version == 1
+
+    def test_gate_eval_call_rejected(self) -> None:
+        """upsert_node rejects eval() in condition (forbidden function call)."""
+        state = _empty_state()
+        catalog = _mock_catalog()
+        result = execute_tool(
+            "upsert_node",
+            {
+                "id": "g1",
+                "node_type": "gate",
+                "plugin": None,
+                "input": "in",
+                "on_success": None,
+                "options": {},
+                "condition": "eval('row[\"x\"]')",
+                "routes": {"true": "s1", "false": "s2"},
+            },
+            state,
+            catalog,
+        )
+        assert result.success is False
+        assert "Forbidden construct" in result.data["error"]
+
+    def test_gate_valid_condition_accepted(self) -> None:
+        """upsert_node accepts gate with well-formed condition."""
+        state = _empty_state()
+        catalog = _mock_catalog()
+        result = execute_tool(
+            "upsert_node",
+            {
+                "id": "g1",
+                "node_type": "gate",
+                "plugin": None,
+                "input": "in",
+                "on_success": None,
+                "options": {},
+                "condition": "row['score'] >= 0.85 and row.get('status') is not None",
+                "routes": {"true": "s1", "false": "s2"},
+            },
+            state,
+            catalog,
+        )
+        assert result.success is True
+        assert len(result.updated_state.nodes) == 1
+
+    def test_gate_none_condition_not_validated(self) -> None:
+        """upsert_node with condition=None skips expression validation.
+
+        Presence validation is the job of CompositionState.validate(), not
+        the upsert_node handler. This test ensures we don't crash on None.
+        """
+        state = _empty_state()
+        catalog = _mock_catalog()
+        result = execute_tool(
+            "upsert_node",
+            {
+                "id": "g1",
+                "node_type": "gate",
+                "plugin": None,
+                "input": "in",
+                "on_success": None,
+                "options": {},
+                "condition": None,
+                "routes": {"true": "s1", "false": "s2"},
+            },
+            state,
+            catalog,
+        )
+        # Succeeds at tool level; validate() will flag missing condition
+        assert result.success is True
+
+    def test_transform_with_condition_skips_expression_validation(self) -> None:
+        """Non-gate nodes with a condition field don't trigger expression validation.
+
+        Only gates have expressions; a transform with a stray condition field
+        is a structural error caught by validate(), not an expression error.
+        """
+        state = _empty_state()
+        catalog = _mock_catalog()
+        result = execute_tool(
+            "upsert_node",
+            {
+                "id": "t1",
+                "node_type": "transform",
+                "plugin": "uppercase",
+                "input": "in",
+                "on_success": "out",
+                "options": {},
+                "condition": "this is not python!!!",
+            },
+            state,
+            catalog,
+        )
+        # The invalid syntax is irrelevant for a transform node — not validated
+        assert result.success is True
+
 
 class TestUpsertEdge:
     def test_adds_edge(self) -> None:
@@ -2678,6 +2819,90 @@ class TestSetPipeline:
         # The orphan node has no reachable input — validation should flag it
         assert result.validation.is_valid is False
         assert len(result.validation.errors) > 0
+
+    def test_set_pipeline_gate_injection_rejected(self) -> None:
+        """set_pipeline rejects gate nodes with injection in condition."""
+        state = _empty_state()
+        catalog = _mock_catalog()
+        args = _valid_pipeline_args()
+        args["nodes"].append(
+            {
+                "id": "g1",
+                "node_type": "gate",
+                "plugin": None,
+                "input": "source_out",
+                "on_success": None,
+                "on_error": None,
+                "options": {},
+                "condition": "__import__('os').system('whoami')",
+                "routes": {"true": "main", "false": "main"},
+            }
+        )
+        result = execute_tool("set_pipeline", args, state, catalog)
+        assert result.success is False
+        assert "Forbidden construct" in result.data["error"]
+        assert result.updated_state.version == 1
+
+    def test_set_pipeline_gate_malformed_condition_rejected(self) -> None:
+        """set_pipeline rejects gate nodes with syntax errors in condition."""
+        state = _empty_state()
+        catalog = _mock_catalog()
+        args = _valid_pipeline_args()
+        args["nodes"].append(
+            {
+                "id": "g1",
+                "node_type": "gate",
+                "plugin": None,
+                "input": "source_out",
+                "on_success": None,
+                "on_error": None,
+                "options": {},
+                "condition": "row['x'] >>>= 5",
+                "routes": {"true": "main", "false": "main"},
+            }
+        )
+        result = execute_tool("set_pipeline", args, state, catalog)
+        assert result.success is False
+        assert "Invalid gate condition syntax" in result.data["error"]
+
+    def test_set_pipeline_gate_valid_condition_accepted(self) -> None:
+        """set_pipeline accepts gate nodes with valid conditions."""
+        state = _empty_state()
+        catalog = _mock_catalog()
+        args = _valid_pipeline_args()
+        args["nodes"].append(
+            {
+                "id": "g1",
+                "node_type": "gate",
+                "plugin": None,
+                "input": "source_out",
+                "on_success": None,
+                "on_error": None,
+                "options": {},
+                "condition": "row['score'] >= 0.5",
+                "routes": {"true": "main", "false": "main"},
+            }
+        )
+        result = execute_tool("set_pipeline", args, state, catalog)
+        assert result.success is True
+        gate_nodes = [n for n in result.updated_state.nodes if n.node_type == "gate"]
+        assert len(gate_nodes) == 1
+        assert gate_nodes[0].condition == "row['score'] >= 0.5"
+
+    def test_set_pipeline_non_gate_with_condition_skips_validation(self) -> None:
+        """set_pipeline only validates conditions on gate nodes.
+
+        Transform nodes with a stray condition field are not expression-validated
+        (structural validation in CompositionState.validate() catches this).
+        """
+        state = _empty_state()
+        catalog = _mock_catalog()
+        args = _valid_pipeline_args()
+        # Add a condition to the transform node — structurally wrong but not expression-validated
+        args["nodes"][0]["condition"] = "this is garbage syntax!!!"
+        result = execute_tool("set_pipeline", args, state, catalog)
+        # Succeeds at tool level; validate() flags structural mismatch
+        assert result.success is True
 
 
 # ---------------------------------------------------------------------------
