@@ -5,13 +5,16 @@
 // (Sources, Transforms, Sinks). Opens from the right side of the inspector
 // panel whose outermost container already carries position: relative.
 //
+// Features:
+// - Fuzzy search across plugin names and descriptions
+// - Tab-based filtering by plugin type with counts
+// - Schema details fetched on demand and cached
+//
 // Data is fetched once on first open and cached in component state for the
-// lifetime of the drawer instance.  Schema details are fetched on demand
-// when a PluginCard is expanded and cached in a Map keyed by
-// "<type>:<name>".
+// lifetime of the drawer instance.
 // ============================================================================
 
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef, useMemo } from "react";
 import {
   listSources,
   listTransforms,
@@ -22,6 +25,24 @@ import type { PluginSummary, PluginSchemaInfo } from "@/types/index";
 import { PluginCard } from "./PluginCard";
 
 type CatalogTab = "sources" | "transforms" | "sinks";
+
+/**
+ * Simple fuzzy match: all query characters must appear in order in target.
+ * Returns true if match, false otherwise.
+ */
+function fuzzyMatch(query: string, target: string): boolean {
+  const q = query.toLowerCase();
+  const t = target.toLowerCase();
+  if (q.length === 0) return true;
+
+  let qIdx = 0;
+  for (let tIdx = 0; tIdx < t.length && qIdx < q.length; tIdx++) {
+    if (t[tIdx] === q[qIdx]) {
+      qIdx++;
+    }
+  }
+  return qIdx === q.length;
+}
 
 interface CatalogDrawerProps {
   isOpen: boolean;
@@ -40,6 +61,8 @@ export function CatalogDrawer({ isOpen, onClose }: CatalogDrawerProps) {
   const [schemaErrors, setSchemaErrors] = useState<Set<string>>(new Set());
   const [fetchError, setFetchError] = useState(false);
   const [isFetching, setIsFetching] = useState(false);
+  const [searchQuery, setSearchQuery] = useState("");
+  const searchInputRef = useRef<HTMLInputElement>(null);
 
   // Fetch all three lists in parallel on first open.
   // On failure: set fetchError, don't retry until drawer is closed and reopened.
@@ -68,17 +91,35 @@ export function CatalogDrawer({ isOpen, onClose }: CatalogDrawerProps) {
     }
   }, [isOpen, fetchError]);
 
-  // Keyboard: Escape closes the drawer
+  // Keyboard: Escape closes, / focuses search
   useEffect(() => {
     if (!isOpen) return;
     function handleKeyDown(e: KeyboardEvent) {
       if (e.key === "Escape") {
         onClose();
+        return;
+      }
+      // "/" focuses search unless already in an editable element
+      const active = document.activeElement;
+      const isEditable =
+        active?.tagName === "INPUT" ||
+        active?.tagName === "TEXTAREA" ||
+        (active as HTMLElement)?.isContentEditable;
+      if (e.key === "/" && !isEditable) {
+        e.preventDefault();
+        searchInputRef.current?.focus();
       }
     }
     document.addEventListener("keydown", handleKeyDown);
     return () => document.removeEventListener("keydown", handleKeyDown);
   }, [isOpen, onClose]);
+
+  // Clear search when drawer closes
+  useEffect(() => {
+    if (!isOpen) {
+      setSearchQuery("");
+    }
+  }, [isOpen]);
 
   const handleExpand = useCallback(
     (plugin: PluginSummary) => {
@@ -122,12 +163,35 @@ export function CatalogDrawer({ isOpen, onClose }: CatalogDrawerProps) {
     [schemaCache, loadingSchemas, schemaErrors],
   );
 
-  const pluginList: PluginSummary[] =
+  // Get plugins for current tab and apply search filter
+  const allPluginsForTab: PluginSummary[] =
     activeTab === "sources"
       ? (sources ?? [])
       : activeTab === "transforms"
         ? (transforms ?? [])
         : (sinks ?? []);
+
+  const pluginList = useMemo(() => {
+    if (!searchQuery.trim()) {
+      return allPluginsForTab;
+    }
+    return allPluginsForTab.filter((p) =>
+      fuzzyMatch(searchQuery, `${p.name} ${p.description ?? ""}`)
+    );
+  }, [allPluginsForTab, searchQuery]);
+
+  // Counts for tab badges (filtered counts when searching)
+  const counts = useMemo(() => {
+    const filterFn = searchQuery.trim()
+      ? (p: PluginSummary) => fuzzyMatch(searchQuery, `${p.name} ${p.description ?? ""}`)
+      : () => true;
+
+    return {
+      sources: (sources ?? []).filter(filterFn).length,
+      transforms: (transforms ?? []).filter(filterFn).length,
+      sinks: (sinks ?? []).filter(filterFn).length,
+    };
+  }, [sources, transforms, sinks, searchQuery]);
 
   const isLoading =
     (activeTab === "sources" && sources === null) ||
@@ -187,7 +251,60 @@ export function CatalogDrawer({ isOpen, onClose }: CatalogDrawerProps) {
           </button>
         </div>
 
-        {/* Tab strip */}
+        {/* Search input */}
+        <div
+          style={{
+            padding: "8px 12px",
+            borderBottom: "1px solid var(--color-border)",
+            flexShrink: 0,
+          }}
+        >
+          <div style={{ position: "relative" }}>
+            <input
+              ref={searchInputRef}
+              type="text"
+              placeholder="Search plugins... (press /)"
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              aria-label="Search plugins"
+              style={{
+                width: "100%",
+                padding: "6px 28px 6px 10px",
+                border: "1px solid var(--color-border-strong)",
+                borderRadius: 6,
+                backgroundColor: "var(--color-surface-elevated)",
+                color: "var(--color-text)",
+                fontSize: 13,
+              }}
+            />
+            {searchQuery && (
+              <button
+                onClick={() => {
+                  setSearchQuery("");
+                  searchInputRef.current?.focus();
+                }}
+                aria-label="Clear search"
+                style={{
+                  position: "absolute",
+                  right: 6,
+                  top: "50%",
+                  transform: "translateY(-50%)",
+                  background: "none",
+                  border: "none",
+                  color: "var(--color-text-muted)",
+                  cursor: "pointer",
+                  fontSize: 14,
+                  padding: 2,
+                  lineHeight: 1,
+                }}
+              >
+                ×
+              </button>
+            )}
+          </div>
+        </div>
+
+        {/* Tab strip with counts */}
         <div
           role="tablist"
           aria-label="Plugin type tabs"
@@ -204,6 +321,7 @@ export function CatalogDrawer({ isOpen, onClose }: CatalogDrawerProps) {
                 : tab === "transforms"
                   ? "Transforms"
                   : "Sinks";
+            const count = counts[tab];
             const isActive = activeTab === tab;
             return (
               <button
@@ -217,9 +335,31 @@ export function CatalogDrawer({ isOpen, onClose }: CatalogDrawerProps) {
                   padding: "8px 4px",
                   fontSize: 12,
                   fontWeight: isActive ? 600 : 400,
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  gap: 4,
                 }}
               >
                 {label}
+                {sources !== null && (
+                  <span
+                    style={{
+                      fontSize: 10,
+                      backgroundColor: isActive
+                        ? "var(--color-accent)"
+                        : "var(--color-surface-elevated)",
+                      color: isActive
+                        ? "var(--color-text-inverse)"
+                        : "var(--color-text-muted)",
+                      padding: "1px 5px",
+                      borderRadius: 8,
+                      fontWeight: 600,
+                    }}
+                  >
+                    {count}
+                  </span>
+                )}
               </button>
             );
           })}
@@ -253,9 +393,12 @@ export function CatalogDrawer({ isOpen, onClose }: CatalogDrawerProps) {
                 padding: 16,
                 fontSize: 12,
                 color: "var(--color-text-muted)",
+                textAlign: "center",
               }}
             >
-              No plugins available.
+              {searchQuery.trim()
+                ? `No plugins matching "${searchQuery}"`
+                : "No plugins available."}
             </div>
           ) : (
             pluginList.map((plugin) => {

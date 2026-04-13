@@ -16,12 +16,34 @@ interface ChatInputProps {
   onToggleBlobManager?: () => void;
   showBlobManager?: boolean;
   onOpenSecrets?: () => void;
+  /** Controlled mode: external value (use with onChange) */
+  value?: string;
+  /** Controlled mode: callback when value changes */
+  onChange?: (value: string) => void;
 }
 
-export function ChatInput({ onSend, disabled, inputRef, onToggleBlobManager, showBlobManager, onOpenSecrets }: ChatInputProps) {
-  const [text, setText] = useState("");
+export function ChatInput({
+  onSend,
+  disabled,
+  inputRef,
+  onToggleBlobManager,
+  showBlobManager,
+  onOpenSecrets,
+  value: controlledValue,
+  onChange: controlledOnChange,
+}: ChatInputProps) {
+  // Support both controlled and uncontrolled modes
+  const [internalText, setInternalText] = useState("");
+  const isControlled = controlledValue !== undefined;
+  const text = isControlled ? controlledValue : internalText;
+  const setText = isControlled
+    ? (v: string) => controlledOnChange?.(v)
+    : setInternalText;
   const [uploadStatus, setUploadStatus] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  // Track current text in a ref to avoid stale closures during async operations
+  const textRef = useRef(text);
+  textRef.current = text;
   const activeSessionId = useSessionStore((s) => s.activeSessionId);
   const uploadBlob = useBlobStore((s) => s.uploadBlob);
 
@@ -29,8 +51,13 @@ export function ChatInput({ onSend, disabled, inputRef, onToggleBlobManager, sho
     const trimmed = text.trim();
     if (!trimmed || disabled) return;
     onSend(trimmed);
-    setText("");
-  }, [text, disabled, onSend]);
+    // Clear input after send
+    if (isControlled) {
+      controlledOnChange?.("");
+    } else {
+      setInternalText("");
+    }
+  }, [text, disabled, onSend, isControlled, controlledOnChange]);
 
   function handleKeyDown(e: KeyboardEvent<HTMLTextAreaElement>) {
     if (e.key === "Enter" && !e.shiftKey) {
@@ -46,13 +73,17 @@ export function ChatInput({ onSend, disabled, inputRef, onToggleBlobManager, sho
     setUploadStatus(null);
     try {
       const blob = await uploadBlob(activeSessionId, file);
-      // Reference blob by filename, not by filesystem path
-      setText(
-        (prev) =>
-          prev +
-          (prev ? "\n" : "") +
-          `I've uploaded "${blob.filename}"; please use it as the pipeline input.`,
-      );
+      // Use ref to get current text (user may have typed during async upload)
+      const currentText = textRef.current;
+      const newText =
+        currentText +
+        (currentText ? "\n" : "") +
+        `I've uploaded "${blob.filename}"; please use it as the pipeline input.`;
+      if (isControlled) {
+        controlledOnChange?.(newText);
+      } else {
+        setInternalText(newText);
+      }
     } catch {
       // Error is shown in the blob store / blob manager
       setUploadStatus("Upload failed. Check the file manager for details.");

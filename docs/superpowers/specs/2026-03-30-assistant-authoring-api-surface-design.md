@@ -258,7 +258,7 @@ Expected to support:
     "schema": {
       "mode": "observed",
       "fields": [
-        { "name": "url", "field_type": "str", "required": true }
+        { "name": "url", "type": "str", "required": true, "nullable": false }
       ]
     }
   }

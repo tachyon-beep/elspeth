@@ -970,6 +970,108 @@ class TestStage1Validation:
         assert result.is_valid
         assert any("extension suggests a different format" in w.message for w in result.warnings)
 
+    def test_validate_transform_missing_required_options_warns(self) -> None:
+        """W5: Transform that requires config has empty options."""
+        state = self._empty_state()
+        state = state.with_source(self._make_source(on_success="t1"))
+        # value_transform requires 'operations' key
+        incomplete_transform = NodeSpec(
+            id="t1",
+            node_type="transform",
+            plugin="value_transform",
+            input="t1",
+            on_success="main",
+            on_error=None,
+            options={},  # Empty - should trigger warning
+            condition=None,
+            routes=None,
+            fork_to=None,
+            branches=None,
+            policy=None,
+            merge=None,
+        )
+        state = state.with_node(incomplete_transform)
+        output = OutputSpec(name="main", plugin="csv", options={"path": "out.csv"}, on_write_failure="discard")
+        state = state.with_output(output)
+        state = state.with_edge(self._make_edge("e1", "source", "t1"))
+        state = state.with_edge(self._make_edge("e2", "t1", "main"))
+        result = state.validate()
+        assert result.is_valid  # Still structurally valid
+        assert any("value_transform" in w.message and "incomplete" in w.message for w in result.warnings)
+
+    def test_validate_transform_empty_operations_warns(self) -> None:
+        """W5: Transform has the required key but it's empty."""
+        state = self._empty_state()
+        state = state.with_source(self._make_source(on_success="t1"))
+        # value_transform with empty operations list
+        empty_ops_transform = NodeSpec(
+            id="t1",
+            node_type="transform",
+            plugin="value_transform",
+            input="t1",
+            on_success="main",
+            on_error=None,
+            options={"operations": []},  # Empty list - should trigger warning
+            condition=None,
+            routes=None,
+            fork_to=None,
+            branches=None,
+            policy=None,
+            merge=None,
+        )
+        state = state.with_node(empty_ops_transform)
+        output = OutputSpec(name="main", plugin="csv", options={"path": "out.csv"}, on_write_failure="discard")
+        state = state.with_output(output)
+        state = state.with_edge(self._make_edge("e1", "source", "t1"))
+        state = state.with_edge(self._make_edge("e2", "t1", "main"))
+        result = state.validate()
+        assert result.is_valid
+        assert any("value_transform" in w.message and "empty" in w.message for w in result.warnings)
+
+    def test_validate_file_sink_missing_path_warns(self) -> None:
+        """W6: File sink without path configured."""
+        state = self._empty_state()
+        state = state.with_source(self._make_source(on_success="t1"))
+        state = state.with_node(self._make_transform("t1", "t1", "main"))
+        # CSV sink with no path
+        no_path_output = OutputSpec(name="main", plugin="csv", options={}, on_write_failure="discard")
+        state = state.with_output(no_path_output)
+        state = state.with_edge(self._make_edge("e1", "source", "t1"))
+        state = state.with_edge(self._make_edge("e2", "t1", "main"))
+        result = state.validate()
+        assert result.is_valid  # Structurally valid but won't run
+        assert any("no path configured" in w.message for w in result.warnings)
+
+    def test_validate_file_sink_empty_path_warns(self) -> None:
+        """W6: File sink with empty string path."""
+        state = self._empty_state()
+        state = state.with_source(self._make_source(on_success="t1"))
+        state = state.with_node(self._make_transform("t1", "t1", "main"))
+        # JSON sink with empty path
+        empty_path_output = OutputSpec(name="main", plugin="json", options={"path": ""}, on_write_failure="discard")
+        state = state.with_output(empty_path_output)
+        state = state.with_edge(self._make_edge("e1", "source", "t1"))
+        state = state.with_edge(self._make_edge("e2", "t1", "main"))
+        result = state.validate()
+        assert result.is_valid
+        assert any("empty path" in w.message for w in result.warnings)
+
+    def test_validate_non_file_sink_no_path_ok(self) -> None:
+        """Non-file sinks (like database) don't require path."""
+        state = self._empty_state()
+        state = state.with_source(self._make_source(on_success="t1"))
+        state = state.with_node(self._make_transform("t1", "t1", "main"))
+        # Database sink - path is not a required option
+        db_output = OutputSpec(
+            name="main", plugin="database", options={"url": "sqlite:///:memory:", "table": "out"}, on_write_failure="discard"
+        )
+        state = state.with_output(db_output)
+        state = state.with_edge(self._make_edge("e1", "source", "t1"))
+        state = state.with_edge(self._make_edge("e2", "t1", "main"))
+        result = state.validate()
+        # Should NOT warn about missing path for non-file sinks
+        assert not any("no path configured" in w.message for w in result.warnings)
+
     # --- Suggestion rules (S1-S3) ---
 
     def test_validate_no_error_routing_suggests(self) -> None:
@@ -985,15 +1087,43 @@ class TestStage1Validation:
         assert any("error routing" in s.message for s in result.suggestions)
 
     def test_validate_single_output_suggests(self) -> None:
-        """S2: Pipeline with only one output gets a suggestion."""
+        """S2: Pipeline with single EXTERNAL output gets a backup suggestion.
+
+        Local file sinks (csv, json) don't trigger this because if the
+        filesystem fails, a backup file will fail too. External sinks
+        (database, azure_blob) benefit from a local recovery file.
+        """
         state = self._empty_state()
         state = state.with_source(self._make_source(on_success="t1"))
         state = state.with_node(self._make_transform("t1", "t1", "main"))
-        state = state.with_output(self._make_output("main"))
+        # Use external sink (database) to trigger S2 suggestion
+        external_output = OutputSpec(
+            name="main",
+            plugin="database",
+            options={"url": "sqlite:///:memory:", "table": "output"},
+            on_write_failure="discard",
+        )
+        state = state.with_output(external_output)
         state = state.with_edge(self._make_edge("e1", "source", "t1"))
         state = state.with_edge(self._make_edge("e2", "t1", "main"))
         result = state.validate()
-        assert any("second output" in s.message for s in result.suggestions)
+        assert any("local file output" in s.message for s in result.suggestions)
+
+    def test_validate_single_file_output_no_suggestion(self) -> None:
+        """S2: Pipeline with single LOCAL file output gets no backup suggestion.
+
+        Local file sinks don't benefit from a backup file - if the filesystem
+        is failing, the backup will fail too.
+        """
+        state = self._empty_state()
+        state = state.with_source(self._make_source(on_success="t1"))
+        state = state.with_node(self._make_transform("t1", "t1", "main"))
+        state = state.with_output(self._make_output("main"))  # csv = local file sink
+        state = state.with_edge(self._make_edge("e1", "source", "t1"))
+        state = state.with_edge(self._make_edge("e2", "t1", "main"))
+        result = state.validate()
+        # Should NOT suggest backup for local file sinks
+        assert not any("local file output" in s.message for s in result.suggestions)
 
     def test_validate_no_schema_config_suggests(self) -> None:
         """S3: Source without schema_config in options gets a suggestion."""
@@ -1059,8 +1189,11 @@ class TestStage1Validation:
             merge=None,
         )
         state = state.with_node(gate)
-        state = state.with_output(self._make_output("main"))
-        state = state.with_output(self._make_output("errors"))
+        # Use properly configured outputs with paths (W6 semantic completeness)
+        main_output = OutputSpec(name="main", plugin="csv", options={"path": "outputs/main.csv"}, on_write_failure="discard")
+        errors_output = OutputSpec(name="errors", plugin="csv", options={"path": "outputs/errors.csv"}, on_write_failure="discard")
+        state = state.with_output(main_output)
+        state = state.with_output(errors_output)
         state = state.with_edge(self._make_edge("e1", "source", "t1"))
         state = state.with_edge(self._make_edge("e2", "t1", "gate_1"))
         state = state.with_edge(self._make_edge("e3", "gate_1", "main"))

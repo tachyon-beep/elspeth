@@ -595,6 +595,60 @@ class CompositionState:
                         )
                     )
 
+        # W5: Transform/aggregation node has empty or incomplete options
+        # These plugins require configuration to do anything useful.
+        _plugins_requiring_config: dict[str, tuple[str, str]] = {
+            "value_transform": ("operations", "no operations defined — nothing will be computed"),
+            "type_coerce": ("conversions", "no conversions defined — no types will be changed"),
+            "llm": ("template", "no template defined — nothing will be sent to the model"),
+            "field_mapper": ("mapping", "no mapping defined — no fields will be renamed"),
+            "truncate": ("fields", "no fields specified — nothing will be truncated"),
+            "keyword_filter": ("keywords", "no keywords defined — all rows will pass through"),
+            "web_scrape": ("url_field", "no url_field specified — cannot determine which field contains URLs"),
+            "json_explode": ("field", "no field specified — cannot determine which field to explode"),
+        }
+        for node in self.nodes:
+            if node.plugin in _plugins_requiring_config:
+                required_key, reason = _plugins_requiring_config[node.plugin]
+                if not node.options or required_key not in node.options:
+                    warnings.append(
+                        _warn(
+                            f"node:{node.id}",
+                            f"Transform '{node.id}' ({node.plugin}) appears incomplete: {reason}.",
+                            "medium",
+                        )
+                    )
+                # Also check for empty list/dict/tuple values (lists are frozen to tuples)
+                elif node.options.get(required_key) in ([], (), {}, None, ""):
+                    warnings.append(
+                        _warn(
+                            f"node:{node.id}",
+                            f"Transform '{node.id}' ({node.plugin}) has empty '{required_key}': {reason}.",
+                            "medium",
+                        )
+                    )
+
+        # W6: File sink missing required path
+        _file_sinks = {"csv", "json", "jsonl", "text", "parquet", "xml"}
+        for output in self.outputs:
+            if output.plugin in _file_sinks:
+                if not output.options or "path" not in output.options:
+                    warnings.append(
+                        _warn(
+                            f"output:{output.name}",
+                            f"Output '{output.name}' ({output.plugin}) has no path configured — cannot write to file.",
+                            "medium",
+                        )
+                    )
+                elif not output.options.get("path"):
+                    warnings.append(
+                        _warn(
+                            f"output:{output.name}",
+                            f"Output '{output.name}' ({output.plugin}) has empty path — cannot write to file.",
+                            "medium",
+                        )
+                    )
+
         # --- Suggestions (optional improvements) ---
         suggestions: list[ValidationEntry] = []
         _sug = ValidationEntry
@@ -607,17 +661,30 @@ class CompositionState:
                 _sug("pipeline", "Consider adding error routing — rows that fail transforms currently have no explicit destination.", "low")
             )
 
-        # S2: Single output
+        # S2: Single output to external sink — suggest a local fallback
+        # Local file sinks (csv, json, text, parquet) don't benefit from a backup:
+        # if the filesystem is failing, a second file will fail too.
+        # External sinks (database, azure_blob, dataverse, http) benefit from a
+        # local recovery file when the external system is unavailable.
+        _local_file_sinks = {"csv", "json", "jsonl", "text", "parquet"}
         if len(self.outputs) == 1:
-            suggestions.append(
-                _sug("pipeline", "Single output pipeline. Consider adding a second output for rejected/quarantined rows.", "low")
-            )
+            output = self.outputs[0]
+            if output.plugin not in _local_file_sinks:
+                suggestions.append(
+                    _sug(
+                        "pipeline",
+                        f"Single external output ('{output.plugin}'). Consider adding a local file output for recovery if the external system is unavailable.",
+                        "low",
+                    )
+                )
 
-        # S3: Source has no schema_config
-        if self.source is not None and "schema_config" not in self.source.options:
-            suggestions.append(
-                _sug("source", "Source has no explicit schema. Downstream field references depend on runtime column names.", "low")
-            )
+        # S3: Source has no schema (check both alias and field name for backwards compat)
+        if self.source is not None:
+            has_schema = "schema" in self.source.options or "schema_config" in self.source.options
+            if not has_schema:
+                suggestions.append(
+                    _sug("source", "Source has no explicit schema. Downstream field references depend on runtime column names.", "low")
+                )
 
         return ValidationSummary(
             is_valid=len(errors) == 0,

@@ -29,6 +29,33 @@ class PluginConfigError(Exception):
     pass
 
 
+def _validate_schema_config(value: Any, *, require_dict: bool) -> SchemaConfig | None:
+    """Validate and parse schema config from dict or pass through SchemaConfig instance.
+
+    This validator enables Pydantic to accept schema dicts with string field specs
+    like "line: str" that need parsing via SchemaConfig.from_dict().
+
+    Args:
+        value: The schema config value to validate.
+        require_dict: If True, value must be a dict (rejects None and other types).
+            Used when 'schema' key was explicitly provided in the input.
+    """
+    if value is None:
+        if require_dict:
+            raise ValueError(
+                f"'schema' must be a dict, got {type(value).__name__}. "
+                f"Use 'schema: {{mode: observed}}' or provide explicit field definitions."
+            )
+        return None
+    if isinstance(value, SchemaConfig):
+        return value
+    if isinstance(value, dict):
+        return SchemaConfig.from_dict(value)
+    raise ValueError(
+        f"'schema' must be a dict, got {type(value).__name__}. Use 'schema: {{mode: observed}}' or provide explicit field definitions."
+    )
+
+
 class PluginConfig(BaseModel):
     """Base class for typed plugin configurations.
 
@@ -37,18 +64,47 @@ class PluginConfig(BaseModel):
 
     Schema is optional in the base class. Subclasses that process data
     (DataPluginConfig) require schema to be specified.
+
+    The schema field is exposed as "schema" in JSON Schema (for LLM tools and YAML)
+    but stored internally as "schema_config" to avoid shadowing Python's built-in.
     """
 
-    model_config = {"extra": "forbid", "frozen": True}  # Reject unknown fields, immutable after construction
+    model_config = {
+        "extra": "forbid",
+        "frozen": True,
+        "populate_by_name": True,  # Allow both "schema" (alias) and "schema_config" (field name)
+    }
 
-    schema_config: SchemaConfig | None = None
+    schema_config: SchemaConfig | None = Field(
+        default=None,
+        alias="schema",
+        description="Schema configuration for data validation.",
+    )
+
+    @field_validator("schema_config", mode="before")
+    @classmethod
+    def _parse_schema_config(cls, value: Any) -> SchemaConfig | None:
+        """Parse schema dict to SchemaConfig, handling string field specs.
+
+        Accepts:
+        - SchemaConfig instance (passthrough)
+        - dict (parsed via SchemaConfig.from_dict())
+        - None (allowed for PluginConfig, rejected by DataPluginConfig override)
+
+        Raises ValueError for other types (str, list, int, etc.)
+
+        Error messages use 'schema' to match the user-facing alias.
+        """
+        return _validate_schema_config(value, require_dict=False)
 
     @classmethod
     def from_dict(cls, config: dict[str, Any]) -> Self:
         """Create config from dict with clear error on validation failure.
 
         Args:
-            config: Dictionary of configuration values.
+            config: Dictionary of configuration values. Accepts "schema" key
+                (preferred, matches YAML format) or "schema_config" for backwards
+                compatibility.
 
         Returns:
             Validated configuration instance.
@@ -59,18 +115,22 @@ class PluginConfig(BaseModel):
         if not isinstance(config, dict):
             raise PluginConfigError(f"Invalid configuration for {cls.__name__}: config must be a dict, got {type(config).__name__}.")
 
-        try:
-            config_copy = dict(config)
-            if "schema" in config_copy:
-                schema_dict = config_copy.pop("schema")
-                # Type guard: schema must be a dict (not None, string, list, etc.)
-                if not isinstance(schema_dict, dict):
-                    raise ValueError(
-                        f"'schema' must be a dict, got {type(schema_dict).__name__}. "
+        # Pre-validate: reject explicit non-dict schema values.
+        # Pydantic can't distinguish "key absent" from "key explicitly None",
+        # so we check here before passing to model_validate.
+        for key in ("schema", "schema_config"):
+            if key in config:
+                value = config[key]
+                if not isinstance(value, (dict, SchemaConfig)):
+                    raise PluginConfigError(
+                        f"Invalid configuration for {cls.__name__}: "
+                        f"'schema' must be a dict, got {type(value).__name__}. "
                         f"Use 'schema: {{mode: observed}}' or provide explicit field definitions."
                     )
-                config_copy["schema_config"] = SchemaConfig.from_dict(schema_dict)
-            return cls.model_validate(config_copy)
+
+        try:
+            # model_validate handles the schema alias and field_validator parses dicts
+            return cls.model_validate(config)
         except ValidationError as e:
             raise PluginConfigError(f"Invalid configuration for {cls.__name__}: {e}") from e
         except ValueError as e:
@@ -94,8 +154,11 @@ class DataPluginConfig(PluginConfig):
 
     # Override parent's Optional field with required field.
     # This provides both runtime validation (Pydantic) and static typing (mypy).
+    # Alias matches parent - required for Pydantic to properly override.
+    # The parent's model_validator handles parsing; this just enforces required.
     schema_config: SchemaConfig = Field(
         ...,
+        alias="schema",
         description=(
             "Schema configuration for data validation. "
             "Use 'schema: {mode: observed}' to infer types from data, or "

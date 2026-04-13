@@ -1,48 +1,49 @@
 /**
- * Design tokens that must be used in JS contexts where CSS variables
- * cannot be resolved (e.g. React Flow inline node styles).
+ * Design tokens for use in JS contexts (e.g. React Flow inline node styles).
  *
- * These values MUST stay in sync with the :root block in App.css.
- * When changing App.css colour tokens, update this file in the same commit.
+ * These use CSS custom property references (`var(--color-*)`) so they
+ * automatically adapt to light/dark theme without JavaScript intervention.
+ *
+ * Note: CSS variables in inline styles work in all modern browsers.
  */
 
 // ── Component type badge colours ─────────────────────────────────────────────
 
 export const BADGE_COLORS = {
-  transform: "#e8a030",
-  gate: "#c390f9",
-  aggregation: "#61daff",
-  coalesce: "#14b0ae",
+  transform: "var(--color-badge-transform)",
+  gate: "var(--color-badge-gate)",
+  aggregation: "var(--color-badge-aggregation)",
+  coalesce: "var(--color-badge-coalesce)",
 } as const;
 
 export const BADGE_BACKGROUNDS = {
-  transform: "rgba(232, 160, 48, 0.15)",
-  gate: "rgba(195, 144, 249, 0.15)",
-  aggregation: "rgba(97, 218, 255, 0.15)",
-  coalesce: "rgba(20, 176, 174, 0.15)",
+  transform: "var(--color-warning-bg)",      // amber family
+  gate: "rgba(138, 90, 192, 0.15)",          // purple — no direct CSS var, use semi-transparent
+  aggregation: "var(--color-info-bg)",       // blue family
+  coalesce: "var(--color-success-bg)",       // teal family
 } as const;
 
 // ── Edge colours ─────────────────────────────────────────────────────────────
 
 export const EDGE_COLORS = {
-  normal: "#6a9898",     // --color-text-muted
-  error: "#e85653",      // --color-error
+  normal: "var(--color-text-muted)",
+  error: "var(--color-error)",
 } as const;
 
-export const EDGE_LABEL_COLOR = "#8db8b8"; // --color-text-secondary
+export const EDGE_LABEL_COLOR = "var(--color-text-secondary)";
 
 // ── Validation indicator colours ─────────────────────────────────────────────
 
 export const VALIDATION_COLORS = {
-  valid: "#14b0ae",           // matches --color-success
-  warning: "#e38444",         // matches --color-warning
-  invalid: "#e85653",         // matches --color-error
-  unchecked: "#7a9a9a",       // muted/neutral
+  valid: "var(--color-success)",
+  warning: "var(--color-warning)",
+  invalid: "var(--color-error)",
+  unchecked: "var(--color-status-pending)",
 };
 
 export const VALIDATION_BACKGROUNDS = {
-  valid: "rgba(20, 176, 174, 0.15)",
-  warning: "rgba(227, 132, 68, 0.15)",
-  invalid: "rgba(232, 86, 83, 0.15)",
+  valid: "var(--color-success-bg)",
+  warning: "var(--color-warning-bg)",
+  invalid: "var(--color-error-bg)",
   unchecked: "rgba(122, 154, 154, 0.1)",
 };

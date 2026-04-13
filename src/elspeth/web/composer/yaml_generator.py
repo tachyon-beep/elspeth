@@ -10,6 +10,11 @@ serialization of our own frozen dataclasses. Fields are either always
 present (direct access) or conditionally present based on node_type
 (check with ``in``). Never use .get() — a missing field is a bug in
 to_dict(), not an expected absence.
+
+Web-specific metadata keys (e.g., blob_ref for file provenance tracking)
+are filtered from options before YAML generation. These are UI-layer
+concerns that should not leak into engine configuration. Plugin configs
+use Pydantic with extra="forbid" — unknown keys cause validation failure.
 """
 
 from __future__ import annotations
@@ -19,6 +24,19 @@ from typing import Any
 import yaml
 
 from elspeth.web.composer.state import CompositionState
+
+# Web-specific metadata keys that should NOT appear in engine YAML.
+# These are UI-layer concerns for provenance tracking, not plugin config.
+# Plugin configs use Pydantic with extra="forbid" — unknown keys cause errors.
+_WEB_ONLY_OPTION_KEYS = frozenset({"blob_ref"})
+
+
+def _strip_web_metadata(options: dict[str, Any]) -> dict[str, Any]:
+    """Remove web-specific metadata keys from options dict.
+
+    Returns a shallow copy with web-only keys removed.
+    """
+    return {k: v for k, v in options.items() if k not in _WEB_ONLY_OPTION_KEYS}
 
 
 def generate_yaml(state: CompositionState) -> str:
@@ -49,7 +67,8 @@ def generate_yaml(state: CompositionState) -> str:
     # Source — state_dict["source"] is always present (None or dict).
     source = state_dict["source"]
     if source is not None:
-        source_options = dict(source["options"])
+        # Strip web-specific metadata (e.g., blob_ref) before generating engine YAML.
+        source_options = _strip_web_metadata(dict(source["options"]))
         source_options["on_validation_failure"] = source["on_validation_failure"]
         doc["source"] = {
             "plugin": source["plugin"],

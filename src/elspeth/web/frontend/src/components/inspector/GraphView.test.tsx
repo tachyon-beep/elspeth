@@ -158,4 +158,210 @@ describe("GraphView", () => {
     render(<GraphView />);
     expect(screen.queryByTestId("minimap")).not.toBeInTheDocument();
   });
+
+  // Edge inference tests — verify connection point matching
+  describe("edge inference via connection points", () => {
+    it("infers source→transform edge when node.input matches source.on_success", () => {
+      // This is the ELSPETH connection model: source.on_success is a connection point
+      // name that must match node.input for data to flow.
+      useSessionStore.setState({
+        compositionState: makeState({
+          source: {
+            plugin: "text",
+            options: {},
+            on_success: "transform_in",  // Connection point name
+          },
+          nodes: [
+            makeNode({
+              id: "my_transform",
+              input: "transform_in",  // Matches source.on_success
+              on_success: "results",
+            }),
+          ],
+          outputs: [{ name: "results", plugin: "csv", options: {} }],
+          edges: [],  // No explicit edges — should be inferred
+        }),
+      });
+      render(<GraphView />);
+      // Should infer edge from source to my_transform
+      expect(screen.getByTestId("edge-inferred-conn-source-my_transform")).toBeInTheDocument();
+    });
+
+    it("infers transform→transform edge when inputs match on_success values", () => {
+      useSessionStore.setState({
+        compositionState: makeState({
+          source: {
+            plugin: "csv",
+            options: {},
+            on_success: "step1_in",
+          },
+          nodes: [
+            makeNode({
+              id: "transform1",
+              input: "step1_in",
+              on_success: "step2_in",
+            }),
+            makeNode({
+              id: "transform2",
+              input: "step2_in",
+              on_success: "results",
+            }),
+          ],
+          outputs: [{ name: "results", plugin: "csv", options: {} }],
+          edges: [],
+        }),
+      });
+      render(<GraphView />);
+      // Should infer: source → transform1 → transform2
+      expect(screen.getByTestId("edge-inferred-conn-source-transform1")).toBeInTheDocument();
+      expect(screen.getByTestId("edge-inferred-conn-transform1-transform2")).toBeInTheDocument();
+    });
+
+    it("infers error routing via connection points", () => {
+      // Error handler receives rows via on_error connection point matching
+      useSessionStore.setState({
+        compositionState: makeState({
+          source: {
+            plugin: "csv",
+            options: {},
+            on_success: "process_in",
+          },
+          nodes: [
+            makeNode({
+              id: "processor",
+              input: "process_in",
+              on_success: "results",
+              on_error: "error_handler_in",  // Connection point for error routing
+            }),
+            makeNode({
+              id: "error_handler",
+              input: "error_handler_in",  // Receives errors from processor
+              on_success: "errors",
+            }),
+          ],
+          outputs: [
+            { name: "results", plugin: "csv", options: {} },
+            { name: "errors", plugin: "json", options: {} },
+          ],
+          edges: [],
+        }),
+      });
+      render(<GraphView />);
+      // Error edge should be inferred with error styling
+      expect(screen.getByTestId("edge-inferred-conn-processor-error_handler")).toBeInTheDocument();
+      // Label should be "error"
+      expect(screen.getByText("error")).toBeInTheDocument();
+    });
+
+    it("infers gate routes via connection points", () => {
+      // Gate routes to different nodes via connection point matching
+      useSessionStore.setState({
+        compositionState: makeState({
+          source: {
+            plugin: "csv",
+            options: {},
+            on_success: "gate_in",
+          },
+          nodes: [
+            {
+              id: "quality_gate",
+              node_type: "gate" as const,
+              plugin: null,
+              input: "gate_in",
+              on_success: null,
+              on_error: null,
+              options: {},
+              condition: "row['score'] >= 0.8",
+              routes: { "true": "high_quality_in", "false": "low_quality_in" },
+            },
+            makeNode({
+              id: "high_quality_handler",
+              input: "high_quality_in",
+              on_success: "good_output",
+            }),
+            makeNode({
+              id: "low_quality_handler",
+              input: "low_quality_in",
+              on_success: "review_output",
+            }),
+          ],
+          outputs: [
+            { name: "good_output", plugin: "csv", options: {} },
+            { name: "review_output", plugin: "csv", options: {} },
+          ],
+          edges: [],
+        }),
+      });
+      render(<GraphView />);
+      // Gate → handlers via route connection matching
+      expect(screen.getByTestId("edge-inferred-conn-quality_gate-high_quality_handler")).toBeInTheDocument();
+      expect(screen.getByTestId("edge-inferred-conn-quality_gate-low_quality_handler")).toBeInTheDocument();
+      // Route labels should be present
+      expect(screen.getByText("true")).toBeInTheDocument();
+      expect(screen.getByText("false")).toBeInTheDocument();
+    });
+
+    it("merges inferred edges with partial explicit edges", () => {
+      // When some edges are explicit and others need inference
+      useSessionStore.setState({
+        compositionState: makeState({
+          source: {
+            plugin: "csv",
+            options: {},
+            on_success: "step1_in",
+          },
+          nodes: [
+            makeNode({
+              id: "transform1",
+              input: "step1_in",
+              on_success: "step2_in",
+            }),
+            makeNode({
+              id: "transform2",
+              input: "step2_in",
+              on_success: "results",
+            }),
+          ],
+          outputs: [{ name: "results", plugin: "csv", options: {} }],
+          // Only one explicit edge — the other should be inferred
+          edges: [makeEdge({ id: "e1", from_node: "source", to_node: "transform1" })],
+        }),
+      });
+      render(<GraphView />);
+      // Explicit edge exists
+      expect(screen.getByTestId("edge-e-source-transform1-0")).toBeInTheDocument();
+      // Second edge should be inferred (not blocked by explicit edge existing)
+      expect(screen.getByTestId("edge-inferred-conn-transform1-transform2")).toBeInTheDocument();
+    });
+
+    it("infers transform→sink edges via direct sink references", () => {
+      // When on_success points directly to a sink name (not a connection point)
+      useSessionStore.setState({
+        compositionState: makeState({
+          source: {
+            plugin: "csv",
+            options: {},
+            on_success: "process_in",
+          },
+          nodes: [
+            makeNode({
+              id: "processor",
+              input: "process_in",
+              on_success: "results",  // Direct sink reference
+              on_error: "errors",     // Direct sink reference
+            }),
+          ],
+          outputs: [
+            { name: "results", plugin: "csv", options: {} },
+            { name: "errors", plugin: "json", options: {} },
+          ],
+          edges: [],
+        }),
+      });
+      render(<GraphView />);
+      // Sink edges should be inferred
+      expect(screen.getByTestId("edge-inferred-sink-processor-results")).toBeInTheDocument();
+      expect(screen.getByTestId("edge-inferred-sink-processor-errors-error")).toBeInTheDocument();
+    });
+  });
 });

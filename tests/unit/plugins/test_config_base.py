@@ -304,7 +304,8 @@ class TestPluginConfigWithSchema:
             path: str
 
         # Should fail without schema - from_dict wraps in PluginConfigError
-        with pytest.raises(PluginConfigError, match=r"schema_config[\s\S]*Field required"):
+        # Error message uses alias "schema" not field name "schema_config"
+        with pytest.raises(PluginConfigError, match=r"schema[\s\S]*Field required"):
             SourceConfig.from_dict({"path": "data.csv"})
 
         # Should succeed with schema
@@ -343,17 +344,19 @@ class TestSourceDataConfig:
 
     def test_on_validation_failure_required(self) -> None:
         """on_validation_failure must be explicitly specified."""
+        from elspeth.contracts.schema import SchemaConfig
         from elspeth.plugins.infrastructure.config_base import SourceDataConfig
 
         with pytest.raises(ValidationError) as exc_info:
             SourceDataConfig(  # type: ignore[call-arg]  # testing missing required arg
                 path="data.csv",
-                schema_config=None,  # Will fail DataPluginConfig validation too
+                schema_config=SchemaConfig.from_dict({"mode": "observed"}),
+                # on_validation_failure is missing - should fail
             )
 
         # Should fail because on_validation_failure is required
         errors = exc_info.value.errors()
-        field_names = [e["loc"][0] for e in errors]
+        field_names = [e["loc"][0] for e in errors if e["loc"]]
         assert "on_validation_failure" in field_names
 
     def test_on_validation_failure_accepts_sink_name(self) -> None:

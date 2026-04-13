@@ -351,6 +351,7 @@ export function InspectorPanel() {
   const loadStateVersions = useSessionStore((s) => s.loadStateVersions);
   const injectSystemMessage = useSessionStore((s) => s.injectSystemMessage);
   const sendValidationFeedback = useSessionStore((s) => s.sendValidationFeedback);
+  const selectNode = useSessionStore((s) => s.selectNode);
 
   const validationResult = useExecutionStore((s) => s.validationResult);
   const isValidating = useExecutionStore((s) => s.isValidating);
@@ -433,6 +434,20 @@ export function InspectorPanel() {
       revertToVersion(stateId);
     },
     [revertToVersion],
+  );
+
+  // Handle click on validation error/warning — select node and switch to Spec tab
+  // Only navigate for actual nodes; source/sink entries can't be highlighted in SpecView
+  const handleValidationComponentClick = useCallback(
+    (componentId: string) => {
+      const isNode = compositionState?.nodes.some((n) => n.id === componentId);
+      if (isNode) {
+        selectNode(componentId);
+        setActiveTab("spec");
+      }
+      // For source/sink, don't switch tabs — SpecView only renders nodes
+    },
+    [selectNode, compositionState],
   );
 
   // Tab navigation with arrow keys (left/right wrapping)
@@ -675,6 +690,7 @@ export function InspectorPanel() {
         <ValidationResultBanner
           result={validationResult}
           nodes={compositionState?.nodes}
+          onComponentClick={handleValidationComponentClick}
         />
       )}
 

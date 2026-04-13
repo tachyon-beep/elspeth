@@ -101,13 +101,13 @@ def test_validator_rejects_invalid_transform_config():
     """Invalid transform config with missing required field returns error."""
 
     config = {
-        # Missing 'schema_config' - required by PassThroughConfig (DataPluginConfig)
+        # Missing schema - required by PassThroughConfig (DataPluginConfig)
     }
 
     errors = validate_transform_config("passthrough", config)
     assert len(errors) == 1
-    # DataPluginConfig validator error reports the field name that failed
-    assert errors[0].field == "schema_config"
+    # DataPluginConfig validator error reports the alias "schema", not field name "schema_config"
+    assert errors[0].field == "schema"
 
 
 def test_validator_rejects_invalid_sink_config():

@@ -215,6 +215,10 @@ class TestValidationGlossaryCompleteness:
                 "does not match any node input or output",
                 "has no outgoing edges",
                 "filename extension suggests a different format",
+                "appears incomplete:",  # W5: transform missing required options
+                "has empty '",  # W5: transform has empty required option
+                "has no path configured",  # W6: file sink missing path
+                "has empty path",  # W6: file sink empty path
             ]:
                 if fragment in warning.message:
                     assert fragment in _WEB_SKILL_CONTENT, (

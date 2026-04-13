@@ -341,7 +341,8 @@ class TestJSONSourceConfigValidation:
         from elspeth.plugins.infrastructure.config_base import PluginConfigError
         from elspeth.plugins.sources.json_source import JSONSource
 
-        with pytest.raises(PluginConfigError, match=r"schema_config[\s\S]*Field required"):
+        # Error message uses alias "schema" not field name "schema_config"
+        with pytest.raises(PluginConfigError, match=r"schema[\s\S]*Field required"):
             JSONSource({"path": "/tmp/test.json", "on_validation_failure": QUARANTINE_SINK})
 
     def test_missing_on_validation_failure_raises_error(self) -> None:

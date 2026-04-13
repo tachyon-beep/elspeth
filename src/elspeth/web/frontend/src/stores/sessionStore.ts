@@ -25,6 +25,10 @@ interface SessionState {
   stateVersions: CompositionStateVersion[];
   error: string | null;
 
+  // Shared selection state for cross-component sync (GraphView <-> SpecView)
+  selectedNodeId: string | null;
+  selectNode: (nodeId: string | null) => void;
+
   loadSessions: () => Promise<void>;
   createSession: () => Promise<void>;
   selectSession: (id: string) => Promise<void>;
@@ -50,6 +54,7 @@ const initialState = {
   stateVersions: [] as CompositionStateVersion[],
   isLoadingVersions: false,
   error: null as string | null,
+  selectedNodeId: null as string | null,
 };
 
 export const useSessionStore = create<SessionState>((set, get) => ({
@@ -74,6 +79,7 @@ export const useSessionStore = create<SessionState>((set, get) => ({
         compositionState: null,
         stateVersions: [],
         error: null,
+        selectedNodeId: null, // Clear selection for new session
       }));
     } catch {
       set({ error: "Failed to create session. Please try again." });
@@ -96,6 +102,7 @@ export const useSessionStore = create<SessionState>((set, get) => ({
                 compositionState: null,
                 stateVersions: [],
                 isComposing: false,
+                selectedNodeId: null,
               }
             : {}),
         };
@@ -117,6 +124,7 @@ export const useSessionStore = create<SessionState>((set, get) => ({
       stateVersions: [],
       isComposing: false,
       error: null,
+      selectedNodeId: null, // Clear selection when switching sessions
     });
 
     try {
@@ -169,14 +177,21 @@ export const useSessionStore = create<SessionState>((set, get) => ({
           getExecutionStore().clearValidation();
         }
 
+        // Clear selection if the selected node no longer exists in new state
+        const newState = state ?? s.compositionState;
+        const nodeStillExists =
+          !s.selectedNodeId ||
+          newState?.nodes.some((n) => n.id === s.selectedNodeId);
+
         return {
           messages: s.messages.map((existing) =>
             existing.id === optimisticMessage.id
               ? { ...existing, local_status: undefined }
               : existing,
           ).concat(message),
-          compositionState: state ?? s.compositionState,
+          compositionState: newState,
           isComposing: false,
+          ...(nodeStillExists ? {} : { selectedNodeId: null }),
         };
       });
 
@@ -274,14 +289,21 @@ export const useSessionStore = create<SessionState>((set, get) => ({
           getExecutionStore().clearValidation();
         }
 
+        // Clear selection if the selected node no longer exists in new state
+        const newState = state ?? s.compositionState;
+        const nodeStillExists =
+          !s.selectedNodeId ||
+          newState?.nodes.some((n) => n.id === s.selectedNodeId);
+
         return {
           messages: s.messages.map((existing) =>
             existing.id === messageId
               ? { ...existing, local_status: undefined }
               : existing,
           ).concat(assistantMessage),
-          compositionState: state ?? s.compositionState,
+          compositionState: newState,
           isComposing: false,
+          ...(nodeStillExists ? {} : { selectedNodeId: null }),
         };
       });
 
@@ -331,6 +353,7 @@ export const useSessionStore = create<SessionState>((set, get) => ({
         compositionState: result.composition_state,
         stateVersions: [],
         isComposing: false,
+        selectedNodeId: null, // Clear selection for forked session
       }));
 
       // Fire-and-forget: refresh blob list for the NEW forked session
@@ -370,7 +393,8 @@ export const useSessionStore = create<SessionState>((set, get) => ({
         activeSessionId,
         stateId,
       );
-      set({ compositionState });
+      // Clear selection — the reverted version may not contain the selected node
+      set({ compositionState, selectedNodeId: null });
     } catch {
       set({ error: "Failed to revert to version. Please try again." });
     }
@@ -378,6 +402,10 @@ export const useSessionStore = create<SessionState>((set, get) => ({
 
   clearError() {
     set({ error: null });
+  },
+
+  selectNode(nodeId: string | null) {
+    set({ selectedNodeId: nodeId });
   },
 
   injectSystemMessage(content: string, stableId?: string) {

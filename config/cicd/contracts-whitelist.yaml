@@ -491,6 +491,10 @@ allowed_dict_patterns:
   - "src/elspeth/web/composer/state.py:CompositionState.from_dict:d"
   - "src/elspeth/web/composer/state.py:CompositionState.with_metadata:patch"
   - "src/elspeth/web/composer/state.py:CompositionState.to_dict:return"
+  # YAML generator — strips web-specific metadata from plugin options dicts
+  # Options are dynamic (vary by plugin) so dict[str, Any] is the correct type
+  - "src/elspeth/web/composer/yaml_generator.py:_strip_web_metadata:options"
+  - "src/elspeth/web/composer/yaml_generator.py:_strip_web_metadata:return"
 
   # ═══════════════════════════════════════════════════════════════════════════
   # WEB COMPOSER — Tool executor (Tier 3 LLM tool call arguments)

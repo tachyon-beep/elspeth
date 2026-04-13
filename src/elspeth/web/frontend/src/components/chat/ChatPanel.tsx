@@ -5,6 +5,7 @@ import { useComposer } from "@/hooks/useComposer";
 import { MessageBubble } from "./MessageBubble";
 import { ComposingIndicator } from "./ComposingIndicator";
 import { ChatInput } from "./ChatInput";
+import { TemplateCards } from "./TemplateCards";
 import { BlobManager } from "@/components/blobs/BlobManager";
 import type { BlobMetadata } from "@/types/api";
 
@@ -33,6 +34,7 @@ export function ChatPanel({ onOpenSecrets }: ChatPanelProps) {
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const [showScrollButton, setShowScrollButton] = useState(false);
   const [showBlobManager, setShowBlobManager] = useState(false);
+  const [inputText, setInputText] = useState("");
 
   function scrollToBottom() {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -64,6 +66,11 @@ export function ChatPanel({ onOpenSecrets }: ChatPanelProps) {
     }
   }, [isComposing]);
 
+  // Reset scroll state when switching sessions
+  useEffect(() => {
+    setShowScrollButton(false);
+  }, [activeSessionId]);
+
   const handleSend = useCallback(
     (content: string) => {
       sendMessage(content);
@@ -91,6 +98,15 @@ export function ChatPanel({ onOpenSecrets }: ChatPanelProps) {
       setShowBlobManager(false);
     },
     [sendMessage],
+  );
+
+  const handleSelectTemplate = useCallback(
+    (prompt: string) => {
+      setInputText(prompt);
+      // Focus the input so user can edit or press Enter to send
+      inputRef.current?.focus();
+    },
+    [],
   );
 
   // No active session: show prompt to select or create one
@@ -200,17 +216,7 @@ export function ChatPanel({ onOpenSecrets }: ChatPanelProps) {
         aria-relevant="additions"
       >
         {messages.length === 0 ? (
-          <div
-            style={{
-              padding: 32,
-              color: "var(--color-text-muted)",
-              fontSize: 15,
-              textAlign: "center",
-            }}
-          >
-            Welcome to ELSPETH. Describe the pipeline you want to build,
-            and I'll compose it for you.
-          </div>
+          <TemplateCards onSelectTemplate={handleSelectTemplate} />
         ) : (
           messages.map((msg) => (
             <MessageBubble
@@ -260,6 +266,8 @@ export function ChatPanel({ onOpenSecrets }: ChatPanelProps) {
         onToggleBlobManager={() => setShowBlobManager((v) => !v)}
         showBlobManager={showBlobManager}
         onOpenSecrets={onOpenSecrets}
+        value={inputText}
+        onChange={setInputText}
       />
     </div>
   );

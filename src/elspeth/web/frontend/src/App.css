@@ -841,6 +841,249 @@ summary:focus-visible {
 }
 
 /* ---------------------------------------------------------------------------
+   Light Theme Tokens
+   --------------------------------------------------------------------------- */
+
+/* Automatic light theme based on OS preference */
+@media (prefers-color-scheme: light) {
+  :root:not([data-theme="dark"]) {
+    /* ── Backgrounds — light teal family ──────────────────────────────────── */
+    --color-bg:                #f4f8f9;
+    --color-surface:           #ffffff;
+    --color-surface-sidebar:   #eaf2f3;
+    --color-surface-inspector: #f0f6f7;
+    --color-surface-elevated:  #ffffff;
+    --color-surface-hover:     rgba(0, 45, 53, 0.04);
+
+    /* ── Text ────────────────────────────────────────────────────────────────── */
+    --color-text:              #0f2d35;
+    --color-text-secondary:    #3a5a64;
+    --color-text-muted:        #5a7a84;
+    --color-text-inverse:      #ffffff;
+
+    /* ── Borders — darker for light backgrounds ───────────────────────────── */
+    --color-border:            rgba(15, 45, 53, 0.12);
+    --color-border-strong:     rgba(15, 45, 53, 0.25);
+
+    /* ── Chat bubbles ────────────────────────────────────────────────────────── */
+    --color-bubble-user:           rgba(40, 130, 100, 0.10);
+    --color-bubble-user-border:    rgba(40, 130, 100, 0.30);
+    --color-bubble-assistant:      rgba(15, 45, 53, 0.05);
+    --color-bubble-assistant-border: rgba(15, 45, 53, 0.15);
+    --color-bubble-system:         rgba(15, 45, 53, 0.03);
+
+    /* ── Semantic backgrounds — adjusted for light theme ────────────────────── */
+    --color-success-bg:        rgba(20, 160, 158, 0.10);
+    --color-success-border:    rgba(20, 160, 158, 0.35);
+    --color-error-bg:          rgba(210, 70, 67, 0.10);
+    --color-error-border:      rgba(210, 70, 67, 0.35);
+    --color-warning-bg:        rgba(200, 115, 55, 0.12);
+    --color-warning-border:    rgba(200, 115, 55, 0.35);
+    --color-info-bg:           rgba(40, 150, 190, 0.10);
+    --color-info-border:       rgba(40, 150, 190, 0.30);
+
+    /* ── Semantic colours — slightly darkened for light backgrounds ───────── */
+    --color-success:           #0d8a88;
+    --color-error:             #c93b38;
+    --color-warning:           #b86830;
+    --color-info:              #2890b8;
+
+    /* ── Component type badges — darkened for contrast ─────────────────────── */
+    --color-badge-source:      #2a8a70;
+    --color-badge-transform:   #b07818;
+    --color-badge-gate:        #8a5ac0;
+    --color-badge-sink:        #b85530;
+    --color-badge-aggregation: #2890b8;
+    --color-badge-coalesce:    #0d8a88;
+
+    /* Per-node validation indicator borders */
+    --color-node-valid: #0d8a88;
+    --color-node-warning: #b86830;
+    --color-node-invalid: #c93b38;
+    --color-node-unchecked: var(--color-border-strong);
+
+    /* ── Interactive / accent ────────────────────────────────────────────────── */
+    --color-accent:            #156048;
+    --color-focus-ring:        #8a5ac0;
+    --color-btn-primary-bg:    #1a7a5a;
+    --color-btn-primary-bg-hover: #156048;
+    --color-link:              #2890b8;
+    --color-highlight:         rgba(21, 96, 72, 0.12);
+    --color-selected-ring:     rgba(21, 96, 72, 0.45);
+
+    /* ── Status badges ───────────────────────────────────────────────────────── */
+    --color-status-pending:    #5a7a84;
+    --color-status-running:    #2890b8;
+    --color-status-completed:  #0d8a88;
+    --color-status-failed:     #c93b38;
+    --color-status-cancelled:  #b86830;
+
+    /* ── Scrollbar — darker for light backgrounds ─────────────────────────── */
+    --color-scrollbar-track:       var(--color-bg);
+    --color-scrollbar-thumb:       rgba(15, 45, 53, 0.18);
+    --color-scrollbar-thumb-hover: rgba(15, 45, 53, 0.30);
+  }
+}
+
+/* Manual light theme override */
+[data-theme="light"] {
+  /* ── Backgrounds — light teal family ──────────────────────────────────── */
+  --color-bg:                #f4f8f9;
+  --color-surface:           #ffffff;
+  --color-surface-sidebar:   #eaf2f3;
+  --color-surface-inspector: #f0f6f7;
+  --color-surface-elevated:  #ffffff;
+  --color-surface-hover:     rgba(0, 45, 53, 0.04);
+
+  /* ── Text ────────────────────────────────────────────────────────────────── */
+  --color-text:              #0f2d35;
+  --color-text-secondary:    #3a5a64;
+  --color-text-muted:        #5a7a84;
+  --color-text-inverse:      #ffffff;
+
+  /* ── Borders — darker for light backgrounds ───────────────────────────── */
+  --color-border:            rgba(15, 45, 53, 0.12);
+  --color-border-strong:     rgba(15, 45, 53, 0.25);
+
+  /* ── Chat bubbles ────────────────────────────────────────────────────────── */
+  --color-bubble-user:           rgba(40, 130, 100, 0.10);
+  --color-bubble-user-border:    rgba(40, 130, 100, 0.30);
+  --color-bubble-assistant:      rgba(15, 45, 53, 0.05);
+  --color-bubble-assistant-border: rgba(15, 45, 53, 0.15);
+  --color-bubble-system:         rgba(15, 45, 53, 0.03);
+
+  /* ── Semantic backgrounds — adjusted for light theme ────────────────────── */
+  --color-success-bg:        rgba(20, 160, 158, 0.10);
+  --color-success-border:    rgba(20, 160, 158, 0.35);
+  --color-error-bg:          rgba(210, 70, 67, 0.10);
+  --color-error-border:      rgba(210, 70, 67, 0.35);
+  --color-warning-bg:        rgba(200, 115, 55, 0.12);
+  --color-warning-border:    rgba(200, 115, 55, 0.35);
+  --color-info-bg:           rgba(40, 150, 190, 0.10);
+  --color-info-border:       rgba(40, 150, 190, 0.30);
+
+  /* ── Semantic colours — slightly darkened for light backgrounds ───────── */
+  --color-success:           #0d8a88;
+  --color-error:             #c93b38;
+  --color-warning:           #b86830;
+  --color-info:              #2890b8;
+
+  /* ── Component type badges — darkened for contrast ─────────────────────── */
+  --color-badge-source:      #2a8a70;
+  --color-badge-transform:   #b07818;
+  --color-badge-gate:        #8a5ac0;
+  --color-badge-sink:        #b85530;
+  --color-badge-aggregation: #2890b8;
+  --color-badge-coalesce:    #0d8a88;
+
+  /* Per-node validation indicator borders */
+  --color-node-valid: #0d8a88;
+  --color-node-warning: #b86830;
+  --color-node-invalid: #c93b38;
+  --color-node-unchecked: var(--color-border-strong);
+
+  /* ── Interactive / accent ────────────────────────────────────────────────── */
+  --color-accent:            #156048;
+  --color-focus-ring:        #8a5ac0;
+  --color-btn-primary-bg:    #1a7a5a;
+  --color-btn-primary-bg-hover: #156048;
+  --color-link:              #2890b8;
+  --color-highlight:         rgba(21, 96, 72, 0.12);
+  --color-selected-ring:     rgba(21, 96, 72, 0.45);
+
+  /* ── Status badges ───────────────────────────────────────────────────────── */
+  --color-status-pending:    #5a7a84;
+  --color-status-running:    #2890b8;
+  --color-status-completed:  #0d8a88;
+  --color-status-failed:     #c93b38;
+  --color-status-cancelled:  #b86830;
+
+  /* ── Scrollbar — darker for light backgrounds ─────────────────────────── */
+  --color-scrollbar-track:       var(--color-bg);
+  --color-scrollbar-thumb:       rgba(15, 45, 53, 0.18);
+  --color-scrollbar-thumb-hover: rgba(15, 45, 53, 0.30);
+}
+
+/* Manual dark theme override — ensures dark theme even if OS prefers light */
+[data-theme="dark"] {
+  /* ── Backgrounds — DTA deep teal family ──────────────────────────────────── */
+  --color-bg:                #0f2d35;
+  --color-surface:           #122f37;
+  --color-surface-sidebar:   #0c2830;
+  --color-surface-inspector: #112e36;
+  --color-surface-elevated:  #1a3d47;
+  --color-surface-hover:     rgba(255, 255, 255, 0.04);
+
+  /* ── Text ────────────────────────────────────────────────────────────────── */
+  --color-text:              #dff0ee;
+  --color-text-secondary:    #8db8b8;
+  --color-text-muted:        #89b8b8;
+  --color-text-inverse:      #ffffff;
+
+  /* ── Borders — teal-tinted ───────────────────────────────────────────────── */
+  --color-border:            rgba(143, 200, 200, 0.12);
+  --color-border-strong:     rgba(143, 200, 200, 0.25);
+
+  /* ── Chat bubbles ────────────────────────────────────────────────────────── */
+  --color-bubble-user:           rgba(40, 130, 100, 0.14);
+  --color-bubble-user-border:    rgba(40, 130, 100, 0.35);
+  --color-bubble-assistant:      rgba(255, 255, 255, 0.05);
+  --color-bubble-assistant-border: rgba(255, 255, 255, 0.18);
+  --color-bubble-system:         rgba(255, 255, 255, 0.03);
+
+  /* ── Semantic backgrounds ────────────────────────────────────────────────── */
+  --color-success-bg:        rgba(20, 176, 174, 0.12);
+  --color-success-border:    rgba(20, 176, 174, 0.30);
+  --color-error-bg:          rgba(232, 86, 83, 0.12);
+  --color-error-border:      rgba(232, 86, 83, 0.30);
+  --color-warning-bg:        rgba(227, 132, 68, 0.14);
+  --color-warning-border:    rgba(227, 132, 68, 0.30);
+  --color-info-bg:           rgba(97, 218, 255, 0.10);
+  --color-info-border:       rgba(97, 218, 255, 0.25);
+
+  /* ── Semantic colours ─────────────────────────────────────────────────────── */
+  --color-success:           #14b0ae;
+  --color-error:             #e85653;
+  --color-warning:           #e38444;
+  --color-info:              #61daff;
+
+  /* ── Component type badges ───────────────────────────────────────────────── */
+  --color-badge-source:      #4db89a;
+  --color-badge-transform:   #e8a030;
+  --color-badge-gate:        #c390f9;
+  --color-badge-sink:        #e07040;
+  --color-badge-aggregation: #61daff;
+  --color-badge-coalesce:    #14b0ae;
+
+  /* Per-node validation indicator borders */
+  --color-node-valid: #14b0ae;
+  --color-node-warning: #e38444;
+  --color-node-invalid: #e85653;
+  --color-node-unchecked: var(--color-border-strong);
+
+  /* ── Interactive / accent ────────────────────────────────────────────────── */
+  --color-accent:            #1a7a52;
+  --color-focus-ring:        #c390f9;
+  --color-btn-primary-bg:    #16664a;
+  --color-btn-primary-bg-hover: #1a5840;
+  --color-link:              #61daff;
+  --color-highlight:         rgba(26, 122, 82, 0.14);
+  --color-selected-ring:     rgba(26, 122, 82, 0.55);
+
+  /* ── Status badges ───────────────────────────────────────────────────────── */
+  --color-status-pending:    #7a9a9a;
+  --color-status-running:    #61daff;
+  --color-status-completed:  #14b0ae;
+  --color-status-failed:     #e85653;
+  --color-status-cancelled:  #e38444;
+
+  /* ── Scrollbar — teal-tinted ─────────────────────────────────────────────── */
+  --color-scrollbar-track:       var(--color-bg);
+  --color-scrollbar-thumb:       rgba(143, 200, 200, 0.15);
+  --color-scrollbar-thumb-hover: rgba(143, 200, 200, 0.28);
+}
+
+/* ---------------------------------------------------------------------------
    High Contrast — respect OS-level contrast preferences
    --------------------------------------------------------------------------- */
 @media (prefers-contrast: more) {
@@ -973,4 +1216,148 @@ summary:focus-visible {
   padding: 4px 12px;
   border-left: 3px solid var(--color-border-strong);
   color: var(--color-text-secondary);
+}
+
+/* ---------------------------------------------------------------------------
+   Template Cards (onboarding quick-start)
+   --------------------------------------------------------------------------- */
+.template-card:hover {
+  background-color: var(--color-surface-hover);
+  border-color: var(--color-border-strong);
+}
+
+.template-card:focus-visible {
+  outline: 2px solid var(--color-focus-ring);
+  outline-offset: 2px;
+}
+
+/* ---------------------------------------------------------------------------
+   Command Palette (Ctrl+K)
+   --------------------------------------------------------------------------- */
+.command-palette-backdrop {
+  position: fixed;
+  inset: 0;
+  background-color: rgba(0, 0, 0, 0.5);
+  z-index: 300;
+}
+
+.command-palette {
+  position: fixed;
+  top: 15%;
+  left: 50%;
+  transform: translateX(-50%);
+  width: 560px;
+  max-width: calc(100vw - 32px);
+  max-height: 70vh;
+  background-color: var(--color-surface);
+  border: 1px solid var(--color-border-strong);
+  border-radius: var(--radius-lg);
+  box-shadow: 0 16px 48px rgba(0, 0, 0, 0.35);
+  z-index: 301;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.command-palette-input-wrapper {
+  padding: var(--space-md);
+  border-bottom: 1px solid var(--color-border);
+}
+
+.command-palette-input {
+  width: 100%;
+  padding: var(--space-sm) var(--space-md);
+  border: 1px solid var(--color-border-strong);
+  border-radius: var(--radius-md);
+  background-color: var(--color-surface-elevated);
+  color: var(--color-text);
+  font-family: var(--font-sans);
+  font-size: var(--font-size-base);
+}
+
+.command-palette-input:focus {
+  outline: none;
+  border-color: var(--color-focus-ring);
+}
+
+.command-palette-input::placeholder {
+  color: var(--color-text-muted);
+}
+
+.command-palette-list {
+  flex: 1;
+  overflow-y: auto;
+  padding: var(--space-sm) 0;
+}
+
+.command-palette-empty {
+  padding: var(--space-xl);
+  text-align: center;
+  color: var(--color-text-muted);
+  font-size: var(--font-size-sm);
+}
+
+.command-palette-group {
+  margin-bottom: var(--space-sm);
+}
+
+.command-palette-group-header {
+  padding: var(--space-xs) var(--space-md);
+  font-size: var(--font-size-xs);
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  color: var(--color-text-muted);
+}
+
+.command-palette-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: var(--space-sm) var(--space-md);
+  cursor: pointer;
+  transition: background-color var(--transition-fast);
+}
+
+.command-palette-item:hover,
+.command-palette-item-selected {
+  background-color: var(--color-surface-hover);
+}
+
+.command-palette-item-selected {
+  background-color: var(--color-highlight);
+}
+
+.command-palette-item-title {
+  color: var(--color-text);
+  font-size: var(--font-size-sm);
+}
+
+.command-palette-kbd {
+  padding: 2px 6px;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  background-color: var(--color-surface-elevated);
+  color: var(--color-text-muted);
+  font-family: var(--font-mono);
+  font-size: var(--font-size-xs);
+}
+
+.command-palette-footer {
+  display: flex;
+  gap: var(--space-lg);
+  padding: var(--space-sm) var(--space-md);
+  border-top: 1px solid var(--color-border);
+  font-size: var(--font-size-xs);
+  color: var(--color-text-muted);
+}
+
+.command-palette-footer kbd {
+  padding: 1px 4px;
+  border: 1px solid var(--color-border);
+  border-radius: 3px;
+  background-color: var(--color-surface-elevated);
+  font-family: var(--font-mono);
+  font-size: 10px;
+  margin-right: 4px;
 }

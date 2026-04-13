@@ -255,6 +255,39 @@ class TestGenerateYaml:
         parsed = yaml.safe_load(yaml_str)
         assert "landscape" not in parsed
 
+    def test_blob_ref_stripped_from_source_options(self) -> None:
+        """blob_ref is web-specific metadata and should not appear in engine YAML.
+
+        The web composer tracks file provenance via blob_ref in source options,
+        but plugin configs use Pydantic extra="forbid" and will reject it.
+        The YAML generator must strip these web-only keys before output.
+        """
+        state = CompositionState(
+            source=SourceSpec(
+                plugin="text",
+                on_success="out",
+                options={
+                    "path": "/data/input.txt",
+                    "blob_ref": "20b944e3-fd46-434f-b9a2-4fb508db30f0",  # Should be stripped
+                    "column": "line",
+                },
+                on_validation_failure="discard",
+            ),
+            nodes=(),
+            edges=(),
+            outputs=(OutputSpec(name="out", plugin="csv", options={}, on_write_failure="discard"),),
+            metadata=PipelineMetadata(),
+            version=1,
+        )
+        yaml_str = generate_yaml(state)
+        parsed = yaml.safe_load(yaml_str)
+
+        # blob_ref must not appear in the YAML
+        assert "blob_ref" not in parsed["source"]["options"]
+        # Other options should still be present
+        assert parsed["source"]["options"]["path"] == "/data/input.txt"
+        assert parsed["source"]["options"]["column"] == "line"
+
     def test_on_error_emitted_when_set(self) -> None:
         state = CompositionState(
             source=SourceSpec(

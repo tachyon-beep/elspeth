@@ -13,11 +13,12 @@
 // Empty state when no nodes.
 // ============================================================================
 
-import { useMemo } from "react";
+import { useMemo, useCallback } from "react";
 import {
   ReactFlow,
   type Node,
   type Edge,
+  type NodeMouseHandler,
   Background,
   Controls,
   MiniMap,
@@ -80,8 +81,23 @@ function layoutGraph(
 
 export function GraphView() {
   const compositionState = useSessionStore((s) => s.compositionState);
+  const selectedNodeId = useSessionStore((s) => s.selectedNodeId);
+  const selectNode = useSessionStore((s) => s.selectNode);
 
   const validationResult = useExecutionStore((s) => s.validationResult);
+
+  // Node click handler — toggle selection
+  const onNodeClick: NodeMouseHandler = useCallback(
+    (_event, node) => {
+      selectNode(selectedNodeId === node.id ? null : node.id);
+    },
+    [selectedNodeId, selectNode],
+  );
+
+  // Pane click handler — deselect when clicking background
+  const onPaneClick = useCallback(() => {
+    selectNode(null);
+  }, [selectNode]);
 
   // Build a map of component_id → validation severity for border coloring
   const nodeValidationMap = useMemo(() => {
@@ -147,12 +163,19 @@ export function GraphView() {
   }, [validationResult]);
 
   const { nodes, edges } = useMemo(() => {
+    // DEBUG: Trace source rendering issue
+    console.log("[GraphView] compositionState:", compositionState);
+    console.log("[GraphView] source:", compositionState?.source);
+    console.log("[GraphView] outputs:", compositionState?.outputs);
+    console.log("[GraphView] edges:", compositionState?.edges);
+
     const hasContent =
       compositionState &&
       (compositionState.source !== null ||
         compositionState.nodes.length > 0 ||
         compositionState.outputs.length > 0);
     if (!hasContent) {
+      console.log("[GraphView] No content, returning empty");
       return { nodes: [] as Node[], edges: [] as Edge[] };
     }
 
@@ -164,7 +187,19 @@ export function GraphView() {
       badgeColor: string,
       validationStatus?: "valid" | "warning" | "error",
       validationTooltip?: string,
+      isSelected?: boolean,
     ): Node {
+      // Selection ring takes priority over validation border
+      const borderStyle = isSelected
+        ? "2px solid var(--color-selected-ring)"
+        : validationStatus === "error"
+          ? `2px solid ${VALIDATION_COLORS.invalid}`
+          : validationStatus === "warning"
+            ? `2px solid ${VALIDATION_COLORS.warning}`
+            : validationStatus === "valid"
+              ? `2px solid ${VALIDATION_COLORS.valid}`
+              : "1px solid var(--color-border-strong)";
+
       return {
         id,
         data: {
@@ -225,17 +260,14 @@ export function GraphView() {
         position: { x: 0, y: 0 },
         style: {
           backgroundColor: "var(--color-surface-elevated)",
-          border: validationStatus === "error"
-            ? `2px solid ${VALIDATION_COLORS.invalid}`
-            : validationStatus === "warning"
-              ? `2px solid ${VALIDATION_COLORS.warning}`
-              : validationStatus === "valid"
-                ? `2px solid ${VALIDATION_COLORS.valid}`
-                : "1px solid var(--color-border-strong)",
+          border: borderStyle,
           borderRadius: 8,
           width: NODE_WIDTH,
           height: NODE_HEIGHT,
           padding: 0,
+          // Selection box-shadow for extra emphasis
+          boxShadow: isSelected ? "0 0 0 3px var(--color-selected-ring)" : undefined,
+          cursor: "pointer",
         },
       };
     }
@@ -253,6 +285,7 @@ export function GraphView() {
           "#4db89a",
           nodeValidationMap["source"],
           nodeMessageMap["source"],
+          selectedNodeId === "source",
         ),
       );
     }
@@ -268,6 +301,7 @@ export function GraphView() {
           BADGE_COLORS[node.node_type],
           nodeValidationMap[node.id],
           nodeMessageMap[node.id],
+          selectedNodeId === node.id,
         ),
       );
     }
@@ -283,10 +317,15 @@ export function GraphView() {
           "#e07040",
           nodeValidationMap[output.name],
           nodeMessageMap[output.name],
+          selectedNodeId === output.name,
         ),
       );
     }
 
+    // DEBUG: Log what nodes we're about to render
+    console.log("[GraphView] rfNodes before layout:", rfNodes.map(n => ({ id: n.id, position: n.position })));
+
+    // Build edges: start with explicit edges from compositionState
     const rfEdges: Edge[] = compositionState.edges.map((edge, i) => ({
       id: `e-${edge.from_node}-${edge.to_node}-${i}`,
       source: edge.from_node,
@@ -300,8 +339,170 @@ export function GraphView() {
       labelStyle: { fontSize: 10, fill: EDGE_LABEL_COLOR },
     }));
 
-    return layoutGraph(rfNodes, rfEdges);
-  }, [compositionState, nodeValidationMap, nodeMessageMap]);
+    // Build a set of existing edge connections to avoid duplicates
+    const existingConnections = new Set(
+      rfEdges.map(e => `${e.source}->${e.target}`)
+    );
+    const nodeIds = new Set(rfNodes.map(n => n.id));
+
+    // Always infer missing edges from connection properties.
+    // ELSPETH uses a NAMED CONNECTION POINT model:
+    // - source.on_success is a connection point name (e.g., "transform_in")
+    // - node.input is the connection point name it reads from
+    // - node.on_success/on_error/routes are connection points or sink names
+    //
+    // Edge inference strategy:
+    // 1. Build a producer registry: connection_point → { nodeId, edgeType, label }
+    // 2. For each node, look up node.input in the registry to find upstream producer
+    // 3. For direct sink references (on_success/on_error/routes pointing to sink names),
+    //    create edges directly since sinks are in nodeIds
+
+    // Producer registry: connection_point_name → { nodeId, edgeType, label }
+    // This tracks all producers (source and nodes) and their output connection types
+    type ProducerInfo = { nodeId: string; edgeType: "success" | "error"; label: string };
+    const connectionProducers: Record<string, ProducerInfo> = {};
+
+    // Source produces on its on_success connection
+    if (compositionState.source?.on_success) {
+      connectionProducers[compositionState.source.on_success] = {
+        nodeId: "source",
+        edgeType: "success",
+        label: "success",
+      };
+    }
+
+    // Each node can produce on on_success, on_error, or routes
+    for (const node of compositionState.nodes) {
+      if (node.on_success) {
+        connectionProducers[node.on_success] = {
+          nodeId: node.id,
+          edgeType: "success",
+          label: "success",
+        };
+      }
+      if (node.on_error) {
+        connectionProducers[node.on_error] = {
+          nodeId: node.id,
+          edgeType: "error",
+          label: "error",
+        };
+      }
+      if (node.routes) {
+        for (const [routeLabel, targetConn] of Object.entries(node.routes)) {
+          connectionProducers[targetConn] = {
+            nodeId: node.id,
+            edgeType: "success",
+            label: routeLabel,
+          };
+        }
+      }
+    }
+
+    // Infer edges by matching node.input to upstream connection producers
+    for (const node of compositionState.nodes) {
+      if (node.input) {
+        const producer = connectionProducers[node.input];
+        if (producer && !existingConnections.has(`${producer.nodeId}->${node.id}`)) {
+          const isError = producer.edgeType === "error";
+          rfEdges.push({
+            id: `inferred-conn-${producer.nodeId}-${node.id}`,
+            source: producer.nodeId,
+            target: node.id,
+            label: producer.label,
+            animated: isError,
+            style: {
+              stroke: isError ? EDGE_COLORS.error : EDGE_COLORS.normal,
+              strokeWidth: 1.5,
+            },
+            labelStyle: { fontSize: 10, fill: EDGE_LABEL_COLOR },
+          });
+          existingConnections.add(`${producer.nodeId}->${node.id}`);
+          console.log("[GraphView] Inferred edge via connection match:", producer.nodeId, "->", node.id, "(connection:", node.input, ", type:", producer.edgeType, ")");
+        }
+      }
+    }
+
+    // Handle source → sink direct edge (no transforms in between)
+    if (
+      compositionState.source?.on_success &&
+      nodeIds.has(compositionState.source.on_success) &&
+      !existingConnections.has(`source->${compositionState.source.on_success}`)
+    ) {
+      rfEdges.push({
+        id: `inferred-sink-source-${compositionState.source.on_success}`,
+        source: "source",
+        target: compositionState.source.on_success,
+        label: "success",
+        style: { stroke: EDGE_COLORS.normal, strokeWidth: 1.5 },
+        labelStyle: { fontSize: 10, fill: EDGE_LABEL_COLOR },
+      });
+      existingConnections.add(`source->${compositionState.source.on_success}`);
+      console.log("[GraphView] Inferred source → sink edge:", "source", "->", compositionState.source.on_success);
+    }
+
+    // Handle direct sink references (on_success/on_error/routes pointing to sink names)
+    // Sinks are in nodeIds, so we can create edges directly to them
+    for (const node of compositionState.nodes) {
+      // on_success → sink (only if target is a sink, not a connection point)
+      if (
+        node.on_success &&
+        nodeIds.has(node.on_success) &&
+        !existingConnections.has(`${node.id}->${node.on_success}`)
+      ) {
+        rfEdges.push({
+          id: `inferred-sink-${node.id}-${node.on_success}`,
+          source: node.id,
+          target: node.on_success,
+          label: "success",
+          style: { stroke: EDGE_COLORS.normal, strokeWidth: 1.5 },
+          labelStyle: { fontSize: 10, fill: EDGE_LABEL_COLOR },
+        });
+        existingConnections.add(`${node.id}->${node.on_success}`);
+      }
+
+      // on_error → sink
+      if (
+        node.on_error &&
+        nodeIds.has(node.on_error) &&
+        !existingConnections.has(`${node.id}->${node.on_error}`)
+      ) {
+        rfEdges.push({
+          id: `inferred-sink-${node.id}-${node.on_error}-error`,
+          source: node.id,
+          target: node.on_error,
+          label: "error",
+          animated: true,
+          style: { stroke: EDGE_COLORS.error, strokeWidth: 1.5 },
+          labelStyle: { fontSize: 10, fill: EDGE_LABEL_COLOR },
+        });
+        existingConnections.add(`${node.id}->${node.on_error}`);
+      }
+
+      // Gate routes → sink
+      if (node.routes) {
+        for (const [routeLabel, targetId] of Object.entries(node.routes)) {
+          if (nodeIds.has(targetId) && !existingConnections.has(`${node.id}->${targetId}`)) {
+            rfEdges.push({
+              id: `inferred-sink-${node.id}-${targetId}-${routeLabel}`,
+              source: node.id,
+              target: targetId,
+              label: routeLabel,
+              style: { stroke: EDGE_COLORS.normal, strokeWidth: 1.5 },
+              labelStyle: { fontSize: 10, fill: EDGE_LABEL_COLOR },
+            });
+            existingConnections.add(`${node.id}->${targetId}`);
+          }
+        }
+      }
+    }
+
+    console.log("[GraphView] Total edges (explicit + inferred):", rfEdges.length);
+
+    const result = layoutGraph(rfNodes, rfEdges);
+    console.log("[GraphView] After layout - nodes:", result.nodes.map(n => ({ id: n.id, position: n.position })));
+    console.log("[GraphView] After layout - edges:", result.edges.map(e => ({ id: e.id, source: e.source, target: e.target })));
+    return result;
+  }, [compositionState, nodeValidationMap, nodeMessageMap, selectedNodeId]);
 
   // Empty state — must match the hasContent check above so that a
   // source-to-sink pipeline (zero transform nodes) still renders.
@@ -334,7 +535,9 @@ export function GraphView() {
         edges={edges}
         nodesDraggable={false}
         nodesConnectable={false}
-        elementsSelectable={false}
+        elementsSelectable={true}
+        onNodeClick={onNodeClick}
+        onPaneClick={onPaneClick}
         fitView
         fitViewOptions={{ padding: 0.15, maxZoom: 1.5, minZoom: 0.3 }}
         proOptions={{ hideAttribution: true }}

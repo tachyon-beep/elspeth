@@ -5,6 +5,7 @@ import {
   useEffect,
   type ReactNode,
 } from "react";
+import { useTheme } from "@/hooks/useTheme";
 
 const INSPECTOR_WIDTH_KEY = "elspeth_inspector_width";
 const SIDEBAR_COLLAPSED_KEY = "elspeth_sidebar_collapsed";
@@ -60,6 +61,7 @@ export function Layout({ sidebar, chat, inspector }: LayoutProps) {
     loadPersistedBoolean(SIDEBAR_COLLAPSED_KEY, false)
   );
   const isResizing = useRef(false);
+  const { resolvedTheme, toggleTheme } = useTheme();
 
   // Persist inspector width to localStorage when it changes.
   useEffect(() => {
@@ -153,32 +155,74 @@ export function Layout({ sidebar, chat, inspector }: LayoutProps) {
           width: sidebarWidth,
         }}
       >
-        {/* Collapse toggle */}
-        <button
-          className="sidebar-toggle"
-          onClick={handleToggleSidebar}
-          aria-label={
-            sidebarCollapsed ? "Expand sessions sidebar" : "Collapse sessions sidebar"
-          }
-          title={sidebarCollapsed ? "Expand sidebar" : "Collapse sidebar"}
+        {/* Sidebar toolbar: collapse toggle + theme toggle */}
+        <div
           style={{
             display: "flex",
             alignItems: "center",
-            justifyContent: "center",
-            width: "100%",
-            minHeight: 44, // 44px minimum for iOS touch targets (WCAG 2.5.8)
-            minWidth: 44,
-            border: "none",
+            justifyContent: sidebarCollapsed ? "center" : "space-between",
             borderBottom: "1px solid var(--color-border)",
-            backgroundColor: "transparent",
-            color: "var(--color-text-muted)",
-            cursor: "pointer",
             flexShrink: 0,
-            fontSize: 14,
           }}
         >
-          {sidebarCollapsed ? "\u25B6" : "\u25C0"}
-        </button>
+          {/* Collapse toggle */}
+          <button
+            className="sidebar-toggle"
+            onClick={handleToggleSidebar}
+            aria-label={
+              sidebarCollapsed ? "Expand sessions sidebar" : "Collapse sessions sidebar"
+            }
+            title={sidebarCollapsed ? "Expand sidebar" : "Collapse sidebar"}
+            style={{
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+              minHeight: 44,
+              minWidth: 44,
+              border: "none",
+              backgroundColor: "transparent",
+              color: "var(--color-text-muted)",
+              cursor: "pointer",
+              fontSize: 14,
+            }}
+          >
+            {sidebarCollapsed ? "\u25B6" : "\u25C0"}
+          </button>
+
+          {/* Theme toggle — visible when sidebar is expanded */}
+          {!sidebarCollapsed && (
+            <button
+              className="theme-toggle"
+              onClick={toggleTheme}
+              aria-label={
+                resolvedTheme === "dark"
+                  ? "Switch to light theme"
+                  : "Switch to dark theme"
+              }
+              title={
+                resolvedTheme === "dark"
+                  ? "Switch to light theme"
+                  : "Switch to dark theme"
+              }
+              style={{
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
+                minHeight: 44,
+                minWidth: 44,
+                border: "none",
+                backgroundColor: "transparent",
+                color: "var(--color-text-muted)",
+                cursor: "pointer",
+                fontSize: 16,
+                marginRight: 4,
+              }}
+            >
+              {/* Sun for light theme, moon for dark */}
+              {resolvedTheme === "dark" ? "\u2600" : "\u263E"}
+            </button>
+          )}
+        </div>
         {/* Sidebar content — hidden when collapsed */}
         <div
           style={{

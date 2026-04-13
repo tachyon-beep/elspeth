@@ -21,6 +21,8 @@ interface ValidationResultProps {
   result: ValidationResultType;
   /** Nodes from CompositionState for mapping component_id to display name */
   nodes?: NodeSpec[];
+  /** Callback when user clicks an error/warning to navigate to that component */
+  onComponentClick?: (componentId: string) => void;
 }
 
 /**
@@ -40,6 +42,7 @@ function resolveComponentName(
 export function ValidationResultBanner({
   result,
   nodes,
+  onComponentClick,
 }: ValidationResultProps) {
   if (result.is_valid) {
     return (
@@ -88,26 +91,59 @@ export function ValidationResultBanner({
                 color: "var(--color-warning)",
               }}
             >
-              {result.warnings.map((warn: ValidationWarning, i: number) => (
-                <li key={i} style={{ marginBottom: 2 }}>
-                  <strong>
-                    [{warn.component_type ?? "unknown"}]{" "}
-                    {resolveComponentName(warn.component_id, nodes)}:
-                  </strong>{" "}
-                  {warn.message}
-                  {warn.suggestion && (
-                    <div
-                      style={{
-                        color: "var(--color-text-muted)",
-                        fontSize: 12,
-                        marginTop: 2,
-                      }}
-                    >
-                      Suggestion: {warn.suggestion}
-                    </div>
-                  )}
-                </li>
-              ))}
+              {result.warnings.map((warn: ValidationWarning, i: number) => {
+                // Only make clickable if component is an actual node (not source/sink)
+                const isNode = nodes?.some((n) => n.id === warn.component_id);
+                const isClickable = warn.component_id && onComponentClick && isNode;
+                const content = (
+                  <>
+                    <strong>
+                      [{warn.component_type ?? "unknown"}]{" "}
+                      {resolveComponentName(warn.component_id, nodes)}:
+                    </strong>{" "}
+                    {warn.message}
+                    {warn.suggestion && (
+                      <div
+                        style={{
+                          color: "var(--color-text-muted)",
+                          fontSize: 12,
+                          marginTop: 2,
+                        }}
+                      >
+                        Suggestion: {warn.suggestion}
+                      </div>
+                    )}
+                  </>
+                );
+
+                return (
+                  <li key={i} style={{ marginBottom: 2 }}>
+                    {isClickable ? (
+                      <button
+                        onClick={() => onComponentClick(warn.component_id!)}
+                        style={{
+                          background: "none",
+                          border: "none",
+                          padding: 0,
+                          margin: 0,
+                          font: "inherit",
+                          color: "inherit",
+                          textAlign: "left",
+                          cursor: "pointer",
+                          textDecoration: "underline",
+                          textDecorationColor: "var(--color-warning-border)",
+                          textUnderlineOffset: 2,
+                        }}
+                        title={`Click to select ${warn.component_id} in the pipeline view`}
+                      >
+                        {content}
+                      </button>
+                    ) : (
+                      content
+                    )}
+                  </li>
+                );
+              })}
             </ul>
           </div>
         )}
@@ -134,26 +170,59 @@ export function ValidationResultBanner({
           padding: "0 12px 8px 28px",
         }}
       >
-        {result.errors.map((err, i) => (
-          <li key={i} style={{ marginBottom: 4 }}>
-            <strong>
-              [{err.component_type ?? "unknown"}]{" "}
-              {resolveComponentName(err.component_id, nodes)}:
-            </strong>{" "}
-            {err.message}
-            {err.suggestion && (
-              <div
-                style={{
-                  color: "var(--color-text-muted)",
-                  fontSize: 12,
-                  marginTop: 2,
-                }}
-              >
-                Suggestion: {err.suggestion}
-              </div>
-            )}
-          </li>
-        ))}
+        {result.errors.map((err, i) => {
+          // Only make clickable if component is an actual node (not source/sink)
+          const isNode = nodes?.some((n) => n.id === err.component_id);
+          const isClickable = err.component_id && onComponentClick && isNode;
+          const content = (
+            <>
+              <strong>
+                [{err.component_type ?? "unknown"}]{" "}
+                {resolveComponentName(err.component_id, nodes)}:
+              </strong>{" "}
+              {err.message}
+              {err.suggestion && (
+                <div
+                  style={{
+                    color: "var(--color-text-muted)",
+                    fontSize: 12,
+                    marginTop: 2,
+                  }}
+                >
+                  Suggestion: {err.suggestion}
+                </div>
+              )}
+            </>
+          );
+
+          return (
+            <li key={i} style={{ marginBottom: 4 }}>
+              {isClickable ? (
+                <button
+                  onClick={() => onComponentClick(err.component_id!)}
+                  style={{
+                    background: "none",
+                    border: "none",
+                    padding: 0,
+                    margin: 0,
+                    font: "inherit",
+                    color: "inherit",
+                    textAlign: "left",
+                    cursor: "pointer",
+                    textDecoration: "underline",
+                    textDecorationColor: "var(--color-error-border)",
+                    textUnderlineOffset: 2,
+                  }}
+                  title={`Click to select ${err.component_id} in the pipeline view`}
+                >
+                  {content}
+                </button>
+              ) : (
+                content
+              )}
+            </li>
+          );
+        })}
       </ul>
     </div>
   );

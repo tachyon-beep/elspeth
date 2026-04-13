@@ -1,6 +1,18 @@
 import { create } from "zustand";
+import { loader } from "@monaco-editor/react";
 import type { UserProfile, ApiError } from "../types/index";
 import * as api from "../api/client";
+
+/**
+ * Preload Monaco editor in the background after successful authentication.
+ * This downloads and initializes the ~2MB Monaco bundle so the YAML tab
+ * renders instantly instead of showing "Initializing editor..." on first access.
+ */
+function preloadMonaco(): void {
+  loader.init().catch(() => {
+    // Silent failure - Monaco will load on-demand when YamlView mounts
+  });
+}
 
 const TOKEN_KEY = "auth_token";
 
@@ -31,6 +43,7 @@ export const useAuthStore = create<AuthState>((set) => ({
 
       const user = await api.fetchCurrentUser();
       set({ user, isLoading: false });
+      preloadMonaco();
     } catch (err) {
       const apiErr = err as ApiError;
       const message =
@@ -48,6 +61,7 @@ export const useAuthStore = create<AuthState>((set) => ({
     try {
       const user = await api.fetchCurrentUser();
       set({ user, isLoading: false });
+      preloadMonaco();
     } catch {
       set({
         token: null,
@@ -80,6 +94,7 @@ export const useAuthStore = create<AuthState>((set) => ({
     try {
       const user = await api.fetchCurrentUser();
       set({ user, isLoading: false });
+      preloadMonaco();
     } catch {
       // Token invalid or expired -- clear it
       localStorage.removeItem(TOKEN_KEY);

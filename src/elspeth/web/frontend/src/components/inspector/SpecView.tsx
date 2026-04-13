@@ -27,9 +27,11 @@
 // Empty state: "No pipeline yet -- describe what you want to build in the chat."
 // ============================================================================
 
-import { useState, useCallback } from "react";
+import { useState, useCallback, useEffect, useRef, useMemo } from "react";
 import { useSessionStore } from "@/stores/sessionStore";
-import type { NodeSpec, EdgeSpec, CompositionState, ValidationEntryDTO } from "@/types/index";
+import { useExecutionStore } from "@/stores/executionStore";
+import { useComposer } from "@/hooks/useComposer";
+import type { NodeSpec, EdgeSpec, CompositionState, ValidationEntryDTO, ValidationError, ValidationWarning } from "@/types/index";
 
 // ── Type badge CSS class mapping ─────────────────────────────────────────────
 // Uses .type-badge + .type-badge-{type} classes from App.css
@@ -47,6 +49,18 @@ const TYPE_LABELS: Record<NodeSpec["node_type"], string> = {
   aggregation: "AGGREGATION",
   coalesce: "COALESCE",
 };
+
+// CSS variable names for colored card bands by node type
+const TYPE_BAND_COLORS: Record<NodeSpec["node_type"], string> = {
+  transform: "var(--color-badge-transform)",
+  gate: "var(--color-badge-gate)",
+  aggregation: "var(--color-badge-aggregation)",
+  coalesce: "var(--color-badge-coalesce)",
+};
+
+// Source and sink use their own badge styles
+const SOURCE_BADGE_CLASS = "type-badge type-badge-source";
+const SINK_BADGE_CLASS = "type-badge type-badge-sink";
 
 // ── Relationship computation ─────────────────────────────────────────────────
 
@@ -161,9 +175,15 @@ function ConnectionIndicator({
   );
 }
 
-// ── SuggestionBanner — collapsible info banner ──────────────────────────────
+// ── SuggestionBanner — collapsible info banner with clickable items ─────────
 
-function SuggestionBanner({ suggestions }: { suggestions: ValidationEntryDTO[] }) {
+interface SuggestionBannerProps {
+  suggestions: ValidationEntryDTO[];
+  onApply?: (suggestion: ValidationEntryDTO) => void;
+  isApplying?: boolean;
+}
+
+function SuggestionBanner({ suggestions, onApply, isApplying }: SuggestionBannerProps) {
   const [expanded, setExpanded] = useState(suggestions.length <= 2);
 
   return (
@@ -204,8 +224,43 @@ function SuggestionBanner({ suggestions }: { suggestions: ValidationEntryDTO[] }
       {expanded && (
         <ul style={{ margin: 0, paddingLeft: 16 }}>
           {suggestions.map((entry, i) => (
-            <li key={i} style={{ marginBottom: 2 }}>
-              <strong>{entry.component}:</strong> {entry.message}
+            <li
+              key={i}
+              style={{
+                marginBottom: 4,
+                display: "flex",
+                alignItems: "flex-start",
+                gap: 8,
+              }}
+            >
+              <span style={{ flex: 1 }}>
+                <strong>{entry.component}:</strong> {entry.message}
+              </span>
+              {onApply && (
+                <button
+                  onClick={() => onApply(entry)}
+                  disabled={isApplying}
+                  title="Ask assistant to apply this suggestion"
+                  aria-label={`Apply suggestion: ${entry.message}`}
+                  style={{
+                    padding: "2px 8px",
+                    fontSize: 11,
+                    backgroundColor: isApplying
+                      ? "var(--color-surface)"
+                      : "var(--color-accent)",
+                    color: isApplying
+                      ? "var(--color-text-muted)"
+                      : "var(--color-text-inverse)",
+                    border: "none",
+                    borderRadius: 4,
+                    cursor: isApplying ? "not-allowed" : "pointer",
+                    flexShrink: 0,
+                    whiteSpace: "nowrap",
+                  }}
+                >
+                  {isApplying ? "Applying..." : "Apply"}
+                </button>
+              )}
             </li>
           ))}
         </ul>
@@ -218,7 +273,57 @@ function SuggestionBanner({ suggestions }: { suggestions: ValidationEntryDTO[] }
 
 export function SpecView() {
   const compositionState = useSessionStore((s) => s.compositionState);
-  const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null);
+  const selectedNodeId = useSessionStore((s) => s.selectedNodeId);
+  const selectNode = useSessionStore((s) => s.selectNode);
+  const validationResult = useExecutionStore((s) => s.validationResult);
+  const { sendMessage, isComposing } = useComposer();
+
+  // Handler for applying a suggestion via the LLM
+  const handleApplySuggestion = useCallback(
+    (suggestion: ValidationEntryDTO) => {
+      const prompt = `Please apply this suggestion to the pipeline:\n\n**${suggestion.component}:** ${suggestion.message}`;
+      sendMessage(prompt);
+    },
+    [sendMessage],
+  );
+
+  // Refs for scroll-into-view when selection changes (e.g., from GraphView click)
+  const cardRefs = useRef<Map<string, HTMLDivElement>>(new Map());
+
+  // Auto-scroll to selected card when selection changes from external source
+  useEffect(() => {
+    if (selectedNodeId) {
+      const card = cardRefs.current.get(selectedNodeId);
+      card?.scrollIntoView({ behavior: "smooth", block: "nearest" });
+    }
+  }, [selectedNodeId]);
+
+  // Build maps of component_id -> errors/warnings for inline display
+  const { nodeErrors, nodeWarnings } = useMemo(() => {
+    const errors = new Map<string, ValidationError[]>();
+    const warnings = new Map<string, ValidationWarning[]>();
+
+    if (validationResult) {
+      for (const err of validationResult.errors) {
+        if (err.component_id) {
+          const existing = errors.get(err.component_id) ?? [];
+          existing.push(err);
+          errors.set(err.component_id, existing);
+        }
+      }
+      if (validationResult.warnings) {
+        for (const warn of validationResult.warnings) {
+          if (warn.component_id) {
+            const existing = warnings.get(warn.component_id) ?? [];
+            existing.push(warn);
+            warnings.set(warn.component_id, existing);
+          }
+        }
+      }
+    }
+
+    return { nodeErrors: errors, nodeWarnings: warnings };
+  }, [validationResult]);
 
   // Compute relationships for the selected node
   const { upstream, downstream } =
@@ -238,13 +343,13 @@ export function SpecView() {
   );
 
   function handleCardClick(nodeId: string) {
-    setSelectedNodeId((prev) => (prev === nodeId ? null : nodeId));
+    selectNode(selectedNodeId === nodeId ? null : nodeId);
   }
 
   function handleBackgroundClick(e: React.MouseEvent) {
     // Only deselect if clicking the container itself, not a card
     if (e.target === e.currentTarget) {
-      setSelectedNodeId(null);
+      selectNode(null);
     }
   }
 
@@ -343,15 +448,51 @@ export function SpecView() {
           </div>
         )}
 
-      {/* Stage 1 validation suggestions */}
+      {/* Stage 1 validation suggestions — clickable to send to LLM */}
       {compositionState.validation_suggestions &&
         compositionState.validation_suggestions.length > 0 && (
           <SuggestionBanner
             suggestions={compositionState.validation_suggestions}
+            onApply={handleApplySuggestion}
+            isApplying={isComposing}
           />
         )}
 
-      {/* Component cards */}
+      {/* Source card */}
+      {compositionState.source && (
+        <div
+          className="component-card"
+          style={{ borderLeft: "3px solid var(--color-badge-source)" }}
+        >
+          <div
+            style={{
+              display: "flex",
+              gap: 6,
+              alignItems: "center",
+              marginBottom: 4,
+            }}
+          >
+            <span className={SOURCE_BADGE_CLASS}>SOURCE</span>
+          </div>
+          <div style={{ fontWeight: 600, fontSize: 13 }}>
+            {compositionState.source.plugin}
+          </div>
+          {compositionState.source.on_success && (
+            <div
+              style={{
+                marginTop: 6,
+                fontSize: 11,
+                color: "var(--color-text-muted)",
+              }}
+            >
+              <span aria-hidden="true">{"\u2193"}</span>
+              <span className="sr-only">continues to</span> {compositionState.source.on_success}
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* Node cards (transforms, gates, aggregations, coalesce) */}
       {compositionState.nodes.map((node) => {
         const relBadge = getRelBadge(
           node.id,
@@ -366,6 +507,10 @@ export function SpecView() {
         return (
           <div
             key={node.id}
+            ref={(el) => {
+              if (el) cardRefs.current.set(node.id, el);
+              else cardRefs.current.delete(node.id);
+            }}
             tabIndex={0}
             role="button"
             aria-pressed={isSelected}
@@ -382,6 +527,7 @@ export function SpecView() {
             ]
               .filter(Boolean)
               .join(" ")}
+            style={{ borderLeft: `3px solid ${TYPE_BAND_COLORS[node.node_type]}` }}
           >
             {/* Top row: type badge + relationship badge */}
             <div
@@ -450,9 +596,85 @@ export function SpecView() {
                 ))}
               </div>
             )}
+
+            {/* Inline validation errors */}
+            {nodeErrors.get(node.id)?.map((err, i) => (
+              <div
+                key={`error-${i}`}
+                style={{
+                  marginTop: 6,
+                  padding: "4px 8px",
+                  borderRadius: 4,
+                  backgroundColor: "var(--color-error-bg)",
+                  border: "1px solid var(--color-error-border)",
+                  fontSize: 11,
+                  color: "var(--color-error)",
+                }}
+              >
+                <strong>Error:</strong> {err.message}
+                {err.suggestion && (
+                  <div style={{ color: "var(--color-text-muted)", marginTop: 2 }}>
+                    Suggestion: {err.suggestion}
+                  </div>
+                )}
+              </div>
+            ))}
+
+            {/* Inline validation warnings */}
+            {nodeWarnings.get(node.id)?.map((warn, i) => (
+              <div
+                key={`warning-${i}`}
+                style={{
+                  marginTop: 6,
+                  padding: "4px 8px",
+                  borderRadius: 4,
+                  backgroundColor: "var(--color-warning-bg)",
+                  border: "1px solid var(--color-warning-border)",
+                  fontSize: 11,
+                  color: "var(--color-warning)",
+                }}
+              >
+                <strong>Warning:</strong> {warn.message}
+                {warn.suggestion && (
+                  <div style={{ color: "var(--color-text-muted)", marginTop: 2 }}>
+                    Suggestion: {warn.suggestion}
+                  </div>
+                )}
+              </div>
+            ))}
           </div>
         );
       })}
+
+      {/* Output/sink cards */}
+      {compositionState.outputs.map((output) => (
+        <div
+          key={output.name}
+          className="component-card"
+          style={{ borderLeft: "3px solid var(--color-badge-sink)" }}
+        >
+          <div
+            style={{
+              display: "flex",
+              gap: 6,
+              alignItems: "center",
+              marginBottom: 4,
+            }}
+          >
+            <span className={SINK_BADGE_CLASS}>SINK</span>
+          </div>
+          <div style={{ fontWeight: 600, fontSize: 13 }}>{output.name}</div>
+          <div
+            style={{
+              fontSize: 12,
+              color: "var(--color-text-muted)",
+              marginTop: 2,
+            }}
+          >
+            {output.plugin}
+          </div>
+        </div>
+      ))}
     </div>
   );
 }

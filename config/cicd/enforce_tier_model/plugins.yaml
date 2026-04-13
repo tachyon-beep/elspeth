@@ -19,7 +19,7 @@ per_file_rules:
   - R5
   reason: Type discrimination for config field validation and coercion
   expires: null
-  max_hits: 6
+  max_hits: 8
 - pattern: plugins/transforms/llm/*
   rules:
   - R1

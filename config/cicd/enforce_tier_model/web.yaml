@@ -586,6 +586,17 @@ allow_hits:
   reason: Unwrapping redact_source_storage_path() output — helper returns dict with "source" key; .get() with fallback to original is defensive against helper contract change
   safety: Falls back to unredacted source_data (less privacy, not less safety)
   expires: null
+# Group F: CompositionState.validate() — checking user-provided pipeline config options
+- key: web/composer/state.py:R1:CompositionState:validate:fp=846f14aa57a3d83c
+  owner: web-composer
+  reason: Tier 3 boundary — user-provided pipeline node options; checking if required option value is empty after confirming key exists
+  safety: Returns validation warning to user; does not affect execution
+  expires: null
+- key: web/composer/state.py:R1:CompositionState:validate:fp=33c51d2ddcf08740
+  owner: web-composer
+  reason: Tier 3 boundary — user-provided sink output options; checking if path is empty after confirming key exists
+  safety: Returns validation warning to user; does not affect execution
+  expires: null
 per_file_rules:
 - pattern: web/composer/tools.py
   rules:

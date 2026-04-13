@@ -87,6 +87,8 @@ export interface ChatMessage {
 export interface SourceSpec {
   plugin: string;
   options: Record<string, unknown>;
+  on_success?: string;
+  on_validation_failure?: string;
 }
 
 /**
