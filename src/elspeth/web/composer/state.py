@@ -4,7 +4,7 @@ All dataclasses are frozen with slots. Container fields (options, routes,
 fork_to, branches) are deep-frozen via freeze_fields() in __post_init__.
 Mutation methods return new instances — they never modify the original.
 
-Layer: L3 (application). Imports from L0 (contracts.freeze) only.
+Layer: L3 (application).
 """
 
 from __future__ import annotations
@@ -15,6 +15,9 @@ from pathlib import PurePosixPath
 from typing import Any, Literal, Self
 
 from elspeth.contracts.freeze import deep_thaw, freeze_fields
+from elspeth.engine.orchestrator.validation import (
+    _ALLOWED_FAILSINK_PLUGINS,
+)
 
 NodeType = Literal["transform", "gate", "aggregation", "coalesce"]
 EdgeType = Literal["on_success", "on_error", "route_true", "route_false", "fork"]
@@ -683,7 +686,7 @@ class CompositionState:
         # W7: on_write_failure reference validation
         # Mirrors rules from engine/orchestrator/validation.py so LLMs get
         # early feedback instead of failing at pipeline build time.
-        _failsink_eligible = {"csv", "json", "xml"}
+        _failsink_eligible = _ALLOWED_FAILSINK_PLUGINS
         output_name_set = {o.name for o in self.outputs}
         output_by_name = {o.name: o for o in self.outputs}
         for output in self.outputs:

@@ -165,10 +165,10 @@ class PluginConfig(BaseModel):
         }
 
         if not isinstance(config, dict):
-            _cause = f"config must be a dict, got {type(config).__name__}."
+            _err_fields["cause"] = f"config must be a dict, got {type(config).__name__}."
             raise PluginConfigError(
-                f"Invalid configuration for {cls.__name__}: {_cause}",
-                **{**_err_fields, "cause": _cause},
+                f"Invalid configuration for {cls.__name__}: {_err_fields['cause']}",
+                **_err_fields,
             )
 
         # Pre-validate: reject explicit non-dict schema values.
@@ -178,27 +178,29 @@ class PluginConfig(BaseModel):
             if key in config:
                 value = config[key]
                 if not isinstance(value, (dict, SchemaConfig)):
-                    _cause = (
+                    _err_fields["cause"] = (
                         f"'schema' must be a dict, got {type(value).__name__}. "
                         f"Use 'schema: {{mode: observed}}' or provide explicit field definitions."
                     )
                     raise PluginConfigError(
-                        f"Invalid configuration for {cls.__name__}: {_cause}",
-                        **{**_err_fields, "cause": _cause},
+                        f"Invalid configuration for {cls.__name__}: {_err_fields['cause']}",
+                        **_err_fields,
                     )
 
         try:
             # model_validate handles the schema alias and field_validator parses dicts
             return cls.model_validate(config)
         except ValidationError as e:
+            _err_fields["cause"] = str(e)
             raise PluginConfigError(
                 f"Invalid configuration for {cls.__name__}: {e}",
-                **{**_err_fields, "cause": str(e)},
+                **_err_fields,
             ) from e
         except ValueError as e:
+            _err_fields["cause"] = str(e)
             raise PluginConfigError(
                 f"Invalid configuration for {cls.__name__}: {e}",
-                **{**_err_fields, "cause": str(e)},
+                **_err_fields,
             ) from e
 
 
