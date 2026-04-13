@@ -160,6 +160,7 @@ def _extract_base_names(node: ast.ClassDef) -> list[str]:
 def _class_sets_component_type(node: ast.ClassDef) -> bool:
     """Check if a class body contains _plugin_component_type = <string>."""
     for item in node.body:
+        # Annotated: _plugin_component_type: ClassVar[str | None] = "source"
         if (
             isinstance(item, ast.AnnAssign)
             and isinstance(item.target, ast.Name)
@@ -169,6 +170,16 @@ def _class_sets_component_type(node: ast.ClassDef) -> bool:
             and isinstance(item.value.value, str)
         ):
             return True
+        # Bare: _plugin_component_type = "source"
+        if isinstance(item, ast.Assign):
+            for target in item.targets:
+                if (
+                    isinstance(target, ast.Name)
+                    and target.id == "_plugin_component_type"
+                    and isinstance(item.value, ast.Constant)
+                    and isinstance(item.value.value, str)
+                ):
+                    return True
     return False
 
 

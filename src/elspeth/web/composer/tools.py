@@ -363,7 +363,14 @@ def get_tool_definitions() -> list[dict[str, Any]]:
         },
         {
             "name": "upsert_node",
-            "description": "Add or update a pipeline node (transform, gate, aggregation, coalesce).",
+            "description": (
+                "Add or update a pipeline node. "
+                "Fields are node_type-dependent: "
+                "transform/aggregation use plugin+options; "
+                "gate uses condition+routes (or fork_to); "
+                "coalesce uses branches+policy+merge. "
+                "Omit fields that don't apply to your node_type."
+            ),
             "parameters": {
                 "type": "object",
                 "properties": {
@@ -372,17 +379,34 @@ def get_tool_definitions() -> list[dict[str, Any]]:
                         "type": "string",
                         "enum": ["transform", "gate", "aggregation", "coalesce"],
                     },
-                    "plugin": {"type": ["string", "null"], "description": "Plugin name. Null for gates/coalesces."},
+                    "plugin": {
+                        "type": ["string", "null"],
+                        "description": "Plugin name. Required for transform/aggregation. Null for gate/coalesce.",
+                    },
                     "input": {"type": "string", "description": "Input connection name."},
-                    "on_success": {"type": ["string", "null"], "description": "Output connection. Null for gates."},
-                    "on_error": {"type": ["string", "null"], "description": "Error output connection."},
-                    "options": {"type": "object", "description": "Plugin-specific config."},
-                    "condition": {"type": ["string", "null"], "description": "Gate expression."},
-                    "routes": {"type": ["object", "null"], "description": "Gate route mapping."},
-                    "fork_to": {"type": ["array", "null"], "items": {"type": "string"}, "description": "Fork destinations."},
-                    "branches": {"type": ["array", "null"], "items": {"type": "string"}, "description": "Coalesce branch inputs."},
-                    "policy": {"type": ["string", "null"], "description": "Coalesce policy."},
-                    "merge": {"type": ["string", "null"], "description": "Coalesce merge strategy."},
+                    "on_success": {
+                        "type": ["string", "null"],
+                        "description": "Output connection. Required for transform/aggregation/coalesce. Null for gates (routing is via condition/routes).",
+                    },
+                    "on_error": {"type": ["string", "null"], "description": "Error output connection (transform/aggregation only)."},
+                    "options": {"type": "object", "description": "Plugin-specific config (transform/aggregation only)."},
+                    "condition": {"type": ["string", "null"], "description": "Boolean expression (gate only). Evaluated per row."},
+                    "routes": {
+                        "type": ["object", "null"],
+                        "description": "Route mapping {true: sink_or_node, false: sink_or_node} (gate only, mutually exclusive with fork_to).",
+                    },
+                    "fork_to": {
+                        "type": ["array", "null"],
+                        "items": {"type": "string"},
+                        "description": "Fork destinations — row is copied to all listed paths (gate only, mutually exclusive with routes).",
+                    },
+                    "branches": {
+                        "type": ["array", "null"],
+                        "items": {"type": "string"},
+                        "description": "Input branch names to merge (coalesce only).",
+                    },
+                    "policy": {"type": ["string", "null"], "description": "Merge trigger policy (coalesce only)."},
+                    "merge": {"type": ["string", "null"], "description": "Field merge strategy (coalesce only)."},
                 },
                 "required": ["id", "node_type", "input"],
             },
