@@ -58,10 +58,16 @@ class TestWebCommandHappyPath:
 
     def test_non_local_host_with_default_secret_key_fails(self) -> None:
         """0.0.0.0 with default secret_key triggers the production guard."""
+        import os
+
         mock_uvicorn = MagicMock()
-        with patch.dict("sys.modules", {"uvicorn": mock_uvicorn}):
+        # --no-dotenv prevents .env loading (which sets ELSPETH_WEB__SECRET_KEY).
+        # Also scrub the key from env in case prior tests leaked it via the
+        # web command's env-var bridging (cli.py:2324).
+        env_without_key = {k: v for k, v in os.environ.items() if k != "ELSPETH_WEB__SECRET_KEY"}
+        with patch.dict(os.environ, env_without_key, clear=True), patch.dict("sys.modules", {"uvicorn": mock_uvicorn}):
             mock_uvicorn.run = MagicMock()
-            result = runner.invoke(app, ["web", "--host", "0.0.0.0"])
+            result = runner.invoke(app, ["--no-dotenv", "web", "--host", "0.0.0.0"])
 
         assert result.exit_code != 0
         mock_uvicorn.run.assert_not_called()

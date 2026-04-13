@@ -275,10 +275,11 @@ class TypeCoerce(BaseTransform):
 
     name = "type_coerce"
     plugin_version = "1.0.0"
+    config_model = TypeCoerceConfig
 
     def __init__(self, config: dict[str, Any]) -> None:
         super().__init__(config)
-        cfg = TypeCoerceConfig.from_dict(config)
+        cfg = TypeCoerceConfig.from_dict(config, plugin_name=self.name)
         self._conversions = cfg.conversions
         self._schema_config = cfg.schema_config
 

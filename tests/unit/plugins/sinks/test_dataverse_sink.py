@@ -175,7 +175,7 @@ class TestDataverseSinkInit:
     @patch("elspeth.plugins.sinks.dataverse.create_schema_from_config", return_value=MagicMock())
     def test_alternate_key_not_in_field_mapping_values_raises(self, _mock_schema: MagicMock) -> None:
         """alternate_key must be a Dataverse column that appears as a value in field_mapping."""
-        with pytest.raises(ValueError, match="not found in field_mapping values"):
+        with pytest.raises(PluginConfigError, match="not found in field_mapping values"):
             DataverseSink(_config(alternate_key="nonexistent_column"))
 
     @patch("elspeth.plugins.sinks.dataverse.create_schema_from_config", return_value=MagicMock())

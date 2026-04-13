@@ -10,7 +10,7 @@ import hashlib
 import math
 import time
 from collections.abc import Callable
-from typing import TYPE_CHECKING, Any, Literal
+from typing import TYPE_CHECKING, Any, ClassVar, Literal
 
 import chromadb
 import chromadb.api
@@ -77,6 +77,8 @@ class ChromaSinkConfig(DataPluginConfig):
     validator. This is the same delegation pattern used by
     ChromaSearchProviderConfig.
     """
+
+    _plugin_component_type: ClassVar[str | None] = "sink"
 
     collection: str = Field(description="ChromaDB collection name")
     mode: Literal["persistent", "client"] = Field(description="Connection mode")
@@ -167,11 +169,12 @@ class ChromaSink(BaseSink):
 
     name = "chroma_sink"
     plugin_version = "1.0.0"
+    config_model = ChromaSinkConfig
     supports_resume = False
 
     def __init__(self, config: dict[str, Any]) -> None:
         super().__init__(config)
-        self._config = ChromaSinkConfig.from_dict(config)
+        self._config = ChromaSinkConfig.from_dict(config, plugin_name=self.name)
         self._schema_class: type[PluginSchema] = create_schema_from_config(
             self._config.schema_config,
             "ChromaSinkRowSchema",

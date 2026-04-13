@@ -57,11 +57,12 @@ class TextSource(BaseSource):
 
     name = "text"
     plugin_version = "1.0.0"
+    config_model = TextSourceConfig
     _on_validation_failure: str
 
     def __init__(self, config: dict[str, Any]) -> None:
         super().__init__(config)
-        cfg = TextSourceConfig.from_dict(config)
+        cfg = TextSourceConfig.from_dict(config, plugin_name=self.name)
 
         self._path = cfg.resolved_path()
         self._column = cfg.column

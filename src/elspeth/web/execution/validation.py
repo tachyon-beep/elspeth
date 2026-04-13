@@ -15,7 +15,6 @@ and the file is deleted in a finally block.
 
 from __future__ import annotations
 
-import re
 import tempfile
 from collections.abc import Mapping
 from pathlib import Path
@@ -28,6 +27,7 @@ from elspeth.contracts.secrets import WebSecretResolver
 from elspeth.core.config import load_settings
 from elspeth.core.dag.graph import ExecutionGraph
 from elspeth.core.dag.models import GraphValidationError
+from elspeth.plugins.infrastructure.config_base import PluginConfigError
 from elspeth.plugins.infrastructure.manager import PluginNotFoundError
 from elspeth.web.composer.state import CompositionState
 from elspeth.web.config import WebSettings
@@ -39,7 +39,7 @@ from elspeth.web.execution.schemas import (
 )
 
 # ── Check names (ordered) ─────────────────────────────────────────────
-_CHECK_PATH_ALLOWLIST = "source_path_allowlist"
+_CHECK_PATH_ALLOWLIST = "path_allowlist"
 _CHECK_SECRET_REFS = "secret_refs"
 _CHECK_SETTINGS = "settings_load"
 _CHECK_PLUGINS = "plugin_instantiation"
@@ -47,6 +47,20 @@ _CHECK_GRAPH = "graph_structure"
 _CHECK_SCHEMA = "schema_compatibility"
 
 _ALL_CHECKS = [_CHECK_PATH_ALLOWLIST, _CHECK_SECRET_REFS, _CHECK_SETTINGS, _CHECK_PLUGINS, _CHECK_GRAPH, _CHECK_SCHEMA]
+
+
+def _infer_component_type_from_plugin_error(
+    exc: PluginNotFoundError | PluginConfigError,
+) -> str | None:
+    """Extract component type from plugin error metadata.
+
+    Reads PluginConfigError.component_type directly — set by from_dict()
+    from the config class hierarchy's _plugin_component_type attribute.
+    Returns None for PluginNotFoundError or when component_type was not set.
+    """
+    if isinstance(exc, PluginConfigError):
+        return exc.component_type
+    return None
 
 
 def _skipped_checks(from_check: str) -> list[ValidationCheck]:
@@ -68,37 +82,10 @@ def _skipped_checks(from_check: str) -> list[ValidationCheck]:
     return result
 
 
-def _extract_component_id(message: str) -> tuple[str | None, str | None]:
-    """Best-effort extraction of component_id and type from error message.
-
-    Parses node IDs like 'gate_1', 'transform_2', 'sink_primary' from
-    engine error messages. Returns (component_id, component_type) or
-    (None, None) for structural errors.
-    """
-    # NOTE: This relies on error message string format from the engine.
-    # Long-term, the engine should raise structured exceptions with
-    # component_id as a field, not embedded in message strings. For MVP
-    # this is acceptable — attribution degrades to (None, None), not failure.
-    # Common patterns: "in gate_1", "node gate_1", "'gate_1'"
-    patterns = [
-        r"(?:in |node |'|\")((?:gate|transform|sink|source|aggregation)_\w+)",
-        r"((?:gate|transform|sink|source|aggregation)_\w+)",
-    ]
-    for pattern in patterns:
-        match = re.search(pattern, message)
-        if match:
-            node_id = match.group(1)
-            # Extract type from prefix
-            for prefix in ("gate", "transform", "sink", "source", "aggregation"):
-                if node_id.startswith(prefix):
-                    return node_id, prefix
-    return None, None
-
-
 def _collect_secret_refs(obj: Any) -> list[str]:
     """Walk a nested dict/list/Mapping structure and collect all secret_ref names."""
     refs: list[str] = []
-    if isinstance(obj, (dict, Mapping)):
+    if isinstance(obj, Mapping):
         if len(obj) == 1 and "secret_ref" in obj:
             ref = obj["secret_ref"]
             if isinstance(ref, str):
@@ -148,11 +135,11 @@ def validate_pipeline(
     # Step 1: Source + sink path allowlist check (C3/S2 defense-in-depth)
     # Any `path` or `file` key in source/sink options must resolve under
     # an allowed directory. Uses the shared helpers from AD-4.
-    from elspeth.web.composer.tools import _allowed_sink_directories, _allowed_source_directories
+    from elspeth.web.paths import allowed_sink_directories, allowed_source_directories
 
     data_dir_resolved = Path(settings.data_dir).resolve()
-    allowed_source_dirs = _allowed_source_directories(str(settings.data_dir))
-    allowed_sink_dirs = _allowed_sink_directories(str(settings.data_dir))
+    allowed_source_dirs = allowed_source_directories(str(settings.data_dir))
+    allowed_sink_dirs = allowed_sink_directories(str(settings.data_dir))
     # state is a CompositionState (typed domain object). state.source is a
     # SourceSpec with typed .options attribute (Mapping[str, Any]).
     source_options = dict(state.source.options) if state.source is not None else {}
@@ -168,11 +155,11 @@ def validate_pipeline(
                     is_valid=False,
                     checks=[
                         ValidationCheck(
-                            name="source_path_allowlist",
+                            name=_CHECK_PATH_ALLOWLIST,
                             passed=False,
                             detail=f"Source {key} '{value}' is outside allowed source directories",
                         ),
-                        *_skipped_checks("source_path_allowlist"),
+                        *_skipped_checks(_CHECK_PATH_ALLOWLIST),
                     ],
                     errors=[
                         ValidationError(
@@ -197,11 +184,11 @@ def validate_pipeline(
                         is_valid=False,
                         checks=[
                             ValidationCheck(
-                                name="source_path_allowlist",
+                                name=_CHECK_PATH_ALLOWLIST,
                                 passed=False,
                                 detail=f"Sink '{output.name}' {key} '{value}' is outside allowed output directories",
                             ),
-                            *_skipped_checks("source_path_allowlist"),
+                            *_skipped_checks(_CHECK_PATH_ALLOWLIST),
                         ],
                         errors=[
                             ValidationError(
@@ -213,7 +200,7 @@ def validate_pipeline(
                         ],
                     )
 
-    # B11 fix: Always record the source_path_allowlist check
+    # B11 fix: Always record the path_allowlist check
     if path_checked:
         checks.append(
             ValidationCheck(
@@ -328,20 +315,27 @@ def validate_pipeline(
                 detail="All plugins instantiated",
             )
         )
-    except PluginNotFoundError as exc:
+    except (PluginNotFoundError, PluginConfigError) as exc:
+        comp_type = _infer_component_type_from_plugin_error(exc)
+        plugin_name = exc.plugin_name if isinstance(exc, PluginConfigError) else None
+        # Prefer cause (validation detail) over str(exc) which includes the
+        # internal class name prefix (e.g. "Invalid configuration for CSVSourceConfig: ...").
+        if isinstance(exc, PluginConfigError) and exc.cause is not None and plugin_name is not None:
+            detail = f"Invalid configuration for {comp_type} '{plugin_name}': {exc.cause}"
+        else:
+            detail = str(exc)
         checks.append(
             ValidationCheck(
                 name=_CHECK_PLUGINS,
                 passed=False,
-                detail=str(exc),
+                detail=detail,
             )
         )
-        comp_id, comp_type = _extract_component_id(str(exc))
         errors.append(
             ValidationError(
-                component_id=comp_id,
+                component_id=plugin_name,
                 component_type=comp_type,
-                message=str(exc),
+                message=detail,
                 suggestion=None,
             )
         )
@@ -375,11 +369,10 @@ def validate_pipeline(
                 detail=str(exc),
             )
         )
-        comp_id, comp_type = _extract_component_id(str(exc))
         errors.append(
             ValidationError(
-                component_id=comp_id,
-                component_type=comp_type,
+                component_id=exc.component_id,
+                component_type=exc.component_type,
                 message=str(exc),
                 suggestion=None,
             )
@@ -405,11 +398,10 @@ def validate_pipeline(
                 detail=str(exc),
             )
         )
-        comp_id, comp_type = _extract_component_id(str(exc))
         errors.append(
             ValidationError(
-                component_id=comp_id,
-                component_type=comp_type,
+                component_id=exc.component_id,
+                component_type=exc.component_type,
                 message=str(exc),
                 suggestion=None,
             )

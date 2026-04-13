@@ -163,19 +163,12 @@ export function GraphView() {
   }, [validationResult]);
 
   const { nodes, edges } = useMemo(() => {
-    // DEBUG: Trace source rendering issue
-    console.log("[GraphView] compositionState:", compositionState);
-    console.log("[GraphView] source:", compositionState?.source);
-    console.log("[GraphView] outputs:", compositionState?.outputs);
-    console.log("[GraphView] edges:", compositionState?.edges);
-
     const hasContent =
       compositionState &&
       (compositionState.source !== null ||
         compositionState.nodes.length > 0 ||
         compositionState.outputs.length > 0);
     if (!hasContent) {
-      console.log("[GraphView] No content, returning empty");
       return { nodes: [] as Node[], edges: [] as Edge[] };
     }
 
@@ -205,37 +198,29 @@ export function GraphView() {
         data: {
           label: (
             <div
-              style={{ display: "flex", flexDirection: "column", gap: 4, padding: "8px 12px" }}
+              className="graph-node-content"
               title={validationTooltip ?? (validationStatus === "valid" ? "Valid" : undefined)}
             >
-              <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
-                <span style={{
-                  fontSize: 10,
-                  fontWeight: 700,
-                  textTransform: "uppercase",
-                  padding: "1px 6px",
-                  borderRadius: 3,
-                  backgroundColor: badgeBg,
-                  color: badgeColor,
-                }}>
+              <div className="graph-node-header">
+                <span
+                  className="graph-node-badge"
+                  style={{ backgroundColor: badgeBg, color: badgeColor }}
+                >
                   {typeLabel}
                 </span>
-                <span style={{ fontSize: 13, fontWeight: 600, color: "var(--color-text)" }}>
+                <span className="graph-node-label">
                   {id}
                 </span>
                 {validationStatus && (
                   <span
+                    className="graph-validation-dot"
                     style={{
-                      width: 8,
-                      height: 8,
-                      borderRadius: "50%",
                       backgroundColor:
                         validationStatus === "error"
                           ? VALIDATION_COLORS.invalid
                           : validationStatus === "warning"
                             ? VALIDATION_COLORS.warning
                             : VALIDATION_COLORS.valid,
-                      flexShrink: 0,
                     }}
                     title={
                       validationTooltip
@@ -250,7 +235,7 @@ export function GraphView() {
                 )}
               </div>
               {subtitle && (
-                <div style={{ fontSize: 11, color: "var(--color-text-muted)" }}>
+                <div className="graph-node-subtitle">
                   {subtitle}
                 </div>
               )}
@@ -281,8 +266,8 @@ export function GraphView() {
           "source",
           "source",
           compositionState.source.plugin,
-          "rgba(77, 184, 154, 0.15)",
-          "#4db89a",
+          BADGE_BACKGROUNDS.source,
+          BADGE_COLORS.source,
           nodeValidationMap["source"],
           nodeMessageMap["source"],
           selectedNodeId === "source",
@@ -313,17 +298,14 @@ export function GraphView() {
           output.name,
           "sink",
           output.plugin,
-          "rgba(224, 112, 64, 0.15)",
-          "#e07040",
+          BADGE_BACKGROUNDS.sink,
+          BADGE_COLORS.sink,
           nodeValidationMap[output.name],
           nodeMessageMap[output.name],
           selectedNodeId === output.name,
         ),
       );
     }
-
-    // DEBUG: Log what nodes we're about to render
-    console.log("[GraphView] rfNodes before layout:", rfNodes.map(n => ({ id: n.id, position: n.position })));
 
     // Build edges: start with explicit edges from compositionState
     const rfEdges: Edge[] = compositionState.edges.map((edge, i) => ({
@@ -417,7 +399,6 @@ export function GraphView() {
             labelStyle: { fontSize: 10, fill: EDGE_LABEL_COLOR },
           });
           existingConnections.add(`${producer.nodeId}->${node.id}`);
-          console.log("[GraphView] Inferred edge via connection match:", producer.nodeId, "->", node.id, "(connection:", node.input, ", type:", producer.edgeType, ")");
         }
       }
     }
@@ -437,7 +418,6 @@ export function GraphView() {
         labelStyle: { fontSize: 10, fill: EDGE_LABEL_COLOR },
       });
       existingConnections.add(`source->${compositionState.source.on_success}`);
-      console.log("[GraphView] Inferred source → sink edge:", "source", "->", compositionState.source.on_success);
     }
 
     // Handle direct sink references (on_success/on_error/routes pointing to sink names)
@@ -496,12 +476,7 @@ export function GraphView() {
       }
     }
 
-    console.log("[GraphView] Total edges (explicit + inferred):", rfEdges.length);
-
-    const result = layoutGraph(rfNodes, rfEdges);
-    console.log("[GraphView] After layout - nodes:", result.nodes.map(n => ({ id: n.id, position: n.position })));
-    console.log("[GraphView] After layout - edges:", result.edges.map(e => ({ id: e.id, source: e.source, target: e.target })));
-    return result;
+    return layoutGraph(rfNodes, rfEdges);
   }, [compositionState, nodeValidationMap, nodeMessageMap, selectedNodeId]);
 
   // Empty state — must match the hasContent check above so that a
@@ -510,10 +485,6 @@ export function GraphView() {
     return (
       <div
         className="empty-state"
-        style={{
-          padding: 24,
-          fontSize: 14,
-        }}
       >
         No pipeline to visualise. Start a conversation to build one.
       </div>

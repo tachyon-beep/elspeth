@@ -31,7 +31,35 @@ from elspeth.web.composer.state import (
     SourceSpec,
     ValidationSummary,
 )
+from elspeth.web.paths import allowed_sink_directories, allowed_source_directories
 from elspeth.web.sessions.models import blobs_table
+
+
+def _compute_validation_delta(
+    before: ValidationSummary,
+    after: ValidationSummary,
+) -> dict[str, Any]:
+    """Compute new/resolved entries between two validation states.
+
+    Compares by (component, message) tuple since ValidationEntry
+    instances are recreated on each validate() call (no stable identity).
+    """
+    before_errors = {(e.component, e.message) for e in before.errors}
+    after_errors = {(e.component, e.message) for e in after.errors}
+    before_warnings = {(w.component, w.message) for w in before.warnings}
+    after_warnings = {(w.component, w.message) for w in after.warnings}
+
+    new_errors = [e.to_dict() for e in after.errors if (e.component, e.message) not in before_errors]
+    resolved_errors = [e.to_dict() for e in before.errors if (e.component, e.message) not in after_errors]
+    new_warnings = [w.to_dict() for w in after.warnings if (w.component, w.message) not in before_warnings]
+    resolved_warnings = [w.to_dict() for w in before.warnings if (w.component, w.message) not in after_warnings]
+
+    return {
+        "new_errors": new_errors,
+        "resolved_errors": resolved_errors,
+        "new_warnings": new_warnings,
+        "resolved_warnings": resolved_warnings,
+    }
 
 
 @dataclass(frozen=True, slots=True)
@@ -44,6 +72,9 @@ class ToolResult:
         validation: Stage 1 validation result for the updated state.
         affected_nodes: Node IDs changed or with changed edges.
         data: Optional data payload for discovery tools.
+        prior_validation: Validation from before the mutation. When set,
+            to_dict() includes a ``validation_delta`` showing new and
+            resolved entries so the agent can focus on what changed.
     """
 
     success: bool
@@ -51,6 +82,7 @@ class ToolResult:
     validation: ValidationSummary
     affected_nodes: tuple[str, ...]
     data: Any = None
+    prior_validation: ValidationSummary | None = None
 
     def __post_init__(self) -> None:
         freeze_fields(self, "affected_nodes")
@@ -62,6 +94,11 @@ class ToolResult:
 
         Validation entries are serialized as structured dicts with
         component, message, and severity fields (B2 requirement).
+
+        When prior_validation is set, includes a validation_delta with
+        new_errors, resolved_errors, new_warnings, resolved_warnings to
+        help the agent focus on what changed rather than re-reading the
+        full validation state.
         """
 
         result: dict[str, Any] = {
@@ -77,14 +114,31 @@ class ToolResult:
         }
         if self.data is not None:
             result["data"] = deep_thaw(self.data)
+
+        if self.prior_validation is not None:
+            result["validation_delta"] = _compute_validation_delta(
+                self.prior_validation,
+                self.validation,
+            )
+
         return result
 
 
-def diff_states(baseline: CompositionState, current: CompositionState) -> dict[str, Any]:
+def diff_states(
+    baseline: CompositionState,
+    current: CompositionState,
+    *,
+    baseline_validation: ValidationSummary | None = None,
+    current_validation: ValidationSummary | None = None,
+) -> dict[str, Any]:
     """Compare two composition states and return a structured change summary.
 
     Reports added, removed, and modified nodes/edges/outputs, plus source
     and metadata changes. Used by the diff_pipeline MCP tool (B5).
+
+    Args:
+        baseline_validation: Pre-computed validation for the baseline state.
+        current_validation: Pre-computed validation for the current state.
     """
     changes: dict[str, Any] = {
         "from_version": baseline.version,
@@ -146,9 +200,11 @@ def diff_states(baseline: CompositionState, current: CompositionState) -> dict[s
         if name not in current_outputs:
             changes["outputs"]["removed"].append(name)
 
-    # Validation delta
-    baseline_validation = baseline.validate()
-    current_validation = current.validate()
+    # Validation delta — reuse pre-computed validations when available
+    if baseline_validation is None:
+        baseline_validation = baseline.validate()
+    if current_validation is None:
+        current_validation = current.validate()
     baseline_warnings = {e.message for e in baseline_validation.warnings}
     current_warnings = {e.message for e in current_validation.warnings}
     changes["warnings_introduced"] = sorted(current_warnings - baseline_warnings)
@@ -399,8 +455,7 @@ def get_tool_definitions() -> list[dict[str, Any]]:
                     "options": {"type": "object", "description": "Plugin-specific config."},
                     "on_write_failure": {
                         "type": "string",
-                        "enum": ["discard", "quarantine"],
-                        "description": "How to handle write failures.",
+                        "description": "How to handle per-row write failures. Use 'discard' to drop with audit record, or a sink name (e.g. 'results_failures') to divert failed rows to that failsink.",
                         "default": "discard",
                     },
                 },
@@ -500,7 +555,7 @@ def get_tool_definitions() -> list[dict[str, Any]]:
                     "outputs": {
                         "type": "array",
                         "items": {"type": "object"},
-                        "description": "Array of output specs: [{name, plugin, options, on_write_failure?}]",
+                        "description": "Array of output specs: [{sink_name, plugin, options, on_write_failure?}]",
                     },
                     "metadata": {
                         "type": "object",
@@ -533,14 +588,20 @@ def get_tool_definitions() -> list[dict[str, Any]]:
         },
         {
             "name": "list_models",
-            "description": "List available LLM model identifiers that can be used "
-            "in LLM transform nodes. Optionally filter by provider prefix.",
+            "description": "List available LLM model identifiers. Without a provider "
+            "filter, returns provider names and counts. With a provider filter, "
+            "returns matching model IDs (capped at limit).",
             "parameters": {
                 "type": "object",
                 "properties": {
                     "provider": {
                         "type": "string",
-                        "description": "Optional provider prefix to filter by (e.g. 'openrouter/', 'azure/').",
+                        "description": "Provider prefix to filter by (e.g. 'openrouter/', 'azure/'). "
+                        "Omit to get a provider summary instead of individual models.",
+                    },
+                    "limit": {
+                        "type": "integer",
+                        "description": "Max models to return (default 50).",
                     },
                 },
                 "required": [],
@@ -553,6 +614,22 @@ def get_tool_definitions() -> list[dict[str, Any]]:
             "without executing. Use this to confirm the pipeline is set up "
             "correctly before running.",
             "parameters": {"type": "object", "properties": {}, "required": []},
+        },
+        {
+            "name": "get_pipeline_state",
+            "description": "Inspect the full current pipeline state including all "
+            "options for source, nodes, and outputs. Use this during correction "
+            "loops to see what is currently configured before patching.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "component": {
+                        "type": "string",
+                        "description": "Optional: return only one component — 'source', a node ID, or an output name. Omit for full state.",
+                    },
+                },
+                "required": [],
+            },
         },
         {
             "name": "diff_pipeline",
@@ -580,7 +657,8 @@ def get_tool_definitions() -> list[dict[str, Any]]:
         },
         {
             "name": "set_source_from_blob",
-            "description": "Wire a blob as the pipeline source. Resolves the blob's storage path internally and infers the source plugin from its MIME type.",
+            "description": "Wire a blob as the pipeline source. Resolves the blob's storage path internally and infers the source plugin from its MIME type. "
+            "Use 'options' for plugin-specific config (e.g., 'column' and 'schema' for text sources).",
             "parameters": {
                 "type": "object",
                 "properties": {
@@ -592,6 +670,11 @@ def get_tool_definitions() -> list[dict[str, Any]]:
                         "enum": ["quarantine", "discard"],
                         "description": "How to handle validation failures.",
                         "default": "quarantine",
+                    },
+                    "options": {
+                        "type": "object",
+                        "description": "Plugin-specific config (merged with blob path). Required fields vary by plugin: "
+                        "text sources need 'column' (output field name) and 'schema' (e.g., {mode: 'observed'}).",
                     },
                 },
                 "required": ["blob_id", "on_success"],
@@ -835,7 +918,7 @@ def _handle_set_output(
     catalog: CatalogService,
     data_dir: str | None = None,
 ) -> ToolResult:
-    return _execute_set_output(arguments, state, catalog)
+    return _execute_set_output(arguments, state, catalog, data_dir)
 
 
 def _handle_remove_output(
@@ -877,6 +960,8 @@ def _failure_result(
 def _mutation_result(
     new_state: CompositionState,
     affected: tuple[str, ...],
+    *,
+    prior_validation: ValidationSummary | None = None,
 ) -> ToolResult:
     """Build a ToolResult for a successful mutation."""
     validation = new_state.validate()
@@ -885,6 +970,7 @@ def _mutation_result(
         updated_state=new_state,
         validation=validation,
         affected_nodes=affected,
+        prior_validation=prior_validation,
     )
 
 
@@ -969,26 +1055,6 @@ def _sync_list_blobs(engine: Engine, session_id: str) -> list[dict[str, Any]]:
         ]
 
 
-def _allowed_source_directories(data_dir: str) -> tuple[Path, ...]:
-    """Return the set of directories from which source paths are allowed.
-
-    AD-4: Single shared helper used by composer tool validation,
-    execution validation, and execution runtime guard.
-    """
-    base = Path(data_dir).resolve()
-    return (base / "blobs",)
-
-
-def _allowed_sink_directories(data_dir: str) -> tuple[Path, ...]:
-    """Return the set of directories to which sink paths may write.
-
-    AD-4 extension: Mirrors _allowed_source_directories for output paths.
-    Sinks write to data_dir/outputs (not blobs, which is for ingestion).
-    """
-    base = Path(data_dir).resolve()
-    return (base / "outputs", base / "blobs")
-
-
 def _validate_source_path(
     options: dict[str, Any],
     data_dir: str | None,
@@ -1001,7 +1067,7 @@ def _validate_source_path(
     if data_dir is None:
         return None
 
-    allowed = _allowed_source_directories(data_dir)
+    allowed = allowed_source_directories(data_dir)
 
     for key in ("path", "file"):
         if key in options:
@@ -1014,6 +1080,134 @@ def _validate_source_path(
                     f"must be under {data_dir}/blobs/."
                 )
     return None
+
+
+def _validate_sink_path(
+    options: dict[str, Any],
+    data_dir: str | None,
+) -> str | None:
+    """Validate that sink path options are under allowed output directories.
+
+    Returns an error message if validation fails, None if OK.
+    Mirrors _validate_source_path but uses _allowed_sink_directories.
+    """
+    if data_dir is None:
+        return None
+
+    allowed = allowed_sink_directories(data_dir)
+
+    for key in ("path", "file"):
+        if key in options:
+            raw = Path(options[key])
+            resolved = (Path(data_dir).resolve() / raw).resolve() if not raw.is_absolute() else raw.resolve()
+            if not any(resolved.is_relative_to(d) for d in allowed):
+                return (
+                    f"Path violation (S2): '{options[key]}' is outside the "
+                    f"allowed directories. Sink output paths "
+                    f"must be under {data_dir}/outputs/ or {data_dir}/blobs/."
+                )
+    return None
+
+
+def _prevalidate_plugin_options(
+    plugin_type: PluginKind,
+    plugin_name: str,
+    options: dict[str, Any],
+    *,
+    injected_fields: dict[str, Any] | None = None,
+) -> str | None:
+    """Pre-validate plugin options against the plugin's config model.
+
+    Catches missing required options (e.g., schema, operations) and
+    malformed values (e.g., invalid field specs) BEFORE storing them in
+    CompositionState. Returns None if valid, or a descriptive error
+    message suitable for returning to the LLM agent.
+
+    The plugin's own Pydantic config model is the authority — this
+    function asks the plugin what it needs rather than hardcoding
+    knowledge about individual plugins.
+
+    Args:
+        plugin_type: "source", "transform", or "sink".
+        plugin_name: Plugin name (e.g., "csv", "value_transform").
+        options: Options dict as provided by the LLM agent.
+        injected_fields: Synthetic values for fields that come from
+            other parts of the pipeline spec (e.g., on_validation_failure
+            for sources). Merged into options for validation only —
+            not stored.
+    """
+    from elspeth.plugins.infrastructure.config_base import PluginConfigError
+    from elspeth.plugins.infrastructure.validation import (
+        UnknownPluginTypeError,
+        get_sink_config_model,
+        get_source_config_model,
+        get_transform_config_model,
+    )
+
+    try:
+        if plugin_type == "source":
+            config_cls = get_source_config_model(plugin_name)
+        elif plugin_type == "transform":
+            config_cls = get_transform_config_model(plugin_name, options)
+        elif plugin_type == "sink":
+            config_cls = get_sink_config_model(plugin_name)
+        else:
+            # PluginKind is Literal["source", "transform", "sink"] — unreachable.
+            raise AssertionError(f"_prevalidate_plugin_options: unexpected plugin_type={plugin_type!r}")
+    except UnknownPluginTypeError:
+        # Plugin name not in registry — let engine validation catch it later.
+        return None
+    except ValueError as exc:
+        # Config model selection raised (e.g. unknown LLM provider) — surface it.
+        return f"Invalid options for {plugin_type} '{plugin_name}': {exc}"
+
+    if config_cls is None:
+        return None
+
+    # Options may contain frozen containers (MappingProxyType, tuple) from
+    # CompositionState.  Thaw them so Pydantic receives plain dicts/lists.
+    merged = deep_thaw(options)
+    if injected_fields:
+        for k, v in injected_fields.items():
+            if k not in merged:
+                merged[k] = v
+
+    try:
+        config_cls.from_dict(merged, plugin_name=plugin_name)
+        return None
+    except PluginConfigError as exc:
+        # Use exc.cause to get the problem description without the class-name prefix.
+        # Falls back to str(exc) for raise sites that don't set cause (e.g. plugin __init__ guards).
+        msg = exc.cause if exc.cause is not None else str(exc)
+        return f"Invalid options for {plugin_type} '{plugin_name}': {msg}"
+
+
+_WEB_ONLY_SOURCE_KEYS = frozenset({"blob_ref"})
+
+
+def _prevalidate_source(
+    plugin_name: str,
+    options: dict[str, Any],
+    on_validation_failure: str = "quarantine",
+) -> str | None:
+    """Pre-validate source options, injecting on_validation_failure and filtering web-only keys."""
+    filtered = {k: v for k, v in options.items() if k not in _WEB_ONLY_SOURCE_KEYS}
+    return _prevalidate_plugin_options(
+        "source",
+        plugin_name,
+        filtered,
+        injected_fields={"on_validation_failure": on_validation_failure},
+    )
+
+
+def _prevalidate_transform(plugin_name: str, options: dict[str, Any]) -> str | None:
+    """Pre-validate transform options."""
+    return _prevalidate_plugin_options("transform", plugin_name, options)
+
+
+def _prevalidate_sink(plugin_name: str, options: dict[str, Any]) -> str | None:
+    """Pre-validate sink options."""
+    return _prevalidate_plugin_options("sink", plugin_name, options)
 
 
 def _execute_set_source(
@@ -1035,11 +1229,16 @@ def _execute_set_source(
     if path_error is not None:
         return _failure_result(state, path_error)
 
+    on_vf = args.get("on_validation_failure", "quarantine")
+    prevalidation_error = _prevalidate_source(plugin, options, on_vf)
+    if prevalidation_error is not None:
+        return _failure_result(state, prevalidation_error)
+
     source = SourceSpec(
         plugin=plugin,
         on_success=args["on_success"],
         options=options,
-        on_validation_failure=args.get("on_validation_failure", "quarantine"),
+        on_validation_failure=on_vf,
     )
     new_state = state.with_source(source)
     return _mutation_result(new_state, ("source",))
@@ -1054,11 +1253,19 @@ def _execute_upsert_node(
     node_type = args["node_type"]
     plugin = args.get("plugin")
 
-    # Validate plugin for types that require one
+    # Validate plugin for types that require one.
+    # Gates and coalesces intentionally have plugin=None (they're expression-based or
+    # structural, not plugin-driven), so the "and plugin is not None" guard covers them.
+    # NodeSpec documents this: "plugin: Plugin name. None for gates and coalesces."
     if node_type in ("transform", "aggregation") and plugin is not None:
         plugin_error = _validate_plugin_name(catalog, "transform", plugin)
         if plugin_error is not None:
             return _failure_result(state, plugin_error)
+
+        node_options = args.get("options", {})
+        prevalidation_error = _prevalidate_transform(plugin, node_options)
+        if prevalidation_error is not None:
+            return _failure_result(state, prevalidation_error)
 
     fork_to = args.get("fork_to")
     if fork_to is not None:
@@ -1197,6 +1404,7 @@ def _execute_set_output(
     args: dict[str, Any],
     state: CompositionState,
     catalog: CatalogService,
+    data_dir: str | None = None,
 ) -> ToolResult:
     """Add or replace a pipeline output (sink)."""
     plugin = args["plugin"]
@@ -1205,10 +1413,20 @@ def _execute_set_output(
     if plugin_error is not None:
         return _failure_result(state, plugin_error)
 
+    # S2: Validate sink path allowlist (mirrors source path check)
+    sink_options = args.get("options", {})
+    path_error = _validate_sink_path(sink_options, data_dir)
+    if path_error is not None:
+        return _failure_result(state, path_error)
+
+    prevalidation_error = _prevalidate_sink(plugin, sink_options)
+    if prevalidation_error is not None:
+        return _failure_result(state, prevalidation_error)
+
     output = OutputSpec(
         name=args["sink_name"],
         plugin=plugin,
-        options=args.get("options", {}),
+        options=sink_options,
         on_write_failure=args.get("on_write_failure", "discard"),
     )
     new_state = state.with_output(output)
@@ -1302,11 +1520,29 @@ def _execute_set_source_from_blob(
     except (ValueError, KeyError) as exc:
         return _failure_result(state, f"Unknown source plugin '{plugin}': {exc}")
 
+    # Merge caller-provided options with blob-derived options.
+    # Caller options come first, then we overlay the authoritative blob fields.
+    # This allows callers to provide plugin-specific config (schema, column, etc.)
+    # while ensuring path and blob_ref always reflect the actual blob.
+    caller_options = arguments.get("options", {})
+    merged_options = {
+        **caller_options,
+        **mime_extra,
+        "path": blob["storage_path"],
+        "blob_ref": blob["id"],
+    }
+
+    # Pre-validate options against the plugin's config model.
+    on_vf = arguments.get("on_validation_failure", "quarantine")
+    prevalidation_error = _prevalidate_source(plugin, merged_options, on_vf)
+    if prevalidation_error is not None:
+        return _failure_result(state, prevalidation_error)
+
     source = SourceSpec(
         plugin=plugin,
         on_success=arguments["on_success"],
-        options={"path": blob["storage_path"], "blob_ref": blob["id"], **mime_extra},
-        on_validation_failure=arguments.get("on_validation_failure", "quarantine"),
+        options=merged_options,
+        on_validation_failure=on_vf,
     )
     new_state = state.with_source(source)
     return _mutation_result(new_state, ("source",))
@@ -1415,7 +1651,7 @@ def _execute_create_blob(
                     storage_path=str(storage_path),
                     created_at=now,
                     created_by="assistant",
-                    source_description=arguments.get("description", "created inline by assistant"),
+                    source_description=arguments.get("description"),
                     status="ready",
                 )
             )
@@ -1459,20 +1695,26 @@ def _execute_update_blob(
     content_bytes = content.encode("utf-8")
     file_hash = content_hash(content_bytes)
 
-    # Overwrite storage file
+    # Overwrite storage file — snapshot old content for rollback on DB failure
     storage_path = Path(blob["storage_path"])
+    old_content = storage_path.read_bytes()
     storage_path.write_bytes(content_bytes)
 
     # Update record — include session_id filter for defence in depth
-    with session_engine.begin() as conn:
-        conn.execute(
-            update(blobs_table)
-            .where(blobs_table.c.id == blob_id, blobs_table.c.session_id == session_id)
-            .values(
-                size_bytes=len(content_bytes),
-                content_hash=file_hash,
+    try:
+        with session_engine.begin() as conn:
+            conn.execute(
+                update(blobs_table)
+                .where(blobs_table.c.id == blob_id, blobs_table.c.session_id == session_id)
+                .values(
+                    size_bytes=len(content_bytes),
+                    content_hash=file_hash,
+                )
             )
-        )
+    except BaseException:
+        # Restore old content so file matches DB metadata
+        storage_path.write_bytes(old_content)
+        raise
 
     return _discovery_result(
         state,
@@ -1505,10 +1747,9 @@ def _execute_delete_blob(
     if blob is None:
         return _failure_result(state, f"Blob '{blob_id}' not found.")
 
-    # Remove storage file
+    # Remove storage file — missing_ok avoids TOCTOU race
     storage_path = Path(blob["storage_path"])
-    if storage_path.exists():
-        storage_path.unlink()
+    storage_path.unlink(missing_ok=True)
 
     # Delete record — include session_id filter for defence in depth
     with session_engine.begin() as conn:
@@ -1709,21 +1950,40 @@ def _execute_set_pipeline(
     if path_error is not None:
         return _failure_result(state, path_error)
 
-    # 2. Validate node plugins
+    src_on_vf = src_args.get("on_validation_failure", "quarantine")
+    src_prevalidation = _prevalidate_source(src_plugin, src_options, src_on_vf)
+    if src_prevalidation is not None:
+        return _failure_result(state, src_prevalidation)
+
+    # 2. Validate node plugins and options
     for node_args in args["nodes"]:
+        node_id = node_args.get("id", "?")
         node_type = node_args["node_type"]
         node_plugin = node_args.get("plugin")
         if node_type in ("transform", "aggregation") and node_plugin is not None:
             plugin_error = _validate_plugin_name(catalog, "transform", node_plugin)
             if plugin_error is not None:
-                return _failure_result(state, plugin_error)
+                return _failure_result(state, f"Node '{node_id}': {plugin_error}")
+            node_options = node_args.get("options", {})
+            node_prevalidation = _prevalidate_transform(node_plugin, node_options)
+            if node_prevalidation is not None:
+                return _failure_result(state, f"Node '{node_id}': {node_prevalidation}")
 
-    # 3. Validate output plugins
+    # 3. Validate output plugins and options
     for out_args in args["outputs"]:
+        out_name = out_args.get("sink_name", "?")
         out_plugin = out_args["plugin"]
         plugin_error = _validate_plugin_name(catalog, "sink", out_plugin)
         if plugin_error is not None:
-            return _failure_result(state, plugin_error)
+            return _failure_result(state, f"Output '{out_name}': {plugin_error}")
+        # S2: Validate sink path allowlist (mirrors source path check)
+        out_options = out_args.get("options", {})
+        out_path_error = _validate_sink_path(out_options, data_dir)
+        if out_path_error is not None:
+            return _failure_result(state, f"Output '{out_name}': {out_path_error}")
+        out_prevalidation = _prevalidate_sink(out_plugin, out_options)
+        if out_prevalidation is not None:
+            return _failure_result(state, f"Output '{out_name}': {out_prevalidation}")
 
     # 4. Construct specs (same field extraction as individual handlers)
     try:
@@ -1776,7 +2036,7 @@ def _execute_set_pipeline(
         for o in args["outputs"]:
             output_specs.append(
                 OutputSpec(
-                    name=o["name"],
+                    name=o["sink_name"],
                     plugin=o["plugin"],
                     options=o.get("options", {}),
                     on_write_failure=o.get("on_write_failure", "discard"),
@@ -1790,10 +2050,12 @@ def _execute_set_pipeline(
             meta = meta_raw
         else:
             return _failure_result(state, "metadata must be an object.")
-        metadata_spec = PipelineMetadata(
-            name=meta.get("name", "Untitled Pipeline"),
-            description=meta.get("description", ""),
-        )
+        meta_kwargs: dict[str, str] = {}
+        if "name" in meta:
+            meta_kwargs["name"] = meta["name"]
+        if "description" in meta:
+            meta_kwargs["description"] = meta["description"]
+        metadata_spec = PipelineMetadata(**meta_kwargs)
     except (KeyError, TypeError) as exc:
         return _failure_result(state, f"Invalid pipeline spec: {exc}")
 
@@ -1841,6 +2103,15 @@ def _execute_patch_source_options(
     if path_error is not None:
         return _failure_result(state, path_error)
 
+    # Pre-validate patched options against config model
+    prevalidation_error = _prevalidate_source(
+        state.source.plugin,
+        new_options,
+        state.source.on_validation_failure,
+    )
+    if prevalidation_error is not None:
+        return _failure_result(state, prevalidation_error)
+
     new_source = SourceSpec(
         plugin=state.source.plugin,
         options=new_options,
@@ -1872,6 +2143,12 @@ def _execute_patch_node_options(
     if current is None:
         return _failure_result(state, f"Node '{node_id}' not found.")
     new_options = _apply_merge_patch(current.options, patch)
+
+    if current.node_type in ("transform", "aggregation") and current.plugin is not None:
+        prevalidation_error = _prevalidate_transform(current.plugin, new_options)
+        if prevalidation_error is not None:
+            return _failure_result(state, prevalidation_error)
+
     new_node = NodeSpec(
         id=current.id,
         node_type=current.node_type,
@@ -1912,6 +2189,11 @@ def _execute_patch_output_options(
     if current is None:
         return _failure_result(state, f"Output '{sink_name}' not found.")
     new_options = _apply_merge_patch(current.options, patch)
+
+    prevalidation_error = _prevalidate_sink(current.plugin, new_options)
+    if prevalidation_error is not None:
+        return _failure_result(state, prevalidation_error)
+
     new_output = OutputSpec(
         name=current.name,
         plugin=current.plugin,
@@ -2023,9 +2305,34 @@ _VALIDATION_ERROR_PATTERNS: list[tuple[str, str, str]] = [
         "Use list_sources, list_transforms, or list_sinks to see available plugins.",
     ),
     (
-        r"Path violation \(S2\)",
+        r"Path violation \(S2\).*[Ss]ource",
         "The source file path is outside the allowed directories.",
         "Source paths must be under the blobs/ directory. Upload a file first or use set_source_from_blob.",
+    ),
+    (
+        r"Path violation \(S2\).*[Ss]ink",
+        "The sink output path is outside the allowed directories.",
+        "Sink output paths must be under the outputs/ or blobs/ directory.",
+    ),
+    (
+        r"Path violation \(S2\)",
+        "A file path is outside the allowed directories.",
+        "Source paths must be under the blobs/ directory. Sink output paths must be under the outputs/ or blobs/ directory.",
+    ),
+    (
+        r"Invalid options for source '(.+)':",
+        "The source plugin configuration is invalid. A required option may be missing or have an invalid value.",
+        "Use get_pipeline_state with component='source' to see current options, then use patch_source_options to fix.",
+    ),
+    (
+        r"Invalid options for transform '(.+)':",
+        "A transform node has invalid configuration. A required option may be missing or have an invalid value.",
+        "Use get_pipeline_state to see the node's current options, then use patch_node_options to fix.",
+    ),
+    (
+        r"Invalid options for sink '(.+)':",
+        "A sink output has invalid configuration. A required option may be missing (e.g. path for file-based sinks).",
+        "Use get_pipeline_state to see the output's current options, then use patch_output_options to fix.",
     ),
 ]
 
@@ -2071,7 +2378,12 @@ def _execute_list_models(
     catalog: CatalogService,
     data_dir: str | None = None,
 ) -> ToolResult:
-    """List available LLM model identifiers."""
+    """List available LLM model identifiers.
+
+    Without a provider filter, returns provider names and model counts
+    to avoid dumping hundreds of entries. With a provider filter,
+    returns matching model IDs capped at ``limit``.
+    """
     try:
         import litellm
 
@@ -2080,18 +2392,145 @@ def _execute_list_models(
         all_models = []
 
     provider = args.get("provider")
-    if provider and isinstance(provider, str):
-        filtered = [m for m in all_models if m.startswith(provider)]
-    else:
-        filtered = all_models
+    limit = args.get("limit", 50)
+    if not isinstance(limit, int) or limit < 1:
+        limit = 50
 
-    return ToolResult(
-        success=True,
-        updated_state=state,
-        validation=state.validate(),
-        affected_nodes=(),
-        data={"models": filtered, "count": len(filtered)},
-    )
+    if provider is not None and isinstance(provider, str):
+        if provider == "":
+            # Empty string means "models without a provider prefix"
+            filtered = [m for m in all_models if "/" not in m]
+        else:
+            filtered = [m for m in all_models if m.startswith(provider)]
+        truncated = len(filtered) > limit
+        data: dict[str, Any] = {
+            "models": filtered[:limit],
+            "count": len(filtered),
+            "truncated": truncated,
+        }
+    else:
+        # Group by provider prefix to avoid token waste
+        providers: dict[str, int] = {}
+        for m in all_models:
+            prefix = m.split("/", 1)[0] if "/" in m else ""
+            providers[prefix] = providers.get(prefix, 0) + 1
+        data = {
+            "providers": providers,
+            "total_models": len(all_models),
+            "hint": "Use provider parameter to list models for a specific provider. An empty string key means models without a provider prefix.",
+        }
+
+    return _discovery_result(state, data)
+
+
+def _execute_get_pipeline_state(
+    args: dict[str, Any],
+    state: CompositionState,
+    catalog: CatalogService,
+    data_dir: str | None = None,
+) -> ToolResult:
+    """Return full pipeline state including all options.
+
+    If ``component`` is specified, returns only that component's details.
+    Otherwise returns the full state: source, all nodes with options, all
+    outputs with options, edges, and metadata.
+    """
+    component = args.get("component")
+
+    if component == "source":
+        if state.source is None:
+            data: Any = {"source": None}
+        else:
+            data = {
+                "source": {
+                    "plugin": state.source.plugin,
+                    "on_success": state.source.on_success,
+                    "options": deep_thaw(state.source.options),
+                    "on_validation_failure": state.source.on_validation_failure,
+                },
+            }
+    elif component is not None:
+        # Try node, then output
+        node = next((n for n in state.nodes if n.id == component), None)
+        if node is not None:
+            data = {
+                "node": {
+                    "id": node.id,
+                    "node_type": node.node_type,
+                    "plugin": node.plugin,
+                    "input": node.input,
+                    "on_success": node.on_success,
+                    "on_error": node.on_error,
+                    "options": deep_thaw(node.options),
+                    "condition": node.condition,
+                    "routes": deep_thaw(node.routes) if node.routes else None,
+                    "fork_to": list(node.fork_to) if node.fork_to else None,
+                    "branches": list(node.branches) if node.branches else None,
+                    "policy": node.policy,
+                    "merge": node.merge,
+                },
+            }
+        else:
+            output = next((o for o in state.outputs if o.name == component), None)
+            if output is not None:
+                data = {
+                    "output": {
+                        "sink_name": output.name,
+                        "plugin": output.plugin,
+                        "options": deep_thaw(output.options),
+                        "on_write_failure": output.on_write_failure,
+                    },
+                }
+            else:
+                return _failure_result(state, f"Component '{component}' not found. Specify 'source', a node ID, or an output name.")
+    else:
+        # Full state
+        data = {
+            "source": {
+                "plugin": state.source.plugin,
+                "on_success": state.source.on_success,
+                "options": deep_thaw(state.source.options),
+                "on_validation_failure": state.source.on_validation_failure,
+            }
+            if state.source is not None
+            else None,
+            "nodes": [
+                {
+                    "id": n.id,
+                    "node_type": n.node_type,
+                    "plugin": n.plugin,
+                    "input": n.input,
+                    "on_success": n.on_success,
+                    "on_error": n.on_error,
+                    "options": deep_thaw(n.options),
+                    "condition": n.condition,
+                    "routes": deep_thaw(n.routes) if n.routes else None,
+                    "fork_to": list(n.fork_to) if n.fork_to else None,
+                    "branches": list(n.branches) if n.branches else None,
+                    "policy": n.policy,
+                    "merge": n.merge,
+                }
+                for n in state.nodes
+            ],
+            "outputs": [
+                {
+                    "sink_name": o.name,
+                    "plugin": o.plugin,
+                    "options": deep_thaw(o.options),
+                    "on_write_failure": o.on_write_failure,
+                }
+                for o in state.outputs
+            ],
+            "edges": [
+                {"id": e.id, "from_node": e.from_node, "to_node": e.to_node, "edge_type": e.edge_type, "label": e.label}
+                for e in state.edges
+            ],
+            "metadata": {"name": state.metadata.name, "description": state.metadata.description},
+            "version": state.version,
+        }
+
+    data = redact_source_storage_path(data)
+    return _discovery_result(state, data)
 
 
 def _execute_preview_pipeline(
@@ -2124,7 +2563,7 @@ def _execute_preview_pipeline(
         summary["source"] = {
             "plugin": state.source.plugin,
             "on_success": state.source.on_success,
-            "has_schema_config": "schema_config" in state.source.options,
+            "has_schema_config": "schema" in state.source.options,
         }
 
     return ToolResult(
@@ -2143,11 +2582,16 @@ def _execute_diff_pipeline(
     data_dir: str | None = None,
     *,
     baseline: CompositionState | None = None,
+    current_validation: ValidationSummary | None = None,
 ) -> ToolResult:
     """Compute a diff/change summary against a baseline state.
 
     The baseline is passed explicitly by the MCP server or web composer.
     If no baseline is available, returns a notice instead.
+
+    Args:
+        current_validation: Pre-computed validation for the current state.
+            Threaded from the caller to avoid redundant recomputation.
     """
     if baseline is None:
         return _discovery_result(
@@ -2158,7 +2602,7 @@ def _execute_diff_pipeline(
             },
         )
 
-    changes = diff_states(baseline, state)
+    changes = diff_states(baseline, state, current_validation=current_validation)
     return _discovery_result(state, changes)
 
 
@@ -2173,6 +2617,7 @@ _DISCOVERY_TOOLS: dict[str, ToolHandler] = {
     "get_expression_grammar": _handle_get_expression_grammar,
     "explain_validation_error": _execute_explain_validation_error,
     "list_models": _execute_list_models,
+    "get_pipeline_state": _execute_get_pipeline_state,
     "preview_pipeline": _execute_preview_pipeline,
     "diff_pipeline": _execute_diff_pipeline,
 }
@@ -2180,7 +2625,7 @@ _DISCOVERY_TOOLS: dict[str, ToolHandler] = {
 # All discovery tools are cacheable. If a non-cacheable discovery tool is
 # re-added in future (e.g. get_current_state which returns live mutable
 # state), add it to _DISCOVERY_TOOLS but NOT to this frozenset.
-_CACHEABLE_DISCOVERY_TOOLS: frozenset[str] = frozenset(_DISCOVERY_TOOLS.keys()) - {"diff_pipeline"}
+_CACHEABLE_DISCOVERY_TOOLS: frozenset[str] = frozenset(_DISCOVERY_TOOLS.keys()) - {"diff_pipeline", "get_pipeline_state"}
 
 _MUTATION_TOOLS: dict[str, ToolHandler] = {
     "set_source": _execute_set_source,
@@ -2258,6 +2703,20 @@ def is_cacheable_discovery_tool(name: str) -> bool:
 # --- Tool Executor ---
 
 
+def _inject_prior_validation(
+    result: ToolResult,
+    prior: ValidationSummary,
+) -> ToolResult:
+    """Attach prior validation to a successful mutation result for delta computation.
+
+    Returns the result unchanged if the mutation failed or already carries
+    prior_validation (set explicitly by the handler).
+    """
+    if result.success and result.prior_validation is None:
+        return replace(result, prior_validation=prior)
+    return result
+
+
 def execute_tool(
     tool_name: str,
     arguments: dict[str, Any],
@@ -2269,6 +2728,7 @@ def execute_tool(
     secret_service: Any | None = None,
     user_id: str | None = None,
     baseline: CompositionState | None = None,
+    prior_validation: ValidationSummary | None = None,
 ) -> ToolResult:
     """Execute a composition tool by name.
 
@@ -2286,38 +2746,54 @@ def execute_tool(
         secret_service: WebSecretService instance. Required for secret tools.
         user_id: Current user ID. Required for secret tools.
         baseline: Baseline state for diff_pipeline comparisons.
+        prior_validation: Pre-computed validation for the current state.
+            When provided, mutation tools reuse this instead of calling
+            state.validate() for the pre-mutation delta. Callers should
+            thread the previous ToolResult.validation forward — the state
+            is immutable, so validation is deterministic.
     """
     # diff_pipeline has an extended signature with baseline kwarg
     if tool_name == "diff_pipeline":
-        return _execute_diff_pipeline(arguments, state, catalog, data_dir, baseline=baseline)
+        return _execute_diff_pipeline(
+            arguments,
+            state,
+            catalog,
+            data_dir,
+            baseline=baseline,
+            current_validation=prior_validation,
+        )
 
     # Check standard tools first
-    handler = _DISCOVERY_TOOLS.get(tool_name) or _MUTATION_TOOLS.get(tool_name)
-    if handler is not None:
-        return handler(arguments, state, catalog, data_dir)
+    discovery_handler = _DISCOVERY_TOOLS.get(tool_name)
+    if discovery_handler is not None:
+        return discovery_handler(arguments, state, catalog, data_dir)
+
+    mutation_handler = _MUTATION_TOOLS.get(tool_name)
+    if mutation_handler is not None:
+        prior = prior_validation if prior_validation is not None else state.validate()
+        result = mutation_handler(arguments, state, catalog, data_dir)
+        return _inject_prior_validation(result, prior)
 
     # Check blob tools (extended signature with session context)
-    blob_handler = _BLOB_DISCOVERY_TOOLS.get(tool_name) or _BLOB_MUTATION_TOOLS.get(tool_name)
-    if blob_handler is not None:
-        return blob_handler(
-            arguments,
-            state,
-            catalog,
-            data_dir,
-            session_engine=session_engine,
-            session_id=session_id,
-        )
+    blob_discovery = _BLOB_DISCOVERY_TOOLS.get(tool_name)
+    if blob_discovery is not None:
+        return blob_discovery(arguments, state, catalog, data_dir, session_engine=session_engine, session_id=session_id)
+
+    blob_mutation = _BLOB_MUTATION_TOOLS.get(tool_name)
+    if blob_mutation is not None:
+        prior = prior_validation if prior_validation is not None else state.validate()
+        result = blob_mutation(arguments, state, catalog, data_dir, session_engine=session_engine, session_id=session_id)
+        return _inject_prior_validation(result, prior)
 
     # Check secret tools (extended signature with secret_service + user_id)
-    secret_handler = _SECRET_DISCOVERY_TOOLS.get(tool_name) or _SECRET_MUTATION_TOOLS.get(tool_name)
-    if secret_handler is not None:
-        return secret_handler(
-            arguments,
-            state,
-            catalog,
-            data_dir,
-            secret_service=secret_service,
-            user_id=user_id,
-        )
+    secret_discovery = _SECRET_DISCOVERY_TOOLS.get(tool_name)
+    if secret_discovery is not None:
+        return secret_discovery(arguments, state, catalog, data_dir, secret_service=secret_service, user_id=user_id)
+
+    secret_mutation = _SECRET_MUTATION_TOOLS.get(tool_name)
+    if secret_mutation is not None:
+        prior = prior_validation if prior_validation is not None else state.validate()
+        result = secret_mutation(arguments, state, catalog, data_dir, secret_service=secret_service, user_id=user_id)
+        return _inject_prior_validation(result, prior)
 
     return _failure_result(state, f"Unknown tool: {tool_name}")

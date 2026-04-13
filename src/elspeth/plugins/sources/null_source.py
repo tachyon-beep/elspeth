@@ -47,6 +47,7 @@ class NullSource(BaseSource):
 
     name = "null"
     plugin_version = "1.0.0"
+    config_model = None  # NullSource requires no config (resume-only)
     determinism = Determinism.DETERMINISTIC
     output_schema: type[PluginSchema] = NullSourceSchema
     # NullSource yields no rows, so it never quarantines - but set to satisfy protocol

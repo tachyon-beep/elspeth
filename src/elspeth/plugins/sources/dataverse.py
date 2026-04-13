@@ -14,7 +14,7 @@ import urllib.parse
 import xml.etree.ElementTree as ET
 from collections.abc import Iterator, Mapping
 from datetime import UTC, datetime
-from typing import Any, Self
+from typing import Any, ClassVar, Self
 
 import structlog
 from pydantic import Field, ValidationError, field_validator, model_validator
@@ -56,6 +56,8 @@ class DataverseSourceConfig(DataPluginConfig):
     Extends DataPluginConfig which requires schema configuration.
     Unlike file-based sources, does not extend PathConfig (no local file path).
     """
+
+    _plugin_component_type: ClassVar[str | None] = "source"
 
     environment_url: str = Field(
         ...,
@@ -189,10 +191,11 @@ class DataverseSource(BaseSource):
 
     name = "dataverse"
     determinism = Determinism.EXTERNAL_CALL  # Live REST API, not static file read
+    config_model = DataverseSourceConfig
 
     def __init__(self, config: dict[str, Any]) -> None:
         super().__init__(config)
-        cfg = DataverseSourceConfig.from_dict(config)
+        cfg = DataverseSourceConfig.from_dict(config, plugin_name=self.name)
 
         # Store config
         self._environment_url = cfg.environment_url

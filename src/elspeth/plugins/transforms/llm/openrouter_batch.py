@@ -161,6 +161,7 @@ class OpenRouterBatchLLMTransform(BaseTransform):
 
     name = "openrouter_batch_llm"
     is_batch_aware = True  # Engine passes list[dict] for batch processing
+    config_model = OpenRouterBatchConfig
 
     # LLM transforms are non-deterministic by nature
     determinism: Determinism = Determinism.NON_DETERMINISTIC
@@ -174,7 +175,7 @@ class OpenRouterBatchLLMTransform(BaseTransform):
         super().__init__(config)
 
         # Parse OpenRouter-specific config
-        cfg = OpenRouterBatchConfig.from_dict(config)
+        cfg = OpenRouterBatchConfig.from_dict(config, plugin_name=self.name)
 
         # Declare output fields for centralized collision detection.
         self.declared_output_fields = frozenset(get_llm_guaranteed_fields(cfg.response_field))

@@ -12,7 +12,7 @@ import time
 import urllib.parse
 from datetime import UTC, datetime
 from types import MappingProxyType
-from typing import Any, Literal, Self
+from typing import Any, ClassVar, Literal, Self
 
 import structlog
 from pydantic import BaseModel, Field, field_validator, model_validator
@@ -53,6 +53,8 @@ class DataverseSinkConfig(DataPluginConfig):
 
     Extends DataPluginConfig which requires schema configuration.
     """
+
+    _plugin_component_type: ClassVar[str | None] = "sink"
 
     environment_url: str = Field(
         ...,
@@ -175,6 +177,23 @@ class DataverseSinkConfig(DataPluginConfig):
 
         return self
 
+    @model_validator(mode="after")
+    def validate_alternate_key_in_field_mapping(self) -> Self:
+        """Reject configs where alternate_key is not in field_mapping values.
+
+        The alternate_key must name a Dataverse column that appears as a value
+        in field_mapping (pipeline_field -> dataverse_column). Moved from
+        DataverseSink.__init__ so from_dict() catches it (pre-validation /
+        engine-validation agreement).
+        """
+        if self.alternate_key not in self.field_mapping.values():
+            raise ValueError(
+                f"alternate_key '{self.alternate_key}' not found in field_mapping values. "
+                f"The alternate_key must be a Dataverse column that appears as a value in field_mapping. "
+                f"Available field_mapping values: {sorted(self.field_mapping.values())}"
+            )
+        return self
+
 
 # Rebuild model to resolve forward references
 DataverseSinkConfig.model_rebuild()
@@ -190,12 +209,13 @@ class DataverseSink(BaseSink):
 
     name = "dataverse"
     determinism = Determinism.EXTERNAL_CALL
+    config_model = DataverseSinkConfig
     idempotent = True  # PATCH upsert is idempotent — safe for retries and crash recovery (engine does not yet read this flag)
     supports_resume = False  # Dataverse writes are not locally staged
 
     def __init__(self, config: dict[str, Any]) -> None:
         super().__init__(config)
-        cfg = DataverseSinkConfig.from_dict(config)
+        cfg = DataverseSinkConfig.from_dict(config, plugin_name=self.name)
 
         # Store config
         self._environment_url = cfg.environment_url
@@ -219,17 +239,13 @@ class DataverseSink(BaseSink):
 
         # Resolve the pipeline field name for the alternate key.
         # field_mapping is pipeline_field → dataverse_column; we need the reverse.
+        # Presence of alternate_key in field_mapping values is guaranteed by
+        # DataverseSinkConfig.validate_alternate_key_in_field_mapping model_validator.
         self._alternate_key_pipeline_field: str | None = None
         for pipeline_field, dataverse_col in self._field_mapping.items():
             if dataverse_col == self._alternate_key:
                 self._alternate_key_pipeline_field = pipeline_field
                 break
-        if self._alternate_key_pipeline_field is None:
-            raise ValueError(
-                f"alternate_key '{self._alternate_key}' not found in field_mapping values. "
-                f"The alternate_key must be a Dataverse column that appears as a value in field_mapping. "
-                f"Available field_mapping values: {sorted(self._field_mapping.values())}"
-            )
 
         # Lazy-constructed client (needs lifecycle context)
         self._client: DataverseClient | None = None

@@ -27,10 +27,12 @@ interface Command {
   enabled?: boolean;
 }
 
+/** Custom event name used to request an inspector tab switch. */
+export const SWITCH_TAB_EVENT = "elspeth-switch-tab";
+
 interface CommandPaletteProps {
   isOpen: boolean;
   onClose: () => void;
-  onSwitchTab?: (tab: "spec" | "graph" | "yaml" | "runs") => void;
 }
 
 // ── Fuzzy match ──────────────────────────────────────────────────────────────
@@ -71,7 +73,6 @@ function fuzzyMatch(query: string, target: string): number {
 export function CommandPalette({
   isOpen,
   onClose,
-  onSwitchTab,
 }: CommandPaletteProps) {
   const [query, setQuery] = useState("");
   const [selectedIndex, setSelectedIndex] = useState(0);
@@ -147,52 +148,46 @@ export function CommandPalette({
       },
     });
 
-    // Navigation (inspector tabs)
-    if (onSwitchTab) {
-      cmds.push({
-        id: "tab-spec",
-        title: "Switch to Spec Tab",
-        category: "navigation",
-        shortcut: "Ctrl+1",
-        action: () => {
-          onSwitchTab("spec");
-          onClose();
-        },
-      });
+    // Navigation (inspector tabs) — dispatched via custom DOM event so
+    // InspectorPanel can listen without prop threading through Layout.
+    const switchTab = (tab: string) => {
+      window.dispatchEvent(
+        new CustomEvent(SWITCH_TAB_EVENT, { detail: tab }),
+      );
+      onClose();
+    };
 
-      cmds.push({
-        id: "tab-graph",
-        title: "Switch to Graph Tab",
-        category: "navigation",
-        shortcut: "Ctrl+2",
-        action: () => {
-          onSwitchTab("graph");
-          onClose();
-        },
-      });
+    cmds.push({
+      id: "tab-spec",
+      title: "Switch to Spec Tab",
+      category: "navigation",
+      shortcut: "Alt+1",
+      action: () => switchTab("spec"),
+    });
 
-      cmds.push({
-        id: "tab-yaml",
-        title: "Switch to YAML Tab",
-        category: "navigation",
-        shortcut: "Ctrl+3",
-        action: () => {
-          onSwitchTab("yaml");
-          onClose();
-        },
-      });
+    cmds.push({
+      id: "tab-graph",
+      title: "Switch to Graph Tab",
+      category: "navigation",
+      shortcut: "Alt+2",
+      action: () => switchTab("graph"),
+    });
 
-      cmds.push({
-        id: "tab-runs",
-        title: "Switch to Runs Tab",
-        category: "navigation",
-        shortcut: "Ctrl+4",
-        action: () => {
-          onSwitchTab("runs");
-          onClose();
-        },
-      });
-    }
+    cmds.push({
+      id: "tab-yaml",
+      title: "Switch to YAML Tab",
+      category: "navigation",
+      shortcut: "Alt+3",
+      action: () => switchTab("yaml"),
+    });
+
+    cmds.push({
+      id: "tab-runs",
+      title: "Switch to Runs Tab",
+      category: "navigation",
+      shortcut: "Alt+4",
+      action: () => switchTab("runs"),
+    });
 
     // Sessions (up to 10 recent)
     const recentSessions = sessions
@@ -222,7 +217,6 @@ export function CommandPalette({
     validate,
     execute,
     onClose,
-    onSwitchTab,
   ]);
 
   // Filter and sort commands by fuzzy match
@@ -329,22 +323,27 @@ export function CommandPalette({
           <input
             ref={inputRef}
             type="text"
+            role="combobox"
             className="command-palette-input"
             placeholder="Type a command or search..."
             value={query}
             onChange={(e) => setQuery(e.target.value)}
             aria-label="Search commands"
+            aria-expanded={filteredCommands.length > 0}
+            aria-controls="command-palette-listbox"
             aria-activedescendant={
               filteredCommands[selectedIndex]
                 ? `cmd-${filteredCommands[selectedIndex].id}`
                 : undefined
             }
+            aria-autocomplete="list"
           />
         </div>
 
         {/* Results */}
         <div
           ref={listRef}
+          id="command-palette-listbox"
           className="command-palette-list"
           role="listbox"
         >

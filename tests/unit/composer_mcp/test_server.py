@@ -38,10 +38,10 @@ class TestBuildToolDefs:
         tools = _build_tool_defs()
         assert len(tools) > 20
 
-    def test_expected_count_is_28(self) -> None:
-        """22 composer (9 discovery + 13 mutation) + 6 session = 28."""
+    def test_expected_count_is_29(self) -> None:
+        """23 composer (10 discovery + 13 mutation) + 6 session = 29."""
         tools = _build_tool_defs()
-        assert len(tools) == 28
+        assert len(tools) == 29
 
     def test_all_tools_have_name_and_description(self) -> None:
         for tool in _build_tool_defs():
@@ -100,7 +100,7 @@ class TestDispatchTool:
     def test_set_source_mutates_state(self, scratch_dir: Path) -> None:
         result = _dispatch_tool(
             "set_source",
-            {"plugin": "csv", "on_success": "node_1", "options": {}},
+            {"plugin": "csv", "on_success": "node_1", "options": {"path": "/data/blobs/input.csv", "schema": {"mode": "observed"}}},
             _empty_state(),
             _mock_catalog(),
             scratch_dir,
@@ -133,7 +133,7 @@ class TestDispatchTool:
         # Modify state via set_source
         modified = _dispatch_tool(
             "set_source",
-            {"plugin": "csv", "on_success": "node_1", "options": {}},
+            {"plugin": "csv", "on_success": "node_1", "options": {"path": "/data/blobs/input.csv", "schema": {"mode": "observed"}}},
             _empty_state(),
             _mock_catalog(),
             scratch_dir,

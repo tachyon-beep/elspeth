@@ -169,28 +169,28 @@ allow_hits:
   owner: architecture
   reason: HTTP redirect Location header — external system boundary, header may be absent
   safety: Missing Location header breaks redirect loop naturally
-- key: plugins/sinks/database_sink.py:R1:DatabaseSink:__init__:fp=ded76dbbb1479f9c
+- key: plugins/sinks/database_sink.py:R1:DatabaseSink:__init__:fp=9bb0e8373353cba6
   owner: architecture
   reason: os.environ.get() for optional env var at trust boundary — ELSPETH_ALLOW_RAW_SECRETS is genuinely optional with empty-string default
   safety: Empty string default is meaning-preserving (feature disabled); no data fabrication
   expires: '2026-05-02'
-- key: plugins/sinks/csv_sink.py:R1:CSVSink:validate_output_target:fp=5d6649996f9b8101
+- key: plugins/sinks/csv_sink.py:R1:CSVSink:validate_output_target:fp=24247d73d135efe0
   owner: feature
   reason: Display header mapping - fields not in map keep original name (transform-added fields)
   safety: Intentional fallback to original field name, not bug hiding
-- key: plugins/sinks/csv_sink.py:R1:CSVSink:_open_file:fp=7779a935c35ef7a8
+- key: plugins/sinks/csv_sink.py:R1:CSVSink:_open_file:fp=46539535021617ba
   owner: feature
   reason: Intentional fallback - reverse mapping may not contain all fields (transform-added)
   safety: Falls back to original field name - correct behavior for fields not in source
-- key: plugins/sinks/csv_sink.py:R1:CSVSink:_get_field_names_and_display:fp=bc5894572130666a
+- key: plugins/sinks/csv_sink.py:R1:CSVSink:_get_field_names_and_display:fp=7b22dabffabfc6c8
   owner: feature
   reason: Intentional fallback - display mapping may not contain all fields (transform-added)
   safety: Falls back to normalized field name - correct behavior for fields not in source
-- key: plugins/sinks/json_sink.py:R1:JSONSink:validate_output_target:fp=1011c279ee1a5b44
+- key: plugins/sinks/json_sink.py:R1:JSONSink:validate_output_target:fp=79de1ac15fd8954b
   owner: feature
   reason: Display header mapping - fields not in map keep original name (transform-added fields)
   safety: Intentional fallback to original field name, not bug hiding
-- key: plugins/infrastructure/discovery.py:R9:_discover_in_file:fp=4de39e296bd4a878
+- key: plugins/infrastructure/discovery.py:R9:_discover_in_file:fp=0acd1690c04355a2
   owner: architecture
   reason: sys.modules.pop cleanup on import failure — module may not be registered yet
   safety: Legitimate cleanup pattern in error path
@@ -275,7 +275,7 @@ allow_hits:
   reason: Worker thread can raise any exception type — must catch broadly to prevent buffer slot leak (FrameworkBugError/AuditIntegrityError re-raised before this catch)
   safety: Exception converted to TransformResult.error (row gets quarantined), buffer stays consistent; framework errors re-raised above
   expires: '2026-06-08'
-- key: plugins/sinks/azure_blob_sink.py:R5:AzureBlobSinkConfig:headers_mapping:fp=7ca855f402cbaf42
+- key: plugins/sinks/azure_blob_sink.py:R5:AzureBlobSinkConfig:headers_mapping:fp=62d056151ce64838
   owner: refactor
   reason: isinstance(dict) check for config field type discrimination — same pattern as SinkPathConfig.headers_mapping
   safety: Config validated by Pydantic before this property runs; isinstance only distinguishes dict from str
@@ -400,37 +400,37 @@ allow_hits:
   reason: httpx.get() method call for Azure Search $count endpoint — false positive from R1 rule matching .get( syntax
   safety: This is the actual HTTP call, not a defensive dict access
   expires: null
-- key: plugins/sinks/chroma_sink.py:R6:ChromaSink:write:fp=b4b747bb26344d76
+- key: plugins/sinks/chroma_sink.py:R6:ChromaSink:write:fp=be9aff156cae9c9a
   owner: feature
   reason: Per-row KeyError catch at Tier 2→external boundary — missing id/document field diverts the row via _divert_row() instead of aborting the batch
   safety: Row diverted to failsink with descriptive reason; remaining valid rows written normally; no silent data loss
   expires: null
-- key: plugins/sinks/chroma_sink.py:R5:ChromaSink:write:fp=5ec13563341213a4
+- key: plugins/sinks/chroma_sink.py:R5:ChromaSink:write:fp=8ed4feef4b57fb7d
   owner: feature
   reason: Tier 2→external trust boundary — ChromaDB requires string IDs; isinstance(str) validates before write to avoid batch-aborting TypeError from SDK
   safety: Non-string ID diverts the row via _divert_row() with descriptive reason; not silent suppression
   expires: null
-- key: plugins/sinks/chroma_sink.py:R5:ChromaSink:write:fp=14275469d1b3e44b
+- key: plugins/sinks/chroma_sink.py:R5:ChromaSink:write:fp=41553914dbebaeab
   owner: feature
   reason: Tier 2→external trust boundary — ChromaDB requires string documents; isinstance(str) validates before write
   safety: Non-string document diverts the row via _divert_row() with descriptive reason; not silent suppression
   expires: null
-- key: plugins/sinks/chroma_sink.py:R6:ChromaSink:write:fp=0edafbd3bc689eff
+- key: plugins/sinks/chroma_sink.py:R6:ChromaSink:write:fp=2acb96392542b86f
   owner: feature
   reason: Per-row KeyError catch for optional metadata fields — missing metadata field skipped (metadata is optional per-field)
   safety: Missing metadata fields silently omitted from the per-row metadata dict; no data fabrication
   expires: null
-- key: plugins/sinks/chroma_sink.py:R5:ChromaSink:write:fp=6ba8a1d631684578
+- key: plugins/sinks/chroma_sink.py:R5:ChromaSink:write:fp=833714ab4df9af9c
   owner: feature
   reason: Tier 2→external trust boundary — validates metadata value types before sending to ChromaDB; isinstance check filters rows with non-scalar metadata (dict, list, datetime) so they go to failsink instead of crashing the batch
   safety: Invalid rows diverted via _divert_row() with per-field detail; valid rows written normally; no silent data loss
   expires: null
-- key: plugins/sinks/chroma_sink.py:R5:ChromaSink:write:fp=0844634d5f6790dc
+- key: plugins/sinks/chroma_sink.py:R5:ChromaSink:write:fp=8a95aafe9a07a512
   owner: bugfix
   reason: Tier 2→external trust boundary — isinstance(float) guards non-finite metadata values (NaN/Infinity) before they reach canonical_json() hashing; diverts affected rows instead of crashing the batch
   safety: Non-finite float rows diverted via _divert_row() with per-field detail; valid rows written normally; no silent data loss
   expires: null
-- key: plugins/transforms/web_scrape.py:R5:WebScrapeTransform:__init__:fp=189a33d2bccf7c9b
+- key: plugins/transforms/web_scrape.py:R5:WebScrapeTransform:__init__:fp=ba7f69182a5b9f3a
   owner: feature
   reason: Offensive isinstance assertion — detects Pydantic validator bug if allowed_hosts is not list[str] after validation
   safety: Crashes immediately with descriptive error; better than silently iterating string characters as ip_network calls
@@ -440,7 +440,7 @@ allow_hits:
   reason: Optional extras (e.g. chromadb for [rag]) are external dependencies — ImportError is expected when not installed
   safety: Only catches ImportError/ModuleNotFoundError; logs warning with file name and error; SyntaxError and other bugs still crash
   expires: null
-- key: plugins/transforms/value_transform.py:R4:ValueTransform:process:fp=3e8908e176fbca49
+- key: plugins/transforms/value_transform.py:R4:ValueTransform:process:fp=4820afe5ac81bd88
   owner: feature
   reason: User-provided expressions are Tier 3-like boundary — catch-all ensures unexpected evaluation errors produce TransformResult.error not pipeline crash
   safety: Converts to structured error result with type and message; row enters quarantine path, not silent drop

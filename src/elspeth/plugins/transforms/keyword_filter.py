@@ -123,13 +123,14 @@ class KeywordFilter(BaseTransform):
     name = "keyword_filter"
     determinism = Determinism.DETERMINISTIC
     plugin_version = "1.0.0"
+    config_model = KeywordFilterConfig
     is_batch_aware = False
     creates_tokens = False
 
     def __init__(self, config: dict[str, Any]) -> None:
         super().__init__(config)
 
-        cfg = KeywordFilterConfig.from_dict(config)
+        cfg = KeywordFilterConfig.from_dict(config, plugin_name=self.name)
         self._fields = cfg.fields
 
         # Patterns already validated (regex syntax + ReDoS safety) by config validator

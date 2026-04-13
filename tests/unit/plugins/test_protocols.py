@@ -193,6 +193,10 @@ class TestTransformProtocol:
             def on_complete(self, ctx: PluginContext) -> None:
                 pass
 
+            @classmethod
+            def get_config_model(cls, config: dict[str, Any] | None = None) -> None:
+                return None
+
         transform = DoubleTransform({})
 
         # IMPORTANT: Verify protocol conformance at runtime (see test_source_protocol_conformance).

@@ -191,7 +191,7 @@ class TestComposerSingleToolCall:
                     "arguments": {
                         "plugin": "csv",
                         "on_success": "t1",
-                        "options": {"path": "/data/blobs/data.csv"},
+                        "options": {"path": "/data/blobs/data.csv", "schema": {"mode": "observed"}},
                         "on_validation_failure": "quarantine",
                     },
                 }
@@ -228,7 +228,7 @@ class TestComposerMultiTurnToolCalls:
                     "arguments": {
                         "plugin": "csv",
                         "on_success": "t1",
-                        "options": {},
+                        "options": {"path": "/data/blobs/input.csv", "schema": {"mode": "observed"}},
                         "on_validation_failure": "quarantine",
                     },
                 }
@@ -591,7 +591,7 @@ class TestComposerMultipleToolCallsPerTurn:
                     "arguments": {
                         "plugin": "csv",
                         "on_success": "t1",
-                        "options": {},
+                        "options": {"path": "/data/blobs/input.csv", "schema": {"mode": "observed"}},
                         "on_validation_failure": "quarantine",
                     },
                 },
@@ -765,7 +765,7 @@ class TestPartialStatePreservation:
                     "arguments": {
                         "plugin": "csv",
                         "on_success": "t1",
-                        "options": {},
+                        "options": {"path": "/data/blobs/input.csv", "schema": {"mode": "observed"}},
                         "on_validation_failure": "quarantine",
                     },
                 }

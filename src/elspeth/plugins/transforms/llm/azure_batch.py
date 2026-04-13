@@ -156,6 +156,7 @@ class AzureBatchLLMTransform(BaseTransform):
 
     name = "azure_batch_llm"
     is_batch_aware = True  # Engine passes list[dict] for batch processing
+    config_model = AzureBatchConfig
 
     # LLM transforms are non-deterministic by nature
     determinism: Determinism = Determinism.NON_DETERMINISTIC
@@ -168,7 +169,7 @@ class AzureBatchLLMTransform(BaseTransform):
         """
         super().__init__(config)
 
-        cfg = AzureBatchConfig.from_dict(config)
+        cfg = AzureBatchConfig.from_dict(config, plugin_name=self.name)
 
         # Declare output fields for centralized collision detection.
         self.declared_output_fields = frozenset(get_llm_guaranteed_fields(cfg.response_field))

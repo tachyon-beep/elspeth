@@ -15,7 +15,7 @@ Example usage:
 """
 
 from pathlib import Path
-from typing import Any, Self
+from typing import Any, ClassVar, Self
 
 from pydantic import BaseModel, Field, ValidationError, field_validator, model_validator
 
@@ -24,9 +24,42 @@ from elspeth.contracts.schema import SchemaConfig
 
 
 class PluginConfigError(Exception):
-    """Raised when plugin configuration is invalid."""
+    """Raised when plugin configuration is invalid.
 
-    pass
+    Attributes:
+        cause: The underlying validation message without the class-name prefix.
+               Callers should read this instead of parsing str(exc).
+               None only when the raise site omits the keyword argument (legacy
+               or non-from_dict paths such as plugin __init__ guards).
+        plugin_class: The config class name (e.g. ``'CSVSourceConfig'``), or
+                      None when raised outside ``from_dict()``. Callers can use
+                      the suffix to infer component type without regex-parsing.
+        plugin_name: The runtime plugin name (e.g. ``'csv'``), as it appears
+                     in pipeline YAML. Set by ``from_dict()`` when provided by
+                     the caller. None when the caller doesn't know the name
+                     (direct ``from_dict()`` calls without context) or when
+                     raised outside ``from_dict()``.
+        component_type: The pipeline component type (``'source'``, ``'sink'``,
+                        ``'transform'``), or None when raised outside
+                        ``from_dict()`` or when the type is unknown.
+                        Set from the config class hierarchy's
+                        ``_plugin_component_type`` attribute.
+    """
+
+    def __init__(
+        self,
+        message: str,
+        *,
+        cause: str | None = None,
+        plugin_class: str | None = None,
+        plugin_name: str | None = None,
+        component_type: str | None = None,
+    ) -> None:
+        super().__init__(message)
+        self.cause: str | None = cause
+        self.plugin_class: str | None = plugin_class
+        self.plugin_name: str | None = plugin_name
+        self.component_type: str | None = component_type
 
 
 def _validate_schema_config(value: Any, *, require_dict: bool) -> SchemaConfig | None:
@@ -69,6 +102,8 @@ class PluginConfig(BaseModel):
     but stored internally as "schema_config" to avoid shadowing Python's built-in.
     """
 
+    _plugin_component_type: ClassVar[str | None] = None
+
     model_config = {
         "extra": "forbid",
         "frozen": True,
@@ -98,13 +133,23 @@ class PluginConfig(BaseModel):
         return _validate_schema_config(value, require_dict=False)
 
     @classmethod
-    def from_dict(cls, config: dict[str, Any]) -> Self:
+    def from_dict(
+        cls,
+        config: object,
+        *,
+        plugin_name: str | None = None,
+    ) -> Self:
         """Create config from dict with clear error on validation failure.
 
         Args:
-            config: Dictionary of configuration values. Accepts "schema" key
-                (preferred, matches YAML format) or "schema_config" for backwards
-                compatibility.
+            config: Configuration value — expected to be a dict but typed as
+                ``object`` because callers may pass unsanitized YAML output.
+                Non-dict values are rejected with PluginConfigError.
+                Accepts "schema" key (preferred, matches YAML format) or
+                "schema_config" for backwards compatibility.
+            plugin_name: Runtime plugin name (e.g. ``'csv'``). Threaded into
+                PluginConfigError so consumers get both the internal class name
+                and the user-facing plugin name without string parsing.
 
         Returns:
             Validated configuration instance.
@@ -112,8 +157,19 @@ class PluginConfig(BaseModel):
         Raises:
             PluginConfigError: If configuration is invalid.
         """
+        _err_fields: dict[str, Any] = {
+            "cause": "",
+            "plugin_class": cls.__name__,
+            "plugin_name": plugin_name,
+            "component_type": cls._plugin_component_type,
+        }
+
         if not isinstance(config, dict):
-            raise PluginConfigError(f"Invalid configuration for {cls.__name__}: config must be a dict, got {type(config).__name__}.")
+            _cause = f"config must be a dict, got {type(config).__name__}."
+            raise PluginConfigError(
+                f"Invalid configuration for {cls.__name__}: {_cause}",
+                **{**_err_fields, "cause": _cause},
+            )
 
         # Pre-validate: reject explicit non-dict schema values.
         # Pydantic can't distinguish "key absent" from "key explicitly None",
@@ -122,19 +178,28 @@ class PluginConfig(BaseModel):
             if key in config:
                 value = config[key]
                 if not isinstance(value, (dict, SchemaConfig)):
-                    raise PluginConfigError(
-                        f"Invalid configuration for {cls.__name__}: "
+                    _cause = (
                         f"'schema' must be a dict, got {type(value).__name__}. "
                         f"Use 'schema: {{mode: observed}}' or provide explicit field definitions."
+                    )
+                    raise PluginConfigError(
+                        f"Invalid configuration for {cls.__name__}: {_cause}",
+                        **{**_err_fields, "cause": _cause},
                     )
 
         try:
             # model_validate handles the schema alias and field_validator parses dicts
             return cls.model_validate(config)
         except ValidationError as e:
-            raise PluginConfigError(f"Invalid configuration for {cls.__name__}: {e}") from e
+            raise PluginConfigError(
+                f"Invalid configuration for {cls.__name__}: {e}",
+                **{**_err_fields, "cause": str(e)},
+            ) from e
         except ValueError as e:
-            raise PluginConfigError(f"Invalid configuration for {cls.__name__}: {e}") from e
+            raise PluginConfigError(
+                f"Invalid configuration for {cls.__name__}: {e}",
+                **{**_err_fields, "cause": str(e)},
+            ) from e
 
 
 class DataPluginConfig(PluginConfig):
@@ -150,7 +215,29 @@ class DataPluginConfig(PluginConfig):
         This class overrides schema_config from Optional to required.
         Pydantic validates this at construction time, and mypy sees the
         narrowed type - no cast() needed in plugin implementations.
+
+    Component Type Enforcement:
+        All subclasses must set ``_plugin_component_type`` to ``'source'``,
+        ``'sink'``, or ``'transform'`` — either directly or by inheriting
+        from an intermediate base (SourceDataConfig, SinkPathConfig,
+        TransformDataConfig). Intermediate bases that intentionally leave
+        the type unset must declare ``_component_type_exempt = True`` in
+        their own class body; this exemption does not propagate to children.
     """
+
+    _component_type_exempt: ClassVar[bool] = True
+
+    def __init_subclass__(cls, **kwargs: Any) -> None:
+        super().__init_subclass__(**kwargs)
+        if "_component_type_exempt" in cls.__dict__:
+            return
+        if cls._plugin_component_type is None:
+            raise TypeError(
+                f"{cls.__qualname__} inherits from DataPluginConfig but does not "
+                f"set _plugin_component_type. Set it to 'source', 'sink', or "
+                f"'transform' (directly or via an intermediate base like "
+                f"SourceDataConfig, SinkPathConfig, or TransformDataConfig)."
+            )
 
     # Override parent's Optional field with required field.
     # This provides both runtime validation (Pydantic) and static typing (mypy).
@@ -175,6 +262,8 @@ class PathConfig(DataPluginConfig):
 
     Provides path validation and resolution relative to a base directory.
     """
+
+    _component_type_exempt: ClassVar[bool] = True
 
     path: str
 
@@ -212,6 +301,8 @@ class SourceDataConfig(PathConfig):
     (SourceSettings in core/config.py), not here. The bridge in
     cli_helpers.py injects on_success after plugin construction.
     """
+
+    _plugin_component_type: ClassVar[str | None] = "source"
 
     on_validation_failure: str = Field(
         ...,  # Required - no default
@@ -294,6 +385,8 @@ class SinkPathConfig(PathConfig):
             - dict: Custom mapping from normalized to output names
     """
 
+    _plugin_component_type: ClassVar[str | None] = "sink"
+
     headers: str | dict[str, str] | None = Field(
         default=None,
         description=("Header output mode: 'normalized', 'original', or {field: header} mapping"),
@@ -342,6 +435,8 @@ class TransformDataConfig(DataPluginConfig):
         `elspeth.core.templates.extract_jinja2_fields()` to discover which
         fields your template references, then declare them explicitly.
     """
+
+    _plugin_component_type: ClassVar[str | None] = "transform"
 
     required_input_fields: list[str] | None = Field(
         default=None,

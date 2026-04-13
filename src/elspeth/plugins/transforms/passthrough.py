@@ -38,10 +38,11 @@ class PassThrough(BaseTransform):
 
     name = "passthrough"
     plugin_version = "1.0.0"
+    config_model = PassThroughConfig
 
     def __init__(self, config: dict[str, Any]) -> None:
         super().__init__(config)
-        cfg = PassThroughConfig.from_dict(config)
+        cfg = PassThroughConfig.from_dict(config, plugin_name=self.name)
 
         self._schema_config = cfg.schema_config
         self.input_schema, self.output_schema = self._create_schemas(cfg.schema_config, "PassThrough")

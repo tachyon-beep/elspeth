@@ -261,10 +261,25 @@ allow_hits:
     emitted)
   safety: Unknown plugin returns None; no warning emitted; no false positive
   expires: null
-- key: web/composer/tools.py:R6:_execute_list_models:fp=46aacdbef3c718ed
+- key: web/composer/tools.py:R6:_execute_list_models:fp=4ea514a3ac1f2655
   owner: web-composer
   reason: list_models gracefully handles missing litellm — returns empty model list
   safety: ImportError/AttributeError returns empty list; no data fabrication
+  expires: null
+- key: web/composer/tools.py:R6:_prevalidate_plugin_options:fp=e9aa723028ec2cb6
+  owner: web-composer
+  reason: UnknownPluginTypeError is expected for unrecognised plugin names — lets engine validation catch it later
+  safety: Returns None (no pre-validation result); plugin name still validated during full pipeline instantiation
+  expires: null
+- key: web/execution/validation.py:R5:validate_pipeline:fp=819a97f2df35d76b
+  owner: web-execution
+  reason: isinstance(exc, PluginConfigError) discriminates exception type to extract plugin_name attribute
+  safety: Type dispatch for error formatting, not contract masking; both branches produce validation checks
+  expires: null
+- key: web/execution/validation.py:R5:validate_pipeline:fp=76fa971fbe4cd0b1
+  owner: web-execution
+  reason: isinstance(exc, PluginConfigError) discriminates exception type to prefer cause detail over generic str(exc)
+  safety: Type dispatch for error formatting, not contract masking; both branches produce validation checks
   expires: null
 - key: web/execution/validation.py:R1:validate_pipeline:fp=06ac41f797c829ef
   owner: web-execution
@@ -301,9 +316,9 @@ allow_hits:
   reason: Chained resolution — server store miss returns None; SecretNotFoundError is the expected miss signal
   safety: Only SecretNotFoundError is caught; caller receives None for genuine absence
   expires: null
-- key: web/execution/validation.py:R5:_collect_secret_refs:fp=2fd9a6d2ad02843a
+- key: web/execution/validation.py:R5:_collect_secret_refs:fp=960090b735d7640d
   owner: web-execution
-  reason: Tree-walk — isinstance() dispatches dict/list/scalar branches in recursive config traversal
+  reason: Tree-walk — isinstance(Mapping) dispatches dict/list/scalar branches in recursive config traversal
   safety: No contract masking; structural dispatch on deserialized YAML (Tier 3 data)
   expires: null
 - key: web/execution/validation.py:R5:_collect_secret_refs:fp=d6e0cb4ecbe3b083
@@ -596,6 +611,11 @@ allow_hits:
   owner: web-composer
   reason: Tier 3 boundary — user-provided sink output options; checking if path is empty after confirming key exists
   safety: Returns validation warning to user; does not affect execution
+  expires: null
+- key: web/execution/validation.py:R5:_infer_component_type_from_plugin_error:fp=13660ad4db709533
+  owner: web-validation
+  reason: Union type dispatch — function receives PluginNotFoundError | PluginConfigError, isinstance needed to read component_type attribute only present on PluginConfigError
+  safety: Returns None for non-matching type; no error suppression
   expires: null
 per_file_rules:
 - pattern: web/composer/tools.py

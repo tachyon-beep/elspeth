@@ -1,22 +1,39 @@
-import { useEffect, useRef, useId, type ComponentPropsWithoutRef } from "react";
+import { useEffect, useRef, useId, useState, type ComponentPropsWithoutRef } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import mermaid from "mermaid";
 import DOMPurify from "dompurify";
+import { useTheme, type ResolvedTheme } from "@/hooks/useTheme";
 
-// Initialize mermaid once with dark theme matching ELSPETH's color palette
-mermaid.initialize({
-  startOnLoad: false,
-  theme: "dark",
-  themeVariables: {
-    primaryColor: "#1a3d47",
-    primaryBorderColor: "#4db89a",
-    primaryTextColor: "#dff0ee",
-    lineColor: "#6a9898",
-    secondaryColor: "#28504a",
-    tertiaryColor: "#0f2d35",
+const MERMAID_THEMES: Record<ResolvedTheme, Parameters<typeof mermaid.initialize>[0]> = {
+  dark: {
+    startOnLoad: false,
+    theme: "dark",
+    themeVariables: {
+      primaryColor: "#1a3d47",
+      primaryBorderColor: "#4db89a",
+      primaryTextColor: "#dff0ee",
+      lineColor: "#6a9898",
+      secondaryColor: "#28504a",
+      tertiaryColor: "#0f2d35",
+    },
   },
-});
+  light: {
+    startOnLoad: false,
+    theme: "default",
+    themeVariables: {
+      primaryColor: "#eaf2f3",
+      primaryBorderColor: "#2a8a70",
+      primaryTextColor: "#0f2d35",
+      lineColor: "#5a7a84",
+      secondaryColor: "#f0f6f7",
+      tertiaryColor: "#f4f8f9",
+    },
+  },
+};
+
+// Initial mermaid configuration (dark default, updated reactively by MermaidDiagram)
+mermaid.initialize(MERMAID_THEMES.dark);
 
 interface MarkdownRendererProps {
   content: string;
@@ -84,6 +101,16 @@ function CodeBlock({
 function MermaidDiagram({ chart }: { chart: string }) {
   const containerRef = useRef<HTMLDivElement>(null);
   const uniqueId = useId().replace(/:/g, "-");
+  const { resolvedTheme } = useTheme();
+  // Counter forces a unique mermaid render ID when the theme changes,
+  // since mermaid.render() caches by ID.
+  const [renderCount, setRenderCount] = useState(0);
+
+  // Re-initialize mermaid when theme changes
+  useEffect(() => {
+    mermaid.initialize(MERMAID_THEMES[resolvedTheme]);
+    setRenderCount((c) => c + 1);
+  }, [resolvedTheme]);
 
   useEffect(() => {
     const container = containerRef.current;
@@ -92,7 +119,7 @@ function MermaidDiagram({ chart }: { chart: string }) {
     let cancelled = false;
 
     mermaid
-      .render(`mermaid-${uniqueId}`, chart)
+      .render(`mermaid-${uniqueId}-${renderCount}`, chart)
       .then(({ svg }) => {
         if (!cancelled && container) {
           container.innerHTML = DOMPurify.sanitize(svg, {
@@ -110,7 +137,7 @@ function MermaidDiagram({ chart }: { chart: string }) {
     return () => {
       cancelled = true;
     };
-  }, [chart, uniqueId]);
+  }, [chart, uniqueId, renderCount]);
 
   return (
     <div

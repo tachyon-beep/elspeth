@@ -70,47 +70,17 @@ interface TemplateCardsProps {
 
 export function TemplateCards({ onSelectTemplate }: TemplateCardsProps) {
   return (
-    <div
-      style={{
-        padding: "24px 32px",
-        maxWidth: 800,
-        margin: "0 auto",
-      }}
-    >
-      <div
-        style={{
-          textAlign: "center",
-          marginBottom: 24,
-        }}
-      >
-        <h2
-          style={{
-            margin: "0 0 8px",
-            fontSize: 18,
-            fontWeight: 600,
-            color: "var(--color-text)",
-          }}
-        >
-          Welcome to ELSPETH
-        </h2>
-        <p
-          style={{
-            margin: 0,
-            fontSize: 14,
-            color: "var(--color-text-muted)",
-          }}
-        >
+    <div className="template-cards-container">
+      <div className="template-cards-heading">
+        <h2 className="template-cards-title">Welcome to ELSPETH</h2>
+        <p className="template-cards-subtitle">
           Choose a template to get started, or describe your own pipeline below.
         </p>
       </div>
 
       <div
-        style={{
-          display: "grid",
-          gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))",
-          gap: 12,
-        }}
-        role="list"
+        className="template-cards-grid"
+        role="group"
         aria-label="Pipeline templates"
       >
         {TEMPLATES.map((template) => (
@@ -118,51 +88,14 @@ export function TemplateCards({ onSelectTemplate }: TemplateCardsProps) {
             key={template.id}
             onClick={() => onSelectTemplate(template.prompt)}
             className="template-card"
-            role="listitem"
-            style={{
-              display: "flex",
-              flexDirection: "column",
-              alignItems: "flex-start",
-              gap: 6,
-              padding: "14px 16px",
-              backgroundColor: "var(--color-surface-elevated)",
-              border: "1px solid var(--color-border)",
-              borderRadius: 8,
-              cursor: "pointer",
-              textAlign: "left",
-              transition: "border-color 150ms ease, background-color 150ms ease",
-            }}
           >
-            <div
-              style={{
-                display: "flex",
-                alignItems: "center",
-                gap: 8,
-              }}
-            >
-              <span
-                style={{ fontSize: 20 }}
-                aria-hidden="true"
-              >
+            <div className="template-card-header">
+              <span className="template-card-icon" aria-hidden="true">
                 {template.icon}
               </span>
-              <span
-                style={{
-                  fontSize: 14,
-                  fontWeight: 600,
-                  color: "var(--color-text)",
-                }}
-              >
-                {template.title}
-              </span>
+              <span className="template-card-title">{template.title}</span>
             </div>
-            <span
-              style={{
-                fontSize: 12,
-                color: "var(--color-text-muted)",
-                lineHeight: 1.4,
-              }}
-            >
+            <span className="template-card-description">
               {template.description}
             </span>
           </button>

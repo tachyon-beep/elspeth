@@ -5,6 +5,9 @@
 .scratch/*
 !.scratch/.gitkeep
 
+# Generated bug analysis docs (can be regenerated)
+docs/bugs/generated/
+
 # Byte-compiled / optimized / DLL files
 __pycache__/
 *.py[cod]

@@ -6,12 +6,20 @@ import {
   type ReactNode,
 } from "react";
 import { useTheme } from "@/hooks/useTheme";
+import { ErrorBoundary } from "./ErrorBoundary";
 
 const INSPECTOR_WIDTH_KEY = "elspeth_inspector_width";
 const SIDEBAR_COLLAPSED_KEY = "elspeth_sidebar_collapsed";
 
 const MIN_INSPECTOR_WIDTH = 240;
 const SIDEBAR_EXPANDED_WIDTH = 200;
+const SIDEBAR_COLLAPSED_WIDTH = 40;
+
+/** Breakpoint below which the sidebar auto-collapses. */
+const NARROW_BREAKPOINT = 1024;
+
+/** Breakpoint below which the inspector becomes an overlay sheet. */
+const OVERLAY_BREAKPOINT = 900;
 
 /**
  * Compute the default inspector width as ~50% of the space remaining
@@ -23,7 +31,6 @@ function defaultInspectorWidth(): number {
   const half = Math.round(available / 2);
   return Math.max(MIN_INSPECTOR_WIDTH, half);
 }
-const SIDEBAR_COLLAPSED_WIDTH = 40;
 
 function loadPersistedNumber(key: string, fallback: number): number {
   const raw = localStorage.getItem(key);
@@ -45,13 +52,19 @@ interface LayoutProps {
 }
 
 /**
- * Three-panel CSS grid layout.
+ * Three-panel CSS grid layout with responsive breakpoints.
  *
- * - Sessions sidebar: 200px fixed, collapsible to 40px (persisted to localStorage)
- * - Chat panel: flex (1fr, takes remaining space)
- * - Inspector panel: ~50% of remaining viewport width by default, resizable via drag handle (persisted to localStorage)
- *   Min 240px, max 50% viewport width.
- * - Minimum supported width: 1280px (horizontal scroll below that).
+ * Desktop (>1024px):
+ *   - Sessions sidebar: 200px fixed, collapsible to 40px (persisted)
+ *   - Chat panel: flex (1fr, takes remaining space)
+ *   - Inspector panel: resizable via drag handle (persisted)
+ *
+ * Narrow (<=1024px):
+ *   - Sidebar auto-collapses (user can still expand manually)
+ *
+ * Overlay (<= 900px):
+ *   - Inspector becomes a slide-over overlay sheet with backdrop
+ *   - Toggle button appears in the chat header area
  */
 export function Layout({ sidebar, chat, inspector }: LayoutProps) {
   const [inspectorWidth, setInspectorWidth] = useState(() =>
@@ -60,8 +73,51 @@ export function Layout({ sidebar, chat, inspector }: LayoutProps) {
   const [sidebarCollapsed, setSidebarCollapsed] = useState(() =>
     loadPersistedBoolean(SIDEBAR_COLLAPSED_KEY, false)
   );
+  const [inspectorVisible, setInspectorVisible] = useState(true);
+  const [isOverlayMode, setIsOverlayMode] = useState(
+    () => window.innerWidth <= OVERLAY_BREAKPOINT,
+  );
   const isResizing = useRef(false);
   const { resolvedTheme, toggleTheme } = useTheme();
+
+  // Respond to viewport width changes for responsive breakpoints.
+  useEffect(() => {
+    const narrowMq = window.matchMedia(`(max-width: ${NARROW_BREAKPOINT}px)`);
+    const overlayMq = window.matchMedia(`(max-width: ${OVERLAY_BREAKPOINT}px)`);
+
+    function handleNarrow(e: MediaQueryListEvent) {
+      if (e.matches) {
+        setSidebarCollapsed(true);
+      }
+    }
+
+    function handleOverlay(e: MediaQueryListEvent) {
+      setIsOverlayMode(e.matches);
+      if (e.matches) {
+        // Hide inspector when entering overlay mode
+        setInspectorVisible(false);
+      } else {
+        // Always show inspector when leaving overlay mode
+        setInspectorVisible(true);
+      }
+    }
+
+    // Apply initial state
+    if (narrowMq.matches) {
+      setSidebarCollapsed(true);
+    }
+    if (overlayMq.matches) {
+      setIsOverlayMode(true);
+      setInspectorVisible(false);
+    }
+
+    narrowMq.addEventListener("change", handleNarrow);
+    overlayMq.addEventListener("change", handleOverlay);
+    return () => {
+      narrowMq.removeEventListener("change", handleNarrow);
+      overlayMq.removeEventListener("change", handleOverlay);
+    };
+  }, []);
 
   // Persist inspector width to localStorage when it changes.
   useEffect(() => {
@@ -75,6 +131,14 @@ export function Layout({ sidebar, chat, inspector }: LayoutProps) {
 
   const handleToggleSidebar = useCallback(() => {
     setSidebarCollapsed((prev) => !prev);
+  }, []);
+
+  const handleToggleInspector = useCallback(() => {
+    setInspectorVisible((prev) => !prev);
+  }, []);
+
+  const handleCloseOverlay = useCallback(() => {
+    setInspectorVisible(false);
   }, []);
 
   const handleMouseDown = useCallback((e: React.MouseEvent) => {
@@ -128,42 +192,23 @@ export function Layout({ sidebar, chat, inspector }: LayoutProps) {
     ? SIDEBAR_COLLAPSED_WIDTH
     : SIDEBAR_EXPANDED_WIDTH;
 
+  // In overlay mode, the grid only has sidebar + chat (inspector floats).
+  const gridColumns = isOverlayMode
+    ? `${sidebarWidth}px 1fr`
+    : inspectorVisible
+      ? `${sidebarWidth}px 1fr ${inspectorWidth}px`
+      : `${sidebarWidth}px 1fr`;
+
   return (
     <div
-      className="app-layout"
-      style={{
-        display: "grid",
-        gridTemplateColumns: `${sidebarWidth}px 1fr ${inspectorWidth}px`,
-        gridTemplateRows: "100vh",
-        gridTemplateAreas: '"sidebar chat inspector"',
-        height: "100vh",
-        minWidth: 1280,
-        overflow: "hidden",
-      }}
+      className={`app-layout${isOverlayMode ? " app-layout--overlay" : ""}`}
+      style={{ gridTemplateColumns: gridColumns }}
     >
       {/* Sidebar panel */}
-      <div
-        className="layout-sidebar"
-        style={{
-          gridArea: "sidebar",
-          display: "flex",
-          flexDirection: "column",
-          borderRight: "1px solid var(--color-border)",
-          backgroundColor: "var(--color-surface-sidebar)",
-          overflow: "hidden",
-          transition: "width 150ms ease",
-          width: sidebarWidth,
-        }}
-      >
+      <div className="layout-sidebar" style={{ width: sidebarWidth }}>
         {/* Sidebar toolbar: collapse toggle + theme toggle */}
         <div
-          style={{
-            display: "flex",
-            alignItems: "center",
-            justifyContent: sidebarCollapsed ? "center" : "space-between",
-            borderBottom: "1px solid var(--color-border)",
-            flexShrink: 0,
-          }}
+          className={`layout-sidebar-toolbar${sidebarCollapsed ? " layout-sidebar-toolbar--collapsed" : ""}`}
         >
           {/* Collapse toggle */}
           <button
@@ -173,18 +218,6 @@ export function Layout({ sidebar, chat, inspector }: LayoutProps) {
               sidebarCollapsed ? "Expand sessions sidebar" : "Collapse sessions sidebar"
             }
             title={sidebarCollapsed ? "Expand sidebar" : "Collapse sidebar"}
-            style={{
-              display: "flex",
-              alignItems: "center",
-              justifyContent: "center",
-              minHeight: 44,
-              minWidth: 44,
-              border: "none",
-              backgroundColor: "transparent",
-              color: "var(--color-text-muted)",
-              cursor: "pointer",
-              fontSize: 14,
-            }}
           >
             {sidebarCollapsed ? "\u25B6" : "\u25C0"}
           </button>
@@ -204,19 +237,6 @@ export function Layout({ sidebar, chat, inspector }: LayoutProps) {
                   ? "Switch to light theme"
                   : "Switch to dark theme"
               }
-              style={{
-                display: "flex",
-                alignItems: "center",
-                justifyContent: "center",
-                minHeight: 44,
-                minWidth: 44,
-                border: "none",
-                backgroundColor: "transparent",
-                color: "var(--color-text-muted)",
-                cursor: "pointer",
-                fontSize: 16,
-                marginRight: 4,
-              }}
             >
               {/* Sun for light theme, moon for dark */}
               {resolvedTheme === "dark" ? "\u2600" : "\u263E"}
@@ -225,78 +245,91 @@ export function Layout({ sidebar, chat, inspector }: LayoutProps) {
         </div>
         {/* Sidebar content — hidden when collapsed */}
         <div
-          style={{
-            flex: 1,
-            overflow: "hidden",
-            display: sidebarCollapsed ? "none" : "flex",
-            flexDirection: "column",
-          }}
+          className={`layout-sidebar-content${sidebarCollapsed ? " layout-sidebar-content--hidden" : ""}`}
         >
-          {sidebar}
+          <ErrorBoundary label="Session sidebar">
+            {sidebar}
+          </ErrorBoundary>
         </div>
       </div>
 
       {/* Chat panel */}
-      <div
-        className="layout-chat"
-        style={{
-          gridArea: "chat",
-          overflow: "hidden",
-          display: "flex",
-          flexDirection: "column",
-          backgroundColor: "var(--color-surface)",
-        }}
-      >
-        {chat}
+      <div className="layout-chat">
+        {/* Inspector toggle button — visible when inspector is hidden or in overlay mode */}
+        {(!inspectorVisible || isOverlayMode) && (
+          <button
+            className="inspector-toggle-btn"
+            onClick={handleToggleInspector}
+            aria-label={inspectorVisible ? "Hide inspector" : "Show inspector"}
+            title={inspectorVisible ? "Hide inspector" : "Show inspector"}
+          >
+            {inspectorVisible ? "\u25B6" : "\u25C0"} Inspector
+          </button>
+        )}
+        <ErrorBoundary label="Chat panel">
+          {chat}
+        </ErrorBoundary>
       </div>
 
-      {/* Inspector panel with resize handle */}
-      <div
-        className="layout-inspector"
-        style={{
-          gridArea: "inspector",
-          position: "relative",
-          borderLeft: "1px solid var(--color-border)",
-          overflow: "hidden",
-          display: "flex",
-          flexDirection: "column",
-          backgroundColor: "var(--color-surface-inspector)",
-        }}
-      >
-        {/* Drag-to-resize handle */}
+      {/* Inspector panel — inline in desktop, overlay sheet in narrow viewports.
+          Always mounted so InspectorPanel preserves state (active tab) across
+          overlay toggles; hidden via display:none instead of unmounting. */}
+      {inspectorVisible && isOverlayMode && (
         <div
-          className="resize-handle"
-          onMouseDown={handleMouseDown}
-          onTouchStart={handleTouchStart}
-          role="separator"
-          aria-orientation="vertical"
-          aria-label="Resize inspector panel"
-          tabIndex={0}
-          onKeyDown={(e) => {
-            // Arrow keys adjust inspector width by 10px increments
-            if (e.key === "ArrowLeft") {
-              e.preventDefault();
-              setInspectorWidth((w) =>
-                Math.min(w + 10, window.innerWidth * 0.5)
-              );
-            } else if (e.key === "ArrowRight") {
-              e.preventDefault();
-              setInspectorWidth((w) => Math.max(w - 10, MIN_INSPECTOR_WIDTH));
-            }
-          }}
-          style={{
-            position: "absolute",
-            left: -8,
-            top: 0,
-            bottom: 0,
-            width: 20,
-            cursor: "col-resize",
-            backgroundColor: "transparent",
-            zIndex: 10,
-            touchAction: "none",
-          }}
+          className="inspector-overlay-backdrop"
+          onClick={handleCloseOverlay}
+          aria-hidden="true"
         />
-        {inspector}
+      )}
+      <div
+        className={`layout-inspector${isOverlayMode ? " layout-inspector--overlay" : ""}`}
+        style={
+          !inspectorVisible
+            ? { display: "none" }
+            : isOverlayMode
+              ? { width: Math.min(inspectorWidth, window.innerWidth - 48) }
+              : undefined
+        }
+      >
+        {/* Drag-to-resize handle — hidden in overlay mode */}
+        {!isOverlayMode && (
+          <div
+            className="resize-handle"
+            onMouseDown={handleMouseDown}
+            onTouchStart={handleTouchStart}
+            role="separator"
+            aria-orientation="vertical"
+            aria-label="Resize inspector panel"
+            tabIndex={0}
+            onKeyDown={(e) => {
+              if (e.key === "ArrowLeft") {
+                e.preventDefault();
+                setInspectorWidth((w) =>
+                  Math.min(w + 10, window.innerWidth * 0.5)
+                );
+              } else if (e.key === "ArrowRight") {
+                e.preventDefault();
+                setInspectorWidth((w) => Math.max(w - 10, MIN_INSPECTOR_WIDTH));
+              }
+            }}
+          />
+        )}
+
+        {/* Close button in overlay mode */}
+        {isOverlayMode && (
+          <button
+            className="inspector-overlay-close"
+            onClick={handleCloseOverlay}
+            aria-label="Close inspector"
+            title="Close inspector"
+          >
+            &#x2715;
+          </button>
+        )}
+
+        <ErrorBoundary label="Inspector panel">
+          {inspector}
+        </ErrorBoundary>
       </div>
     </div>
   );

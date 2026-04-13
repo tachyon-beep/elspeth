@@ -1,4 +1,5 @@
-import { useEffect, useRef, useCallback } from "react";
+import { useEffect, useRef } from "react";
+import { useFocusTrap } from "@/hooks/useFocusTrap";
 
 interface ConfirmDialogProps {
   title: string;
@@ -15,7 +16,7 @@ interface ConfirmDialogProps {
  *
  * Focus-trapped modal with keyboard support (Escape to cancel,
  * Enter on confirm button). Focus returns to the trigger element
- * on close via the onCancel/onConfirm callbacks.
+ * on close via useFocusTrap's restore-on-unmount behaviour.
  */
 export function ConfirmDialog({
   title,
@@ -27,12 +28,10 @@ export function ConfirmDialog({
   onCancel,
 }: ConfirmDialogProps) {
   const dialogRef = useRef<HTMLDivElement>(null);
-  const confirmRef = useRef<HTMLButtonElement>(null);
 
-  // Focus the confirm button on mount
-  useEffect(() => {
-    confirmRef.current?.focus();
-  }, []);
+  // Focus trap with initial focus on the confirm button.
+  // On unmount, focus restores to the element that was focused before the dialog.
+  useFocusTrap(dialogRef, true, ".confirm-dialog-confirm-btn");
 
   // Escape key closes
   useEffect(() => {
@@ -45,32 +44,6 @@ export function ConfirmDialog({
     document.addEventListener("keydown", handleKeyDown);
     return () => document.removeEventListener("keydown", handleKeyDown);
   }, [onCancel]);
-
-  // Focus trap
-  const handleKeyDown = useCallback(
-    (e: React.KeyboardEvent) => {
-      if (e.key !== "Tab") return;
-      const dialog = dialogRef.current;
-      if (!dialog) return;
-
-      const focusable = dialog.querySelectorAll<HTMLElement>(
-        'button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])',
-      );
-      if (focusable.length === 0) return;
-
-      const first = focusable[0];
-      const last = focusable[focusable.length - 1];
-
-      if (e.shiftKey && document.activeElement === first) {
-        e.preventDefault();
-        last.focus();
-      } else if (!e.shiftKey && document.activeElement === last) {
-        e.preventDefault();
-        first.focus();
-      }
-    },
-    [],
-  );
 
   const confirmBtnClass =
     variant === "danger" ? "btn btn-danger" : "btn btn-primary";
@@ -89,7 +62,6 @@ export function ConfirmDialog({
         aria-labelledby="confirm-dialog-title"
         aria-describedby="confirm-dialog-message"
         className="confirm-dialog"
-        onKeyDown={handleKeyDown}
       >
         <h2 id="confirm-dialog-title" className="confirm-dialog-title">
           {title}
@@ -100,16 +72,13 @@ export function ConfirmDialog({
         <div className="confirm-dialog-actions">
           <button
             onClick={onCancel}
-            className="btn"
-            style={{ minWidth: 80, minHeight: 44 }}
+            className="btn confirm-dialog-btn"
           >
             {cancelLabel}
           </button>
           <button
-            ref={confirmRef}
             onClick={onConfirm}
-            className={confirmBtnClass}
-            style={{ minWidth: 80, minHeight: 44 }}
+            className={`${confirmBtnClass} confirm-dialog-btn confirm-dialog-confirm-btn`}
           >
             {confirmLabel}
           </button>

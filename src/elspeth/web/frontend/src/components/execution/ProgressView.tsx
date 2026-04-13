@@ -26,53 +26,27 @@ export function ProgressView() {
     progress.status === "completed" || progress.status === "cancelled";
 
   return (
-    <div style={{ padding: 12, fontSize: 13 }}>
+    <div className="progress-container">
       {/* WebSocket disconnect banner */}
       {wsDisconnected && !isTerminal && (
         <div
           role="status"
-          style={{
-            padding: "6px 10px",
-            marginBottom: 8,
-            backgroundColor: "var(--color-warning-bg)",
-            color: "var(--color-warning)",
-            border: "1px solid var(--color-warning-border)",
-            borderRadius: 4,
-            fontSize: 12,
-          }}
+          className="progress-ws-banner"
         >
           Live progress connection lost. Reconnecting...
         </div>
       )}
 
       {/* Status header with cancel button */}
-      <div
-        style={{
-          display: "flex",
-          justifyContent: "space-between",
-          alignItems: "center",
-          marginBottom: 8,
-        }}
-      >
-        <span
-          style={{
-            fontWeight: 600,
-            textTransform: "uppercase",
-            fontSize: 12,
-            color: "var(--color-text)",
-          }}
-        >
+      <div className="progress-status-header">
+        <span className="progress-status-label">
           {progress.status}
         </span>
         {!isTerminal && (
           <button
             onClick={() => setShowCancelConfirm(true)}
             aria-label="Cancel pipeline execution"
-            className="btn btn-danger"
-            style={{
-              padding: "4px 10px",
-              fontSize: 12,
-            }}
+            className="btn btn-danger progress-cancel-btn"
           >
             Cancel
           </button>
@@ -95,14 +69,9 @@ export function ProgressView() {
 
       {/* Progress bar -- indeterminate mode (no percentage, animated stripe) */}
       <div
-        className="progress-bar"
+        className="progress-bar progress-bar-outer"
         role="progressbar"
         aria-label="Pipeline execution in progress"
-        style={{
-          height: 8,
-          borderRadius: 4,
-          marginBottom: 12,
-        }}
       >
         <div
           className={isTerminal ? "progress-bar-complete" : "progress-bar-stripe"}
@@ -120,47 +89,22 @@ export function ProgressView() {
       </div>
 
       {/* Row counters -- large and prominent */}
-      <div
-        style={{
-          display: "flex",
-          gap: 24,
-          marginBottom: 12,
-        }}
-      >
+      <div className="progress-counters">
         <div>
-          <div
-            style={{
-              fontSize: 12,
-              color: "var(--color-text-muted)",
-              marginBottom: 2,
-            }}
-          >
+          <div className="progress-counter-label">
             Processed
           </div>
-          <div
-            style={{
-              fontSize: 20,
-              fontWeight: 700,
-              color: "var(--color-text)",
-            }}
-          >
+          <div className="progress-counter-value">
             {progress.rows_processed.toLocaleString()}
           </div>
         </div>
         <div>
-          <div
-            style={{
-              fontSize: 12,
-              color: "var(--color-text-muted)",
-              marginBottom: 2,
-            }}
-          >
+          <div className="progress-counter-label">
             Failed
           </div>
           <div
+            className="progress-counter-value"
             style={{
-              fontSize: 20,
-              fontWeight: 700,
               color:
                 progress.rows_failed > 0
                   ? "var(--color-error)"
@@ -176,15 +120,7 @@ export function ProgressView() {
       {progress.status === "cancelled" && (
         <div
           role="status"
-          style={{
-            padding: "8px 12px",
-            marginBottom: 8,
-            backgroundColor: "var(--color-warning-bg)",
-            color: "var(--color-warning)",
-            borderRadius: 4,
-            fontSize: 13,
-            border: "1px solid var(--color-warning-border)",
-          }}
+          className="progress-cancelled-msg"
         >
           Pipeline execution was cancelled.
         </div>
@@ -193,34 +129,15 @@ export function ProgressView() {
       {/* Recent errors */}
       {progress.recent_errors.length > 0 && (
         <div>
-          <div
-            style={{
-              fontSize: 12,
-              fontWeight: 600,
-              color: "var(--color-error)",
-              marginBottom: 4,
-            }}
-          >
+          <div className="progress-errors-title">
             Recent errors ({progress.recent_errors.length})
           </div>
-          <div
-            style={{
-              maxHeight: 200,
-              overflowY: "auto",
-              fontSize: 12,
-              fontFamily: "var(--font-mono)",
-              backgroundColor: "var(--color-error-bg)",
-              borderRadius: 4,
-              padding: 8,
-              border: "1px solid var(--color-error-border)",
-            }}
-          >
+          <div className="progress-errors-container">
             {progress.recent_errors.map((err, i) => (
               <div
                 key={`${err.node_id}-${i}`}
+                className="progress-error-item"
                 style={{
-                  marginBottom: 4,
-                  paddingBottom: 4,
                   borderBottom:
                     i < progress.recent_errors.length - 1
                       ? "1px solid var(--color-error-border)"
@@ -231,7 +148,7 @@ export function ProgressView() {
                 {err.node_id && ": "}
                 {err.message}
                 {err.row_id && (
-                  <span style={{ color: "var(--color-text-muted)" }}>
+                  <span className="progress-error-row-id">
                     {" "}
                     (row: {err.row_id})
                   </span>

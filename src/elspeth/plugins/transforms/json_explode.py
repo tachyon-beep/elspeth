@@ -22,7 +22,7 @@ and has no on_error configuration.
 from __future__ import annotations
 
 import copy
-from typing import Any
+from typing import Any, ClassVar
 
 from pydantic import Field, field_validator, model_validator
 
@@ -46,11 +46,16 @@ class JSONExplodeConfig(DataPluginConfig):
     Routing fields such as on_success are owned by TransformSettings at the
     pipeline settings layer, not plugin options.
 
+    _plugin_component_type overrides DataPluginConfig (None) because this
+    config extends DataPluginConfig directly, bypassing TransformDataConfig.
+
     Attributes:
         array_field: Name of the array field to explode (required)
         output_field: Name for the exploded element (default: "item")
         include_index: Whether to include item_index field (default: True)
     """
+
+    _plugin_component_type: ClassVar[str | None] = "transform"
 
     array_field: str = Field(..., description="Name of the array field to explode")
     output_field: str = Field(default="item", description="Name for the exploded element")
@@ -107,6 +112,7 @@ class JSONExplode(BaseTransform):
 
     name = "json_explode"
     plugin_version = "1.0.0"
+    config_model = JSONExplodeConfig
     creates_tokens = True  # CRITICAL: enables new token creation for deaggregation
 
     def __init__(self, config: dict[str, Any]) -> None:
@@ -121,10 +127,12 @@ class JSONExplode(BaseTransform):
         if "on_success" in config:
             raise PluginConfigError(
                 "JSONExplode does not accept 'on_success' in plugin options. "
-                "Set routing at the settings layer with transforms[].on_success."
+                "Set routing at the settings layer with transforms[].on_success.",
+                plugin_class="JSONExplodeConfig",
+                component_type="transform",
             )
         super().__init__(config)
-        cfg = JSONExplodeConfig.from_dict(config)
+        cfg = JSONExplodeConfig.from_dict(config, plugin_name=self.name)
         self._array_field = cfg.array_field
         self._output_field = cfg.output_field
         self._include_index = cfg.include_index

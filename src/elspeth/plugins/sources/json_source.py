@@ -94,6 +94,18 @@ class JSONSourceConfig(SourceDataConfig):
             raise ValueError(
                 "data_key is not supported with format='jsonl' — JSONL reads line-by-line, data_key extracts from a JSON object root"
             )
+        # Also catch auto-detected JSONL format from .jsonl extension.
+        # When format is None, the plugin auto-detects from the path extension.
+        # Moved from JSONSource.__init__ so from_dict() catches it
+        # (pre-validation / engine-validation agreement).
+        if self.format is None and self.data_key is not None:
+            from pathlib import Path
+
+            if Path(self.path).suffix == ".jsonl":
+                raise ValueError(
+                    "data_key is not supported with JSONL format (auto-detected from .jsonl extension) "
+                    "— JSONL reads line-by-line, data_key extracts from a JSON object root"
+                )
         return self
 
     @model_validator(mode="after")
@@ -124,12 +136,13 @@ class JSONSource(BaseSource):
 
     name = "json"
     plugin_version = "1.0.0"
+    config_model = JSONSourceConfig
     # Override parent type - SourceDataConfig requires this to be set
     _on_validation_failure: str
 
     def __init__(self, config: dict[str, Any]) -> None:
         super().__init__(config)
-        cfg = JSONSourceConfig.from_dict(config)
+        cfg = JSONSourceConfig.from_dict(config, plugin_name=self.name)
 
         self._path = cfg.resolved_path()
         self._encoding = cfg.encoding
@@ -141,14 +154,9 @@ class JSONSource(BaseSource):
             fmt = "jsonl" if self._path.suffix == ".jsonl" else "json"
         self._format = fmt
 
-        # The Pydantic validator _reject_data_key_with_jsonl only fires when
-        # format is explicitly "jsonl".  When format was None (auto-detected),
-        # data_key slips through unchecked.  Enforce the same constraint here.
-        if self._format == "jsonl" and self._data_key is not None:
-            raise ValueError(
-                "data_key is not supported with JSONL format (auto-detected from .jsonl extension) "
-                "— JSONL reads line-by-line, data_key extracts from a JSON object root"
-            )
+        # data_key + auto-detected JSONL is now caught by
+        # JSONSourceConfig._reject_data_key_with_jsonl model_validator —
+        # from_dict() above already enforced it.
 
         # Store schema config for audit trail
         # SourceDataConfig (via DataPluginConfig) ensures schema_config is not None

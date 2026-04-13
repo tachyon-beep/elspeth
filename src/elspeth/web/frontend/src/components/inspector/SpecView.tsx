@@ -189,24 +189,11 @@ function SuggestionBanner({ suggestions, onApply, isApplying }: SuggestionBanner
   return (
     <div
       role="note"
-      style={{
-        padding: "8px 12px",
-        backgroundColor: "var(--color-info-bg)",
-        borderRadius: 6,
-        fontSize: 13,
-        color: "var(--color-info)",
-        border: "1px solid var(--color-info-border)",
-      }}
+      className="spec-suggestion-banner"
     >
       <div
-        style={{
-          fontWeight: 600,
-          marginBottom: expanded ? 4 : 0,
-          cursor: "pointer",
-          display: "flex",
-          justifyContent: "space-between",
-          alignItems: "center",
-        }}
+        className="spec-suggestion-header"
+        style={{ marginBottom: expanded ? 4 : 0 }}
         onClick={() => setExpanded(!expanded)}
         onKeyDown={(e) => {
           if (e.key === "Enter" || e.key === " ") {
@@ -219,21 +206,16 @@ function SuggestionBanner({ suggestions, onApply, isApplying }: SuggestionBanner
         aria-expanded={expanded}
       >
         <span>Suggestions ({suggestions.length})</span>
-        <span style={{ fontSize: 11 }}>{expanded ? "▲" : "▼"}</span>
+        <span className="spec-suggestion-expand">{expanded ? "▲" : "▼"}</span>
       </div>
       {expanded && (
-        <ul style={{ margin: 0, paddingLeft: 16 }}>
+        <ul className="spec-suggestion-list">
           {suggestions.map((entry, i) => (
             <li
               key={i}
-              style={{
-                marginBottom: 4,
-                display: "flex",
-                alignItems: "flex-start",
-                gap: 8,
-              }}
+              className="spec-suggestion-item"
             >
-              <span style={{ flex: 1 }}>
+              <span className="spec-suggestion-item-text">
                 <strong>{entry.component}:</strong> {entry.message}
               </span>
               {onApply && (
@@ -242,21 +224,7 @@ function SuggestionBanner({ suggestions, onApply, isApplying }: SuggestionBanner
                   disabled={isApplying}
                   title="Ask assistant to apply this suggestion"
                   aria-label={`Apply suggestion: ${entry.message}`}
-                  style={{
-                    padding: "2px 8px",
-                    fontSize: 11,
-                    backgroundColor: isApplying
-                      ? "var(--color-surface)"
-                      : "var(--color-accent)",
-                    color: isApplying
-                      ? "var(--color-text-muted)"
-                      : "var(--color-text-inverse)",
-                    border: "none",
-                    borderRadius: 4,
-                    cursor: isApplying ? "not-allowed" : "pointer",
-                    flexShrink: 0,
-                    whiteSpace: "nowrap",
-                  }}
+                  className={`spec-suggestion-apply-btn ${isApplying ? "spec-suggestion-apply-btn--disabled" : "spec-suggestion-apply-btn--active"}`}
                 >
                   {isApplying ? "Applying..." : "Apply"}
                 </button>
@@ -368,13 +336,7 @@ export function SpecView() {
       compositionState.outputs.length > 0);
   if (!hasContent) {
     return (
-      <div
-        className="empty-state"
-        style={{
-          padding: 24,
-          fontSize: 14,
-        }}
-      >
+      <div className="empty-state">
         Send a message to start building your pipeline. Components will appear here as ELSPETH composes them.
       </div>
     );
@@ -391,31 +353,19 @@ export function SpecView() {
   return (
     <div
       onClick={handleBackgroundClick}
-      style={{
-        padding: 12,
-        display: "flex",
-        flexDirection: "column",
-        gap: 8,
-      }}
+      className="spec-container"
     >
       {/* Stage 1 validation errors */}
       {compositionState.validation_errors &&
         compositionState.validation_errors.length > 0 && (
           <div
             role="alert"
-            style={{
-              padding: "8px 12px",
-              backgroundColor: "var(--color-error-bg)",
-              borderRadius: 6,
-              fontSize: 13,
-              color: "var(--color-error)",
-              border: "1px solid var(--color-error-border)",
-            }}
+            className="spec-validation-error-block"
           >
-            <div style={{ fontWeight: 600, marginBottom: 4 }}>Errors</div>
-            <ul style={{ margin: 0, paddingLeft: 16 }}>
+            <div className="spec-validation-title">Errors</div>
+            <ul className="spec-validation-list">
               {compositionState.validation_errors.map((msg, i) => (
-                <li key={i} style={{ marginBottom: 2 }}>
+                <li key={i} className="spec-validation-item">
                   {msg}
                 </li>
               ))}
@@ -428,19 +378,12 @@ export function SpecView() {
         compositionState.validation_warnings.length > 0 && (
           <div
             role="status"
-            style={{
-              padding: "8px 12px",
-              backgroundColor: "var(--color-warning-bg)",
-              borderRadius: 6,
-              fontSize: 13,
-              color: "var(--color-warning)",
-              border: "1px solid var(--color-warning-border)",
-            }}
+            className="spec-validation-warning-block"
           >
-            <div style={{ fontWeight: 600, marginBottom: 4 }}>Warnings</div>
-            <ul style={{ margin: 0, paddingLeft: 16 }}>
+            <div className="spec-validation-title">Warnings</div>
+            <ul className="spec-validation-list">
               {compositionState.validation_warnings.map((entry, i) => (
-                <li key={i} style={{ marginBottom: 2 }}>
+                <li key={i} className="spec-validation-item">
                   <strong>{entry.component}:</strong> {entry.message}
                 </li>
               ))}
@@ -464,27 +407,14 @@ export function SpecView() {
           className="component-card"
           style={{ borderLeft: "3px solid var(--color-badge-source)" }}
         >
-          <div
-            style={{
-              display: "flex",
-              gap: 6,
-              alignItems: "center",
-              marginBottom: 4,
-            }}
-          >
+          <div className="spec-card-header">
             <span className={SOURCE_BADGE_CLASS}>SOURCE</span>
           </div>
-          <div style={{ fontWeight: 600, fontSize: 13 }}>
+          <div className="spec-card-name">
             {compositionState.source.plugin}
           </div>
           {compositionState.source.on_success && (
-            <div
-              style={{
-                marginTop: 6,
-                fontSize: 11,
-                color: "var(--color-text-muted)",
-              }}
-            >
+            <div className="spec-card-connections">
               <span aria-hidden="true">{"\u2193"}</span>
               <span className="sr-only">continues to</span> {compositionState.source.on_success}
             </div>
@@ -530,14 +460,7 @@ export function SpecView() {
             style={{ borderLeft: `3px solid ${TYPE_BAND_COLORS[node.node_type]}` }}
           >
             {/* Top row: type badge + relationship badge */}
-            <div
-              style={{
-                display: "flex",
-                gap: 6,
-                alignItems: "center",
-                marginBottom: 4,
-              }}
-            >
+            <div className="spec-card-header">
               {/* Type badge: uses CSS class from App.css */}
               <span className={TYPE_BADGE_CLASSES[node.node_type]}>
                 {TYPE_LABELS[node.node_type]}
@@ -563,30 +486,18 @@ export function SpecView() {
             </div>
 
             {/* Plugin name */}
-            <div style={{ fontWeight: 600, fontSize: 13 }}>{node.id}</div>
+            <div className="spec-card-name">{node.id}</div>
 
             {/* Plugin name */}
             {node.plugin && (
-              <div
-                style={{
-                  fontSize: 12,
-                  color: "var(--color-text-muted)",
-                  marginTop: 2,
-                }}
-              >
+              <div className="spec-card-plugin">
                 {node.plugin}
               </div>
             )}
 
             {/* Connection indicators */}
             {edges.length > 0 && (
-              <div
-                style={{
-                  marginTop: 6,
-                  fontSize: 11,
-                  color: "var(--color-text-muted)",
-                }}
-              >
+              <div className="spec-card-connections">
                 {edges.map((edge, i) => (
                   <ConnectionIndicator
                     key={`${edge.from_node}-${edge.to_node}-${i}`}
@@ -601,19 +512,11 @@ export function SpecView() {
             {nodeErrors.get(node.id)?.map((err, i) => (
               <div
                 key={`error-${i}`}
-                style={{
-                  marginTop: 6,
-                  padding: "4px 8px",
-                  borderRadius: 4,
-                  backgroundColor: "var(--color-error-bg)",
-                  border: "1px solid var(--color-error-border)",
-                  fontSize: 11,
-                  color: "var(--color-error)",
-                }}
+                className="spec-card-error"
               >
                 <strong>Error:</strong> {err.message}
                 {err.suggestion && (
-                  <div style={{ color: "var(--color-text-muted)", marginTop: 2 }}>
+                  <div className="spec-card-error-suggestion">
                     Suggestion: {err.suggestion}
                   </div>
                 )}
@@ -624,19 +527,11 @@ export function SpecView() {
             {nodeWarnings.get(node.id)?.map((warn, i) => (
               <div
                 key={`warning-${i}`}
-                style={{
-                  marginTop: 6,
-                  padding: "4px 8px",
-                  borderRadius: 4,
-                  backgroundColor: "var(--color-warning-bg)",
-                  border: "1px solid var(--color-warning-border)",
-                  fontSize: 11,
-                  color: "var(--color-warning)",
-                }}
+                className="spec-card-warning"
               >
                 <strong>Warning:</strong> {warn.message}
                 {warn.suggestion && (
-                  <div style={{ color: "var(--color-text-muted)", marginTop: 2 }}>
+                  <div className="spec-card-warning-suggestion">
                     Suggestion: {warn.suggestion}
                   </div>
                 )}
@@ -653,24 +548,11 @@ export function SpecView() {
           className="component-card"
           style={{ borderLeft: "3px solid var(--color-badge-sink)" }}
         >
-          <div
-            style={{
-              display: "flex",
-              gap: 6,
-              alignItems: "center",
-              marginBottom: 4,
-            }}
-          >
+          <div className="spec-card-header">
             <span className={SINK_BADGE_CLASS}>SINK</span>
           </div>
-          <div style={{ fontWeight: 600, fontSize: 13 }}>{output.name}</div>
-          <div
-            style={{
-              fontSize: 12,
-              color: "var(--color-text-muted)",
-              marginTop: 2,
-            }}
-          >
+          <div className="spec-card-name">{output.name}</div>
+          <div className="spec-card-plugin">
             {output.plugin}
           </div>
         </div>

@@ -106,9 +106,10 @@ class AzureContentSafety(BaseAzureSafetyTransform):
     """
 
     name = "azure_content_safety"
+    config_model = AzureContentSafetyConfig
 
     def __init__(self, config: dict[str, Any]) -> None:
-        cfg = AzureContentSafetyConfig.from_dict(config)
+        cfg = AzureContentSafetyConfig.from_dict(config, plugin_name=self.name)
         super().__init__(config, cfg, "AzureContentSafetySchema")
         self._thresholds = cfg.thresholds
 

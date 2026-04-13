@@ -26,6 +26,7 @@ if TYPE_CHECKING:
     from elspeth.contracts.results import SourceRow, TransformResult
     from elspeth.contracts.schema_contract import PipelineRow, SchemaContract
     from elspeth.contracts.sink import OutputValidationResult
+    from elspeth.plugins.infrastructure.config_base import PluginConfig
 
 
 class SourceProtocol(Protocol):
@@ -135,6 +136,15 @@ class SourceProtocol(Protocol):
         Returns:
             SchemaContract if available, None otherwise. Using Any return type
             to avoid circular import with contracts module in Protocol definition.
+        """
+        ...
+
+    @classmethod
+    def get_config_model(cls, config: dict[str, Any] | None = None) -> type["PluginConfig"] | None:
+        """Return the Pydantic config model for this plugin type.
+
+        Returns None for sources with no config (e.g. NullSource).
+        Override for dynamic dispatch based on config contents.
         """
         ...
 
@@ -268,6 +278,15 @@ class TransformProtocol(Protocol):
         """Called after all rows processed or on error, before close(). Individually protected."""
         ...
 
+    @classmethod
+    def get_config_model(cls, config: dict[str, Any] | None = None) -> type["PluginConfig"] | None:
+        """Return the Pydantic config model for this plugin type.
+
+        Override for dynamic dispatch (e.g. LLMTransform selects provider-specific
+        model based on config["provider"]).
+        """
+        ...
+
 
 class BatchTransformProtocol(Protocol):
     """Protocol for batch-aware transforms — type-checking only, not @runtime_checkable.
@@ -372,6 +391,14 @@ class BatchTransformProtocol(Protocol):
 
     def on_complete(self, ctx: "LifecycleContext") -> None:
         """Called after all rows processed or on error, before close(). Individually protected."""
+        ...
+
+    @classmethod
+    def get_config_model(cls, config: dict[str, Any] | None = None) -> type["PluginConfig"] | None:
+        """Return the Pydantic config model for this plugin type.
+
+        Override for dynamic dispatch based on config contents.
+        """
         ...
 
 
@@ -555,6 +582,14 @@ class SinkProtocol(Protocol):
         Note:
             Default is a no-op. Only sinks configured with headers: original need
             to override this.
+        """
+        ...
+
+    @classmethod
+    def get_config_model(cls, config: dict[str, Any] | None = None) -> type["PluginConfig"] | None:
+        """Return the Pydantic config model for this plugin type.
+
+        Override for dynamic dispatch based on config contents.
         """
         ...
 

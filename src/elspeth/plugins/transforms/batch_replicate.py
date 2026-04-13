@@ -94,11 +94,12 @@ class BatchReplicate(BaseTransform):
 
     name = "batch_replicate"
     plugin_version = "1.0.0"
+    config_model = BatchReplicateConfig
     is_batch_aware = True  # CRITICAL: Engine buffers rows for batch processing
 
     def __init__(self, config: dict[str, Any]) -> None:
         super().__init__(config)
-        cfg = BatchReplicateConfig.from_dict(config)
+        cfg = BatchReplicateConfig.from_dict(config, plugin_name=self.name)
 
         # Declare output fields for centralized collision detection.
         self.declared_output_fields = frozenset(["copy_index"] if cfg.include_copy_index else [])

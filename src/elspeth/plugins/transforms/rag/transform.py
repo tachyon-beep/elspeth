@@ -56,11 +56,12 @@ class RAGRetrievalTransform(BaseTransform):
 
     name = "rag_retrieval"
     determinism: Determinism = Determinism.EXTERNAL_CALL
+    config_model = RAGRetrievalConfig
 
     def __init__(self, config: dict[str, Any]) -> None:
         super().__init__(config)
 
-        self._rag_config = RAGRetrievalConfig.from_dict(config)
+        self._rag_config = RAGRetrievalConfig.from_dict(config, plugin_name=self.name)
         prefix = self._rag_config.output_prefix
 
         # Output field names

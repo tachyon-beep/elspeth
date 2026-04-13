@@ -86,10 +86,11 @@ class Truncate(BaseTransform):
 
     name = "truncate"
     plugin_version = "1.0.0"
+    config_model = TruncateConfig
 
     def __init__(self, config: dict[str, Any]) -> None:
         super().__init__(config)
-        cfg = TruncateConfig.from_dict(config)
+        cfg = TruncateConfig.from_dict(config, plugin_name=self.name)
         self._fields = cfg.fields
         self._suffix = cfg.suffix
         self._strict = cfg.strict

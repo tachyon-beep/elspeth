@@ -95,6 +95,7 @@ class CSVSink(BaseSink):
 
     name = "csv"
     plugin_version = "1.0.0"
+    config_model = CSVSinkConfig
     # determinism inherited from BaseSink (IO_WRITE)
 
     # Resume capability: CSV can append to existing files
@@ -194,7 +195,7 @@ class CSVSink(BaseSink):
 
     def __init__(self, config: dict[str, Any]) -> None:
         super().__init__(config)
-        cfg = CSVSinkConfig.from_dict(config)
+        cfg = CSVSinkConfig.from_dict(config, plugin_name=self.name)
 
         self._path = cfg.resolved_path()
         self._delimiter = cfg.delimiter

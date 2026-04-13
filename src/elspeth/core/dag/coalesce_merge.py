@@ -180,7 +180,9 @@ def merge_union_fields(
                         f"types for field '{fd.name}' in union merge: "
                         f"branch '{prior_branch}' has {prior_type!r}, "
                         f"branch '{branch_name}' has {fd.field_type!r}. "
-                        "Union merge requires compatible types on shared fields."
+                        "Union merge requires compatible types on shared fields.",
+                        component_id=coalesce_id,
+                        component_type="coalesce",
                     )
                 if require_all:
                     # OR for required: required if required in ANY branch.

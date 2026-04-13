@@ -30,7 +30,7 @@ from elspeth.web.composer.protocol import (
     ComposerResult,
     ComposerSettings,
 )
-from elspeth.web.composer.state import CompositionState
+from elspeth.web.composer.state import CompositionState, ValidationSummary
 from elspeth.web.composer.tools import (
     execute_tool,
     get_tool_definitions,
@@ -162,6 +162,12 @@ class ComposerServiceImpl:
         # compose() call gets its own independent cache dict.
         discovery_cache: dict[str, Any] = {}
 
+        # Validation threading: compute once for the initial state, then
+        # carry forward from each ToolResult.validation. Avoids redundant
+        # validate() calls — CompositionState is immutable so validation
+        # is deterministic for a given state object.
+        last_validation: ValidationSummary | None = None
+
         while True:
             response = await self._call_llm(llm_messages, tools)
             assistant_message = response.choices[0].message
@@ -252,6 +258,7 @@ class ComposerServiceImpl:
                         session_id=session_id,
                         secret_service=self._secret_service,
                         user_id=user_id,
+                        prior_validation=last_validation,
                     )
                 except (KeyError, TypeError) as exc:
                     # Track mutation intent even on failure — the LLM
@@ -274,6 +281,7 @@ class ComposerServiceImpl:
 
                 state = result.updated_state
                 state_ref[0] = state  # Publish for timeout capture
+                last_validation = result.validation
                 result_json = _serialize_tool_result(result)
 
                 # Cache cacheable discovery results

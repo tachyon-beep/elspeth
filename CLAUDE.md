@@ -203,6 +203,7 @@ elspeth validate --settings pipeline.yaml             # Validate config
 elspeth plugins list                                  # List available plugins
 elspeth purge --retention-days 90                      # Purge old payload data
 elspeth explain --run <run_id> --row <row_id>         # Lineage explorer (TUI)
+
 ```
 
 ### Landscape MCP Analysis Server

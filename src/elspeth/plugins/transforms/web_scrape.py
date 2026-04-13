@@ -194,12 +194,13 @@ class WebScrapeTransform(BaseTransform):
     name = "web_scrape"
     determinism = Determinism.EXTERNAL_CALL
     plugin_version = "1.0.0"
+    config_model = WebScrapeConfig
 
     def __init__(self, options: dict[str, Any]) -> None:
         super().__init__(options)
 
         # Parse and validate config
-        cfg = WebScrapeConfig.from_dict(options)
+        cfg = WebScrapeConfig.from_dict(options, plugin_name=self.name)
 
         # Required fields
         self._url_field = cfg.url_field

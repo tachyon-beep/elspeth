@@ -308,7 +308,7 @@ class TestStructuredValidation:
         state = _empty_state()
         result = execute_tool(
             "set_source",
-            {"plugin": "csv", "on_success": "t1", "options": {}, "on_validation_failure": "quarantine"},
+            {"plugin": "csv", "on_success": "t1", "options": {"schema": {"mode": "observed"}}, "on_validation_failure": "quarantine"},
             state,
             catalog,
         )
@@ -490,8 +490,10 @@ class TestDiffStates:
         s1 = _empty_state().with_output(output)
         s2 = s1.with_source(source)
         diff = diff_states(s1, s2)
-        # s2 has a warning about dangling on_success
-        assert len(diff["warnings_introduced"]) > 0
+        # s2 introduces W2: source on_success points to non-existent target
+        assert any("on_success 'dangling'" in w and "data may not flow" in w for w in diff["warnings_introduced"]), (
+            f"Expected dangling on_success warning, got: {diff['warnings_introduced']}"
+        )
 
     def test_version_tracking(self) -> None:
         s1 = _empty_state()
@@ -780,7 +782,13 @@ class TestDiffStatesWarningsResolved:
         fixed_source = SourceSpec(plugin="csv", on_success="main", options={}, on_validation_failure="quarantine")
         s2 = s1.with_source(fixed_source)
         diff = diff_states(s1, s2)
-        assert len(diff["warnings_resolved"]) > 0
+        # Fixing on_success resolves W2 (dangling target) and W1 (unreferenced output)
+        assert any("on_success 'dangling'" in w and "data may not flow" in w for w in diff["warnings_resolved"]), (
+            f"Expected dangling on_success resolved, got: {diff['warnings_resolved']}"
+        )
+        assert any("Output 'main'" in w and "never receive data" in w for w in diff["warnings_resolved"]), (
+            f"Expected unreferenced output resolved, got: {diff['warnings_resolved']}"
+        )
 
     def test_metadata_changed_tracked(self) -> None:
         s1 = _empty_state()
@@ -788,6 +796,28 @@ class TestDiffStatesWarningsResolved:
         diff = diff_states(s1, s2)
         assert diff["metadata_changed"] is True
         assert diff["total_changes"] >= 1
+
+    def test_precomputed_validation_matches_fresh(self) -> None:
+        """diff_states with pre-computed validations produces same result as fresh."""
+        source = SourceSpec(plugin="csv", on_success="dangling", options={}, on_validation_failure="quarantine")
+        output = OutputSpec(name="main", plugin="csv", options={}, on_write_failure="discard")
+        s1 = _empty_state().with_output(output)
+        s2 = s1.with_source(source)
+
+        # Fresh (no pre-computed)
+        diff_fresh = diff_states(s1, s2)
+
+        # Pre-computed
+        diff_threaded = diff_states(
+            s1,
+            s2,
+            baseline_validation=s1.validate(),
+            current_validation=s2.validate(),
+        )
+
+        assert diff_fresh["warnings_introduced"] == diff_threaded["warnings_introduced"]
+        assert diff_fresh["warnings_resolved"] == diff_threaded["warnings_resolved"]
+        assert diff_fresh["total_changes"] == diff_threaded["total_changes"]
 
 
 class TestSetSourceFromBlob:
@@ -806,7 +836,7 @@ class TestSetSourceFromBlob:
         blob_id = create_result.data["blob_id"]
         result = execute_tool(
             "set_source_from_blob",
-            {"blob_id": blob_id, "on_success": "step1"},
+            {"blob_id": blob_id, "on_success": "step1", "options": {"schema": {"mode": "observed"}}},
             state,
             catalog,
             session_engine=blob_env["engine"],
@@ -886,7 +916,7 @@ class TestCreateBlobToSetSourceEndToEnd:
         # Step 2: Wire the blob as the pipeline source
         source_result = execute_tool(
             "set_source_from_blob",
-            {"blob_id": blob_id, "on_success": "transform1"},
+            {"blob_id": blob_id, "on_success": "transform1", "options": {"schema": {"mode": "observed"}}},
             state,
             catalog,
             session_engine=blob_env["engine"],

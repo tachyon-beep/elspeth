@@ -81,6 +81,7 @@ class JSONSink(BaseSink):
 
     name = "json"
     plugin_version = "1.0.0"
+    config_model = JSONSinkConfig
     # determinism inherited from BaseSink (IO_WRITE)
 
     # Note: supports_resume is set per-instance in __init__ based on format.
@@ -200,7 +201,7 @@ class JSONSink(BaseSink):
 
     def __init__(self, config: dict[str, Any]) -> None:
         super().__init__(config)
-        cfg = JSONSinkConfig.from_dict(config)
+        cfg = JSONSinkConfig.from_dict(config, plugin_name=self.name)
 
         self._path = cfg.resolved_path()
         self._encoding = cfg.encoding

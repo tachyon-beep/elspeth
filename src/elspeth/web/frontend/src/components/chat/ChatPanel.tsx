@@ -115,17 +115,6 @@ export function ChatPanel({ onOpenSecrets }: ChatPanelProps) {
       <div
         id="chat-main"
         className="chat-panel chat-panel--empty"
-        style={{
-          display: "flex",
-          alignItems: "center",
-          justifyContent: "center",
-          height: "100%",
-          color: "var(--color-text-muted)",
-          fontSize: 15,
-          padding: 32,
-          textAlign: "center",
-        }}
-        role="main"
         aria-label="Chat panel"
       >
         Select a session from the sidebar, or create a new one to get
@@ -138,66 +127,22 @@ export function ChatPanel({ onOpenSecrets }: ChatPanelProps) {
     <div
       id="chat-main"
       className="chat-panel"
-      style={{
-        display: "flex",
-        flexDirection: "column",
-        height: "100%",
-        overflow: "hidden",
-        position: "relative",
-      }}
-      role="main"
       aria-label="Chat panel"
     >
       {/* Session title header */}
       {activeSessionTitle && (
-        <div
-          style={{
-            padding: "8px 16px",
-            borderBottom: "1px solid var(--color-border)",
-            fontSize: 13,
-            fontWeight: 600,
-            color: "var(--color-text)",
-            overflow: "hidden",
-            textOverflow: "ellipsis",
-            whiteSpace: "nowrap",
-            flexShrink: 0,
-          }}
-        >
-          <h2 style={{ margin: 0, fontSize: "inherit", fontWeight: "inherit" }}>
-            {activeSessionTitle}
-          </h2>
+        <div className="chat-panel-header">
+          <h2 className="chat-panel-header-title">{activeSessionTitle}</h2>
         </div>
       )}
 
       {/* Error banner */}
       {error && (
-        <div
-          role="alert"
-          style={{
-            padding: "8px 12px",
-            backgroundColor: "var(--color-error-bg)",
-            color: "var(--color-error)",
-            fontSize: 13,
-            display: "flex",
-            justifyContent: "space-between",
-            alignItems: "center",
-          }}
-        >
+        <div role="alert" className="chat-panel-error">
           <span>{error}</span>
           <button
             onClick={clearError}
-            style={{
-              background: "none",
-              border: "none",
-              cursor: "pointer",
-              fontSize: 16,
-              color: "var(--color-error)",
-              minWidth: 44,
-              minHeight: 44,
-              display: "flex",
-              alignItems: "center",
-              justifyContent: "center",
-            }}
+            className="chat-panel-error-dismiss"
             aria-label="Dismiss error"
           >
             {"\u00D7"}
@@ -209,7 +154,7 @@ export function ChatPanel({ onOpenSecrets }: ChatPanelProps) {
       <div
         ref={scrollContainerRef}
         onScroll={handleScroll}
-        style={{ flex: 1, overflowY: "auto", padding: "16px 0" }}
+        className="chat-panel-messages"
         role="log"
         aria-label="Chat messages"
         aria-live="polite"
@@ -238,18 +183,6 @@ export function ChatPanel({ onOpenSecrets }: ChatPanelProps) {
           onClick={scrollToBottom}
           aria-label="Scroll to bottom"
           className="btn scroll-to-bottom-btn"
-          style={{
-            position: "absolute",
-            bottom: 80,
-            left: "50%",
-            transform: "translateX(-50%)",
-            zIndex: 10,
-            borderRadius: 20,
-            padding: "6px 16px",
-            fontSize: 13,
-            cursor: "pointer",
-            boxShadow: "0 2px 8px rgba(0,0,0,0.15)",
-          }}
         >
           {"\u2193"} Jump to latest
         </button>

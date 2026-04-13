@@ -56,20 +56,13 @@ function loadStoredTheme(): Theme | null {
 
 /**
  * Apply theme to document by setting data-theme attribute.
- * When theme is "system", we remove the attribute to let CSS media queries work.
+ * Always sets the resolved theme so CSS only needs [data-theme="light"]
+ * and :root (dark) selectors — no @media duplication needed.
  */
-function applyThemeToDocument(theme: Theme, resolvedTheme: ResolvedTheme): void {
+function applyThemeToDocument(_theme: Theme, resolvedTheme: ResolvedTheme): void {
   if (typeof document === "undefined") return;
 
-  if (theme === "system") {
-    // Remove attribute — CSS @media (prefers-color-scheme) handles it
-    document.documentElement.removeAttribute("data-theme");
-  } else {
-    // Explicit override
-    document.documentElement.setAttribute("data-theme", theme);
-  }
-
-  // Also set color-scheme for native form elements
+  document.documentElement.setAttribute("data-theme", resolvedTheme);
   document.documentElement.style.colorScheme = resolvedTheme;
 }
 

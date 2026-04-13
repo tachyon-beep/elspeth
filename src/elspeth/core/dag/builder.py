@@ -146,7 +146,9 @@ def build_execution_graph(
             raise GraphValidationError(
                 f"Generated node_id exceeds {_NODE_ID_MAX_LENGTH} characters: "
                 f"'{generated}' (length={len(generated)}). "
-                "Use shorter transform/gate/aggregation/source/sink names."
+                "Use shorter transform/gate/aggregation/source/sink names.",
+                component_id=name,
+                component_type=prefix,
             )
 
         return NodeID(generated)
@@ -378,7 +380,9 @@ def build_execution_graph(
                         f"Duplicate branch name '{branch_name}' found in coalesce settings.\n"
                         f"Branch '{branch_name}' is already mapped to coalesce '{existing_coalesce}', "
                         f"but coalesce '{coalesce_config.name}' also declares it.\n"
-                        f"Each fork branch can only merge at one coalesce point."
+                        f"Each fork branch can only merge at one coalesce point.",
+                        component_id=coalesce_config.name,
+                        component_type="coalesce",
                     )
                 branch_to_coalesce[BranchName(branch_name)] = CoalesceName(coalesce_config.name)
 
@@ -418,14 +422,18 @@ def build_execution_graph(
             duplicates = sorted([branch for branch, count in branch_counts.items() if count > 1])
             if duplicates:
                 raise GraphValidationError(
-                    f"Gate '{gate_entry.name}' has duplicate fork branches: {duplicates}. Each fork branch name must be unique."
+                    f"Gate '{gate_entry.name}' has duplicate fork branches: {duplicates}. Each fork branch name must be unique.",
+                    component_id=gate_entry.name,
+                    component_type="gate",
                 )
             for branch_name in gate_entry.fork_to:
                 if branch_name in fork_branch_owner:
                     raise GraphValidationError(
                         f"Fork branch '{branch_name}' is declared by multiple gates: "
                         f"'{fork_branch_owner[branch_name]}' and '{gate_entry.name}'. "
-                        "Fork branch names must be globally unique across all gates."
+                        "Fork branch names must be globally unique across all gates.",
+                        component_id=gate_entry.name,
+                        component_type="gate",
                     )
                 fork_branch_owner[branch_name] = gate_entry.name
                 if BranchName(branch_name) in branch_to_coalesce:
@@ -458,7 +466,9 @@ def build_execution_graph(
                         f"  2. Match a sink name exactly\n"
                         f"\n"
                         f"Available coalesce branches: {sorted(branch_to_coalesce.keys())}\n"
-                        f"Available sinks: {sorted(sink_ids.keys())}"
+                        f"Available sinks: {sorted(sink_ids.keys())}",
+                        component_id=gate_entry.name,
+                        component_type="gate",
                     )
 
     # ===== VALIDATE COALESCE BRANCHES ARE PRODUCED BY GATES =====
@@ -480,7 +490,9 @@ def build_execution_graph(
                     f"\n"
                     f"Branches produced by gates: {sorted(produced_branches) if produced_branches else '(none)'}\n"
                     f"Coalesce '{coalesce_name}' expects branches: "
-                    f"{sorted([b for b, c in branch_to_coalesce.items() if c == coalesce_name])}"
+                    f"{sorted([b for b, c in branch_to_coalesce.items() if c == coalesce_name])}",
+                    component_id=str(coalesce_name),
+                    component_type="coalesce",
                 )
 
     # ===== BUILD PRODUCER REGISTRY =====
@@ -614,7 +626,9 @@ def build_execution_graph(
             suggestions = _suggest_similar(input_connection, sorted(producers.keys()))
             hint = f" Did you mean: {', '.join(suggestions)}?" if suggestions else ""
             raise GraphValidationError(
-                f"Gate '{gate_name}' input '{input_connection}' has no producer.{hint}\nAvailable connections: {', '.join(sorted(producers.keys()))}"
+                f"Gate '{gate_name}' input '{input_connection}' has no producer.{hint}\nAvailable connections: {', '.join(sorted(producers.keys()))}",
+                component_id=gate_name,
+                component_type="gate",
             )
         producer_id, _producer_label = producers[input_connection]
         upstream_info = graph.get_node_info(producer_id)
@@ -661,7 +675,11 @@ def build_execution_graph(
         if target not in consumers:
             suggestions = _suggest_similar(target, sorted(consumers.keys()))
             hint = f" Did you mean: {', '.join(suggestions)}?" if suggestions else ""
-            raise GraphValidationError(f"Gate route target '{target}' is neither a sink nor a known connection name.{hint}")
+            raise GraphValidationError(
+                f"Gate route target '{target}' is neither a sink nor a known connection name.{hint}",
+                component_id=str(gate_id),
+                component_type="gate",
+            )
         graph.add_route_resolution_entry(gate_id, route_label, RouteDestination.processing_node(consumers[target]))
 
     # Ensure all declared gate route labels are resolvable before runtime.
@@ -677,7 +695,9 @@ def build_execution_graph(
             suggestions = _suggest_similar(on_success, sorted(consumers.keys()))
             hint = f" Did you mean: {', '.join(suggestions)}?" if suggestions else ""
             raise GraphValidationError(
-                f"Transform '{wired.settings.name}' on_success '{on_success}' is neither a sink nor a known connection.{hint}"
+                f"Transform '{wired.settings.name}' on_success '{on_success}' is neither a sink nor a known connection.{hint}",
+                component_id=wired.settings.name,
+                component_type="transform",
             )
 
     for agg_name, (_transform, agg_settings) in aggregations.items():
@@ -691,7 +711,9 @@ def build_execution_graph(
             suggestions = _suggest_similar(agg_on_success, sorted(consumers.keys()))
             hint = f" Did you mean: {', '.join(suggestions)}?" if suggestions else ""
             raise GraphValidationError(
-                f"Aggregation '{agg_settings.name}' on_success '{agg_on_success}' is neither a sink nor a known connection.{hint}"
+                f"Aggregation '{agg_settings.name}' on_success '{agg_on_success}' is neither a sink nor a known connection.{hint}",
+                component_id=agg_settings.name,
+                component_type="aggregation",
             )
 
     if coalesce_settings:
@@ -701,13 +723,17 @@ def build_execution_graph(
             if coalesce_config.on_success in consumers:
                 raise GraphValidationError(
                     f"Coalesce '{coalesce_config.name}' has on_success='{coalesce_config.on_success}'. "
-                    "Coalesce on_success must point to a sink when configured."
+                    "Coalesce on_success must point to a sink when configured.",
+                    component_id=coalesce_config.name,
+                    component_type="coalesce",
                 )
             on_success_sink = SinkName(coalesce_config.on_success)
             if on_success_sink not in sink_ids:
                 raise GraphValidationError(
                     f"Coalesce '{coalesce_config.name}' on_success references unknown sink "
-                    f"'{coalesce_config.on_success}'. Available sinks: {sorted(sink_ids.keys())}"
+                    f"'{coalesce_config.on_success}'. Available sinks: {sorted(sink_ids.keys())}",
+                    component_id=coalesce_config.name,
+                    component_type="coalesce",
                 )
             graph.add_edge(
                 coalesce_ids[CoalesceName(coalesce_config.name)],
@@ -729,7 +755,9 @@ def build_execution_graph(
         suggestions = _suggest_similar(source_on_success, sorted(str(s) for s in sink_ids))
         hint = f" Did you mean: {', '.join(suggestions)}?" if suggestions else ""
         raise GraphValidationError(
-            f"Source '{source.name}' on_success '{source_on_success}' is neither a sink nor a known connection.{hint}"
+            f"Source '{source.name}' on_success '{source_on_success}' is neither a sink nor a known connection.{hint}",
+            component_id=source.name,
+            component_type="source",
         )
 
     # Re-run namespace validation with dangling-output checks enabled now
@@ -772,7 +800,9 @@ def build_execution_graph(
                 hint = f" Did you mean: {', '.join(suggestions)}?" if suggestions else ""
                 raise GraphValidationError(
                     f"Transform '{wired.settings.name}' on_error '{on_error}' references unknown sink.{hint} "
-                    f"Available sinks: {', '.join(sorted(str(s) for s in sink_ids))}"
+                    f"Available sinks: {', '.join(sorted(str(s) for s in sink_ids))}",
+                    component_id=wired.settings.name,
+                    component_type="transform",
                 )
             graph.add_edge(
                 transform_ids_by_name[wired.settings.name],
@@ -790,7 +820,9 @@ def build_execution_graph(
             if failsink_name not in sink_ids:
                 raise GraphValidationError(
                     f"Sink '{sink_name_key}' on_write_failure references '{on_write_failure}' "
-                    f"which is not in sink_ids. Available: {sorted(str(s) for s in sink_ids)}."
+                    f"which is not in sink_ids. Available: {sorted(str(s) for s in sink_ids)}.",
+                    component_id=str(sink_name_key),
+                    component_type="sink",
                 )
             graph.add_edge(
                 sink_node_id,
@@ -847,7 +879,11 @@ def build_execution_graph(
     for coalesce_id in coalesce_ids.values():
         incoming_edges_with_data = list(graph._graph.in_edges(coalesce_id, data=True, keys=True))
         if not incoming_edges_with_data:
-            raise GraphValidationError(f"Coalesce node '{coalesce_id}' has no incoming branches; cannot determine schema for audit.")
+            raise GraphValidationError(
+                f"Coalesce node '{coalesce_id}' has no incoming branches; cannot determine schema for audit.",
+                component_id=str(coalesce_id),
+                component_type="coalesce",
+            )
 
         coal_config = coalesce_id_to_config[coalesce_id]
 
@@ -943,7 +979,9 @@ def build_execution_graph(
                     f"Coalesce node '{coalesce_id}' select_branch '{select_branch}' "
                     f"has no schema mapping. Available branches: "
                     f"{sorted(branch_to_schema.keys())}. "
-                    "This indicates a graph construction bug."
+                    "This indicates a graph construction bug.",
+                    component_id=str(coalesce_id),
+                    component_type="coalesce",
                 )
             _assign_schema(coalesce_id, branch_to_schema[select_branch])
         else:

@@ -14,7 +14,7 @@ import itertools
 import json
 import time
 from collections.abc import Iterator, Mapping
-from typing import TYPE_CHECKING, Any, Literal, Self
+from typing import TYPE_CHECKING, Any, ClassVar, Literal, Self
 
 import structlog
 from pydantic import BaseModel, Field, ValidationError, field_validator, model_validator
@@ -98,6 +98,9 @@ class AzureBlobSourceConfig(DataPluginConfig):
     3. use_managed_identity + account_url - Azure Managed Identity
     4. tenant_id + client_id + client_secret + account_url - Service Principal
 
+    _plugin_component_type overrides DataPluginConfig (None) because this
+    config extends DataPluginConfig directly, bypassing SourceDataConfig.
+
     Example configurations:
 
         # Option 1: Connection string (simplest)
@@ -125,6 +128,8 @@ class AzureBlobSourceConfig(DataPluginConfig):
         container: "my-container"
         blob_path: "data/input.csv"
     """
+
+    _plugin_component_type: ClassVar[str | None] = "source"
 
     # Auth Option 1: Connection string
     connection_string: str | None = Field(
@@ -312,10 +317,11 @@ class AzureBlobSource(BaseSource):
     """
 
     name = "azure_blob"
+    config_model = AzureBlobSourceConfig
 
     def __init__(self, config: dict[str, Any]) -> None:
         super().__init__(config)
-        cfg = AzureBlobSourceConfig.from_dict(config)
+        cfg = AzureBlobSourceConfig.from_dict(config, plugin_name=self.name)
 
         # Store auth config for creating clients
         self._auth_config = cfg.get_auth_config()

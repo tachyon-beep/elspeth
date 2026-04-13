@@ -965,6 +965,19 @@ class LLMTransform(BaseTransform, BatchTransformMixin):
 
     name = "llm"
     determinism: Determinism = Determinism.NON_DETERMINISTIC
+    config_model = LLMConfig  # Base; get_config_model dispatches to provider-specific
+
+    @classmethod
+    def get_config_model(cls, config: dict[str, Any] | None = None) -> type[LLMConfig]:
+        """Dispatch to provider-specific config class based on config["provider"]."""
+        provider = config.get("provider") if config is not None else None
+        if provider is not None and provider in _PROVIDERS:
+            config_cls, _ = _PROVIDERS[provider]
+            return config_cls
+        elif provider is not None:
+            raise ValueError(f"Unknown LLM provider '{provider}'. Valid providers: {sorted(_PROVIDERS)}")
+        # provider missing — return base LLMConfig so Pydantic catches it with Literal validation
+        return LLMConfig
 
     def __init__(self, config: dict[str, Any]) -> None:
         super().__init__(config)
@@ -983,7 +996,7 @@ class LLMTransform(BaseTransform, BatchTransformMixin):
         # from_dict() returns Self on the subclass, but mypy sees type[LLMConfig].
         self._config = cast(
             "AzureOpenAIConfig | OpenRouterConfig",
-            config_cls.from_dict(config),
+            config_cls.from_dict(config, plugin_name=self.name),
         )
 
         # Store common LLM settings.

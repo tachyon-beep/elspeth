@@ -57,7 +57,7 @@ per_file_rules:
   - R5
   reason: Optional schema access for mixed node types
   expires: null
-  max_hits: 2
+  max_hits: 3
 - pattern: core/landscape/database.py
   rules:
   - R5

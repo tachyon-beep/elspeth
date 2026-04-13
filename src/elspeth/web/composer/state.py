@@ -173,7 +173,7 @@ class OutputSpec:
         name: Sink name (used as connection point in edges and routes).
         plugin: Sink plugin name (e.g. "csv", "json", "database").
         options: Plugin-specific configuration.
-        on_write_failure: How to handle write failures ("discard" or "quarantine").
+        on_write_failure: How to handle write failures ("discard" or a sink name).
     """
 
     name: str
@@ -648,6 +648,56 @@ class CompositionState:
                             "medium",
                         )
                     )
+
+        # W7: on_write_failure reference validation
+        # Mirrors rules from engine/orchestrator/validation.py so LLMs get
+        # early feedback instead of failing at pipeline build time.
+        _failsink_eligible = {"csv", "json", "xml"}
+        output_name_set = {o.name for o in self.outputs}
+        output_by_name = {o.name: o for o in self.outputs}
+        for output in self.outputs:
+            dest = output.on_write_failure
+            if dest == "discard":
+                continue
+            # Rule 2: must reference an existing output
+            if dest not in output_name_set:
+                warnings.append(
+                    _warn(
+                        f"output:{output.name}",
+                        f"Output '{output.name}' on_write_failure references '{dest}' which is not a configured output.",
+                        "high",
+                    )
+                )
+                continue  # Skip dependent checks
+            # Rule 3: no self-reference
+            if dest == output.name:
+                warnings.append(
+                    _warn(
+                        f"output:{output.name}",
+                        f"Output '{output.name}' on_write_failure references itself — a sink cannot be its own failsink.",
+                        "high",
+                    )
+                )
+                continue
+            # Rule 4: target must use an eligible file plugin
+            target = output_by_name[dest]
+            if target.plugin not in _failsink_eligible:
+                warnings.append(
+                    _warn(
+                        f"output:{output.name}",
+                        f"Output '{output.name}' on_write_failure references '{dest}' (plugin='{target.plugin}'), but failsinks must use csv, json, or xml.",
+                        "medium",
+                    )
+                )
+            # Rule 5: no chains — target must use 'discard'
+            if target.on_write_failure != "discard":
+                warnings.append(
+                    _warn(
+                        f"output:{output.name}",
+                        f"Output '{output.name}' on_write_failure references '{dest}', but '{dest}' has on_write_failure='{target.on_write_failure}' — failsink targets must use 'discard' (no chains).",
+                        "medium",
+                    )
+                )
 
         # --- Suggestions (optional improvements) ---
         suggestions: list[ValidationEntry] = []

@@ -93,59 +93,40 @@ export function BlobRow({ blob, sessionId, onDownload, onDelete, onUseAsInput }:
   return (
     <div>
       <div
-        className="blob-row"
+        className="blob-row blob-row-container"
         style={{
-          display: "flex",
-          alignItems: "center",
-          gap: 8,
-          padding: "6px 8px",
           borderBottom: previewOpen ? "none" : "1px solid var(--color-border)",
-          fontSize: 13,
         }}
       >
         {/* Status dot */}
         <span
+          className="blob-row-status-dot"
           title={status.label}
           style={{
-            width: 8,
-            height: 8,
-            borderRadius: "50%",
             backgroundColor: status.color,
-            flexShrink: 0,
           }}
         />
 
         {/* Creator badge */}
-        <span title={`Created by ${blob.created_by}`} style={{ flexShrink: 0 }}>
+        <span className="blob-row-creator" title={`Created by ${blob.created_by}`}>
           {creatorBadge(blob.created_by)}
         </span>
 
         {/* Filename */}
         <span
-          style={{
-            flex: 1,
-            overflow: "hidden",
-            textOverflow: "ellipsis",
-            whiteSpace: "nowrap",
-          }}
+          className="blob-row-filename"
           title={blob.filename}
         >
           {blob.filename}
         </span>
 
         {/* Size */}
-        <span
-          style={{
-            color: "var(--color-text-muted)",
-            fontSize: 12,
-            flexShrink: 0,
-          }}
-        >
+        <span className="blob-row-size">
           {formatBytes(blob.size_bytes)}
         </span>
 
         {/* Actions */}
-        <div style={{ display: "flex", gap: 4, flexShrink: 0 }}>
+        <div className="blob-row-actions">
           {canPreview && blob.status === "ready" && (
             <button
               onClick={handleTogglePreview}
@@ -190,44 +171,22 @@ export function BlobRow({ blob, sessionId, onDownload, onDelete, onUseAsInput }:
 
       {/* Preview panel */}
       {previewOpen && (
-        <div
-          style={{
-            padding: "8px 12px",
-            borderBottom: "1px solid var(--color-border)",
-            backgroundColor: "var(--color-surface-elevated)",
-          }}
-        >
+        <div className="blob-row-preview">
           {previewLoading && (
-            <div style={{ color: "var(--color-text-muted)", fontSize: 12 }}>
+            <div className="blob-row-preview-loading">
               Loading preview...
             </div>
           )}
           {previewError && (
-            <div style={{ color: "var(--color-error)", fontSize: 12 }}>
+            <div className="blob-row-preview-error">
               {previewError}
             </div>
           )}
           {displayContent !== null && !previewLoading && (
-            <pre
-              style={{
-                margin: 0,
-                padding: 8,
-                fontFamily: "monospace",
-                fontSize: 12,
-                lineHeight: 1.4,
-                maxHeight: 200,
-                overflowY: "auto",
-                whiteSpace: "pre-wrap",
-                wordBreak: "break-word",
-                backgroundColor: "var(--color-surface)",
-                border: "1px solid var(--color-border)",
-                borderRadius: 4,
-                color: "var(--color-text)",
-              }}
-            >
+            <pre className="blob-row-preview-pre">
               {displayContent}
               {truncated && (
-                <span style={{ color: "var(--color-text-muted)", fontStyle: "italic" }}>
+                <span className="blob-row-preview-truncated">
                   {"\n... (truncated)"}
                 </span>
               )}

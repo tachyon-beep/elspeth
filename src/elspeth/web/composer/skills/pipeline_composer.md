@@ -118,20 +118,65 @@ These pass structural validation but won't run. The validation warnings will fla
 If a tool call fails or returns unexpected results:
 
 1. **Check schema loaded** — if you see `InputValidationError` or empty params, go back to "CRITICAL: Load Tool Schemas First" at the top
-2. **Check plugin schema** — call `get_plugin_schema` to verify option names and types
-3. **Inspect the error** — call `explain_validation_error` if the failure message is unclear
-4. **Retry with corrections** — apply what you learned and retry the operation
-5. **Only then report a blocker** — if the issue persists after investigation, explain what you tried
+2. **Re-sync state** — call `get_pipeline_state` to see the current pipeline after the failure
+3. **Check plugin schema** — call `get_plugin_schema` to verify option names and types
+4. **Inspect the error** — call `explain_validation_error` if the failure message is unclear
+5. **Retry with corrections** — apply what you learned and retry the operation
+6. **Only then report a blocker** — if the issue persists after investigation, explain what you tried
 
 **Do not stop at the first failure.** Investigate and retry at least once before asking the user for help.
 
-### Source Schema
+### Schema Configuration
 
-Always configure a schema on the source. Use `mode: fixed` when the user specifies exact fields, `mode: observed` when they want the pipeline to infer schema from data.
+Every data plugin (source, transform, sink) requires a `schema` key in its options. Schema controls how the plugin validates the rows it processes.
+
+#### Schema modes
+
+| Mode | What it does | When to use |
+|------|-------------|-------------|
+| `observed` | Accept any fields. Types are inferred from the first row at runtime. No upfront field declarations. | You don't know what fields exist, the data shape varies, or the plugin creates new fields dynamically. |
+| `fixed` | Declare exact fields by name and type. Rows with extra fields are rejected. Rows missing declared fields are quarantined. | You know exactly what fields the data has and want strict enforcement. |
+| `flexible` | Declare known fields by name and type, but allow additional fields to pass through. | You know some fields but the data may carry extras you don't want to reject. |
+
+**Choosing the right mode:**
+
+- **Sources:** Match the mode to how well you know the input data. If the user says "read this CSV" with no further detail, use `observed`. If the user says "it has columns id, name, and price", use `fixed` with those fields.
+- **Transforms:** The schema describes the transform's **input** — the fields it expects to receive from upstream. It does NOT describe the transform's output. If the transform creates new fields (like `value_transform` computing a `total` field), those new fields must NOT appear in the schema — they don't exist yet when the row enters the transform. Use `observed` when the transform doesn't need to validate specific input fields. Use `fixed` or `flexible` when the transform requires specific named fields to exist in its input (e.g., a `type_coerce` that converts `price` needs `price` to exist).
+- **Sinks:** Usually `observed` — sinks write whatever they receive. Use `fixed` only if the sink requires specific columns.
+
+#### Schema structure
 
 ```json
+{"schema": {"mode": "observed"}}
 {"schema": {"mode": "fixed", "fields": ["id: int", "name: str", "amount: float"]}}
+{"schema": {"mode": "flexible", "fields": ["id: int", "name: str"]}}
 ```
+
+The `schema` key is an object with `mode` (required) and `fields` (required for fixed/flexible, forbidden for observed).
+
+#### Field format
+
+Fields are simple strings: `"field_name: type"` where type is `str`, `int`, `float`, `bool`, or `any`.
+
+```
+"id: int"          — integer field named id
+"name: str"        — string field named name
+"price: float"     — float field named price
+"active: bool"     — boolean field named active
+"data: any"        — any type
+```
+
+**Common mistake:** Do NOT put schema-level objects inside the `fields` array. Each entry in `fields` is a single string like `"name: str"`, not a dict like `{"mode": "fixed", ...}` or `{"name": "x", "type": "str", ...}`.
+
+#### Schema vs output: the critical distinction
+
+A plugin's schema describes what it **receives as input**. Fields that a transform **creates** are not part of its schema. The DAG validator checks schema compatibility between adjacent nodes — "does the upstream producer provide the fields that the downstream consumer's schema requires?" If you list a field in a transform's schema that the upstream node doesn't produce, validation fails with a "Missing fields" error.
+
+Example of the mistake:
+- Source produces: `text`
+- value_transform creates: `combined` (via expression `row['text'] + ' world'`)
+- WRONG: `{"schema": {"mode": "fixed", "fields": ["text: str", "combined: str"]}}` — validator says source doesn't provide `combined`
+- RIGHT: `{"schema": {"mode": "observed"}}` — transform accepts whatever the source provides, then adds `combined`
 
 ### Sink Configuration
 
@@ -289,57 +334,54 @@ If the user's intent matches a known pattern, use its safe defaults and build im
 
 ## Plugin Quick Reference
 
+### Always call `get_plugin_schema` before configuring
+
+Each plugin has a Pydantic config model that defines exactly which options are required, their types, and constraints. **Call `get_plugin_schema` for every plugin you configure** — it returns the JSON Schema for that plugin's config.
+
+The mutation tools (`set_source`, `upsert_node`, `set_output`, `set_pipeline`) pre-validate options against the plugin's config model. If required options are missing or malformed, the tool returns an error explaining what's needed — fix the options and retry.
+
 ### Sources
 
 **csv** — Read delimited files (CSV, TSV) into rows.
-Minimal config: `{"path": "data.csv"}`
 Gotchas:
 - Headers are auto-normalized to identifiers (`"First Name"` becomes `first_name`) — use `field_mapping` if you need specific names.
 
 **json** — Read a JSON array of objects or a JSONL file.
-Minimal config: `{"path": "data.json"}`
 Gotchas:
 - If your JSON is wrapped (e.g., `{"results": [...]}`), you must set `data_key` to the array key — without it, the source sees one object, not many rows.
 
 **text** — Read a text file, one line per row.
-Minimal config: `{"path": "input.txt", "column": "line"}`
 Gotchas:
 - `column` is required — it names the single output field. Omitting it is a validation error.
+- When wiring a text file via `set_source_from_blob`, you MUST pass `options: {column: "...", schema: {...}}` — the blob only provides the path.
 
 ### Transforms
 
 **web_scrape** — Fetch and extract content from a URL in each row.
-Minimal config: `{"url_field": "url"}`
 Gotchas:
 - You must specify `url_field` — the name of the row field containing the URL to fetch. There is no default.
 
 **llm** — Send row data to an LLM using a Jinja2 template.
-Minimal config: `{"template": "Summarise: {{ row['text'] }}", "provider": "openrouter", "model": "anthropic/claude-3.5-sonnet"}`
 Gotchas:
 - The response is always a **string** in `llm_response` (or custom `response_field`), even if the model returns JSON. Use `json_explode` after this step to parse structured output.
 - Templates use `{{ row['field_name'] }}` syntax. List all referenced fields in `required_input_fields`.
 
 **keyword_filter** — Route rows based on keyword presence in a field.
-Minimal config: `{"field": "text", "keywords": ["urgent", "critical"]}`
 Gotchas:
 - Matching is **case-insensitive by default**. Set `case_sensitive: true` if you need exact case matching.
 
 **json_explode** — Expand a nested JSON string field into top-level row fields.
-Minimal config: `{"field": "llm_response"}`
 Gotchas:
 - The `field` must contain a valid JSON string. Typically used after an `llm` step — make sure the LLM template instructs the model to return JSON.
 
 **field_mapper** — Rename fields in each row.
-Minimal config: `{"mapping": {"old_name": "new_name"}}`
 
 **type_coerce** — Convert field types (str→int, str→float, str→bool, *→str).
-Minimal config: `{"conversions": [{"field": "price", "to": "float"}]}`
 Gotchas:
 - Strict coercion only — "3.5" won't coerce to int, bool only accepts 0/1/true/false strings.
 - Use before `value_transform` when source data has string types that need numeric operations.
 
 **value_transform** — Compute new or modified field values using expressions.
-Minimal config: `{"operations": [{"target": "total", "expression": "row['price'] * row['quantity']"}]}`
 Gotchas:
 - Operations run sequentially — later operations can reference fields computed by earlier ones.
 - Only safe expressions allowed (no function calls like `round()`, `len()`, etc.).
@@ -349,10 +391,8 @@ Gotchas:
 **All sink paths must be inside the `outputs/` directory.** Paths outside this folder will be rejected as a security measure.
 
 **csv** — Write rows to a CSV file.
-Minimal config: `{"path": "outputs/results.csv"}`
 
 **json** — Write rows to a JSON or JSONL file.
-Minimal config: `{"path": "outputs/results.json"}`
 Gotchas:
 - Default format is `json` (single array). Set `format: "jsonl"` for one record per line — important for large outputs or streaming consumers.
 - Failsinks should also use `outputs/` paths, e.g., `outputs/errors.json`
@@ -383,19 +423,31 @@ When a user uploads a file, use `set_source_from_blob` — it infers the plugin 
 
 For non-standard MIME types, pass the `plugin` parameter explicitly.
 
+**Plugin-specific required options:** Some source plugins require configuration beyond just the file path. Pass these via the `options` parameter:
+
+| Plugin | Required options | Example |
+|--------|-----------------|---------|
+| `csv` | `schema` | `options: {schema: {mode: "observed"}}` |
+| `json` | `schema` | `options: {schema: {mode: "observed"}}` |
+| `text` | `column` (output field name), `schema` | `options: {column: "line", schema: {mode: "fixed", fields: ["line: str"]}}` |
+
+**Example — text file upload:**
+```json
+set_source_from_blob({
+  "blob_id": "...",
+  "on_success": "process",
+  "options": {
+    "column": "line",
+    "schema": {"mode": "observed"}
+  }
+})
+```
+
+Without the required options, validation will fail with a `PluginConfigError`. The `options` parameter merges with blob-derived options (path is set automatically from the blob).
+
 ### Schema modes
 
-| Mode | Behaviour | When to use |
-|------|-----------|-------------|
-| `observed` | Infer fields from first row at runtime | User doesn't know the fields; exploring data |
-| `fixed` | Declare exact fields; reject extras | User specifies exact fields; strict validation |
-| `flexible` | Declare known fields; allow extras | User knows some fields but data may have more |
-
-Schema field format (two valid forms):
-- **Simple:** `"field_name: type"` where type is `str`, `int`, `float`, `bool`, or `any`
-- **Dict:** `{"name": "field_name", "type": "str", "required": true, "nullable": false}`
-
-**Use the simple format.** The dict format is for internal round-trips. Never use `field_type` — the correct key is `type`.
+See "Schema Configuration" above for full mode reference, field format, and the schema-vs-output distinction.
 
 ### Inline data (no file upload needed)
 
@@ -407,9 +459,11 @@ When the user provides data directly in conversation (a URL, a JSON snippet, a f
 This is the canonical way to handle inline/literal data. There is no separate "inline source" plugin — the blob system handles it.
 
 **Examples:**
-- User says "use this URL: https://example.com" → `create_blob(filename="input.txt", mime_type="text/plain", content="https://example.com")` then `set_source_from_blob`
-- User provides JSON data → `create_blob(filename="data.json", mime_type="application/json", content='[{"id": 1, "name": "test"}]')` then `set_source_from_blob`
-- User provides CSV rows → `create_blob(filename="data.csv", mime_type="text/csv", content="name,age\nAlice,30\nBob,25")` then `set_source_from_blob`
+- User says "use this URL: https://example.com" → `create_blob(filename="input.txt", mime_type="text/plain", content="https://example.com")` then `set_source_from_blob({blob_id, on_success, options: {column: "url", schema: {mode: "observed"}}})`
+- User provides JSON data → `create_blob(filename="data.json", mime_type="application/json", content='[{"id": 1, "name": "test"}]')` then `set_source_from_blob({blob_id, on_success, options: {schema: {mode: "observed"}}})`
+- User provides CSV rows → `create_blob(filename="data.csv", mime_type="text/csv", content="name,age\nAlice,30\nBob,25")` then `set_source_from_blob({blob_id, on_success, options: {schema: {mode: "observed"}}})`
+
+**Note:** Text sources require `column` (the output field name) and `schema`. CSV and JSON sources require only `schema` (the file path is set automatically from the blob).
 
 Never ask the user to upload a file when the data is already in the conversation.
 

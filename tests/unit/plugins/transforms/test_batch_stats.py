@@ -15,6 +15,7 @@ import pytest
 
 from elspeth.contracts.plugin_context import PluginContext
 from elspeth.contracts.schema_contract import SchemaContract
+from elspeth.plugins.infrastructure.config_base import PluginConfigError
 from elspeth.testing import make_field, make_row
 from tests.fixtures.factories import make_context
 
@@ -517,7 +518,7 @@ class TestGroupByCollisionAtInit:
         """
         from elspeth.plugins.transforms.batch_stats import BatchStats
 
-        with pytest.raises(ValueError, match="collides"):
+        with pytest.raises(PluginConfigError, match="collides"):
             BatchStats(
                 {
                     "schema": DYNAMIC_SCHEMA,
@@ -530,7 +531,7 @@ class TestGroupByCollisionAtInit:
         """group_by='count' should be rejected at init, not at process time."""
         from elspeth.plugins.transforms.batch_stats import BatchStats
 
-        with pytest.raises(ValueError, match="collides"):
+        with pytest.raises(PluginConfigError, match="collides"):
             BatchStats(
                 {
                     "schema": DYNAMIC_SCHEMA,
@@ -592,7 +593,7 @@ class TestBatchStatsGroupByInOutputContract:
         """group_by collision with stat fields is still detected at init."""
         from elspeth.plugins.transforms.batch_stats import BatchStats
 
-        with pytest.raises(ValueError, match="collides"):
+        with pytest.raises(PluginConfigError, match="collides"):
             BatchStats(
                 {
                     "schema": DYNAMIC_SCHEMA,

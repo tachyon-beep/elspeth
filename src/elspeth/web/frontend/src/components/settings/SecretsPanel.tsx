@@ -1,6 +1,7 @@
 // src/components/settings/SecretsPanel.tsx
 import { useState, useEffect, useCallback, useRef } from "react";
 import { useSecretsStore } from "@/stores/secretsStore";
+import { useFocusTrap } from "@/hooks/useFocusTrap";
 import type { SecretInventoryItem } from "@/types/api";
 
 interface SecretsPanelProps {
@@ -9,25 +10,15 @@ interface SecretsPanelProps {
 
 function ScopeBadge({ scope }: { scope: SecretInventoryItem["scope"] }) {
   const colors: Record<SecretInventoryItem["scope"], { bg: string; text: string }> = {
-    user: { bg: "var(--color-accent-muted, #d1fae5)", text: "var(--color-accent, #065f46)" },
-    server: { bg: "var(--color-info-bg, #dbeafe)", text: "var(--color-info, #1e40af)" },
-    org: { bg: "var(--color-surface-raised, #f3f4f6)", text: "var(--color-text-secondary)" },
+    user: { bg: "var(--color-accent-muted)", text: "var(--color-accent)" },
+    server: { bg: "var(--color-info-bg)", text: "var(--color-info)" },
+    org: { bg: "var(--color-surface-raised)", text: "var(--color-text-secondary)" },
   };
   const { bg, text } = colors[scope] ?? colors.org;
   return (
     <span
-      style={{
-        display: "inline-block",
-        fontSize: 10,
-        fontWeight: 600,
-        letterSpacing: "0.05em",
-        textTransform: "uppercase",
-        padding: "1px 6px",
-        borderRadius: 3,
-        backgroundColor: bg,
-        color: text,
-        marginLeft: 6,
-      }}
+      className="secrets-scope-badge"
+      style={{ backgroundColor: bg, color: text }}
     >
       {scope}
     </span>
@@ -72,6 +63,7 @@ export function SecretsPanel({ onClose }: SecretsPanelProps) {
   const [value, setValue] = useState("");
   const [isSubmitting, setIsSubmitting] = useState(false);
   const modalRef = useRef<HTMLDivElement>(null);
+  useFocusTrap(modalRef, true, "#secret-name");
 
   useEffect(() => {
     loadSecrets();
@@ -85,37 +77,6 @@ export function SecretsPanel({ onClose }: SecretsPanelProps) {
     document.addEventListener("keydown", handleKeyDown);
     return () => document.removeEventListener("keydown", handleKeyDown);
   }, [onClose]);
-
-  // Focus trap: constrain Tab within the modal
-  useEffect(() => {
-    const modal = modalRef.current;
-    if (!modal) return;
-
-    // Focus the first input on mount
-    const firstInput = modal.querySelector<HTMLElement>("input, button");
-    firstInput?.focus();
-
-    function handleTab(e: KeyboardEvent) {
-      if (e.key !== "Tab" || !modal) return;
-      const focusable = modal.querySelectorAll<HTMLElement>(
-        'button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])',
-      );
-      if (focusable.length === 0) return;
-
-      const first = focusable[0];
-      const last = focusable[focusable.length - 1];
-
-      if (e.shiftKey && document.activeElement === first) {
-        e.preventDefault();
-        last.focus();
-      } else if (!e.shiftKey && document.activeElement === last) {
-        e.preventDefault();
-        first.focus();
-      }
-    }
-    document.addEventListener("keydown", handleTab);
-    return () => document.removeEventListener("keydown", handleTab);
-  }, []);
 
   const handleSubmit = useCallback(
     async (e: React.FormEvent) => {
@@ -179,70 +140,35 @@ export function SecretsPanel({ onClose }: SecretsPanelProps) {
         }}
       >
         {/* Header */}
-        <div
-          style={{
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "space-between",
-            padding: "14px 16px",
-            borderBottom: "1px solid var(--color-border)",
-            flexShrink: 0,
-          }}
-        >
-          <h2 style={{ margin: 0, fontSize: 15, fontWeight: 600 }}>
+        <div className="secrets-panel-header">
+          <h2 className="secrets-panel-title">
             API Keys &amp; Secrets
           </h2>
           <button
             onClick={onClose}
             aria-label="Close secrets panel"
-            style={{
-              background: "none",
-              border: "none",
-              cursor: "pointer",
-              color: "var(--color-text-muted)",
-              fontSize: 18,
-              lineHeight: 1,
-              padding: "2px 6px",
-              borderRadius: 4,
-              minWidth: 44,
-              minHeight: 44,
-              display: "flex",
-              alignItems: "center",
-              justifyContent: "center",
-            }}
+            className="secrets-panel-close"
           >
             ×
           </button>
         </div>
 
         {/* Scrollable body */}
-        <div style={{ flex: 1, overflowY: "auto", padding: "16px" }}>
+        <div className="secrets-panel-body">
           {/* Entry form */}
           <section aria-labelledby="secrets-add-heading">
             <h3
               id="secrets-add-heading"
-              style={{
-                margin: "0 0 10px",
-                fontSize: 12,
-                fontWeight: 600,
-                textTransform: "uppercase",
-                letterSpacing: "0.06em",
-                color: "var(--color-text-secondary)",
-              }}
+              className="secrets-section-heading"
             >
               Add or update a secret
             </h3>
             <form onSubmit={handleSubmit} noValidate>
-              <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+              <div className="secrets-form-fields">
                 <div>
                   <label
                     htmlFor="secret-name"
-                    style={{
-                      display: "block",
-                      marginBottom: 4,
-                      fontSize: 12,
-                      color: "var(--color-text-secondary)",
-                    }}
+                    className="secrets-form-label"
                   >
                     Name
                   </label>
@@ -254,27 +180,13 @@ export function SecretsPanel({ onClose }: SecretsPanelProps) {
                     placeholder="e.g. OPENAI_API_KEY"
                     value={name}
                     onChange={(e) => setName(e.target.value)}
-                    style={{
-                      width: "100%",
-                      padding: "6px 10px",
-                      borderRadius: 4,
-                      border: "1px solid var(--color-border)",
-                      backgroundColor: "var(--color-surface-input, var(--color-surface))",
-                      color: "var(--color-text)",
-                      fontSize: 13,
-                      boxSizing: "border-box",
-                    }}
+                    className="secrets-form-input"
                   />
                 </div>
                 <div>
                   <label
                     htmlFor="secret-value"
-                    style={{
-                      display: "block",
-                      marginBottom: 4,
-                      fontSize: 12,
-                      color: "var(--color-text-secondary)",
-                    }}
+                    className="secrets-form-label"
                   >
                     Value
                   </label>
@@ -287,30 +199,13 @@ export function SecretsPanel({ onClose }: SecretsPanelProps) {
                     placeholder="Paste your secret value here"
                     value={value}
                     onChange={(e) => setValue(e.target.value)}
-                    style={{
-                      width: "100%",
-                      padding: "6px 10px",
-                      borderRadius: 4,
-                      border: "1px solid var(--color-border)",
-                      backgroundColor: "var(--color-surface-input, var(--color-surface))",
-                      color: "var(--color-text)",
-                      fontSize: 13,
-                      boxSizing: "border-box",
-                    }}
+                    className="secrets-form-input"
                   />
                 </div>
                 <button
                   type="submit"
                   disabled={!name.trim() || !value || isSubmitting}
-                  className="btn btn-primary"
-                  style={{
-                    alignSelf: "flex-start",
-                    padding: "6px 16px",
-                    fontSize: 13,
-                    fontWeight: 500,
-                    cursor: !name.trim() || !value || isSubmitting ? "not-allowed" : "pointer",
-                    opacity: !name.trim() || !value || isSubmitting ? 0.55 : 1,
-                  }}
+                  className="btn btn-primary secrets-submit-btn"
                 >
                   {isSubmitting ? "Saving…" : "Save secret"}
                 </button>
@@ -339,74 +234,30 @@ export function SecretsPanel({ onClose }: SecretsPanelProps) {
           <section aria-labelledby="secrets-inventory-heading" style={{ marginTop: 20 }}>
             <h3
               id="secrets-inventory-heading"
-              style={{
-                margin: "0 0 10px",
-                fontSize: 12,
-                fontWeight: 600,
-                textTransform: "uppercase",
-                letterSpacing: "0.06em",
-                color: "var(--color-text-secondary)",
-              }}
+              className="secrets-section-heading"
             >
               Secret inventory
             </h3>
 
             {isLoading ? (
               <div
-                style={{
-                  padding: "12px 0",
-                  color: "var(--color-text-muted)",
-                  textAlign: "center",
-                }}
+                role="status"
+                aria-live="polite"
+                className="secrets-loading"
               >
                 Loading…
               </div>
             ) : secrets.length === 0 ? (
-              <div
-                style={{
-                  padding: "12px 0",
-                  color: "var(--color-text-muted)",
-                  textAlign: "center",
-                }}
-              >
+              <div className="secrets-empty">
                 No secrets configured. Add one above.
               </div>
             ) : (
-              <ul
-                role="list"
-                style={{
-                  listStyle: "none",
-                  margin: 0,
-                  padding: 0,
-                  display: "flex",
-                  flexDirection: "column",
-                  gap: 4,
-                }}
-              >
+              <ul role="list" className="secrets-list">
                 {secrets.map((secret) => (
-                  <li
-                    key={secret.name}
-                    style={{
-                      display: "flex",
-                      alignItems: "center",
-                      gap: 8,
-                      padding: "7px 10px",
-                      borderRadius: 4,
-                      border: "1px solid var(--color-border)",
-                      backgroundColor: "var(--color-surface-raised, var(--color-surface))",
-                    }}
-                  >
+                  <li key={secret.name} className="secrets-list-item">
                     <AvailabilityDot available={secret.available} />
 
-                    <span
-                      style={{
-                        flex: 1,
-                        fontFamily: "monospace",
-                        fontSize: 12,
-                        wordBreak: "break-all",
-                        color: "var(--color-text)",
-                      }}
-                    >
+                    <span className="secrets-list-name">
                       {secret.name}
                     </span>
 
@@ -418,22 +269,7 @@ export function SecretsPanel({ onClose }: SecretsPanelProps) {
                         onClick={() => handleDelete(secret.name)}
                         aria-label={`Delete secret ${secret.name}`}
                         title="Delete"
-                        style={{
-                          background: "none",
-                          border: "none",
-                          cursor: "pointer",
-                          color: "var(--color-error, #dc2626)",
-                          fontSize: 14,
-                          padding: "2px 4px",
-                          lineHeight: 1,
-                          borderRadius: 3,
-                          flexShrink: 0,
-                          minWidth: 44,
-                          minHeight: 44,
-                          display: "flex",
-                          alignItems: "center",
-                          justifyContent: "center",
-                        }}
+                        className="secrets-delete-btn"
                       >
                         ×
                       </button>
@@ -444,14 +280,7 @@ export function SecretsPanel({ onClose }: SecretsPanelProps) {
             )}
           </section>
 
-          <p
-            style={{
-              marginTop: 16,
-              fontSize: 11,
-              color: "var(--color-text-muted)",
-              lineHeight: 1.5,
-            }}
-          >
+          <p className="secrets-footnote">
             Secrets are encrypted at rest. Values are never shown after saving.
             Server-scoped secrets are configured by an administrator and cannot
             be deleted here.

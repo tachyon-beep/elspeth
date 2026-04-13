@@ -95,39 +95,16 @@ export function BlobManager({ onUseAsInput }: BlobManagerProps) {
 
   return (
     <div
-      className="blob-manager"
-      style={{
-        borderTop: "1px solid var(--color-border)",
-        maxHeight: 280,
-        display: "flex",
-        flexDirection: "column",
-        fontSize: 13,
-      }}
+      className="blob-manager blob-manager-container"
     >
       {/* Header */}
-      <div
-        style={{
-          display: "flex",
-          alignItems: "center",
-          justifyContent: "space-between",
-          padding: "6px 12px",
-          borderBottom: "1px solid var(--color-border)",
-          flexShrink: 0,
-        }}
-      >
-        <span style={{ fontWeight: 600, fontSize: 12, color: "var(--color-text-secondary)" }}>
+      <div className="blob-manager-header">
+        <span className="blob-manager-title">
           Files ({blobs.length})
         </span>
         <button
           onClick={() => fileInputRef.current?.click()}
-          className="btn"
-          style={{
-            fontSize: 12,
-            padding: "2px 8px",
-            cursor: "pointer",
-            minHeight: 36,
-            minWidth: 44,
-          }}
+          className="btn blob-manager-upload-btn"
           aria-label="Upload file"
         >
           + Upload
@@ -146,25 +123,20 @@ export function BlobManager({ onUseAsInput }: BlobManagerProps) {
       {error && (
         <div
           role="alert"
-          style={{
-            padding: "4px 12px",
-            fontSize: 12,
-            color: "var(--color-error)",
-            backgroundColor: "var(--color-error-bg)",
-          }}
+          className="blob-manager-error"
         >
           {error}
         </div>
       )}
 
       {/* Categorized file list */}
-      <div style={{ flex: 1, overflowY: "auto" }}>
+      <div className="blob-manager-list">
         {isLoading ? (
-          <div style={{ padding: 12, color: "var(--color-text-muted)", textAlign: "center" }}>
+          <div className="blob-manager-loading">
             Loading...
           </div>
         ) : blobs.length === 0 ? (
-          <div style={{ padding: 12, color: "var(--color-text-muted)", textAlign: "center" }}>
+          <div className="blob-manager-empty">
             No files yet. Upload a file to get started.
           </div>
         ) : (
@@ -173,18 +145,7 @@ export function BlobManager({ onUseAsInput }: BlobManagerProps) {
             if (categoryBlobs.length === 0) return null;
             return (
               <div key={category}>
-                <div
-                  style={{
-                    padding: "4px 12px",
-                    fontSize: 11,
-                    fontWeight: 600,
-                    color: "var(--color-text-muted)",
-                    textTransform: "uppercase",
-                    letterSpacing: "0.5px",
-                    backgroundColor: "var(--color-surface-elevated)",
-                    borderBottom: "1px solid var(--color-border)",
-                  }}
-                >
+                <div className="blob-manager-category-header">
                   {CATEGORY_LABELS[category]}
                 </div>
                 {categoryBlobs.map((blob) => (

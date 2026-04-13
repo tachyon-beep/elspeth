@@ -78,7 +78,8 @@ def _build_coalesce_schema(schema_config: SchemaConfig) -> type[PluginSchema]:
     if schema_config.fields is None:
         raise GraphValidationError(
             f"Coalesce union schema has no fields (mode={schema_config.mode!r}). "
-            "Observed schemas should be filtered before calling _build_coalesce_schema."
+            "Observed schemas should be filtered before calling _build_coalesce_schema.",
+            component_type="coalesce",
         )
 
     field_definitions: dict[str, Any] = {}
@@ -194,7 +195,9 @@ class ExecutionGraph:
                 raise GraphValidationError(
                     f"Node '{node_id}' has config['schema'] of type "
                     f"{type(schema_dict).__name__}, expected Mapping. "
-                    f"This is a configuration or graph construction bug."
+                    f"This is a configuration or graph construction bug.",
+                    component_id=node_id,
+                    component_type=node_type.value if isinstance(node_type, NodeType) else str(node_type),
                 )
             output_schema_config = SchemaConfig.from_dict(schema_dict)
 
@@ -298,10 +301,13 @@ class ExecutionGraph:
             # out_edges returns (from, to, key) for MultiDiGraph
             for _, _, edge_key in self._graph.out_edges(node_id, keys=True):
                 if edge_key in labels_seen:
+                    node_info = cast(NodeInfo, self._graph.nodes[node_id]["info"])
                     raise GraphValidationError(
                         f"Node '{node_id}' has duplicate outgoing edge label '{edge_key}'. "
                         "Edge labels must be unique per source node to ensure correct "
-                        "routing event recording."
+                        "routing event recording.",
+                        component_id=node_id,
+                        component_type=node_info.node_type.value,
                     )
                 labels_seen.add(edge_key)
 
@@ -341,14 +347,18 @@ class ExecutionGraph:
                 if sink_name is None:
                     raise GraphValidationError(
                         f"Sink node '{to_id}' exists in the graph but is not registered "
-                        "in the sink ID map. This indicates a graph construction bug."
+                        "in the sink ID map. This indicates a graph construction bug.",
+                        component_id=str(to_id),
+                        component_type="sink",
                     )
                 if (NodeID(node_id_str), sink_name) not in self._route_label_map:
                     raise GraphValidationError(
                         f"Gate '{node_id_str}' has a direct edge to sink node '{to_id}' "
                         f"(sink name '{sink_name}') but no registered route label. "
                         "This indicates a graph construction bug — every gate→sink edge "
-                        "must have a corresponding route label entry."
+                        "must have a corresponding route label entry.",
+                        component_id=node_id_str,
+                        component_type="gate",
                     )
 
     def topological_order(self) -> list[str]:
@@ -423,7 +433,9 @@ class ExecutionGraph:
                 if key not in self._route_resolution_map:
                     raise GraphValidationError(
                         f"Gate '{info.plugin_name}' route label '{route_label}' has no destination in route resolution map. "
-                        "All declared route labels must resolve during graph construction."
+                        "All declared route labels must resolve during graph construction.",
+                        component_id=str(node_id),
+                        component_type="gate",
                     )
 
     @staticmethod
@@ -511,7 +523,12 @@ class ExecutionGraph:
             next_nodes.append(next_node_id)
 
         if len(next_nodes) > 1:
-            raise GraphValidationError(f"Node '{node_id}' has multiple continue MOVE edges to processing nodes: {sorted(next_nodes)}")
+            node_info = self.get_node_info(node_id)
+            raise GraphValidationError(
+                f"Node '{node_id}' has multiple continue MOVE edges to processing nodes: {sorted(next_nodes)}",
+                component_id=str(node_id),
+                component_type=node_info.node_type.value,
+            )
         if len(next_nodes) == 1:
             return next_nodes[0]
         return None
@@ -896,7 +913,9 @@ class ExecutionGraph:
         raise GraphValidationError(
             f"Cannot trace first transform for branch '{branch_name}' leading to "
             f"coalesce node '{coalesce_nid}'. This indicates a graph construction bug — "
-            f"transform branches must have MOVE edge chains from gate to coalesce."
+            f"transform branches must have MOVE edge chains from gate to coalesce.",
+            component_id=str(coalesce_nid),
+            component_type="coalesce",
         )
 
     def get_branch_to_sink_map(self) -> dict[BranchName, SinkName]:
@@ -1281,7 +1300,9 @@ class ExecutionGraph:
             raise GraphValidationError(
                 f"Gate '{to_node_id}' must preserve schema: "
                 f"input_schema={to_info.input_schema.__name__}, "
-                f"output_schema={to_info.output_schema.__name__}"
+                f"output_schema={to_info.output_schema.__name__}",
+                component_id=str(to_node_id),
+                component_type="gate",
             )
 
         # ===== PHASE 1: CONTRACT VALIDATION (field name requirements) =====
@@ -1305,7 +1326,9 @@ class ExecutionGraph:
                     f"\n"
                     f"Fix: Either:\n"
                     f"  1. Add missing fields to producer's schema or guaranteed_fields, or\n"
-                    f"  2. Remove from consumer's required_input_fields if truly optional"
+                    f"  2. Remove from consumer's required_input_fields if truly optional",
+                    component_id=str(to_node_id),
+                    component_type=to_info.node_type.value,
                 )
 
         # ===== PHASE 2: TYPE VALIDATION (schema compatibility) =====
@@ -1332,7 +1355,9 @@ class ExecutionGraph:
             raise GraphValidationError(
                 f"Edge from '{from_node_id}' to '{to_node_id}' invalid: "
                 f"producer schema '{producer_schema.__name__}' incompatible with "
-                f"consumer schema '{consumer_schema.__name__}': {result.error_message}"
+                f"consumer schema '{consumer_schema.__name__}': {result.error_message}",
+                component_id=str(to_node_id),
+                component_type=to_info.node_type.value,
             )
 
     def get_effective_producer_schema(
@@ -1386,7 +1411,9 @@ class ExecutionGraph:
                 if "select_branch" not in node_info.config:
                     raise GraphValidationError(
                         f"Coalesce node '{node_id}' has merge strategy 'select' but "
-                        "no 'select_branch' in config. This indicates a graph construction bug."
+                        "no 'select_branch' in config. This indicates a graph construction bug.",
+                        component_id=str(node_id),
+                        component_type="coalesce",
                     )
                 select_branch = node_info.config["select_branch"]
                 # Identity branch: COPY edge from gate to coalesce with label == select_branch
@@ -1420,7 +1447,9 @@ class ExecutionGraph:
                 # Pass-through node with no inputs is a graph construction bug - CRASH
                 raise GraphValidationError(
                     f"{node_info.node_type.capitalize()} node '{node_id}' has no incoming edges - "
-                    f"this indicates a bug in graph construction"
+                    f"this indicates a bug in graph construction",
+                    component_id=str(node_id),
+                    component_type=node_info.node_type.value,
                 )
 
             # Gather all input schemas for validation
@@ -1446,7 +1475,9 @@ class ExecutionGraph:
                         f"expected by downstream consumers. "
                         f"Observed branches: {observed_names}, explicit branches: {explicit_names}. "
                         f"Fix: ensure all branches produce explicit schemas with compatible fields, "
-                        f"or all branches produce observed schemas."
+                        f"or all branches produce observed schemas.",
+                        component_id=str(node_id),
+                        component_type=node_info.node_type.value,
                     )
 
                 # All explicit - verify structural compatibility
@@ -1461,7 +1492,9 @@ class ExecutionGraph:
                             raise GraphValidationError(
                                 f"{node_info.node_type.capitalize()} '{node_id}' receives incompatible schemas from "
                                 f"multiple inputs - this is a graph construction bug. "
-                                f"First input: {first_name}, other input: {other_name}. {error_msg}"
+                                f"First input: {first_name}, other input: {other_name}. {error_msg}",
+                                component_id=str(node_id),
+                                component_type=node_info.node_type.value,
                             )
 
             # Return first schema (all are now either all-observed or all-explicit-compatible)
@@ -1564,7 +1597,11 @@ class ExecutionGraph:
         incoming = list(self._graph.in_edges(coalesce_id, keys=True, data=True))
 
         if not incoming:
-            raise GraphValidationError(f"Coalesce '{coalesce_id}' has no incoming edges — this is a graph construction bug")
+            raise GraphValidationError(
+                f"Coalesce '{coalesce_id}' has no incoming edges — this is a graph construction bug",
+                component_id=str(coalesce_id),
+                component_type="coalesce",
+            )
         if len(incoming) < 2:
             return  # Degenerate case (1 branch) - always compatible
 
@@ -1596,7 +1633,9 @@ class ExecutionGraph:
                 f"expected by downstream consumers. "
                 f"Observed branches: {observed_names}, explicit branches: {explicit_names}. "
                 f"Fix: ensure all branches produce explicit schemas with compatible fields, "
-                f"or all branches produce observed schemas."
+                f"or all branches produce observed schemas.",
+                component_id=str(coalesce_id),
+                component_type="coalesce",
             )
 
         # All explicit: verify structural compatibility across branches
@@ -1610,7 +1649,9 @@ class ExecutionGraph:
                     raise GraphValidationError(
                         f"Coalesce '{coalesce_id}' receives incompatible schemas from "
                         f"multiple branches: first branch has {first_name}, "
-                        f"branch from '{other_id}' has {other_name}. {error_msg}"
+                        f"branch from '{other_id}' has {other_name}. {error_msg}",
+                        component_id=str(coalesce_id),
+                        component_type="coalesce",
                     )
 
     def _validate_sink_required_fields(self) -> None:
@@ -1691,7 +1732,9 @@ class ExecutionGraph:
                     f"(branch-exclusive or AND-downgraded), or an upstream transform "
                     f"did not declare them as guaranteed output. "
                     f"Fix: ensure the upstream node guarantees these fields, "
-                    f"or remove them from the sink's declared_required_fields."
+                    f"or remove them from the sink's declared_required_fields.",
+                    component_id=str(node_id),
+                    component_type="sink",
                 )
 
     # ===== CONTRACT VALIDATION HELPERS =====
@@ -1765,7 +1808,11 @@ class ExecutionGraph:
         if node_info.node_type == NodeType.AGGREGATION:
             options = node_info.config["options"]
             if not isinstance(options, dict):
-                raise GraphValidationError(f"Aggregation node config 'options' must be dict, got {type(options).__name__}")
+                raise GraphValidationError(
+                    f"Aggregation node config 'options' must be dict, got {type(options).__name__}",
+                    component_id=str(node_id),
+                    component_type="aggregation",
+                )
             if "required_input_fields" in options:
                 required_input = options["required_input_fields"]
                 if required_input is not None and len(required_input) > 0:

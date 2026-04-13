@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from types import MappingProxyType
+from typing import Any
 from unittest.mock import MagicMock
 
 import pytest
@@ -16,11 +17,16 @@ from elspeth.web.catalog.schemas import (
 from elspeth.web.composer.state import (
     CompositionState,
     PipelineMetadata,
+    SourceSpec,
     ValidationEntry,
+    ValidationSummary,
 )
 from elspeth.web.composer.tools import (
     ToolResult,
     _apply_merge_patch,
+    _compute_validation_delta,
+    _inject_prior_validation,
+    _prevalidate_plugin_options,
     execute_tool,
     get_expression_grammar,
     get_tool_definitions,
@@ -166,7 +172,7 @@ class TestSetSource:
             {
                 "plugin": "csv",
                 "on_success": "t1",
-                "options": {"path": "/data/in.csv"},
+                "options": {"path": "/data/in.csv", "schema": {"mode": "observed"}},
                 "on_validation_failure": "quarantine",
             },
             state,
@@ -340,7 +346,12 @@ class TestUpsertEdge:
         # Add an output
         r2 = execute_tool(
             "set_output",
-            {"sink_name": "csv_out", "plugin": "csv", "options": {}, "on_write_failure": "discard"},
+            {
+                "sink_name": "csv_out",
+                "plugin": "csv",
+                "options": {"path": "/data/outputs/output.csv", "schema": {"mode": "observed"}},
+                "on_write_failure": "discard",
+            },
             r1.updated_state,
             catalog,
         )
@@ -374,7 +385,12 @@ class TestUpsertEdge:
         )
         r2 = execute_tool(
             "set_output",
-            {"sink_name": "err_out", "plugin": "csv", "options": {}, "on_write_failure": "discard"},
+            {
+                "sink_name": "err_out",
+                "plugin": "csv",
+                "options": {"path": "/data/outputs/output.csv", "schema": {"mode": "observed"}},
+                "on_write_failure": "discard",
+            },
             r1.updated_state,
             catalog,
         )
@@ -394,13 +410,18 @@ class TestUpsertEdge:
         catalog = _mock_catalog()
         r1 = execute_tool(
             "set_source",
-            {"plugin": "csv", "on_success": "old_stream", "options": {}},
+            {"plugin": "csv", "on_success": "old_stream", "options": {"path": "/data/blobs/input.csv", "schema": {"mode": "observed"}}},
             state,
             catalog,
         )
         r2 = execute_tool(
             "set_output",
-            {"sink_name": "main", "plugin": "csv", "options": {}, "on_write_failure": "discard"},
+            {
+                "sink_name": "main",
+                "plugin": "csv",
+                "options": {"path": "/data/outputs/output.csv", "schema": {"mode": "observed"}},
+                "on_write_failure": "discard",
+            },
             r1.updated_state,
             catalog,
         )
@@ -472,7 +493,12 @@ class TestUpsertEdge:
         )
         r2 = execute_tool(
             "set_output",
-            {"sink_name": "csv_out", "plugin": "csv", "options": {}, "on_write_failure": "discard"},
+            {
+                "sink_name": "csv_out",
+                "plugin": "csv",
+                "options": {"path": "/data/outputs/output.csv", "schema": {"mode": "observed"}},
+                "on_write_failure": "discard",
+            },
             r1.updated_state,
             catalog,
         )
@@ -593,7 +619,7 @@ class TestSetOutput:
             {
                 "sink_name": "main",
                 "plugin": "csv",
-                "options": {"path": "/data/out.csv"},
+                "options": {"path": "/data/out.csv", "schema": {"mode": "observed"}},
                 "on_write_failure": "discard",
             },
             state,
@@ -614,7 +640,7 @@ class TestSetOutput:
             {
                 "sink_name": "main",
                 "plugin": "csv",
-                "options": {},
+                "options": {"schema": {"mode": "observed"}},
                 "on_write_failure": "discard",
             },
             state,
@@ -625,7 +651,7 @@ class TestSetOutput:
             {
                 "sink_name": "main",
                 "plugin": "csv",
-                "options": {"path": "/new.csv"},
+                "options": {"path": "/new.csv", "schema": {"mode": "observed"}},
                 "on_write_failure": "quarantine",
             },
             r1.updated_state,
@@ -634,6 +660,30 @@ class TestSetOutput:
         assert r2.success is True
         assert len(r2.updated_state.outputs) == 1
         assert r2.updated_state.outputs[0].on_write_failure == "quarantine"
+
+    def test_on_write_failure_accepts_sink_name_for_failsink_routing(self) -> None:
+        """on_write_failure can be a sink name — not just 'discard'/'quarantine'.
+
+        Regression guard: the tool schema must not constrain on_write_failure to
+        an enum. The skill document instructs LLMs to set it to a sink name (e.g.
+        'results_failures') to wire automatic failsink pipelines. If an enum
+        constraint is re-added, the LLM cannot build failsink routes.
+        """
+        state = _empty_state()
+        catalog = _mock_catalog()
+        result = execute_tool(
+            "set_output",
+            {
+                "sink_name": "main",
+                "plugin": "csv",
+                "options": {"path": "/data/out.csv", "schema": {"mode": "observed"}},
+                "on_write_failure": "results_failures",
+            },
+            state,
+            catalog,
+        )
+        assert result.success is True
+        assert result.updated_state.outputs[0].on_write_failure == "results_failures"
 
     def test_unknown_sink_plugin_fails(self) -> None:
         state = _empty_state()
@@ -663,7 +713,7 @@ class TestRemoveOutput:
             {
                 "sink_name": "main",
                 "plugin": "csv",
-                "options": {},
+                "options": {"path": "/data/outputs/output.csv", "schema": {"mode": "observed"}},
                 "on_write_failure": "discard",
             },
             state,
@@ -692,7 +742,7 @@ class TestSetSourcePathSecurity:
             {
                 "plugin": "csv",
                 "on_success": "t1",
-                "options": {"path": "/data/blobs/input.csv"},
+                "options": {"path": "/data/blobs/input.csv", "schema": {"mode": "observed"}},
                 "on_validation_failure": "quarantine",
             },
             state,
@@ -771,8 +821,13 @@ class TestSetSourcePathSecurity:
         )
         assert result.success is False
 
-    def test_no_path_key_skips_validation(self) -> None:
-        """Source options without path/file keys are not subject to S2."""
+    def test_no_path_key_skips_s2_but_fails_prevalidation(self) -> None:
+        """Source options without path/file keys are not subject to S2 path security.
+
+        S2 only checks path/file keys for directory traversal — absent keys are not
+        rejected. However, pre-validation (Pydantic) correctly rejects the call because
+        csv source requires 'path'. The failure comes from pre-validation, not S2.
+        """
         state = _empty_state()
         catalog = _mock_catalog()
         result = execute_tool(
@@ -780,14 +835,19 @@ class TestSetSourcePathSecurity:
             {
                 "plugin": "csv",
                 "on_success": "t1",
-                "options": {"connection_string": "postgres://..."},
+                "options": {"schema": {"mode": "observed"}},
                 "on_validation_failure": "quarantine",
             },
             state,
             catalog,
             data_dir="/data",
         )
-        assert result.success is True
+        # Pydantic catches the missing required 'path' field
+        assert result.success is False
+        # Error is from pre-validation (path required), not S2 (traversal / allowed dir)
+        assert "path" in result.data["error"]
+        assert "traversal" not in result.data["error"].lower()
+        assert "allowed" not in result.data["error"].lower()
 
     def test_relative_path_resolves_against_data_dir(self) -> None:
         """blobs/input.csv should resolve under {data_dir}/blobs/."""
@@ -798,7 +858,7 @@ class TestSetSourcePathSecurity:
             {
                 "plugin": "csv",
                 "on_success": "t1",
-                "options": {"path": "blobs/input.csv"},
+                "options": {"path": "blobs/input.csv", "schema": {"mode": "observed"}},
                 "on_validation_failure": "quarantine",
             },
             state,
@@ -863,11 +923,6 @@ class TestDiscoveryTools:
 
 
 class TestToolDefinitions:
-    def test_has_thirty_two_tools(self) -> None:
-        """9 discovery + 13 mutation + 7 blob tools + 3 secret tools = 32 tools."""
-        defs = get_tool_definitions()
-        assert len(defs) == 32
-
     def test_all_have_json_schema(self) -> None:
         for defn in get_tool_definitions():
             assert "name" in defn
@@ -885,7 +940,7 @@ class TestToolResultValidation:
             {
                 "plugin": "csv",
                 "on_success": "t1",
-                "options": {},
+                "options": {"path": "/data/in.csv", "schema": {"mode": "observed"}},
                 "on_validation_failure": "quarantine",
             },
             state,
@@ -897,13 +952,357 @@ class TestToolResultValidation:
         assert any("No sinks" in e.message for e in result.validation.errors)
 
 
+class TestComputeValidationDelta:
+    """Tests for _compute_validation_delta identity semantics."""
+
+    def test_same_message_different_component_not_collapsed(self) -> None:
+        """Two entries with identical message but different component are distinct."""
+        before = ValidationSummary(
+            is_valid=False,
+            errors=(ValidationEntry("node:a", "Configuration incomplete.", "high"),),
+        )
+        after = ValidationSummary(
+            is_valid=False,
+            errors=(
+                ValidationEntry("node:a", "Configuration incomplete.", "high"),
+                ValidationEntry("node:b", "Configuration incomplete.", "high"),
+            ),
+        )
+        delta = _compute_validation_delta(before, after)
+        # node:b is genuinely new — must appear in new_errors
+        assert len(delta["new_errors"]) == 1
+        assert delta["new_errors"][0]["component"] == "node:b"
+        assert delta["resolved_errors"] == []
+
+    def test_same_component_same_message_not_duplicated(self) -> None:
+        """Identical (component, message) across before/after is not new."""
+        entry = ValidationEntry("source", "No source configured.", "high")
+        before = ValidationSummary(is_valid=False, errors=(entry,))
+        after = ValidationSummary(is_valid=False, errors=(entry,))
+        delta = _compute_validation_delta(before, after)
+        assert delta["new_errors"] == []
+        assert delta["resolved_errors"] == []
+
+    def test_resolved_entry_uses_component_identity(self) -> None:
+        """An entry resolved for one component doesn't mask another."""
+        before = ValidationSummary(
+            is_valid=False,
+            errors=(
+                ValidationEntry("node:a", "Missing field.", "high"),
+                ValidationEntry("node:b", "Missing field.", "high"),
+            ),
+        )
+        after = ValidationSummary(
+            is_valid=False,
+            errors=(ValidationEntry("node:b", "Missing field.", "high"),),
+        )
+        delta = _compute_validation_delta(before, after)
+        assert len(delta["resolved_errors"]) == 1
+        assert delta["resolved_errors"][0]["component"] == "node:a"
+        assert delta["new_errors"] == []
+
+    def test_warning_delta_uses_component_identity(self) -> None:
+        """Warnings also use (component, message) identity."""
+        before = ValidationSummary(
+            is_valid=True,
+            errors=(),
+            warnings=(ValidationEntry("output:main", "No path configured.", "medium"),),
+        )
+        after = ValidationSummary(
+            is_valid=True,
+            errors=(),
+            warnings=(
+                ValidationEntry("output:main", "No path configured.", "medium"),
+                ValidationEntry("output:backup", "No path configured.", "medium"),
+            ),
+        )
+        delta = _compute_validation_delta(before, after)
+        assert len(delta["new_warnings"]) == 1
+        assert delta["new_warnings"][0]["component"] == "output:backup"
+
+    def test_both_empty_yields_empty_delta(self) -> None:
+        """Two empty validation states produce an all-empty delta."""
+        before = ValidationSummary(is_valid=True, errors=(), warnings=())
+        after = ValidationSummary(is_valid=True, errors=(), warnings=())
+        delta = _compute_validation_delta(before, after)
+        assert delta == {
+            "new_errors": [],
+            "resolved_errors": [],
+            "new_warnings": [],
+            "resolved_warnings": [],
+        }
+
+    def test_empty_before_makes_all_after_new(self) -> None:
+        """When before is empty, every entry in after is new."""
+        before = ValidationSummary(is_valid=True, errors=(), warnings=())
+        after = ValidationSummary(
+            is_valid=False,
+            errors=(
+                ValidationEntry("node:x", "Bad config.", "high"),
+                ValidationEntry("source", "Missing field.", "high"),
+            ),
+            warnings=(ValidationEntry("output:main", "Slow path.", "medium"),),
+        )
+        delta = _compute_validation_delta(before, after)
+        assert len(delta["new_errors"]) == 2
+        assert len(delta["new_warnings"]) == 1
+        assert delta["resolved_errors"] == []
+        assert delta["resolved_warnings"] == []
+
+    def test_empty_after_makes_all_before_resolved(self) -> None:
+        """When after is empty, every entry in before is resolved."""
+        before = ValidationSummary(
+            is_valid=False,
+            errors=(ValidationEntry("node:a", "Missing plugin.", "high"),),
+            warnings=(ValidationEntry("output:main", "No path.", "medium"),),
+        )
+        after = ValidationSummary(is_valid=True, errors=(), warnings=())
+        delta = _compute_validation_delta(before, after)
+        assert len(delta["resolved_errors"]) == 1
+        assert delta["resolved_errors"][0]["component"] == "node:a"
+        assert len(delta["resolved_warnings"]) == 1
+        assert delta["resolved_warnings"][0]["component"] == "output:main"
+        assert delta["new_errors"] == []
+        assert delta["new_warnings"] == []
+
+    def test_mixed_errors_and_warnings_independent(self) -> None:
+        """Error and warning deltas are computed independently."""
+        shared_entry = ValidationEntry("node:a", "Problem.", "high")
+        before = ValidationSummary(
+            is_valid=False,
+            errors=(shared_entry,),
+            warnings=(ValidationEntry("source", "Old warning.", "medium"),),
+        )
+        after = ValidationSummary(
+            is_valid=False,
+            errors=(shared_entry,),
+            warnings=(ValidationEntry("source", "New warning.", "medium"),),
+        )
+        delta = _compute_validation_delta(before, after)
+        # Error unchanged — no new, no resolved
+        assert delta["new_errors"] == []
+        assert delta["resolved_errors"] == []
+        # Warning changed — old resolved, new appeared
+        assert len(delta["new_warnings"]) == 1
+        assert delta["new_warnings"][0]["message"] == "New warning."
+        assert len(delta["resolved_warnings"]) == 1
+        assert delta["resolved_warnings"][0]["message"] == "Old warning."
+
+    def test_serialized_entries_include_severity(self) -> None:
+        """Delta entries are serialized via to_dict() and include severity."""
+        before = ValidationSummary(is_valid=True, errors=(), warnings=())
+        after = ValidationSummary(
+            is_valid=False,
+            errors=(ValidationEntry("node:a", "Broken.", "high"),),
+        )
+        delta = _compute_validation_delta(before, after)
+        entry = delta["new_errors"][0]
+        assert entry == {"component": "node:a", "message": "Broken.", "severity": "high"}
+
+
+class TestInjectPriorValidation:
+    """Tests for _inject_prior_validation — attaches pre-mutation validation."""
+
+    def _make_result(
+        self,
+        *,
+        success: bool,
+        prior: ValidationSummary | None = None,
+    ) -> ToolResult:
+        state = _empty_state()
+        return ToolResult(
+            success=success,
+            updated_state=state,
+            validation=ValidationSummary(is_valid=True, errors=()),
+            affected_nodes=(),
+            prior_validation=prior,
+        )
+
+    def test_injects_prior_on_success(self) -> None:
+        """Successful mutation without prior_validation gets it injected."""
+        prior = ValidationSummary(is_valid=False, errors=(ValidationEntry("source", "No source.", "high"),))
+        result = self._make_result(success=True)
+        assert result.prior_validation is None
+
+        injected = _inject_prior_validation(result, prior)
+        assert injected.prior_validation is prior
+        assert injected.success is True
+
+    def test_skips_injection_on_failure(self) -> None:
+        """Failed mutation results are returned unchanged."""
+        prior = ValidationSummary(is_valid=True, errors=())
+        result = self._make_result(success=False)
+
+        injected = _inject_prior_validation(result, prior)
+        assert injected.prior_validation is None
+        assert injected is result  # identity — unchanged
+
+    def test_skips_injection_when_already_set(self) -> None:
+        """Results that already carry prior_validation are not overwritten."""
+        original_prior = ValidationSummary(
+            is_valid=False,
+            errors=(ValidationEntry("node:a", "Handler set this.", "high"),),
+        )
+        new_prior = ValidationSummary(is_valid=True, errors=())
+        result = self._make_result(success=True, prior=original_prior)
+
+        injected = _inject_prior_validation(result, new_prior)
+        assert injected.prior_validation is original_prior  # not overwritten
+        assert injected is result  # identity — unchanged
+
+    def test_to_dict_includes_delta_when_prior_set(self) -> None:
+        """ToolResult.to_dict() includes validation_delta when prior_validation present."""
+        prior = ValidationSummary(
+            is_valid=False,
+            errors=(ValidationEntry("source", "No source.", "high"),),
+        )
+        state = _empty_state()
+        result = ToolResult(
+            success=True,
+            updated_state=state,
+            validation=ValidationSummary(is_valid=True, errors=()),
+            affected_nodes=(),
+            prior_validation=prior,
+        )
+        d = result.to_dict()
+        assert "validation_delta" in d
+        assert len(d["validation_delta"]["resolved_errors"]) == 1
+        assert d["validation_delta"]["new_errors"] == []
+
+    def test_to_dict_omits_delta_when_no_prior(self) -> None:
+        """ToolResult.to_dict() excludes validation_delta when no prior_validation."""
+        result = self._make_result(success=True)
+        d = result.to_dict()
+        assert "validation_delta" not in d
+
+
+class TestExecuteToolPriorValidation:
+    """Integration: execute_tool populates prior_validation for mutation tools."""
+
+    def test_mutation_tool_gets_prior_validation(self) -> None:
+        """set_source (a mutation tool) should populate prior_validation."""
+        state = _empty_state()
+        catalog = _mock_catalog()
+        result = execute_tool(
+            "set_source",
+            {
+                "plugin": "csv",
+                "on_success": "t1",
+                "options": {"path": "/data/in.csv", "schema": {"mode": "observed"}},
+                "on_validation_failure": "quarantine",
+            },
+            state,
+            catalog,
+        )
+        assert result.success is True
+        assert result.prior_validation is not None
+        # Prior should reflect the original empty state's validation
+        d = result.to_dict()
+        assert "validation_delta" in d
+
+    def test_discovery_tool_has_no_prior_validation(self) -> None:
+        """list_sources (a discovery tool) should NOT have prior_validation."""
+        state = _empty_state()
+        catalog = _mock_catalog()
+        result = execute_tool("list_sources", {}, state, catalog)
+        assert result.success is True
+        assert result.prior_validation is None
+        d = result.to_dict()
+        assert "validation_delta" not in d
+
+    def test_threaded_prior_used_for_mutation(self) -> None:
+        """When prior_validation is threaded, execute_tool uses it as-is."""
+        state = _empty_state()
+        catalog = _mock_catalog()
+        # Pre-compute validation for the empty state
+        threaded = state.validate()
+        result = execute_tool(
+            "set_source",
+            {
+                "plugin": "csv",
+                "on_success": "t1",
+                "options": {"path": "/data/in.csv", "schema": {"mode": "observed"}},
+                "on_validation_failure": "quarantine",
+            },
+            state,
+            catalog,
+            prior_validation=threaded,
+        )
+        assert result.success is True
+        # The threaded validation should be used as the prior — identity check
+        assert result.prior_validation is threaded
+
+    def test_threaded_prior_produces_correct_delta(self) -> None:
+        """Threaded validation produces the same delta as fresh computation."""
+        state = _empty_state()
+        catalog = _mock_catalog()
+        source_args = {
+            "plugin": "csv",
+            "on_success": "t1",
+            "options": {"path": "/data/in.csv", "schema": {"mode": "observed"}},
+            "on_validation_failure": "quarantine",
+        }
+        # Without threading (fresh computation)
+        result_fresh = execute_tool("set_source", source_args, state, catalog)
+        # With threading
+        threaded = state.validate()
+        result_threaded = execute_tool(
+            "set_source",
+            source_args,
+            state,
+            catalog,
+            prior_validation=threaded,
+        )
+        # Deltas should be identical
+        delta_fresh = result_fresh.to_dict()["validation_delta"]
+        delta_threaded = result_threaded.to_dict()["validation_delta"]
+        assert delta_fresh == delta_threaded
+
+    def test_chained_threading_across_mutations(self) -> None:
+        """Validation chains correctly across sequential mutations."""
+        state = _empty_state()
+        catalog = _mock_catalog()
+
+        # First mutation — no prior to thread
+        r1 = execute_tool(
+            "set_source",
+            {
+                "plugin": "csv",
+                "on_success": "main",
+                "options": {"path": "/data/in.csv", "schema": {"mode": "observed"}},
+                "on_validation_failure": "quarantine",
+            },
+            state,
+            catalog,
+        )
+        assert r1.success is True
+
+        # Second mutation — thread r1's validation as prior
+        r2 = execute_tool(
+            "set_output",
+            {
+                "sink_name": "main",
+                "plugin": "csv",
+                "options": {"path": "/data/outputs/out.csv", "schema": {"mode": "observed"}},
+                "on_write_failure": "discard",
+            },
+            r1.updated_state,
+            catalog,
+            prior_validation=r1.validation,
+        )
+        assert r2.success is True
+        # r1.validation becomes r2's prior — identity check
+        assert r2.prior_validation is r1.validation
+        # The delta should reflect changes from r1's state to r2's state
+        assert "validation_delta" in r2.to_dict()
+
+
 class TestToolRegistry:
     """Tests for the tool registry pattern — two dicts + cacheable frozenset."""
 
-    def test_discovery_tools_has_nine_entries(self) -> None:
+    def test_discovery_tools_membership(self) -> None:
         from elspeth.web.composer.tools import _DISCOVERY_TOOLS
 
-        assert len(_DISCOVERY_TOOLS) == 9
         expected = {
             "list_sources",
             "list_transforms",
@@ -912,15 +1311,15 @@ class TestToolRegistry:
             "get_expression_grammar",
             "explain_validation_error",
             "list_models",
+            "get_pipeline_state",
             "preview_pipeline",
             "diff_pipeline",
         }
         assert set(_DISCOVERY_TOOLS.keys()) == expected
 
-    def test_mutation_tools_has_thirteen_entries(self) -> None:
+    def test_mutation_tools_membership(self) -> None:
         from elspeth.web.composer.tools import _MUTATION_TOOLS
 
-        assert len(_MUTATION_TOOLS) == 13
         expected = {
             "set_source",
             "upsert_node",
@@ -944,14 +1343,14 @@ class TestToolRegistry:
         overlap = set(_DISCOVERY_TOOLS.keys()) & set(_MUTATION_TOOLS.keys())
         assert overlap == set(), f"Registry overlap: {overlap}"
 
-    def test_cacheable_discovery_excludes_diff(self) -> None:
-        """diff_pipeline depends on mutable state, so it is not cacheable."""
+    def test_cacheable_discovery_excludes_stateful_tools(self) -> None:
+        """diff_pipeline and get_pipeline_state depend on mutable state, so they are not cacheable."""
         from elspeth.web.composer.tools import (
             _CACHEABLE_DISCOVERY_TOOLS,
             _DISCOVERY_TOOLS,
         )
 
-        assert frozenset(_DISCOVERY_TOOLS.keys()) - {"diff_pipeline"} == _CACHEABLE_DISCOVERY_TOOLS
+        assert frozenset(_DISCOVERY_TOOLS.keys()) - {"diff_pipeline", "get_pipeline_state"} == _CACHEABLE_DISCOVERY_TOOLS
 
     def test_cacheable_is_subset_of_discovery(self) -> None:
         from elspeth.web.composer.tools import (
@@ -1006,7 +1405,7 @@ class TestToolRegistry:
             {
                 "plugin": "csv",
                 "on_success": "t1",
-                "options": {},
+                "options": {"path": "/data/blobs/input.csv", "schema": {"mode": "observed"}},
                 "on_validation_failure": "quarantine",
             },
             state,
@@ -1033,6 +1432,214 @@ class TestToolRegistry:
         import elspeth.web.composer.tools as mod
 
         importlib.reload(mod)  # Force re-evaluation of module-level assertion
+
+
+# ---------------------------------------------------------------------------
+# get_pipeline_state functional tests
+# ---------------------------------------------------------------------------
+
+
+class TestGetPipelineState:
+    """Functional tests for get_pipeline_state — exercises all three modes
+    (full state, component-specific, not-found) plus deep_thaw and redaction.
+    """
+
+    def _build_populated_state(self) -> CompositionState:
+        """Build a state with source, node, output, and edge via tool calls."""
+        state = _empty_state()
+        catalog = _mock_catalog()
+
+        r1 = execute_tool(
+            "set_source",
+            {
+                "plugin": "csv",
+                "on_success": "t1",
+                "options": {"path": "/data/blobs/in.csv", "schema": {"mode": "observed"}},
+                "on_validation_failure": "quarantine",
+            },
+            state,
+            catalog,
+        )
+        assert r1.success is True
+
+        r2 = execute_tool(
+            "upsert_node",
+            {
+                "id": "t1",
+                "node_type": "transform",
+                "plugin": "uppercase",
+                "input": "source",
+                "on_success": "out",
+                "options": {"schema": {"mode": "observed"}},
+            },
+            r1.updated_state,
+            catalog,
+        )
+        assert r2.success is True
+
+        r3 = execute_tool(
+            "set_output",
+            {
+                "sink_name": "out",
+                "plugin": "csv",
+                "options": {"path": "/data/outputs/result.csv", "schema": {"mode": "observed"}},
+                "on_write_failure": "discard",
+            },
+            r2.updated_state,
+            catalog,
+        )
+        assert r3.success is True
+
+        r4 = execute_tool(
+            "upsert_edge",
+            {"id": "e1", "from_node": "source", "to_node": "t1", "edge_type": "on_success"},
+            r3.updated_state,
+            catalog,
+        )
+        assert r4.success is True
+
+        return r4.updated_state
+
+    def test_full_state_returns_all_components(self) -> None:
+        """No component arg returns source, nodes, outputs, edges, metadata."""
+        state = self._build_populated_state()
+        catalog = _mock_catalog()
+
+        result = execute_tool("get_pipeline_state", {}, state, catalog)
+        assert result.success is True
+
+        # Use to_dict() for structural checks — result.data is frozen by ToolResult.__post_init__
+        data = result.to_dict()["data"]
+        assert data["source"] is not None
+        assert data["source"]["plugin"] == "csv"
+        assert len(data["nodes"]) == 1
+        assert data["nodes"][0]["id"] == "t1"
+        assert len(data["outputs"]) == 1
+        assert data["outputs"][0]["sink_name"] == "out"
+        assert len(data["edges"]) == 1
+        assert data["edges"][0]["id"] == "e1"
+        assert "metadata" in data
+        assert "version" in data
+
+    def test_full_state_options_are_plain_dicts(self) -> None:
+        """to_dict() deep_thaw converts frozen containers to plain dicts for JSON serialization."""
+        state = self._build_populated_state()
+        catalog = _mock_catalog()
+
+        result = execute_tool("get_pipeline_state", {}, state, catalog)
+        assert result.success is True
+
+        # to_dict() runs deep_thaw on result.data — options must be plain dicts
+        data = result.to_dict()["data"]
+        source_opts = data["source"]["options"]
+        assert isinstance(source_opts, dict)
+        assert isinstance(source_opts.get("schema"), dict)
+
+        node_opts = data["nodes"][0]["options"]
+        assert isinstance(node_opts, dict)
+
+    def test_component_source(self) -> None:
+        """component='source' returns only the source component."""
+        state = self._build_populated_state()
+        catalog = _mock_catalog()
+
+        result = execute_tool("get_pipeline_state", {"component": "source"}, state, catalog)
+        assert result.success is True
+        data = result.to_dict()["data"]
+        assert "source" in data
+        assert data["source"]["plugin"] == "csv"
+        # Should not contain nodes/outputs/edges
+        assert "nodes" not in data
+        assert "outputs" not in data
+
+    def test_component_source_when_none(self) -> None:
+        """component='source' with no source set returns null source."""
+        state = _empty_state()
+        catalog = _mock_catalog()
+
+        result = execute_tool("get_pipeline_state", {"component": "source"}, state, catalog)
+        assert result.success is True
+        data = result.to_dict()["data"]
+        assert data["source"] is None
+
+    def test_component_node_by_id(self) -> None:
+        """component=<node_id> returns that node's details."""
+        state = self._build_populated_state()
+        catalog = _mock_catalog()
+
+        result = execute_tool("get_pipeline_state", {"component": "t1"}, state, catalog)
+        assert result.success is True
+        data = result.to_dict()["data"]
+        assert "node" in data
+        assert data["node"]["id"] == "t1"
+        assert data["node"]["plugin"] == "uppercase"
+        assert isinstance(data["node"]["options"], dict)
+
+    def test_component_output_by_name(self) -> None:
+        """component=<output_name> returns that output's details."""
+        state = self._build_populated_state()
+        catalog = _mock_catalog()
+
+        result = execute_tool("get_pipeline_state", {"component": "out"}, state, catalog)
+        assert result.success is True
+        data = result.to_dict()["data"]
+        assert "output" in data
+        assert data["output"]["sink_name"] == "out"
+        assert data["output"]["plugin"] == "csv"
+
+    def test_component_not_found(self) -> None:
+        """component=<nonexistent> returns failure."""
+        state = self._build_populated_state()
+        catalog = _mock_catalog()
+
+        result = execute_tool("get_pipeline_state", {"component": "nonexistent"}, state, catalog)
+        assert result.success is False
+
+    def test_empty_state_full_returns_nulls(self) -> None:
+        """Full state on empty pipeline returns null source and empty lists."""
+        state = _empty_state()
+        catalog = _mock_catalog()
+
+        result = execute_tool("get_pipeline_state", {}, state, catalog)
+        assert result.success is True
+        data = result.to_dict()["data"]
+        assert data["source"] is None
+        assert data["nodes"] == []
+        assert data["outputs"] == []
+        assert data["edges"] == []
+
+    def test_no_prior_validation(self) -> None:
+        """get_pipeline_state is a discovery tool — no prior_validation."""
+        state = self._build_populated_state()
+        catalog = _mock_catalog()
+
+        result = execute_tool("get_pipeline_state", {}, state, catalog)
+        assert result.prior_validation is None
+
+    def test_blob_ref_source_path_redacted(self) -> None:
+        """When source has blob_ref, internal storage path is redacted (B4)."""
+        source = SourceSpec(
+            plugin="csv",
+            on_success="t1",
+            options={"path": "/internal/blobs/abc123.csv", "blob_ref": "abc123", "schema": {"mode": "observed"}},
+            on_validation_failure="quarantine",
+        )
+        state = CompositionState(
+            source=source,
+            nodes=(),
+            edges=(),
+            outputs=(),
+            metadata=PipelineMetadata(),
+            version=1,
+        )
+        catalog = _mock_catalog()
+
+        result = execute_tool("get_pipeline_state", {}, state, catalog)
+        assert result.success is True
+        data = result.to_dict()["data"]
+        # path should be removed, blob_ref should remain
+        assert "path" not in data["source"]["options"]
+        assert data["source"]["options"]["blob_ref"] == "abc123"
 
 
 # ---------------------------------------------------------------------------
@@ -1188,7 +1795,7 @@ class TestBlobTools:
         catalog = _mock_catalog()
         result = execute_tool(
             "set_source_from_blob",
-            {"blob_id": self.blob_id, "on_success": "out"},
+            {"blob_id": self.blob_id, "on_success": "out", "options": {"schema": {"mode": "observed"}}},
             state,
             catalog,
             session_engine=self.engine,
@@ -1210,7 +1817,7 @@ class TestBlobTools:
 
         result = execute_tool(
             "set_source_from_blob",
-            {"blob_id": self.blob_id, "on_success": "out"},
+            {"blob_id": self.blob_id, "on_success": "out", "options": {"schema": {"mode": "observed"}, "column": "line"}},
             state,
             catalog,
             session_engine=self.engine,
@@ -1233,7 +1840,7 @@ class TestBlobTools:
 
         result = execute_tool(
             "set_source_from_blob",
-            {"blob_id": self.blob_id, "on_success": "out"},
+            {"blob_id": self.blob_id, "on_success": "out", "options": {"schema": {"mode": "observed"}}},
             state,
             catalog,
             session_engine=self.engine,
@@ -1244,6 +1851,150 @@ class TestBlobTools:
         assert result.updated_state.source is not None
         assert result.updated_state.source.plugin == "json"
         assert result.updated_state.source.options["format"] == "jsonl"
+
+    def test_set_source_from_blob_merges_caller_options(self) -> None:
+        """Caller-provided options are merged with blob-derived options.
+
+        Plugin-specific config like schema and column must flow through,
+        while path and blob_ref remain authoritative from the blob.
+        """
+        from elspeth.web.sessions.models import blobs_table
+
+        state = _empty_state()
+        catalog = _mock_catalog()
+
+        # Update the test blob to text/plain so we get the text plugin
+        with self.engine.begin() as conn:
+            conn.execute(blobs_table.update().where(blobs_table.c.id == self.blob_id).values(mime_type="text/plain"))
+
+        result = execute_tool(
+            "set_source_from_blob",
+            {
+                "blob_id": self.blob_id,
+                "on_success": "out",
+                "options": {
+                    "column": "line",
+                    "schema": {"mode": "observed"},
+                },
+            },
+            state,
+            catalog,
+            session_engine=self.engine,
+            session_id=self.session_id,
+        )
+
+        assert result.success is True
+        assert result.updated_state.source is not None
+        assert result.updated_state.source.plugin == "text"
+        # Caller options merged in
+        assert result.updated_state.source.options["column"] == "line"
+        assert result.updated_state.source.options["schema"] == {"mode": "observed"}
+        # Blob-derived options still present (path is internal, blob_ref is visible)
+        assert "blob_ref" in result.updated_state.source.options
+        assert result.updated_state.source.options["blob_ref"] == self.blob_id
+
+    def test_set_source_from_blob_blob_options_override_caller(self) -> None:
+        """Blob-derived path and blob_ref cannot be overridden by caller.
+
+        This is a security constraint: the blob's storage path is authoritative.
+        Callers cannot inject an arbitrary path via the options parameter.
+        """
+        state = _empty_state()
+        catalog = _mock_catalog()
+
+        result = execute_tool(
+            "set_source_from_blob",
+            {
+                "blob_id": self.blob_id,
+                "on_success": "out",
+                "options": {
+                    "path": "/etc/passwd",  # Attempted path injection
+                    "blob_ref": "malicious-ref",
+                    "schema": {"mode": "observed"},
+                },
+            },
+            state,
+            catalog,
+            session_engine=self.engine,
+            session_id=self.session_id,
+        )
+
+        assert result.success is True
+        assert result.updated_state.source is not None
+        # Blob's path and ref take precedence — caller cannot override
+        assert result.updated_state.source.options["blob_ref"] == self.blob_id
+        assert result.updated_state.source.options["path"] != "/etc/passwd"
+
+    def test_set_source_from_blob_gets_prior_validation(self) -> None:
+        """Blob mutation tools must populate prior_validation for validation delta."""
+        state = _empty_state()
+        catalog = _mock_catalog()
+        result = execute_tool(
+            "set_source_from_blob",
+            {"blob_id": self.blob_id, "on_success": "out", "options": {"schema": {"mode": "observed"}}},
+            state,
+            catalog,
+            session_engine=self.engine,
+            session_id=self.session_id,
+        )
+        assert result.success is True
+        assert result.prior_validation is not None
+        d = result.to_dict()
+        assert "validation_delta" in d
+
+    def test_set_source_from_blob_threaded_prior_used(self) -> None:
+        """Threaded prior_validation is reused by blob mutation tools (identity check).
+
+        execute_tool dispatches blob mutations through a separate branch from
+        standard mutations. Both branches must honour the prior_validation kwarg.
+        """
+        state = _empty_state()
+        catalog = _mock_catalog()
+        threaded = state.validate()
+        result = execute_tool(
+            "set_source_from_blob",
+            {"blob_id": self.blob_id, "on_success": "out", "options": {"schema": {"mode": "observed"}}},
+            state,
+            catalog,
+            session_engine=self.engine,
+            session_id=self.session_id,
+            prior_validation=threaded,
+        )
+        assert result.success is True
+        assert result.prior_validation is threaded
+
+    def test_set_source_from_blob_threaded_prior_produces_correct_delta(self) -> None:
+        """Threaded and fresh prior_validation produce identical deltas for blob tools."""
+        state = _empty_state()
+        catalog = _mock_catalog()
+        blob_args: dict[str, Any] = {
+            "blob_id": self.blob_id,
+            "on_success": "out",
+            "options": {"schema": {"mode": "observed"}},
+        }
+        # Fresh (no threading)
+        result_fresh = execute_tool(
+            "set_source_from_blob",
+            blob_args,
+            state,
+            catalog,
+            session_engine=self.engine,
+            session_id=self.session_id,
+        )
+        # Threaded
+        threaded = state.validate()
+        result_threaded = execute_tool(
+            "set_source_from_blob",
+            blob_args,
+            state,
+            catalog,
+            session_engine=self.engine,
+            session_id=self.session_id,
+            prior_validation=threaded,
+        )
+        delta_fresh = result_fresh.to_dict()["validation_delta"]
+        delta_threaded = result_threaded.to_dict()["validation_delta"]
+        assert delta_fresh == delta_threaded
 
 
 # ---------------------------------------------------------------------------
@@ -1337,7 +2088,7 @@ class TestSecretTools:
             {
                 "plugin": "csv",
                 "on_success": "t1",
-                "options": {"path": "/data/in.csv"},
+                "options": {"path": "/data/in.csv", "schema": {"mode": "observed"}},
                 "on_validation_failure": "quarantine",
             },
             state,
@@ -1391,7 +2142,7 @@ class TestSecretTools:
             {
                 "plugin": "csv",
                 "on_success": "t1",
-                "options": {},
+                "options": {"schema": {"mode": "observed"}},
                 "on_validation_failure": "quarantine",
             },
             state,
@@ -1410,6 +2161,116 @@ class TestSecretTools:
             user_id="test-user",
         )
         assert r2.success is False
+
+    def test_wire_secret_ref_gets_prior_validation(self) -> None:
+        """Secret mutation tools must populate prior_validation for validation delta."""
+        catalog = _mock_catalog()
+        svc = self._mock_secret_service()
+        state = _empty_state()
+        r1 = execute_tool(
+            "set_source",
+            {
+                "plugin": "csv",
+                "on_success": "t1",
+                "options": {"path": "/data/in.csv", "schema": {"mode": "observed"}},
+                "on_validation_failure": "quarantine",
+            },
+            state,
+            catalog,
+        )
+        assert r1.success is True
+        r2 = execute_tool(
+            "wire_secret_ref",
+            {
+                "name": "OPENROUTER_API_KEY",
+                "target": "source",
+                "option_key": "api_key",
+            },
+            r1.updated_state,
+            catalog,
+            secret_service=svc,
+            user_id="test-user",
+        )
+        assert r2.success is True
+        assert r2.prior_validation is not None
+        d = r2.to_dict()
+        assert "validation_delta" in d
+
+    def _build_state_with_source(self, catalog: Any) -> CompositionState:
+        """Helper: build state with a source for secret tool tests."""
+        r = execute_tool(
+            "set_source",
+            {
+                "plugin": "csv",
+                "on_success": "t1",
+                "options": {"path": "/data/in.csv", "schema": {"mode": "observed"}},
+                "on_validation_failure": "quarantine",
+            },
+            _empty_state(),
+            catalog,
+        )
+        assert r.success is True
+        return r.updated_state
+
+    def test_wire_secret_ref_threaded_prior_used(self) -> None:
+        """Threaded prior_validation is reused by secret mutation tools (identity check).
+
+        execute_tool dispatches secret mutations through a separate branch from
+        standard mutations. Both branches must honour the prior_validation kwarg.
+        """
+        catalog = _mock_catalog()
+        svc = self._mock_secret_service()
+        state = self._build_state_with_source(catalog)
+        threaded = state.validate()
+        result = execute_tool(
+            "wire_secret_ref",
+            {
+                "name": "OPENROUTER_API_KEY",
+                "target": "source",
+                "option_key": "api_key",
+            },
+            state,
+            catalog,
+            secret_service=svc,
+            user_id="test-user",
+            prior_validation=threaded,
+        )
+        assert result.success is True
+        assert result.prior_validation is threaded
+
+    def test_wire_secret_ref_threaded_prior_produces_correct_delta(self) -> None:
+        """Threaded and fresh prior_validation produce identical deltas for secret tools."""
+        catalog = _mock_catalog()
+        svc = self._mock_secret_service()
+        state = self._build_state_with_source(catalog)
+        secret_args = {
+            "name": "OPENROUTER_API_KEY",
+            "target": "source",
+            "option_key": "api_key",
+        }
+        # Fresh (no threading)
+        result_fresh = execute_tool(
+            "wire_secret_ref",
+            secret_args,
+            state,
+            catalog,
+            secret_service=svc,
+            user_id="test-user",
+        )
+        # Threaded
+        threaded = state.validate()
+        result_threaded = execute_tool(
+            "wire_secret_ref",
+            secret_args,
+            state,
+            catalog,
+            secret_service=svc,
+            user_id="test-user",
+            prior_validation=threaded,
+        )
+        delta_fresh = result_fresh.to_dict()["validation_delta"]
+        delta_threaded = result_threaded.to_dict()["validation_delta"]
+        assert delta_fresh == delta_threaded
 
 
 # ---------------------------------------------------------------------------
@@ -1456,12 +2317,13 @@ class TestPatchSourceOptions:
     def _state_with_source(self, options: dict) -> CompositionState:
         state = _empty_state()
         catalog = _mock_catalog()
+        merged = {"schema": {"mode": "observed"}, **options}
         r = execute_tool(
             "set_source",
             {
                 "plugin": "csv",
                 "on_success": "t1",
-                "options": options,
+                "options": merged,
                 "on_validation_failure": "quarantine",
             },
             state,
@@ -1595,12 +2457,13 @@ class TestPatchOutputOptions:
     def _state_with_output(self, options: dict) -> CompositionState:
         state = _empty_state()
         catalog = _mock_catalog()
+        merged = {"schema": {"mode": "observed"}, **options}
         r = execute_tool(
             "set_output",
             {
                 "sink_name": "main",
                 "plugin": "csv",
-                "options": options,
+                "options": merged,
                 "on_write_failure": "discard",
             },
             state,
@@ -1648,7 +2511,7 @@ def _valid_pipeline_args() -> dict:
         "source": {
             "plugin": "csv",
             "on_success": "source_out",
-            "options": {"path": "/data/in.csv"},
+            "options": {"path": "/data/in.csv", "schema": {"mode": "observed"}},
             "on_validation_failure": "quarantine",
         },
         "nodes": [
@@ -1673,9 +2536,9 @@ def _valid_pipeline_args() -> dict:
         ],
         "outputs": [
             {
-                "name": "main",
+                "sink_name": "main",
                 "plugin": "csv",
-                "options": {"path": "/data/out.csv"},
+                "options": {"path": "/data/out.csv", "schema": {"mode": "observed"}},
                 "on_write_failure": "discard",
             }
         ],
@@ -1818,6 +2681,45 @@ class TestSetPipeline:
 
 
 # ---------------------------------------------------------------------------
+# Failed mutation version contract test
+# ---------------------------------------------------------------------------
+
+
+class TestFailedMutationVersionStable:
+    """Failed mutations must not advance the version counter."""
+
+    def test_failed_mutation_preserves_version(self) -> None:
+        state = _empty_state()
+        catalog = _mock_catalog()
+        # remove_node with nonexistent ID fails
+        result = execute_tool(
+            "remove_node",
+            {"id": "nonexistent_node"},
+            state,
+            catalog,
+        )
+        assert result.success is False
+        # Version must not advance on failure
+        assert result.updated_state.version == state.version
+
+
+# ---------------------------------------------------------------------------
+# Service-level KeyError handling test
+# ---------------------------------------------------------------------------
+
+
+class TestServiceKeyError:
+    """Tool raises KeyError on missing required argument — execute_tool propagates."""
+
+    def test_missing_required_arg_raises_key_error(self) -> None:
+        state = _empty_state()
+        catalog = _mock_catalog()
+        # set_source requires "plugin" — omitting it should raise KeyError
+        with pytest.raises(KeyError):
+            execute_tool("set_source", {}, state, catalog)
+
+
+# ---------------------------------------------------------------------------
 # clear_source tool tests
 # ---------------------------------------------------------------------------
 
@@ -1829,7 +2731,12 @@ class TestClearSource:
         # First set a source
         r1 = execute_tool(
             "set_source",
-            {"plugin": "csv", "on_success": "t1", "options": {}, "on_validation_failure": "quarantine"},
+            {
+                "plugin": "csv",
+                "on_success": "t1",
+                "options": {"path": "/data/blobs/input.csv", "schema": {"mode": "observed"}},
+                "on_validation_failure": "quarantine",
+            },
             state,
             catalog,
         )
@@ -1934,14 +2841,14 @@ class TestExplainValidationError:
 
 
 class TestListModels:
-    def test_list_models_returns_data(self) -> None:
+    def test_list_models_returns_provider_summary(self) -> None:
         state = _empty_state()
         catalog = _mock_catalog()
         result = execute_tool("list_models", {}, state, catalog)
         assert result.success is True
-        assert "models" in result.data
-        assert "count" in result.data
-        assert isinstance(result.data["models"], (list, tuple))
+        # Without provider filter, returns provider-grouped summary
+        assert "providers" in result.data
+        assert "total_models" in result.data
 
     def test_list_models_with_provider_filter(self) -> None:
         state = _empty_state()
@@ -1955,6 +2862,31 @@ class TestListModels:
         )
         assert result.success is True
         assert isinstance(result.data["models"], (list, tuple))
+
+    def test_list_models_empty_string_provider_filters_unprefixed(self) -> None:
+        """Empty string from provider summary round-trips as a filter for unprefixed models."""
+        state = _empty_state()
+        catalog = _mock_catalog()
+        result = execute_tool(
+            "list_models",
+            {"provider": ""},
+            state,
+            catalog,
+        )
+        assert result.success is True
+        # Should enter the filter path, not the summary path
+        assert "models" in result.data
+        assert "providers" not in result.data
+
+    def test_list_models_summary_uses_empty_string_for_unprefixed(self) -> None:
+        """Provider summary uses empty string (not display-only label) for unprefixed models."""
+        state = _empty_state()
+        catalog = _mock_catalog()
+        result = execute_tool("list_models", {}, state, catalog)
+        assert result.success is True
+        providers = result.data.get("providers", {})
+        # Must not contain the non-round-trippable "(no provider)" label
+        assert "(no provider)" not in providers
 
 
 # ---------------------------------------------------------------------------
@@ -1981,7 +2913,7 @@ class TestPreviewPipeline:
             {
                 "plugin": "csv",
                 "on_success": "t1",
-                "options": {"path": "/data/in.csv", "schema_config": {"fields": []}},
+                "options": {"path": "/data/in.csv", "schema": {"mode": "observed"}},
                 "on_validation_failure": "quarantine",
             },
             state,
@@ -1995,7 +2927,7 @@ class TestPreviewPipeline:
         )
         r3 = execute_tool(
             "set_output",
-            {"sink_name": "main", "plugin": "csv", "options": {}},
+            {"sink_name": "main", "plugin": "csv", "options": {"path": "/data/outputs/output.csv", "schema": {"mode": "observed"}}},
             r2.updated_state,
             catalog,
         )
@@ -2005,3 +2937,293 @@ class TestPreviewPipeline:
         assert result.data["source"]["has_schema_config"] is True
         assert result.data["node_count"] == 1
         assert result.data["output_count"] == 1
+
+
+class TestPrevalidatePluginOptions:
+    """Direct unit tests for _prevalidate_plugin_options.
+
+    Covers the 6 code paths identified in the architecture review:
+    bypass (unknown plugin), success, config error with prefix stripping,
+    injected_fields merge, MappingProxyType deep-thaw, and ValueError surfacing.
+    Also covers the absence-is-evidence contract: missing required fields (like
+    path) must produce validation errors, not be papered over by placeholders.
+    """
+
+    def test_valid_options_returns_none(self) -> None:
+        """Valid config returns None (no pre-validation error)."""
+        result = _prevalidate_plugin_options(
+            "transform",
+            "passthrough",
+            {"schema": {"mode": "observed"}},
+        )
+        assert result is None
+
+    def test_invalid_options_returns_error_string(self) -> None:
+        """Missing required field returns a descriptive error string."""
+        result = _prevalidate_plugin_options(
+            "transform",
+            "passthrough",
+            {},  # missing required 'schema'
+        )
+        assert result is not None
+        assert result.startswith("Invalid options for transform 'passthrough':")
+
+    def test_unknown_plugin_name_returns_none(self) -> None:
+        """Unregistered plugin name skips pre-validation; engine catches it later."""
+        result = _prevalidate_plugin_options(
+            "transform",
+            "nonexistent_plugin_xyz",
+            {},
+        )
+        assert result is None
+
+    def test_injected_fields_satisfy_required_options(self) -> None:
+        """Injected fields are merged in for validation only — not stored in state."""
+        # csv source requires on_validation_failure + path (injected) plus schema (in options)
+        result = _prevalidate_plugin_options(
+            "source",
+            "csv",
+            {"schema": {"mode": "observed"}},
+            injected_fields={"on_validation_failure": "discard", "path": "/tmp/test.csv"},
+        )
+        assert result is None
+
+    def test_frozen_mappingproxy_options_are_thawed(self) -> None:
+        """MappingProxyType options from CompositionState are deep-thawed before Pydantic sees them."""
+        from types import MappingProxyType
+
+        frozen_options = MappingProxyType({"schema": MappingProxyType({"mode": "observed"})})
+        result = _prevalidate_plugin_options(
+            "transform",
+            "passthrough",
+            frozen_options,  # type: ignore[arg-type]
+        )
+        assert result is None
+
+    def test_config_class_prefix_stripped_from_error(self) -> None:
+        """'Invalid configuration for XConfig:' prefix is stripped so the LLM sees only the problem."""
+        result = _prevalidate_plugin_options(
+            "transform",
+            "passthrough",
+            {},  # missing required 'schema'
+        )
+        assert result is not None
+        # Internal class name should not appear — LLM gets the validation detail only
+        assert "Invalid configuration for PassThroughConfig" not in result
+        assert result.startswith("Invalid options for transform 'passthrough':")
+
+    def test_llm_unknown_provider_surfaced_not_swallowed(self) -> None:
+        """ValueError from get_config_model (unknown LLM provider) becomes an error, not silent None."""
+        result = _prevalidate_plugin_options(
+            "transform",
+            "llm",
+            {"provider": "nonexistent_provider", "schema": {"mode": "observed"}},
+        )
+        assert result is not None
+        assert result.startswith("Invalid options for transform 'llm':")
+        assert "nonexistent_provider" in result
+
+    def test_llm_valid_provider_missing_required_fields_surfaces_errors(self) -> None:
+        """Valid provider with missing required fields reports them — not silent None.
+
+        Verifies Phase 2 of LLM dispatch: after provider resolution succeeds,
+        the provider-specific Pydantic model validates required fields. Without
+        this test, a regression that returns the base LLMConfig (which lacks
+        deployment_name/endpoint) instead of AzureOpenAIConfig would be invisible.
+        """
+        result = _prevalidate_plugin_options(
+            "transform",
+            "llm",
+            {"provider": "azure", "schema": {"mode": "observed"}},
+        )
+        assert result is not None
+        assert result.startswith("Invalid options for transform 'llm':")
+        # Azure-specific required fields must be reported
+        assert "deployment_name" in result
+        assert "endpoint" in result
+        assert "api_key" in result
+        assert "template" in result
+
+    def test_llm_openrouter_missing_required_fields_surfaces_errors(self) -> None:
+        """OpenRouter with missing required fields reports provider-specific missing fields."""
+        result = _prevalidate_plugin_options(
+            "transform",
+            "llm",
+            {"provider": "openrouter", "schema": {"mode": "observed"}},
+        )
+        assert result is not None
+        assert result.startswith("Invalid options for transform 'llm':")
+        # OpenRouter-specific required fields — model is required (no deployment_name fallback)
+        assert "model" in result
+        assert "api_key" in result
+        assert "template" in result
+
+    def test_unreachable_plugin_type_raises_assertion(self) -> None:
+        """Passing an invalid plugin_type triggers the unreachable-branch assertion (not silent bypass)."""
+        with pytest.raises(AssertionError, match="unexpected plugin_type"):
+            _prevalidate_plugin_options(
+                "unknown_kind",  # type: ignore[arg-type]
+                "csv",
+                {},
+            )
+
+    def test_absent_source_path_returns_error_not_none(self) -> None:
+        """Absence of path is evidence of a missing required field — not a gap to fill with a placeholder.
+
+        Pre-validates csv source options without path. The function must return a descriptive
+        error, not None. This guards against regression where callers inject a fake placeholder
+        path to suppress the error (violating the data manifesto's 'absence is evidence' rule).
+        """
+        result = _prevalidate_plugin_options(
+            "source",
+            "csv",
+            {"schema": {"mode": "observed"}},
+            injected_fields={"on_validation_failure": "quarantine"},
+            # path deliberately absent — caller did not provide it
+        )
+        assert result is not None
+        assert "path" in result
+
+    def test_absent_sink_path_returns_error_not_none(self) -> None:
+        """Absence of path for a sink plugin is a validation error, not a placeholder opportunity.
+
+        Pre-validates csv sink options without path. The function must return a descriptive
+        error, not None. Regression guard for the symmetric case on sinks.
+        """
+        result = _prevalidate_plugin_options(
+            "sink",
+            "csv",
+            {},
+            # path deliberately absent, no injected_fields
+        )
+        assert result is not None
+        assert "path" in result
+
+    def test_null_source_no_config_model_returns_none(self) -> None:
+        """NullSource is registered as None in the source registry — no config validation needed.
+
+        Exercises the config_cls is None branch (line 1077-1078). This is distinct from
+        UnknownPluginTypeError: 'null' is a known, valid plugin that explicitly has no config
+        class (it is a resume-only source with no options).
+        """
+        result = _prevalidate_plugin_options(
+            "source",
+            "null",
+            {},
+        )
+        assert result is None
+
+    def test_batch_stats_valid_options(self) -> None:
+        """Aggregation plugin (batch_stats) with valid options passes pre-validation.
+
+        batch_stats is an aggregation plugin dispatched as plugin_type="transform".
+        This exercises the aggregation-as-transform path in _prevalidate_plugin_options.
+        """
+        result = _prevalidate_plugin_options(
+            "transform",
+            "batch_stats",
+            {
+                "schema": {"mode": "observed"},
+                "value_field": "amount",
+            },
+        )
+        assert result is None
+
+    def test_batch_stats_missing_value_field(self) -> None:
+        """Aggregation plugin with missing required field returns error."""
+        result = _prevalidate_plugin_options(
+            "transform",
+            "batch_stats",
+            {
+                "schema": {"mode": "observed"},
+                # value_field deliberately absent
+            },
+        )
+        assert result is not None
+        assert result.startswith("Invalid options for transform 'batch_stats':")
+        assert "value_field" in result
+
+    def test_batch_stats_empty_value_field_rejected(self) -> None:
+        """batch_stats rejects empty string value_field via field_validator."""
+        result = _prevalidate_plugin_options(
+            "transform",
+            "batch_stats",
+            {
+                "schema": {"mode": "observed"},
+                "value_field": "",
+            },
+        )
+        assert result is not None
+        assert "value_field" in result
+
+    def test_upsert_node_aggregation_type_validates_as_transform(self) -> None:
+        """upsert_node with node_type='aggregation' routes through _prevalidate_transform.
+
+        Regression guard: the upsert_node guard checks
+        ``node_type in ("transform", "aggregation")``. If someone narrowed this
+        to ``node_type == "transform"``, aggregation nodes would bypass
+        pre-validation. This test exercises the aggregation path end-to-end.
+        """
+        state = _empty_state()
+        catalog = _mock_catalog()
+        # Add batch_stats to the mock catalog's transform list
+        catalog.list_transforms.return_value = [
+            *catalog.list_transforms.return_value,
+            PluginSummary(
+                name="batch_stats",
+                description="Batch statistics aggregation",
+                plugin_type="transform",
+                config_fields=[],
+            ),
+        ]
+        # Missing value_field should be caught by pre-validation
+        result = execute_tool(
+            "upsert_node",
+            {
+                "id": "agg1",
+                "node_type": "aggregation",
+                "plugin": "batch_stats",
+                "input": "source",
+                "on_success": "out",
+                "options": {"schema": {"mode": "observed"}},
+                # value_field deliberately absent
+            },
+            state,
+            catalog,
+        )
+        assert result.success is False
+
+    def test_upsert_node_aggregation_valid_options_succeeds(self) -> None:
+        """upsert_node with node_type='aggregation' and valid options succeeds."""
+        state = _empty_state()
+        catalog = _mock_catalog()
+        catalog.list_transforms.return_value = [
+            *catalog.list_transforms.return_value,
+            PluginSummary(
+                name="batch_stats",
+                description="Batch statistics aggregation",
+                plugin_type="transform",
+                config_fields=[],
+            ),
+        ]
+        result = execute_tool(
+            "upsert_node",
+            {
+                "id": "agg1",
+                "node_type": "aggregation",
+                "plugin": "batch_stats",
+                "input": "source",
+                "on_success": "out",
+                "options": {
+                    "schema": {"mode": "observed"},
+                    "value_field": "amount",
+                },
+            },
+            state,
+            catalog,
+        )
+        assert result.success is True
+        node = result.updated_state.nodes[0]
+        assert node.id == "agg1"
+        assert node.node_type == "aggregation"
+        assert node.plugin == "batch_stats"

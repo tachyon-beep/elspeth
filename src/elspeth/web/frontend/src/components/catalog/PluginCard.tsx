@@ -41,26 +41,14 @@ export function PluginCard({ plugin, schema, schemaError, onExpand }: PluginCard
       tabIndex={0}
       role="button"
       aria-expanded={expanded}
-      style={{
-        padding: "8px 12px",
-        borderBottom: "1px solid var(--color-border)",
-        cursor: "pointer",
-      }}
+      className="plugin-card"
     >
       {/* Header — always visible */}
-      <div style={{ display: "flex", flexDirection: "column", gap: 2 }}>
-        <span style={{ fontWeight: 700, fontSize: 13, color: "var(--color-text)" }}>
+      <div className="plugin-card-header">
+        <span className="plugin-card-name">
           {plugin.name}
         </span>
-        <span
-          style={{
-            fontSize: 11,
-            color: "var(--color-text-muted)",
-            whiteSpace: "nowrap",
-            overflow: "hidden",
-            textOverflow: "ellipsis",
-          }}
-        >
+        <span className="plugin-card-desc">
           {plugin.description}
         </span>
       </div>
@@ -68,46 +56,32 @@ export function PluginCard({ plugin, schema, schemaError, onExpand }: PluginCard
       {/* Expanded content */}
       {expanded && (
         <div
-          style={{ marginTop: 8 }}
+          className="plugin-card-expanded"
           onClick={(e) => e.stopPropagation()}
         >
           {schemaError ? (
-            <span style={{ fontSize: 12, color: "var(--color-error)" }}>
+            <span className="plugin-card-schema-error">
               Failed to load schema. Collapse and expand to retry.
             </span>
           ) : schema === null ? (
-            <span style={{ fontSize: 12, color: "var(--color-text-muted)" }}>
+            <span className="plugin-card-schema-loading">
               Loading...
             </span>
           ) : configSchema?.properties ? (
-            <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+            <div className="plugin-card-fields">
               {Object.entries(configSchema.properties).map(([name, field]) => (
                 <div key={name}>
-                  <span style={{ fontWeight: 600, fontSize: 12 }}>{name}</span>
-                  <span
-                    style={{ color: "var(--color-text-muted)", marginLeft: 8, fontSize: 12 }}
-                  >
+                  <span className="plugin-card-field-name">{name}</span>
+                  <span className="plugin-card-field-type">
                     {(field as { type?: string }).type ?? "any"}
                   </span>
                   {configSchema.required?.includes(name) && (
-                    <span
-                      style={{
-                        color: "var(--color-warning)",
-                        marginLeft: 8,
-                        fontSize: 10,
-                      }}
-                    >
+                    <span className="plugin-card-field-required">
                       required
                     </span>
                   )}
                   {(field as { description?: string }).description && (
-                    <div
-                      style={{
-                        fontSize: 11,
-                        color: "var(--color-text-muted)",
-                        marginTop: 2,
-                      }}
-                    >
+                    <div className="plugin-card-field-desc">
                       {(field as { description?: string }).description}
                     </div>
                   )}
@@ -115,7 +89,7 @@ export function PluginCard({ plugin, schema, schemaError, onExpand }: PluginCard
               ))}
             </div>
           ) : (
-            <span style={{ fontSize: 12, color: "var(--color-text-muted)" }}>
+            <span className="plugin-card-no-fields">
               No configuration fields.
             </span>
           )}

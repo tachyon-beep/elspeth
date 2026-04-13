@@ -111,10 +111,11 @@ class ValueTransform(BaseTransform):
 
     name = "value_transform"
     plugin_version = "1.0.0"
+    config_model = ValueTransformConfig
 
     def __init__(self, config: dict[str, Any]) -> None:
         super().__init__(config)
-        cfg = ValueTransformConfig.from_dict(config)
+        cfg = ValueTransformConfig.from_dict(config, plugin_name=self.name)
         self._operations = cfg.operations
         self._schema_config = cfg.schema_config
 

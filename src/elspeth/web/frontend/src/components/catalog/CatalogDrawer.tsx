@@ -23,6 +23,7 @@ import {
 } from "@/api/client";
 import type { PluginSummary, PluginSchemaInfo } from "@/types/index";
 import { PluginCard } from "./PluginCard";
+import { useFocusTrap } from "@/hooks/useFocusTrap";
 
 type CatalogTab = "sources" | "transforms" | "sinks";
 
@@ -63,6 +64,8 @@ export function CatalogDrawer({ isOpen, onClose }: CatalogDrawerProps) {
   const [isFetching, setIsFetching] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
   const searchInputRef = useRef<HTMLInputElement>(null);
+  const drawerRef = useRef<HTMLDivElement>(null);
+  useFocusTrap(drawerRef, isOpen);
 
   // Fetch all three lists in parallel on first open.
   // On failure: set fetchError, don't retry until drawer is closed and reopened.
@@ -205,61 +208,27 @@ export function CatalogDrawer({ isOpen, onClose }: CatalogDrawerProps) {
       {/* Backdrop */}
       <div
         data-testid="catalog-backdrop"
+        className="catalog-backdrop"
         onClick={onClose}
-        style={{
-          position: "absolute",
-          inset: 0,
-          backgroundColor: "rgba(0,0,0,0.3)",
-          zIndex: 38,
-        }}
       />
 
       {/* Drawer panel */}
-      <div
-        style={{
-          position: "absolute",
-          top: 0,
-          right: 0,
-          bottom: 0,
-          width: "min(320px, calc(100% - 40px))",
-          zIndex: 40,
-          backgroundColor: "var(--color-surface)",
-          borderLeft: "1px solid var(--color-border)",
-          display: "flex",
-          flexDirection: "column",
-        }}
-      >
+      <div ref={drawerRef} className="catalog-drawer">
         {/* Header */}
-        <div
-          style={{
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "space-between",
-            padding: "10px 12px",
-            borderBottom: "1px solid var(--color-border)",
-            flexShrink: 0,
-          }}
-        >
-          <span style={{ fontWeight: 700, fontSize: 14 }}>Plugin Catalog</span>
+        <div className="catalog-header">
+          <span className="catalog-header-title">Plugin Catalog</span>
           <button
             onClick={onClose}
             aria-label="Close plugin catalog"
-            className="btn"
-            style={{ padding: "4px 8px", fontSize: 14, lineHeight: 1, minWidth: 44, minHeight: 44 }}
+            className="btn catalog-close-btn"
           >
             ×
           </button>
         </div>
 
         {/* Search input */}
-        <div
-          style={{
-            padding: "8px 12px",
-            borderBottom: "1px solid var(--color-border)",
-            flexShrink: 0,
-          }}
-        >
-          <div style={{ position: "relative" }}>
+        <div className="catalog-search-wrapper">
+          <div className="catalog-search-container">
             <input
               ref={searchInputRef}
               type="text"
@@ -267,15 +236,7 @@ export function CatalogDrawer({ isOpen, onClose }: CatalogDrawerProps) {
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
               aria-label="Search plugins"
-              style={{
-                width: "100%",
-                padding: "6px 28px 6px 10px",
-                border: "1px solid var(--color-border-strong)",
-                borderRadius: 6,
-                backgroundColor: "var(--color-surface-elevated)",
-                color: "var(--color-text)",
-                fontSize: 13,
-              }}
+              className="catalog-search-input"
             />
             {searchQuery && (
               <button
@@ -284,19 +245,7 @@ export function CatalogDrawer({ isOpen, onClose }: CatalogDrawerProps) {
                   searchInputRef.current?.focus();
                 }}
                 aria-label="Clear search"
-                style={{
-                  position: "absolute",
-                  right: 6,
-                  top: "50%",
-                  transform: "translateY(-50%)",
-                  background: "none",
-                  border: "none",
-                  color: "var(--color-text-muted)",
-                  cursor: "pointer",
-                  fontSize: 14,
-                  padding: 2,
-                  lineHeight: 1,
-                }}
+                className="catalog-search-clear"
               >
                 ×
               </button>
@@ -308,11 +257,7 @@ export function CatalogDrawer({ isOpen, onClose }: CatalogDrawerProps) {
         <div
           role="tablist"
           aria-label="Plugin type tabs"
-          style={{
-            display: "flex",
-            borderBottom: "1px solid var(--color-border)",
-            flexShrink: 0,
-          }}
+          className="catalog-tab-strip"
         >
           {(["sources", "transforms", "sinks"] as CatalogTab[]).map((tab) => {
             const label =
@@ -329,33 +274,12 @@ export function CatalogDrawer({ isOpen, onClose }: CatalogDrawerProps) {
                 role="tab"
                 aria-selected={isActive}
                 onClick={() => setActiveTab(tab)}
-                className={`tab-strip-tab ${isActive ? "tab-strip-tab-active" : ""}`}
-                style={{
-                  flex: 1,
-                  padding: "8px 4px",
-                  fontSize: 12,
-                  fontWeight: isActive ? 600 : 400,
-                  display: "flex",
-                  alignItems: "center",
-                  justifyContent: "center",
-                  gap: 4,
-                }}
+                className={`tab-strip-tab catalog-tab ${isActive ? "tab-strip-tab-active" : ""}`}
               >
                 {label}
                 {sources !== null && (
                   <span
-                    style={{
-                      fontSize: 10,
-                      backgroundColor: isActive
-                        ? "var(--color-accent)"
-                        : "var(--color-surface-elevated)",
-                      color: isActive
-                        ? "var(--color-text-inverse)"
-                        : "var(--color-text-muted)",
-                      padding: "1px 5px",
-                      borderRadius: 8,
-                      fontWeight: 600,
-                    }}
+                    className={`catalog-tab-count ${isActive ? "catalog-tab-count--active" : "catalog-tab-count--inactive"}`}
                   >
                     {count}
                   </span>
@@ -366,36 +290,21 @@ export function CatalogDrawer({ isOpen, onClose }: CatalogDrawerProps) {
         </div>
 
         {/* Scrollable plugin list */}
-        <div style={{ flex: 1, overflowY: "auto" }}>
+        <div className="catalog-list">
           {fetchError ? (
-            <div
-              style={{
-                padding: 16,
-                fontSize: 12,
-                color: "var(--color-error)",
-              }}
-            >
+            <div className="catalog-status-message catalog-status-message--error">
               Failed to load plugin catalog. Close and reopen to retry.
             </div>
           ) : isLoading || isFetching ? (
             <div
-              style={{
-                padding: 16,
-                fontSize: 12,
-                color: "var(--color-text-muted)",
-              }}
+              role="status"
+              aria-live="polite"
+              className="catalog-status-message"
             >
               Loading...
             </div>
           ) : pluginList.length === 0 ? (
-            <div
-              style={{
-                padding: 16,
-                fontSize: 12,
-                color: "var(--color-text-muted)",
-                textAlign: "center",
-              }}
-            >
+            <div className="catalog-status-message catalog-status-message--center">
               {searchQuery.trim()
                 ? `No plugins matching "${searchQuery}"`
                 : "No plugins available."}

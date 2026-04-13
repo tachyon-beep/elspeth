@@ -100,7 +100,13 @@ allowed_dict_patterns:
   - "src/elspeth/plugins/infrastructure/base.py:BaseTransform.__init__:config"
   - "src/elspeth/plugins/infrastructure/base.py:BaseSink.__init__:config"
   - "src/elspeth/plugins/infrastructure/base.py:BaseSource.__init__:config"
-  - "src/elspeth/plugins/infrastructure/config_base.py:PluginConfig.from_dict:config"
+  # config_base.py:PluginConfig.from_dict:config — removed: config param now typed 'object'
+
+  # Base classes - get_config_model dispatchers (config is user YAML, Tier 3 boundary)
+  - "src/elspeth/plugins/infrastructure/base.py:BaseTransform.get_config_model:config"
+  - "src/elspeth/plugins/infrastructure/base.py:BaseSink.get_config_model:config"
+  - "src/elspeth/plugins/infrastructure/base.py:BaseSource.get_config_model:config"
+  - "src/elspeth/plugins/transforms/llm/transform.py:LLMTransform.get_config_model:config"
 
   # Plugin implementations - config input
   - "src/elspeth/plugins/sinks/chroma_sink.py:ChromaSink.__init__:config"
@@ -564,6 +570,15 @@ allowed_dict_patterns:
   - "src/elspeth/web/composer/tools.py:_execute_delete_blob:arguments"
   - "src/elspeth/web/composer/tools.py:_execute_get_blob_content:arguments"
   - "src/elspeth/web/composer/tools.py:_execute_diff_pipeline:args"
+  - "src/elspeth/web/composer/tools.py:_execute_get_pipeline_state:args"
+  # Prevalidation helpers — options dicts are user-authored plugin config (Tier 3)
+  - "src/elspeth/web/composer/tools.py:_compute_validation_delta:return"
+  - "src/elspeth/web/composer/tools.py:_validate_sink_path:options"
+  - "src/elspeth/web/composer/tools.py:_prevalidate_plugin_options:options"
+  - "src/elspeth/web/composer/tools.py:_prevalidate_plugin_options:injected_fields"
+  - "src/elspeth/web/composer/tools.py:_prevalidate_source:options"
+  - "src/elspeth/web/composer/tools.py:_prevalidate_transform:options"
+  - "src/elspeth/web/composer/tools.py:_prevalidate_sink:options"
 
   # WEB COMPOSER — Service, protocol, prompts (LLM message lists)
   # LiteLLM message format is list[dict[str, Any]] by API contract.

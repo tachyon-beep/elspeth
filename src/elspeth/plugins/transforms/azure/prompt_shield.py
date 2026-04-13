@@ -75,9 +75,10 @@ class AzurePromptShield(BaseAzureSafetyTransform):
     """
 
     name = "azure_prompt_shield"
+    config_model = AzurePromptShieldConfig
 
     def __init__(self, config: dict[str, Any]) -> None:
-        cfg = AzurePromptShieldConfig.from_dict(config)
+        cfg = AzurePromptShieldConfig.from_dict(config, plugin_name=self.name)
         super().__init__(config, cfg, "AzurePromptShieldSchema")
         self._analysis_type = cfg.analysis_type
 

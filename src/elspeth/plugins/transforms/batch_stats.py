@@ -10,7 +10,7 @@ will buffer rows and call process() with a list when the trigger fires.
 import math
 from typing import Any
 
-from pydantic import Field, field_validator
+from pydantic import Field, field_validator, model_validator
 
 from elspeth.contracts.contexts import TransformContext
 from elspeth.contracts.schema import SchemaConfig
@@ -42,6 +42,26 @@ class BatchStatsConfig(TransformDataConfig):
         if not v:
             raise ValueError("value_field must not be empty")
         return v
+
+    @model_validator(mode="after")
+    def _reject_group_by_collision(self) -> "BatchStatsConfig":
+        """Reject group_by names that collide with aggregate output keys.
+
+        The set of output keys is deterministic from compute_mean — no runtime
+        state needed. Moved from BatchStats.__init__ so that from_dict()
+        catches it (pre-validation / engine-validation agreement).
+        """
+        if self.group_by is None:
+            return self
+        stat_fields = {"count", "sum", "batch_size", "skipped_non_finite", "skipped_non_finite_indices"}
+        if self.compute_mean:
+            stat_fields.add("mean")
+        if self.group_by in stat_fields:
+            raise ValueError(
+                f"group_by field '{self.group_by}' collides with aggregate output key. "
+                f"Choose a group_by field name that is not one of: {', '.join(sorted(stat_fields))}"
+            )
+        return self
 
 
 class BatchStats(BaseTransform):
@@ -75,11 +95,12 @@ class BatchStats(BaseTransform):
 
     name = "batch_stats"
     plugin_version = "1.0.0"
+    config_model = BatchStatsConfig
     is_batch_aware = True  # CRITICAL: Engine buffers rows for batch processing
 
     def __init__(self, config: dict[str, Any]) -> None:
         super().__init__(config)
-        cfg = BatchStatsConfig.from_dict(config)
+        cfg = BatchStatsConfig.from_dict(config, plugin_name=self.name)
         self._value_field = cfg.value_field
         self._group_by = cfg.group_by
         self._compute_mean = cfg.compute_mean
@@ -92,14 +113,11 @@ class BatchStats(BaseTransform):
         if cfg.compute_mean:
             stat_fields.add("mean")
         # _all_possible_output_keys is stat fields + conditional fields (without group_by)
-        # used for collision detection before group_by is added to output guarantees.
+        # used at runtime for field-set operations.
         self._all_possible_output_keys = frozenset(stat_fields | {"skipped_non_finite", "skipped_non_finite_indices"})
 
-        if cfg.group_by is not None and cfg.group_by in self._all_possible_output_keys:
-            raise ValueError(
-                f"group_by field '{cfg.group_by}' collides with aggregate output key. "
-                f"Choose a group_by field name that is not one of: {', '.join(sorted(self._all_possible_output_keys))}"
-            )
+        # group_by collision is now caught by BatchStatsConfig._reject_group_by_collision
+        # model_validator — from_dict() above already enforced it.
 
         # group_by is guaranteed on every successful result when configured.
         # Added after the collision check so it doesn't self-collide.

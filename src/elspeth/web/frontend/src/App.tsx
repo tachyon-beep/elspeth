@@ -4,12 +4,16 @@ import * as api from "./api/client";
 import { AuthGuard } from "./components/common/AuthGuard";
 import { Layout } from "./components/common/Layout";
 import { CommandPalette } from "./components/common/CommandPalette";
+import { ShortcutsHelp } from "./components/common/ShortcutsHelp";
 import { SessionSidebar } from "./components/sessions/SessionSidebar";
 import { ChatPanel } from "./components/chat/ChatPanel";
 import { InspectorPanel } from "./components/inspector/InspectorPanel";
 import { SecretsPanel } from "./components/settings/SecretsPanel";
 import { initStoreSubscriptions } from "./stores/subscriptions";
 import { useSessionStore } from "./stores/sessionStore";
+import { useExecutionStore } from "./stores/executionStore";
+import { useHashRouter } from "./hooks/useHashRouter";
+import { SWITCH_TAB_EVENT } from "./components/common/CommandPalette";
 import type { SystemStatus } from "./types/index";
 
 // Health check interval in milliseconds (30 seconds)
@@ -32,9 +36,15 @@ function App() {
   const [backendAvailable, setBackendAvailable] = useState<boolean | null>(null);
   const [showSecrets, setShowSecrets] = useState(false);
   const [showPalette, setShowPalette] = useState(false);
+  const [showShortcuts, setShowShortcuts] = useState(false);
   const healthCheckRef = useRef<number | null>(null);
 
+  // Sync URL hash ↔ session/tab state for deep linking & back/forward
+  useHashRouter();
+
   const createSession = useSessionStore((s) => s.createSession);
+  const activeSessionId = useSessionStore((s) => s.activeSessionId);
+  const compositionState = useSessionStore((s) => s.compositionState);
 
   const openSecrets = useCallback(() => setShowSecrets(true), []);
   const closeSecrets = useCallback(() => setShowSecrets(false), []);
@@ -78,10 +88,64 @@ function App() {
         input?.focus();
         return;
       }
+
+      // Alt+1/2/3/4: Switch inspector tabs
+      if (e.altKey && !e.ctrlKey && !e.metaKey) {
+        const tabMap: Record<string, string> = {
+          "1": "spec",
+          "2": "graph",
+          "3": "yaml",
+          "4": "runs",
+        };
+        const tab = tabMap[e.key];
+        if (tab) {
+          e.preventDefault();
+          window.dispatchEvent(
+            new CustomEvent(SWITCH_TAB_EVENT, { detail: tab }),
+          );
+          return;
+        }
+      }
+
+      // Ctrl+Shift+V / Cmd+Shift+V: Validate pipeline
+      if (
+        e.key === "V" &&
+        e.shiftKey &&
+        (e.ctrlKey || e.metaKey) &&
+        activeSessionId &&
+        compositionState
+      ) {
+        e.preventDefault();
+        useExecutionStore.getState().validate(activeSessionId);
+        return;
+      }
+
+      // Ctrl+E / Cmd+E: Execute pipeline
+      if (e.key === "e" && (e.ctrlKey || e.metaKey) && activeSessionId) {
+        e.preventDefault();
+        const execStore = useExecutionStore.getState();
+        const canExec =
+          execStore.validationResult?.is_valid === true &&
+          !execStore.isExecuting &&
+          execStore.progress?.status !== "running";
+        if (canExec) {
+          execStore.execute(activeSessionId);
+        }
+        return;
+      }
+
+      // ?: Show keyboard shortcuts (only when not typing in an input)
+      if (e.key === "?" && !e.ctrlKey && !e.metaKey) {
+        const tag = (e.target as HTMLElement)?.tagName;
+        if (tag === "INPUT" || tag === "TEXTAREA") return;
+        e.preventDefault();
+        setShowShortcuts(true);
+        return;
+      }
     }
     document.addEventListener("keydown", handleKeyDown);
     return () => document.removeEventListener("keydown", handleKeyDown);
-  }, [createSession]);
+  }, [createSession, activeSessionId, compositionState]);
 
   // Initial health check and periodic polling
   useEffect(() => {
@@ -99,30 +163,15 @@ function App() {
 
   return (
     <AuthGuard>
-      <div
-        style={{
-          display: "flex",
-          flexDirection: "column",
-          height: "100%",
-        }}
-      >
+      <div className="app-root">
+        <a href="#chat-main" className="skip-to-content">
+          Skip to main content
+        </a>
         <h1 className="sr-only">ELSPETH Pipeline Composer</h1>
 
         {/* Backend unavailable banner */}
         {backendAvailable === false && (
-          <div
-            role="alert"
-            style={{
-              padding: "10px 14px",
-              backgroundColor: "var(--color-error-bg)",
-              color: "var(--color-error)",
-              borderBottom: "1px solid var(--color-error-border)",
-              fontSize: 13,
-              display: "flex",
-              alignItems: "center",
-              justifyContent: "space-between",
-            }}
-          >
+          <div role="alert" className="alert-banner">
             <span>
               <strong>Backend unavailable</strong> — Cannot connect to the
               ELSPETH server. Check that the backend is running.
@@ -131,17 +180,7 @@ function App() {
               onClick={checkHealth}
               aria-label="Retry connection"
               title="Retry connection"
-              style={{
-                background: "none",
-                border: "1px solid var(--color-error-border)",
-                borderRadius: 4,
-                cursor: "pointer",
-                color: "var(--color-error)",
-                fontSize: 12,
-                padding: "2px 8px",
-                marginLeft: 12,
-                flexShrink: 0,
-              }}
+              className="alert-banner-action"
             >
               Retry
             </button>
@@ -150,19 +189,7 @@ function App() {
 
         {/* Composer unavailable banner (backend is up but LLM not configured) */}
         {backendAvailable && systemStatus && !systemStatus.composer_available && (
-          <div
-            role="alert"
-            style={{
-              padding: "10px 14px",
-              backgroundColor: "var(--color-error-bg)",
-              color: "var(--color-error)",
-              borderBottom: "1px solid var(--color-error-border)",
-              fontSize: 13,
-              display: "flex",
-              alignItems: "center",
-              justifyContent: "space-between",
-            }}
-          >
+          <div role="alert" className="alert-banner">
             <span>
               Service unavailable:{" "}
               {systemStatus.composer_reason ??
@@ -172,23 +199,13 @@ function App() {
               onClick={openSecrets}
               aria-label="Open secrets settings"
               title="Configure API keys"
-              style={{
-                background: "none",
-                border: "1px solid var(--color-error-border)",
-                borderRadius: 4,
-                cursor: "pointer",
-                color: "var(--color-error)",
-                fontSize: 12,
-                padding: "2px 8px",
-                marginLeft: 12,
-                flexShrink: 0,
-              }}
+              className="alert-banner-action"
             >
               ⚙ API Keys
             </button>
           </div>
         )}
-        <div style={{ flex: 1, minHeight: 0, position: "relative" }}>
+        <div className="app-main" role="main">
           <Layout
             sidebar={<SessionSidebar />}
             chat={<ChatPanel onOpenSecrets={openSecrets} />}
@@ -198,6 +215,9 @@ function App() {
 
         {showSecrets && <SecretsPanel onClose={closeSecrets} />}
         <CommandPalette isOpen={showPalette} onClose={closePalette} />
+        {showShortcuts && (
+          <ShortcutsHelp onClose={() => setShowShortcuts(false)} />
+        )}
       </div>
     </AuthGuard>
   );

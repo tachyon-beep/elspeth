@@ -35,7 +35,7 @@ from __future__ import annotations
 
 from abc import ABC, abstractmethod
 from collections.abc import Iterator, Mapping
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, ClassVar
 
 from elspeth.contracts import Determinism, PluginSchema, SourceRow
 from elspeth.contracts.diversion import RowDiversion, SinkWriteResult
@@ -48,6 +48,7 @@ if TYPE_CHECKING:
     from elspeth.contracts.schema import SchemaConfig
     from elspeth.contracts.schema_contract import SchemaContract
     from elspeth.contracts.sink import OutputValidationResult
+    from elspeth.plugins.infrastructure.config_base import PluginConfig
 from elspeth.plugins.infrastructure.results import (
     TransformResult,
 )
@@ -139,6 +140,20 @@ class BaseTransform(ABC):
     # Audit metadata
     determinism: Determinism = Determinism.DETERMINISTIC
     plugin_version: str = "0.0.0"
+
+    # Config model — each subclass sets this to its Pydantic config class.
+    # get_config_model() is the public API; override it for dynamic dispatch
+    # (e.g. provider-based LLM config selection).
+    config_model: ClassVar[type[PluginConfig] | None] = None
+
+    @classmethod
+    def get_config_model(cls, config: dict[str, Any] | None = None) -> type[PluginConfig] | None:
+        """Return the Pydantic config model for this plugin type.
+
+        Override in subclasses that need dynamic dispatch (e.g. LLMTransform
+        selects a provider-specific model based on config["provider"]).
+        """
+        return cls.config_model
 
     # Batch support - override to True for batch-aware transforms
     # When True, engine may pass list[dict] instead of single dict to process()
@@ -407,6 +422,14 @@ class BaseSink(ABC):
     determinism: Determinism = Determinism.IO_WRITE
     plugin_version: str = "0.0.0"
 
+    # Config model — each subclass sets this to its Pydantic config class.
+    config_model: ClassVar[type[PluginConfig] | None] = None
+
+    @classmethod
+    def get_config_model(cls, config: dict[str, Any] | None = None) -> type[PluginConfig] | None:
+        """Return the Pydantic config model for this plugin type."""
+        return cls.config_model
+
     # Default: sinks don't support resume. Override in subclasses that can append.
     supports_resume: bool = False
 
@@ -664,6 +687,18 @@ class BaseSource(ABC):
     # Audit metadata
     determinism: Determinism = Determinism.IO_READ
     plugin_version: str = "0.0.0"
+
+    # Config model — each subclass sets this to its Pydantic config class.
+    # NullSource sets this to None (no config validation needed).
+    config_model: ClassVar[type[PluginConfig] | None] = None
+
+    @classmethod
+    def get_config_model(cls, config: dict[str, Any] | None = None) -> type[PluginConfig] | None:
+        """Return the Pydantic config model for this plugin type.
+
+        Returns None for sources with no config (e.g. NullSource).
+        """
+        return cls.config_model
 
     # Sink name for quarantined rows, or "discard" to drop invalid rows
     # All sources must set this - config-based sources get it from SourceDataConfig

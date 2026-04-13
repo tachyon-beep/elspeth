@@ -9,36 +9,15 @@
 export function ComposingIndicator() {
   return (
     <div
-      className="composing-indicator"
-      style={{
-        display: "flex",
-        justifyContent: "flex-start",
-        padding: "4px 16px",
-      }}
+      className="composing-indicator composing-row"
       aria-live="polite"
       role="status"
     >
-      <div
-        style={{
-          padding: "10px 14px",
-          borderRadius: 12,
-          backgroundColor: "var(--color-bubble-assistant)",
-          border: "1px solid var(--color-bubble-assistant-border)",
-          display: "flex",
-          alignItems: "center",
-          gap: 4,
-        }}
-      >
+      <div className="composing-bubble">
         <span className="composing-dot" aria-hidden="true" />
         <span className="composing-dot" aria-hidden="true" />
         <span className="composing-dot" aria-hidden="true" />
-        <span
-          style={{
-            fontSize: 12,
-            color: "var(--color-text-muted)",
-            marginLeft: 6,
-          }}
-        >
+        <span className="composing-text">
           ELSPETH is composing...
         </span>
       </div>

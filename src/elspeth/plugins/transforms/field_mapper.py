@@ -82,10 +82,11 @@ class FieldMapper(BaseTransform):
 
     name = "field_mapper"
     plugin_version = "1.0.0"
+    config_model = FieldMapperConfig
 
     def __init__(self, config: dict[str, Any]) -> None:
         super().__init__(config)
-        cfg = FieldMapperConfig.from_dict(config)
+        cfg = FieldMapperConfig.from_dict(config, plugin_name=self.name)
         self._mapping: dict[str, str] = cfg.mapping
         self._select_only: bool = cfg.select_only
         self._strict: bool = cfg.strict

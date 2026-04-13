@@ -1072,6 +1072,90 @@ class TestStage1Validation:
         # Should NOT warn about missing path for non-file sinks
         assert not any("no path configured" in w.message for w in result.warnings)
 
+    # --- W7: on_write_failure reference validation ---
+
+    def test_validate_on_write_failure_nonexistent_output_warns(self) -> None:
+        """W7: on_write_failure references output that doesn't exist."""
+        state = self._empty_state()
+        state = state.with_source(self._make_source(on_success="t1"))
+        state = state.with_node(self._make_transform("t1", "t1", "main"))
+        bad_output = OutputSpec(name="main", plugin="csv", options={"path": "/out.csv"}, on_write_failure="nonexistent")
+        state = state.with_output(bad_output)
+        state = state.with_edge(self._make_edge("e1", "source", "t1"))
+        state = state.with_edge(self._make_edge("e2", "t1", "main"))
+        result = state.validate()
+        assert any("not a configured output" in w.message for w in result.warnings)
+
+    def test_validate_on_write_failure_self_reference_warns(self) -> None:
+        """W7: on_write_failure references itself."""
+        state = self._empty_state()
+        state = state.with_source(self._make_source(on_success="t1"))
+        state = state.with_node(self._make_transform("t1", "t1", "main"))
+        self_ref = OutputSpec(name="main", plugin="csv", options={"path": "/out.csv"}, on_write_failure="main")
+        state = state.with_output(self_ref)
+        state = state.with_edge(self._make_edge("e1", "source", "t1"))
+        state = state.with_edge(self._make_edge("e2", "t1", "main"))
+        result = state.validate()
+        assert any("references itself" in w.message for w in result.warnings)
+
+    def test_validate_on_write_failure_ineligible_plugin_warns(self) -> None:
+        """W7: failsink target uses non-file plugin (e.g. database)."""
+        state = self._empty_state()
+        state = state.with_source(self._make_source(on_success="t1"))
+        state = state.with_node(self._make_transform("t1", "t1", "main"))
+        main_out = OutputSpec(name="main", plugin="csv", options={"path": "/out.csv"}, on_write_failure="backup")
+        backup_out = OutputSpec(
+            name="backup", plugin="database", options={"url": "sqlite:///:memory:", "table": "t"}, on_write_failure="discard"
+        )
+        state = state.with_output(main_out)
+        state = state.with_output(backup_out)
+        state = state.with_edge(self._make_edge("e1", "source", "t1"))
+        state = state.with_edge(self._make_edge("e2", "t1", "main"))
+        result = state.validate()
+        assert any("must use csv, json, or xml" in w.message for w in result.warnings)
+
+    def test_validate_on_write_failure_chain_warns(self) -> None:
+        """W7: failsink target has its own non-discard on_write_failure (chain)."""
+        state = self._empty_state()
+        state = state.with_source(self._make_source(on_success="t1"))
+        state = state.with_node(self._make_transform("t1", "t1", "main"))
+        main_out = OutputSpec(name="main", plugin="csv", options={"path": "/out.csv"}, on_write_failure="errors")
+        errors_out = OutputSpec(name="errors", plugin="csv", options={"path": "/errors.csv"}, on_write_failure="overflow")
+        overflow_out = OutputSpec(name="overflow", plugin="csv", options={"path": "/overflow.csv"}, on_write_failure="discard")
+        state = state.with_output(main_out)
+        state = state.with_output(errors_out)
+        state = state.with_output(overflow_out)
+        state = state.with_edge(self._make_edge("e1", "source", "t1"))
+        state = state.with_edge(self._make_edge("e2", "t1", "main"))
+        result = state.validate()
+        assert any("no chains" in w.message for w in result.warnings)
+
+    def test_validate_on_write_failure_valid_no_warning(self) -> None:
+        """W7: Valid failsink reference produces no warning."""
+        state = self._empty_state()
+        state = state.with_source(self._make_source(on_success="t1"))
+        state = state.with_node(self._make_transform("t1", "t1", "main"))
+        main_out = OutputSpec(name="main", plugin="csv", options={"path": "/out.csv"}, on_write_failure="errors")
+        errors_out = OutputSpec(name="errors", plugin="csv", options={"path": "/errors.csv"}, on_write_failure="discard")
+        state = state.with_output(main_out)
+        state = state.with_output(errors_out)
+        state = state.with_edge(self._make_edge("e1", "source", "t1"))
+        state = state.with_edge(self._make_edge("e2", "t1", "main"))
+        result = state.validate()
+        # No on_write_failure warnings
+        assert not any("on_write_failure" in w.message for w in result.warnings)
+
+    def test_validate_on_write_failure_discard_no_warning(self) -> None:
+        """W7: on_write_failure='discard' is always valid, no warning."""
+        state = self._empty_state()
+        state = state.with_source(self._make_source(on_success="t1"))
+        state = state.with_node(self._make_transform("t1", "t1", "main"))
+        state = state.with_output(OutputSpec(name="main", plugin="csv", options={"path": "/out.csv"}, on_write_failure="discard"))
+        state = state.with_edge(self._make_edge("e1", "source", "t1"))
+        state = state.with_edge(self._make_edge("e2", "t1", "main"))
+        result = state.validate()
+        assert not any("on_write_failure" in w.message for w in result.warnings)
+
     # --- Suggestion rules (S1-S3) ---
 
     def test_validate_no_error_routing_suggests(self) -> None:

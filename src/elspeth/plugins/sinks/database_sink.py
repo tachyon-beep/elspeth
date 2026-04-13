@@ -12,7 +12,7 @@ import os
 import time
 from collections.abc import Mapping
 from types import MappingProxyType
-from typing import TYPE_CHECKING, Any, Literal
+from typing import TYPE_CHECKING, Any, ClassVar, Literal
 
 from pydantic import field_validator
 from sqlalchemy import Boolean, Column, Float, Integer, MetaData, Table, Text, create_engine, insert
@@ -52,6 +52,8 @@ class DatabaseSinkConfig(DataPluginConfig):
 
     Inherits from DataPluginConfig, which requires schema configuration.
     """
+
+    _plugin_component_type: ClassVar[str | None] = "sink"
 
     url: str
     table: str
@@ -95,6 +97,7 @@ class DatabaseSink(BaseSink):
 
     name = "database"
     plugin_version = "1.0.0"
+    config_model = DatabaseSinkConfig
     # determinism inherited from BaseSink (IO_WRITE)
 
     # Resume capability: Database can append to existing tables
@@ -110,7 +113,7 @@ class DatabaseSink(BaseSink):
 
     def __init__(self, config: dict[str, Any]) -> None:
         super().__init__(config)
-        cfg = DatabaseSinkConfig.from_dict(config)
+        cfg = DatabaseSinkConfig.from_dict(config, plugin_name=self.name)
 
         # Honor ELSPETH_ALLOW_RAW_SECRETS for dev environments (consistent with config.py)
         allow_raw = os.environ.get("ELSPETH_ALLOW_RAW_SECRETS", "").lower() == "true"

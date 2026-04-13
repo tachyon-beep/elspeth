@@ -12,7 +12,10 @@
 // ============================================================================
 
 import { useState, useCallback, useEffect, useRef } from "react";
+import { ErrorBoundary } from "@/components/common/ErrorBoundary";
 import { ConfirmDialog } from "@/components/common/ConfirmDialog";
+import { SWITCH_TAB_EVENT } from "@/components/common/CommandPalette";
+import { TAB_CHANGED_EVENT } from "@/hooks/useHashRouter";
 import { useSessionStore } from "@/stores/sessionStore";
 import { useExecutionStore } from "@/stores/executionStore";
 import { SpecView } from "./SpecView";
@@ -22,6 +25,7 @@ import { RunsView } from "./RunsView";
 import { ValidationResultBanner } from "@/components/execution/ValidationResult";
 import { CatalogDrawer } from "@/components/catalog/CatalogDrawer";
 import type { CompositionStateVersion } from "@/types/index";
+import { relativeTime } from "@/utils/time";
 
 type TabId = "spec" | "graph" | "yaml" | "runs";
 
@@ -31,19 +35,6 @@ const TABS: { id: TabId; label: string }[] = [
   { id: "yaml", label: "YAML" },
   { id: "runs", label: "Runs" },
 ];
-
-/** Format a timestamp as a relative string (e.g. "2 hours ago"). */
-function relativeTime(iso: string): string {
-  const diff = Date.now() - new Date(iso).getTime();
-  const seconds = Math.floor(diff / 1000);
-  if (seconds < 60) return "just now";
-  const minutes = Math.floor(seconds / 60);
-  if (minutes < 60) return `${minutes}m ago`;
-  const hours = Math.floor(minutes / 60);
-  if (hours < 24) return `${hours}h ago`;
-  const days = Math.floor(hours / 24);
-  return `${days}d ago`;
-}
 
 // ---------------------------------------------------------------------------
 // VersionSelector — custom dropdown with inline revert
@@ -187,7 +178,7 @@ function VersionSelector({
   }
 
   return (
-    <div ref={containerRef} style={{ position: "relative" }}>
+    <div ref={containerRef} className="version-selector">
       <button
         ref={triggerRef}
         aria-haspopup="listbox"
@@ -195,38 +186,13 @@ function VersionSelector({
         aria-label={`Version ${currentVersion}`}
         onClick={toggle}
         onKeyDown={handleTriggerKeyDown}
-        className="btn"
-        style={{
-          padding: "4px 10px",
-          fontSize: 12,
-          fontWeight: 600,
-          lineHeight: "20px",
-          borderRadius: 12,
-          display: "inline-flex",
-          alignItems: "center",
-          gap: 4,
-        }}
+        className="btn version-selector-trigger"
       >
         v{currentVersion} ▾
       </button>
 
       {isOpen && (
-        <div
-          style={{
-            position: "absolute",
-            top: "100%",
-            left: 0,
-            marginTop: 4,
-            minWidth: 260,
-            maxHeight: 240,
-            overflowY: "auto",
-            backgroundColor: "var(--color-surface-elevated)",
-            border: "1px solid var(--color-border-strong)",
-            borderRadius: 6,
-            boxShadow: "0 4px 12px rgba(0,0,0,0.15)",
-            zIndex: 100,
-          }}
-        >
+        <div className="version-selector-dropdown">
           <ul
             ref={listRef}
             role="listbox"
@@ -234,20 +200,10 @@ function VersionSelector({
             aria-activedescendant={focusedIndex >= 0 && sortedVersions[focusedIndex] ? `version-option-${sortedVersions[focusedIndex].version}` : undefined}
             onKeyDown={handleListKeyDown}
             tabIndex={0}
-            style={{
-              listStyle: "none",
-              margin: 0,
-              padding: 4,
-            }}
+            className="version-selector-list"
           >
             {isLoadingVersions && sortedVersions.length === 0 && (
-              <li
-                style={{
-                  padding: "8px 10px",
-                  fontSize: 12,
-                  color: "var(--color-text-muted)",
-                }}
-              >
+              <li className="version-selector-loading">
                 Loading versions...
               </li>
             )}
@@ -261,52 +217,29 @@ function VersionSelector({
                   role="option"
                   aria-selected={isCurrent}
                   aria-label={`Version ${v.version}${isCurrent ? " (current)" : ""}`}
-                  style={{
-                    display: "flex",
-                    alignItems: "center",
-                    justifyContent: "space-between",
-                    padding: "6px 10px",
-                    fontSize: 12,
-                    borderRadius: 4,
-                    backgroundColor: isFocused
-                      ? "var(--color-surface-hover)"
-                      : "transparent",
-                    cursor: isCurrent ? "default" : "pointer",
-                  }}
+                  className={`version-selector-item${isFocused ? " version-selector-item--focused" : ""}${isCurrent ? " version-selector-item--current" : ""}`}
                   onMouseEnter={() => setFocusedIndex(i)}
                 >
-                  <span style={{ display: "flex", gap: 8, alignItems: "center" }}>
-                    <span style={{ fontWeight: 600 }}>
+                  <span className="version-selector-item-info">
+                    <span className="version-selector-item-label">
                       v{v.version}
                       {isCurrent && (
-                        <span
-                          style={{
-                            fontWeight: 400,
-                            color: "var(--color-text-muted)",
-                            marginLeft: 4,
-                          }}
-                        >
+                        <span className="version-selector-item-tag">
                           (current)
                         </span>
                       )}
                     </span>
-                    <span style={{ color: "var(--color-text-muted)" }}>
+                    <span className="version-selector-item-meta">
                       {v.node_count} nodes
                     </span>
-                    <span style={{ color: "var(--color-text-muted)" }}>
+                    <span className="version-selector-item-meta">
                       {relativeTime(v.created_at)}
                     </span>
                   </span>
                   {!isCurrent && (
                     <button
                       aria-label={`Revert to version ${v.version}`}
-                      className="btn"
-                      style={{
-                        padding: "2px 8px",
-                        fontSize: 11,
-                        marginLeft: 8,
-                        flexShrink: 0,
-                      }}
+                      className="btn version-selector-revert-btn"
                       onClick={(e) => {
                         e.stopPropagation();
                         handleRevert(v);
@@ -342,6 +275,25 @@ function VersionSelector({
 export function InspectorPanel() {
   const [activeTab, setActiveTab] = useState<TabId>("spec");
   const [catalogOpen, setCatalogOpen] = useState(false);
+
+  // Listen for tab switch requests from the command palette or hash router.
+  useEffect(() => {
+    function handleSwitchTab(e: Event) {
+      const tab = (e as CustomEvent<string>).detail;
+      if (tab === "spec" || tab === "graph" || tab === "yaml" || tab === "runs") {
+        setActiveTab(tab);
+      }
+    }
+    window.addEventListener(SWITCH_TAB_EVENT, handleSwitchTab);
+    return () => window.removeEventListener(SWITCH_TAB_EVENT, handleSwitchTab);
+  }, []);
+
+  // Notify hash router when tab changes (for URL sync).
+  useEffect(() => {
+    window.dispatchEvent(
+      new CustomEvent(TAB_CHANGED_EVENT, { detail: activeTab }),
+    );
+  }, [activeTab]);
 
   const activeSessionId = useSessionStore((s) => s.activeSessionId);
   const compositionState = useSessionStore((s) => s.compositionState);
@@ -469,37 +421,15 @@ export function InspectorPanel() {
   }
 
   return (
-    <div
-      style={{
-        display: "flex",
-        flexDirection: "column",
-        height: "100%",
-        overflow: "hidden",
-        backgroundColor: "var(--color-surface-inspector)",
-      }}
-    >
+    <div className="inspector-content">
       {/* Header — z-index above tab content but below catalog backdrop.
           When the catalog drawer is open, backdrop covers the header;
           close via backdrop click, Escape, or the drawer's X button. */}
-      <div
-        style={{
-          borderBottom: "1px solid var(--color-border)",
-          padding: "8px 12px 0 12px",
-          position: "relative",
-          zIndex: 35,
-        }}
-      >
+      <div className="inspector-header">
         {/* Row 1: Version selector + validation dot | Validate + Execute */}
-        <div
-          style={{
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "space-between",
-            marginBottom: 6,
-          }}
-        >
+        <div className="inspector-header-row">
           {/* Left: VersionSelector + ValidationDot */}
-          <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+          <div className="inspector-header-left">
             {compositionState && (
               <VersionSelector
                 key={activeSessionId}
@@ -548,17 +478,8 @@ export function InspectorPanel() {
                 <span
                   aria-label={labels[status]}
                   title={labels[status]}
-                  style={{
-                    display: "inline-flex",
-                    alignItems: "center",
-                    justifyContent: "center",
-                    width: 16,
-                    height: 16,
-                    fontSize: 12,
-                    lineHeight: 1,
-                    flexShrink: 0,
-                    color: colors[status],
-                  }}
+                  className="inspector-validation-dot"
+                  style={{ color: colors[status] }}
                 >
                   {symbols[status]}
                 </span>
@@ -567,12 +488,11 @@ export function InspectorPanel() {
           </div>
 
           {/* Right: Catalog + Validate + Execute */}
-          <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
+          <div className="inspector-header-right">
             {/* Catalog toggle */}
             <button
               onClick={() => setCatalogOpen(!catalogOpen)}
-              className="btn"
-              style={{ padding: "6px 10px", fontSize: 12 }}
+              className="btn inspector-action-btn"
             >
               Catalog
             </button>
@@ -582,16 +502,7 @@ export function InspectorPanel() {
               onClick={handleValidate}
               disabled={!canValidate}
               aria-label={isValidating ? "Validating" : "Validate pipeline"}
-              className="btn"
-              style={{
-                padding: "6px 10px",
-                fontSize: 12,
-                minWidth: 64,
-                minHeight: 36,
-                display: "flex",
-                alignItems: "center",
-                justifyContent: "center",
-              }}
+              className="btn inspector-action-btn"
             >
               {isValidating ? (
                 <span
@@ -609,16 +520,7 @@ export function InspectorPanel() {
               onClick={handleExecute}
               disabled={isExecuting || !canExecute}
               aria-label={isExecuting ? "Starting pipeline" : "Execute pipeline"}
-              className={`btn ${canExecute && !isExecuting ? "btn-primary" : ""}`}
-              style={{
-                padding: "6px 10px",
-                fontSize: 12,
-                minWidth: 64,
-                minHeight: 36,
-                display: "flex",
-                alignItems: "center",
-                justifyContent: "center",
-              }}
+              className={`btn inspector-action-btn ${canExecute && !isExecuting ? "btn-primary" : ""}`}
             >
               {isExecuting ? (
                 <>
@@ -641,12 +543,6 @@ export function InspectorPanel() {
           role="tablist"
           aria-label="Inspector tabs"
           className="tab-strip"
-          style={{
-            display: "flex",
-            gap: 4,
-            borderBottom: "1px solid var(--color-border)",
-            paddingBottom: 6,
-          }}
         >
           {TABS.map((tab, i) => (
             <button
@@ -659,11 +555,6 @@ export function InspectorPanel() {
               onClick={() => setActiveTab(tab.id)}
               onKeyDown={(e) => handleTabKeyDown(e, i)}
               className={`tab-strip-tab ${activeTab === tab.id ? "tab-strip-tab-active" : ""}`}
-              style={{
-                padding: "6px 12px",
-                fontSize: 13,
-                fontWeight: activeTab === tab.id ? 600 : 400,
-              }}
             >
               {tab.label}
             </button>
@@ -675,11 +566,7 @@ export function InspectorPanel() {
       {error && (
         <div
           role="alert"
-          className="validation-banner validation-banner-fail"
-          style={{
-            padding: "6px 12px",
-            fontSize: 12,
-          }}
+          className="validation-banner validation-banner-fail inspector-error-banner"
         >
           {error}
         </div>
@@ -700,12 +587,28 @@ export function InspectorPanel() {
         aria-live="polite"
         id={`inspector-tabpanel-${activeTab}`}
         aria-labelledby={`inspector-tab-${activeTab}`}
-        style={{ flex: 1, overflow: "auto" }}
+        className="inspector-tab-content"
       >
-        {activeTab === "spec" && <SpecView />}
-        {activeTab === "graph" && <GraphView />}
-        {activeTab === "yaml" && <YamlView />}
-        {activeTab === "runs" && <RunsView />}
+        {activeTab === "spec" && (
+          <ErrorBoundary label="Spec view">
+            <SpecView />
+          </ErrorBoundary>
+        )}
+        {activeTab === "graph" && (
+          <ErrorBoundary label="Graph view">
+            <GraphView />
+          </ErrorBoundary>
+        )}
+        {activeTab === "yaml" && (
+          <ErrorBoundary label="YAML view">
+            <YamlView />
+          </ErrorBoundary>
+        )}
+        {activeTab === "runs" && (
+          <ErrorBoundary label="Runs view">
+            <RunsView />
+          </ErrorBoundary>
+        )}
       </div>
 
       <CatalogDrawer isOpen={catalogOpen} onClose={() => setCatalogOpen(false)} />

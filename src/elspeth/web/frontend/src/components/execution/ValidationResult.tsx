@@ -48,28 +48,18 @@ export function ValidationResultBanner({
     return (
       <div
         role="status"
-        className="validation-banner validation-banner-pass"
-        style={{
-          display: "flex",
-          flexDirection: "column",
-          gap: 4,
-        }}
+        className="validation-banner validation-banner-pass validation-banner-content"
       >
-        <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+        <div className="validation-banner-header">
           <span aria-hidden="true">{"\u2713"}</span>
-          <span style={{ fontWeight: 600 }}>{result.summary ?? "Validation passed"}</span>
+          <span className="validation-banner-summary">
+            {result.summary ?? "Validation passed"}
+          </span>
         </div>
         {result.checks.length > 0 && (
-          <ul
-            style={{
-              margin: 0,
-              padding: "0 0 0 22px",
-              fontSize: 12,
-              color: "var(--color-success)",
-            }}
-          >
+          <ul className="validation-banner-checks">
             {result.checks.map((check, i) => (
-              <li key={i} style={{ marginBottom: 2 }}>
+              <li key={i} className="validation-banner-check-item">
                 <span aria-hidden="true">
                   {check.passed ? "\u2713" : "\u2717"}
                 </span>{" "}
@@ -79,20 +69,12 @@ export function ValidationResultBanner({
           </ul>
         )}
         {result.warnings && result.warnings.length > 0 && (
-          <div style={{ marginTop: 6 }}>
-            <div style={{ fontWeight: 600, fontSize: 12, color: "var(--color-warning)" }}>
+          <div className="validation-banner-warnings-section">
+            <div className="validation-banner-warnings-title">
               Warnings ({result.warnings.length}):
             </div>
-            <ul
-              style={{
-                margin: "2px 0 0",
-                padding: "0 0 0 22px",
-                fontSize: 12,
-                color: "var(--color-warning)",
-              }}
-            >
+            <ul className="validation-banner-warnings-list">
               {result.warnings.map((warn: ValidationWarning, i: number) => {
-                // Only make clickable if component is an actual node (not source/sink)
                 const isNode = nodes?.some((n) => n.id === warn.component_id);
                 const isClickable = warn.component_id && onComponentClick && isNode;
                 const content = (
@@ -103,13 +85,7 @@ export function ValidationResultBanner({
                     </strong>{" "}
                     {warn.message}
                     {warn.suggestion && (
-                      <div
-                        style={{
-                          color: "var(--color-text-muted)",
-                          fontSize: 12,
-                          marginTop: 2,
-                        }}
-                      >
+                      <div className="validation-banner-suggestion">
                         Suggestion: {warn.suggestion}
                       </div>
                     )}
@@ -117,23 +93,11 @@ export function ValidationResultBanner({
                 );
 
                 return (
-                  <li key={i} style={{ marginBottom: 2 }}>
+                  <li key={i} className="validation-banner-warn-item">
                     {isClickable ? (
                       <button
                         onClick={() => onComponentClick(warn.component_id!)}
-                        style={{
-                          background: "none",
-                          border: "none",
-                          padding: 0,
-                          margin: 0,
-                          font: "inherit",
-                          color: "inherit",
-                          textAlign: "left",
-                          cursor: "pointer",
-                          textDecoration: "underline",
-                          textDecorationColor: "var(--color-warning-border)",
-                          textUnderlineOffset: 2,
-                        }}
+                        className="validation-banner-component-btn validation-banner-component-btn--warning"
                         title={`Click to select ${warn.component_id} in the pipeline view`}
                       >
                         {content}
@@ -156,22 +120,11 @@ export function ValidationResultBanner({
       role="alert"
       className="validation-banner validation-banner-fail"
     >
-      <div
-        style={{
-          padding: "8px 12px",
-          fontWeight: 600,
-        }}
-      >
+      <div className="validation-banner-fail-title">
         Validation failed
       </div>
-      <ul
-        style={{
-          margin: 0,
-          padding: "0 12px 8px 28px",
-        }}
-      >
+      <ul className="validation-banner-fail-list">
         {result.errors.map((err, i) => {
-          // Only make clickable if component is an actual node (not source/sink)
           const isNode = nodes?.some((n) => n.id === err.component_id);
           const isClickable = err.component_id && onComponentClick && isNode;
           const content = (
@@ -182,13 +135,7 @@ export function ValidationResultBanner({
               </strong>{" "}
               {err.message}
               {err.suggestion && (
-                <div
-                  style={{
-                    color: "var(--color-text-muted)",
-                    fontSize: 12,
-                    marginTop: 2,
-                  }}
-                >
+                <div className="validation-banner-suggestion">
                   Suggestion: {err.suggestion}
                 </div>
               )}
@@ -196,23 +143,11 @@ export function ValidationResultBanner({
           );
 
           return (
-            <li key={i} style={{ marginBottom: 4 }}>
+            <li key={i} className="validation-banner-error-item">
               {isClickable ? (
                 <button
                   onClick={() => onComponentClick(err.component_id!)}
-                  style={{
-                    background: "none",
-                    border: "none",
-                    padding: 0,
-                    margin: 0,
-                    font: "inherit",
-                    color: "inherit",
-                    textAlign: "left",
-                    cursor: "pointer",
-                    textDecoration: "underline",
-                    textDecorationColor: "var(--color-error-border)",
-                    textUnderlineOffset: 2,
-                  }}
+                  className="validation-banner-component-btn validation-banner-component-btn--error"
                   title={`Click to select ${err.component_id} in the pipeline view`}
                 >
                   {content}

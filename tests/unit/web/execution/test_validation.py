@@ -18,7 +18,13 @@ from pydantic import ValidationError as PydanticValidationError
 
 from elspeth.contracts.secrets import ResolvedSecret
 from elspeth.core.dag.models import GraphValidationError
-from elspeth.web.execution.validation import _collect_secret_refs, validate_pipeline
+from elspeth.plugins.infrastructure.config_base import PluginConfigError
+from elspeth.plugins.infrastructure.manager import PluginNotFoundError
+from elspeth.web.execution.validation import (
+    _collect_secret_refs,
+    _infer_component_type_from_plugin_error,
+    validate_pipeline,
+)
 
 
 class FakeSourceSpec:
@@ -70,6 +76,11 @@ class FakeWebSettings:
         self.data_dir = data_dir
 
 
+def _check(result, name: str):
+    """Look up a validation check by name, not position."""
+    return next(c for c in result.checks if c.name == name)
+
+
 class TestValidatePipelinePathAllowlist:
     """C3/S2: Source path allowlist check — defense-in-depth."""
 
@@ -84,7 +95,7 @@ class TestValidatePipelinePathAllowlist:
             mock_load.side_effect = FileNotFoundError("no temp file")
             result = validate_pipeline(state, settings, mock_yaml_gen)
         # B11: path check is always recorded — verify it passed
-        path_check = next(c for c in result.checks if c.name == "source_path_allowlist")
+        path_check = next(c for c in result.checks if c.name == "path_allowlist")
         assert path_check.passed is True
 
     def test_path_outside_blobs_blocked(self) -> None:
@@ -95,8 +106,7 @@ class TestValidatePipelinePathAllowlist:
         mock_yaml_gen = MagicMock()
         result = validate_pipeline(state, settings, mock_yaml_gen)
         assert result.is_valid is False
-        assert result.checks[0].name == "source_path_allowlist"
-        assert result.checks[0].passed is False
+        assert _check(result, "path_allowlist").passed is False
         assert any("Path traversal" in e.message for e in result.errors)
 
     def test_path_traversal_via_dotdot_blocked(self) -> None:
@@ -118,7 +128,7 @@ class TestValidatePipelinePathAllowlist:
             mock_load.side_effect = FileNotFoundError("no temp file")
             result = validate_pipeline(state, settings, mock_yaml_gen)
         # B11: check IS recorded with passed=True and "skipped" detail
-        path_check = next(c for c in result.checks if c.name == "source_path_allowlist")
+        path_check = next(c for c in result.checks if c.name == "path_allowlist")
         assert path_check.passed is True
         assert "skipped" in path_check.detail.lower()
 
@@ -159,7 +169,7 @@ class TestValidatePipelineSinkPathAllowlist:
         with patch("elspeth.web.execution.validation.load_settings") as mock_load:
             mock_load.side_effect = FileNotFoundError("no temp file")
             result = validate_pipeline(state, settings, mock_yaml_gen)
-        path_check = next(c for c in result.checks if c.name == "source_path_allowlist")
+        path_check = next(c for c in result.checks if c.name == "path_allowlist")
         assert path_check.passed is True
         assert "All paths within allowed directories" in path_check.detail
 
@@ -174,7 +184,7 @@ class TestValidatePipelineSinkPathAllowlist:
         with patch("elspeth.web.execution.validation.load_settings") as mock_load:
             mock_load.side_effect = FileNotFoundError("no temp file")
             result = validate_pipeline(state, settings, mock_yaml_gen)
-        path_check = next(c for c in result.checks if c.name == "source_path_allowlist")
+        path_check = next(c for c in result.checks if c.name == "path_allowlist")
         assert path_check.passed is True
 
     def test_sink_without_path_passes(self) -> None:
@@ -189,7 +199,7 @@ class TestValidatePipelineSinkPathAllowlist:
         with patch("elspeth.web.execution.validation.load_settings") as mock_load:
             mock_load.side_effect = FileNotFoundError("no temp file")
             result = validate_pipeline(state, settings, mock_yaml_gen)
-        path_check = next(c for c in result.checks if c.name == "source_path_allowlist")
+        path_check = next(c for c in result.checks if c.name == "path_allowlist")
         assert path_check.passed is True
 
 
@@ -208,7 +218,7 @@ class TestValidatePipelineRelativePaths:
         with patch("elspeth.web.execution.validation.load_settings") as mock_load:
             mock_load.side_effect = FileNotFoundError("no temp file")
             result = validate_pipeline(state, settings, mock_yaml_gen)
-        path_check = next(c for c in result.checks if c.name == "source_path_allowlist")
+        path_check = next(c for c in result.checks if c.name == "path_allowlist")
         assert path_check.passed is True
 
     def test_relative_source_path_resolves_against_data_dir(self) -> None:
@@ -222,7 +232,7 @@ class TestValidatePipelineRelativePaths:
         with patch("elspeth.web.execution.validation.load_settings") as mock_load:
             mock_load.side_effect = FileNotFoundError("no temp file")
             result = validate_pipeline(state, settings, mock_yaml_gen)
-        path_check = next(c for c in result.checks if c.name == "source_path_allowlist")
+        path_check = next(c for c in result.checks if c.name == "path_allowlist")
         assert path_check.passed is True
 
     def test_relative_traversal_still_blocked(self) -> None:
@@ -249,7 +259,7 @@ class TestValidatePipelineRelativePaths:
         with patch("elspeth.web.execution.validation.load_settings") as mock_load:
             mock_load.side_effect = FileNotFoundError("no temp file")
             result = validate_pipeline(state, settings, mock_yaml_gen)
-        path_check = next(c for c in result.checks if c.name == "source_path_allowlist")
+        path_check = next(c for c in result.checks if c.name == "path_allowlist")
         assert path_check.passed is True
 
 
@@ -286,11 +296,9 @@ class TestValidatePipelineSuccess:
         assert result.is_valid is True
         assert len(result.checks) == 6
         assert all(c.passed for c in result.checks)
-        # B11 fix: source_path_allowlist check is always recorded
-        assert result.checks[0].name == "source_path_allowlist"
-        assert result.checks[0].passed is True
-        assert result.checks[1].name == "secret_refs"
-        assert result.checks[1].passed is True
+        # B11 fix: path_allowlist check is always recorded
+        assert _check(result, "path_allowlist").passed is True
+        assert _check(result, "secret_refs").passed is True
         assert result.errors == []
 
         # Verify real engine functions were called
@@ -328,16 +336,13 @@ class TestValidatePipelineSettingsFailure:
         result = validate_pipeline(state, settings, mock_yaml_gen)
 
         assert result.is_valid is False
-        # B11: index 0=path_allowlist, 1=secret_refs, 2=settings_load
-        assert result.checks[0].name == "source_path_allowlist"
-        assert result.checks[0].passed is True
-        assert result.checks[1].name == "secret_refs"
-        assert result.checks[1].passed is True
-        assert result.checks[2].name == "settings_load"
-        assert result.checks[2].passed is False
+        assert _check(result, "path_allowlist").passed is True
+        assert _check(result, "secret_refs").passed is True
+        assert _check(result, "settings_load").passed is False
         # Downstream checks are skipped but recorded
-        assert all(not c.passed for c in result.checks[3:])
-        assert any("Skipped" in c.detail for c in result.checks[3:])
+        skipped = [c for c in result.checks if "Skipped" in c.detail]
+        assert len(skipped) >= 1
+        assert all(not c.passed for c in skipped)
         assert len(result.errors) >= 1
 
     @patch("elspeth.web.execution.validation.load_settings")
@@ -354,8 +359,7 @@ class TestValidatePipelineSettingsFailure:
         result = validate_pipeline(state, settings, mock_yaml_gen)
 
         assert result.is_valid is False
-        # B11: index 2 is settings_load (0=path_allowlist, 1=secret_refs)
-        assert result.checks[2].passed is False
+        assert _check(result, "settings_load").passed is False
 
 
 class TestValidatePipelinePluginFailure:
@@ -378,10 +382,58 @@ class TestValidatePipelinePluginFailure:
         result = validate_pipeline(state, settings, mock_yaml_gen)
 
         assert result.is_valid is False
-        # B11: index 0=path_allowlist, 1=secret_refs, 2=settings_load, 3=plugin_instantiation
-        assert result.checks[2].passed is True  # settings_load passed
-        assert result.checks[3].passed is False  # plugin_instantiation failed
+        assert _check(result, "settings_load").passed is True
+        assert _check(result, "plugin_instantiation").passed is False
         assert any("unknown" in e.message.lower() for e in result.errors)
+
+    def test_real_text_source_config_error_returns_validation_result(self) -> None:
+        mock_yaml_gen = MagicMock()
+        mock_yaml_gen.generate_yaml.return_value = """
+source:
+  plugin: text
+  on_success: transform_in
+  options:
+    on_validation_failure: discard
+transforms:
+- name: append_world
+  plugin: value_transform
+  input: transform_in
+  on_success: results
+  on_error: results
+  options:
+    schema:
+      mode: fixed
+      fields:
+      - 'line: str'
+      - 'result: str'
+    operations:
+    - target: result
+      expression: row['line'] + ' world'
+sinks:
+  results:
+    plugin: csv
+    on_write_failure: discard
+    options:
+      schema:
+        mode: fixed
+        fields:
+        - 'line: str'
+        - 'result: str'
+      path: outputs/hello_world.csv
+      mode: write
+"""
+
+        state = FakeCompositionState()
+        settings = FakeWebSettings()
+        result = validate_pipeline(state, settings, mock_yaml_gen)
+
+        assert result.is_valid is False
+        assert _check(result, "settings_load").passed is True
+        assert _check(result, "plugin_instantiation").passed is False
+        assert any("textsourceconfig" in e.message.lower() for e in result.errors)
+        assert any("path" in e.message.lower() for e in result.errors)
+        assert any("schema" in e.message.lower() for e in result.errors)
+        assert any("column" in e.message.lower() for e in result.errors)
 
 
 class TestValidatePipelineGraphFailure:
@@ -414,8 +466,7 @@ class TestValidatePipelineGraphFailure:
         result = validate_pipeline(state, settings, mock_yaml_gen)
 
         assert result.is_valid is False
-        # B11: index 0=path_allowlist, 1=secret_refs, 2=settings_load, 3=plugins, 4=graph_structure
-        assert result.checks[4].passed is False  # graph_structure failed
+        assert _check(result, "graph_structure").passed is False
         assert len(result.errors) >= 1
 
     @patch("elspeth.web.execution.validation.load_settings")
@@ -448,9 +499,8 @@ class TestValidatePipelineGraphFailure:
         result = validate_pipeline(state, settings, mock_yaml_gen)
 
         assert result.is_valid is False
-        # B11: index 0=path_allowlist, 1=secret_refs, 2=settings, 3=plugins, 4=graph, 5=schema
-        assert result.checks[4].passed is True  # graph_structure passed
-        assert result.checks[5].passed is False  # schema_compatibility failed
+        assert _check(result, "graph_structure").passed is True
+        assert _check(result, "schema_compatibility").passed is False
 
 
 class TestValidatePipelineNoBareCatch:
@@ -705,3 +755,47 @@ class TestValidatePipelineSecretRefs:
         secret_check = next(c for c in result.checks if c.name == "secret_refs")
         assert "REF_B" in secret_check.detail
         assert "REF_A" not in secret_check.detail  # REF_A resolved fine
+
+
+class TestInferComponentTypeFromPluginError:
+    """Tests for _infer_component_type_from_plugin_error dispatch."""
+
+    def test_plugin_config_error_with_source_type(self) -> None:
+        """PluginConfigError with component_type='source' returns 'source'."""
+        exc = PluginConfigError(
+            "Invalid CSV config",
+            cause="missing path",
+            plugin_class="CsvSourceConfig",
+            component_type="source",
+        )
+        assert _infer_component_type_from_plugin_error(exc) == "source"
+
+    def test_plugin_config_error_with_sink_type(self) -> None:
+        """PluginConfigError with component_type='sink' returns 'sink'."""
+        exc = PluginConfigError(
+            "Invalid JSON config",
+            cause="bad format",
+            plugin_class="JsonSinkConfig",
+            component_type="sink",
+        )
+        assert _infer_component_type_from_plugin_error(exc) == "sink"
+
+    def test_plugin_config_error_with_transform_type(self) -> None:
+        """PluginConfigError with component_type='transform' returns 'transform'."""
+        exc = PluginConfigError(
+            "Invalid field mapper config",
+            cause="missing mappings",
+            plugin_class="FieldMapperConfig",
+            component_type="transform",
+        )
+        assert _infer_component_type_from_plugin_error(exc) == "transform"
+
+    def test_plugin_config_error_without_component_type(self) -> None:
+        """PluginConfigError raised outside from_dict() has no component_type."""
+        exc = PluginConfigError("Generic config error")
+        assert _infer_component_type_from_plugin_error(exc) is None
+
+    def test_plugin_not_found_error_returns_none(self) -> None:
+        """PluginNotFoundError always returns None — no component_type attribute."""
+        exc = PluginNotFoundError("No plugin named 'foobar'")
+        assert _infer_component_type_from_plugin_error(exc) is None

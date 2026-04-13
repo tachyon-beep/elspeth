@@ -22,7 +22,30 @@ if TYPE_CHECKING:
 
 
 class GraphValidationError(ValueError):
-    """Raised when graph validation fails."""
+    """Raised when graph validation fails.
+
+    Attributes:
+        component_id: The node ID responsible for the error (e.g. ``'gate_1'``,
+                      ``'transform_check'``), or None for structural errors
+                      (cycles, wrong source count, etc.) where no single node
+                      is at fault. Callers should read this instead of
+                      regex-parsing str(exc).
+        component_type: The node type (e.g. ``'gate'``, ``'transform'``,
+                        ``'coalesce'``), or None for structural errors.
+                        Set at the raise site where the type is known,
+                        avoiding fragile string-splitting of component_id.
+    """
+
+    def __init__(
+        self,
+        message: str,
+        *,
+        component_id: str | None = None,
+        component_type: str | None = None,
+    ) -> None:
+        super().__init__(message)
+        self.component_id: str | None = component_id
+        self.component_type: str | None = component_type
 
 
 @dataclass(frozen=True, slots=True)
@@ -119,7 +142,7 @@ class NodeInfo:
     def __post_init__(self) -> None:
         if len(self.node_id) > _NODE_ID_MAX_LENGTH:
             msg = f"node_id exceeds {_NODE_ID_MAX_LENGTH} characters: '{self.node_id}' (length={len(self.node_id)})"
-            raise GraphValidationError(msg)
+            raise GraphValidationError(msg, component_id=self.node_id, component_type=self.node_type.name.lower())
         # Offensive programming: declared_required_fields is sink-specific.
         # Catch the misuse at construction time rather than letting stray
         # data sit on a non-sink node until a future validator widens its
@@ -128,7 +151,9 @@ class NodeInfo:
             raise GraphValidationError(
                 f"NodeInfo.declared_required_fields is only meaningful for SINK nodes; "
                 f"node {self.node_id!r} has type {self.node_type.name} "
-                f"with declared_required_fields={sorted(self.declared_required_fields)!r}."
+                f"with declared_required_fields={sorted(self.declared_required_fields)!r}.",
+                component_id=self.node_id,
+                component_type=self.node_type.name.lower(),
             )
         # NOTE: config is NOT frozen here because the builder mutates
         # output_schema_config on pass-through nodes (gates, coalesce) via
@@ -168,7 +193,9 @@ class WiredTransform:
         """Ensure wiring metadata matches the instantiated plugin."""
         if self.plugin.name != self.settings.plugin:
             raise GraphValidationError(
-                f"WiredTransform mismatch: settings.plugin='{self.settings.plugin}' but plugin instance name='{self.plugin.name}'."
+                f"WiredTransform mismatch: settings.plugin='{self.settings.plugin}' but plugin instance name='{self.plugin.name}'.",
+                component_id=self.settings.name,
+                component_type="transform",
             )
 
 

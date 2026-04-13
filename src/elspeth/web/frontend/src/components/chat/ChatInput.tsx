@@ -97,30 +97,13 @@ export function ChatInput({
   const canSend = !disabled && text.trim().length > 0;
 
   return (
-    <div
-      className="chat-input"
-      style={{
-        padding: "8px 16px",
-        borderTop: "1px solid var(--color-border)",
-      }}
-    >
+    <div className="chat-input">
       {uploadStatus && (
-        <div
-          role="alert"
-          style={{
-            padding: "6px 10px",
-            marginBottom: 8,
-            backgroundColor: "var(--color-error-bg)",
-            color: "var(--color-error)",
-            borderRadius: 4,
-            fontSize: 12,
-            border: "1px solid var(--color-error-border)",
-          }}
-        >
+        <div role="alert" className="chat-input-upload-alert">
           {uploadStatus}
         </div>
       )}
-      <div style={{ display: "flex", gap: 8, alignItems: "flex-end" }} role="group" aria-label="Message composition">
+      <div className="chat-input-row" role="group" aria-label="Message composition">
         <textarea
           ref={inputRef}
           data-chat-input
@@ -130,18 +113,7 @@ export function ChatInput({
           placeholder="Describe the pipeline you want to build..."
           aria-label="Message input"
           rows={2}
-          style={{
-            flex: 1,
-            resize: "vertical",
-            padding: "8px 12px",
-            border: "1px solid var(--color-border-strong)",
-            borderRadius: 6,
-            fontSize: 14,
-            fontFamily: "inherit",
-            lineHeight: 1.4,
-            backgroundColor: "var(--color-surface-elevated)",
-            color: "var(--color-text)",
-          }}
+          className="chat-input-textarea"
         />
 
         {/* File manager toggle */}
@@ -150,22 +122,7 @@ export function ChatInput({
             onClick={onToggleBlobManager}
             title={showBlobManager ? "Hide file manager" : "Show file manager"}
             aria-label={showBlobManager ? "Hide file manager" : "Show file manager"}
-            style={{
-              padding: "8px 10px",
-              backgroundColor: showBlobManager
-                ? "var(--color-surface-hover)"
-                : "transparent",
-              border: "1px solid var(--color-border-strong)",
-              borderRadius: 6,
-              cursor: "pointer",
-              fontSize: 16,
-              color: "var(--color-text)",
-              minWidth: 44,
-              minHeight: 44,
-              display: "flex",
-              alignItems: "center",
-              justifyContent: "center",
-            }}
+            className={`chat-input-icon-btn${showBlobManager ? " chat-input-icon-btn--active" : ""}`}
           >
             <span aria-hidden="true">{"\uD83D\uDCC1"}</span>
           </button>
@@ -176,20 +133,7 @@ export function ChatInput({
           type="button"
           onClick={() => fileInputRef.current?.click()}
           disabled={!activeSessionId}
-          style={{
-            padding: "8px 10px",
-            backgroundColor: "transparent",
-            border: "1px solid var(--color-border-strong)",
-            borderRadius: 6,
-            cursor: !activeSessionId ? "not-allowed" : "pointer",
-            fontSize: 16,
-            color: "var(--color-text)",
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "center",
-            minWidth: 44,
-            minHeight: 44,
-          }}
+          className="chat-input-icon-btn"
           title="Upload file"
           aria-label="Upload file"
         >
@@ -210,20 +154,7 @@ export function ChatInput({
           <button
             type="button"
             onClick={onOpenSecrets}
-            style={{
-              padding: "8px 10px",
-              backgroundColor: "transparent",
-              border: "1px solid var(--color-border-strong)",
-              borderRadius: 6,
-              cursor: "pointer",
-              fontSize: 16,
-              color: "var(--color-text)",
-              display: "flex",
-              alignItems: "center",
-              justifyContent: "center",
-              minWidth: 44,
-              minHeight: 44,
-            }}
+            className="chat-input-icon-btn"
             title="API Keys & Secrets"
             aria-label="Open secrets settings"
           >
@@ -236,34 +167,12 @@ export function ChatInput({
           onClick={handleSend}
           disabled={!canSend}
           aria-label="Send message"
-          style={{
-            padding: "8px 16px",
-            backgroundColor: canSend
-              ? "var(--color-accent)"
-              : "var(--color-surface-elevated)",
-            color: canSend
-              ? "var(--color-text-inverse)"
-              : "var(--color-text-muted)",
-            border: "none",
-            borderRadius: 6,
-            cursor: canSend ? "pointer" : "not-allowed",
-            fontSize: 14,
-            minWidth: 44,
-            minHeight: 44,
-          }}
+          className="chat-input-send-btn"
         >
           Send
         </button>
       </div>
-      <div
-        style={{
-          fontSize: 11,
-          color: "var(--color-text-muted)",
-          padding: "2px 0 4px",
-          textAlign: "right",
-        }}
-        aria-hidden="true"
-      >
+      <div className="chat-input-hint" aria-hidden="true">
         Shift+Enter for new line
       </div>
     </div>

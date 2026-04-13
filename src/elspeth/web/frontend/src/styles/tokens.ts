@@ -10,17 +10,21 @@
 // ── Component type badge colours ─────────────────────────────────────────────
 
 export const BADGE_COLORS = {
+  source: "var(--color-badge-source)",
   transform: "var(--color-badge-transform)",
   gate: "var(--color-badge-gate)",
   aggregation: "var(--color-badge-aggregation)",
   coalesce: "var(--color-badge-coalesce)",
+  sink: "var(--color-badge-sink)",
 } as const;
 
 export const BADGE_BACKGROUNDS = {
-  transform: "var(--color-warning-bg)",      // amber family
-  gate: "rgba(138, 90, 192, 0.15)",          // purple — no direct CSS var, use semi-transparent
-  aggregation: "var(--color-info-bg)",       // blue family
-  coalesce: "var(--color-success-bg)",       // teal family
+  source: "var(--color-badge-source-bg)",
+  transform: "var(--color-badge-transform-bg)",
+  gate: "var(--color-badge-gate-bg)",
+  aggregation: "var(--color-badge-aggregation-bg)",
+  coalesce: "var(--color-badge-coalesce-bg)",
+  sink: "var(--color-badge-sink-bg)",
 } as const;
 
 // ── Edge colours ─────────────────────────────────────────────────────────────

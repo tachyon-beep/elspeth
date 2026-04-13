@@ -79,7 +79,7 @@ def validate_source_config(
 
     # Validate using Pydantic
     try:
-        config_model.from_dict(config)
+        config_model.from_dict(config, plugin_name=source_type)
         return []  # Valid
     except PydanticValidationError as e:
         return _extract_errors(e)
@@ -90,36 +90,22 @@ def validate_source_config(
 def get_source_config_model(source_type: str) -> type["PluginConfig"] | None:
     """Get Pydantic config model for source type.
 
+    Resolves the plugin class via pluggy discovery (PluginManager), then
+    calls get_config_model() on it.
+
     Returns:
         Config model class, or None for sources with no config (e.g., null_source)
+
+    Raises:
+        UnknownPluginTypeError: If source_type is not a registered plugin.
     """
-    # Import here to avoid circular dependencies
-    if source_type == "csv":
-        from elspeth.plugins.sources.csv_source import CSVSourceConfig
+    from elspeth.plugins.infrastructure.manager import PluginNotFoundError, get_shared_plugin_manager
 
-        return CSVSourceConfig
-    elif source_type == "text":
-        from elspeth.plugins.sources.text_source import TextSourceConfig
-
-        return TextSourceConfig
-    elif source_type == "json":
-        from elspeth.plugins.sources.json_source import JSONSourceConfig
-
-        return JSONSourceConfig
-    elif source_type == "azure_blob":
-        from elspeth.plugins.sources.azure_blob_source import AzureBlobSourceConfig
-
-        return AzureBlobSourceConfig
-    elif source_type == "dataverse":
-        from elspeth.plugins.sources.dataverse import DataverseSourceConfig
-
-        return DataverseSourceConfig
-    elif source_type == "null":
-        # NullSource has no config class (resume-only source)
-        # Return None to signal "no validation needed"
-        return None
-    else:
-        raise UnknownPluginTypeError(f"Unknown source type: {source_type}")
+    try:
+        plugin_cls = get_shared_plugin_manager().get_source_by_name(source_type)
+    except PluginNotFoundError as exc:
+        raise UnknownPluginTypeError(f"Unknown source type: {source_type}") from exc
+    return plugin_cls.get_config_model()
 
 
 def validate_transform_config(
@@ -138,9 +124,12 @@ def validate_transform_config(
     # Get config model for transform type (config needed for provider dispatch)
     config_model = get_transform_config_model(transform_type, config)
 
+    if config_model is None:
+        return []  # No validation needed
+
     # Validate using Pydantic
     try:
-        config_model.from_dict(config)
+        config_model.from_dict(config, plugin_name=transform_type)
         return []  # Valid
     except PydanticValidationError as e:
         return _extract_errors(e)
@@ -164,9 +153,12 @@ def validate_sink_config(
     # Get config model for sink type
     config_model = get_sink_config_model(sink_type)
 
+    if config_model is None:
+        return []  # No validation needed
+
     # Validate using Pydantic
     try:
-        config_model.from_dict(config)
+        config_model.from_dict(config, plugin_name=sink_type)
         return []  # Valid
     except PydanticValidationError as e:
         return _extract_errors(e)
@@ -223,14 +215,18 @@ def _extract_wrapped_plugin_config_error(
             return [ValidationError(field="schema", message=str(cause), value=config["schema"])]
         return [ValidationError(field="config", message=str(cause), value=config)]
 
-    raise error
+    raise error from cause
 
 
 def get_transform_config_model(
     transform_type: str,
     config: dict[str, Any] | None = None,
-) -> type["PluginConfig"]:
+) -> type["PluginConfig"] | None:
     """Get Pydantic config model for transform type.
+
+    Resolves the plugin class via pluggy discovery (PluginManager), then
+    calls get_config_model(config) on it. The config parameter enables
+    provider dispatch (e.g. LLMTransform selects provider-specific model).
 
     Args:
         transform_type: Plugin type name
@@ -238,112 +234,38 @@ def get_transform_config_model(
 
     Returns:
         Config model class for the transform type
+
+    Raises:
+        UnknownPluginTypeError: If transform_type is not a registered plugin.
     """
-    # Import here to avoid circular dependencies
-    if transform_type == "passthrough":
-        from elspeth.plugins.transforms.passthrough import PassThroughConfig
+    from elspeth.plugins.infrastructure.manager import PluginNotFoundError, get_shared_plugin_manager
 
-        return PassThroughConfig
-    elif transform_type == "field_mapper":
-        from elspeth.plugins.transforms.field_mapper import FieldMapperConfig
-
-        return FieldMapperConfig
-    elif transform_type == "json_explode":
-        from elspeth.plugins.transforms.json_explode import JSONExplodeConfig
-
-        return JSONExplodeConfig
-    elif transform_type == "keyword_filter":
-        from elspeth.plugins.transforms.keyword_filter import KeywordFilterConfig
-
-        return KeywordFilterConfig
-    elif transform_type == "truncate":
-        from elspeth.plugins.transforms.truncate import TruncateConfig
-
-        return TruncateConfig
-    elif transform_type == "batch_replicate":
-        from elspeth.plugins.transforms.batch_replicate import BatchReplicateConfig
-
-        return BatchReplicateConfig
-    elif transform_type == "batch_stats":
-        from elspeth.plugins.transforms.batch_stats import BatchStatsConfig
-
-        return BatchStatsConfig
-    elif transform_type == "azure_content_safety":
-        from elspeth.plugins.transforms.azure.content_safety import AzureContentSafetyConfig
-
-        return AzureContentSafetyConfig
-    elif transform_type == "azure_prompt_shield":
-        from elspeth.plugins.transforms.azure.prompt_shield import AzurePromptShieldConfig
-
-        return AzurePromptShieldConfig
-    elif transform_type == "llm":
-        # Unified LLM plugin — dispatch to provider-specific config
-        from elspeth.plugins.transforms.llm.transform import _PROVIDERS
-
-        provider = config["provider"] if config is not None and "provider" in config else None
-        if provider in _PROVIDERS:
-            config_cls, _ = _PROVIDERS[provider]
-            return config_cls
-        elif provider is not None:
-            raise ValueError(f"Unknown LLM provider '{provider}'. Valid providers: {sorted(_PROVIDERS)}")
-        else:
-            # provider missing — let Pydantic catch it with Literal validation
-            from elspeth.plugins.transforms.llm.base import LLMConfig
-
-            return LLMConfig
-    elif transform_type == "azure_batch_llm":
-        from elspeth.plugins.transforms.llm.azure_batch import AzureBatchConfig
-
-        return AzureBatchConfig
-    elif transform_type == "openrouter_batch_llm":
-        from elspeth.plugins.transforms.llm.openrouter_batch import OpenRouterBatchConfig
-
-        return OpenRouterBatchConfig
-    elif transform_type == "web_scrape":
-        from elspeth.plugins.transforms.web_scrape import WebScrapeConfig
-
-        return WebScrapeConfig
-    elif transform_type == "rag_retrieval":
-        from elspeth.plugins.transforms.rag.config import RAGRetrievalConfig
-
-        return RAGRetrievalConfig
-    else:
-        raise UnknownPluginTypeError(f"Unknown transform type: {transform_type}")
+    try:
+        plugin_cls = get_shared_plugin_manager().get_transform_by_name(transform_type)
+    except PluginNotFoundError as exc:
+        raise UnknownPluginTypeError(f"Unknown transform type: {transform_type}") from exc
+    return plugin_cls.get_config_model(config)
 
 
-def get_sink_config_model(sink_type: str) -> type["PluginConfig"]:
+def get_sink_config_model(sink_type: str) -> type["PluginConfig"] | None:
     """Get Pydantic config model for sink type.
+
+    Resolves the plugin class via pluggy discovery (PluginManager), then
+    calls get_config_model() on it.
 
     Returns:
         Config model class for the sink type
+
+    Raises:
+        UnknownPluginTypeError: If sink_type is not a registered plugin.
     """
-    # Import here to avoid circular dependencies
-    if sink_type == "csv":
-        from elspeth.plugins.sinks.csv_sink import CSVSinkConfig
+    from elspeth.plugins.infrastructure.manager import PluginNotFoundError, get_shared_plugin_manager
 
-        return CSVSinkConfig
-    elif sink_type == "json":
-        from elspeth.plugins.sinks.json_sink import JSONSinkConfig
-
-        return JSONSinkConfig
-    elif sink_type == "database":
-        from elspeth.plugins.sinks.database_sink import DatabaseSinkConfig
-
-        return DatabaseSinkConfig
-    elif sink_type == "azure_blob":
-        from elspeth.plugins.sinks.azure_blob_sink import AzureBlobSinkConfig
-
-        return AzureBlobSinkConfig
-    elif sink_type == "dataverse":
-        from elspeth.plugins.sinks.dataverse import DataverseSinkConfig
-
-        return DataverseSinkConfig
-    elif sink_type == "chroma_sink":
-        from elspeth.plugins.sinks.chroma_sink import ChromaSinkConfig
-
-        return ChromaSinkConfig
-    else:
-        raise UnknownPluginTypeError(f"Unknown sink type: {sink_type}")
+    try:
+        plugin_cls = get_shared_plugin_manager().get_sink_by_name(sink_type)
+    except PluginNotFoundError as exc:
+        raise UnknownPluginTypeError(f"Unknown sink type: {sink_type}") from exc
+    return plugin_cls.get_config_model()
 
 
 def _extract_errors(

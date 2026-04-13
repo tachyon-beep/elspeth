@@ -108,7 +108,7 @@ class TestAzureBlobSinkConfig:
             AzureBlobSink(_base_config(blob_path=""))
 
     def test_invalid_template_syntax_raises_value_error(self) -> None:
-        with pytest.raises(ValueError, match="Invalid blob_path template"):
+        with pytest.raises(PluginConfigError, match="Invalid blob_path template"):
             AzureBlobSink(_base_config(blob_path="{{ unclosed"))
 
     def test_csv_delimiter_must_be_single_char(self) -> None:

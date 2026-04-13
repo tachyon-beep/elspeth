@@ -76,12 +76,13 @@ class CSVSource(BaseSource):
 
     name = "csv"
     plugin_version = "1.0.0"
+    config_model = CSVSourceConfig
     # Override parent type - SourceDataConfig requires this to be set
     _on_validation_failure: str
 
     def __init__(self, config: dict[str, Any]) -> None:
         super().__init__(config)
-        cfg = CSVSourceConfig.from_dict(config)
+        cfg = CSVSourceConfig.from_dict(config, plugin_name=self.name)
 
         self._path = cfg.resolved_path()
         self._delimiter = cfg.delimiter
