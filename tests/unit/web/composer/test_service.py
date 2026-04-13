@@ -556,6 +556,77 @@ class TestComposerErrorHandling:
 
         assert result.message == "Fixed."
 
+    @pytest.mark.asyncio
+    async def test_internal_key_error_is_not_swallowed(self) -> None:
+        """KeyError from tool handler internals must crash, not be sent to LLM.
+
+        Previously, KeyError from missing LLM arguments and KeyError from
+        internal bugs were both caught and fed back to the LLM. Internal
+        bugs should crash immediately — the LLM cannot self-correct our code.
+        """
+        catalog = _mock_catalog()
+        settings = _make_settings()
+        service = ComposerServiceImpl(catalog=catalog, settings=settings)
+        state = _empty_state()
+
+        # Provide all required arguments so pre-validation passes,
+        # but patch execute_tool to raise a KeyError from "internal logic"
+        valid_call = _make_llm_response(
+            tool_calls=[
+                {
+                    "id": "c1",
+                    "name": "set_source",
+                    "arguments": {
+                        "plugin": "csv",
+                        "on_success": "out",
+                        "options": {},
+                        "on_validation_failure": "quarantine",
+                    },
+                }
+            ],
+        )
+
+        with (
+            patch.object(service, "_call_llm", new_callable=AsyncMock) as mock_llm,
+            patch(
+                "elspeth.web.composer.service.execute_tool",
+                side_effect=KeyError("internal_state_key"),
+            ),
+        ):
+            mock_llm.return_value = valid_call
+            with pytest.raises(KeyError, match="internal_state_key"):
+                await service.compose("Setup", [], state)
+
+    @pytest.mark.asyncio
+    async def test_missing_args_error_message_lists_keys(self) -> None:
+        """Missing required arguments should produce a clear error listing the keys."""
+        catalog = _mock_catalog()
+        settings = _make_settings()
+        service = ComposerServiceImpl(catalog=catalog, settings=settings)
+        state = _empty_state()
+
+        # set_source requires plugin, on_success, options, on_validation_failure
+        bad_call = _make_llm_response(
+            tool_calls=[
+                {
+                    "id": "c1",
+                    "name": "set_source",
+                    "arguments": {"plugin": "csv"},  # missing 3 required args
+                }
+            ],
+        )
+        text = _make_llm_response(content="Ok.")
+
+        with patch.object(service, "_call_llm", new_callable=AsyncMock) as mock_llm:
+            mock_llm.side_effect = [bad_call, text]
+            await service.compose("Setup", [], state)
+
+        # Verify the error message sent back to the LLM mentions the missing keys
+        tool_msg = mock_llm.call_args_list[1][0][0][-1]  # last message in second call
+        error_content = json.loads(tool_msg["content"])
+        assert "on_success" in error_content["error"]
+        assert "missing required" in error_content["error"].lower()
+
 
 class TestBuildMessages:
     @pytest.mark.asyncio

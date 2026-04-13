@@ -39,6 +39,26 @@ from elspeth.web.composer.tools import (
 )
 
 
+def _build_required_args_index() -> dict[str, list[str]]:
+    """Build a lookup of required argument names per tool from tool definitions.
+
+    Used to validate LLM-provided arguments before entering tool handler code,
+    so that missing-argument KeyErrors are caught at the boundary (Tier 3) and
+    don't mask internal KeyErrors from bugs in tool handler logic.
+
+    All tool definitions are system-owned and MUST have "parameters" and
+    "required" keys — direct access will crash on a schema definition bug.
+    """
+    index: dict[str, list[str]] = {}
+    for defn in get_tool_definitions():
+        name = defn["name"]
+        index[name] = defn["parameters"]["required"]
+    return index
+
+
+_TOOL_REQUIRED_ARGS: dict[str, list[str]] = _build_required_args_index()
+
+
 @dataclass(frozen=True, slots=True)
 class ComposerAvailability:
     """Boot-time availability snapshot for the composer service."""
@@ -241,12 +261,34 @@ class ComposerServiceImpl:
 
                 all_cache_hits = False
 
-                # execute_tool() is system code, but the arguments dict
-                # comes from LLM output (Tier 3). Missing/wrong-type keys
-                # in LLM-provided arguments are expected failures — return
-                # the error to the LLM so it can self-correct. Bugs in
-                # execute_tool's own logic will raise other exceptions and
-                # crash as intended (Amendment 2).
+                # Validate required arguments at the Tier 3 boundary
+                # BEFORE entering tool handler code.  This catches LLM
+                # argument omissions here; any KeyError that escapes
+                # execute_tool() is an internal bug and must crash.
+                # Unknown tool names skip validation — execute_tool()
+                # handles them with a failure result downstream.
+                required = _TOOL_REQUIRED_ARGS[tool_name] if tool_name in _TOOL_REQUIRED_ARGS else []
+                missing = [k for k in required if k not in arguments]
+                if missing:
+                    if not is_discovery_tool(tool_name):
+                        turn_has_mutation = True
+                    llm_messages.append(
+                        {
+                            "role": "tool",
+                            "tool_call_id": tool_call.id,
+                            "content": json.dumps(
+                                {
+                                    "error": (f"Tool '{tool_name}' missing required argument(s): {', '.join(missing)}"),
+                                }
+                            ),
+                        }
+                    )
+                    continue
+
+                # TypeError is still caught because LLM can provide wrong
+                # value types (e.g. string where list expected → tuple()
+                # fails).  KeyError is NOT caught — after required-arg
+                # validation above, any KeyError is an internal bug.
                 try:
                     result = execute_tool(
                         tool_name,
@@ -260,10 +302,7 @@ class ComposerServiceImpl:
                         user_id=user_id,
                         prior_validation=last_validation,
                     )
-                except (KeyError, TypeError) as exc:
-                    # Track mutation intent even on failure — the LLM
-                    # attempted a mutation, so charge composition budget,
-                    # not discovery.
+                except TypeError as exc:
                     if not is_discovery_tool(tool_name):
                         turn_has_mutation = True
                     llm_messages.append(

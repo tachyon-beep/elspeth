@@ -493,7 +493,7 @@ class AzureBlobSink(BaseSink):
         if display_map is None:
             return data_fields, data_fields
 
-        display_fields = [display_map[field] if field in display_map else field for field in data_fields]  # noqa: SIM401
+        display_fields = [display_map[field] if field in display_map else field for field in data_fields]
         return data_fields, display_fields
 
     def _serialize_csv(self, rows: list[dict[str, Any]]) -> bytes:
