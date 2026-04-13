@@ -27,6 +27,7 @@ from __future__ import annotations
 from typing import Any
 from unittest.mock import MagicMock
 
+import pytest
 from hypothesis import assume, given, settings
 from hypothesis import strategies as st
 
@@ -274,6 +275,7 @@ class TestFirstPolicyProperties:
         assert len(outcome.consumed_tokens) == 1
 
 
+@pytest.mark.filterwarnings("ignore:Coalesce.*quorum_count.*equals branch count:UserWarning")
 class TestQuorumPolicyProperties:
     """Property tests for quorum merge policy."""
 

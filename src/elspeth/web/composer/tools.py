@@ -1127,6 +1127,12 @@ def _prevalidate_plugin_options(
     function asks the plugin what it needs rather than hardcoding
     knowledge about individual plugins.
 
+    Secret-ref markers (``{"secret_ref": "NAME"}``) are stripped before
+    validation. The underlying Pydantic errors are filtered to exclude
+    errors on secret-ref'd fields — those fields ARE provisioned, just
+    deferred to execution time when ``resolve_secret_refs`` replaces them
+    with actual values.
+
     Args:
         plugin_type: "source", "transform", or "sink".
         plugin_name: Plugin name (e.g., "csv", "value_transform").
@@ -1136,6 +1142,8 @@ def _prevalidate_plugin_options(
             for sources). Merged into options for validation only —
             not stored.
     """
+    from pydantic import ValidationError
+
     from elspeth.plugins.infrastructure.config_base import PluginConfigError
     from elspeth.plugins.infrastructure.validation import (
         UnknownPluginTypeError,
@@ -1172,14 +1180,39 @@ def _prevalidate_plugin_options(
             if k not in merged:
                 merged[k] = v
 
+    # Strip secret_ref markers before validation.  A secret-ref'd field
+    # IS provisioned (the user called wire_secret_ref), just deferred to
+    # execution time.  Stripping it may cause Pydantic to report
+    # "field required" — we filter those errors out below.
+    secret_ref_keys: set[str] = set()
+    for key, value in list(merged.items()):
+        if isinstance(value, Mapping) and len(value) == 1 and "secret_ref" in value:
+            secret_ref_keys.add(key)
+            del merged[key]
+
     try:
         config_cls.from_dict(merged, plugin_name=plugin_name)
         return None
     except PluginConfigError as exc:
-        # Use exc.cause to get the problem description without the class-name prefix.
-        # Falls back to str(exc) for raise sites that don't set cause (e.g. plugin __init__ guards).
-        msg = exc.cause if exc.cause is not None else str(exc)
-        return f"Invalid options for {plugin_type} '{plugin_name}': {msg}"
+        if not secret_ref_keys:
+            # No secret refs were stripped — report the error as-is.
+            msg = exc.cause if exc.cause is not None else str(exc)
+            return f"Invalid options for {plugin_type} '{plugin_name}': {msg}"
+
+        # Secret refs were stripped.  Filter out errors on those fields.
+        cause = exc.__cause__
+        if not isinstance(cause, ValidationError):
+            # ValueError path (model validators) — can't filter per-field.
+            msg = exc.cause if exc.cause is not None else str(exc)
+            return f"Invalid options for {plugin_type} '{plugin_name}': {msg}"
+
+        remaining = [e for e in cause.errors() if not (e["loc"] and e["loc"][0] in secret_ref_keys)]
+        if not remaining:
+            return None
+
+        # Re-format only the non-secret errors.
+        lines = "; ".join(f"{'.'.join(str(p) for p in e['loc'])}: {e['msg']}" for e in remaining)
+        return f"Invalid options for {plugin_type} '{plugin_name}': {lines}"
 
 
 _WEB_ONLY_SOURCE_KEYS = frozenset({"blob_ref"})

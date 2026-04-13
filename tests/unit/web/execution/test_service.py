@@ -644,6 +644,161 @@ class TestCancelMechanism:
         assert str(run_id) not in service._shutdown_events
 
 
+# ── Completion-Path Guard ─────────────────────────────────────────────
+
+
+class TestCompletionPathExternalCancellation:
+    """Defence-in-depth: if the DB says 'cancelled' when _run_pipeline
+    tries to write 'completed', exit gracefully — no 'failed' broadcast,
+    no BaseException cascade, no re-raise."""
+
+    @patch("elspeth.web.execution.service.Orchestrator")
+    @patch("elspeth.web.execution.service.ExecutionGraph")
+    @patch("elspeth.web.execution.service.instantiate_plugins_from_config")
+    @patch("elspeth.web.execution.service.load_settings_from_yaml_string")
+    @patch("elspeth.web.execution.service.LandscapeDB")
+    @patch("elspeth.web.execution.service.FilesystemPayloadStore")
+    def test_run_pipeline_exits_gracefully_when_completed_but_db_cancelled(
+        self,
+        mock_payload: MagicMock,
+        mock_landscape: MagicMock,
+        mock_load: MagicMock,
+        mock_instantiate: MagicMock,
+        mock_graph_cls: MagicMock,
+        mock_orch_cls: MagicMock,
+        service: ExecutionServiceImpl,
+        mock_session_service: MagicMock,
+    ) -> None:
+        """Pipeline completes, but orphan cleanup already set DB to 'cancelled'.
+        _run_pipeline must detect this and return cleanly."""
+        mock_bundle = MagicMock()
+        mock_bundle.aggregations = {}
+        mock_instantiate.return_value = mock_bundle
+        mock_graph_cls.from_plugin_instances.return_value = MagicMock()
+        mock_orch = MagicMock()
+        mock_orch_cls.return_value = mock_orch
+        mock_result = MagicMock()
+        mock_result.rows_processed = 100
+        mock_result.rows_succeeded = 95
+        mock_result.rows_failed = 5
+        mock_result.rows_quarantined = 0
+        mock_result.run_id = "landscape-run-123"
+        mock_orch.run.return_value = mock_result
+
+        run_id = str(uuid4())
+
+        # First call: update_run_status("running") succeeds.
+        # Second call: update_run_status("completed") raises ValueError
+        # because the DB was externally set to "cancelled".
+        call_count = 0
+
+        async def status_side_effect(*args: Any, **kwargs: Any) -> None:
+            nonlocal call_count
+            call_count += 1
+            if call_count == 2:
+                raise ValueError("Illegal run transition: 'cancelled' → 'completed'. Allowed: []")
+
+        mock_session_service.update_run_status = AsyncMock(side_effect=status_side_effect)
+        mock_session_service.get_run.return_value = MagicMock(status="cancelled")
+
+        # Should NOT raise — graceful exit
+        service._run_pipeline(run_id, "source:\n  plugin: csv", threading.Event())
+
+        # The "failed" path should NOT have been entered: check that
+        # update_run_status was called exactly twice (running + completed),
+        # NOT three times (running + completed + failed).
+        assert mock_session_service.update_run_status.call_count == 2
+
+    @patch("elspeth.web.execution.service.Orchestrator")
+    @patch("elspeth.web.execution.service.ExecutionGraph")
+    @patch("elspeth.web.execution.service.instantiate_plugins_from_config")
+    @patch("elspeth.web.execution.service.load_settings_from_yaml_string")
+    @patch("elspeth.web.execution.service.LandscapeDB")
+    @patch("elspeth.web.execution.service.FilesystemPayloadStore")
+    def test_completion_guard_reraises_for_non_cancelled_status(
+        self,
+        mock_payload: MagicMock,
+        mock_landscape: MagicMock,
+        mock_load: MagicMock,
+        mock_instantiate: MagicMock,
+        mock_graph_cls: MagicMock,
+        mock_orch_cls: MagicMock,
+        service: ExecutionServiceImpl,
+        mock_session_service: MagicMock,
+    ) -> None:
+        """If update_run_status('completed') raises ValueError for a reason
+        other than 'already cancelled', the error must propagate (offensive)."""
+        mock_bundle = MagicMock()
+        mock_bundle.aggregations = {}
+        mock_instantiate.return_value = mock_bundle
+        mock_graph_cls.from_plugin_instances.return_value = MagicMock()
+        mock_orch = MagicMock()
+        mock_orch_cls.return_value = mock_orch
+        mock_result = MagicMock()
+        mock_result.rows_processed = 10
+        mock_result.rows_succeeded = 10
+        mock_result.rows_failed = 0
+        mock_result.rows_quarantined = 0
+        mock_result.run_id = "landscape-run-456"
+        mock_orch.run.return_value = mock_result
+
+        run_id = str(uuid4())
+
+        call_count = 0
+
+        async def status_side_effect(*args: Any, **kwargs: Any) -> None:
+            nonlocal call_count
+            call_count += 1
+            if call_count == 2:
+                raise ValueError("Illegal run transition: 'completed' → 'completed'. Allowed: []")
+
+        mock_session_service.update_run_status = AsyncMock(side_effect=status_side_effect)
+        # DB says "completed" (not "cancelled") — this should re-raise
+        mock_session_service.get_run.return_value = MagicMock(status="completed")
+
+        with pytest.raises(ValueError, match="completed"):
+            service._run_pipeline(run_id, "source:\n  plugin: csv", threading.Event())
+
+
+# ── Liveness Registry ─────────────────────────────────────────────────
+
+
+class TestGetLiveRunIds:
+    """Tests for get_live_run_ids — used by periodic orphan cleanup."""
+
+    def test_returns_empty_when_no_active_runs(
+        self,
+        service: ExecutionServiceImpl,
+    ) -> None:
+        """No runs registered → empty frozenset."""
+        assert service.get_live_run_ids() == frozenset()
+
+    def test_returns_registered_run_ids(
+        self,
+        service: ExecutionServiceImpl,
+    ) -> None:
+        """Manually registered shutdown events appear in live run IDs."""
+        event = threading.Event()
+        with service._shutdown_events_lock:
+            service._shutdown_events["run-abc"] = event
+            service._shutdown_events["run-def"] = event
+        assert service.get_live_run_ids() == frozenset({"run-abc", "run-def"})
+
+    def test_returns_snapshot_not_live_reference(
+        self,
+        service: ExecutionServiceImpl,
+    ) -> None:
+        """Returned frozenset is a snapshot — later changes don't affect it."""
+        event = threading.Event()
+        with service._shutdown_events_lock:
+            service._shutdown_events["run-1"] = event
+        snapshot = service.get_live_run_ids()
+        with service._shutdown_events_lock:
+            service._shutdown_events["run-2"] = event
+        # Snapshot should not include run-2
+        assert snapshot == frozenset({"run-1"})
+
+
 # ── Blob Ref Pre-Validation ───────────────────────────────────────────
 
 

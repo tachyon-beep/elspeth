@@ -74,6 +74,7 @@ describe("sessionStore", () => {
       expect(state.isComposing).toBe(false);
       expect(state.error).toBe("Server error");
       expect(state.messages[0].local_status).toBe("failed");
+      expect(state.messages[0].local_error).toBe("Server error");
     });
 
     it("clears local_status on successful response", async () => {

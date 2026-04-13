@@ -1387,6 +1387,7 @@ class TestNotifyBranchLost:
         assert result is not None
         assert "branch_lost" in result.failure_reason
 
+    @pytest.mark.filterwarnings("ignore:Coalesce.*quorum_count.*equals branch count:UserWarning")
     def test_quorum_loss_makes_impossible_fails(self):
         executor, *_ = _make_executor()
         s = _settings(branches=["a", "b"], policy="quorum", quorum_count=2)
@@ -1951,6 +1952,7 @@ class TestFailPendingDetails:
         assert result.coalesce_metadata.branches_lost is not None
         assert "b" in result.coalesce_metadata.branches_lost
 
+    @pytest.mark.filterwarnings("ignore:Coalesce.*quorum_count.*equals branch count:UserWarning")
     def test_failure_metadata_includes_quorum_required(self):
         executor, *_ = _make_executor()
         s = _settings(branches=["a", "b", "c"], policy="quorum", quorum_count=3)
@@ -2971,6 +2973,7 @@ class TestNotifyBranchLostEvaluateAfterLoss:
 
     # --- quorum policy ---
 
+    @pytest.mark.filterwarnings("ignore:Coalesce.*quorum_count.*equals branch count:UserWarning")
     def test_quorum_loss_makes_quorum_impossible(self):
         """quorum: when remaining live branches < quorum_count, fail immediately."""
         executor, *_ = _make_executor()
@@ -3175,6 +3178,7 @@ class TestNotifyBranchLostEvaluateAfterLoss:
         assert outcome.held is False
         assert outcome.merged_token is not None
 
+    @pytest.mark.filterwarnings("ignore:Coalesce.*quorum_count.*equals branch count:UserWarning")
     def test_quorum_loss_before_any_arrival_impossible(self):
         """quorum: loss before any arrival making quorum impossible triggers failure."""
         executor, *_ = _make_executor()

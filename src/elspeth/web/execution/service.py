@@ -127,6 +127,20 @@ class ExecutionServiceImpl:
         future = asyncio.run_coroutine_threadsafe(coro, self._loop)
         return future.result(timeout=30.0)
 
+    def get_live_run_ids(self) -> frozenset[str]:
+        """Return run IDs with active executor threads.
+
+        A run ID is present in _shutdown_events from the moment it is
+        registered in _execute_locked (before thread pool submission)
+        until the _run_pipeline finally block removes it. Presence means
+        the executor thread is alive or has not yet cleaned up — the run
+        is NOT orphaned.
+
+        Thread-safe: reads under the lock.
+        """
+        with self._shutdown_events_lock:
+            return frozenset(self._shutdown_events.keys())
+
     def shutdown(self) -> None:
         """Shut down the thread pool. Called during app shutdown.
 
@@ -602,15 +616,34 @@ class ExecutionServiceImpl:
                     },
                 ),
             )
-            self._call_async(
-                self._session_service.update_run_status(
-                    run_uuid,
-                    status="completed",
-                    landscape_run_id=result.run_id,
-                    rows_processed=result.rows_processed,
-                    rows_failed=result.rows_failed,
+            # Race defence: if orphan cleanup (or another actor) set DB
+            # status to "cancelled" while the pipeline was running, this
+            # transition raises ValueError. Detect that specific case and
+            # exit gracefully — the pipeline completed but the external
+            # decision stands. Log landscape_run_id for cross-reference.
+            try:
+                self._call_async(
+                    self._session_service.update_run_status(
+                        run_uuid,
+                        status="completed",
+                        landscape_run_id=result.run_id,
+                        rows_processed=result.rows_processed,
+                        rows_failed=result.rows_failed,
+                    )
                 )
-            )
+            except ValueError:
+                current = self._call_async(self._session_service.get_run(run_uuid))
+                if current.status == "cancelled":
+                    slog.warning(
+                        "run_completed_but_externally_cancelled",
+                        run_id=run_id,
+                        landscape_run_id=result.run_id,
+                        rows_processed=result.rows_processed,
+                        rows_failed=result.rows_failed,
+                    )
+                    self._finalize_output_blobs(run_id, success=False)
+                    return  # Graceful exit — finally block still runs
+                raise  # Non-cancelled ValueError — crash per offensive programming
             self._finalize_output_blobs(run_id, success=True)
 
         except GracefulShutdownError:

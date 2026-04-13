@@ -349,6 +349,8 @@ class SessionServiceProtocol(Protocol):
     async def cancel_all_orphaned_runs(
         self,
         max_age_seconds: int | None = None,
+        exclude_run_ids: frozenset[str] = frozenset(),
+        reason: str | None = None,
     ) -> int:
         """Force-cancel orphaned runs across all sessions.
 
@@ -359,5 +361,9 @@ class SessionServiceProtocol(Protocol):
             max_age_seconds: Only cancel runs older than this. None cancels
                 all non-terminal runs (correct for single-process servers
                 where every non-terminal run is orphaned after restart).
+            exclude_run_ids: Run IDs known to have active executor threads.
+                These are skipped even if they exceed max_age_seconds.
+            reason: Written to the error column so operators can distinguish
+                orphan-cleanup cancellations from user cancellations.
         """
         ...

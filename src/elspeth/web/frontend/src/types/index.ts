@@ -78,6 +78,7 @@ export interface ChatMessage {
   tool_calls: ToolCall[] | null;
   created_at: string;
   local_status?: "pending" | "failed";
+  local_error?: string;
   composition_state_id?: string;
 }
 

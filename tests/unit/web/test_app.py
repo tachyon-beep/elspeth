@@ -5,7 +5,7 @@ from __future__ import annotations
 import asyncio
 import contextlib
 from pathlib import Path
-from unittest.mock import AsyncMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 from fastapi import Depends
@@ -248,15 +248,21 @@ class TestPeriodicOrphanCleanup:
         """Periodic cleanup passes max_age_seconds (not None) to cancel_all_orphaned_runs."""
         mock_service = AsyncMock()
         mock_service.cancel_all_orphaned_runs.return_value = 0
+        mock_exec = MagicMock()
+        mock_exec.get_live_run_ids.return_value = frozenset()
 
-        task = asyncio.create_task(_periodic_orphan_cleanup(mock_service, interval_seconds=0, max_age_seconds=900))
+        task = asyncio.create_task(_periodic_orphan_cleanup(mock_service, mock_exec, interval_seconds=0, max_age_seconds=900))
         # Let the loop run long enough for at least one call
         await asyncio.sleep(0.05)
         task.cancel()
         with contextlib.suppress(asyncio.CancelledError):
             await task
 
-        mock_service.cancel_all_orphaned_runs.assert_called_with(max_age_seconds=900)
+        mock_service.cancel_all_orphaned_runs.assert_called_with(
+            max_age_seconds=900,
+            exclude_run_ids=frozenset(),
+            reason="Orphaned by periodic cleanup — no active executor thread",
+        )
 
     @pytest.mark.asyncio
     async def test_continues_after_exception(self) -> None:
@@ -266,8 +272,10 @@ class TestPeriodicOrphanCleanup:
             RuntimeError("db connection lost"),
             2,  # recovers on second call
         ]
+        mock_exec = MagicMock()
+        mock_exec.get_live_run_ids.return_value = frozenset()
 
-        task = asyncio.create_task(_periodic_orphan_cleanup(mock_service, interval_seconds=0, max_age_seconds=3600))
+        task = asyncio.create_task(_periodic_orphan_cleanup(mock_service, mock_exec, interval_seconds=0, max_age_seconds=3600))
         await asyncio.sleep(0.05)
         task.cancel()
         with contextlib.suppress(asyncio.CancelledError):
@@ -280,12 +288,36 @@ class TestPeriodicOrphanCleanup:
         """Task cancellation doesn't raise or leave dangling state."""
         mock_service = AsyncMock()
         mock_service.cancel_all_orphaned_runs.return_value = 0
+        mock_exec = MagicMock()
+        mock_exec.get_live_run_ids.return_value = frozenset()
 
-        task = asyncio.create_task(_periodic_orphan_cleanup(mock_service, interval_seconds=10, max_age_seconds=3600))
+        task = asyncio.create_task(_periodic_orphan_cleanup(mock_service, mock_exec, interval_seconds=10, max_age_seconds=3600))
         await asyncio.sleep(0.01)
         task.cancel()
         with pytest.raises(asyncio.CancelledError):
             await task
+
+    @pytest.mark.asyncio
+    async def test_excludes_live_run_ids(self) -> None:
+        """Periodic cleanup passes live run IDs as exclude_run_ids."""
+        mock_service = AsyncMock()
+        mock_service.cancel_all_orphaned_runs.return_value = 0
+        mock_exec = MagicMock()
+        live_ids = frozenset({"run-1", "run-2"})
+        mock_exec.get_live_run_ids.return_value = live_ids
+
+        task = asyncio.create_task(_periodic_orphan_cleanup(mock_service, mock_exec, interval_seconds=0, max_age_seconds=3600))
+        await asyncio.sleep(0.05)
+        task.cancel()
+        with contextlib.suppress(asyncio.CancelledError):
+            await task
+
+        mock_exec.get_live_run_ids.assert_called()
+        mock_service.cancel_all_orphaned_runs.assert_called_with(
+            max_age_seconds=3600,
+            exclude_run_ids=live_ids,
+            reason="Orphaned by periodic cleanup — no active executor thread",
+        )
 
 
 class TestDataDirCreation:

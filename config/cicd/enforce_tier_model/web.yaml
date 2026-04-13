@@ -266,7 +266,7 @@ allow_hits:
   reason: list_models gracefully handles missing litellm — returns empty model list
   safety: ImportError/AttributeError returns empty list; no data fabrication
   expires: null
-- key: web/composer/tools.py:R6:_prevalidate_plugin_options:fp=e9aa723028ec2cb6
+- key: web/composer/tools.py:R6:_prevalidate_plugin_options:fp=fc8016eaf9c18704
   owner: web-composer
   reason: UnknownPluginTypeError is expected for unrecognised plugin names — lets engine validation catch it later
   safety: Returns None (no pre-validation result); plugin name still validated during full pipeline instantiation
@@ -376,87 +376,87 @@ allow_hits:
   reason: IntegrityError on duplicate active state is expected race condition
   safety: Upsert-or-skip
   expires: null
-- key: web/execution/service.py:R8:ExecutionServiceImpl:execute:fp=6b73361a8ac5d0a2
+- key: web/execution/service.py:R8:ExecutionServiceImpl:execute:fp=f9d716e6737bdfa8
   owner: web-execution
   reason: Session lock map creates per-session lock lazily on first execution
   safety: Mutation is thread-safe; setdefault is atomic for dict
   expires: null
-- key: web/execution/service.py:R1:ExecutionServiceImpl:_execute_locked:fp=d0ed57b8b677c903
+- key: web/execution/service.py:R1:ExecutionServiceImpl:_execute_locked:fp=8b6dd812e7fa61a7
   owner: web-execution
   reason: Optional keys in user-authored config — source options key may be absent
   safety: Returns None; validation handles absence
   expires: null
-- key: web/execution/service.py:R1:ExecutionServiceImpl:_execute_locked:fp=e3f68e58c027c03e
+- key: web/execution/service.py:R1:ExecutionServiceImpl:_execute_locked:fp=d517259b04dfd709
   owner: web-execution
   reason: Optional keys in user-authored config — output options key may be absent
   safety: Returns None; validation handles absence
   expires: null
-- key: web/execution/service.py:R1:ExecutionServiceImpl:_execute_locked:fp=7f6ddb6f6886747d
+- key: web/execution/service.py:R1:ExecutionServiceImpl:_execute_locked:fp=5764544d0fb0a69d
   owner: web-execution
   reason: Optional keys in user-authored config — blob_ref is optional in source options
   safety: Returns None; blob link skipped
   expires: null
-- key: web/execution/service.py:R9:ExecutionServiceImpl:_execute_locked:fp=a9830a0576541b9d
+- key: web/execution/service.py:R9:ExecutionServiceImpl:_execute_locked:fp=09ed4d7d08d52682
   owner: web-execution
   reason: Idempotent shutdown-event cleanup on failure path
   safety: Pop is idempotent; except BaseException handler cleans up before re-raise
   expires: null
-- key: web/execution/service.py:R4:ExecutionServiceImpl:_execute_locked:fp=bf664da424295be0
+- key: web/execution/service.py:R4:ExecutionServiceImpl:_execute_locked:fp=d434fe7026fbd499
   owner: web-execution
   reason: Best-effort run status cleanup on setup failure — must not mask original exception
   safety: Logged with slog.error; original exception always re-raised
   expires: null
-- key: web/execution/service.py:R1:ExecutionServiceImpl:cancel:fp=4b333dbe70c09e93
+- key: web/execution/service.py:R1:ExecutionServiceImpl:cancel:fp=5f9322be834f7f93
   owner: web-execution
   reason: Check for live shutdown event before fallback handling
   safety: Returns None if absent; no silent default
   expires: null
-- key: web/execution/service.py:R5:ExecutionServiceImpl:_run_pipeline:fp=dbc9d6d3935f722e
+- key: web/execution/service.py:R5:ExecutionServiceImpl:_run_pipeline:fp=d33285840a94e691
   owner: web-execution
   reason: Tier 3 — config from YAML deserialization may be non-dict
   safety: Raises TypeError if not dict; no silent default
   expires: null
-- key: web/execution/service.py:R1:ExecutionServiceImpl:_run_pipeline:fp=8972b28590f4e022
+- key: web/execution/service.py:R1:ExecutionServiceImpl:_run_pipeline:fp=de1e255da5e2981e
   owner: web-execution
   reason: Scope-to-audit-source mapping — .get() on explicit mapping dict with crash-on-unknown guard
   safety: Unknown scope raises ValueError immediately; no silent default
   expires: null
-- key: web/execution/service.py:R4:ExecutionServiceImpl:_run_pipeline:_safe_broadcast:fp=cfe10809a8cb49f8
+- key: web/execution/service.py:R4:ExecutionServiceImpl:_run_pipeline:_safe_broadcast:fp=bd41b655121e6763
   owner: web-execution
   reason: Progress broadcasting may fail with transport exceptions
   safety: Logged; pipeline continues
   expires: null
-- key: web/execution/service.py:R6:ExecutionServiceImpl:_run_pipeline:fp=e0dfd4c767eae067
+- key: web/execution/service.py:R6:ExecutionServiceImpl:_run_pipeline:fp=8f9e8f3c5491bd68
   owner: web-execution
   reason: GracefulShutdownError is an expected control-flow signal from orchestrator cancellation
   safety: Classified as cancelled; separated from BaseException failure path
   expires: null
-- key: web/execution/service.py:R5:ExecutionServiceImpl:_run_pipeline:fp=817598b5bb6a432b
+- key: web/execution/service.py:R5:ExecutionServiceImpl:_run_pipeline:fp=63dbff30d4e5ebcd
   owner: web-execution
   reason: Error classification — SecretResolutionError triggers safe message
   safety: Secret names not leaked to client
   expires: null
-- key: web/execution/service.py:R5:ExecutionServiceImpl:_run_pipeline:fp=78ff43a9a8d4a714
+- key: web/execution/service.py:R5:ExecutionServiceImpl:_run_pipeline:fp=f1d26a399a29fb8b
   owner: web-execution
   reason: BaseException split for process-termination vs ordinary failures
   safety: Control flow distinction, not type masking
   expires: null
-- key: web/execution/service.py:R4:ExecutionServiceImpl:_run_pipeline:fp=e712f11c338bbe09
+- key: web/execution/service.py:R4:ExecutionServiceImpl:_run_pipeline:fp=1aa4f497e1bad2ea
   owner: web-execution
   reason: Status update after pipeline failure — must not mask original exception
   safety: Logged; original exception re-raised
   expires: null
-- key: web/execution/service.py:R9:ExecutionServiceImpl:_run_pipeline:fp=2b3f141b2b19ea44
+- key: web/execution/service.py:R9:ExecutionServiceImpl:_run_pipeline:fp=74ae0ff6e51ddf16
   owner: web-execution
   reason: Final shutdown-event cleanup is intentionally idempotent
   safety: Pop is idempotent
   expires: null
-- key: web/execution/service.py:R6:ExecutionServiceImpl:_finalize_output_blobs:fp=29b0fcc2401c800f
+- key: web/execution/service.py:R6:ExecutionServiceImpl:_finalize_output_blobs:fp=062931caddff8fd1
   owner: web-execution
   reason: Blob finalization after terminal status — failure must not mask run outcome
   safety: Narrowed to (OSError, SQLAlchemyError); logged with slog.error; run status preserved
   expires: null
-- key: web/execution/service.py:R5:ExecutionServiceImpl:_on_pipeline_done:fp=8e6114e3efa3098c
+- key: web/execution/service.py:R5:ExecutionServiceImpl:_on_pipeline_done:fp=23dadf69cf235148
   owner: web-execution
   reason: Error classification for sanitized client messaging
   safety: SecretResolutionError triggers safe message

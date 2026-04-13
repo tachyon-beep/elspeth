@@ -42,6 +42,7 @@ from elspeth.web.sessions.service import SessionServiceImpl
 
 async def _periodic_orphan_cleanup(
     session_service: SessionServiceImpl,
+    execution_service: ExecutionServiceImpl,
     *,
     interval_seconds: int,
     max_age_seconds: int,
@@ -53,8 +54,10 @@ async def _periodic_orphan_cleanup(
     Startup cleanup handles the bulk case, but if the server runs for
     days/weeks without restart, this catches runs orphaned mid-uptime.
 
-    Uses max_age_seconds (not None) because a run younger than the
-    threshold may still be legitimately executing in a background thread.
+    Consults execution_service.get_live_run_ids() to distinguish runs
+    with active executor threads from genuinely orphaned ones. A run
+    is only orphaned if it has no registered shutdown event — age alone
+    is not proof of orphanhood.
     """
     import structlog
 
@@ -62,11 +65,14 @@ async def _periodic_orphan_cleanup(
     while True:
         await asyncio.sleep(interval_seconds)
         try:
+            live_run_ids = execution_service.get_live_run_ids()
             cancelled = await session_service.cancel_all_orphaned_runs(
                 max_age_seconds=max_age_seconds,
+                exclude_run_ids=live_run_ids,
+                reason="Orphaned by periodic cleanup — no active executor thread",
             )
             if cancelled:
-                slog.info("periodic_orphan_cleanup", cancelled=cancelled)
+                slog.info("periodic_orphan_cleanup", cancelled=cancelled, excluded=len(live_run_ids))
         except Exception:
             slog.error("periodic_orphan_cleanup_failed", exc_info=True)
 
@@ -89,7 +95,9 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     # No age filter — cancel ALL pending/running runs immediately.
     settings: WebSettings = app.state.settings
     session_service = app.state.session_service
-    cancelled = await session_service.cancel_all_orphaned_runs()
+    cancelled = await session_service.cancel_all_orphaned_runs(
+        reason="Orphaned by server restart — no active process",
+    )
     if cancelled:
         slog.info("cancelled_orphaned_runs", count=cancelled)
 
@@ -139,9 +147,11 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     # Periodic orphan cleanup — catches runs orphaned by SIGKILL/OOM
     # between restarts. Startup cleanup (above) handles the bulk case;
     # this catches runs orphaned while the server is still running.
+    # Liveness-aware: excludes runs with active executor threads.
     orphan_task = asyncio.create_task(
         _periodic_orphan_cleanup(
             session_service,
+            execution_service,
             interval_seconds=settings.orphan_run_check_interval_seconds,
             max_age_seconds=settings.orphan_run_max_age_seconds,
         )

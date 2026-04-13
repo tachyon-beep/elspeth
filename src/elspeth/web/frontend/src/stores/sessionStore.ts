@@ -186,7 +186,7 @@ export const useSessionStore = create<SessionState>((set, get) => ({
         return {
           messages: s.messages.map((existing) =>
             existing.id === optimisticMessage.id
-              ? { ...existing, local_status: undefined }
+              ? { ...existing, local_status: undefined, local_error: undefined }
               : existing,
           ).concat(message),
           compositionState: newState,
@@ -225,7 +225,7 @@ export const useSessionStore = create<SessionState>((set, get) => ({
         error: errorMessage,
         messages: state.messages.map((existing) =>
           existing.id === optimisticMessage.id
-            ? { ...existing, local_status: "failed" }
+            ? { ...existing, local_status: "failed", local_error: errorMessage }
             : existing,
         ),
       }));
@@ -298,7 +298,7 @@ export const useSessionStore = create<SessionState>((set, get) => ({
         return {
           messages: s.messages.map((existing) =>
             existing.id === messageId
-              ? { ...existing, local_status: undefined }
+              ? { ...existing, local_status: undefined, local_error: undefined }
               : existing,
           ).concat(assistantMessage),
           compositionState: newState,
@@ -325,7 +325,7 @@ export const useSessionStore = create<SessionState>((set, get) => ({
         error: errorMessage,
         messages: state.messages.map((existing) =>
           existing.id === messageId
-            ? { ...existing, local_status: "failed" }
+            ? { ...existing, local_status: "failed", local_error: errorMessage }
             : existing,
         ),
       }));

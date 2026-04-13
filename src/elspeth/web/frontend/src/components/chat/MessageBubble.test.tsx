@@ -42,12 +42,25 @@ describe("MessageBubble", () => {
       const onRetry = vi.fn();
       render(
         <MessageBubble
-          message={makeMessage({ local_status: "failed" })}
+          message={makeMessage({ local_status: "failed", local_error: "The AI service is temporarily unavailable. Please try again in a moment." })}
           isComposing={false}
           onRetry={onRetry}
         />,
       );
       expect(screen.getByText("Retry")).toBeInTheDocument();
+      expect(screen.getByText("The AI service is temporarily unavailable. Please try again in a moment.")).toBeInTheDocument();
+    });
+
+    it("shows default error when local_error is absent", () => {
+      const onRetry = vi.fn();
+      render(
+        <MessageBubble
+          message={makeMessage({ local_status: "failed" })}
+          isComposing={false}
+          onRetry={onRetry}
+        />,
+      );
+      expect(screen.getByText("Failed to send message. Please try again.")).toBeInTheDocument();
     });
   });
 

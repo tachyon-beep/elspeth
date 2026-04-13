@@ -746,6 +746,8 @@ class SessionServiceImpl:
     async def cancel_all_orphaned_runs(
         self,
         max_age_seconds: int | None = None,
+        exclude_run_ids: frozenset[str] = frozenset(),
+        reason: str | None = None,
     ) -> int:
         """Force-cancel orphaned runs across all sessions.
 
@@ -756,6 +758,10 @@ class SessionServiceImpl:
             max_age_seconds: Only cancel runs older than this. None cancels
                 all non-terminal runs (correct for single-process servers
                 where every non-terminal run is orphaned after restart).
+            exclude_run_ids: Run IDs known to have active executor threads.
+                These are skipped even if they exceed max_age_seconds.
+            reason: Written to the error column so operators can distinguish
+                orphan-cleanup cancellations from user cancellations.
         """
         now = self._now()
 
@@ -765,11 +771,17 @@ class SessionServiceImpl:
                 if max_age_seconds is not None:
                     cutoff = now - timedelta(seconds=max_age_seconds)
                     conditions.append(runs_table.c.started_at <= cutoff)
+                if exclude_run_ids:
+                    conditions.append(runs_table.c.id.not_in(exclude_run_ids))
 
                 stale_rows = conn.execute(select(runs_table.c.id).where(*conditions)).fetchall()
 
+                values: dict[str, Any] = {"status": "cancelled", "finished_at": now}
+                if reason is not None:
+                    values["error"] = reason
+
                 for row in stale_rows:
-                    conn.execute(update(runs_table).where(runs_table.c.id == row.id).values(status="cancelled", finished_at=now))
+                    conn.execute(update(runs_table).where(runs_table.c.id == row.id).values(**values))
                 return len(stale_rows)
 
         return cast(int, await self._run_sync(_sync))

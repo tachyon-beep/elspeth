@@ -855,6 +855,145 @@ class TestCancelAllOrphanedRuns:
         assert run2.status == "pending"
 
 
+class TestCancelAllOrphanedRunsExcludeRunIds:
+    """Tests for exclude_run_ids — liveness-aware orphan cleanup."""
+
+    @pytest.mark.asyncio
+    async def test_excludes_live_run_ids_from_cancellation(self, service) -> None:
+        """Runs with IDs in exclude_run_ids are skipped even if they exceed max_age."""
+        session = await service.create_session("alice", "Pipeline", "local")
+        state = await service.save_composition_state(
+            session.id,
+            CompositionStateData(is_valid=True),
+        )
+        run = await service.create_run(session.id, state.id)
+        await service.update_run_status(run.id, "running")
+
+        # Exclude this run's ID — it should NOT be cancelled
+        cancelled = await service.cancel_all_orphaned_runs(
+            max_age_seconds=0,
+            exclude_run_ids=frozenset({str(run.id)}),
+        )
+        assert cancelled == 0
+
+        # Run should still be running
+        fetched = await service.get_run(run.id)
+        assert fetched.status == "running"
+
+    @pytest.mark.asyncio
+    async def test_cancels_non_excluded_runs(self, service) -> None:
+        """Runs NOT in exclude_run_ids are still cancelled normally."""
+        session = await service.create_session("alice", "Pipeline", "local")
+        state = await service.save_composition_state(
+            session.id,
+            CompositionStateData(is_valid=True),
+        )
+        run = await service.create_run(session.id, state.id)
+        await service.update_run_status(run.id, "running")
+
+        # Exclude a different run ID — this run should be cancelled
+        cancelled = await service.cancel_all_orphaned_runs(
+            max_age_seconds=0,
+            exclude_run_ids=frozenset({"not-this-run-id"}),
+        )
+        assert cancelled == 1
+
+        fetched = await service.get_run(run.id)
+        assert fetched.status == "cancelled"
+
+    @pytest.mark.asyncio
+    async def test_empty_exclude_set_cancels_all(self, service) -> None:
+        """Empty exclude_run_ids (default) does not change behaviour."""
+        session = await service.create_session("alice", "Pipeline", "local")
+        state = await service.save_composition_state(
+            session.id,
+            CompositionStateData(is_valid=True),
+        )
+        run = await service.create_run(session.id, state.id)
+        await service.update_run_status(run.id, "running")
+
+        cancelled = await service.cancel_all_orphaned_runs(
+            max_age_seconds=0,
+            exclude_run_ids=frozenset(),
+        )
+        assert cancelled == 1
+
+
+class TestCancelAllOrphanedRunsReason:
+    """Tests for reason parameter — error provenance on orphan cancellation."""
+
+    @pytest.mark.asyncio
+    async def test_reason_written_to_error_column(self, service) -> None:
+        """When reason is provided, it's stored in the run's error field."""
+        session = await service.create_session("alice", "Pipeline", "local")
+        state = await service.save_composition_state(
+            session.id,
+            CompositionStateData(is_valid=True),
+        )
+        run = await service.create_run(session.id, state.id)
+        await service.update_run_status(run.id, "running")
+
+        await service.cancel_all_orphaned_runs(
+            max_age_seconds=0,
+            reason="Orphaned by server restart — no active process",
+        )
+
+        fetched = await service.get_run(run.id)
+        assert fetched.status == "cancelled"
+        assert fetched.error == "Orphaned by server restart — no active process"
+
+    @pytest.mark.asyncio
+    async def test_no_reason_leaves_error_null(self, service) -> None:
+        """When reason is None (default), error field stays unset."""
+        session = await service.create_session("alice", "Pipeline", "local")
+        state = await service.save_composition_state(
+            session.id,
+            CompositionStateData(is_valid=True),
+        )
+        run = await service.create_run(session.id, state.id)
+        await service.update_run_status(run.id, "running")
+
+        await service.cancel_all_orphaned_runs(max_age_seconds=0)
+
+        fetched = await service.get_run(run.id)
+        assert fetched.status == "cancelled"
+        assert fetched.error is None
+
+
+class TestCancelledTerminalTransitions:
+    """Tests for cancelled as a terminal state — no outgoing transitions.
+
+    These transitions are the exact paths triggered when the orphan cleanup
+    cancels a run in the DB while the executor thread is still running.
+    The executor then tries cancelled→completed or cancelled→failed,
+    both of which must be rejected.
+    """
+
+    @pytest.mark.asyncio
+    async def test_illegal_transition_cancelled_to_completed_raises(self, service) -> None:
+        session = await service.create_session("alice", "Pipeline", "local")
+        state = await service.save_composition_state(
+            session.id,
+            CompositionStateData(is_valid=True),
+        )
+        run = await service.create_run(session.id, state.id)
+        await service.update_run_status(run.id, "cancelled")
+        with pytest.raises(ValueError, match=r"Illegal.*transition"):
+            await service.update_run_status(run.id, "completed")
+
+    @pytest.mark.asyncio
+    async def test_illegal_transition_cancelled_to_failed_raises(self, service) -> None:
+        session = await service.create_session("alice", "Pipeline", "local")
+        state = await service.save_composition_state(
+            session.id,
+            CompositionStateData(is_valid=True),
+        )
+        run = await service.create_run(session.id, state.id)
+        await service.update_run_status(run.id, "cancelled")
+        with pytest.raises(ValueError, match=r"Illegal.*transition"):
+            await service.update_run_status(run.id, "failed")
+
+
 class TestArchiveSessionWithActiveRun:
     """Tests for archive_session when a run is active."""
 

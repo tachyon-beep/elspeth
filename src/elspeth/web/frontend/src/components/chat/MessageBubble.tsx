@@ -147,7 +147,7 @@ export function MessageBubble({ message, isComposing, onRetry, onFork }: Message
         {isUser && message.local_status === "failed" && onRetry && (
           <div className="message-failed-row">
             <span className="message-failed-text">
-              No LLM available. Message not processed.
+              {message.local_error ?? "Failed to send message. Please try again."}
             </span>
             <button
               onClick={() => onRetry(message.id)}

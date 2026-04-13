@@ -3227,3 +3227,59 @@ class TestPrevalidatePluginOptions:
         assert node.id == "agg1"
         assert node.node_type == "aggregation"
         assert node.plugin == "batch_stats"
+
+    def test_secret_ref_field_passes_prevalidation(self) -> None:
+        """Options with secret_ref markers pass prevalidation.
+
+        A secret-ref'd field is provisioned (the user called wire_secret_ref),
+        just deferred to execution time. Prevalidation must not reject it.
+        """
+        result = _prevalidate_plugin_options(
+            "transform",
+            "azure_content_safety",
+            {
+                "api_key": {"secret_ref": "AZURE_API_KEY"},
+                "endpoint": "https://test.cognitiveservices.azure.com",
+                "schema": {"mode": "observed"},
+                "fields": "text",
+                "thresholds": {"hate": 2, "violence": 2, "sexual": 2, "self_harm": 2},
+            },
+        )
+        assert result is None
+
+    def test_secret_ref_field_non_secret_errors_still_reported(self) -> None:
+        """Secret-ref'd fields are forgiven but other errors are still reported.
+
+        api_key has a secret_ref (valid), but fields and thresholds are missing
+        (real errors). The error message must mention the missing fields but
+        NOT api_key.
+        """
+        result = _prevalidate_plugin_options(
+            "transform",
+            "azure_content_safety",
+            {
+                "api_key": {"secret_ref": "AZURE_API_KEY"},
+                "endpoint": "https://test.cognitiveservices.azure.com",
+                "schema": {"mode": "observed"},
+                # fields and thresholds deliberately absent
+            },
+        )
+        assert result is not None
+        assert "fields" in result
+        assert "thresholds" in result
+        assert "api_key" not in result
+
+    def test_secret_ref_in_source_passes_prevalidation(self) -> None:
+        """Source options with a secret_ref marker pass prevalidation."""
+        result = _prevalidate_plugin_options(
+            "transform",
+            "llm",
+            {
+                "provider": "openrouter",
+                "model": "openai/gpt-4o",
+                "api_key": {"secret_ref": "OPENROUTER_API_KEY"},
+                "template": "Classify: {{text}}",
+                "schema": {"mode": "observed"},
+            },
+        )
+        assert result is None
