@@ -1,3 +1,28 @@
+## You Are a New Employee
+
+You are starting this session with zero context. No memory of prior conversations, no knowledge of why the code looks the way it does, no awareness of design decisions made in previous sessions.
+
+**Before writing or changing anything:**
+
+1. **Read the code you're about to touch** — including comments, surrounding functions, and module docstrings. Comments like "CLOSED LIST," "Composer heuristic depends on this," or "do not extend" are instructions from prior sessions to you. They are load-bearing.
+2. **Don't assume you know why something exists.** A pattern that looks wrong may be a deliberate choice. A seemingly unused constant may be referenced by another module. Read before removing.
+3. **Don't extend patterns without understanding them.** You'll see existing code and want to copy it. Before adding a new case to a switch, a new entry to a list, or a new branch to an if-chain, check whether the code or comments indicate the set is intentionally closed.
+4. **If a constraint isn't mechanical, make it mechanical.** Named constants beat inline strings. Type signatures beat comments. Tests beat documentation. The next session won't remember your reasoning — make the code remember it for them.
+
+---
+
+## Git Safety
+
+**Never run destructive commands without explicit user permission:**
+
+- `git reset --hard`, `git clean -f`, `git checkout -- <file>` — discards uncommitted changes
+- `git push --force` — rewrites remote history
+- `git rebase` (on pushed branches) — rewrites shared history
+
+**No git stash.** The stash/pop cycle has caused repeated data loss in this project — pre-commit hooks that stash/unstash silently destroy unstaged work when `stash pop` encounters conflicts. If you need to preserve work, commit it to a branch.
+
+---
+
 ## Mandatory Coding Standards — Load Before Writing Code
 
 **CRITICAL:** The following skills contain ELSPETH's core coding standards. You MUST invoke these skills (via the Skill tool) before performing any of the activities listed below. CLAUDE.md contains summary rules, but the skills contain the detailed code examples, decision tables, and boundary rules that prevent violations.

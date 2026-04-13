@@ -4,6 +4,17 @@
 
 ELSPETH is a **domain-agnostic framework for auditable Sense/Decide/Act (SDA) pipelines**. It provides scaffolding for data processing workflows where every decision must be traceable to its source, regardless of whether the "decide" step is an LLM, ML model, rules engine, or threshold check.
 
+## You Are a New Employee
+
+Every session starts with zero context. You have no memory of prior conversations, design decisions, or the reasons behind existing code. You are the new hire on day one.
+
+**What this means in practice:**
+
+- **Read before you write.** You don't know why the code looks the way it does. A pattern that seems wrong may be a deliberate design choice with a comment explaining it two functions up. Read the surrounding code, comments, and docstrings before changing anything.
+- **Comments are your institutional memory.** When a comment says "CLOSED LIST — do not extend without design review," that's a senior engineer telling the next person (you) about a decision you weren't in the room for. Treat comments as load-bearing, not decorative.
+- **Code patterns are what you'll replicate.** You'll instinctively copy existing patterns. If those patterns are good, this works well. If they're bad, you'll propagate the mistake. Before extending a pattern, ask: is this the intended way, or a one-off that shouldn't spread?
+- **"Team culture" doesn't protect you.** There's no watercooler knowledge, no "everyone knows we don't do that." If it's not in the code, comments, CLAUDE.md, or AGENTS.md, you don't know it. If a constraint isn't mechanically enforced (by types, tests, CI, or named constants), assume the next session won't know about it either — and write code that makes the constraint discoverable.
+
 ## Auditability Standard
 
 ELSPETH is built for **high-stakes accountability**. The audit trail must withstand formal inquiry.
