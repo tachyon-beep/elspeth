@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from elspeth.plugins.infrastructure.config_base import PluginConfig
+from elspeth.contracts.plugin_protocols import PluginConfigProtocol
 from elspeth.plugins.infrastructure.discovery import get_plugin_description
 from elspeth.plugins.infrastructure.manager import PluginManager
 from elspeth.plugins.infrastructure.validation import (
@@ -131,7 +131,7 @@ class CatalogServiceImpl:
 
         return fields
 
-    def _resolve_config_model(self, plugin_type: str, name: str) -> type[PluginConfig] | None:
+    def _resolve_config_model(self, plugin_type: str, name: str) -> type[PluginConfigProtocol] | None:
         """Resolve plugin name to its Pydantic config model class.
 
         Returns None for plugins with no config model. This includes both

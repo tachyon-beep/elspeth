@@ -19,14 +19,12 @@ Usage:
 """
 
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Any
+from typing import Any
 
 from pydantic import ValidationError as PydanticValidationError
 
+from elspeth.contracts.plugin_protocols import PluginConfigProtocol
 from elspeth.plugins.infrastructure.config_base import PluginConfigError
-
-if TYPE_CHECKING:
-    from elspeth.plugins.infrastructure.config_base import PluginConfig
 
 
 class UnknownPluginTypeError(ValueError):
@@ -87,7 +85,7 @@ def validate_source_config(
         return _extract_wrapped_plugin_config_error(e, config)
 
 
-def get_source_config_model(source_type: str) -> type["PluginConfig"] | None:
+def get_source_config_model(source_type: str) -> type[PluginConfigProtocol] | None:
     """Get Pydantic config model for source type.
 
     Resolves the plugin class via pluggy discovery (PluginManager), then
@@ -221,7 +219,7 @@ def _extract_wrapped_plugin_config_error(
 def get_transform_config_model(
     transform_type: str,
     config: dict[str, Any] | None = None,
-) -> type["PluginConfig"] | None:
+) -> type[PluginConfigProtocol] | None:
     """Get Pydantic config model for transform type.
 
     Resolves the plugin class via pluggy discovery (PluginManager), then
@@ -247,7 +245,7 @@ def get_transform_config_model(
     return plugin_cls.get_config_model(config)
 
 
-def get_sink_config_model(sink_type: str) -> type["PluginConfig"] | None:
+def get_sink_config_model(sink_type: str) -> type[PluginConfigProtocol] | None:
     """Get Pydantic config model for sink type.
 
     Resolves the plugin class via pluggy discovery (PluginManager), then

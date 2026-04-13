@@ -26,7 +26,31 @@ if TYPE_CHECKING:
     from elspeth.contracts.results import SourceRow, TransformResult
     from elspeth.contracts.schema_contract import PipelineRow, SchemaContract
     from elspeth.contracts.sink import OutputValidationResult
-    from elspeth.plugins.infrastructure.config_base import PluginConfig
+
+
+class PluginConfigProtocol(Protocol):
+    """Minimal type shape for plugin config classes.
+
+    Captures only the interface that callers of get_config_model() actually
+    use: from_dict() for validation and model_json_schema() for schema
+    generation.  Defined here in L0/contracts to avoid a structural
+    dependency from contracts → plugins/infrastructure/config_base.
+    """
+
+    @classmethod
+    def from_dict(
+        cls,
+        config: object,
+        *,
+        plugin_name: str | None = None,
+    ) -> Any:
+        """Create config from dict with validation."""
+        ...
+
+    @classmethod
+    def model_json_schema(cls) -> dict[str, Any]:
+        """Return JSON Schema for this config model."""
+        ...
 
 
 class SourceProtocol(Protocol):
@@ -140,7 +164,7 @@ class SourceProtocol(Protocol):
         ...
 
     @classmethod
-    def get_config_model(cls, config: dict[str, Any] | None = None) -> type["PluginConfig"] | None:
+    def get_config_model(cls, config: dict[str, Any] | None = None) -> type[PluginConfigProtocol] | None:
         """Return the Pydantic config model for this plugin type.
 
         Returns None for sources with no config (e.g. NullSource).
@@ -279,7 +303,7 @@ class TransformProtocol(Protocol):
         ...
 
     @classmethod
-    def get_config_model(cls, config: dict[str, Any] | None = None) -> type["PluginConfig"] | None:
+    def get_config_model(cls, config: dict[str, Any] | None = None) -> type[PluginConfigProtocol] | None:
         """Return the Pydantic config model for this plugin type.
 
         Override for dynamic dispatch (e.g. LLMTransform selects provider-specific
@@ -394,7 +418,7 @@ class BatchTransformProtocol(Protocol):
         ...
 
     @classmethod
-    def get_config_model(cls, config: dict[str, Any] | None = None) -> type["PluginConfig"] | None:
+    def get_config_model(cls, config: dict[str, Any] | None = None) -> type[PluginConfigProtocol] | None:
         """Return the Pydantic config model for this plugin type.
 
         Override for dynamic dispatch based on config contents.
@@ -586,7 +610,7 @@ class SinkProtocol(Protocol):
         ...
 
     @classmethod
-    def get_config_model(cls, config: dict[str, Any] | None = None) -> type["PluginConfig"] | None:
+    def get_config_model(cls, config: dict[str, Any] | None = None) -> type[PluginConfigProtocol] | None:
         """Return the Pydantic config model for this plugin type.
 
         Override for dynamic dispatch based on config contents.
