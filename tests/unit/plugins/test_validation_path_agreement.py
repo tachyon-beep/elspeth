@@ -296,40 +296,38 @@ def test_prevalidation_rejects_invalid_sink(sink_type, config, error_pattern):
 # ── Parametric test: engine-instantiation path ──────────────────────────
 
 
-@pytest.mark.parametrize("transform_type,config,error_pattern", _TRANSFORM_REJECTION_CASES)
-def test_engine_rejects_invalid_transform(transform_type, config, error_pattern):
-    """Engine path (plugin_cls(config)) rejects known-invalid transform configs."""
+@pytest.fixture(scope="module")
+def plugin_manager():
+    """Shared PluginManager for engine-path tests — avoids re-scanning plugins per parametrized case."""
     from elspeth.plugins.infrastructure.manager import PluginManager
 
     manager = PluginManager()
     manager.register_builtin_plugins()
-    plugin_cls = manager.get_transform_by_name(transform_type)
+    return manager
+
+
+@pytest.mark.parametrize("transform_type,config,error_pattern", _TRANSFORM_REJECTION_CASES)
+def test_engine_rejects_invalid_transform(transform_type, config, error_pattern, plugin_manager):
+    """Engine path (plugin_cls(config)) rejects known-invalid transform configs."""
+    plugin_cls = plugin_manager.get_transform_by_name(transform_type)
 
     with pytest.raises((ValueError, PluginConfigError)):
         plugin_cls(config)
 
 
 @pytest.mark.parametrize("source_type,config,error_pattern", _SOURCE_REJECTION_CASES)
-def test_engine_rejects_invalid_source(source_type, config, error_pattern):
+def test_engine_rejects_invalid_source(source_type, config, error_pattern, plugin_manager):
     """Engine path (plugin_cls(config)) rejects known-invalid source configs."""
-    from elspeth.plugins.infrastructure.manager import PluginManager
-
-    manager = PluginManager()
-    manager.register_builtin_plugins()
-    plugin_cls = manager.get_source_by_name(source_type)
+    plugin_cls = plugin_manager.get_source_by_name(source_type)
 
     with pytest.raises((ValueError, PluginConfigError)):
         plugin_cls(config)
 
 
 @pytest.mark.parametrize("sink_type,config,error_pattern", _SINK_REJECTION_CASES)
-def test_engine_rejects_invalid_sink(sink_type, config, error_pattern):
+def test_engine_rejects_invalid_sink(sink_type, config, error_pattern, plugin_manager):
     """Engine path (plugin_cls(config)) rejects known-invalid sink configs."""
-    from elspeth.plugins.infrastructure.manager import PluginManager
-
-    manager = PluginManager()
-    manager.register_builtin_plugins()
-    plugin_cls = manager.get_sink_by_name(sink_type)
+    plugin_cls = plugin_manager.get_sink_by_name(sink_type)
 
     with pytest.raises((ValueError, PluginConfigError)):
         plugin_cls(config)

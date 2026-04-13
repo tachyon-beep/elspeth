@@ -38,10 +38,13 @@ class TestBuildToolDefs:
         tools = _build_tool_defs()
         assert len(tools) > 20
 
-    def test_expected_count_is_29(self) -> None:
-        """23 composer (10 discovery + 13 mutation) + 6 session = 29."""
+    def test_tool_count_matches_registry(self) -> None:
+        """Tool count must equal composer subset + session tools."""
+        from elspeth.composer_mcp.server import _COMPOSER_TOOL_NAMES, _SESSION_TOOL_DEFS
+
         tools = _build_tool_defs()
-        assert len(tools) == 29
+        expected = len(_COMPOSER_TOOL_NAMES) + len(_SESSION_TOOL_DEFS)
+        assert len(tools) == expected, f"Expected {expected}, got {len(tools)}"
 
     def test_all_tools_have_name_and_description(self) -> None:
         for tool in _build_tool_defs():
