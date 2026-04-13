@@ -2478,6 +2478,59 @@ def _execute_list_models(
     return _discovery_result(state, data)
 
 
+def _serialize_source(source: SourceSpec) -> dict[str, Any]:
+    """Serialize a SourceSpec to a plain dict for LLM consumption."""
+    return {
+        "plugin": source.plugin,
+        "on_success": source.on_success,
+        "options": deep_thaw(source.options),
+        "on_validation_failure": source.on_validation_failure,
+    }
+
+
+def _serialize_node(node: NodeSpec) -> dict[str, Any]:
+    """Serialize a NodeSpec to a plain dict for LLM consumption.
+
+    Includes all fields (even None) so the LLM sees the full schema.
+    """
+    return {
+        "id": node.id,
+        "node_type": node.node_type,
+        "plugin": node.plugin,
+        "input": node.input,
+        "on_success": node.on_success,
+        "on_error": node.on_error,
+        "options": deep_thaw(node.options),
+        "condition": node.condition,
+        "routes": deep_thaw(node.routes) if node.routes else None,
+        "fork_to": list(node.fork_to) if node.fork_to else None,
+        "branches": list(node.branches) if node.branches else None,
+        "policy": node.policy,
+        "merge": node.merge,
+    }
+
+
+def _serialize_output(output: OutputSpec) -> dict[str, Any]:
+    """Serialize an OutputSpec to a plain dict for LLM consumption."""
+    return {
+        "sink_name": output.name,
+        "plugin": output.plugin,
+        "options": deep_thaw(output.options),
+        "on_write_failure": output.on_write_failure,
+    }
+
+
+def _serialize_edge(edge: EdgeSpec) -> dict[str, Any]:
+    """Serialize an EdgeSpec to a plain dict for LLM consumption."""
+    return {
+        "id": edge.id,
+        "from_node": edge.from_node,
+        "to_node": edge.to_node,
+        "edge_type": edge.edge_type,
+        "label": edge.label,
+    }
+
+
 def _execute_get_pipeline_state(
     args: dict[str, Any],
     state: CompositionState,
@@ -2493,93 +2546,25 @@ def _execute_get_pipeline_state(
     component = args.get("component")
 
     if component == "source":
-        if state.source is None:
-            data: Any = {"source": None}
-        else:
-            data = {
-                "source": {
-                    "plugin": state.source.plugin,
-                    "on_success": state.source.on_success,
-                    "options": deep_thaw(state.source.options),
-                    "on_validation_failure": state.source.on_validation_failure,
-                },
-            }
+        data: Any = {"source": _serialize_source(state.source) if state.source is not None else None}
     elif component is not None:
         # Try node, then output
         node = next((n for n in state.nodes if n.id == component), None)
         if node is not None:
-            data = {
-                "node": {
-                    "id": node.id,
-                    "node_type": node.node_type,
-                    "plugin": node.plugin,
-                    "input": node.input,
-                    "on_success": node.on_success,
-                    "on_error": node.on_error,
-                    "options": deep_thaw(node.options),
-                    "condition": node.condition,
-                    "routes": deep_thaw(node.routes) if node.routes else None,
-                    "fork_to": list(node.fork_to) if node.fork_to else None,
-                    "branches": list(node.branches) if node.branches else None,
-                    "policy": node.policy,
-                    "merge": node.merge,
-                },
-            }
+            data = {"node": _serialize_node(node)}
         else:
             output = next((o for o in state.outputs if o.name == component), None)
             if output is not None:
-                data = {
-                    "output": {
-                        "sink_name": output.name,
-                        "plugin": output.plugin,
-                        "options": deep_thaw(output.options),
-                        "on_write_failure": output.on_write_failure,
-                    },
-                }
+                data = {"output": _serialize_output(output)}
             else:
                 return _failure_result(state, f"Component '{component}' not found. Specify 'source', a node ID, or an output name.")
     else:
         # Full state
         data = {
-            "source": {
-                "plugin": state.source.plugin,
-                "on_success": state.source.on_success,
-                "options": deep_thaw(state.source.options),
-                "on_validation_failure": state.source.on_validation_failure,
-            }
-            if state.source is not None
-            else None,
-            "nodes": [
-                {
-                    "id": n.id,
-                    "node_type": n.node_type,
-                    "plugin": n.plugin,
-                    "input": n.input,
-                    "on_success": n.on_success,
-                    "on_error": n.on_error,
-                    "options": deep_thaw(n.options),
-                    "condition": n.condition,
-                    "routes": deep_thaw(n.routes) if n.routes else None,
-                    "fork_to": list(n.fork_to) if n.fork_to else None,
-                    "branches": list(n.branches) if n.branches else None,
-                    "policy": n.policy,
-                    "merge": n.merge,
-                }
-                for n in state.nodes
-            ],
-            "outputs": [
-                {
-                    "sink_name": o.name,
-                    "plugin": o.plugin,
-                    "options": deep_thaw(o.options),
-                    "on_write_failure": o.on_write_failure,
-                }
-                for o in state.outputs
-            ],
-            "edges": [
-                {"id": e.id, "from_node": e.from_node, "to_node": e.to_node, "edge_type": e.edge_type, "label": e.label}
-                for e in state.edges
-            ],
+            "source": _serialize_source(state.source) if state.source is not None else None,
+            "nodes": [_serialize_node(n) for n in state.nodes],
+            "outputs": [_serialize_output(o) for o in state.outputs],
+            "edges": [_serialize_edge(e) for e in state.edges],
             "metadata": {"name": state.metadata.name, "description": state.metadata.description},
             "version": state.version,
         }

@@ -571,6 +571,11 @@ allowed_dict_patterns:
   - "src/elspeth/web/composer/tools.py:_execute_get_blob_content:arguments"
   - "src/elspeth/web/composer/tools.py:_execute_diff_pipeline:args"
   - "src/elspeth/web/composer/tools.py:_execute_get_pipeline_state:args"
+  # Serialization helpers — produce JSON dicts for LLM tool responses
+  - "src/elspeth/web/composer/tools.py:_serialize_source:return"
+  - "src/elspeth/web/composer/tools.py:_serialize_node:return"
+  - "src/elspeth/web/composer/tools.py:_serialize_output:return"
+  - "src/elspeth/web/composer/tools.py:_serialize_edge:return"
   # Prevalidation helpers — options dicts are user-authored plugin config (Tier 3)
   - "src/elspeth/web/composer/tools.py:_compute_validation_delta:return"
   - "src/elspeth/web/composer/tools.py:_validate_sink_path:options"
