@@ -505,7 +505,8 @@ def build_execution_graph(
             existing_node, _existing_label = producers[connection_name]
             raise GraphValidationError(
                 f"Duplicate producer for connection '{connection_name}': "
-                f"{producer_desc[connection_name]} ({existing_node}) and {description} ({node_id})."
+                f"{producer_desc[connection_name]} ({existing_node}) and {description} ({node_id}).",
+                component_id=str(node_id),
             )
         producers[connection_name] = (node_id, label)
         producer_desc[connection_name] = description

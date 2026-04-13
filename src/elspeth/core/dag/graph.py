@@ -62,12 +62,20 @@ _coalesce_schema_counter = itertools.count(1)
 _EMPTY_DECLARED_REQUIRED_FIELDS: frozenset[str] = frozenset()
 
 
-def _build_coalesce_schema(schema_config: SchemaConfig) -> type[PluginSchema]:
+def _build_coalesce_schema(
+    schema_config: SchemaConfig,
+    *,
+    coalesce_id: str | None = None,
+) -> type[PluginSchema]:
     """Build a PluginSchema class from a coalesce SchemaConfig.
 
     Used by get_effective_producer_schema() to enable PHASE 2 type validation
     on union-merge coalesce edges.  The SchemaConfig is set by the builder's
     ``_assign_schema()`` on the coalesce node.
+
+    Args:
+        schema_config: The schema configuration for the coalesce node.
+        coalesce_id: The node ID of the coalesce node, for error attribution.
 
     Raises:
         GraphValidationError: If the schema config has no fields (indicates
@@ -79,6 +87,7 @@ def _build_coalesce_schema(schema_config: SchemaConfig) -> type[PluginSchema]:
         raise GraphValidationError(
             f"Coalesce union schema has no fields (mode={schema_config.mode!r}). "
             "Observed schemas should be filtered before calling _build_coalesce_schema.",
+            component_id=coalesce_id,
             component_type="coalesce",
         )
 
@@ -464,16 +473,24 @@ class ExecutionGraph:
                 first_node, first_desc = dup_entries[0]
                 second_node, second_desc = dup_entries[1]
                 error_parts.append(f"'{dup_name}': {first_desc} ({first_node}) and {second_desc} ({second_node})")
+            first_dup_node, _first_dup_desc = next(
+                (node_id, desc) for name, node_id, desc in consumer_claims if name == duplicate_consumers[0]
+            )
             raise GraphValidationError(
-                f"Duplicate consumers for {len(duplicate_consumers)} connection(s): " + "; ".join(error_parts) + ". Use a gate for fan-out."
+                f"Duplicate consumers for {len(duplicate_consumers)} connection(s): "
+                + "; ".join(error_parts)
+                + ". Use a gate for fan-out.",
+                component_id=str(first_dup_node),
             )
 
         for connection_name in consumers:
             if connection_name not in producers:
                 suggestions = _suggest_similar(connection_name, sorted(producers.keys()))
                 hint = f" Did you mean: {', '.join(suggestions)}?" if suggestions else ""
+                consumer_node = consumers[connection_name]
                 raise GraphValidationError(
-                    f"No producer for connection '{connection_name}'.{hint}\nAvailable connections: {', '.join(sorted(producers.keys()))}"
+                    f"No producer for connection '{connection_name}'.{hint}\nAvailable connections: {', '.join(sorted(producers.keys()))}",
+                    component_id=str(consumer_node),
                 )
 
         connection_names = set(producers.keys()) | set(consumers.keys())
@@ -1432,7 +1449,7 @@ class ExecutionGraph:
                 # Union merge: the builder sets output_schema_config with concrete
                 # field types.  Build a PluginSchema class from it so PHASE 2 edge
                 # validation can type-check downstream.
-                result = _build_coalesce_schema(node_info.output_schema_config)
+                result = _build_coalesce_schema(node_info.output_schema_config, coalesce_id=str(node_id))
                 _cache[node_id] = result
                 return result
             # nested merge, observed union, or no synthesized schema: return None (dynamic)
