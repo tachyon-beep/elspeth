@@ -2668,6 +2668,7 @@ def _execute_preview_pipeline(
         "errors": [e.to_dict() for e in validation.errors],
         "warnings": [e.to_dict() for e in validation.warnings],
         "suggestions": [e.to_dict() for e in validation.suggestions],
+        "edge_contracts": [ec.to_dict() for ec in validation.edge_contracts],
         "source": None,
         "node_count": len(state.nodes),
         "output_count": len(state.outputs),

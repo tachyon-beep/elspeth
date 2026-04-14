@@ -656,7 +656,8 @@ def create_session_router() -> APIRouter:
         """Get YAML representation of the current composition state (M1).
 
         Reconstructs a CompositionState from the persisted record and
-        generates deterministic YAML via generate_yaml().
+        re-validates it before generating deterministic YAML via
+        generate_yaml().
         """
         session = await _verify_session_ownership(session_id, user, request)
         service: SessionServiceProtocol = request.app.state.session_service
@@ -664,6 +665,12 @@ def create_session_router() -> APIRouter:
         if state_record is None:
             raise HTTPException(status_code=404, detail="No composition state exists")
         state = _state_from_record(state_record)
+        validation = state.validate()
+        if not validation.is_valid:
+            raise HTTPException(
+                status_code=409,
+                detail="Current composition state is invalid. Fix validation errors before exporting YAML.",
+            )
         yaml_str = generate_yaml(state)
         return {"yaml": yaml_str}
 

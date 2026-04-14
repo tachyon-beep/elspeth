@@ -9,7 +9,13 @@ import pytest
 
 from elspeth.composer_mcp.server import _build_tool_defs, _dispatch_tool
 from elspeth.web.catalog.protocol import CatalogService
-from elspeth.web.composer.state import CompositionState, PipelineMetadata
+from elspeth.web.composer.state import (
+    CompositionState,
+    NodeSpec,
+    OutputSpec,
+    PipelineMetadata,
+    SourceSpec,
+)
 
 
 def _empty_state() -> CompositionState:
@@ -18,6 +24,72 @@ def _empty_state() -> CompositionState:
         nodes=(),
         edges=(),
         outputs=(),
+        metadata=PipelineMetadata(),
+        version=1,
+    )
+
+
+def _invalid_contract_state() -> CompositionState:
+    return CompositionState(
+        source=SourceSpec(
+            plugin="csv",
+            on_success="t1",
+            options={"path": "/data/blobs/input.csv", "schema": {"mode": "observed"}},
+            on_validation_failure="quarantine",
+        ),
+        nodes=(
+            NodeSpec(
+                id="t1",
+                node_type="transform",
+                plugin="value_transform",
+                input="t1",
+                on_success="main",
+                on_error=None,
+                options={
+                    "required_input_fields": ["text"],
+                    "operations": [{"target": "out", "expression": "row['text']"}],
+                    "schema": {"mode": "observed"},
+                },
+                condition=None,
+                routes=None,
+                fork_to=None,
+                branches=None,
+                policy=None,
+                merge=None,
+            ),
+        ),
+        edges=(),
+        outputs=(
+            OutputSpec(
+                name="main",
+                plugin="csv",
+                options={"path": "outputs/out.csv", "schema": {"mode": "observed"}},
+                on_write_failure="discard",
+            ),
+        ),
+        metadata=PipelineMetadata(),
+        version=1,
+    )
+
+
+def _valid_state_with_no_edge_contracts() -> CompositionState:
+    return CompositionState(
+        source=SourceSpec(
+            plugin="csv",
+            on_success="main",
+            options={"path": "/data/in.csv", "schema": {"mode": "observed"}},
+            on_validation_failure="quarantine",
+        ),
+        nodes=(),
+        edges=(),
+        outputs=(
+            OutputSpec(
+                name="main",
+                plugin="csv",
+                options={"path": "outputs/out.csv", "schema": {"mode": "observed"}},
+                on_write_failure="discard",
+            ),
+        ),
         metadata=PipelineMetadata(),
         version=1,
     )
@@ -164,14 +236,50 @@ class TestDispatchTool:
         assert load_result["success"] is True
         assert load_result["state"]["source"]["plugin"] == "csv"
 
-    def test_generate_yaml_returns_string(self, scratch_dir: Path) -> None:
+    def test_generate_yaml_returns_string_for_valid_state(self, scratch_dir: Path) -> None:
         result = _dispatch_tool(
             "generate_yaml",
             {},
-            _empty_state(),
+            _valid_state_with_no_edge_contracts(),
             _mock_catalog(),
             scratch_dir,
         )
+        assert result["success"] is True
+        assert isinstance(result["data"], str)
+
+    def test_generate_yaml_rejects_invalid_contract_state(self, scratch_dir: Path) -> None:
+        result = _dispatch_tool(
+            "generate_yaml",
+            {},
+            _invalid_contract_state(),
+            _mock_catalog(),
+            scratch_dir,
+        )
+
+        assert result["success"] is False
+        assert "invalid" in result["error"].lower()
+        assert result["validation"]["is_valid"] is False
+        assert len(result["validation"]["errors"]) >= 1
+        assert result["validation"]["edge_contracts"] == [
+            {
+                "from": "source",
+                "to": "t1",
+                "producer_guarantees": [],
+                "consumer_requires": ["text"],
+                "missing_fields": ["text"],
+                "satisfied": False,
+            }
+        ]
+
+    def test_generate_yaml_allows_valid_state_with_no_edge_contracts(self, scratch_dir: Path) -> None:
+        result = _dispatch_tool(
+            "generate_yaml",
+            {},
+            _valid_state_with_no_edge_contracts(),
+            _mock_catalog(),
+            scratch_dir,
+        )
+
         assert result["success"] is True
         assert isinstance(result["data"], str)
 

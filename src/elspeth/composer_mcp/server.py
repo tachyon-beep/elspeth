@@ -14,7 +14,7 @@ import argparse
 import json
 import logging
 from pathlib import Path
-from typing import Any
+from typing import Any, TypedDict
 
 from mcp.server import Server
 from mcp.server.stdio import stdio_server
@@ -36,6 +36,34 @@ from elspeth.web.composer.yaml_generator import generate_yaml
 __all__ = ["create_server", "main"]
 
 logger = logging.getLogger(__name__)
+
+
+class _ValidationEntryPayload(TypedDict):
+    component: str
+    message: str
+    severity: str
+
+
+_EdgeContractPayload = TypedDict(
+    "_EdgeContractPayload",
+    {
+        "from": str,
+        "to": str,
+        "producer_guarantees": list[str],
+        "consumer_requires": list[str],
+        "missing_fields": list[str],
+        "satisfied": bool,
+    },
+)
+
+
+class _ValidationPayload(TypedDict):
+    is_valid: bool
+    errors: list[_ValidationEntryPayload]
+    warnings: list[_ValidationEntryPayload]
+    suggestions: list[_ValidationEntryPayload]
+    edge_contracts: list[_EdgeContractPayload]
+
 
 # Composer tools exposed via MCP (excludes blob and secret tools).
 _COMPOSER_TOOL_NAMES: frozenset[str] = frozenset(_DISCOVERY_TOOLS) | frozenset(_MUTATION_TOOLS)
@@ -175,6 +203,30 @@ def _dispatch_tool(
     }
 
 
+def _edge_contract_to_payload(contract: Any) -> _EdgeContractPayload:
+    """Serialize an edge contract without leaking a dict[str, Any] return."""
+    payload = contract.to_dict()
+    return {
+        "from": payload["from"],
+        "to": payload["to"],
+        "producer_guarantees": payload["producer_guarantees"],
+        "consumer_requires": payload["consumer_requires"],
+        "missing_fields": payload["missing_fields"],
+        "satisfied": payload["satisfied"],
+    }
+
+
+def _validation_to_dict(validation: Any) -> _ValidationPayload:
+    """Serialize validation for MCP session-tool error payloads."""
+    return {
+        "is_valid": validation.is_valid,
+        "errors": [entry.to_dict() for entry in validation.errors],
+        "warnings": [entry.to_dict() for entry in validation.warnings],
+        "suggestions": [entry.to_dict() for entry in validation.suggestions],
+        "edge_contracts": [_edge_contract_to_payload(contract) for contract in validation.edge_contracts],
+    }
+
+
 def _dispatch_session_tool(
     tool_name: str,
     arguments: dict[str, Any],
@@ -244,6 +296,14 @@ def _dispatch_session_tool(
         }
 
     if tool_name == "generate_yaml":
+        validation = state.validate()
+        if not validation.is_valid:
+            return {
+                "success": False,
+                "error": "Current composition state is invalid. Fix validation errors before calling generate_yaml.",
+                "validation": _validation_to_dict(validation),
+                "state": state.to_dict(),
+            }
         yaml_str = generate_yaml(state)
         return {
             "success": True,

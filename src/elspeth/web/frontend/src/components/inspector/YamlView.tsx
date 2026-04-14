@@ -9,6 +9,7 @@
 // - Copy-to-clipboard button
 // - Download button for YAML export
 // - Theme-aware (light/dark)
+// - Explicit blocked/error state when YAML export fails
 //
 // Empty state when no composition state exists.
 // ============================================================================
@@ -18,11 +19,38 @@ import { Highlight, themes } from "prism-react-renderer";
 import { useSessionStore } from "@/stores/sessionStore";
 import { useTheme } from "@/hooks/useTheme";
 import * as api from "@/api/client";
+import type { ApiError } from "@/types/index";
+
+interface YamlFetchError {
+  title: string;
+  detail: string;
+}
+
+function describeYamlFetchError(error: unknown): YamlFetchError {
+  const apiError = error as Partial<ApiError>;
+  const detail =
+    typeof apiError.detail === "string" && apiError.detail.trim().length > 0
+      ? apiError.detail
+      : "Please try again.";
+
+  if (apiError.status === 409) {
+    return {
+      title: "YAML export is blocked by validation errors.",
+      detail,
+    };
+  }
+
+  return {
+    title: "Failed to load YAML.",
+    detail,
+  };
+}
 
 export function YamlView() {
   const compositionState = useSessionStore((s) => s.compositionState);
   const activeSessionId = useSessionStore((s) => s.activeSessionId);
   const [yaml, setYaml] = useState<string | null>(null);
+  const [yamlError, setYamlError] = useState<YamlFetchError | null>(null);
   const [isLoading, setIsLoading] = useState(false);
   const [copied, setCopied] = useState(false);
   const { resolvedTheme } = useTheme();
@@ -33,24 +61,28 @@ export function YamlView() {
   useEffect(() => {
     if (!activeSessionId || version === null) {
       setYaml(null);
+      setYamlError(null);
       setIsLoading(false);
       return;
     }
 
     let cancelled = false;
     setIsLoading(true);
+    setYamlError(null);
 
     api
       .fetchYaml(activeSessionId)
       .then(({ yaml: text }) => {
         if (!cancelled) {
           setYaml(text);
+          setYamlError(null);
           setIsLoading(false);
         }
       })
-      .catch(() => {
+      .catch((error: unknown) => {
         if (!cancelled) {
           setYaml(null);
+          setYamlError(describeYamlFetchError(error));
           setIsLoading(false);
         }
       });
@@ -102,6 +134,20 @@ export function YamlView() {
         className="yaml-loading"
       >
         Loading YAML...
+      </div>
+    );
+  }
+
+  if (yamlError && !yaml) {
+    return (
+      <div
+        role="alert"
+        className="validation-banner validation-banner-fail"
+      >
+        <div className="validation-banner-content">
+          <div className="validation-banner-summary">{yamlError.title}</div>
+          <div>{yamlError.detail}</div>
+        </div>
       </div>
     );
   }

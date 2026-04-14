@@ -3276,6 +3276,63 @@ class TestPreviewPipeline:
         assert result.data["node_count"] == 1
         assert result.data["output_count"] == 1
 
+    def test_preview_pipeline_includes_edge_contracts(self) -> None:
+        """preview_pipeline includes raw edge contract evidence from validation."""
+        state = _empty_state()
+        catalog = _mock_catalog()
+        r1 = execute_tool(
+            "set_source",
+            {
+                "plugin": "csv",
+                "on_success": "t1",
+                "options": {"path": "/data/in.csv", "schema": {"mode": "fixed", "fields": ["text: str"]}},
+                "on_validation_failure": "quarantine",
+            },
+            state,
+            catalog,
+        )
+        r2 = execute_tool(
+            "upsert_node",
+            {
+                "id": "t1",
+                "node_type": "transform",
+                "plugin": "value_transform",
+                "input": "t1",
+                "on_success": "main",
+                "options": {
+                    "required_input_fields": ["text"],
+                    "operations": [{"target": "out", "expression": "row['text']"}],
+                    "schema": {"mode": "observed"},
+                },
+            },
+            r1.updated_state,
+            catalog,
+        )
+        r3 = execute_tool(
+            "set_output",
+            {
+                "sink_name": "main",
+                "plugin": "csv",
+                "options": {"path": "outputs/out.csv", "schema": {"mode": "observed"}},
+                "on_write_failure": "discard",
+            },
+            r2.updated_state,
+            catalog,
+        )
+
+        result = execute_tool("preview_pipeline", {}, r3.updated_state, catalog)
+
+        assert result.success is True
+        assert "edge_contracts" in result.data
+        contracts = result.data["edge_contracts"]
+        assert len(contracts) >= 1
+        source_to_t1 = next(c for c in contracts if c["to"] == "t1")
+        assert source_to_t1["from"] == "source"
+        assert "text" in source_to_t1["producer_guarantees"]
+        assert "text" in source_to_t1["consumer_requires"]
+        assert source_to_t1["satisfied"] is True
+        assert result.data["is_valid"] is True
+
     def test_preview_source_with_schema_config_field_name(self) -> None:
         state = _empty_state().with_source(
             SourceSpec(

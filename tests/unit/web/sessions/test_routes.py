@@ -614,7 +614,7 @@ class TestYamlEndpoint:
 
     @pytest.mark.asyncio
     async def test_yaml_returns_yaml_when_state_exists(self, tmp_path) -> None:
-        """Returns generated YAML when composition state exists."""
+        """Returns generated YAML for a valid state even when edge_contracts is empty."""
         app, service = _make_app(tmp_path)
         client = TestClient(app)
 
@@ -623,9 +623,16 @@ class TestYamlEndpoint:
             session.id,
             CompositionStateData(
                 source={"plugin": "csv", "on_success": "out", "options": {"path": "/data.csv"}, "on_validation_failure": "quarantine"},
-                outputs=[{"name": "out", "plugin": "csv", "options": {}, "on_write_failure": "quarantine"}],
+                outputs=[
+                    {
+                        "name": "out",
+                        "plugin": "csv",
+                        "options": {"path": "outputs/out.csv", "schema": {"mode": "observed"}},
+                        "on_write_failure": "discard",
+                    }
+                ],
                 metadata_={"name": "Test Pipeline", "description": ""},
-                is_valid=True,
+                is_valid=False,
             ),
         )
 
@@ -634,6 +641,59 @@ class TestYamlEndpoint:
         body = resp.json()
         assert "yaml" in body
         assert "csv" in body["yaml"]
+
+    @pytest.mark.asyncio
+    async def test_yaml_returns_409_when_current_state_is_invalid(self, tmp_path) -> None:
+        app, service = _make_app(tmp_path)
+        client = TestClient(app)
+
+        session = await service.create_session("alice", "Pipeline", "local")
+        await service.save_composition_state(
+            session.id,
+            CompositionStateData(
+                source={
+                    "plugin": "csv",
+                    "on_success": "t1",
+                    "options": {"path": "/data/blobs/input.csv", "schema": {"mode": "observed"}},
+                    "on_validation_failure": "quarantine",
+                },
+                nodes=[
+                    {
+                        "id": "t1",
+                        "node_type": "transform",
+                        "plugin": "value_transform",
+                        "input": "t1",
+                        "on_success": "main",
+                        "on_error": None,
+                        "options": {
+                            "required_input_fields": ["text"],
+                            "operations": [{"target": "out", "expression": "row['text']"}],
+                            "schema": {"mode": "observed"},
+                        },
+                        "condition": None,
+                        "routes": None,
+                        "fork_to": None,
+                        "branches": None,
+                        "policy": None,
+                        "merge": None,
+                    },
+                ],
+                outputs=[
+                    {
+                        "name": "main",
+                        "plugin": "csv",
+                        "options": {"path": "outputs/out.csv", "schema": {"mode": "observed"}},
+                        "on_write_failure": "discard",
+                    }
+                ],
+                metadata_={"name": "Invalid Contract Pipeline", "description": ""},
+                is_valid=True,
+            ),
+        )
+
+        resp = client.get(f"/api/sessions/{session.id}/state/yaml")
+        assert resp.status_code == 409
+        assert "invalid" in resp.json()["detail"].lower()
 
     def test_yaml_returns_404_when_no_state(self, tmp_path) -> None:
         """No composition state yet -> 404."""
