@@ -105,6 +105,7 @@ A pipeline is **not complete** until:
 1. `is_valid` is `true` (no structural errors)
 2. **All medium/high severity warnings are resolved** — these indicate missing required configuration
 3. All required plugin options are filled with meaningful values (not empty)
+4. **All edge contracts are satisfied** — every downstream step's `required_input_fields` must be guaranteed by its upstream producer, and sink schemas may impose their own required fields. Check `edge_contracts` in the preview response. If any edge shows `"satisfied": false`, the pipeline is not complete.
 
 **Watch for these incomplete-but-valid states:**
 - Transform with empty `options` (e.g., `value_transform` with no operations)
@@ -112,6 +113,13 @@ A pipeline is **not complete** until:
 - `llm` transform with no `template`
 
 These pass structural validation but won't run. The validation warnings will flag them — **fix warnings before presenting the pipeline as complete**.
+
+- **Empty `edge_contracts` is not contract success** — `edge_contracts: []` means no field contracts were declared by any node. The preview may still be structurally valid, but field compatibility was not proven by contract evidence.
+- **Skipped checks are unresolved** — if preview warnings say a contract check was skipped (for example because the producer is a coalesce node), treat that as unresolved rather than satisfied and surface the warning to the user.
+
+Pipelines without `required_input_fields` declarations are not verified by the composer's contract check; the runtime validator is the final authority.
+
+`generate_yaml` is an export step, not the primary validator. After Task 5B it becomes a hard backstop and should refuse invalid states, but the agent must still use `preview_pipeline` to diagnose and fix contract failures before retrying export.
 
 #### Tool Failure Recovery
 
@@ -125,6 +133,78 @@ If a tool call fails or returns unexpected results:
 6. **Only then report a blocker** — if the issue persists after investigation, explain what you tried
 
 **Do not stop at the first failure.** Investigate and retry at least once before asking the user for help.
+
+#### Fixing Schema Contract Violations
+
+When `preview_pipeline` returns an unsatisfied edge contract, follow this sequence:
+
+1. **Read the violation** — identify which edge failed, what fields are missing, and which node is the producer.
+2. **Patch the producer contract** — usually by fixing the actual producer shape first, then making the schema explicit. For most sources this means `patch_source_options` to change from `observed` to `fixed`/`flexible` with the required fields declared:
+   ```json
+   patch_source_options({
+     "patch": {"schema": {"mode": "fixed", "fields": ["text: str"]}}
+   })
+   ```
+   `patch_source_options`, `patch_node_options`, and `patch_output_options` use a **shallow merge-patch**. When changing `schema`, send the full replacement schema object, not just one nested key. For example, do **not** send `{"patch": {"schema": {"fields": ["text: str"]}}}` — that replaces the whole `schema` object and drops `mode`.
+   Bad patch: `patch_node_options({"node_id": "clean", "patch": {"schema": {"fields": ["text: str"]}}})`
+   Good patch: `patch_node_options({"node_id": "clean", "patch": {"schema": {"mode": "flexible", "fields": ["text: str"]}}})`
+3. **Re-preview** — call `preview_pipeline` and verify the edge now shows `"satisfied": true`.
+4. **Only then call `generate_yaml` or report success.** If `generate_yaml` still refuses the export, treat that as confirmation the pipeline remains unresolved and return to `preview_pipeline` rather than bypassing the gate.
+
+**Example — csv source + value_transform:**
+- `preview_pipeline` returns: `edge_contracts: [{"from": "source", "to": "add_world", "satisfied": false, "consumer_requires": ["text"], "producer_guarantees": []}]`
+- Fix: `patch_source_options({"patch": {"schema": {"mode": "fixed", "fields": ["text: str"]}}})`
+- Re-preview confirms: `"satisfied": true`
+
+**Example — sink contract failure:**
+- `preview_pipeline` returns: `edge_contracts: [{"from": "t1", "to": "output:main", "satisfied": false, "consumer_requires": ["text"], "producer_guarantees": []}]`
+- Fix the sink only if its requirement is overstated and it does not truly need named fields up front: `patch_output_options({"sink_name": "main", "patch": {"schema": {"mode": "observed"}}})`
+- Otherwise fix the upstream producer truthfully with `patch_source_options(...)` or `patch_node_options({"node_id": "t1", "patch": {"schema": {"mode": "flexible", "fields": ["text: str"]}}})`
+
+**Example — intermediate transform breaks the chain:**
+- `source` truthfully guarantees `text`, but `preview_pipeline` shows `{"from": "clean", "to": "use_text", "satisfied": false, "producer_guarantees": []}` because `clean` is a schema-less pass-through transform.
+- Fix the intermediate node, not the source: `patch_node_options({"node_id": "clean", "patch": {"schema": {"mode": "flexible", "fields": ["text: str"]}}})`
+- If two truthful producer-schema patches still do not satisfy the edge, stop and explain the limitation instead of looping.
+
+**Text-source note:** if the source plugin is `text`, observed mode is only a valid contract shortcut when the configured `column` is a valid Python identifier, is not a Python keyword, and the consumer requires that same field. If the required field and `column` do not match, fix the `column` or downstream field reference; do not invent a `fixed` schema that claims a different key than the plugin actually emits.
+
+**Example — text source column mismatch:**
+- Source is `text` with `column: "line"`, but the consumer requires `text`.
+- Fix the real mismatch by changing the source column or downstream field reference. Do not patch the schema to pretend the source emits `text` when it actually emits `line`.
+
+**Example — invalid text column keyword:**
+- Source is `text` with `column: "class"` and `{"schema": {"mode": "observed"}}`.
+- Composer does not infer a guarantee for `class`, and runtime rejects the source config because `class` is a Python keyword.
+- Fix the real config by renaming the column to a valid non-keyword identifier such as `text` or `line_text`, then align downstream requirements to that emitted field.
+
+**Example — skipped contract check:**
+- `preview_pipeline` warns that a contract check was skipped because the producer is `coalesce` or another unresolved merge path.
+- Treat this as unresolved. Do not call `generate_yaml` yet just because `is_valid` is still `true`.
+- Either add explicit schema declarations on the real upstream producer/intermediate nodes and re-preview, or explain that this edge can only be fully checked at runtime.
+
+**Example — no contract evidence yet:**
+- `preview_pipeline` returns `is_valid: true` and `edge_contracts: []`.
+- This is structurally valid, but not verified by contract evidence.
+- If the user wants schema-compatibility proof, add truthful `required_input_fields` and/or explicit schema declarations, then re-preview. If they only need export, make it clear that runtime remains the final authority.
+
+If `get_pipeline_state` and `preview_pipeline` disagree (e.g., state shows a field but preview shows an unsatisfied contract), treat this as unresolved. Do not report success. Re-run both tools, fix the discrepancy, and confirm before responding.
+
+#### Known Limitation: Intermediate Transforms Break the Guarantee Chain
+
+Transforms without explicit schema declarations report zero guaranteed fields to downstream consumers — even schema-preserving transforms like `passthrough`. If a transform sits between a source and a consumer with `required_input_fields`, the contract check will report a violation even though the data flows through unchanged.
+
+**Fix:** Either add a `schema` to the intermediate transform declaring the fields it passes through, or move `required_input_fields` to the first transform in the chain (directly downstream of the source). The source→first-consumer edge is where contract checking is most reliable.
+
+#### Non-Converging Contract Violations
+
+If `preview_pipeline` still shows `"satisfied": false` after **2** producer-schema patch attempts for the same edge, **stop patching and explain the limitation to the user.** The most common cause is an intermediate transform that does not propagate schema guarantees (see above). Do not repeatedly call `patch_source_options` or `patch_node_options` trying different schema configurations — after 2 attempts, treat the issue as structural rather than a missing field declaration. Ask the user whether to:
+1. Add an explicit `schema` declaration on the intermediate transform, or
+2. Accept that this contract cannot be verified at composition time (the runtime validator will still check it).
+
+If the same producer feeds multiple consumers with conflicting truthful requirements, do not loop trying to force one schema to satisfy all of them. Surface the conflict explicitly and ask whether to:
+1. Split the path so each consumer gets its own producer contract,
+2. Insert an intermediate transform or aggregation with an explicit schema on one branch, or
+3. Relax or correct one of the downstream requirements if it was overstated.
 
 ### Schema Configuration
 
@@ -141,6 +221,7 @@ Every data plugin (source, transform, sink) requires a `schema` key in its optio
 **Choosing the right mode:**
 
 - **Sources:** Match the mode to how well you know the input data. If the user says "read this CSV" with no further detail, use `observed`. If the user says "it has columns id, name, and price", use `fixed` with those fields.
+  **Default:** If downstream steps declare `required_input_fields` or reference fields by name, prefer `fixed` or `flexible` so the contract is explicit. `text` is the only observed-source exception, and only for its configured `column` when that column is a valid Python identifier and not a Python keyword; see the text source contract rule in "Plugin Quick Reference > Sources > text" below.
 - **Transforms:** The schema describes the transform's **input** — the fields it expects to receive from upstream. It does NOT describe the transform's output. If the transform creates new fields (like `value_transform` computing a `total` field), those new fields must NOT appear in the schema — they don't exist yet when the row enters the transform. Use `observed` when the transform doesn't need to validate specific input fields. Use `fixed` or `flexible` when the transform requires specific named fields to exist in its input (e.g., a `type_coerce` that converts `price` needs `price` to exist).
 - **Sinks:** Usually `observed` — sinks write whatever they receive. Use `fixed` only if the sink requires specific columns.
 
@@ -353,7 +434,9 @@ Gotchas:
 **text** — Read a text file, one line per row.
 Gotchas:
 - `column` is required — it names the single output field. Omitting it is a validation error.
+- `column` must be a valid Python identifier and not a Python keyword. Example: `column: "class"` is rejected; use `text` or `line_text` instead.
 - When wiring a text file via `set_source_from_blob`, you MUST pass `options: {column: "...", schema: {...}}` — the blob only provides the path.
+- **Schema rule for text sources:** Prefer an explicit `fixed` or `flexible` schema when you know the text column shape; it gives the strongest contract and clearer types. Narrow exception: a `text` source with `{"schema": {"mode": "observed"}}` is still treated as guaranteeing `{column}` by the shared composer/runtime contract helper only when `column` is a valid Python identifier, is not a Python keyword, and `guaranteed_fields` is not explicitly set. Do not generalize this exception to other observed sources.
 
 ### Transforms
 
