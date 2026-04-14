@@ -3276,6 +3276,23 @@ class TestPreviewPipeline:
         assert result.data["node_count"] == 1
         assert result.data["output_count"] == 1
 
+    def test_preview_source_with_schema_config_field_name(self) -> None:
+        state = _empty_state().with_source(
+            SourceSpec(
+                plugin="csv",
+                on_success="t1",
+                options={"path": "/data/in.csv", "schema_config": {"mode": "observed"}},
+                on_validation_failure="quarantine",
+            )
+        )
+        catalog = _mock_catalog()
+
+        result = execute_tool("preview_pipeline", {}, state, catalog)
+
+        assert result.success is True
+        assert result.data["source"]["plugin"] == "csv"
+        assert result.data["source"]["has_schema_config"] is True
+
 
 class TestPrevalidatePluginOptions:
     """Direct unit tests for _prevalidate_plugin_options.

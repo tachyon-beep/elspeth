@@ -232,6 +232,17 @@ class ValidationSummary:
     suggestions: tuple[ValidationEntry, ...] = ()
 
 
+def _source_options_have_schema(options: Mapping[str, Any]) -> bool:
+    """Return whether source options carry a schema under the current contract.
+
+    Composer state can contain either the user-facing ``schema`` alias or the
+    internal ``schema_config`` field name, because plugin config parsing allows
+    population by either key. Read-only summaries and validation must use the
+    same rule so they cannot drift.
+    """
+    return "schema" in options or "schema_config" in options
+
+
 def _validate_gate_expression(condition: str) -> str | None:
     """Validate a gate condition expression at composition time.
 
@@ -762,9 +773,9 @@ class CompositionState:
                     )
                 )
 
-        # S3: Source has no schema (check both alias and field name for backwards compat)
+        # S3: Source has no schema under the current composer/plugin config contract
         if self.source is not None:
-            has_schema = "schema" in self.source.options or "schema_config" in self.source.options
+            has_schema = _source_options_have_schema(self.source.options)
             if not has_schema:
                 suggestions.append(
                     _sug("source", "Source has no explicit schema. Downstream field references depend on runtime column names.", "low")

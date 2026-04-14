@@ -30,6 +30,7 @@ from elspeth.web.composer.state import (
     PipelineMetadata,
     SourceSpec,
     ValidationSummary,
+    _source_options_have_schema,
     _validate_gate_expression,
 )
 from elspeth.web.paths import allowed_sink_directories, allowed_source_directories
@@ -2678,7 +2679,7 @@ def _execute_preview_pipeline(
         summary["source"] = {
             "plugin": state.source.plugin,
             "on_success": state.source.on_success,
-            "has_schema_config": "schema" in state.source.options,
+            "has_schema_config": _source_options_have_schema(state.source.options),
         }
 
     return ToolResult(
