@@ -4,7 +4,7 @@
 
 **Goal:** Make the composer reject pipelines with unsatisfied schema contracts at composition time, and expose per-edge contract data in the preview response.
 
-**Architecture:** Add a new validation pass (pass 9) to `CompositionState.validate()` that walks the connection-field chain but reuses shared raw-config contract helpers extracted into `elspeth.contracts.schema` rather than re-implementing runtime semantics inline. The pass must validate connection-namespace integrity before building `producer_map` so invalid drafts fail closed instead of silently overwriting producers. The shared helpers are responsible for parsing schema config, computing producer guarantees, computing node consumer requirements (top-level `required_input_fields`, aggregation `options.required_input_fields`, then explicit `schema.required_fields`), computing sink consumer requirements via `schema.get_effective_required_fields()`, and applying the closed-list observed-only text-source deterministic guarantee rule. Unsatisfied contracts remain error-level and therefore must force `ValidationSummary.is_valid = False`. Separately, add a mechanical backstop on the LLM-facing YAML-export surfaces (`src/elspeth/composer_mcp/server.py` and `GET /api/sessions/{id}/state/yaml`): those entry points must call `state.validate()` and refuse YAML when `is_valid` is false. Do **not** move that guard into `yaml_generator.generate_yaml()`, which must stay a pure serializer for execution-time validation and run creation. Extend `ValidationSummary` with `EdgeContract` tuples, update `ExecutionGraph` to delegate its raw-config requirement extraction to the same helpers, refactor the gate/coalesce walk-back into a shared helper in `state.py`, and patch the pipeline-composer skill with contract-aware completion criteria that remain stricter than today's behaviour.
+**Architecture:** Add a new validation pass (pass 9) to `CompositionState.validate()` that walks the connection-field chain but reuses shared raw-config contract helpers extracted into `elspeth.contracts.schema` rather than re-implementing runtime semantics inline. The pass must validate connection-namespace integrity before building `producer_map` so invalid drafts fail closed instead of silently overwriting producers. The shared helpers are responsible for parsing schema config while preserving the existing `schema` / `schema_config` alias contract, computing producer guarantees, computing node consumer requirements (top-level `required_input_fields`, aggregation `options.required_input_fields`, then explicit `schema.required_fields`), computing sink consumer requirements via `schema.get_effective_required_fields()`, and applying the closed-list observed-only text-source deterministic guarantee rule. Unsatisfied contracts remain error-level and therefore must force `ValidationSummary.is_valid = False`. Separately, add a mechanical backstop on the LLM-facing YAML-export surfaces (`src/elspeth/composer_mcp/server.py` and `GET /api/sessions/{id}/state/yaml`): those entry points must call `state.validate()` and refuse YAML when `is_valid` is false. Do **not** move that guard into `yaml_generator.generate_yaml()`, which must stay a pure serializer for execution-time validation and run creation. Extend `ValidationSummary` with `EdgeContract` tuples, update `ExecutionGraph` to delegate its raw-config requirement extraction to the same helpers, refactor the gate/coalesce walk-back into a shared helper in `state.py`, and patch both pipeline-composer skill files with contract-aware completion criteria that remain stricter than today's behaviour.
 
 **Tech Stack:** Python dataclasses (frozen), `SchemaConfig` from `elspeth.contracts.schema`, pytest
 
@@ -24,14 +24,36 @@
 | `src/elspeth/web/sessions/routes.py` | Modify | Apply the same validation gate to `GET /api/sessions/{id}/state/yaml` so MCP and HTTP export surfaces cannot bypass composer validation |
 | `src/elspeth/plugins/sources/text_source.py` | Modify | Auto-declare `guaranteed_fields` for deterministic observed-schema output only, sync the builder-visible raw schema config, and add enforcement comment |
 | `src/elspeth/web/composer/skills/pipeline_composer.md` | Modify | Add completion criteria item 4, align guidance with the observed-text special-case without weakening the general validation stance, fix flow example |
+| `.claude/skills/pipeline-composer/SKILL.md` | Modify | Keep the Claude skill's overlapping composer guidance and plugin quick-reference content aligned with the web skill; do not leave a second stale skill copy behind |
 | `tests/unit/composer_mcp/test_server.py` | Modify | Add YAML-export backstop test for invalid composition state |
 | `tests/unit/web/composer/test_tools.py` | Modify | Add preview/explanation tests for edge contract telemetry and contract-specific `explain_validation_error` guidance |
 | `tests/unit/web/composer/test_state.py` | Modify | Add `TestSchemaContractValidation` class with test cases |
 | `tests/unit/web/sessions/test_routes.py` | Modify | Add HTTP YAML-export rejection test for invalid current state |
 | `tests/unit/web/composer/test_schema_contract_enforcement.py` | Create | Heuristic enforcement test (test case 20) |
-| `tests/integration/web/test_composer_runtime_agreement.py` | Create | Composer/runtime agreement test (test case 19) |
+| `tests/integration/pipeline/test_composer_runtime_agreement.py` | Create | Composer/runtime agreement test (test case 19), colocated with pipeline/DAG contract integration coverage rather than web-route tests |
 
 ---
+
+## Sub-Plan Structure
+
+This plan is intentionally split into three batchable sub-plans. Do **not** split an individual task across sub-plans; the grouping is by ownership / execution slice, not by step-level decomposition.
+
+| Sub-Plan | Tasks | Scope | Batch Outcome |
+|----------|-------|-------|---------------|
+| **Sub-Plan A: Contract Core** | 1-4 | Core composer contract model, shared-helper wiring, and unit coverage for topology / edge-contract semantics | Composer can compute and validate schema contracts with stable unit-level coverage |
+| **Sub-Plan B: Agent-Facing Surfaces** | 5, 5B, 5C | Preview response, YAML export guardrails, and validation-explanation support | LLM/user-facing surfaces expose contract data and refuse invalid exports |
+| **Sub-Plan C: Runtime Parity and Release Gate** | 6-11 | Observed-text runtime backing, agreement/regression tests, skill updates, and final verification | Runtime and composer agree on the shared contract rules, guidance is updated, and the full verification gate is green |
+
+**Execution order:** Run the sub-plans in order `A -> B -> C`.
+
+**Dependency notes:**
+- Sub-Plan B assumes Sub-Plan A has already produced `edge_contracts` and blocking contract validation.
+- Sub-Plan C assumes Sub-Plan A is in place and must not enable the observed-text positive cases until Task 6 lands.
+- Task 7 remains a sequencing checkpoint inside Sub-Plan C even though it has no implementation body.
+
+---
+
+## Sub-Plan A: Contract Core
 
 ### Task 1: Add `EdgeContract` Dataclass and Extend `ValidationSummary`
 
@@ -230,10 +252,15 @@ class TestSchemaContractValidation:
         plugin: str = "csv",
         options: dict[str, Any] | None = None,
     ) -> SourceSpec:
+        opts = dict(options or {})
+        if plugin == "csv":
+            opts = {"path": "/data/input.csv", **opts}
+        elif plugin == "text":
+            opts = {"path": "/data/input.txt", "column": "text", **opts}
         return SourceSpec(
             plugin=plugin,
             on_success=on_success,
-            options=options or {},
+            options=opts,
             on_validation_failure="quarantine",
         )
 
@@ -245,6 +272,13 @@ class TestSchemaContractValidation:
         plugin: str = "value_transform",
         options: dict[str, Any] | None = None,
     ) -> NodeSpec:
+        opts = dict(options or {})
+        if plugin == "value_transform":
+            opts = {
+                "schema": {"mode": "observed"},
+                "operations": [{"target": "_placeholder", "expression": "row['text']"}],
+                **opts,
+            }
         return NodeSpec(
             id=id,
             node_type="transform",
@@ -252,7 +286,7 @@ class TestSchemaContractValidation:
             input=input,
             on_success=on_success,
             on_error=None,
-            options=options or {},
+            options=opts,
             condition=None,
             routes=None,
             fork_to=None,
@@ -310,7 +344,12 @@ class TestSchemaContractValidation:
         )
 
     def _make_output(self, name: str = "main") -> OutputSpec:
-        return OutputSpec(name=name, plugin="csv", options={"path": f"outputs/{name}.csv"}, on_write_failure="discard")
+        return OutputSpec(
+            name=name,
+            plugin="csv",
+            options={"path": f"outputs/{name}.csv", "schema": {"mode": "observed"}},
+            on_write_failure="discard",
+        )
 
     def _make_edge(
         self,
@@ -675,7 +714,9 @@ def get_raw_sink_required_fields(
 
 Rules for the shared helper layer:
 
+- Each shared helper docstring must state its `ValueError` protocol explicitly: "Raises ValueError for conditions that should surface as pipeline validation errors, not for programming errors at the call site."
 - `parse_raw_schema_config()` raises `ValueError` for malformed schema dicts.
+- The shared helper layer must preserve the existing alias contract from `PluginConfig`: whenever raw options are inspected for schema, accept both the user-facing `schema` alias and the backwards-compatible `schema_config` field name. Do not centralize parsing in a way that strands alias handling in `state.py` or drops parity with plugin config parsing (`populate_by_name=True` / `from_dict()` prevalidation).
 - Define the closed-list observed-text heuristic marker at module scope in `src/elspeth/contracts/schema.py`, not inside a helper body:
   `_TEXT_HEURISTIC_PLUGINS: frozenset[str] = frozenset({"text"})`
   Keep the existing "do not extend without design review" comment adjacent to that constant so discoverability survives refactors.
@@ -684,11 +725,12 @@ Rules for the shared helper layer:
 - `get_raw_sink_required_fields()` is intentionally stricter: parse the sink schema and return `schema.get_effective_required_fields()`, so fixed/flexible typed sink fields are treated as required even when `required_fields` is omitted explicitly.
 - `state.py` and `graph.py` must not keep independent copies of the observed-text rule or sink requirement extraction.
 - The helper surface must be shape-tolerant for aggregation configs: composer passes `node.options` directly, runtime passes the wrapped aggregation config whose plugin options live under `"options"`. The shared helper owns that normalization so the two call sites stay coupled.
+- Keep `tests/unit/web/composer/test_tools.py::test_preview_source_with_schema_config_field_name` green. If alias resolution moves fully into `elspeth.contracts.schema`, add direct helper-level coverage there too rather than relying only on the preview test as an indirect guard.
 - Keep helper side effects explicit. If a nested helper can append diagnostics, pass `errors`/`warnings` into it explicitly rather than mutating hidden closure state. In practice `_register_producer(..., errors)` and `_walk_to_real_producer(..., warnings)` should advertise their side effects in their signatures.
 
 In `src/elspeth/core/dag/graph.py`, update the raw-config requirement extraction path to delegate to the shared helper surface instead of re-implementing the parsing logic inline. Runtime graph validation still owns graph walking, coalesce semantics, and `GraphValidationError`; the shared helper only owns raw-config contract semantics.
 
-In `src/elspeth/web/composer/state.py`, keep the topology walk but replace the inline schema logic with deferred imports of the shared helpers:
+In `src/elspeth/web/composer/state.py`, keep the topology walk but replace the inline schema logic with top-level imports of the shared helpers. Do **not** add a new deferred import here: `state.py` (L3) importing `elspeth.contracts.schema` (L0) is layer-legal, and CLAUDE.md explicitly treats new lazy imports as the "Shifting the Burden" archetype rather than a pattern to spread. Preserve the current `_source_options_have_schema()` behaviour by delegating to the same alias rule (or an extracted shared alias helper) so preview summaries and contract validation cannot disagree about whether a source carries schema:
 
 ```python
 from elspeth.contracts.schema import (
@@ -706,7 +748,7 @@ Then implement `_check_schema_contracts()` with these rules:
   - connection names overlapping sink names => blocking error
   - on any of these, return no `EdgeContract` rows rather than picking a winner via dict overwrite
   - do not assume an earlier Stage 1 check already enforces these rules; `_check_schema_contracts()` must defend itself because current composer validation does not yet reject this entire class of namespace ambiguity
-- define a small `ProducerEntry(NamedTuple)` for `producer_map` values (for example `producer_id`, `plugin_name`, `options`). Do not use anonymous positional tuples here; `_walk_to_real_producer(...)` should read through named fields.
+- define a small internal `_ProducerEntry(NamedTuple)` at module scope in `state.py` for `producer_map` values (for example `producer_id`, `plugin_name`, `options`). Do not define it inside `_check_schema_contracts()`; `_walk_to_real_producer(...)` should read through named fields and mypy should see a stable named type across helper signatures.
 - producer helper `ValueError` => emit blocking `ValidationEntry`, mark the producer as uncheckable, and suppress downstream edge contracts sourced from that producer
 - node consumer helper `ValueError` => emit blocking `ValidationEntry` on that node and skip its edge contract rather than fabricating an empty requirement set. This includes malformed consumer `schema` dicts; they must not silently collapse to `frozenset()`.
 - sink helper `ValueError` => emit blocking `ValidationEntry` on that output and skip its edge contract
@@ -715,6 +757,15 @@ Then implement `_check_schema_contracts()` with these rules:
 - extract the duplicated gate/coalesce walk-back from the node loop and sink loop into `_walk_to_real_producer(producer_id, *, producer_map, node_by_id, warnings)` so both paths share the same route-gate termination and coalesce warning/skip behavior
 - build `EdgeContract` rows only when both sides parsed successfully
 - `_check_schema_contracts()` may accumulate into local mutable lists, but its return type should be immutable tuples to match the surrounding frozen-dataclass design. Do not leak `tuple[list, list, list]` out of the helper boundary.
+
+Add the internal named type at module scope in `state.py` (near the other validation-support types), not inside `_check_schema_contracts()`:
+
+```python
+class _ProducerEntry(NamedTuple):
+    producer_id: str
+    plugin_name: str | None
+    options: Mapping[str, Any]
+```
 
 Key excerpt:
 
@@ -728,24 +779,13 @@ def _check_schema_contracts(
     tuple[ValidationEntry, ...],
     tuple[EdgeContract, ...],
 ]:
-    from elspeth.contracts.schema import (
-        get_raw_node_required_fields,
-        get_raw_producer_guaranteed_fields,
-        get_raw_sink_required_fields,
-    )
-
     errors: list[ValidationEntry] = []
     contract_warnings: list[ValidationEntry] = []
     edge_contracts: list[EdgeContract] = []
     parse_failed_producers: set[str] = set()
     node_by_id = {node.id: node for node in nodes}
 
-    class ProducerEntry(NamedTuple):
-        producer_id: str
-        plugin_name: str | None
-        options: Mapping[str, Any]
-
-    producer_map: dict[str, ProducerEntry] = {}
+    producer_map: dict[str, _ProducerEntry] = {}
     producer_desc: dict[str, str] = {}
 
     def _register_producer(
@@ -765,7 +805,7 @@ def _check_schema_contracts(
                 )
             )
             return
-        producer_map[connection_name] = ProducerEntry(
+        producer_map[connection_name] = _ProducerEntry(
             producer_id=producer_id,
             plugin_name=plugin_name,
             options=options,
@@ -782,10 +822,10 @@ def _check_schema_contracts(
     def _walk_to_real_producer(
         producer_id: str,
         *,
-        producer_map: Mapping[str, ProducerEntry],
+        producer_map: Mapping[str, _ProducerEntry],
         node_by_id: Mapping[str, NodeSpec],
         warnings: list[ValidationEntry],
-    ) -> ProducerEntry | None:
+    ) -> _ProducerEntry | None:
         ...
 
     ...
@@ -965,6 +1005,55 @@ Append to `TestSchemaContractValidation`:
         state = state.with_edge(self._make_edge("e3", "g1", "tb"))
         result = state.validate()
         assert result.is_valid, result.errors
+
+    def test_fork_gate_contract_check_skips_with_warning(self) -> None:
+        """Test 12b: fork gates are pinned as unresolved, not silently checked.
+
+        Fork gates (node.fork_to) create parallel branches. Branch-aware
+        contract checking is intentionally out of scope for this pass, so the
+        composer must skip these edges with an explicit warning rather than
+        pretending the downstream consumers were checked against the source.
+        """
+        state = self._empty_state()
+        state = state.with_source(self._make_source(
+            on_success="gate_in",
+            options={"schema": {"mode": "fixed", "fields": ["text: str"]}},
+        ))
+        state = state.with_node(NodeSpec(
+            id="g1",
+            node_type="gate",
+            plugin=None,
+            input="gate_in",
+            on_success=None,
+            on_error=None,
+            options={},
+            condition="True",
+            routes=None,
+            fork_to=("path_a", "path_b"),
+            branches=None,
+            policy=None,
+            merge=None,
+        ))
+        state = state.with_node(self._make_transform(
+            "ta", "path_a", "out_a",
+            options={"required_input_fields": ["text"]},
+        ))
+        state = state.with_node(self._make_transform(
+            "tb", "path_b", "out_b",
+            options={"required_input_fields": ["text"]},
+        ))
+        state = state.with_output(self._make_output("out_a"))
+        state = state.with_output(self._make_output("out_b"))
+        state = state.with_edge(self._make_edge("e1", "source", "g1"))
+        state = state.with_edge(self._make_edge("e2", "g1", "ta"))
+        state = state.with_edge(self._make_edge("e3", "g1", "tb"))
+
+        result = state.validate()
+
+        # Out of scope for this pass: unresolved warning, no fake edge rows.
+        assert result.is_valid, result.errors
+        assert any("fork" in w.message.lower() and "contract" in w.message.lower() for w in result.warnings)
+        assert not any(ec.to_id in {"ta", "tb"} for ec in result.edge_contracts)
 
     def test_multi_hop_transform_no_schema_breaks_chain(self) -> None:
         """Test 13: Transform A has no schema — transform B's requirements fail."""
@@ -1265,7 +1354,7 @@ Append to `TestSchemaContractValidation`:
 
 - [ ] **Step 2: Run topology tests**
 
-Run: `.venv/bin/python -m pytest tests/unit/web/composer/test_state.py::TestSchemaContractValidation -v -k "gate or route_gate or multi_hop or multi_sink or mixed_consumer or aggregation or coalesce or reserved or bare_string or duplicate or overlap or namespace"`
+Run: `.venv/bin/python -m pytest tests/unit/web/composer/test_state.py::TestSchemaContractValidation -v -k "gate or route_gate or fork_gate or multi_hop or multi_sink or mixed_consumer or aggregation or coalesce or reserved or bare_string or duplicate or overlap or namespace"`
 Expected: PASS
 
 - [ ] **Step 3: Commit**
@@ -1344,6 +1433,8 @@ git commit -m "test(composer): add edge contract data integrity tests"
 
 ---
 
+## Sub-Plan B: Agent-Facing Surfaces
+
 ### Task 5: Expose `edge_contracts` in Preview Response
 
 **Files:**
@@ -1379,14 +1470,23 @@ Add to the preview test class in `tests/unit/web/composer/test_tools.py` (alongs
                 "plugin": "value_transform",
                 "input": "t1",
                 "on_success": "main",
-                "options": {"required_input_fields": ["text"], "operations": [{"field": "out", "expression": "row['text']"}]},
+                "options": {
+                    "required_input_fields": ["text"],
+                    "operations": [{"target": "out", "expression": "row['text']"}],
+                    "schema": {"mode": "observed"},
+                },
             },
             r1.updated_state,
             catalog,
         )
         r3 = execute_tool(
             "set_output",
-            {"sink_name": "main", "plugin": "csv", "options": {"path": "outputs/out.csv"}, "on_write_failure": "discard"},
+            {
+                "sink_name": "main",
+                "plugin": "csv",
+                "options": {"path": "outputs/out.csv", "schema": {"mode": "observed"}},
+                "on_write_failure": "discard",
+            },
             r2.updated_state,
             catalog,
         )
@@ -1474,7 +1574,8 @@ In `tests/unit/composer_mcp/test_server.py`, extend the existing state import to
                     on_error=None,
                     options={
                         "required_input_fields": ["text"],
-                        "operations": [{"field": "out", "expression": "row['text']"}],
+                        "operations": [{"target": "out", "expression": "row['text']"}],
+                        "schema": {"mode": "observed"},
                     },
                     condition=None,
                     routes=None,
@@ -1489,7 +1590,7 @@ In `tests/unit/composer_mcp/test_server.py`, extend the existing state import to
                 OutputSpec(
                     name="main",
                     plugin="csv",
-                    options={"path": "outputs/out.csv"},
+                    options={"path": "outputs/out.csv", "schema": {"mode": "observed"}},
                     on_write_failure="discard",
                 ),
             ),
@@ -1510,7 +1611,7 @@ In `tests/unit/composer_mcp/test_server.py`, extend the existing state import to
         assert result["validation"]["is_valid"] is False
 ```
 
-Add to `tests/unit/web/sessions/test_routes.py`, in `TestStateYamlRoute`:
+Add to `tests/unit/web/sessions/test_routes.py`, in `TestYamlEndpoint`:
 
 ```python
     @pytest.mark.asyncio
@@ -1538,7 +1639,8 @@ Add to `tests/unit/web/sessions/test_routes.py`, in `TestStateYamlRoute`:
                         "on_error": None,
                         "options": {
                             "required_input_fields": ["text"],
-                            "operations": [{"field": "out", "expression": "row['text']"}],
+                            "operations": [{"target": "out", "expression": "row['text']"}],
+                            "schema": {"mode": "observed"},
                         },
                         "condition": None,
                         "routes": None,
@@ -1549,7 +1651,12 @@ Add to `tests/unit/web/sessions/test_routes.py`, in `TestStateYamlRoute`:
                     },
                 ],
                 outputs=[
-                    {"name": "main", "plugin": "csv", "options": {"path": "outputs/out.csv"}, "on_write_failure": "discard"}
+                    {
+                        "name": "main",
+                        "plugin": "csv",
+                        "options": {"path": "outputs/out.csv", "schema": {"mode": "observed"}},
+                        "on_write_failure": "discard",
+                    }
                 ],
                 metadata_={"name": "Invalid Contract Pipeline", "description": ""},
                 is_valid=False,
@@ -1562,6 +1669,88 @@ Add to `tests/unit/web/sessions/test_routes.py`, in `TestStateYamlRoute`:
 ```
 
 Expected: both tests FAIL on current code because the MCP session tool and HTTP route still serialize invalid state.
+
+- [ ] **Step 1b: Add positive backstop tests for valid pipelines with empty `edge_contracts`**
+
+These tests pin the success case where `validation.is_valid` is `true` but no explicit field contracts were declared, so `edge_contracts == ()` / `[]`. The export guard must key off `validation.is_valid`, not `validation.edge_contracts`.
+
+In `tests/unit/composer_mcp/test_server.py`, add to `TestDispatchTool`:
+
+```python
+    def test_generate_yaml_allows_valid_state_with_no_edge_contracts(self, scratch_dir: Path) -> None:
+        valid_state = CompositionState(
+            source=SourceSpec(
+                plugin="csv",
+                on_success="main",
+                options={"path": "/data/in.csv", "schema": {"mode": "observed"}},
+                on_validation_failure="quarantine",
+            ),
+            nodes=(),
+            edges=(),
+            outputs=(
+                OutputSpec(
+                    name="main",
+                    plugin="csv",
+                    options={"path": "outputs/out.csv", "schema": {"mode": "observed"}},
+                    on_write_failure="discard",
+                ),
+            ),
+            metadata=PipelineMetadata(),
+            version=1,
+        )
+
+        result = _dispatch_tool(
+            "generate_yaml",
+            {},
+            valid_state,
+            _mock_catalog(),
+            scratch_dir,
+        )
+
+        assert result["success"] is True
+        assert isinstance(result["data"], str)
+```
+
+In `tests/unit/web/sessions/test_routes.py`, strengthen the existing happy-path YAML test so it uses a plugin-valid state with no declared `required_input_fields`:
+
+```python
+    @pytest.mark.asyncio
+    async def test_yaml_returns_yaml_when_state_exists(self, tmp_path) -> None:
+        """Returns generated YAML for a valid state even when edge_contracts is empty."""
+        app, service = _make_app(tmp_path)
+        client = TestClient(app)
+
+        session = await service.create_session("alice", "Pipeline", "local")
+        await service.save_composition_state(
+            session.id,
+            CompositionStateData(
+                source={
+                    "plugin": "csv",
+                    "on_success": "out",
+                    "options": {"path": "/data.csv", "schema": {"mode": "observed"}},
+                    "on_validation_failure": "quarantine",
+                },
+                outputs=[
+                    {
+                        "name": "out",
+                        "plugin": "csv",
+                        "options": {"path": "outputs/out.csv", "schema": {"mode": "observed"}},
+                        "on_write_failure": "discard",
+                    }
+                ],
+                metadata_={"name": "Test Pipeline", "description": ""},
+                is_valid=True,
+            ),
+        )
+
+        resp = client.get(f"/api/sessions/{session.id}/state/yaml")
+        assert resp.status_code == 200
+        body = resp.json()
+        assert "yaml" in body
+        assert "csv" in body["yaml"]
+```
+
+Expected: on the fixed implementation, both tests PASS even though the validated state has no edge-contract rows.
 
 - [ ] **Step 2: Guard the MCP `generate_yaml` tool**
 
@@ -1666,6 +1855,8 @@ git commit -m "feat(composer): teach explain_validation_error about schema contr
 ```
 
 ---
+
+## Sub-Plan C: Runtime Parity and Release Gate
 
 ### Task 6: TDD the Observed-Text Runtime Backing in `text_source.py`
 
@@ -1857,16 +2048,25 @@ In `src/elspeth/plugins/sources/text_source.py`, at line 109 (the `yield from se
                     )
 ```
 
-- [ ] **Step 4: Auto-declare `guaranteed_fields` in `__init__` and sync the raw config dict**
+- [ ] **Step 4: Auto-declare `guaranteed_fields` in `__init__` and sync a normalized config copy**
 
-In `TextSource.__init__()`, after `self._schema_config = cfg.schema_config` (line 72), add logic to auto-declare the column as a guaranteed field only when the schema is `observed` and does not already declare `guaranteed_fields`. This makes the narrow shared observed-text rule mechanical in runtime code without changing the semantics of `fixed`/`flexible` schemas.
+In `TextSource.__init__()`, restructure the current config / schema setup so the observed-text guarantee is normalized **before** `BaseSource` stores the config dict. Auto-declare the column as a guaranteed field only when the schema is `observed` and does not already declare `guaranteed_fields`. This makes the narrow shared observed-text rule mechanical in runtime code without changing the semantics of `fixed`/`flexible` schemas.
 
-Critical detail: updating `self._schema_config` alone is **not sufficient**. The DAG builder currently materializes source schema contracts from `source.config["schema"]`, so the normalized schema must also be written back into the raw plugin config dict that the builder reads. Do **not** round-trip through `SchemaConfig.to_dict()` / `SchemaConfig.from_dict()` just to mutate a validated `SchemaConfig` you already hold. This is Tier 1 data in process memory. Update the frozen dataclass mechanically with `dataclasses.replace(...)`, then use `to_dict()` only once at the serialization boundary when syncing `self.config["schema"]`.
+Critical detail: updating `self._schema_config` alone is **not sufficient**. The DAG builder currently materializes source schema contracts from `source.config["schema"]`, so the normalized schema must also be present in the raw plugin config dict that the builder reads. However, `BaseSource.__init__()` stores the incoming `config` dict by reference (`self.config = config`), so mutating `self.config["schema"]` after `super().__init__(config)` would leak a caller-visible aliasing side effect. Do **not** do that. Instead:
+
+- parse and normalize the schema first,
+- build a copied `normalized_config` dict,
+- write the canonical `"schema"` entry into that copy,
+- then call `super().__init__(normalized_config)` once.
+
+Because `TextSourceConfig` inherits from `SourceDataConfig`, `cfg.schema_config` is guaranteed to be populated after `from_dict()`. Do **not** add a defensive `if schema_config is not None` guard here; that would misrepresent a constructor invariant as a runtime branch. Do **not** round-trip through `SchemaConfig.to_dict()` / `SchemaConfig.from_dict()` just to mutate a validated `SchemaConfig` you already hold. This is Tier 1 data in process memory. Update the frozen dataclass mechanically with `dataclasses.replace(...)`, then serialize only once when constructing the copied config passed to the base class.
 
 ```python
-        from dataclasses import replace
-
-        self._schema_config = cfg.schema_config
+        # Add at module scope:
+        # from dataclasses import replace
+        cfg = TextSourceConfig.from_dict(config, plugin_name=self.name)
+        schema_config = cfg.schema_config
+        normalized_config = dict(config)
 
         # Auto-declare {column} as a guaranteed output field only for the
         # shared observed-text contract case: observed schema, no explicit
@@ -1876,22 +2076,27 @@ Critical detail: updating `self._schema_config` alone is **not sufficient**. The
         # guarantees through normal SchemaConfig semantics and must not be
         # rewritten into an explicit guaranteed_fields declaration.
         if (
-            self._schema_config is not None
-            and self._schema_config.mode == "observed"
-            and not self._schema_config.declares_guaranteed_fields
-            and self._column
+            schema_config.mode == "observed"
+            and not schema_config.declares_guaranteed_fields
+            and cfg.column
         ):
             # Update the typed, already-validated SchemaConfig directly.
-            # Avoid a dict round-trip and avoid .get() on Tier 1 data.
-            self._schema_config = replace(
-                self._schema_config,
-                guaranteed_fields=(self._column,),
+            # Avoid a dict round-trip and avoid caller-visible mutation of
+            # self.config after BaseSource stores the config reference.
+            schema_config = replace(
+                schema_config,
+                guaranteed_fields=(cfg.column,),
             )
-            # DAG builder currently reads source.config["schema"], not the
-            # plugin's private _schema_config. Keep the raw config dict in
-            # sync so runtime validation sees the same observed-text contract
-            # the composer reports to the LLM.
-            self.config["schema"] = self._schema_config.to_dict()
+
+        # DAG builder currently reads source.config["schema"], not the
+        # plugin's private _schema_config. Normalize the copied config before
+        # BaseSource stores it so runtime validation sees the same observed-text
+        # contract the composer reports to the LLM, without mutating the
+        # caller-supplied config dict.
+        normalized_config["schema"] = schema_config.to_dict()
+        super().__init__(normalized_config)
+
+        self._schema_config = schema_config
 ```
 
 - [ ] **Step 5: Run the enforcement suite to verify it passes**
@@ -1917,11 +2122,11 @@ Task 7's former enforcement suite has been intentionally folded into Task 6 so t
 ### Task 8: Composer/Runtime Agreement Test
 
 **Files:**
-- Create: `tests/integration/web/test_composer_runtime_agreement.py`
+- Create: `tests/integration/pipeline/test_composer_runtime_agreement.py`
 
 - [ ] **Step 1: Write the agreement test**
 
-This test builds the same pipeline configuration, validates it through both the composer and the runtime DAG validator, and asserts they agree on the shared-contract cases covered here. It is not a proof that composer and runtime are globally identical. If the composer later adds intentionally stricter preflight checks that runtime does not mirror, document those in separate asymmetry tests rather than forcing them into this agreement suite. Cover the node-consumer failure case, the observed-text acceptance case, the strict-sink parity case that motivated the shared helper extraction, and an aggregation-consumer failure case that proves the runtime's nested `config["options"]["required_input_fields"]` path stays coupled to the composer's flat `node.options` view.
+This test builds the same pipeline configuration, validates it through both the composer and the runtime DAG validator, and asserts they agree on the shared-contract cases covered here. It is not a proof that composer and runtime are globally identical. If the composer later adds intentionally stricter preflight checks that runtime does not mirror, document those in separate asymmetry tests rather than forcing them into this agreement suite. Cover the node-consumer failure case, the observed-text acceptance case, the strict-sink parity case that motivated the shared helper extraction, and an aggregation-consumer failure case that proves the runtime's nested `config["options"]["required_input_fields"]` path stays coupled to the composer's flat `node.options` view. Place it under `tests/integration/pipeline/`, not `tests/integration/web/`, because this is pipeline/DAG contract agreement work rather than HTTP-route integration.
 
 ```python
 """Composer/runtime agreement test.
@@ -2063,7 +2268,7 @@ class TestComposerRuntimeAgreement:
                 input="t1", on_success="main", on_error=None,
                 options={
                     "required_input_fields": ["text"],
-                    "operations": [{"field": "out", "expression": "row['text'] + ' world'"}],
+                    "operations": [{"target": "out", "expression": "row['text'] + ' world'"}],
                     "schema": {"mode": "observed"},
                 },
                 condition=None, routes=None, fork_to=None,
@@ -2097,7 +2302,7 @@ class TestComposerRuntimeAgreement:
                     source_options={"path": tmp_path, "column": "line", "schema": {"mode": "observed"}},
                     transform_options={
                         "required_input_fields": ["text"],
-                        "operations": [{"field": "out", "expression": "row['text'] + ' world'"}],
+                        "operations": [{"target": "out", "expression": "row['text'] + ' world'"}],
                         "schema": {"mode": "observed"},
                     },
                     sink_options={"path": "outputs/out.csv", "schema": {"mode": "observed"}},
@@ -2138,7 +2343,7 @@ class TestComposerRuntimeAgreement:
                 input="t1", on_success="main", on_error=None,
                 options={
                     "required_input_fields": ["text"],
-                    "operations": [{"field": "out", "expression": "row['text'] + ' world'"}],
+                    "operations": [{"target": "out", "expression": "row['text'] + ' world'"}],
                     "schema": {"mode": "observed"},
                 },
                 condition=None, routes=None, fork_to=None,
@@ -2163,7 +2368,7 @@ class TestComposerRuntimeAgreement:
                 source_options={"path": tmp_path, "column": "text", "schema": {"mode": "fixed", "fields": ["text: str"]}},
                 transform_options={
                     "required_input_fields": ["text"],
-                    "operations": [{"field": "out", "expression": "row['text'] + ' world'"}],
+                    "operations": [{"target": "out", "expression": "row['text'] + ' world'"}],
                     "schema": {"mode": "observed"},
                 },
                 sink_options={"path": "outputs/out.csv", "schema": {"mode": "observed"}},
@@ -2209,7 +2414,7 @@ class TestComposerRuntimeAgreement:
                 input="t1", on_success="main", on_error=None,
                 options={
                     "required_input_fields": ["text"],
-                    "operations": [{"field": "out", "expression": "row['text'] + ' world'"}],
+                    "operations": [{"target": "out", "expression": "row['text'] + ' world'"}],
                     "schema": {"mode": "observed"},
                 },
                 condition=None, routes=None, fork_to=None,
@@ -2238,7 +2443,7 @@ class TestComposerRuntimeAgreement:
                 source_options={"path": tmp_path, "column": "text", "schema": {"mode": "observed"}},
                 transform_options={
                     "required_input_fields": ["text"],
-                    "operations": [{"field": "out", "expression": "row['text'] + ' world'"}],
+                    "operations": [{"target": "out", "expression": "row['text'] + ' world'"}],
                     "schema": {"mode": "observed"},
                 },
                 sink_options={"path": "outputs/out.csv", "schema": {"mode": "observed"}},
@@ -2371,13 +2576,13 @@ class TestComposerRuntimeAgreement:
 
 - [ ] **Step 2: Run to verify it passes**
 
-Run: `.venv/bin/python -m pytest tests/integration/web/test_composer_runtime_agreement.py -v`
+Run: `.venv/bin/python -m pytest tests/integration/pipeline/test_composer_runtime_agreement.py -v`
 Expected: PASS
 
 - [ ] **Step 3: Commit**
 
 ```bash
-git add tests/integration/web/test_composer_runtime_agreement.py
+git add tests/integration/pipeline/test_composer_runtime_agreement.py
 git commit -m "test(integration): add composer/runtime agreement test for schema contracts"
 ```
 
@@ -2421,7 +2626,7 @@ Append to `TestSchemaContractValidation`:
             "t1", "t1", "main",
             options={
                 "required_input_fields": ["text"],
-                "operations": [{"field": "combined", "expression": "row['text'] + ' world'"}],
+                "operations": [{"target": "combined", "expression": "row['text'] + ' world'"}],
             },
         ))
         state = state.with_output(self._make_output())
@@ -2455,10 +2660,11 @@ git commit -m "test(composer): add regression test for original false-positive s
 
 **Files:**
 - Modify: `src/elspeth/web/composer/skills/pipeline_composer.md:102-113, 353-357, 116`
+- Modify: `.claude/skills/pipeline-composer/SKILL.md` (update the overlapping guidance / quick-reference content so the repo does not carry two conflicting pipeline-composer skill copies)
 
 - [ ] **Step 1: Add completion criteria item 4**
 
-In `pipeline_composer.md`, after line 107 (`3. All required plugin options are filled with meaningful values (not empty)`), add:
+In `pipeline_composer.md`, after line 107 (`3. All required plugin options are filled with meaningful values (not empty)`), add. Mirror the same completion-rule intent into the Claude skill if that copy is also used to guide agents; do not treat the web skill as the only source of truth:
 
 ```markdown
 4. **All edge contracts are satisfied** — every downstream step's `required_input_fields` must be guaranteed by its upstream producer, and sink schemas may impose their own required fields. Check `edge_contracts` in the preview response. If any edge shows `"satisfied": false`, the pipeline is not complete.
@@ -2473,7 +2679,7 @@ Pipelines without `required_input_fields` declarations are not verified by the c
 
 - [ ] **Step 2: Add text source contract rule**
 
-After line 356 (`- When wiring a text file via \`set_source_from_blob\`, you MUST pass...`), add:
+After line 356 (`- When wiring a text file via \`set_source_from_blob\`, you MUST pass...`), add. Apply the same text-source contract clarification to the overlapping quick-reference section in `.claude/skills/pipeline-composer/SKILL.md`:
 
 ```markdown
 - **Schema rule for text sources:** Prefer an explicit `fixed` or `flexible` schema when you know the text column shape; it gives the strongest contract and clearer types. Narrow exception: a `text` source with `{"schema": {"mode": "observed"}}` and a non-empty `column` is still treated as guaranteeing `{column}` by the shared composer/runtime contract helper when `guaranteed_fields` is not explicitly set. Do not generalize this exception to other observed sources.
@@ -2489,7 +2695,7 @@ In the "Choosing the right mode" bullet list (around line 143), after the `- **S
 
 - [ ] **Step 3: Add fix flow example**
 
-After the "Tool Failure Recovery" section (after line 127), add a new subsection:
+After the "Tool Failure Recovery" section (after line 127), add a new subsection. If the Claude skill has an equivalent recovery/help section, mirror this flow there as well; otherwise add a short note there pointing agents back to the same contract-resolution sequence so the two skill files do not drift semantically:
 
 ```markdown
 #### Fixing Schema Contract Violations
@@ -2536,7 +2742,7 @@ If the same producer feeds multiple consumers with conflicting truthful requirem
 - [ ] **Step 4: Run skill drift test to check for regressions**
 
 Run: `.venv/bin/python -m pytest tests/unit/web/composer/test_skill_drift.py -v`
-Expected: PASS (or update the drift test if it checks for specific content hashes)
+Expected: PASS. Then manually review both skill files together: the current drift suite enforces shared plugin-registry parity, but it does not exhaustively compare all prose guidance, so Task 10 is not complete if the two files still disagree in overlapping sections.
 
 - [ ] **Step 5: Add a contract-violation pattern to `explain_validation_error`**
 
@@ -2545,7 +2751,7 @@ Because the skill tells the agent to use `explain_validation_error` for unclear 
 - [ ] **Step 6: Commit**
 
 ```bash
-git add src/elspeth/web/composer/skills/pipeline_composer.md
+git add src/elspeth/web/composer/skills/pipeline_composer.md .claude/skills/pipeline-composer/SKILL.md
 git commit -m "docs(skill): add schema contract completion criteria, text source rule, fix flow example"
 ```
 
@@ -2562,7 +2768,7 @@ Expected: All PASS
 
 - [ ] **Step 2: Run integration tests**
 
-Run: `.venv/bin/python -m pytest tests/integration/web/ -v`
+Run: `.venv/bin/python -m pytest tests/integration/web/ tests/integration/pipeline/test_composer_runtime_agreement.py -v`
 Expected: All PASS
 
 - [ ] **Step 3: Run type checker**
@@ -2578,7 +2784,16 @@ Expected: No errors
 - [ ] **Step 5: Run tier model enforcement**
 
 Run: `.venv/bin/python scripts/cicd/enforce_tier_model.py check --root src/elspeth --allowlist config/cicd/enforce_tier_model`
-Expected: No new violations (the deferred import of the shared raw-config contract helpers from L0 into L3 is layer-legal)
+Expected: No new violations (top-level imports of the shared raw-config contract helpers from L0 into L3 are layer-legal and preferred over new lazy imports)
+
+### What This Doesn't Catch Yet
+
+Task 5B adds a mechanical backstop only at the LLM/user-facing YAML export surfaces:
+
+- `src/elspeth/composer_mcp/server.py` `generate_yaml`
+- `GET /api/sessions/{id}/state/yaml` in `src/elspeth/web/sessions/routes.py`
+
+It does **not** make `yaml_generator.generate_yaml()` universally validation-aware. In particular, `src/elspeth/web/execution/service.py` currently calls the serializer directly during execute-path run creation. That path remains outside the Task 5B backstop and still relies on earlier validation / workflow discipline rather than a universal export guard. Do not describe this plan as "all generate_yaml call sites are protected" unless a future task explicitly changes the execute path too.
 
 - [ ] **Step 6: Register follow-up issue for expanded agreement tests**
 
@@ -2588,5 +2803,5 @@ Create a Filigree issue:
 ```bash
 filigree create "Expand composer/runtime agreement tests — coalesce and type-level" \
   --type=task --priority=3 \
-  --description="The agreement test in tests/integration/web/test_composer_runtime_agreement.py covers four basic scenarios (node reject, observed-text accept, strict-sink reject, aggregation nested-options reject). Expand it to cover the remaining runtime-only gaps: (1) coalesce-merge branch intersection, (2) type-level schema compatibility (Pydantic schema construction). These are cases where runtime may reject but the composer currently cannot check. See docs/superpowers/specs/2026-04-14-composer-schema-contract-validation-design.md 'What This Doesn't Catch' table."
+  --description="The agreement test in tests/integration/pipeline/test_composer_runtime_agreement.py covers four basic scenarios (node reject, observed-text accept, strict-sink reject, aggregation nested-options reject). Expand it to cover the remaining runtime-only gaps: (1) coalesce-merge branch intersection, (2) type-level schema compatibility (Pydantic schema construction). These are cases where runtime may reject but the composer currently cannot check. See docs/superpowers/specs/2026-04-14-composer-schema-contract-validation-design.md 'What This Doesn't Catch' table."
 ```
