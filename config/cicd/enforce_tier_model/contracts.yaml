@@ -9,7 +9,7 @@ per_file_rules:
   - R5
   reason: Type discrimination for schema field parsing and union detection
   expires: null
-  max_hits: 13
+  max_hits: 16
 - pattern: contracts/contract_records.py
   rules:
   - R5

@@ -9,12 +9,19 @@ Layer: L3 (application).
 
 from __future__ import annotations
 
+from collections import Counter
 from collections.abc import Mapping
 from dataclasses import dataclass, replace
 from pathlib import PurePosixPath
-from typing import Any, Literal, Self, TypedDict
+from typing import Any, Literal, NamedTuple, Self, TypedDict
 
 from elspeth.contracts.freeze import deep_thaw, freeze_fields
+from elspeth.contracts.schema import (
+    get_raw_node_required_fields,
+    get_raw_producer_guaranteed_fields,
+    get_raw_sink_required_fields,
+    raw_options_have_schema,
+)
 from elspeth.engine.orchestrator.validation import (
     _ALLOWED_FAILSINK_PLUGINS,
 )
@@ -119,8 +126,8 @@ class NodeSpec:
         default to None when absent from the dict. fork_to and branches are
         converted from list to tuple since to_dict() serialises tuples as lists.
         """
-        fork_to = d.get("fork_to")
-        branches = d.get("branches")
+        fork_to = d["fork_to"] if "fork_to" in d else None
+        branches = d["branches"] if "branches" in d else None
         return cls(
             id=d["id"],
             node_type=d["node_type"],
@@ -129,12 +136,12 @@ class NodeSpec:
             on_success=d["on_success"],
             on_error=d["on_error"],
             options=d["options"],
-            condition=d.get("condition"),
-            routes=d.get("routes"),
+            condition=d["condition"] if "condition" in d else None,
+            routes=d["routes"] if "routes" in d else None,
             fork_to=tuple(fork_to) if fork_to is not None else None,
             branches=tuple(branches) if branches is not None else None,
-            policy=d.get("policy"),
-            merge=d.get("merge"),
+            policy=d["policy"] if "policy" in d else None,
+            merge=d["merge"] if "merge" in d else None,
         )
 
 
@@ -270,6 +277,12 @@ class ValidationSummary:
     edge_contracts: tuple[EdgeContract, ...] = ()
 
 
+class _ProducerEntry(NamedTuple):
+    producer_id: str
+    plugin_name: str | None
+    options: Mapping[str, Any]
+
+
 def _source_options_have_schema(options: Mapping[str, Any]) -> bool:
     """Return whether source options carry a schema under the current contract.
 
@@ -278,7 +291,7 @@ def _source_options_have_schema(options: Mapping[str, Any]) -> bool:
     population by either key. Read-only summaries and validation must use the
     same rule so they cannot drift.
     """
-    return "schema" in options or "schema_config" in options
+    return raw_options_have_schema(options)
 
 
 def _validate_gate_expression(condition: str) -> str | None:
@@ -287,8 +300,8 @@ def _validate_gate_expression(condition: str) -> str | None:
     Returns an error message if the expression is syntactically invalid or
     contains forbidden constructs, or None if valid.
 
-    Uses a deferred import to keep state.py's module-level imports minimal
-    (only contracts.freeze). The import is L3→L1, which is layer-legal.
+    Uses a deferred import to keep the expression-parser dependency local to
+    the validation path. The import is L3→L1, which is layer-legal.
     """
     from elspeth.core.expression_parser import (
         ExpressionParser,
@@ -303,6 +316,404 @@ def _validate_gate_expression(condition: str) -> str | None:
     except ExpressionSecurityError as e:
         return f"Forbidden construct in gate condition: {e}"
     return None
+
+
+def _check_schema_contracts(
+    source: SourceSpec | None,
+    nodes: tuple[NodeSpec, ...],
+    outputs: tuple[OutputSpec, ...],
+) -> tuple[
+    tuple[ValidationEntry, ...],
+    tuple[ValidationEntry, ...],
+    tuple[EdgeContract, ...],
+]:
+    """Validate producer/consumer schema contracts across declarative routing."""
+    errors: list[ValidationEntry] = []
+    contract_warnings: list[ValidationEntry] = []
+    edge_contracts: list[EdgeContract] = []
+    parse_failed_producers: set[str] = set()
+    node_by_id = {node.id: node for node in nodes}
+    sink_names = {output.name for output in outputs}
+    internal_connection_names: set[str] = set()
+
+    _err = ValidationEntry
+    _warn = ValidationEntry
+
+    if any(node.id == "source" for node in nodes):
+        errors.append(
+            _err(
+                "pipeline",
+                "Reserved node id 'source' cannot be used in composer state because contract walk-back uses it as the source sentinel.",
+                "high",
+            )
+        )
+        return tuple(errors), tuple(contract_warnings), ()
+
+    producer_map: dict[str, _ProducerEntry] = {}
+    producer_desc: dict[str, str] = {}
+    direct_sink_producers: dict[str, list[_ProducerEntry]] = {}
+
+    def _register_producer(
+        connection_name: str,
+        producer_id: str,
+        plugin_name: str | None,
+        options: Mapping[str, Any],
+        description: str,
+    ) -> None:
+        if connection_name in producer_map:
+            errors.append(
+                _err(
+                    f"connection:{connection_name}",
+                    f"Duplicate producer for connection '{connection_name}': {producer_desc[connection_name]} and {description}.",
+                    "high",
+                )
+            )
+            return
+        producer_map[connection_name] = _ProducerEntry(
+            producer_id=producer_id,
+            plugin_name=plugin_name,
+            options=options,
+        )
+        producer_desc[connection_name] = description
+        if connection_name not in sink_names:
+            internal_connection_names.add(connection_name)
+
+    def _register_direct_sink_producer(
+        sink_name: str,
+        producer_id: str,
+        plugin_name: str | None,
+        options: Mapping[str, Any],
+    ) -> None:
+        if sink_name not in direct_sink_producers:
+            direct_sink_producers[sink_name] = []
+        direct_sink_producers[sink_name].append(_ProducerEntry(producer_id=producer_id, plugin_name=plugin_name, options=options))
+
+    if source is not None:
+        if source.on_success in sink_names:
+            _register_direct_sink_producer(
+                source.on_success,
+                "source",
+                source.plugin,
+                source.options,
+            )
+        else:
+            _register_producer(
+                source.on_success,
+                "source",
+                source.plugin,
+                source.options,
+                f"source '{source.plugin}'",
+            )
+
+    for node in nodes:
+        if node.on_success is not None:
+            if node.on_success in sink_names:
+                _register_direct_sink_producer(
+                    node.on_success,
+                    node.id,
+                    node.plugin,
+                    node.options,
+                )
+            else:
+                _register_producer(
+                    node.on_success,
+                    node.id,
+                    node.plugin,
+                    node.options,
+                    f"node '{node.id}' on_success",
+                )
+        if node.on_error is not None:
+            if node.on_error in sink_names:
+                _register_direct_sink_producer(
+                    node.on_error,
+                    node.id,
+                    node.plugin,
+                    node.options,
+                )
+            else:
+                _register_producer(
+                    node.on_error,
+                    node.id,
+                    node.plugin,
+                    node.options,
+                    f"node '{node.id}' on_error",
+                )
+        if node.routes is not None:
+            for route_label, target in node.routes.items():
+                if target in sink_names:
+                    _register_direct_sink_producer(
+                        target,
+                        node.id,
+                        node.plugin,
+                        node.options,
+                    )
+                    continue
+                if target in producer_map and producer_map[target].producer_id == node.id:
+                    continue
+                _register_producer(
+                    target,
+                    node.id,
+                    node.plugin,
+                    node.options,
+                    f"gate '{node.id}' route '{route_label}'",
+                )
+        if node.fork_to is not None:
+            for branch_name in node.fork_to:
+                _register_producer(
+                    branch_name,
+                    node.id,
+                    node.plugin,
+                    node.options,
+                    f"gate '{node.id}' fork '{branch_name}'",
+                )
+
+    consumer_claims: list[tuple[str, str, str]] = [
+        (node.input, node.id, f"node '{node.id}'") for node in nodes if node.node_type != "coalesce"
+    ]
+    consumer_counts = Counter(connection_name for connection_name, _node_id, _desc in consumer_claims)
+    duplicate_consumers = sorted(name for name, count in consumer_counts.items() if count > 1)
+    for connection_name in duplicate_consumers:
+        dup_entries = [(node_id, desc) for name, node_id, desc in consumer_claims if name == connection_name]
+        first_node, first_desc = dup_entries[0]
+        second_node, second_desc = dup_entries[1]
+        errors.append(
+            _err(
+                f"connection:{connection_name}",
+                f"Duplicate consumer for connection '{connection_name}': "
+                f"{first_desc} ({first_node}) and {second_desc} ({second_node}). "
+                "Use a gate for fan-out.",
+                "high",
+            )
+        )
+
+    internal_connection_names.update(connection_name for connection_name, _node_id, _desc in consumer_claims)
+    overlap = sorted(internal_connection_names & sink_names)
+    if overlap:
+        errors.append(
+            _err(
+                "pipeline",
+                f"Connection names overlap with sink names: {overlap}. Connection names and sink names must be disjoint.",
+                "high",
+            )
+        )
+
+    if errors:
+        return tuple(errors), tuple(contract_warnings), ()
+
+    def _walk_producer_entry_to_real_producer(
+        producer: _ProducerEntry,
+        *,
+        connection_name: str,
+        producer_map: Mapping[str, _ProducerEntry],
+        node_by_id: Mapping[str, NodeSpec],
+        warnings: list[ValidationEntry],
+    ) -> _ProducerEntry | None:
+        visited_connections: set[str] = set()
+        current_producer = producer
+        while True:
+            if current_producer.producer_id == "source":
+                return current_producer
+
+            producer_node = node_by_id[current_producer.producer_id]
+            if producer_node.node_type == "coalesce":
+                warnings.append(
+                    _warn(
+                        f"node:{producer_node.id}",
+                        f"Contract check skipped because connection '{connection_name}' is produced by coalesce node '{producer_node.id}'; runtime validator will check this edge.",
+                        "medium",
+                    )
+                )
+                return None
+            if producer_node.node_type != "gate":
+                return current_producer
+            if producer_node.fork_to is not None:
+                warnings.append(
+                    _warn(
+                        f"node:{producer_node.id}",
+                        f"Contract check skipped because fork gate '{producer_node.id}' produces connection '{connection_name}'; branch-aware contract validation is out of scope for composer preview.",
+                        "medium",
+                    )
+                )
+                return None
+            current_connection = producer_node.input
+            if current_connection in visited_connections:
+                warnings.append(
+                    _warn(
+                        f"connection:{connection_name}",
+                        f"Contract check skipped for connection '{connection_name}' because producer walk-back encountered a routing loop.",
+                        "medium",
+                    )
+                )
+                return None
+            visited_connections.add(current_connection)
+            if current_connection not in producer_map:
+                return None
+            current_producer = producer_map[current_connection]
+
+    def _walk_to_real_producer(
+        connection_name: str,
+        *,
+        producer_map: Mapping[str, _ProducerEntry],
+        node_by_id: Mapping[str, NodeSpec],
+        warnings: list[ValidationEntry],
+    ) -> _ProducerEntry | None:
+        if connection_name not in producer_map:
+            return None
+        return _walk_producer_entry_to_real_producer(
+            producer_map[connection_name],
+            connection_name=connection_name,
+            producer_map=producer_map,
+            node_by_id=node_by_id,
+            warnings=warnings,
+        )
+
+    def _producer_owner(producer: _ProducerEntry) -> str:
+        return "source" if producer.producer_id == "source" else f"node:{producer.producer_id}"
+
+    def _producer_label(producer: _ProducerEntry) -> str:
+        if producer.plugin_name is not None:
+            return producer.plugin_name
+        return node_by_id[producer.producer_id].node_type
+
+    def _format_fields(fields: frozenset[str]) -> str:
+        return ", ".join(sorted(fields)) if fields else "(none)"
+
+    for node in nodes:
+        try:
+            consumer_required = get_raw_node_required_fields(
+                node.options,
+                owner=f"node:{node.id}",
+                node_type=node.node_type,
+            )
+        except ValueError as exc:
+            errors.append(_err(f"node:{node.id}", f"Invalid contract config: {exc}", "high"))
+            continue
+
+        if not consumer_required:
+            continue
+
+        actual_producer = _walk_to_real_producer(
+            node.input,
+            producer_map=producer_map,
+            node_by_id=node_by_id,
+            warnings=contract_warnings,
+        )
+        if actual_producer is None or actual_producer.producer_id in parse_failed_producers:
+            continue
+
+        try:
+            producer_guaranteed = get_raw_producer_guaranteed_fields(
+                actual_producer.plugin_name,
+                actual_producer.options,
+                owner=_producer_owner(actual_producer),
+            )
+        except ValueError as exc:
+            errors.append(_err(_producer_owner(actual_producer), f"Invalid contract config: {exc}", "high"))
+            parse_failed_producers.add(actual_producer.producer_id)
+            continue
+
+        missing_fields = consumer_required - producer_guaranteed
+        edge_contracts.append(
+            EdgeContract(
+                from_id=actual_producer.producer_id,
+                to_id=node.id,
+                producer_guarantees=tuple(sorted(producer_guaranteed)),
+                consumer_requires=tuple(sorted(consumer_required)),
+                missing_fields=tuple(sorted(missing_fields)),
+                satisfied=not missing_fields,
+            )
+        )
+        if missing_fields:
+            errors.append(
+                _err(
+                    f"node:{node.id}",
+                    f"Schema contract violation: '{actual_producer.producer_id}' -> '{node.id}'. "
+                    f"Consumer ({node.plugin or node.node_type}) requires fields: [{_format_fields(consumer_required)}]. "
+                    f"Producer ({_producer_label(actual_producer)}) guarantees: [{_format_fields(producer_guaranteed)}]. "
+                    f"Missing fields: [{_format_fields(missing_fields)}].",
+                    "high",
+                )
+            )
+
+    for output in outputs:
+        try:
+            sink_required = get_raw_sink_required_fields(
+                output.options,
+                owner=f"output:{output.name}",
+            )
+        except ValueError as exc:
+            errors.append(_err(f"output:{output.name}", f"Invalid contract config: {exc}", "high"))
+            continue
+
+        if not sink_required:
+            continue
+
+        if output.name in direct_sink_producers:
+            sink_producers = tuple(direct_sink_producers[output.name])
+        else:
+            actual_producer = _walk_to_real_producer(
+                output.name,
+                producer_map=producer_map,
+                node_by_id=node_by_id,
+                warnings=contract_warnings,
+            )
+            sink_producers = () if actual_producer is None else (actual_producer,)
+
+        seen_sink_contract_producers: set[str] = set()
+        for sink_producer in sink_producers:
+            actual_producer = _walk_producer_entry_to_real_producer(
+                sink_producer,
+                connection_name=output.name,
+                producer_map=producer_map,
+                node_by_id=node_by_id,
+                warnings=contract_warnings,
+            )
+            if actual_producer is None:
+                continue
+            # Multiple direct routes from the same producer can converge on one
+            # sink. edge_contracts has no route-label field, so emit one
+            # producer->sink contract check per real upstream producer.
+            if actual_producer.producer_id in seen_sink_contract_producers:
+                continue
+            seen_sink_contract_producers.add(actual_producer.producer_id)
+            if actual_producer.producer_id in parse_failed_producers:
+                continue
+
+            try:
+                producer_guaranteed = get_raw_producer_guaranteed_fields(
+                    actual_producer.plugin_name,
+                    actual_producer.options,
+                    owner=_producer_owner(actual_producer),
+                )
+            except ValueError as exc:
+                errors.append(_err(_producer_owner(actual_producer), f"Invalid contract config: {exc}", "high"))
+                parse_failed_producers.add(actual_producer.producer_id)
+                continue
+
+            missing_fields = sink_required - producer_guaranteed
+            edge_contracts.append(
+                EdgeContract(
+                    from_id=actual_producer.producer_id,
+                    to_id=f"output:{output.name}",
+                    producer_guarantees=tuple(sorted(producer_guaranteed)),
+                    consumer_requires=tuple(sorted(sink_required)),
+                    missing_fields=tuple(sorted(missing_fields)),
+                    satisfied=not missing_fields,
+                )
+            )
+            if missing_fields:
+                errors.append(
+                    _err(
+                        f"output:{output.name}",
+                        f"Schema contract violation: '{actual_producer.producer_id}' -> 'output:{output.name}'. "
+                        f"Sink '{output.name}' requires fields: [{_format_fields(sink_required)}]. "
+                        f"Producer ({_producer_label(actual_producer)}) guarantees: [{_format_fields(producer_guaranteed)}]. "
+                        f"Missing fields: [{_format_fields(missing_fields)}].",
+                        "high",
+                    )
+                )
+
+    return tuple(errors), tuple(contract_warnings), tuple(edge_contracts)
 
 
 @dataclass(frozen=True, slots=True)
@@ -827,9 +1238,15 @@ class CompositionState:
                     _sug("source", "Source has no explicit schema. Downstream field references depend on runtime column names.", "low")
                 )
 
+        # 9. Schema contract validation
+        contract_errors, contract_warnings, edge_contracts = _check_schema_contracts(self.source, self.nodes, self.outputs)
+        errors.extend(contract_errors)
+        warnings.extend(contract_warnings)
+
         return ValidationSummary(
             is_valid=len(errors) == 0,
             errors=tuple(errors),
             warnings=tuple(warnings),
             suggestions=tuple(suggestions),
+            edge_contracts=edge_contracts,
         )

@@ -24,7 +24,7 @@ from elspeth.contracts import (
     check_compatibility,
 )
 from elspeth.contracts.enums import NodeType
-from elspeth.contracts.schema import FIELD_TYPE_MAP, SchemaConfig
+from elspeth.contracts.schema import FIELD_TYPE_MAP, SchemaConfig, get_raw_node_required_fields
 from elspeth.contracts.types import (
     AggregationName,
     BranchName,
@@ -1814,38 +1814,18 @@ class ExecutionGraph:
             Frozenset of field names explicitly required
         """
         node_info = self.get_node_info(node_id)
-
-        # Check plugin config for required_input_fields (highest priority)
-        # This is the explicit declaration from TransformDataConfig
-        required_input = node_info.config.get("required_input_fields")
-        if required_input is not None and len(required_input) > 0:
-            return frozenset(required_input)
-
-        # For aggregation nodes, also check inside "options" where transform config is nested
-        if node_info.node_type == NodeType.AGGREGATION:
-            options = node_info.config["options"]
-            if not isinstance(options, dict):
-                raise GraphValidationError(
-                    f"Aggregation node config 'options' must be dict, got {type(options).__name__}",
-                    component_id=str(node_id),
-                    component_type="aggregation",
-                )
-            if "required_input_fields" in options:
-                required_input = options["required_input_fields"]
-                if required_input is not None and len(required_input) > 0:
-                    return frozenset(required_input)
-
-        # Check for explicit required_fields in schema config
-        schema_config = self.get_schema_config_from_node(node_id)
-
-        if schema_config is None:
-            return frozenset()
-
-        # Only return explicit required_fields declaration, NOT implicit from typed schemas
-        if schema_config.required_fields is not None:
-            return frozenset(schema_config.required_fields)
-
-        return frozenset()
+        try:
+            return get_raw_node_required_fields(
+                node_info.config,
+                owner=f"node:{node_id}",
+                node_type=node_info.node_type.value,
+            )
+        except ValueError as exc:
+            raise GraphValidationError(
+                f"Invalid contract config: {exc}",
+                component_id=str(node_id),
+                component_type=node_info.node_type.value,
+            ) from exc
 
     def get_effective_guaranteed_fields(self, node_id: str) -> frozenset[str]:
         """Get effective output guarantees for a node.

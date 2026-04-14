@@ -1511,3 +1511,571 @@ class TestStage1Validation:
         assert result.is_valid, result.errors
         assert result.warnings == ()
         assert result.suggestions == ()
+
+
+class TestSchemaContractValidation:
+    """Tests for schema contract validation (pass 9) in CompositionState.validate()."""
+
+    def _empty_state(self) -> CompositionState:
+        return CompositionState(
+            source=None,
+            nodes=(),
+            edges=(),
+            outputs=(),
+            metadata=PipelineMetadata(),
+            version=1,
+        )
+
+    def _make_source(
+        self,
+        on_success: str = "t1",
+        plugin: str = "csv",
+        options: dict[str, Any] | None = None,
+    ) -> SourceSpec:
+        opts = dict(options or {})
+        if plugin == "csv":
+            opts = {"path": "/data/input.csv", **opts}
+        elif plugin == "text":
+            opts = {"path": "/data/input.txt", "column": "text", **opts}
+        return SourceSpec(
+            plugin=plugin,
+            on_success=on_success,
+            options=opts,
+            on_validation_failure="quarantine",
+        )
+
+    def _make_transform(
+        self,
+        id: str,
+        input: str,
+        on_success: str,
+        plugin: str = "value_transform",
+        options: dict[str, Any] | None = None,
+        on_error: str | None = None,
+    ) -> NodeSpec:
+        opts = dict(options or {})
+        if plugin == "value_transform":
+            opts = {
+                "schema": {"mode": "observed"},
+                "operations": [{"target": "_placeholder", "expression": "row['text']"}],
+                **opts,
+            }
+        return NodeSpec(
+            id=id,
+            node_type="transform",
+            plugin=plugin,
+            input=input,
+            on_success=on_success,
+            on_error=on_error,
+            options=opts,
+            condition=None,
+            routes=None,
+            fork_to=None,
+            branches=None,
+            policy=None,
+            merge=None,
+        )
+
+    def _make_output(self, name: str = "main") -> OutputSpec:
+        return OutputSpec(
+            name=name,
+            plugin="csv",
+            options={"path": f"outputs/{name}.csv", "schema": {"mode": "observed"}},
+            on_write_failure="discard",
+        )
+
+    def _make_edge(
+        self,
+        id: str,
+        from_node: str,
+        to_node: str,
+        edge_type: EdgeType = "on_success",
+    ) -> EdgeSpec:
+        return EdgeSpec(id=id, from_node=from_node, to_node=to_node, edge_type=edge_type, label=None)
+
+    def test_fixed_schema_satisfies_requirement(self) -> None:
+        state = self._empty_state()
+        state = state.with_source(
+            self._make_source(
+                options={"schema": {"mode": "fixed", "fields": ["text: str"]}},
+            )
+        )
+        state = state.with_node(
+            self._make_transform(
+                "t1",
+                "t1",
+                "main",
+                options={"required_input_fields": ["text"]},
+            )
+        )
+        state = state.with_output(self._make_output())
+        state = state.with_edge(self._make_edge("e1", "source", "t1"))
+        result = state.validate()
+        assert result.is_valid, result.errors
+        assert not any("contract" in e.message.lower() for e in result.errors)
+
+    def test_text_explicit_guaranteed_fields_satisfies_requirement(self) -> None:
+        state = self._empty_state()
+        state = state.with_source(
+            self._make_source(
+                plugin="text",
+                options={
+                    "column": "text",
+                    "schema": {"mode": "observed", "guaranteed_fields": ["text"]},
+                },
+            )
+        )
+        state = state.with_node(
+            self._make_transform(
+                "t1",
+                "t1",
+                "main",
+                options={"required_input_fields": ["text"]},
+            )
+        )
+        state = state.with_output(self._make_output())
+        state = state.with_edge(self._make_edge("e1", "source", "t1"))
+        result = state.validate()
+        assert result.is_valid, result.errors
+
+    def test_no_required_input_fields_skips_check(self) -> None:
+        state = self._empty_state()
+        state = state.with_source(
+            self._make_source(
+                options={"schema": {"mode": "observed"}},
+            )
+        )
+        state = state.with_node(self._make_transform("t1", "t1", "main"))
+        state = state.with_output(self._make_output())
+        state = state.with_edge(self._make_edge("e1", "source", "t1"))
+        result = state.validate()
+        assert result.is_valid, result.errors
+
+    def test_empty_required_input_fields_skips_to_schema_fallback(self) -> None:
+        state = self._empty_state()
+        state = state.with_source(
+            self._make_source(
+                options={"schema": {"mode": "observed"}},
+            )
+        )
+        state = state.with_node(
+            self._make_transform(
+                "t1",
+                "t1",
+                "main",
+                options={"required_input_fields": []},
+            )
+        )
+        state = state.with_output(self._make_output())
+        state = state.with_edge(self._make_edge("e1", "source", "t1"))
+        result = state.validate()
+        assert result.is_valid, result.errors
+
+    def test_source_direct_to_sink_records_contract(self) -> None:
+        state = self._empty_state()
+        state = state.with_source(
+            self._make_source(
+                on_success="main",
+                options={"schema": {"mode": "fixed", "fields": ["text: str"]}},
+            )
+        )
+        state = state.with_output(
+            OutputSpec(
+                name="main",
+                plugin="csv",
+                options={
+                    "path": "outputs/main.csv",
+                    "schema": {"mode": "observed", "required_fields": ["text"]},
+                },
+                on_write_failure="discard",
+            )
+        )
+        result = state.validate()
+        assert result.is_valid, result.errors
+        assert len(result.edge_contracts) == 1
+        sink_contract = result.edge_contracts[0]
+        assert sink_contract.from_id == "source"
+        assert sink_contract.to_id == "output:main"
+        assert sink_contract.satisfied is True
+
+    def test_sink_required_fields_satisfied(self) -> None:
+        state = self._empty_state()
+        state = state.with_source(
+            self._make_source(
+                on_success="main",
+                options={"schema": {"mode": "fixed", "fields": ["text: str"]}},
+            )
+        )
+        state = state.with_output(
+            OutputSpec(
+                name="main",
+                plugin="csv",
+                options={
+                    "path": "outputs/main.csv",
+                    "schema": {"mode": "observed", "required_fields": ["text"]},
+                },
+                on_write_failure="discard",
+            )
+        )
+        result = state.validate()
+        assert result.is_valid, result.errors
+        sink_contract = next(ec for ec in result.edge_contracts if ec.to_id == "output:main")
+        assert sink_contract.satisfied is True
+        assert "text" in sink_contract.consumer_requires
+
+    def test_consumer_schema_required_fields_satisfied(self) -> None:
+        state = self._empty_state()
+        state = state.with_source(
+            self._make_source(
+                options={"schema": {"mode": "fixed", "fields": ["text: str"]}},
+            )
+        )
+        state = state.with_node(
+            self._make_transform(
+                "t1",
+                "t1",
+                "main",
+                options={"schema": {"mode": "observed", "required_fields": ["text"]}},
+            )
+        )
+        state = state.with_output(self._make_output())
+        state = state.with_edge(self._make_edge("e1", "source", "t1"))
+        result = state.validate()
+        assert result.is_valid, result.errors
+        edge_contract = next(ec for ec in result.edge_contracts if ec.to_id == "t1")
+        assert edge_contract.satisfied is True
+        assert edge_contract.consumer_requires == ("text",)
+
+    def test_observed_schema_no_guarantees_fails(self) -> None:
+        state = self._empty_state()
+        state = state.with_source(
+            self._make_source(
+                options={"schema": {"mode": "observed"}},
+            )
+        )
+        state = state.with_node(
+            self._make_transform(
+                "t1",
+                "t1",
+                "main",
+                options={"required_input_fields": ["text"]},
+            )
+        )
+        state = state.with_output(self._make_output())
+        state = state.with_edge(self._make_edge("e1", "source", "t1"))
+        result = state.validate()
+        assert not result.is_valid
+        assert any("schema contract violation" in e.message.lower() for e in result.errors)
+        assert any("text" in e.message for e in result.errors)
+
+    def test_partial_match_fails(self) -> None:
+        state = self._empty_state()
+        state = state.with_source(
+            self._make_source(
+                options={"schema": {"mode": "fixed", "fields": ["text: str"]}},
+            )
+        )
+        state = state.with_node(
+            self._make_transform(
+                "t1",
+                "t1",
+                "main",
+                options={"required_input_fields": ["text", "score"]},
+            )
+        )
+        state = state.with_output(self._make_output())
+        state = state.with_edge(self._make_edge("e1", "source", "t1"))
+        result = state.validate()
+        assert not result.is_valid
+        assert any("score" in e.message for e in result.errors)
+
+    def test_optional_field_not_guaranteed(self) -> None:
+        state = self._empty_state()
+        state = state.with_source(
+            self._make_source(
+                options={"schema": {"mode": "fixed", "fields": ["text: str?"]}},
+            )
+        )
+        state = state.with_node(
+            self._make_transform(
+                "t1",
+                "t1",
+                "main",
+                options={"required_input_fields": ["text"]},
+            )
+        )
+        state = state.with_output(self._make_output())
+        state = state.with_edge(self._make_edge("e1", "source", "t1"))
+        result = state.validate()
+        assert not result.is_valid
+        assert any("text" in e.message for e in result.errors)
+
+    def test_no_schema_config_fails(self) -> None:
+        state = self._empty_state()
+        state = state.with_source(self._make_source(options={}))
+        state = state.with_node(
+            self._make_transform(
+                "t1",
+                "t1",
+                "main",
+                options={"required_input_fields": ["text"]},
+            )
+        )
+        state = state.with_output(self._make_output())
+        state = state.with_edge(self._make_edge("e1", "source", "t1"))
+        result = state.validate()
+        assert not result.is_valid
+        assert any("schema contract violation" in e.message.lower() for e in result.errors)
+
+    def test_malformed_schema_emits_error(self) -> None:
+        state = self._empty_state()
+        state = state.with_source(
+            self._make_source(
+                options={"schema": {"mode": "invalid_mode"}},
+            )
+        )
+        state = state.with_node(
+            self._make_transform(
+                "t1",
+                "t1",
+                "main",
+                options={"required_input_fields": ["text"]},
+            )
+        )
+        state = state.with_output(self._make_output())
+        state = state.with_edge(self._make_edge("e1", "source", "t1"))
+        result = state.validate()
+        assert not result.is_valid
+        assert any("schema" in e.message.lower() for e in result.errors)
+
+    def test_sink_required_fields_violation_fails(self) -> None:
+        state = self._empty_state()
+        state = state.with_source(
+            self._make_source(
+                on_success="main",
+                options={"schema": {"mode": "fixed", "fields": ["line: str"]}},
+            )
+        )
+        state = state.with_output(
+            OutputSpec(
+                name="main",
+                plugin="csv",
+                options={
+                    "path": "outputs/main.csv",
+                    "schema": {"mode": "observed", "required_fields": ["text"]},
+                },
+                on_write_failure="discard",
+            )
+        )
+        result = state.validate()
+        assert not result.is_valid
+        assert any("sink" in e.message.lower() and "text" in e.message.lower() for e in result.errors)
+        sink_contract = next(ec for ec in result.edge_contracts if ec.to_id == "output:main")
+        assert sink_contract.satisfied is False
+        assert "text" in sink_contract.missing_fields
+
+    def test_consumer_schema_required_fields_violation_fails(self) -> None:
+        state = self._empty_state()
+        state = state.with_source(
+            self._make_source(
+                options={"schema": {"mode": "fixed", "fields": ["line: str"]}},
+            )
+        )
+        state = state.with_node(
+            self._make_transform(
+                "t1",
+                "t1",
+                "main",
+                options={
+                    "required_input_fields": [],
+                    "schema": {"mode": "observed", "required_fields": ["text"]},
+                },
+            )
+        )
+        state = state.with_output(self._make_output())
+        state = state.with_edge(self._make_edge("e1", "source", "t1"))
+        result = state.validate()
+        assert not result.is_valid
+        assert any("text" in e.message for e in result.errors)
+
+    def test_malformed_consumer_schema_emits_error(self) -> None:
+        state = self._empty_state()
+        state = state.with_source(
+            self._make_source(
+                options={"schema": {"mode": "fixed", "fields": ["text: str"]}},
+            )
+        )
+        state = state.with_node(
+            self._make_transform(
+                "t1",
+                "t1",
+                "main",
+                options={"schema": {"mode": "invalid_mode"}},
+            )
+        )
+        state = state.with_output(self._make_output())
+        state = state.with_edge(self._make_edge("e1", "source", "t1"))
+        result = state.validate()
+        assert not result.is_valid
+        assert any("schema" in e.message.lower() for e in result.errors)
+        assert not any(ec.to_id == "t1" for ec in result.edge_contracts)
+
+    def test_multiple_transforms_can_share_sink_target(self) -> None:
+        """Shared sink targets stay outside the internal producer namespace."""
+        state = self._empty_state()
+        state = state.with_source(
+            self._make_source(
+                options={"schema": {"mode": "fixed", "fields": ["text: str"]}},
+            )
+        )
+        state = state.with_node(
+            self._make_transform(
+                "t1",
+                "t1",
+                "t2",
+                options={
+                    "required_input_fields": ["text"],
+                    "schema": {"mode": "fixed", "fields": ["text: str"]},
+                },
+                on_error="errors",
+            )
+        )
+        state = state.with_node(
+            self._make_transform(
+                "t2",
+                "t2",
+                "main",
+                options={
+                    "required_input_fields": ["text"],
+                    "schema": {"mode": "fixed", "fields": ["text: str"]},
+                },
+                on_error="errors",
+            )
+        )
+        state = state.with_output(self._make_output("main"))
+        state = state.with_output(
+            OutputSpec(
+                name="errors",
+                plugin="csv",
+                options={
+                    "path": "outputs/errors.csv",
+                    "schema": {"mode": "observed", "required_fields": ["text"]},
+                },
+                on_write_failure="discard",
+            )
+        )
+        state = state.with_edge(self._make_edge("e1", "source", "t1"))
+        state = state.with_edge(self._make_edge("e2", "t1", "t2"))
+
+        result = state.validate()
+
+        assert result.is_valid, result.errors
+        assert not any("duplicate producer" in e.message.lower() for e in result.errors)
+        error_sink_contracts = [ec for ec in result.edge_contracts if ec.to_id == "output:errors"]
+        assert len(error_sink_contracts) == 2
+        assert all(ec.satisfied for ec in error_sink_contracts)
+
+    def test_same_gate_multiple_routes_to_same_sink_emit_one_contract(self) -> None:
+        """Composer preview dedupes indistinguishable gate->sink contract rows."""
+        state = self._empty_state()
+        state = state.with_source(
+            self._make_source(
+                on_success="gate_in",
+                options={"schema": {"mode": "fixed", "fields": ["text: str"]}},
+            )
+        )
+        state = state.with_node(
+            NodeSpec(
+                id="router",
+                node_type="gate",
+                plugin=None,
+                input="gate_in",
+                on_success=None,
+                on_error=None,
+                options={},
+                condition="True",
+                routes={"true": "errors", "false": "errors"},
+                fork_to=None,
+                branches=None,
+                policy=None,
+                merge=None,
+            )
+        )
+        state = state.with_output(
+            OutputSpec(
+                name="errors",
+                plugin="csv",
+                options={
+                    "path": "outputs/errors.csv",
+                    "schema": {"mode": "observed", "required_fields": ["text"]},
+                },
+                on_write_failure="discard",
+            )
+        )
+        state = state.with_edge(self._make_edge("e1", "source", "router"))
+
+        result = state.validate()
+
+        assert result.is_valid, result.errors
+        error_sink_contracts = [ec for ec in result.edge_contracts if ec.to_id == "output:errors"]
+        assert len(error_sink_contracts) == 1
+        assert error_sink_contracts[0].from_id == "source"
+        assert error_sink_contracts[0].satisfied is True
+
+    def test_coalesce_placeholder_input_is_not_counted_as_consumer(self) -> None:
+        """Coalesce.input is a composer placeholder, not a runtime consumer claim."""
+        state = self._empty_state()
+        state = state.with_source(
+            self._make_source(
+                on_success="gate_in",
+                options={"schema": {"mode": "fixed", "fields": ["text: str"]}},
+            )
+        )
+        state = state.with_node(
+            NodeSpec(
+                id="fork_gate",
+                node_type="gate",
+                plugin=None,
+                input="gate_in",
+                on_success=None,
+                on_error=None,
+                options={},
+                condition="True",
+                routes={},
+                fork_to=("branch_a", "branch_b"),
+                branches=None,
+                policy=None,
+                merge=None,
+            )
+        )
+        state = state.with_node(self._make_transform("ta", "branch_a", "a_out"))
+        state = state.with_node(self._make_transform("tb", "branch_b", "b_out"))
+        state = state.with_node(
+            NodeSpec(
+                id="merge",
+                node_type="coalesce",
+                plugin=None,
+                input="branch_a",
+                on_success="main",
+                on_error=None,
+                options={},
+                condition=None,
+                routes=None,
+                fork_to=None,
+                branches=("branch_a", "branch_b"),
+                policy="require_all",
+                merge="nested",
+            )
+        )
+        state = state.with_output(self._make_output("main"))
+        state = state.with_edge(self._make_edge("e1", "source", "fork_gate"))
+        state = state.with_edge(self._make_edge("e2", "fork_gate", "ta"))
+        state = state.with_edge(self._make_edge("e3", "fork_gate", "tb"))
+        state = state.with_edge(self._make_edge("e4", "ta", "merge"))
+        state = state.with_edge(self._make_edge("e5", "tb", "merge"))
+        state = state.with_edge(self._make_edge("e6", "merge", "main"))
+
+        result = state.validate()
+
+        assert result.is_valid, result.errors
+        assert not any("duplicate consumer" in e.message.lower() for e in result.errors)

@@ -28,7 +28,7 @@ from __future__ import annotations
 import re
 from collections.abc import Mapping
 from dataclasses import dataclass
-from typing import Annotated, Any, Literal
+from typing import Annotated, Any, Literal, cast
 
 from pydantic import Field
 
@@ -58,6 +58,11 @@ FIELD_TYPE_MAP: dict[str, Any] = {
 #   - "data.field: str" -> INVALID (use "data_field: str")
 # This is intentional: field names map to Python attributes/dict keys
 FIELD_PATTERN = re.compile(r"^(\w+):\s*(str|int|float|bool|any)(\?)?$")
+
+# CLOSED LIST: only the text source has a fully deterministic observed-mode
+# output shape today. Do not extend this set without design review; broader
+# heuristic growth would rebuild runtime validation piecemeal in the composer.
+_TEXT_HEURISTIC_PLUGINS: frozenset[str] = frozenset({"text"})
 
 
 @dataclass(frozen=True, slots=True)
@@ -659,3 +664,130 @@ class SchemaConfig:
             return explicit | declared_required
 
         return explicit
+
+
+def raw_options_have_schema(options: Mapping[str, Any]) -> bool:
+    """Return whether raw plugin options expose schema config under either alias."""
+    return "schema" in options or "schema_config" in options
+
+
+def _get_raw_schema_value(options: Mapping[str, Any]) -> object | None:
+    """Return raw schema config from plugin options, honoring both alias names."""
+    if "schema" in options:
+        return cast(object, options["schema"])
+    if "schema_config" in options:
+        return cast(object, options["schema_config"])
+    return None
+
+
+def parse_raw_schema_config(raw_schema: object, *, owner: str) -> SchemaConfig | None:
+    """Parse raw schema config for contract validation.
+
+    Raises ValueError for conditions that should surface as pipeline
+    validation errors, not for programming errors at the call site.
+    """
+    if raw_schema is None:
+        return None
+    if not isinstance(raw_schema, Mapping):
+        raise ValueError(f"{owner} schema config must be a mapping, got {type(raw_schema).__name__}")
+    try:
+        return SchemaConfig.from_dict(raw_schema)
+    except ValueError as exc:
+        raise ValueError(f"{owner} schema config: {exc}") from exc
+
+
+def _parse_raw_required_input_fields(
+    value: object,
+    *,
+    owner: str,
+    field_name: str,
+) -> tuple[str, ...] | None:
+    """Parse raw required_input_fields from node config.
+
+    Raises ValueError for conditions that should surface as pipeline
+    validation errors, not for programming errors at the call site.
+    """
+    if value is None:
+        return None
+    if isinstance(value, str):
+        raise ValueError(f"{owner} {field_name} must be a list of field names, not a bare string")
+    try:
+        return _parse_field_names_list(value, field_name)
+    except ValueError as exc:
+        raise ValueError(f"{owner} {exc}") from exc
+
+
+def get_raw_producer_guaranteed_fields(
+    plugin_name: str | None,
+    options: Mapping[str, Any],
+    *,
+    owner: str,
+) -> frozenset[str]:
+    """Return producer guarantees from raw plugin config.
+
+    Raises ValueError for conditions that should surface as pipeline
+    validation errors, not for programming errors at the call site.
+    """
+    schema_config = parse_raw_schema_config(_get_raw_schema_value(options), owner=owner)
+    if schema_config is None:
+        return frozenset()
+
+    # Task 6 wires the closed-list observed-text special case into runtime and
+    # composer together. Until then, observed-mode text sources rely only on
+    # explicit guaranteed_fields declarations.
+    return schema_config.get_effective_guaranteed_fields()
+
+
+def get_raw_node_required_fields(
+    options: Mapping[str, Any],
+    *,
+    owner: str,
+    node_type: str | None = None,
+) -> frozenset[str]:
+    """Return explicit consumer requirements from raw node config.
+
+    Raises ValueError for conditions that should surface as pipeline
+    validation errors, not for programming errors at the call site.
+    """
+    if "required_input_fields" in options:
+        required_input = _parse_raw_required_input_fields(
+            options["required_input_fields"],
+            owner=owner,
+            field_name="required_input_fields",
+        )
+        if required_input is not None:
+            return frozenset(required_input)
+
+    if node_type == "aggregation" and "options" in options:
+        nested_options = options["options"]
+        if not isinstance(nested_options, Mapping):
+            raise ValueError(f"{owner} aggregation wrapper options must be a mapping, got {type(nested_options).__name__}")
+        if "required_input_fields" in nested_options:
+            required_input = _parse_raw_required_input_fields(
+                nested_options["required_input_fields"],
+                owner=owner,
+                field_name="options.required_input_fields",
+            )
+            if required_input is not None:
+                return frozenset(required_input)
+
+    schema_config = parse_raw_schema_config(_get_raw_schema_value(options), owner=owner)
+    if schema_config is None or schema_config.required_fields is None:
+        return frozenset()
+    return frozenset(schema_config.required_fields)
+
+
+def get_raw_sink_required_fields(
+    options: Mapping[str, Any],
+    *,
+    owner: str,
+) -> frozenset[str]:
+    """Return sink requirements from raw sink config.
+
+    Raises ValueError for conditions that should surface as pipeline
+    validation errors, not for programming errors at the call site.
+    """
+    schema_config = parse_raw_schema_config(_get_raw_schema_value(options), owner=owner)
+    if schema_config is None:
+        return frozenset()
+    return schema_config.get_effective_required_fields()
