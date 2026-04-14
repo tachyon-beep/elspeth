@@ -2723,3 +2723,67 @@ class TestSchemaContractValidation:
         assert not result.is_valid
         assert any("disjoint" in e.message.lower() or "overlap" in e.message.lower() for e in result.errors)
         assert result.edge_contracts == ()
+
+    # --- Data integrity ---
+
+    def test_edge_contracts_populated_correctly(self) -> None:
+        """ValidationSummary.edge_contracts carries the expected edge data."""
+        state = self._empty_state()
+        state = state.with_source(
+            self._make_source(
+                options={"schema": {"mode": "fixed", "fields": ["text: str"]}},
+            )
+        )
+        state = state.with_node(
+            self._make_transform(
+                "t1",
+                "t1",
+                "main",
+                options={"required_input_fields": ["text"]},
+            )
+        )
+        state = state.with_output(self._make_output())
+        state = state.with_edge(self._make_edge("e1", "source", "t1"))
+
+        result = state.validate()
+
+        assert result.is_valid, result.errors
+        assert len(result.edge_contracts) >= 1
+        contract = next(ec for ec in result.edge_contracts if ec.to_id == "t1")
+        assert contract.from_id == "source"
+        assert contract.producer_guarantees == ("text",)
+        assert contract.consumer_requires == ("text",)
+        assert contract.missing_fields == ()
+        assert contract.satisfied is True
+
+    def test_edge_contract_to_dict_serialization(self) -> None:
+        """A real emitted EdgeContract serializes with API-facing keys."""
+        state = self._empty_state()
+        state = state.with_source(
+            self._make_source(
+                options={"schema": {"mode": "fixed", "fields": ["text: str"]}},
+            )
+        )
+        state = state.with_node(
+            self._make_transform(
+                "t1",
+                "t1",
+                "main",
+                options={"required_input_fields": ["text"]},
+            )
+        )
+        state = state.with_output(self._make_output())
+        state = state.with_edge(self._make_edge("e1", "source", "t1"))
+
+        result = state.validate()
+
+        contract = next(ec for ec in result.edge_contracts if ec.to_id == "t1")
+        payload = contract.to_dict()
+        assert payload["from"] == "source"
+        assert payload["to"] == "t1"
+        assert payload["producer_guarantees"] == ["text"]
+        assert payload["consumer_requires"] == ["text"]
+        assert payload["missing_fields"] == []
+        assert payload["satisfied"] is True
+        assert "from_id" not in payload
+        assert "to_id" not in payload
