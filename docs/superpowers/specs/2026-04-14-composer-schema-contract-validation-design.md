@@ -14,6 +14,8 @@ The bug has two halves:
 1. **Tooling**: The composer doesn't validate schema contracts.
 2. **Skill**: The assistant has no rule requiring field-contract verification before declaring completion.
 
+There is also no mechanical export backstop today. The LLM-facing YAML export surfaces (`composer_mcp`'s `generate_yaml` tool and `GET /api/sessions/{id}/state/yaml`) currently call the pure serializer directly, so they will happily emit YAML for an invalid composition state unless the caller obeys the soft preview rule.
+
 ## Scope
 
 ### In scope
@@ -40,13 +42,23 @@ Add validation pass 9 (error-level) to `CompositionState.validate()`.
 Build a producer map from the connection-field chain:
 
 ```
-source.on_success = "step_a"  →  producer_map["step_a"] = (source, source.options)
-node(input="step_a").on_success = "step_b"  →  producer_map["step_b"] = (node, node.options)
+source.on_success = "step_a"  →  producer_map["step_a"] = ProducerEntry(...)
+node(input="step_a").on_success = "step_b"  →  producer_map["step_b"] = ProducerEntry(...)
 ```
 
 For each consumer node, look up the producer for `node.input`. Gates with routes produce data for multiple downstream connection points — each route target gets the same guaranteed fields as the gate's producer (gates are schema-preserving, they don't add or remove fields).
 
+Use a small `ProducerEntry` `NamedTuple` (for example `producer_id`, `plugin_name`, `options`) as the `producer_map` value type. Do not use anonymous positional tuples here; `_walk_to_real_producer(...)` and the downstream contract checks need named fields to stay readable and auditable.
+
 Build `node_by_id = {node.id: node for node in nodes}` once at the top of the pass and use a single `_walk_to_real_producer(...)` helper for both the node loop and the sink loop. The walk-back policy is part of the contract design now, not incidental control flow: both loops must share the same gate traversal, coalesce skip warning, and termination behavior.
+
+Before the composer uses that producer map for any contract walk, it must validate the connection namespace and fail closed on ambiguity. The runtime builder already rejects invalid declarative wiring before graph construction, and the contract pass must not paper over the same class of errors with dict overwrite semantics. At minimum, the composer-side contract pass must emit blocking errors and suppress `edge_contracts` when any of these are present:
+
+- duplicate producers for the same connection name
+- duplicate consumers for the same connection name (fan-out without an explicit gate)
+- connection names that overlap sink names
+
+This is not optional hygiene. If `producer_map["x"] = ...` silently overwrites an earlier producer, the LLM sees false contract telemetry on an invalid draft, which is worse than no telemetry at all.
 
 #### Contract check per edge
 
@@ -90,6 +102,8 @@ When producer is a source with `plugin: "text"` and `options["column"]` is set, 
 Rationale: The text source always yields `{column: value}` (text_source.py:110). The output is fully deterministic — one field, always present.
 
 **Enforcement link:** Add a comment in `text_source.py` near line 110 referencing the shared observed-text rule (`# Composer/runtime contract helper depends on this: observed text sources infer {column} as guaranteed field`). This ensures a developer changing the text source's output key discovers the dependency. A cross-module test verifies both sides agree.
+
+**Runtime path requirement:** The runtime side must make this guarantee visible to DAG construction, not just to the plugin's private constructor state. In the current codebase, `build_execution_graph()` materializes source schema contracts from `source.config["schema"]`, so mutating only `TextSource._schema_config` is insufficient. The implementation must keep the builder-visible raw config dict synchronized with the normalized schema for the observed-text special case. Because `SchemaConfig` is already a frozen typed dataclass, the implementation should update it mechanically with `dataclasses.replace(...)`, not by round-tripping through `to_dict()` / `from_dict()` or by using `.get()` on serialized Tier 1 data. Use `to_dict()` only for the final sync into `self.config["schema"]`.
 
 **This heuristic list is intentionally closed.** Only `text` qualifies because its output shape is fully determined by config (`column`). Other sources (csv, json, dataverse) have variable schemas depending on input data and do not qualify for heuristic inference. If a new source has fully deterministic output, the decision to add it here requires explicit design review, not incremental expansion. This constraint prevents the composer from gradually rebuilding the runtime validator via accumulated heuristics (the "Shifting the Burden" archetype).
 
@@ -168,6 +182,17 @@ The `edge_contracts` field appears even when all contracts are satisfied, provid
 
 This pass intentionally does not add `contracts_all_satisfied` or `has_unverified_edges` as separate stored booleans. Those would duplicate information already present in `edge_contracts` and `warnings`, creating a second truth source. If convenience fields are ever added later, they must be derived mechanically at serialization time rather than stored independently on `ValidationSummary`.
 
+#### YAML export backstop
+
+The pure serializer `elspeth.web.composer.yaml_generator.generate_yaml()` stays validation-blind. It is also used by execution-time validation and run creation, so moving workflow policy into that function would tangle serialization with unrelated call sites.
+
+Instead, the LLM-facing export surfaces must validate immediately before returning YAML:
+
+- `src/elspeth/composer_mcp/server.py` `generate_yaml` tool
+- `src/elspeth/web/sessions/routes.py` `GET /api/sessions/{id}/state/yaml`
+
+Those callers must run `state.validate()` and refuse export when `validation.is_valid` is `false`. This is the mechanical backstop for the skill rule. It relies on unsatisfied contracts being error-level; if a future contract path is intentionally warning-only, this export gate must be revisited explicitly rather than assumed.
+
 ### 3. Skill Patch for `pipeline_composer.md`
 
 **File:** `src/elspeth/web/composer/skills/pipeline_composer.md`
@@ -178,7 +203,14 @@ Three targeted additions:
 
 Add item 4 to the existing completion criteria list:
 
-> 4. **All edge contracts are satisfied** — every downstream step's `required_input_fields` must be guaranteed by its upstream producer, and sink schemas may impose their own required fields. Check `edge_contracts` in the preview response. If any edge shows `"satisfied": false`, the pipeline is not complete. If `edge_contracts` is empty, that means no explicit contracts were declared, not that every contract is satisfied. If preview warnings say a contract check was skipped (for example because the producer is a coalesce node), treat that as unresolved rather than satisfied and surface the warning to the user.
+> 4. **All edge contracts are satisfied** — every downstream step's `required_input_fields` must be guaranteed by its upstream producer, and sink schemas may impose their own required fields. Check `edge_contracts` in the preview response. If any edge shows `"satisfied": false`, the pipeline is not complete.
+>
+> - **Empty `edge_contracts` is not success** — `edge_contracts: []` means no explicit field contracts were declared. It does not mean every contract is satisfied.
+> - **Skipped checks are unresolved** — if preview warnings say a contract check was skipped (for example because the producer is a coalesce node), treat that as unresolved rather than satisfied and surface the warning to the user.
+>
+> Pipelines without `required_input_fields` declarations are not verified by the composer's contract check; the runtime validator remains the final authority.
+>
+> `generate_yaml` is an export step, not the primary validator. After this fix it should refuse invalid states, but the agent still uses `preview_pipeline` first to diagnose and fix the actual contract failure.
 
 #### 3b. Text Source Safety Rule
 
@@ -202,7 +234,7 @@ New subsection under Validation, replacing vague "disagreement handling" with a 
 >    })
 >    ```
 > 3. **Re-preview** — call `preview_pipeline` and verify the edge now shows `"satisfied": true`.
-> 4. **Only then report success.**
+> 4. **Only then call `generate_yaml` or report success.** If `generate_yaml` still refuses the export, treat that as confirmation the pipeline remains unresolved and go back to preview/repair instead of bypassing the gate.
 >
 > **Example — csv source + value_transform:**
 > - `preview_pipeline` returns: `edge_contracts: [{"from": "source", "to": "add_world", "satisfied": false, "consumer_requires": ["text"], "producer_guarantees": []}]`
@@ -213,7 +245,17 @@ New subsection under Validation, replacing vague "disagreement handling" with a 
 >
 > If `get_pipeline_state` and `preview_pipeline` disagree (e.g., state shows a field but preview shows an unsatisfied contract), treat this as unresolved. Do not report success. Re-run both tools, fix the discrepancy, and confirm before responding.
 >
+> If `preview_pipeline` still shows `"satisfied": false` after **2** producer-schema patch attempts for the same edge, stop patching and explain the limitation to the user. After 2 attempts, treat the issue as structural rather than a missing field declaration.
+>
 > If the same producer feeds multiple consumers with conflicting truthful requirements, do not loop trying to force one schema to satisfy all of them. Surface the conflict explicitly and ask whether to split the path, add a branch-local transform/aggregation with an explicit schema, or relax/correct one of the downstream requirements.
+
+#### 3d. Error Explanation Tooling
+
+The composer already exposes `explain_validation_error` via `_VALIDATION_ERROR_PATTERNS` in `src/elspeth/web/composer/tools.py`. The contract pass introduces a new error family, so the catalogue should gain a dedicated pattern for `Schema contract violation:` errors that routes the agent to:
+
+- inspect `preview_pipeline.edge_contracts`
+- patch the producer schema with `patch_source_options` or `patch_node_options`
+- re-preview until the edge is satisfied or the 2-attempt stop condition is reached
 
 ## What This Doesn't Catch
 
@@ -241,6 +283,7 @@ The composer's contract check is a fast, early-feedback mechanism. The runtime v
 7. Consumer with `required_input_fields: []` and explicit `schema.required_fields: ["text"]` — empty list does not suppress the fallback; the helper still enforces `schema.required_fields`.
 
 Add direct sink-loop coverage in unit tests as well:
+- source-only pipeline (`source.on_success -> sink name`, no transforms) records a single satisfied `output:main` `EdgeContract`, proving the sink loop works independently of the node loop
 - sink with explicit `required_fields: ["text"]`, upstream source guarantees `text` — no error and `output:main` edge contract satisfied
 - sink with explicit `required_fields: ["text"]`, upstream source guarantees only `line` — error and `output:main` edge contract violated
 
@@ -258,7 +301,7 @@ The agreement suite separately covers the stricter typed-sink parity case (`Sche
 **Topology cases:**
 15. Gate-only pipeline: source → gate → sinks. Gate route targets inherit source's guaranteed fields. Consumer on route target with requirements satisfied by source — no error.
 16. Coalesce producer upstream of a consumer — warning emitted and contract check skipped for that edge because guarantees are runtime-computed from branch policies and merge strategy.
-17. Multi-hop: source → transform A (no requirements, no schema) → transform B (requires `text`). Transform A guarantees nothing — error for transform B.
+17. Multi-hop: source → transform A (no requirements, no schema) → transform B (requires `text`). Use a connection name distinct from the transform ID in the test fixture so the snippet does not conflate routing names with node IDs. Transform A guarantees nothing — error for transform B.
 18. Multi-sink with gate routing: source → gate → sink_a, sink_b. Contract check applies per route, not globally.
 19. Aggregation consumer with `required_input_fields` — composer rejects when upstream guarantees are missing, proving aggregation nodes participate in the same consumer-contract framework.
 
@@ -284,4 +327,4 @@ Scope this suite narrowly: it covers only configurations where shared-contract p
 
 ### Observed-text enforcement test
 
-23. Import `TextSource`, construct with `column: "text"` and minimal valid config, call `load()` on a one-line temp file, verify the yielded row contains key `"text"`. Add a deliberate white-box assertion against the plugin's normalized internal schema config for the auto-declared observed-text guarantee, because there is no public accessor for that constructor-time state. This ties the shared observed-text rule to the plugin's actual behavior — if either side changes, this test fails.
+23. Import `TextSource`, construct with `column: "text"` and minimal valid config, call `load()` on a one-line temp file, verify the yielded row contains key `"text"`. Add deliberate white-box assertions against both the plugin's normalized internal schema config and the builder-visible `source.config["schema"]` entry for the auto-declared observed-text guarantee, because there is no public accessor for that constructor-time state and DAG construction consumes the raw config path. Also pin the fixed-schema control case: `declares_guaranteed_fields` must remain `False` there because it tracks explicit `guaranteed_fields` declarations only, while `get_effective_guaranteed_fields()` still includes required typed fields. This ties the shared observed-text rule to the plugin's actual behavior — if either side changes, this test fails.

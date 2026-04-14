@@ -4,7 +4,7 @@
 
 **Goal:** Make the composer reject pipelines with unsatisfied schema contracts at composition time, and expose per-edge contract data in the preview response.
 
-**Architecture:** Add a new validation pass (pass 9) to `CompositionState.validate()` that walks the connection-field chain but reuses shared raw-config contract helpers extracted into `elspeth.contracts.schema` rather than re-implementing runtime semantics inline. The shared helpers are responsible for parsing schema config, computing producer guarantees, computing node consumer requirements (top-level `required_input_fields`, aggregation `options.required_input_fields`, then explicit `schema.required_fields`), computing sink consumer requirements via `schema.get_effective_required_fields()`, and applying the closed-list observed-only text-source deterministic guarantee rule. Extend `ValidationSummary` with `EdgeContract` tuples, update `ExecutionGraph` to delegate its raw-config requirement extraction to the same helpers, refactor the gate/coalesce walk-back into a shared helper in `state.py`, and patch the pipeline-composer skill with contract-aware completion criteria that remain stricter than today's behaviour.
+**Architecture:** Add a new validation pass (pass 9) to `CompositionState.validate()` that walks the connection-field chain but reuses shared raw-config contract helpers extracted into `elspeth.contracts.schema` rather than re-implementing runtime semantics inline. The pass must validate connection-namespace integrity before building `producer_map` so invalid drafts fail closed instead of silently overwriting producers. The shared helpers are responsible for parsing schema config, computing producer guarantees, computing node consumer requirements (top-level `required_input_fields`, aggregation `options.required_input_fields`, then explicit `schema.required_fields`), computing sink consumer requirements via `schema.get_effective_required_fields()`, and applying the closed-list observed-only text-source deterministic guarantee rule. Unsatisfied contracts remain error-level and therefore must force `ValidationSummary.is_valid = False`. Separately, add a mechanical backstop on the LLM-facing YAML-export surfaces (`src/elspeth/composer_mcp/server.py` and `GET /api/sessions/{id}/state/yaml`): those entry points must call `state.validate()` and refuse YAML when `is_valid` is false. Do **not** move that guard into `yaml_generator.generate_yaml()`, which must stay a pure serializer for execution-time validation and run creation. Extend `ValidationSummary` with `EdgeContract` tuples, update `ExecutionGraph` to delegate its raw-config requirement extraction to the same helpers, refactor the gate/coalesce walk-back into a shared helper in `state.py`, and patch the pipeline-composer skill with contract-aware completion criteria that remain stricter than today's behaviour.
 
 **Tech Stack:** Python dataclasses (frozen), `SchemaConfig` from `elspeth.contracts.schema`, pytest
 
@@ -20,9 +20,14 @@
 | `src/elspeth/core/dag/graph.py` | Modify | Delegate raw-config consumer requirement extraction to the shared helpers instead of maintaining a second copy of the logic |
 | `src/elspeth/web/composer/state.py` | Modify | Add `EdgeContract` dataclass, extend `ValidationSummary`, add `_check_schema_contracts()` connection-walk that calls the shared helpers, call it from `validate()` |
 | `src/elspeth/web/composer/tools.py` | Modify | Serialize `edge_contracts` in `_execute_preview_pipeline()` |
-| `src/elspeth/plugins/sources/text_source.py` | Modify | Auto-declare `guaranteed_fields` for deterministic observed-schema output only + enforcement comment |
+| `src/elspeth/composer_mcp/server.py` | Modify | Refuse `generate_yaml` when current state validation fails; preserve `yaml_generator.generate_yaml()` as a pure serializer below that boundary |
+| `src/elspeth/web/sessions/routes.py` | Modify | Apply the same validation gate to `GET /api/sessions/{id}/state/yaml` so MCP and HTTP export surfaces cannot bypass composer validation |
+| `src/elspeth/plugins/sources/text_source.py` | Modify | Auto-declare `guaranteed_fields` for deterministic observed-schema output only, sync the builder-visible raw schema config, and add enforcement comment |
 | `src/elspeth/web/composer/skills/pipeline_composer.md` | Modify | Add completion criteria item 4, align guidance with the observed-text special-case without weakening the general validation stance, fix flow example |
+| `tests/unit/composer_mcp/test_server.py` | Modify | Add YAML-export backstop test for invalid composition state |
+| `tests/unit/web/composer/test_tools.py` | Modify | Add preview/explanation tests for edge contract telemetry and contract-specific `explain_validation_error` guidance |
 | `tests/unit/web/composer/test_state.py` | Modify | Add `TestSchemaContractValidation` class with test cases |
+| `tests/unit/web/sessions/test_routes.py` | Modify | Add HTTP YAML-export rejection test for invalid current state |
 | `tests/unit/web/composer/test_schema_contract_enforcement.py` | Create | Heuristic enforcement test (test case 20) |
 | `tests/integration/web/test_composer_runtime_agreement.py` | Create | Composer/runtime agreement test (test case 19) |
 
@@ -199,7 +204,7 @@ git commit -m "feat(composer): add EdgeContract dataclass and extend ValidationS
 
 This is the core implementation. We write tests first for the positive and negative cases, then extract shared raw-config contract helpers into `elspeth.contracts.schema`, delegate the runtime's raw-config requirement reads to those helpers, and finally implement `_check_schema_contracts()` on top of the shared layer.
 
-**Dependency note:** The generic contract pass can land before the observed-text special case, but the observed-text acceptance rule must not be enabled in composer unless Task 6 Step 2 lands in the same changeset or earlier. If tasks are committed atomically, keep the observed-text-positive composer tests (`test_text_heuristic_infers_guarantee`, Task 8 observed-text accept, and Task 9's reported scenario regression) out of the Task 2 commit and enable them only when the runtime has matching backing.
+**Dependency note:** The generic contract pass can land before the observed-text special case, but the observed-text acceptance rule must not be enabled in composer unless the Task 6 runtime-backing implementation lands in the same changeset or earlier. If tasks are committed atomically, keep the observed-text-positive composer tests (`test_text_heuristic_infers_guarantee`, Task 8 observed-text accept, and Task 9's reported scenario regression) out of the Task 2 commit and enable them only when the runtime has matching backing.
 
 - [ ] **Step 1: Write failing tests — positive cases (1-5)**
 
@@ -339,8 +344,9 @@ class TestSchemaContractValidation:
 
         The composer infers {column} as a guaranteed field for text sources
         with observed schema and no explicit guaranteed_fields. This mirrors
-        what TextSource does at runtime (auto-declares guaranteed_fields in
-        __init__), so both the composer and the runtime agree.
+        what TextSource does at runtime by updating both its normalized
+        SchemaConfig and the builder-visible raw config dict, so both the
+        composer and the runtime agree.
 
         Staging rule: this test must land with Task 6, not in the initial
         generic contract-pass commit, because runtime backing is added there.
@@ -405,8 +411,37 @@ class TestSchemaContractValidation:
         result = state.validate()
         assert result.is_valid, result.errors
 
+    # --- Post-implementation evidence cases ---
+    # These sink/direct-contract cases assert populated edge_contracts, so they are NOT part of
+    # the pre-implementation "current behavior stays green" run below. They
+    # become green only after EdgeContract exists and pass 9 populates it.
+
+    def test_source_direct_to_sink_records_contract(self) -> None:
+        """Test 5a: Source → sink with no transforms exercises the sink loop directly."""
+        state = self._empty_state()
+        state = state.with_source(self._make_source(
+            on_success="main",
+            options={"schema": {"mode": "fixed", "fields": ["text: str"]}},
+        ))
+        state = state.with_output(OutputSpec(
+            name="main",
+            plugin="csv",
+            options={
+                "path": "outputs/main.csv",
+                "schema": {"mode": "observed", "required_fields": ["text"]},
+            },
+            on_write_failure="discard",
+        ))
+        result = state.validate()
+        assert result.is_valid, result.errors
+        assert len(result.edge_contracts) == 1
+        sink_contract = result.edge_contracts[0]
+        assert sink_contract.from_id == "source"
+        assert sink_contract.to_id == "output:main"
+        assert sink_contract.satisfied is True
+
     def test_sink_required_fields_satisfied(self) -> None:
-        """Test 5b: Sink required_fields satisfied by upstream guarantees."""
+        """Test 5b: Source-only pipeline sink required_fields satisfied by upstream guarantees."""
         state = self._empty_state()
         state = state.with_source(self._make_source(
             on_success="main",
@@ -446,12 +481,21 @@ class TestSchemaContractValidation:
         assert edge_contract.consumer_requires == ("text",)
 ```
 
-- [ ] **Step 2: Run positive tests to verify they fail**
+- [ ] **Step 2: Run the pre-implementation positive cases (1-5 only)**
 
-Run: `.venv/bin/python -m pytest tests/unit/web/composer/test_state.py::TestSchemaContractValidation -v -k "not negative and not topology and not malformed and not partial and not optional and not no_schema"`
-Expected: PASS (these positive tests will pass because validate() currently doesn't emit contract errors — the tests check for absence of errors, which is the current behavior. We need to also add the negative tests to confirm the implementation works.)
+Run:
 
-Actually, tests 1-5 will pass on current code because the current `validate()` never emits contract errors. The negative tests (step 3) are what will fail and drive the implementation.
+```bash
+.venv/bin/python -m pytest \
+  tests/unit/web/composer/test_state.py::TestSchemaContractValidation::test_fixed_schema_satisfies_requirement \
+  tests/unit/web/composer/test_state.py::TestSchemaContractValidation::test_no_required_input_fields_skips_check \
+  tests/unit/web/composer/test_state.py::TestSchemaContractValidation::test_empty_required_input_fields_skips_check \
+  -v
+```
+
+Expected: PASS on current code. These cases only assert that current Stage 1 validation stays green when no contract error is expected.
+
+Do **not** include `test_source_direct_to_sink_records_contract`, `test_sink_required_fields_satisfied`, or `test_consumer_schema_required_fields_satisfied` in this pre-implementation run. Those cases assert populated `edge_contracts`, so they are expected to fail until `EdgeContract` exists and `_check_schema_contracts()` is wired into `validate()`. Also keep the observed-text-positive cases staged with Task 6 when commits are split, per the dependency note above. These cases become part of the post-implementation verification in Step 7.
 
 - [ ] **Step 3: Write failing tests — negative cases (6-10)**
 
@@ -656,10 +700,18 @@ from elspeth.contracts.schema import (
 
 Then implement `_check_schema_contracts()` with these rules:
 
+- before any contract walk, validate connection namespace integrity and abort the contract pass on ambiguity. Mirror the runtime builder's fail-closed policy for the subset needed to keep telemetry trustworthy:
+  - duplicate producers for the same connection name => blocking error
+  - duplicate consumers for the same connection name => blocking error
+  - connection names overlapping sink names => blocking error
+  - on any of these, return no `EdgeContract` rows rather than picking a winner via dict overwrite
+  - do not assume an earlier Stage 1 check already enforces these rules; `_check_schema_contracts()` must defend itself because current composer validation does not yet reject this entire class of namespace ambiguity
+- define a small `ProducerEntry(NamedTuple)` for `producer_map` values (for example `producer_id`, `plugin_name`, `options`). Do not use anonymous positional tuples here; `_walk_to_real_producer(...)` should read through named fields.
 - producer helper `ValueError` => emit blocking `ValidationEntry`, mark the producer as uncheckable, and suppress downstream edge contracts sourced from that producer
 - node consumer helper `ValueError` => emit blocking `ValidationEntry` on that node and skip its edge contract rather than fabricating an empty requirement set. This includes malformed consumer `schema` dicts; they must not silently collapse to `frozenset()`.
 - sink helper `ValueError` => emit blocking `ValidationEntry` on that output and skip its edge contract
 - build `node_by_id = {node.id: node for node in nodes}` once near the top of the function and use it for all producer lookups
+- build the producer registry through an explicit `_register_producer(...)` helper; plain `producer_map[name] = ...` is forbidden because it can silently overwrite an earlier producer on invalid drafts
 - extract the duplicated gate/coalesce walk-back from the node loop and sink loop into `_walk_to_real_producer(producer_id, *, producer_map, node_by_id, warnings)` so both paths share the same route-gate termination and coalesce warning/skip behavior
 - build `EdgeContract` rows only when both sides parsed successfully
 - `_check_schema_contracts()` may accumulate into local mutable lists, but its return type should be immutable tuples to match the surrounding frozen-dataclass design. Do not leak `tuple[list, list, list]` out of the helper boundary.
@@ -688,13 +740,52 @@ def _check_schema_contracts(
     parse_failed_producers: set[str] = set()
     node_by_id = {node.id: node for node in nodes}
 
+    class ProducerEntry(NamedTuple):
+        producer_id: str
+        plugin_name: str | None
+        options: Mapping[str, Any]
+
+    producer_map: dict[str, ProducerEntry] = {}
+    producer_desc: dict[str, str] = {}
+
+    def _register_producer(
+        connection_name: str,
+        producer_id: str,
+        plugin_name: str | None,
+        options: Mapping[str, Any],
+        description: str,
+    ) -> None:
+        if connection_name in producer_map:
+            errors.append(
+                _err(
+                    f"connection:{connection_name}",
+                    f"Duplicate producer for connection '{connection_name}': "
+                    f"{producer_desc[connection_name]} and {description}.",
+                    "high",
+                )
+            )
+            return
+        producer_map[connection_name] = ProducerEntry(
+            producer_id=producer_id,
+            plugin_name=plugin_name,
+            options=options,
+        )
+        producer_desc[connection_name] = description
+
+    # Validate namespace integrity before any contract walk. Invalid drafts must
+    # fail closed instead of emitting misleading edge telemetry.
+    consumer_claims: list[tuple[str, str, str]] = []
+    ...
+    if namespace_errors_detected:
+        return tuple(errors), tuple(contract_warnings), ()
+
     def _walk_to_real_producer(
         producer_id: str,
         *,
-        producer_map: Mapping[str, tuple[str, str | None, Mapping[str, Any]]],
+        producer_map: Mapping[str, ProducerEntry],
         node_by_id: Mapping[str, NodeSpec],
         warnings: list[ValidationEntry],
-    ) -> str | None:
+    ) -> ProducerEntry | None:
         ...
 
     ...
@@ -710,32 +801,40 @@ def _check_schema_contracts(
             errors.append(_err(f"node:{node.id}", f"Invalid contract config: {exc}", "high"))
             continue
 
-        actual_id = _walk_to_real_producer(
+        actual_producer = _walk_to_real_producer(
             node.input,
             producer_map=producer_map,
             node_by_id=node_by_id,
             warnings=contract_warnings,
         )
-        if actual_id is None:
+        if actual_producer is None:
             continue
 
         ...
 
         try:
             producer_guaranteed = get_raw_producer_guaranteed_fields(
-                actual_plugin,
-                actual_options,
-                owner="source" if actual_id == "source" else f"node:{actual_id}",
+                actual_producer.plugin_name,
+                actual_producer.options,
+                owner=(
+                    "source"
+                    if actual_producer.producer_id == "source"
+                    else f"node:{actual_producer.producer_id}"
+                ),
             )
         except ValueError as exc:
             errors.append(
                 _err(
-                    "source" if actual_id == "source" else f"node:{actual_id}",
+                    (
+                        "source"
+                        if actual_producer.producer_id == "source"
+                        else f"node:{actual_producer.producer_id}"
+                    ),
                     f"Invalid contract config: {exc}",
                     "high",
                 )
             )
-            parse_failed_producers.add(actual_id)
+            parse_failed_producers.add(actual_producer.producer_id)
             continue
 
         ...
@@ -750,13 +849,13 @@ def _check_schema_contracts(
             errors.append(_err(f"output:{output.name}", f"Invalid contract config: {exc}", "high"))
             continue
 
-        actual_id = _walk_to_real_producer(
+        actual_producer = _walk_to_real_producer(
             output.name,
             producer_map=producer_map,
             node_by_id=node_by_id,
             warnings=contract_warnings,
         )
-        if actual_id is None:
+        if actual_producer is None:
             continue
 
     return tuple(errors), tuple(contract_warnings), tuple(edge_contracts)
@@ -871,10 +970,14 @@ Append to `TestSchemaContractValidation`:
         """Test 13: Transform A has no schema — transform B's requirements fail."""
         state = self._empty_state()
         state = state.with_source(self._make_source(
+            on_success="source_to_ta",
             options={"schema": {"mode": "fixed", "fields": ["text: str"]}},
         ))
+        # Connection-name reminder: on_success/input values are routing names,
+        # not node IDs. Use a distinct name here to keep the test aligned with
+        # the declarative wiring model.
         # Transform A: no schema, no requirements — passes through
-        state = state.with_node(self._make_transform("ta", "t1", "ta_out"))
+        state = state.with_node(self._make_transform("ta", "source_to_ta", "ta_out"))
         # Transform B: requires 'text' but ta guarantees nothing
         state = state.with_node(self._make_transform(
             "tb", "ta_out", "main",
@@ -1083,11 +1186,86 @@ Append to `TestSchemaContractValidation`:
         result = state.validate()
         assert not result.is_valid
         assert any("bare string" in e.message.lower() for e in result.errors)
+
+    def test_duplicate_producer_connection_emits_error_and_skips_contracts(self) -> None:
+        """Test 14i: Duplicate producers fail closed instead of overwriting producer_map."""
+        state = self._empty_state()
+        state = state.with_source(self._make_source(
+            on_success="gate_in",
+            options={"schema": {"mode": "fixed", "fields": ["text: str"]}},
+        ))
+        state = state.with_node(self._make_gate(
+            "g1", "gate_in", {"a": "dup", "b": "path_b"},
+        ))
+        state = state.with_node(self._make_transform(
+            "ta", "dup", "out_a",
+            options={"required_input_fields": ["text"]},
+        ))
+        # Second producer for the same connection name "dup"
+        state = state.with_node(self._make_transform(
+            "tb", "path_b", "dup",
+        ))
+        state = state.with_output(self._make_output("out_a"))
+        state = state.with_edge(self._make_edge("e1", "source", "g1"))
+        state = state.with_edge(self._make_edge("e2", "g1", "ta"))
+        state = state.with_edge(self._make_edge("e3", "g1", "tb"))
+        result = state.validate()
+        assert not result.is_valid
+        assert any("duplicate producer" in e.message.lower() for e in result.errors)
+        assert result.edge_contracts == ()
+
+    def test_duplicate_consumer_connection_emits_error_and_skips_contracts(self) -> None:
+        """Test 14j: Duplicate consumers fail closed instead of fabricating two edge checks."""
+        state = self._empty_state()
+        state = state.with_source(self._make_source(
+            on_success="shared",
+            options={"schema": {"mode": "fixed", "fields": ["text: str"]}},
+        ))
+        state = state.with_node(self._make_transform(
+            "ta", "shared", "out_a",
+            options={"required_input_fields": ["text"]},
+        ))
+        state = state.with_node(self._make_transform(
+            "tb", "shared", "out_b",
+            options={"required_input_fields": ["text"]},
+        ))
+        state = state.with_output(self._make_output("out_a"))
+        state = state.with_output(self._make_output("out_b"))
+        state = state.with_edge(self._make_edge("e1", "source", "ta"))
+        state = state.with_edge(self._make_edge("e2", "source", "tb"))
+        result = state.validate()
+        assert not result.is_valid
+        assert any("duplicate consumer" in e.message.lower() for e in result.errors)
+        assert result.edge_contracts == ()
+
+    def test_connection_name_overlaps_sink_name_emits_error_and_skips_contracts(self) -> None:
+        """Test 14k: Connection/sink namespace overlap aborts contract telemetry."""
+        state = self._empty_state()
+        state = state.with_source(self._make_source(
+            on_success="t1",
+            options={"schema": {"mode": "fixed", "fields": ["text: str"]}},
+        ))
+        state = state.with_node(self._make_transform(
+            "t1", "t1", "main",
+        ))
+        # Invalid: "main" is used as both a sink name and a connection name
+        state = state.with_node(self._make_transform(
+            "t2", "main", "out",
+            options={"required_input_fields": ["text"]},
+        ))
+        state = state.with_output(self._make_output("main"))
+        state = state.with_output(self._make_output("out"))
+        state = state.with_edge(self._make_edge("e1", "source", "t1"))
+        state = state.with_edge(self._make_edge("e2", "t1", "t2"))
+        result = state.validate()
+        assert not result.is_valid
+        assert any("disjoint" in e.message.lower() or "overlap" in e.message.lower() for e in result.errors)
+        assert result.edge_contracts == ()
 ```
 
 - [ ] **Step 2: Run topology tests**
 
-Run: `.venv/bin/python -m pytest tests/unit/web/composer/test_state.py::TestSchemaContractValidation -v -k "gate or route_gate or multi_hop or multi_sink or mixed_consumer or aggregation or coalesce or reserved or bare_string"`
+Run: `.venv/bin/python -m pytest tests/unit/web/composer/test_state.py::TestSchemaContractValidation -v -k "gate or route_gate or multi_hop or multi_sink or mixed_consumer or aggregation or coalesce or reserved or bare_string or duplicate or overlap or namespace"`
 Expected: PASS
 
 - [ ] **Step 3: Commit**
@@ -1263,91 +1441,253 @@ git commit -m "feat(composer): expose edge_contracts in preview_pipeline respons
 
 ---
 
-### Task 6: Add Enforcement Comment and Auto-Declare Guaranteed Fields in `text_source.py`
+### Task 5B: Add Mechanical Backstop to YAML Export Surfaces
 
 **Files:**
-- Modify: `src/elspeth/plugins/sources/text_source.py`
+- Modify: `src/elspeth/composer_mcp/server.py`
+- Modify: `src/elspeth/web/sessions/routes.py`
+- Test: `tests/unit/composer_mcp/test_server.py`
+- Test: `tests/unit/web/sessions/test_routes.py`
 
-**Prerequisite note:** This task is the runtime backing for the observed-text special case. If tasks are committed separately, do not enable the observed-text-positive tests from Task 2, Task 8, or Task 9 until this task lands.
+`generate_yaml()` itself is a pure serializer and must stay that way. The backstop belongs at the LLM-facing export surfaces that hand YAML back to agents and users. Those callers must re-run `state.validate()` and refuse to emit YAML when `validation.is_valid` is `false`. This backstop depends on unsatisfied contracts remaining error-level; do not add contract-warning paths that leave `is_valid=True` without revisiting this task.
 
-- [ ] **Step 1: Add enforcement comment**
+- [ ] **Step 1: Write failing tests for invalid-state YAML export**
 
-In `src/elspeth/plugins/sources/text_source.py`, at line 109 (the `yield from self._validate_and_yield({self._column: value}, ctx)` line), add a comment:
-
-```python
-                    # Shared composer/runtime contract helper depends on this:
-                    # elspeth.contracts.schema.get_raw_producer_guaranteed_fields()
-                    # infers {self._column} for observed text sources only.
-                    # If you change which key the row uses, update that helper
-                    # and its agreement tests.
-                    yield from self._validate_and_yield(
-                        {self._column: value},
-                        ctx,
-                    )
-```
-
-- [ ] **Step 2: Auto-declare `guaranteed_fields` in `__init__`**
-
-In `TextSource.__init__()`, after `self._schema_config = cfg.schema_config` (line 72), add logic to auto-declare the column as a guaranteed field only when the schema is `observed` and does not already declare `guaranteed_fields`. This makes the narrow shared observed-text rule mechanical in runtime code without changing the semantics of `fixed`/`flexible` schemas. Use the normalized `SchemaConfig.to_dict()` round-trip that already exists; do not add a new `raw_schema_dict` field to config models.
+In `tests/unit/composer_mcp/test_server.py`, extend the existing state import to include `NodeSpec`, `OutputSpec`, and `SourceSpec`, then add to `TestDispatchTool`:
 
 ```python
-        self._schema_config = cfg.schema_config
+    def test_generate_yaml_rejects_invalid_contract_state(self, scratch_dir: Path) -> None:
+        invalid_state = CompositionState(
+            source=SourceSpec(
+                plugin="csv",
+                on_success="t1",
+                options={"path": "/data/blobs/input.csv", "schema": {"mode": "observed"}},
+                on_validation_failure="quarantine",
+            ),
+            nodes=(
+                NodeSpec(
+                    id="t1",
+                    node_type="transform",
+                    plugin="value_transform",
+                    input="t1",
+                    on_success="main",
+                    on_error=None,
+                    options={
+                        "required_input_fields": ["text"],
+                        "operations": [{"field": "out", "expression": "row['text']"}],
+                    },
+                    condition=None,
+                    routes=None,
+                    fork_to=None,
+                    branches=None,
+                    policy=None,
+                    merge=None,
+                ),
+            ),
+            edges=(),
+            outputs=(
+                OutputSpec(
+                    name="main",
+                    plugin="csv",
+                    options={"path": "outputs/out.csv"},
+                    on_write_failure="discard",
+                ),
+            ),
+            metadata=PipelineMetadata(),
+            version=1,
+        )
 
-        # Auto-declare {column} as a guaranteed output field only for the
-        # shared observed-text contract case: observed schema, no explicit
-        # guaranteed_fields, non-empty column. TextSource always produces
-        # {column: value} for every row, so this is a provable invariant.
-        # Keep this narrow: fixed/flexible schemas already express their
-        # guarantees through normal SchemaConfig semantics and must not be
-        # rewritten into an explicit guaranteed_fields declaration.
-        if (
-            self._schema_config is not None
-            and self._schema_config.mode == "observed"
-            and not self._schema_config.declares_guaranteed_fields
-            and self._column
-        ):
-            # Rebuild schema config with guaranteed_fields including the column.
-            # Use SchemaConfig.to_dict() on the validated, normalized config
-            # rather than reaching back to raw YAML input.
-            schema_dict = self._schema_config.to_dict()
-            existing = list(schema_dict.get("guaranteed_fields", []))
-            if self._column not in existing:
-                existing.append(self._column)
-            schema_dict["guaranteed_fields"] = existing
-            self._schema_config = SchemaConfig.from_dict(schema_dict)
+        result = _dispatch_tool(
+            "generate_yaml",
+            {},
+            invalid_state,
+            _mock_catalog(),
+            scratch_dir,
+        )
+
+        assert result["success"] is False
+        assert "invalid" in result["error"].lower()
+        assert result["validation"]["is_valid"] is False
 ```
 
-- [ ] **Step 3: Commit**
+Add to `tests/unit/web/sessions/test_routes.py`, in `TestStateYamlRoute`:
+
+```python
+    @pytest.mark.asyncio
+    async def test_yaml_returns_409_when_current_state_is_invalid(self, tmp_path) -> None:
+        app, service = _make_app(tmp_path)
+        client = TestClient(app)
+
+        session = await service.create_session("alice", "Pipeline", "local")
+        await service.save_composition_state(
+            session.id,
+            CompositionStateData(
+                source={
+                    "plugin": "csv",
+                    "on_success": "t1",
+                    "options": {"path": "/data/blobs/input.csv", "schema": {"mode": "observed"}},
+                    "on_validation_failure": "quarantine",
+                },
+                nodes=[
+                    {
+                        "id": "t1",
+                        "node_type": "transform",
+                        "plugin": "value_transform",
+                        "input": "t1",
+                        "on_success": "main",
+                        "on_error": None,
+                        "options": {
+                            "required_input_fields": ["text"],
+                            "operations": [{"field": "out", "expression": "row['text']"}],
+                        },
+                        "condition": None,
+                        "routes": None,
+                        "fork_to": None,
+                        "branches": None,
+                        "policy": None,
+                        "merge": None,
+                    },
+                ],
+                outputs=[
+                    {"name": "main", "plugin": "csv", "options": {"path": "outputs/out.csv"}, "on_write_failure": "discard"}
+                ],
+                metadata_={"name": "Invalid Contract Pipeline", "description": ""},
+                is_valid=False,
+            ),
+        )
+
+        resp = client.get(f"/api/sessions/{session.id}/state/yaml")
+        assert resp.status_code == 409
+        assert "invalid" in resp.json()["detail"].lower()
+```
+
+Expected: both tests FAIL on current code because the MCP session tool and HTTP route still serialize invalid state.
+
+- [ ] **Step 2: Guard the MCP `generate_yaml` tool**
+
+In `src/elspeth/composer_mcp/server.py`, change the `generate_yaml` session tool branch to:
+
+1. Compute `validation = state.validate()` before any serialization.
+2. If `validation.is_valid` is `False`, return `success=False` with an error such as `"Current composition state is invalid. Fix validation errors before calling generate_yaml."`
+3. Include structured validation telemetry in the failure payload:
+   - `is_valid`
+   - `errors`
+   - `warnings`
+   - `suggestions`
+   - `edge_contracts`
+4. Only call `generate_yaml(state)` on the valid path.
+
+This is the LLM-facing backstop. It must key off `validation.is_valid`, not off a second derived flag such as `contracts_all_satisfied`.
+
+- [ ] **Step 3: Guard the HTTP YAML route**
+
+In `src/elspeth/web/sessions/routes.py`, in `get_state_yaml(...)`:
+
+1. Reconstruct the `CompositionState` as today.
+2. Compute `validation = state.validate()`.
+3. If `validation.is_valid` is `False`, raise `HTTPException(status_code=409, detail="Current composition state is invalid. Fix validation errors before exporting YAML.")`
+4. Only then call `generate_yaml(state)`.
+
+Keep the serializer pure. Do **not** move validation into `elspeth.web.composer.yaml_generator.generate_yaml()`, because execution-time validation and run creation depend on that function staying a deterministic serialization primitive.
+
+- [ ] **Step 4: Run tests to verify they pass**
+
+Run: `.venv/bin/python -m pytest tests/unit/composer_mcp/test_server.py tests/unit/web/sessions/test_routes.py -v -k "generate_yaml or state_yaml"`
+Expected: PASS
+
+- [ ] **Step 5: Commit**
 
 ```bash
-git add src/elspeth/plugins/sources/text_source.py
-git commit -m "feat(text_source): auto-declare column as guaranteed field, add enforcement comment
-
-TextSource always produces {column: value} — this is a provable invariant.
-Auto-declaring guaranteed_fields makes the runtime's SchemaConfig agree with
-the shared contract helper, so both validators produce the same answer.
-This encodes the shared observed-text contract mechanically without relaxing
-general schema validation."
+git add src/elspeth/composer_mcp/server.py src/elspeth/web/sessions/routes.py tests/unit/composer_mcp/test_server.py tests/unit/web/sessions/test_routes.py
+git commit -m "feat(composer): block yaml export for invalid composition state"
 ```
 
 ---
 
-### Task 7: Observed-Text Enforcement Test
+### Task 5C: Add Schema Contract Pattern to `explain_validation_error`
 
 **Files:**
+- Modify: `src/elspeth/web/composer/tools.py`
+- Test: `tests/unit/web/composer/test_tools.py`
+
+The new contract pass will emit a new high-signal validation error family. The LLM tooling needs a matching `explain_validation_error` catalogue entry so agents get a concrete diagnosis and fix path instead of falling back to the generic "not in the known pattern catalogue" branch.
+
+- [ ] **Step 1: Write a failing explain-validation test**
+
+Add to `tests/unit/web/composer/test_tools.py`, in `TestExplainValidationError`:
+
+```python
+    def test_explains_schema_contract_violation(self) -> None:
+        state = _empty_state()
+        catalog = _mock_catalog()
+        result = execute_tool(
+            "explain_validation_error",
+            {
+                "error_text": (
+                    "Schema contract violation: 'source' -> 'add_world'. "
+                    "Consumer requires ['text']; producer guarantees []."
+                )
+            },
+            state,
+            catalog,
+        )
+        assert result.success is True
+        assert "upstream" in result.data["explanation"].lower()
+        assert "preview_pipeline" in result.data["suggested_fix"]
+        assert "patch_source_options" in result.data["suggested_fix"] or "patch_node_options" in result.data["suggested_fix"]
+```
+
+Expected: FAIL on current code because the contract-violation string falls through to the generic explanation path.
+
+- [ ] **Step 2: Add a contract-violation pattern to `_VALIDATION_ERROR_PATTERNS`**
+
+In `src/elspeth/web/composer/tools.py`, add a new tuple to `_VALIDATION_ERROR_PATTERNS` matching schema contract failures, for example:
+
+```python
+    (
+        r"Schema contract violation:",
+        "A downstream node requires fields that its upstream producer does not guarantee.",
+        "Call preview_pipeline to inspect edge_contracts, then update the producer schema with patch_source_options or patch_node_options and re-preview until the edge shows satisfied=true.",
+    ),
+```
+
+Keep this terse and mechanical. It only needs to recognize the contract-family error and route the agent to `preview_pipeline` plus the schema-patch tools.
+
+- [ ] **Step 3: Run the explain-validation tests**
+
+Run: `.venv/bin/python -m pytest tests/unit/web/composer/test_tools.py -v -k "explain_validation_error"`
+Expected: PASS
+
+- [ ] **Step 4: Commit**
+
+```bash
+git add src/elspeth/web/composer/tools.py tests/unit/web/composer/test_tools.py
+git commit -m "feat(composer): teach explain_validation_error about schema contract violations"
+```
+
+---
+
+### Task 6: TDD the Observed-Text Runtime Backing in `text_source.py`
+
+**Files:**
+- Modify: `src/elspeth/plugins/sources/text_source.py`
 - Create: `tests/unit/web/composer/test_schema_contract_enforcement.py`
 
-- [ ] **Step 1: Write the enforcement test**
+**Prerequisite note:** This task is the runtime backing for the observed-text special case. The critical requirement is builder visibility: `build_execution_graph()` currently reads source schema config from `source.config["schema"]`, not from a private normalized field on the plugin instance. If tasks are committed separately, do not enable the observed-text-positive tests from Task 2, Task 8, or Task 9 until this task lands.
+
+- [ ] **Step 1: Write the failing enforcement tests first**
+
+Add `tests/unit/web/composer/test_schema_contract_enforcement.py` with:
 
 ```python
 """Enforcement test tying the shared observed-text contract rule to the plugin.
 
 The shared contract helpers in elspeth.contracts.schema infer that an observed
-text source with column='X' guarantees field 'X'. TextSource.__init__
-auto-declares {column} as a guaranteed field for that same narrow case.
-This test verifies both sides agree: the plugin produces the key and declares
-it as guaranteed for observed schemas only. If either side changes, this test
-fails.
+text source with column='X' guarantees field 'X'. TextSource.__init__ must make
+that guarantee visible in both its normalized schema config and the raw config
+dict consumed by DAG construction. This test verifies both sides agree: the
+plugin produces the key and declares it as guaranteed for observed schemas only.
+If either side changes, this test fails.
 """
 
 from __future__ import annotations
@@ -1397,15 +1737,17 @@ class TestTextSourceHeuristicEnforcement:
             Path(tmp_path).unlink(missing_ok=True)
 
     def test_text_source_auto_declares_guaranteed_fields(self) -> None:
-        """Test 20b: TextSource auto-declares {column} for observed schemas only.
+        """Test 20b: TextSource auto-declares {column} and updates raw config for observed schemas only.
 
         The runtime reads SchemaConfig from the plugin. TextSource.__init__
         must auto-populate guaranteed_fields for the observed-text special case
-        so runtime and composer agree. Without this, the shared helper would say
-        "valid" while runtime rejects.
+        and keep source.config["schema"] in sync, because DAG construction reads
+        the raw config dict rather than the private _schema_config field.
+        Without this, the shared helper would say "valid" while runtime rejects.
 
-        White-box note: this test intentionally inspects source._schema_config.
-        There is no public accessor for the plugin's normalized SchemaConfig, and
+        White-box note: this test intentionally inspects both
+        source._schema_config and source.config["schema"]. There is no public
+        accessor for the plugin's normalized constructor-time SchemaConfig, and
         the behavior under test lives in __init__ before row loading begins.
         """
         with tempfile.NamedTemporaryFile(mode="w", suffix=".txt", delete=False) as f:
@@ -1420,13 +1762,18 @@ class TestTextSourceHeuristicEnforcement:
             }
             source = TextSource(config)
 
-            # Intentional white-box assertion against the normalized internal config.
+            # Intentional white-box assertions against both the normalized
+            # internal config and the builder-visible raw config dict.
             # This test is pinning constructor-time contract state, not public row output.
-            guaranteed = source._schema_config.get_effective_guaranteed_fields()
-            assert "text" in guaranteed, (
-                f"TextSource with column='text' must auto-declare 'text' as a "
-                f"guaranteed field in its schema config. Got: {guaranteed}. "
-                f"Without this, runtime rejects pipelines the composer approves."
+            assert source._schema_config.guaranteed_fields == ("text",), (
+                "TextSource must set the exact observed-text guarantee on its "
+                "normalized SchemaConfig using mechanical dataclass state, not "
+                "only via a derived effective-guarantees view."
+            )
+            raw_schema = source.config["schema"]
+            assert raw_schema["guaranteed_fields"] == ["text"], (
+                "TextSource must also write the observed-text guarantee back to "
+                "source.config['schema'] so DAG construction sees it."
             )
         finally:
             Path(tmp_path).unlink(missing_ok=True)
@@ -1460,6 +1807,11 @@ class TestTextSourceHeuristicEnforcement:
     def test_text_source_observed_only_auto_declare_does_not_touch_fixed_schema(self) -> None:
         """Test 20d: Fixed schemas are not rewritten into explicit guarantees.
 
+        `declares_guaranteed_fields` tracks only whether the schema made an
+        explicit guaranteed_fields declaration. It does NOT mean "has no
+        guarantees at all" for fixed/flexible schemas — required typed fields
+        still contribute through get_effective_guaranteed_fields().
+
         White-box by design for the same reason as test 20b.
         """
         with tempfile.NamedTemporaryFile(mode="w", suffix=".txt", delete=False) as f:
@@ -1475,24 +1827,90 @@ class TestTextSourceHeuristicEnforcement:
             source = TextSource(config)
 
             assert source._schema_config.declares_guaranteed_fields is False, (
-                "Observed-text auto-declare must not rewrite fixed schema semantics"
+                "declares_guaranteed_fields tracks explicit guaranteed_fields "
+                "only. Fixed typed fields remain implicit guarantees and must "
+                "not be rewritten into an explicit observed-text declaration."
             )
             assert "text" in source._schema_config.get_effective_guaranteed_fields()
         finally:
             Path(tmp_path).unlink(missing_ok=True)
 ```
 
-- [ ] **Step 2: Run to verify it passes**
+- [ ] **Step 2: Run the enforcement tests to verify they fail on current code**
+
+Run: `.venv/bin/python -m pytest tests/unit/web/composer/test_schema_contract_enforcement.py -v`
+Expected: FAIL on current code. `test_text_source_produces_configured_column_key` may already be green, but the suite as a whole should be red because the observed-text runtime backing does not yet materialize the guarantee into the constructor state that the shared contract relies on, especially the raw config path consumed by DAG construction.
+
+- [ ] **Step 3: Add the enforcement comment**
+
+In `src/elspeth/plugins/sources/text_source.py`, at line 109 (the `yield from self._validate_and_yield({self._column: value}, ctx)` line), add a comment:
+
+```python
+                    # Shared composer/runtime contract helper depends on this:
+                    # elspeth.contracts.schema.get_raw_producer_guaranteed_fields()
+                    # infers {self._column} for observed text sources only.
+                    # If you change which key the row uses, update that helper
+                    # and its agreement tests.
+                    yield from self._validate_and_yield(
+                        {self._column: value},
+                        ctx,
+                    )
+```
+
+- [ ] **Step 4: Auto-declare `guaranteed_fields` in `__init__` and sync the raw config dict**
+
+In `TextSource.__init__()`, after `self._schema_config = cfg.schema_config` (line 72), add logic to auto-declare the column as a guaranteed field only when the schema is `observed` and does not already declare `guaranteed_fields`. This makes the narrow shared observed-text rule mechanical in runtime code without changing the semantics of `fixed`/`flexible` schemas.
+
+Critical detail: updating `self._schema_config` alone is **not sufficient**. The DAG builder currently materializes source schema contracts from `source.config["schema"]`, so the normalized schema must also be written back into the raw plugin config dict that the builder reads. Do **not** round-trip through `SchemaConfig.to_dict()` / `SchemaConfig.from_dict()` just to mutate a validated `SchemaConfig` you already hold. This is Tier 1 data in process memory. Update the frozen dataclass mechanically with `dataclasses.replace(...)`, then use `to_dict()` only once at the serialization boundary when syncing `self.config["schema"]`.
+
+```python
+        from dataclasses import replace
+
+        self._schema_config = cfg.schema_config
+
+        # Auto-declare {column} as a guaranteed output field only for the
+        # shared observed-text contract case: observed schema, no explicit
+        # guaranteed_fields, non-empty column. TextSource always produces
+        # {column: value} for every row, so this is a provable invariant.
+        # Keep this narrow: fixed/flexible schemas already express their
+        # guarantees through normal SchemaConfig semantics and must not be
+        # rewritten into an explicit guaranteed_fields declaration.
+        if (
+            self._schema_config is not None
+            and self._schema_config.mode == "observed"
+            and not self._schema_config.declares_guaranteed_fields
+            and self._column
+        ):
+            # Update the typed, already-validated SchemaConfig directly.
+            # Avoid a dict round-trip and avoid .get() on Tier 1 data.
+            self._schema_config = replace(
+                self._schema_config,
+                guaranteed_fields=(self._column,),
+            )
+            # DAG builder currently reads source.config["schema"], not the
+            # plugin's private _schema_config. Keep the raw config dict in
+            # sync so runtime validation sees the same observed-text contract
+            # the composer reports to the LLM.
+            self.config["schema"] = self._schema_config.to_dict()
+```
+
+- [ ] **Step 5: Run the enforcement suite to verify it passes**
 
 Run: `.venv/bin/python -m pytest tests/unit/web/composer/test_schema_contract_enforcement.py -v`
 Expected: PASS — TextSource now auto-declares observed-text guarantees and leaves fixed schemas untouched
 
-- [ ] **Step 3: Commit**
+- [ ] **Step 6: Commit**
 
 ```bash
-git add tests/unit/web/composer/test_schema_contract_enforcement.py
-git commit -m "test(composer): add enforcement tests tying observed-text contract to text_source behavior"
+git add src/elspeth/plugins/sources/text_source.py tests/unit/web/composer/test_schema_contract_enforcement.py
+git commit -m "feat(text_source): add observed-text runtime backing with enforcement tests"
 ```
+
+---
+
+### Task 7: Reserved Checkpoint
+
+Task 7's former enforcement suite has been intentionally folded into Task 6 so the observed-text runtime backing is driven by failing tests instead of landing first and being tested later. There is no separate implementation work here. Do not proceed to Task 8 until Task 6 Step 5 is green and the Task 6 commit includes both the runtime change and its enforcement tests.
 
 ---
 
@@ -1761,9 +2179,10 @@ class TestComposerRuntimeAgreement:
 
         This is the critical agreement case that validates the shared
         observed-text rule. The shared helper infers {column} as guaranteed
-        for observed text sources. TextSource.__init__ auto-declares
-        {column} as guaranteed_fields in its schema config. Both validators call
-        SchemaConfig.get_effective_guaranteed_fields() and get the same answer.
+        for observed text sources. TextSource.__init__ writes that guarantee
+        into the builder-visible raw schema config as well as its normalized
+        internal SchemaConfig, so DAG construction and composer validation get
+        the same answer.
 
         If either the shared helper or the TextSource auto-declaration is
         removed without removing the other, this test fails — catching the
@@ -1812,7 +2231,8 @@ class TestComposerRuntimeAgreement:
                 "Composer should accept: observed text rule infers 'text' from column"
             )
 
-            # Runtime should also accept — TextSource auto-declares observed-text guarantees
+            # Runtime should also accept — TextSource makes the observed-text
+            # guarantee builder-visible by syncing source.config["schema"].
             graph = self._build_runtime_graph(
                 source_plugin="text",
                 source_options={"path": tmp_path, "column": "text", "schema": {"mode": "observed"}},
@@ -1988,8 +2408,9 @@ Append to `TestSchemaContractValidation`:
 
         This test confirms the narrow observed-text rule correctly infers
         'text' from column='text', so the reported scenario is now valid
-        (correctly). The runtime agrees because TextSource auto-declares
-        {column} as guaranteed in its schema config (Task 6b).
+        (correctly). The runtime agrees because TextSource updates the
+        builder-visible schema config as well as its normalized internal
+        SchemaConfig (Task 6 runtime backing).
         """
         state = self._empty_state()
         state = state.with_source(self._make_source(
@@ -2040,7 +2461,14 @@ git commit -m "test(composer): add regression test for original false-positive s
 In `pipeline_composer.md`, after line 107 (`3. All required plugin options are filled with meaningful values (not empty)`), add:
 
 ```markdown
-4. **All edge contracts are satisfied** — every downstream step's `required_input_fields` must be guaranteed by its upstream producer, and sink schemas may impose their own required fields. Check `edge_contracts` in the preview response. If any edge shows `"satisfied": false`, the pipeline is not complete. If `edge_contracts` is empty (`[]`), this means no field contracts were declared by any node — it does **not** mean all contracts are satisfied. If preview warnings say a contract check was skipped (for example because the producer is a coalesce node), treat that as unresolved rather than satisfied and surface the warning to the user. Pipelines without `required_input_fields` declarations are not verified by the composer's contract check; the runtime validator is the final authority.
+4. **All edge contracts are satisfied** — every downstream step's `required_input_fields` must be guaranteed by its upstream producer, and sink schemas may impose their own required fields. Check `edge_contracts` in the preview response. If any edge shows `"satisfied": false`, the pipeline is not complete.
+
+- **Empty `edge_contracts` is not success** — `edge_contracts: []` means no field contracts were declared by any node. It does **not** mean all contracts are satisfied.
+- **Skipped checks are unresolved** — if preview warnings say a contract check was skipped (for example because the producer is a coalesce node), treat that as unresolved rather than satisfied and surface the warning to the user.
+
+Pipelines without `required_input_fields` declarations are not verified by the composer's contract check; the runtime validator is the final authority.
+
+`generate_yaml` is an export step, not the primary validator. After Task 5B it becomes a hard backstop and should refuse invalid states, but the agent must still use `preview_pipeline` to diagnose and fix contract failures before retrying export.
 ```
 
 - [ ] **Step 2: Add text source contract rule**
@@ -2076,7 +2504,7 @@ When `preview_pipeline` returns an unsatisfied edge contract, follow this sequen
    })
    ```
 3. **Re-preview** — call `preview_pipeline` and verify the edge now shows `"satisfied": true`.
-4. **Only then report success.**
+4. **Only then call `generate_yaml` or report success.** If `generate_yaml` still refuses the export, treat that as confirmation the pipeline remains unresolved and return to `preview_pipeline` rather than bypassing the gate.
 
 **Example — csv source + value_transform:**
 - `preview_pipeline` returns: `edge_contracts: [{"from": "source", "to": "add_world", "satisfied": false, "consumer_requires": ["text"], "producer_guarantees": []}]`
@@ -2095,7 +2523,7 @@ Transforms without explicit schema declarations report zero guaranteed fields to
 
 #### Non-Converging Contract Violations
 
-If `preview_pipeline` still shows `"satisfied": false` after patching the producer schema, **stop patching and explain the limitation to the user.** The most common cause is an intermediate transform that does not propagate schema guarantees (see above). Do not repeatedly call `patch_source_options` or `patch_node_options` trying different schema configurations — if one patch didn't resolve it, the issue is structural, not a missing field declaration. Ask the user whether to:
+If `preview_pipeline` still shows `"satisfied": false` after **2** producer-schema patch attempts for the same edge, **stop patching and explain the limitation to the user.** The most common cause is an intermediate transform that does not propagate schema guarantees (see above). Do not repeatedly call `patch_source_options` or `patch_node_options` trying different schema configurations — after 2 attempts, treat the issue as structural rather than a missing field declaration. Ask the user whether to:
 1. Add an explicit `schema` declaration on the intermediate transform, or
 2. Accept that this contract cannot be verified at composition time (the runtime validator will still check it).
 
@@ -2110,7 +2538,11 @@ If the same producer feeds multiple consumers with conflicting truthful requirem
 Run: `.venv/bin/python -m pytest tests/unit/web/composer/test_skill_drift.py -v`
 Expected: PASS (or update the drift test if it checks for specific content hashes)
 
-- [ ] **Step 5: Commit**
+- [ ] **Step 5: Add a contract-violation pattern to `explain_validation_error`**
+
+Because the skill tells the agent to use `explain_validation_error` for unclear failures, the implementation must also teach the catalogue about the new error family emitted by the contract pass. Fold this into the same change if Task 5C has not already landed separately.
+
+- [ ] **Step 6: Commit**
 
 ```bash
 git add src/elspeth/web/composer/skills/pipeline_composer.md
@@ -2125,7 +2557,7 @@ git commit -m "docs(skill): add schema contract completion criteria, text source
 
 - [ ] **Step 1: Run full unit test suite**
 
-Run: `.venv/bin/python -m pytest tests/unit/web/composer/ -v`
+Run: `.venv/bin/python -m pytest tests/unit/web/composer/ tests/unit/composer_mcp/test_server.py tests/unit/web/sessions/test_routes.py -v`
 Expected: All PASS
 
 - [ ] **Step 2: Run integration tests**
@@ -2135,12 +2567,12 @@ Expected: All PASS
 
 - [ ] **Step 3: Run type checker**
 
-Run: `.venv/bin/python -m mypy src/elspeth/contracts/schema.py src/elspeth/core/dag/graph.py src/elspeth/plugins/sources/text_source.py src/elspeth/web/composer/state.py src/elspeth/web/composer/tools.py`
+Run: `.venv/bin/python -m mypy src/elspeth/contracts/schema.py src/elspeth/core/dag/graph.py src/elspeth/plugins/sources/text_source.py src/elspeth/web/composer/state.py src/elspeth/web/composer/tools.py src/elspeth/composer_mcp/server.py src/elspeth/web/sessions/routes.py`
 Expected: No errors
 
 - [ ] **Step 4: Run linter**
 
-Run: `.venv/bin/python -m ruff check src/elspeth/contracts/schema.py src/elspeth/core/dag/graph.py src/elspeth/plugins/sources/text_source.py src/elspeth/web/composer/state.py src/elspeth/web/composer/tools.py`
+Run: `.venv/bin/python -m ruff check src/elspeth/contracts/schema.py src/elspeth/core/dag/graph.py src/elspeth/plugins/sources/text_source.py src/elspeth/web/composer/state.py src/elspeth/web/composer/tools.py src/elspeth/composer_mcp/server.py src/elspeth/web/sessions/routes.py`
 Expected: No errors
 
 - [ ] **Step 5: Run tier model enforcement**
