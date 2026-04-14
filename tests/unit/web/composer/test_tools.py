@@ -3172,6 +3172,49 @@ class TestExplainValidationError:
         assert result.success is True
         assert "edge" in result.data["suggested_fix"].lower()
 
+    def test_explains_schema_contract_violation(self) -> None:
+        state = _empty_state()
+        catalog = _mock_catalog()
+        result = execute_tool(
+            "explain_validation_error",
+            {
+                "error_text": (
+                    "Schema contract violation: 'source' -> 'add_world'. "
+                    "Consumer requires ['text']; producer guarantees []."
+                )
+            },
+            state,
+            catalog,
+        )
+        assert result.success is True
+        assert "upstream" in result.data["explanation"].lower()
+        assert "preview_pipeline" in result.data["suggested_fix"]
+        assert "patch_source_options" in result.data["suggested_fix"]
+        assert "patch_node_options" in result.data["suggested_fix"]
+
+    def test_explains_sink_schema_contract_violation(self) -> None:
+        state = _empty_state()
+        catalog = _mock_catalog()
+        result = execute_tool(
+            "explain_validation_error",
+            {
+                "error_text": (
+                    "Schema contract violation: 't1' -> 'output:main'. "
+                    "Sink 'main' requires fields: [text]. "
+                    "Producer (value_transform) guarantees: []. "
+                    "Missing fields: [text]."
+                )
+            },
+            state,
+            catalog,
+        )
+        assert result.success is True
+        assert "sink" in result.data["explanation"].lower()
+        assert "preview_pipeline" in result.data["suggested_fix"]
+        assert "patch_output_options" in result.data["suggested_fix"]
+        assert "patch_source_options" in result.data["suggested_fix"]
+        assert "patch_node_options" in result.data["suggested_fix"]
+
 
 # ---------------------------------------------------------------------------
 # list_models tool tests

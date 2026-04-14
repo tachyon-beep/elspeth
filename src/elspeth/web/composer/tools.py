@@ -2465,6 +2465,16 @@ _VALIDATION_ERROR_PATTERNS: list[tuple[str, str, str]] = [
         "A sink output has invalid configuration. A required option may be missing (e.g. path for file-based sinks).",
         "Use get_pipeline_state to see the output's current options, then use patch_output_options to fix.",
     ),
+    (
+        r"Schema contract violation: '.*' -> 'output:[^']+'",
+        "A sink schema requires fields that its upstream producer does not guarantee.",
+        "Call preview_pipeline to inspect edge_contracts, then either relax the sink schema with patch_output_options or update the upstream schema with patch_source_options or patch_node_options and re-preview until the edge shows satisfied=true.",
+    ),
+    (
+        r"Schema contract violation:",
+        "A downstream node requires fields that its upstream producer does not guarantee.",
+        "Call preview_pipeline to inspect edge_contracts, then update the upstream schema with patch_source_options or patch_node_options and re-preview until the edge shows satisfied=true.",
+    ),
 ]
 
 
