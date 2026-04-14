@@ -566,25 +566,76 @@ def get_tool_definitions() -> list[dict[str, Any]]:
                     "source": {
                         "type": "object",
                         "description": "Source configuration: {plugin, options, on_success, on_validation_failure?}",
+                        "properties": {
+                            "plugin": {"type": "string"},
+                            "options": {"type": "object"},
+                            "on_success": {"type": "string"},
+                            "on_validation_failure": {
+                                "type": "string",
+                                "enum": ["quarantine", "discard"],
+                            },
+                        },
+                        "required": ["plugin", "options", "on_success"],
                     },
                     "nodes": {
                         "type": "array",
-                        "items": {"type": "object"},
+                        "items": {
+                            "type": "object",
+                            "properties": {
+                                "id": {"type": "string"},
+                                "node_type": {"type": "string"},
+                                "plugin": {"type": "string"},
+                                "input": {"type": "string"},
+                                "on_success": {"type": "string"},
+                                "on_error": {"type": "string"},
+                                "options": {"type": "object"},
+                                "condition": {"type": "string"},
+                                "routes": {"type": "object"},
+                                "fork_to": {"type": "array"},
+                                "branches": {"type": "array"},
+                                "policy": {"type": "string"},
+                                "merge": {"type": "string"},
+                            },
+                            "required": ["id", "node_type", "input"],
+                        },
                         "description": "Array of node specs: [{id, input, plugin?, node_type, options?, on_success?, on_error?, condition?, routes?, fork_to?, branches?, policy?, merge?}]",
                     },
                     "edges": {
                         "type": "array",
-                        "items": {"type": "object"},
+                        "items": {
+                            "type": "object",
+                            "properties": {
+                                "id": {"type": "string"},
+                                "from_node": {"type": "string"},
+                                "to_node": {"type": "string"},
+                                "edge_type": {"type": "string"},
+                                "label": {"type": "string"},
+                            },
+                            "required": ["id", "from_node", "to_node", "edge_type"],
+                        },
                         "description": "Array of edge specs: [{id, from_node, to_node, edge_type}]",
                     },
                     "outputs": {
                         "type": "array",
-                        "items": {"type": "object"},
+                        "items": {
+                            "type": "object",
+                            "properties": {
+                                "sink_name": {"type": "string"},
+                                "plugin": {"type": "string"},
+                                "options": {"type": "object"},
+                                "on_write_failure": {"type": "string"},
+                            },
+                            "required": ["sink_name", "plugin", "options"],
+                        },
                         "description": "Array of output specs: [{sink_name, plugin, options, on_write_failure?}]",
                     },
                     "metadata": {
                         "type": "object",
                         "description": "Pipeline metadata: {name?, description?}",
+                        "properties": {
+                            "name": {"type": "string"},
+                            "description": {"type": "string"},
+                        },
                     },
                 },
                 "required": ["source", "nodes", "edges", "outputs"],
@@ -1211,7 +1262,7 @@ def _prevalidate_plugin_options(
     # "field required" — we filter those errors out below.
     secret_ref_keys: set[str] = set()
     for key, value in list(merged.items()):
-        if isinstance(value, Mapping) and len(value) == 1 and "secret_ref" in value:
+        if isinstance(value, Mapping) and len(value) == 1 and "secret_ref" in value and isinstance(value["secret_ref"], str):
             secret_ref_keys.add(key)
             del merged[key]
 

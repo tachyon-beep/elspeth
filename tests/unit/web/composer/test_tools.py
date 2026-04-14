@@ -3621,3 +3621,24 @@ class TestPrevalidatePluginOptions:
             },
         )
         assert result is None
+
+    def test_malformed_secret_ref_marker_still_reports_field_error(self) -> None:
+        """Only syntactically valid secret_ref markers are stripped.
+
+        A non-string secret_ref value is malformed and must remain in the
+        options payload so the plugin config model reports the field error
+        during composer-time validation.
+        """
+        result = _prevalidate_plugin_options(
+            "transform",
+            "azure_content_safety",
+            {
+                "api_key": {"secret_ref": 123},
+                "endpoint": "https://test.cognitiveservices.azure.com",
+                "schema": {"mode": "observed"},
+                "fields": "text",
+                "thresholds": {"hate": 2, "violence": 2, "sexual": 2, "self_harm": 2},
+            },
+        )
+        assert result is not None
+        assert "api_key" in result

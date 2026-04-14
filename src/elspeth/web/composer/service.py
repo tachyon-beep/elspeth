@@ -16,8 +16,9 @@ from __future__ import annotations
 
 import asyncio
 import json
+from collections.abc import Mapping
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, cast
 
 import litellm
 from litellm.exceptions import BadRequestError as LiteLLMBadRequestError
@@ -38,25 +39,94 @@ from elspeth.web.composer.tools import (
     is_discovery_tool,
 )
 
+_ARRAY_ITEM_SEGMENT = "[]"
+type RequiredPath = tuple[str, ...]
 
-def _build_required_args_index() -> dict[str, list[str]]:
-    """Build a lookup of required argument names per tool from tool definitions.
 
-    Used to validate LLM-provided arguments before entering tool handler code,
-    so that missing-argument KeyErrors are caught at the boundary (Tier 3) and
-    don't mask internal KeyErrors from bugs in tool handler logic.
+def _collect_required_paths(
+    schema: Mapping[str, object],
+    prefix: RequiredPath = (),
+) -> tuple[RequiredPath, ...]:
+    """Compile schema-declared required fields into dotted/indexed paths.
 
-    All tool definitions are system-owned and MUST have "parameters" and
-    "required" keys — direct access will crash on a schema definition bug.
+    The schema tree is system-owned tool metadata, so direct key access is
+    intentional: a malformed tool definition should crash at import time.
     """
-    index: dict[str, list[str]] = {}
+    schema_type = cast(str, schema["type"])
+
+    if schema_type == "object":
+        required_paths: list[RequiredPath] = []
+        if "required" in schema:
+            required_fields = cast(list[str], schema["required"])
+            required_paths.extend((*prefix, field) for field in required_fields)
+        if "properties" in schema:
+            properties = cast(Mapping[str, Mapping[str, object]], schema["properties"])
+            for key, child_schema in properties.items():
+                required_paths.extend(_collect_required_paths(child_schema, (*prefix, key)))
+        return tuple(required_paths)
+
+    if schema_type == "array" and "items" in schema:
+        item_schema = cast(Mapping[str, object], schema["items"])
+        return _collect_required_paths(item_schema, (*prefix, _ARRAY_ITEM_SEGMENT))
+
+    return ()
+
+
+def _build_tool_required_paths_index() -> dict[str, tuple[RequiredPath, ...]]:
+    """Build a lookup of required argument paths per tool definition."""
+    index: dict[str, tuple[RequiredPath, ...]] = {}
     for defn in get_tool_definitions():
-        name = defn["name"]
-        index[name] = defn["parameters"]["required"]
+        parameters = cast(Mapping[str, object], defn["parameters"])
+        index[defn["name"]] = _collect_required_paths(parameters)
     return index
 
 
-_TOOL_REQUIRED_ARGS: dict[str, list[str]] = _build_required_args_index()
+def _find_missing_path_instances(
+    value: object,
+    required_path: RequiredPath,
+    *,
+    current_path: str = "",
+) -> list[str]:
+    """Return concrete missing-path instances for one required path."""
+    if not required_path:
+        return []
+
+    head = required_path[0]
+    tail = required_path[1:]
+
+    if head == _ARRAY_ITEM_SEGMENT:
+        match value:
+            case list() as items:
+                missing_paths: list[str] = []
+                for index, item in enumerate(items):
+                    item_path = f"{current_path}[{index}]" if current_path else f"[{index}]"
+                    missing_paths.extend(_find_missing_path_instances(item, tail, current_path=item_path))
+                return missing_paths
+            case _:
+                return []
+
+    match value:
+        case dict() as mapping:
+            next_path = f"{current_path}.{head}" if current_path else head
+            if head not in mapping:
+                return [next_path]
+            return _find_missing_path_instances(mapping[head], tail, current_path=next_path)
+        case _:
+            return []
+
+
+def _find_missing_required_paths(
+    value: object,
+    required_paths: tuple[RequiredPath, ...],
+) -> list[str]:
+    """Return dotted/indexed paths for missing schema-required fields."""
+    missing_paths: list[str] = []
+    for required_path in required_paths:
+        missing_paths.extend(_find_missing_path_instances(value, required_path))
+    return missing_paths
+
+
+_TOOL_REQUIRED_PATHS: dict[str, tuple[RequiredPath, ...]] = _build_tool_required_paths_index()
 
 
 @dataclass(frozen=True, slots=True)
@@ -261,14 +331,16 @@ class ComposerServiceImpl:
 
                 all_cache_hits = False
 
-                # Validate required arguments at the Tier 3 boundary
-                # BEFORE entering tool handler code.  This catches LLM
-                # argument omissions here; any KeyError that escapes
+                # Validate schema-declared required arguments at the
+                # Tier 3 boundary BEFORE entering tool handler code.
+                # This walks nested object/array schemas, so malformed
+                # set_pipeline payloads like source.plugin omissions are
+                # caught here; any KeyError that still escapes
                 # execute_tool() is an internal bug and must crash.
                 # Unknown tool names skip validation — execute_tool()
                 # handles them with a failure result downstream.
-                required = _TOOL_REQUIRED_ARGS[tool_name] if tool_name in _TOOL_REQUIRED_ARGS else []
-                missing = [k for k in required if k not in arguments]
+                required_paths = _TOOL_REQUIRED_PATHS[tool_name] if tool_name in _TOOL_REQUIRED_PATHS else ()
+                missing = _find_missing_required_paths(arguments, required_paths)
                 if missing:
                     if not is_discovery_tool(tool_name):
                         turn_has_mutation = True

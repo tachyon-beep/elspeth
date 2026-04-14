@@ -128,23 +128,21 @@ class ExecutionServiceImpl:
         return future.result(timeout=30.0)
 
     def get_live_run_ids(self) -> frozenset[str]:
-        """Return run IDs with active, non-signalled executor threads.
+        """Return run IDs still owned by an executor thread.
 
         A run ID is present in _shutdown_events from the moment it is
         registered in _execute_locked (before thread pool submission)
         until the _run_pipeline finally block removes it.
 
-        Only IDs whose shutdown event is NOT set are returned. Once the
-        event is set, the pipeline is either shutting down or wedged —
-        orphan cleanup should be allowed to act on it. Without this
-        filter, a wedged thread (or queued work behind it) keeps the
-        run in _shutdown_events forever, and orphan cleanup never
-        recovers the session.
+        Cancellation only signals the worker thread via Event.set(); it
+        does not mean the thread has finished its GracefulShutdownError
+        unwinding or finalization work. Periodic orphan cleanup must keep
+        excluding signalled runs until the worker removes them here.
 
-        Thread-safe: reads under the lock.
+        Thread-safe: returns a snapshot under the lock.
         """
         with self._shutdown_events_lock:
-            return frozenset(run_id for run_id, event in self._shutdown_events.items() if not event.is_set())
+            return frozenset(self._shutdown_events)
 
     def shutdown(self) -> None:
         """Shut down the thread pool. Called during app shutdown.

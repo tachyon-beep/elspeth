@@ -557,6 +557,65 @@ class TestComposerErrorHandling:
         assert result.message == "Fixed."
 
     @pytest.mark.asyncio
+    async def test_malformed_set_pipeline_nested_required_field_returns_error(self) -> None:
+        """Nested required fields in set_pipeline stay recoverable tool errors."""
+        catalog = _mock_catalog()
+        settings = _make_settings()
+        service = ComposerServiceImpl(catalog=catalog, settings=settings)
+        state = _empty_state()
+
+        bad_call = _make_llm_response(
+            tool_calls=[
+                {
+                    "id": "call_bad",
+                    "name": "set_pipeline",
+                    "arguments": {
+                        "source": {
+                            "on_success": "source_out",
+                            "options": {"path": "/data/in.csv", "schema": {"mode": "observed"}},
+                        },
+                        "nodes": [
+                            {
+                                "id": "t1",
+                                "node_type": "transform",
+                                "plugin": "uppercase",
+                                "input": "source_out",
+                                "on_success": "main",
+                                "options": {},
+                            }
+                        ],
+                        "edges": [
+                            {
+                                "id": "e1",
+                                "from_node": "source",
+                                "to_node": "t1",
+                                "edge_type": "on_success",
+                            }
+                        ],
+                        "outputs": [
+                            {
+                                "sink_name": "main",
+                                "plugin": "csv",
+                                "options": {"path": "/data/out.csv", "schema": {"mode": "observed"}},
+                            }
+                        ],
+                    },
+                }
+            ],
+        )
+        text = _make_llm_response(content="Recovered.")
+
+        with patch.object(service, "_call_llm", new_callable=AsyncMock) as mock_llm:
+            mock_llm.side_effect = [bad_call, text]
+            result = await service.compose("Setup", [], state)
+
+        assert result.message == "Recovered."
+        tool_msg = mock_llm.call_args_list[1][0][0][-1]
+        error_content = json.loads(tool_msg["content"])
+        assert "source.plugin" in error_content["error"]
+        assert "missing required" in error_content["error"].lower()
+
+    @pytest.mark.asyncio
     async def test_internal_key_error_is_not_swallowed(self) -> None:
         """KeyError from tool handler internals must crash, not be sent to LLM.
 

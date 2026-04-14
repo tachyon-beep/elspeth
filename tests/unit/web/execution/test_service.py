@@ -852,14 +852,16 @@ class TestGetLiveRunIds:
             service._shutdown_events["run-def"] = event
         assert service.get_live_run_ids() == frozenset({"run-abc", "run-def"})
 
-    def test_excludes_signalled_events(
+    def test_includes_signalled_events_until_worker_exits(
         self,
         service: ExecutionServiceImpl,
     ) -> None:
-        """Runs whose shutdown event is set are not considered live.
+        """Signalled runs stay live until _run_pipeline() removes them.
 
-        A set event means the run is shutting down or wedged — orphan
-        cleanup must be allowed to act on it.
+        A set shutdown event means cancellation was requested, not that the
+        worker thread has finished its GracefulShutdownError unwinding.
+        Periodic orphan cleanup must keep excluding the run until the
+        worker's finally block removes the registry entry.
         """
         live_event = threading.Event()
         signalled_event = threading.Event()
@@ -867,7 +869,7 @@ class TestGetLiveRunIds:
         with service._shutdown_events_lock:
             service._shutdown_events["run-live"] = live_event
             service._shutdown_events["run-signalled"] = signalled_event
-        assert service.get_live_run_ids() == frozenset({"run-live"})
+        assert service.get_live_run_ids() == frozenset({"run-live", "run-signalled"})
 
     def test_returns_snapshot_not_live_reference(
         self,
