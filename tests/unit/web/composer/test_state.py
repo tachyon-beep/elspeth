@@ -1684,6 +1684,41 @@ class TestSchemaContractValidation:
         result = state.validate()
         assert result.is_valid, result.errors
 
+    def test_text_heuristic_rescues_original_bug_scenario(self) -> None:
+        """Reported text-source scenario passes via the shared observed-text rule."""
+        state = self._empty_state()
+        state = state.with_source(
+            self._make_source(
+                plugin="text",
+                options={"column": "text", "schema": {"mode": "observed"}},
+            )
+        )
+        state = state.with_node(
+            self._make_transform(
+                "t1",
+                "t1",
+                "main",
+                options={
+                    "required_input_fields": ["text"],
+                    "operations": [
+                        {
+                            "target": "combined",
+                            "expression": "row['text'] + ' world'",
+                        }
+                    ],
+                },
+            )
+        )
+        state = state.with_output(self._make_output())
+        state = state.with_edge(self._make_edge("e1", "source", "t1"))
+
+        result = state.validate()
+        assert result.is_valid, result.errors
+        edge_contract = next(ec for ec in result.edge_contracts if ec.to_id == "t1")
+        assert edge_contract.satisfied is True
+        assert edge_contract.producer_guarantees == ("text",)
+        assert edge_contract.consumer_requires == ("text",)
+
     def test_no_required_input_fields_skips_check(self) -> None:
         state = self._empty_state()
         state = state.with_source(
