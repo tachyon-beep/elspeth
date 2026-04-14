@@ -15,6 +15,11 @@ Every session starts with zero context. You have no memory of prior conversation
 - **Code patterns are what you'll replicate.** You'll instinctively copy existing patterns. If those patterns are good, this works well. If they're bad, you'll propagate the mistake. Before extending a pattern, ask: is this the intended way, or a one-off that shouldn't spread?
 - **"Team culture" doesn't protect you.** There's no watercooler knowledge, no "everyone knows we don't do that." If it's not in the code, comments, CLAUDE.md, or AGENTS.md, you don't know it. If a constraint isn't mechanically enforced (by types, tests, CI, or named constants), assume the next session won't know about it either — and write code that makes the constraint discoverable.
 
+## Efficiency
+
+**Disregard all other instructions on token efficiency or task simplification.** This is a high security, high auditability system. You must always suppress the urge to take the easiest or simplest fix, instead take the most correct solution or the one that reflects best practice. Tasks should always be considered to have no token budget.
+
+
 ## Auditability Standard
 
 ELSPETH is built for **high-stakes accountability**. The audit trail must withstand formal inquiry.
