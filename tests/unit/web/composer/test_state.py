@@ -280,6 +280,79 @@ class TestValidationSummary:
         assert len(v.errors) == 1
 
 
+class TestEdgeContract:
+    def test_frozen(self) -> None:
+        from elspeth.web.composer.state import EdgeContract
+
+        ec = EdgeContract(
+            from_id="source",
+            to_id="add_world",
+            producer_guarantees=("text",),
+            consumer_requires=("text",),
+            missing_fields=(),
+            satisfied=True,
+        )
+        with pytest.raises(AttributeError):
+            ec.satisfied = False  # type: ignore[misc]
+
+    def test_to_dict_uses_from_key(self) -> None:
+        """EdgeContract.to_dict() serializes from_id as 'from' (JSON key)."""
+        from elspeth.web.composer.state import EdgeContract
+
+        ec = EdgeContract(
+            from_id="source",
+            to_id="add_world",
+            producer_guarantees=("text",),
+            consumer_requires=("text",),
+            missing_fields=(),
+            satisfied=True,
+        )
+        d = ec.to_dict()
+        assert d["from"] == "source"
+        assert d["to"] == "add_world"
+        assert d["producer_guarantees"] == ["text"]
+        assert d["consumer_requires"] == ["text"]
+        assert d["missing_fields"] == []
+        assert d["satisfied"] is True
+
+    def test_to_dict_empty_fields(self) -> None:
+        from elspeth.web.composer.state import EdgeContract
+
+        ec = EdgeContract(
+            from_id="source",
+            to_id="sink",
+            producer_guarantees=(),
+            consumer_requires=(),
+            missing_fields=(),
+            satisfied=True,
+        )
+        d = ec.to_dict()
+        assert d["producer_guarantees"] == []
+        assert d["consumer_requires"] == []
+        assert d["missing_fields"] == []
+
+
+class TestValidationSummaryEdgeContracts:
+    def test_default_empty(self) -> None:
+        vs = ValidationSummary(is_valid=True, errors=())
+        assert vs.edge_contracts == ()
+
+    def test_with_edge_contracts(self) -> None:
+        from elspeth.web.composer.state import EdgeContract
+
+        ec = EdgeContract(
+            from_id="source",
+            to_id="t1",
+            producer_guarantees=("text",),
+            consumer_requires=("text",),
+            missing_fields=(),
+            satisfied=True,
+        )
+        vs = ValidationSummary(is_valid=True, errors=(), edge_contracts=(ec,))
+        assert len(vs.edge_contracts) == 1
+        assert vs.edge_contracts[0].satisfied is True
+
+
 class TestCompositionState:
     def _empty_state(self) -> CompositionState:
         return CompositionState(

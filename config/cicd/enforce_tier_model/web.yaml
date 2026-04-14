@@ -234,33 +234,6 @@ allow_hits:
   reason: Optional fields — to_dict() conditionally omits None fields; from_dict() defaults to None
   safety: Missing = None; matches dataclass field default; round-trip invariant tested
   expires: null
-- key: web/composer/state.py:R1:CompositionState:with_metadata:fp=4052d54b742369cd
-  owner: web-composer
-  reason: Partial patch API — only provided fields are updated, others preserved
-  safety: Defaults are the current field values; no fabrication, no loss
-  expires: null
-- key: web/composer/state.py:R1:CompositionState:with_metadata:fp=af35d414ffa5c984
-  owner: web-composer
-  reason: Partial patch API — only provided fields are updated, others preserved
-  safety: Defaults are the current field values; no fabrication, no loss
-  expires: null
-- key: web/composer/state.py:R1:CompositionState:validate:fp=1b7280c6ae57fc5b
-  owner: web-composer
-  reason: W4 extension check — output.options is a Mapping of user-authored config; path key is optional and may not exist
-  safety: Missing path key returns None; no warning emitted; no fabrication
-  expires: null
-- key: web/composer/state.py:R5:CompositionState:validate:fp=8a00f198f5117ba7
-  owner: web-composer
-  reason: W4 extension check — path_val from options Mapping may be any type; isinstance guards against non-string values
-    before PurePosixPath parsing
-  safety: Non-string path_val is skipped; no warning emitted; no type coercion
-  expires: null
-- key: web/composer/state.py:R1:CompositionState:validate:fp=fc8068f84876f0bf
-  owner: web-composer
-  reason: W4 extension check — _plugin_exts lookup for plugins not in the map; unknown plugins are silently skipped (no warning
-    emitted)
-  safety: Unknown plugin returns None; no warning emitted; no false positive
-  expires: null
 - key: web/composer/tools.py:R6:_execute_list_models:fp=4ea514a3ac1f2655
   owner: web-composer
   reason: list_models gracefully handles missing litellm — returns empty model list
@@ -600,17 +573,6 @@ allow_hits:
   owner: web-sessions
   reason: Unwrapping redact_source_storage_path() output — helper returns dict with "source" key; .get() with fallback to original is defensive against helper contract change
   safety: Falls back to unredacted source_data (less privacy, not less safety)
-  expires: null
-# Group F: CompositionState.validate() — checking user-provided pipeline config options
-- key: web/composer/state.py:R1:CompositionState:validate:fp=3b43afcb325500fe
-  owner: web-composer
-  reason: Tier 3 boundary — user-provided pipeline node options; checking if required option value is empty after confirming key exists
-  safety: Returns validation warning to user; does not affect execution
-  expires: null
-- key: web/composer/state.py:R1:CompositionState:validate:fp=b28f8074168e64bc
-  owner: web-composer
-  reason: Tier 3 boundary — user-provided sink output options; checking if path is empty after confirming key exists
-  safety: Returns validation warning to user; does not affect execution
   expires: null
 - key: web/execution/validation.py:R5:_infer_component_type_from_plugin_error:fp=13660ad4db709533
   owner: web-validation

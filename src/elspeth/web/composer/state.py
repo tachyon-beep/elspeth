@@ -12,7 +12,7 @@ from __future__ import annotations
 from collections.abc import Mapping
 from dataclasses import dataclass, replace
 from pathlib import PurePosixPath
-from typing import Any, Literal, Self
+from typing import Any, Literal, Self, TypedDict
 
 from elspeth.contracts.freeze import deep_thaw, freeze_fields
 from elspeth.engine.orchestrator.validation import (
@@ -217,19 +217,57 @@ class ValidationEntry:
         return {"component": self.component, "message": self.message, "severity": self.severity}
 
 
+EdgeContractDict = TypedDict(
+    "EdgeContractDict",
+    {
+        "from": str,
+        "to": str,
+        "producer_guarantees": list[str],
+        "consumer_requires": list[str],
+        "missing_fields": list[str],
+        "satisfied": bool,
+    },
+)
+
+
+@dataclass(frozen=True, slots=True)
+class EdgeContract:
+    """Schema contract check result for a single producer->consumer edge."""
+
+    from_id: str
+    to_id: str
+    producer_guarantees: tuple[str, ...]
+    consumer_requires: tuple[str, ...]
+    missing_fields: tuple[str, ...]
+    satisfied: bool
+
+    def to_dict(self) -> EdgeContractDict:
+        """Serialize to a plain dict for JSON responses."""
+        return {
+            "from": self.from_id,
+            "to": self.to_id,
+            "producer_guarantees": list(self.producer_guarantees),
+            "consumer_requires": list(self.consumer_requires),
+            "missing_fields": list(self.missing_fields),
+            "satisfied": self.satisfied,
+        }
+
+
 @dataclass(frozen=True, slots=True)
 class ValidationSummary:
     """Stage 1 validation result.
 
     errors block execution. warnings are advisory but actionable.
-    suggestions are optional improvements. All are tuples of
-    ValidationEntry for structured component attribution.
+    suggestions are optional improvements. edge_contracts shows
+    per-edge schema contract check results. All are tuples for
+    structured component attribution.
     """
 
     is_valid: bool
     errors: tuple[ValidationEntry, ...]
     warnings: tuple[ValidationEntry, ...] = ()
     suggestions: tuple[ValidationEntry, ...] = ()
+    edge_contracts: tuple[EdgeContract, ...] = ()
 
 
 def _source_options_have_schema(options: Mapping[str, Any]) -> bool:
@@ -368,9 +406,11 @@ class CompositionState:
     def with_metadata(self, patch: dict[str, Any]) -> CompositionState:
         """Update metadata fields from partial dict. Version incremented."""
         current = self.metadata
+        name = patch["name"] if "name" in patch else current.name
+        description = patch["description"] if "description" in patch else current.description
         new_meta = PipelineMetadata(
-            name=patch.get("name", current.name),
-            description=patch.get("description", current.description),
+            name=name,
+            description=description,
         )
         return replace(self, metadata=new_meta, version=self.version + 1)
 
@@ -627,18 +667,24 @@ class CompositionState:
             "jsonl": {".jsonl"},
         }
         for output in self.outputs:
-            path_val = output.options.get("path")
-            if isinstance(path_val, str):
-                ext = PurePosixPath(path_val).suffix.lower()
-                accepted = _plugin_exts.get(output.plugin)
-                if ext and accepted is not None and ext not in accepted:
-                    warnings.append(
-                        _warn(
-                            f"output:{output.name}",
-                            f"Output '{output.name}' uses plugin '{output.plugin}' but filename extension suggests a different format.",
-                            "low",
-                        )
+            if "path" not in output.options:
+                continue
+            path_val = output.options["path"]
+            if type(path_val) is not str:
+                continue
+
+            ext = PurePosixPath(path_val).suffix.lower()
+            if output.plugin not in _plugin_exts:
+                continue
+            accepted = _plugin_exts[output.plugin]
+            if ext and ext not in accepted:
+                warnings.append(
+                    _warn(
+                        f"output:{output.name}",
+                        f"Output '{output.name}' uses plugin '{output.plugin}' but filename extension suggests a different format.",
+                        "low",
                     )
+                )
 
         # W5: Transform/aggregation node has empty or incomplete options
         # These plugins require configuration to do anything useful.
@@ -664,7 +710,7 @@ class CompositionState:
                         )
                     )
                 # Also check for empty list/dict/tuple values (lists are frozen to tuples)
-                elif node.options.get(required_key) in ([], (), {}, None, ""):
+                elif node.options[required_key] in ([], (), {}, None, ""):
                     warnings.append(
                         _warn(
                             f"node:{node.id}",
@@ -685,7 +731,7 @@ class CompositionState:
                             "medium",
                         )
                     )
-                elif not output.options.get("path"):
+                elif not output.options["path"]:
                     warnings.append(
                         _warn(
                             f"output:{output.name}",
