@@ -946,6 +946,8 @@ git commit -m "feat(composer): add schema contract validation pass (pass 9)"
 **Files:**
 - Test: `tests/unit/web/composer/test_state.py`
 
+Review note (2026-04-14): tighten this batch so `test_multi_sink_gate_routing` uses sinks with required fields and asserts the expected `edge_contracts` rows, and add an explicit aggregation wrapper-shaped `options.required_input_fields` regression here instead of leaving that branch covered only by later Task 8 parity work.
+
 - [ ] **Step 1: Write topology tests**
 
 Append to `TestSchemaContractValidation`:

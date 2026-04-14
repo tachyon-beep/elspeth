@@ -1576,6 +1576,52 @@ class TestSchemaContractValidation:
             merge=None,
         )
 
+    def _make_gate(
+        self,
+        id: str,
+        input: str,
+        routes: dict[str, str],
+        condition: str = "True",
+    ) -> NodeSpec:
+        return NodeSpec(
+            id=id,
+            node_type="gate",
+            plugin=None,
+            input=input,
+            on_success=None,
+            on_error=None,
+            options={},
+            condition=condition,
+            routes=routes,
+            fork_to=None,
+            branches=None,
+            policy=None,
+            merge=None,
+        )
+
+    def _make_coalesce(
+        self,
+        id: str,
+        input: str,
+        on_success: str,
+        branches: tuple[str, ...] | None = None,
+    ) -> NodeSpec:
+        return NodeSpec(
+            id=id,
+            node_type="coalesce",
+            plugin=None,
+            input=input,
+            on_success=on_success,
+            on_error=None,
+            options={},
+            condition=None,
+            routes=None,
+            fork_to=None,
+            branches=branches if branches is not None else (input,),
+            policy="require_all",
+            merge="nested",
+        )
+
     def _make_output(self, name: str = "main") -> OutputSpec:
         return OutputSpec(
             name=name,
@@ -2079,3 +2125,601 @@ class TestSchemaContractValidation:
 
         assert result.is_valid, result.errors
         assert not any("duplicate consumer" in e.message.lower() for e in result.errors)
+
+    # --- Topology cases ---
+
+    def test_gate_inherits_source_guarantees(self) -> None:
+        """Gate route targets inherit source guarantees through walk-back."""
+        state = self._empty_state()
+        state = state.with_source(
+            self._make_source(
+                on_success="gate_in",
+                options={"schema": {"mode": "fixed", "fields": ["text: str"]}},
+            )
+        )
+        state = state.with_node(
+            self._make_gate(
+                "g1",
+                "gate_in",
+                {"high": "main", "low": "errors"},
+            )
+        )
+        state = state.with_node(
+            self._make_transform(
+                "t1",
+                "main",
+                "out",
+                options={"required_input_fields": ["text"]},
+            )
+        )
+        state = state.with_output(self._make_output("out"))
+        state = state.with_output(self._make_output("errors"))
+        state = state.with_edge(self._make_edge("e1", "source", "g1"))
+        state = state.with_edge(self._make_edge("e2", "g1", "t1"))
+
+        result = state.validate()
+
+        assert result.is_valid, result.errors
+        t1_contract = next(ec for ec in result.edge_contracts if ec.to_id == "t1")
+        assert t1_contract.from_id == "source"
+        assert t1_contract.satisfied is True
+
+    def test_route_gate_two_routes_inherit_guarantees(self) -> None:
+        """Both route-gate paths inherit the same upstream guarantees."""
+        state = self._empty_state()
+        state = state.with_source(
+            self._make_source(
+                on_success="gate_in",
+                options={"schema": {"mode": "fixed", "fields": ["text: str"]}},
+            )
+        )
+        state = state.with_node(
+            self._make_gate(
+                "g1",
+                "gate_in",
+                {"a": "path_a", "b": "path_b"},
+            )
+        )
+        state = state.with_node(
+            self._make_transform(
+                "ta",
+                "path_a",
+                "out_a",
+                options={"required_input_fields": ["text"]},
+            )
+        )
+        state = state.with_node(
+            self._make_transform(
+                "tb",
+                "path_b",
+                "out_b",
+                options={"required_input_fields": ["text"]},
+            )
+        )
+        state = state.with_output(self._make_output("out_a"))
+        state = state.with_output(self._make_output("out_b"))
+        state = state.with_edge(self._make_edge("e1", "source", "g1"))
+        state = state.with_edge(self._make_edge("e2", "g1", "ta"))
+        state = state.with_edge(self._make_edge("e3", "g1", "tb"))
+
+        result = state.validate()
+
+        assert result.is_valid, result.errors
+        consumer_contracts = [ec for ec in result.edge_contracts if ec.to_id in {"ta", "tb"}]
+        assert len(consumer_contracts) == 2
+        assert {ec.from_id for ec in consumer_contracts} == {"source"}
+        assert all(ec.satisfied for ec in consumer_contracts)
+
+    def test_fork_gate_contract_check_skips_with_warning(self) -> None:
+        """Fork-gate downstream contract checks stay unresolved with a warning."""
+        state = self._empty_state()
+        state = state.with_source(
+            self._make_source(
+                on_success="gate_in",
+                options={"schema": {"mode": "fixed", "fields": ["text: str"]}},
+            )
+        )
+        state = state.with_node(
+            NodeSpec(
+                id="g1",
+                node_type="gate",
+                plugin=None,
+                input="gate_in",
+                on_success=None,
+                on_error=None,
+                options={},
+                condition="True",
+                routes={},
+                fork_to=("path_a", "path_b"),
+                branches=None,
+                policy=None,
+                merge=None,
+            )
+        )
+        state = state.with_node(
+            self._make_transform(
+                "ta",
+                "path_a",
+                "out_a",
+                options={"required_input_fields": ["text"]},
+            )
+        )
+        state = state.with_node(
+            self._make_transform(
+                "tb",
+                "path_b",
+                "out_b",
+                options={"required_input_fields": ["text"]},
+            )
+        )
+        state = state.with_output(self._make_output("out_a"))
+        state = state.with_output(self._make_output("out_b"))
+        state = state.with_edge(self._make_edge("e1", "source", "g1"))
+        state = state.with_edge(self._make_edge("e2", "g1", "ta"))
+        state = state.with_edge(self._make_edge("e3", "g1", "tb"))
+
+        result = state.validate()
+
+        assert result.is_valid, result.errors
+        assert any("fork" in w.message.lower() and "contract" in w.message.lower() for w in result.warnings)
+        assert not any(ec.to_id in {"ta", "tb"} for ec in result.edge_contracts)
+
+    def test_multi_hop_transform_no_schema_breaks_chain(self) -> None:
+        """A schema-less transform breaks downstream guarantees across hops."""
+        state = self._empty_state()
+        state = state.with_source(
+            self._make_source(
+                on_success="source_to_ta",
+                options={"schema": {"mode": "fixed", "fields": ["text: str"]}},
+            )
+        )
+        state = state.with_node(
+            self._make_transform(
+                "ta",
+                "source_to_ta",
+                "ta_out",
+                plugin="passthrough",
+            )
+        )
+        state = state.with_node(
+            self._make_transform(
+                "tb",
+                "ta_out",
+                "main",
+                options={"required_input_fields": ["text"]},
+            )
+        )
+        state = state.with_output(self._make_output())
+        state = state.with_edge(self._make_edge("e1", "source", "ta"))
+        state = state.with_edge(self._make_edge("e2", "ta", "tb"))
+
+        result = state.validate()
+
+        assert not result.is_valid
+        assert any("text" in e.message for e in result.errors)
+        tb_contract = next(ec for ec in result.edge_contracts if ec.to_id == "tb")
+        assert tb_contract.from_id == "ta"
+        assert tb_contract.satisfied is False
+
+    def test_transform_then_gate_walk_back_terminates(self) -> None:
+        """Walk-back stops at the first non-gate producer in the chain."""
+        state = self._empty_state()
+        state = state.with_source(
+            self._make_source(
+                on_success="ta_in",
+                options={"schema": {"mode": "fixed", "fields": ["text: str"]}},
+            )
+        )
+        state = state.with_node(
+            self._make_transform(
+                "ta",
+                "ta_in",
+                "gate_in",
+                plugin="passthrough",
+            )
+        )
+        state = state.with_node(
+            self._make_gate(
+                "g1",
+                "gate_in",
+                {"high": "tb_in", "low": "sink"},
+            )
+        )
+        state = state.with_node(
+            self._make_transform(
+                "tb",
+                "tb_in",
+                "out",
+                options={"required_input_fields": ["text"]},
+            )
+        )
+        state = state.with_output(self._make_output("out"))
+        state = state.with_output(self._make_output("sink"))
+        state = state.with_edge(self._make_edge("e1", "source", "ta"))
+        state = state.with_edge(self._make_edge("e2", "ta", "g1"))
+        state = state.with_edge(self._make_edge("e3", "g1", "tb"))
+
+        result = state.validate()
+
+        assert not result.is_valid
+        assert any("text" in e.message for e in result.errors)
+        tb_contract = next(ec for ec in result.edge_contracts if ec.to_id == "tb")
+        assert tb_contract.from_id == "ta"
+        assert tb_contract.satisfied is False
+
+    def test_multi_sink_gate_routing(self) -> None:
+        """Route gates emit one satisfied sink contract per direct sink target."""
+        state = self._empty_state()
+        state = state.with_source(
+            self._make_source(
+                on_success="gate_in",
+                options={"schema": {"mode": "fixed", "fields": ["text: str"]}},
+            )
+        )
+        state = state.with_node(
+            self._make_gate(
+                "g1",
+                "gate_in",
+                {"high": "sink_a", "low": "sink_b"},
+            )
+        )
+        state = state.with_output(
+            OutputSpec(
+                name="sink_a",
+                plugin="csv",
+                options={
+                    "path": "outputs/sink_a.csv",
+                    "schema": {"mode": "observed", "required_fields": ["text"]},
+                },
+                on_write_failure="discard",
+            )
+        )
+        state = state.with_output(
+            OutputSpec(
+                name="sink_b",
+                plugin="csv",
+                options={
+                    "path": "outputs/sink_b.csv",
+                    "schema": {"mode": "observed", "required_fields": ["text"]},
+                },
+                on_write_failure="discard",
+            )
+        )
+        state = state.with_edge(self._make_edge("e1", "source", "g1"))
+        state = state.with_edge(self._make_edge("e2", "g1", "sink_a"))
+        state = state.with_edge(self._make_edge("e3", "g1", "sink_b"))
+
+        result = state.validate()
+
+        assert result.is_valid, result.errors
+        sink_contracts = [ec for ec in result.edge_contracts if ec.to_id in {"output:sink_a", "output:sink_b"}]
+        assert len(sink_contracts) == 2
+        assert {ec.to_id for ec in sink_contracts} == {"output:sink_a", "output:sink_b"}
+        assert {ec.from_id for ec in sink_contracts} == {"source"}
+        assert all(ec.satisfied for ec in sink_contracts)
+
+    def test_mixed_consumer_requirements_from_same_producer(self) -> None:
+        """One upstream can satisfy one route and fail another."""
+        state = self._empty_state()
+        state = state.with_source(
+            self._make_source(
+                on_success="gate_in",
+                options={"schema": {"mode": "fixed", "fields": ["text: str"]}},
+            )
+        )
+        state = state.with_node(
+            self._make_gate(
+                "g1",
+                "gate_in",
+                {"a": "path_a", "b": "path_b"},
+            )
+        )
+        state = state.with_node(
+            self._make_transform(
+                "ta",
+                "path_a",
+                "out_a",
+                options={"required_input_fields": ["text"]},
+            )
+        )
+        state = state.with_node(
+            self._make_transform(
+                "tb",
+                "path_b",
+                "out_b",
+                options={"required_input_fields": ["score"]},
+            )
+        )
+        state = state.with_output(self._make_output("out_a"))
+        state = state.with_output(self._make_output("out_b"))
+        state = state.with_edge(self._make_edge("e1", "source", "g1"))
+        state = state.with_edge(self._make_edge("e2", "g1", "ta"))
+        state = state.with_edge(self._make_edge("e3", "g1", "tb"))
+
+        result = state.validate()
+
+        assert not result.is_valid
+        assert any("score" in e.message for e in result.errors)
+        ta_contract = next(ec for ec in result.edge_contracts if ec.to_id == "ta")
+        assert ta_contract.satisfied is True
+        tb_contract = next(ec for ec in result.edge_contracts if ec.to_id == "tb")
+        assert tb_contract.satisfied is False
+        assert "score" in tb_contract.missing_fields
+
+    def test_aggregation_consumer_required_input_fields_fail(self) -> None:
+        """Aggregation consumers honor required_input_fields contracts."""
+        state = self._empty_state()
+        state = state.with_source(
+            self._make_source(
+                on_success="agg1",
+                options={"schema": {"mode": "fixed", "fields": ["line: str"]}},
+            )
+        )
+        state = state.with_node(
+            NodeSpec(
+                id="agg1",
+                node_type="aggregation",
+                plugin="batch_stats",
+                input="agg1",
+                on_success="main",
+                on_error=None,
+                options={
+                    "value_field": "value",
+                    "required_input_fields": ["value"],
+                    "schema": {"mode": "observed"},
+                },
+                condition=None,
+                routes=None,
+                fork_to=None,
+                branches=None,
+                policy=None,
+                merge=None,
+            )
+        )
+        state = state.with_output(self._make_output())
+        state = state.with_edge(self._make_edge("e1", "source", "agg1"))
+
+        result = state.validate()
+
+        assert not result.is_valid
+        assert any("value" in e.message for e in result.errors)
+
+    def test_aggregation_nested_wrapper_required_input_fields_fail(self) -> None:
+        """Aggregation wrapper-shaped options.required_input_fields is honored."""
+        state = self._empty_state()
+        state = state.with_source(
+            self._make_source(
+                on_success="agg1",
+                options={"schema": {"mode": "fixed", "fields": ["line: str"]}},
+            )
+        )
+        state = state.with_node(
+            NodeSpec(
+                id="agg1",
+                node_type="aggregation",
+                plugin="batch_stats",
+                input="agg1",
+                on_success="main",
+                on_error=None,
+                options={
+                    "options": {
+                        "value_field": "value",
+                        "required_input_fields": ["value"],
+                        "schema": {"mode": "observed"},
+                    }
+                },
+                condition=None,
+                routes=None,
+                fork_to=None,
+                branches=None,
+                policy=None,
+                merge=None,
+            )
+        )
+        state = state.with_output(self._make_output())
+        state = state.with_edge(self._make_edge("e1", "source", "agg1"))
+
+        result = state.validate()
+
+        assert not result.is_valid
+        assert any("value" in e.message for e in result.errors)
+        agg_contract = next(ec for ec in result.edge_contracts if ec.to_id == "agg1")
+        assert agg_contract.consumer_requires == ("value",)
+        assert agg_contract.satisfied is False
+
+    def test_coalesce_producer_emits_skip_warning(self) -> None:
+        """Coalesce producers stay unresolved until runtime validation."""
+        state = self._empty_state()
+        state = state.with_source(
+            self._make_source(
+                on_success="branch_a",
+                options={"schema": {"mode": "fixed", "fields": ["text: str"]}},
+            )
+        )
+        state = state.with_node(
+            self._make_coalesce(
+                "c1",
+                "branch_a",
+                "after_merge",
+            )
+        )
+        state = state.with_node(
+            self._make_transform(
+                "t1",
+                "after_merge",
+                "main",
+                options={"required_input_fields": ["text"]},
+            )
+        )
+        state = state.with_output(self._make_output())
+        state = state.with_edge(self._make_edge("e1", "source", "c1"))
+        state = state.with_edge(self._make_edge("e2", "c1", "t1"))
+
+        result = state.validate()
+
+        assert result.is_valid, result.errors
+        assert any("coalesce node" in w.message.lower() and "runtime validator will check" in w.message.lower() for w in result.warnings)
+        assert not any(ec.to_id == "t1" for ec in result.edge_contracts)
+
+    # --- Guard tests ---
+
+    def test_node_id_source_is_reserved(self) -> None:
+        """A node cannot reuse the source sentinel id."""
+        state = self._empty_state()
+        state = state.with_source(
+            self._make_source(
+                options={"schema": {"mode": "fixed", "fields": ["text: str"]}},
+            )
+        )
+        state = state.with_node(
+            self._make_transform(
+                "source",
+                "t1",
+                "main",
+                options={"required_input_fields": ["text"]},
+            )
+        )
+        state = state.with_output(self._make_output())
+        state = state.with_edge(self._make_edge("e1", "source", "source"))
+
+        result = state.validate()
+
+        assert not result.is_valid
+        assert any("reserved" in e.message.lower() for e in result.errors)
+
+    def test_bare_string_required_input_fields_emits_error(self) -> None:
+        """Bare-string required_input_fields fails closed."""
+        state = self._empty_state()
+        state = state.with_source(
+            self._make_source(
+                options={"schema": {"mode": "fixed", "fields": ["text: str"]}},
+            )
+        )
+        state = state.with_node(
+            self._make_transform(
+                "t1",
+                "t1",
+                "main",
+                options={"required_input_fields": "text"},
+            )
+        )
+        state = state.with_output(self._make_output())
+        state = state.with_edge(self._make_edge("e1", "source", "t1"))
+
+        result = state.validate()
+
+        assert not result.is_valid
+        assert any("bare string" in e.message.lower() for e in result.errors)
+
+    def test_duplicate_producer_connection_emits_error_and_skips_contracts(self) -> None:
+        """Duplicate producers fail closed instead of overwriting the namespace."""
+        state = self._empty_state()
+        state = state.with_source(
+            self._make_source(
+                on_success="gate_in",
+                options={"schema": {"mode": "fixed", "fields": ["text: str"]}},
+            )
+        )
+        state = state.with_node(
+            self._make_gate(
+                "g1",
+                "gate_in",
+                {"a": "dup", "b": "path_b"},
+            )
+        )
+        state = state.with_node(
+            self._make_transform(
+                "ta",
+                "dup",
+                "out_a",
+                options={"required_input_fields": ["text"]},
+            )
+        )
+        state = state.with_node(
+            self._make_transform(
+                "tb",
+                "path_b",
+                "dup",
+            )
+        )
+        state = state.with_output(self._make_output("out_a"))
+        state = state.with_edge(self._make_edge("e1", "source", "g1"))
+        state = state.with_edge(self._make_edge("e2", "g1", "ta"))
+        state = state.with_edge(self._make_edge("e3", "g1", "tb"))
+
+        result = state.validate()
+
+        assert not result.is_valid
+        assert any("duplicate producer" in e.message.lower() for e in result.errors)
+        assert result.edge_contracts == ()
+
+    def test_duplicate_consumer_connection_emits_error_and_skips_contracts(self) -> None:
+        """Duplicate consumers fail closed instead of fabricating edge checks."""
+        state = self._empty_state()
+        state = state.with_source(
+            self._make_source(
+                on_success="shared",
+                options={"schema": {"mode": "fixed", "fields": ["text: str"]}},
+            )
+        )
+        state = state.with_node(
+            self._make_transform(
+                "ta",
+                "shared",
+                "out_a",
+                options={"required_input_fields": ["text"]},
+            )
+        )
+        state = state.with_node(
+            self._make_transform(
+                "tb",
+                "shared",
+                "out_b",
+                options={"required_input_fields": ["text"]},
+            )
+        )
+        state = state.with_output(self._make_output("out_a"))
+        state = state.with_output(self._make_output("out_b"))
+        state = state.with_edge(self._make_edge("e1", "source", "ta"))
+        state = state.with_edge(self._make_edge("e2", "source", "tb"))
+
+        result = state.validate()
+
+        assert not result.is_valid
+        assert any("duplicate consumer" in e.message.lower() for e in result.errors)
+        assert result.edge_contracts == ()
+
+    def test_connection_name_overlaps_sink_name_emits_error_and_skips_contracts(self) -> None:
+        """Connection/sink namespace overlap aborts contract telemetry."""
+        state = self._empty_state()
+        state = state.with_source(
+            self._make_source(
+                on_success="t1",
+                options={"schema": {"mode": "fixed", "fields": ["text: str"]}},
+            )
+        )
+        state = state.with_node(
+            self._make_transform(
+                "t1",
+                "t1",
+                "main",
+            )
+        )
+        state = state.with_node(
+            self._make_transform(
+                "t2",
+                "main",
+                "out",
+                options={"required_input_fields": ["text"]},
+            )
+        )
+        state = state.with_output(self._make_output("main"))
+        state = state.with_output(self._make_output("out"))
+        state = state.with_edge(self._make_edge("e1", "source", "t1"))
+        state = state.with_edge(self._make_edge("e2", "t1", "t2"))
+
+        result = state.validate()
+
+        assert not result.is_valid
+        assert any("disjoint" in e.message.lower() or "overlap" in e.message.lower() for e in result.errors)
+        assert result.edge_contracts == ()
