@@ -12,6 +12,7 @@ from __future__ import annotations
 import codecs
 import keyword
 from collections.abc import Iterator, Mapping
+from dataclasses import replace
 from typing import Any
 
 from pydantic import ValidationError, field_validator
@@ -61,15 +62,38 @@ class TextSource(BaseSource):
     _on_validation_failure: str
 
     def __init__(self, config: dict[str, Any]) -> None:
-        super().__init__(config)
         cfg = TextSourceConfig.from_dict(config, plugin_name=self.name)
+        schema_config = cfg.schema_config
+        stored_config = config
+
+        # Auto-declare {column} as a guaranteed output field only for the
+        # shared observed-text contract case: observed schema, no explicit
+        # guaranteed_fields, non-empty column. TextSource always produces
+        # {column: value} for every row, so this is a provable invariant.
+        # Keep this narrow: fixed/flexible schemas already express their
+        # guarantees through normal SchemaConfig semantics and must not be
+        # rewritten into an explicit guaranteed_fields declaration.
+        if schema_config.mode == "observed" and not schema_config.declares_guaranteed_fields and cfg.column:
+            schema_config = replace(
+                schema_config,
+                guaranteed_fields=(cfg.column,),
+            )
+            # DAG builder currently reads source.config["schema"], not the
+            # plugin's private _schema_config. Only the observed/no-explicit-
+            # guarantees path needs a copied raw-config rewrite so runtime
+            # validation sees the same contract the composer reports, without
+            # mutating the caller-supplied config dict or changing node IDs for
+            # unrelated fixed/flexible or explicit-guarantee cases.
+            stored_config = dict(config)
+            stored_config["schema"] = schema_config.to_dict()
+        super().__init__(stored_config)
 
         self._path = cfg.resolved_path()
         self._column = cfg.column
         self._encoding = cfg.encoding
         self._strip_whitespace = cfg.strip_whitespace
         self._skip_blank_lines = cfg.skip_blank_lines
-        self._schema_config = cfg.schema_config
+        self._schema_config = schema_config
         self._on_validation_failure = cfg.on_validation_failure
 
         self._schema_class: type[PluginSchema] = create_schema_from_config(
@@ -106,6 +130,11 @@ class TextSource(BaseSource):
                     if self._skip_blank_lines and value == "":
                         continue
 
+                    # Shared composer/runtime contract helper depends on this:
+                    # elspeth.contracts.schema.get_raw_producer_guaranteed_fields()
+                    # infers {self._column} for observed text sources only.
+                    # If you change which key the row uses, update that helper
+                    # and its agreement tests.
                     yield from self._validate_and_yield(
                         {self._column: value},
                         ctx,
