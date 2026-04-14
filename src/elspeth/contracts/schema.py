@@ -25,6 +25,7 @@ are accepted, but quoted strings are recommended for clarity.
 
 from __future__ import annotations
 
+import keyword
 import re
 from collections.abc import Mapping
 from dataclasses import dataclass
@@ -732,10 +733,12 @@ def get_raw_producer_guaranteed_fields(
     if schema_config is None:
         return frozenset()
 
-    # Task 6 wires the closed-list observed-text special case into runtime and
-    # composer together. Until then, observed-mode text sources rely only on
-    # explicit guaranteed_fields declarations.
-    return schema_config.get_effective_guaranteed_fields()
+    guaranteed = schema_config.get_effective_guaranteed_fields()
+    if plugin_name in _TEXT_HEURISTIC_PLUGINS and schema_config.mode == "observed" and not schema_config.declares_guaranteed_fields:
+        column = options.get("column")
+        if isinstance(column, str) and column.isidentifier() and not keyword.iskeyword(column):
+            return frozenset({column})
+    return guaranteed
 
 
 def get_raw_node_required_fields(

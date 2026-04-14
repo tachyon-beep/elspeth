@@ -902,3 +902,59 @@ class TestNullableRoundTripRegression:
         assert rt_map["b"].required is True and rt_map["b"].nullable is True
         assert rt_map["c"].required is False and rt_map["c"].nullable is False
         assert rt_map["d"].required is False and rt_map["d"].nullable is True
+
+
+class TestRawSchemaHelpers:
+    """Tests for raw-config helper parity between composer and runtime."""
+
+    def test_text_observed_source_infers_column_guarantee(self) -> None:
+        """Observed text sources infer their configured column as guaranteed."""
+        from elspeth.contracts.schema import get_raw_producer_guaranteed_fields
+
+        guaranteed = get_raw_producer_guaranteed_fields(
+            "text",
+            {
+                "column": "text",
+                "schema": {"mode": "observed"},
+            },
+            owner="source:source",
+        )
+
+        assert guaranteed == frozenset({"text"})
+
+    def test_text_observed_source_preserves_explicit_guarantees(self) -> None:
+        """Explicit observed guarantees win over the text-source heuristic."""
+        from elspeth.contracts.schema import get_raw_producer_guaranteed_fields
+
+        guaranteed = get_raw_producer_guaranteed_fields(
+            "text",
+            {
+                "column": "text",
+                "schema": {
+                    "mode": "observed",
+                    "guaranteed_fields": ["custom_field"],
+                },
+            },
+            owner="source:source",
+        )
+
+        assert guaranteed == frozenset({"custom_field"})
+
+    @pytest.mark.parametrize("column", ["class", "not-valid"])
+    def test_text_observed_source_invalid_column_does_not_infer_guarantee(
+        self,
+        column: str,
+    ) -> None:
+        """Invalid text-source columns must not trigger the observed-text heuristic."""
+        from elspeth.contracts.schema import get_raw_producer_guaranteed_fields
+
+        guaranteed = get_raw_producer_guaranteed_fields(
+            "text",
+            {
+                "column": column,
+                "schema": {"mode": "observed"},
+            },
+            owner="source:source",
+        )
+
+        assert guaranteed == frozenset()
