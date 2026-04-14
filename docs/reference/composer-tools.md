@@ -1,6 +1,6 @@
 # Composer Tool Reference
 
-Complete reference for the 27 tools available to the LLM pipeline composer. These tools are used in a tool-use loop where the LLM translates natural-language pipeline descriptions into valid ELSPETH pipeline configurations.
+Complete reference for the composer-facing tools and export surfaces available to the LLM pipeline composer. These tools are used in a tool-use loop where the LLM translates natural-language pipeline descriptions into valid ELSPETH pipeline configurations.
 
 ---
 
@@ -8,6 +8,7 @@ Complete reference for the 27 tools available to the LLM pipeline composer. Thes
 
 - [How Tools Work](#how-tools-work)
 - [Discovery Tools](#discovery-tools)
+- [Export Surface](#export-surface)
 - [Mutation Tools](#mutation-tools)
 - [Blob Tools](#blob-tools)
 - [Secret Tools](#secret-tools)
@@ -116,9 +117,21 @@ Preview the current pipeline configuration — validation status, source summary
 
 **Parameters:** None
 
-**Returns:** Structured summary of the pipeline's current state including validation errors, warnings, and suggestions.
+**Returns:** Structured summary of the pipeline's current state including:
+- `is_valid`
+- structured validation `errors`, `warnings`, and `suggestions`
+- `edge_contracts` for declared producer/consumer field contracts
+- source, node, and output summary data
 
-**When to use:** After making a series of changes, to confirm the pipeline is set up correctly before responding to the user.
+Each `edge_contracts` entry reports:
+- `from` / `to`
+- `producer_guarantees`
+- `consumer_requires`
+- `satisfied`
+
+**When to use:** After making a series of changes, to confirm the pipeline is set up correctly before responding to the user or calling `generate_yaml`.
+
+**Important:** `edge_contracts: []` is not positive contract evidence. It means no field contracts were declared. Also treat skipped contract-check warnings as unresolved rather than satisfied.
 
 ---
 
@@ -132,7 +145,27 @@ Get a human-readable explanation of a validation error with suggested fixes.
 
 **Returns:** Explanation of what the error means and how to fix it.
 
-**When to use:** When a mutation tool returns validation errors that aren't immediately clear. Pass the exact error text from the validation result.
+**When to use:** When a mutation tool or export surface returns validation errors that aren't immediately clear. Pass the exact error text from the validation result.
+
+**Contract-aware behaviour:** Schema contract violations are recognised explicitly. For node contract failures, the guidance directs you to `preview_pipeline` plus `patch_source_options` / `patch_node_options`. For sink contract failures, it can also direct you to `patch_output_options`.
+
+---
+
+## Export Surface
+
+### `generate_yaml`
+
+Export the current composition state as deterministic pipeline YAML.
+
+**Parameters:** None
+
+**Returns:** YAML text for the current composition state.
+
+**Validation backstop:** The LLM-facing export surfaces re-run validation before emitting YAML.
+- The MCP `generate_yaml` session tool returns failure if the current composition state is invalid.
+- The HTTP `GET /api/sessions/{id}/state/yaml` endpoint returns `409` for invalid state.
+
+**Important:** This is an export step, not the primary validator. Use `preview_pipeline` first to inspect validation results and `edge_contracts`. The underlying serializer remains a pure serializer and is not universally validation-aware at every internal call site.
 
 ---
 
