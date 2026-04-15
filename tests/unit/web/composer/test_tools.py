@@ -2253,6 +2253,400 @@ class TestBlobTools:
 
 
 # ---------------------------------------------------------------------------
+# Blob active-run protection (Finding 2: 73a1aa6cef)
+# ---------------------------------------------------------------------------
+
+
+class TestDeleteBlobActiveRunGuard:
+    """delete_blob must refuse to delete blobs linked to active (pending/running) runs.
+
+    Mirrors BlobServiceImpl.delete_blob() active-run guard — the composer tool
+    layer must enforce the same invariant.
+    """
+
+    @pytest.fixture(autouse=True)
+    def _setup(self, tmp_path: Path):
+        from datetime import UTC, datetime
+        from uuid import uuid4
+
+        from sqlalchemy import create_engine
+        from sqlalchemy.pool import StaticPool
+
+        from elspeth.web.sessions.models import (
+            blobs_table,
+            metadata,
+            sessions_table,
+        )
+
+        self.engine = create_engine(
+            "sqlite:///:memory:",
+            poolclass=StaticPool,
+            connect_args={"check_same_thread": False},
+        )
+        metadata.create_all(self.engine)
+
+        self.session_id = str(uuid4())
+        self.blob_id = str(uuid4())
+        self.run_id = str(uuid4())
+        now = datetime.now(UTC)
+
+        # Create blob on disk so unlink has a real target
+        storage_dir = tmp_path / "blobs" / self.session_id
+        storage_dir.mkdir(parents=True)
+        self.storage_path = storage_dir / f"{self.blob_id}_data.csv"
+        self.storage_path.write_bytes(b"a,b\n1,2")
+
+        with self.engine.begin() as conn:
+            conn.execute(
+                sessions_table.insert().values(
+                    id=self.session_id,
+                    user_id="test-user",
+                    auth_provider_type="local",
+                    title="Test",
+                    created_at=now,
+                    updated_at=now,
+                )
+            )
+            conn.execute(
+                blobs_table.insert().values(
+                    id=self.blob_id,
+                    session_id=self.session_id,
+                    filename="data.csv",
+                    mime_type="text/csv",
+                    size_bytes=100,
+                    content_hash="abc123",
+                    storage_path=str(self.storage_path),
+                    created_at=now,
+                    created_by="user",
+                    source_description=None,
+                    status="ready",
+                )
+            )
+
+    def _insert_run_and_link(self, status: str) -> None:
+        from datetime import UTC, datetime
+        from uuid import uuid4
+
+        from elspeth.web.sessions.models import (
+            blob_run_links_table,
+            composition_states_table,
+            runs_table,
+        )
+
+        now = datetime.now(UTC)
+        state_id = str(uuid4())
+        with self.engine.begin() as conn:
+            conn.execute(
+                composition_states_table.insert().values(
+                    id=state_id,
+                    session_id=self.session_id,
+                    version=1,
+                    source=None,
+                    nodes=None,
+                    edges=None,
+                    outputs=None,
+                    metadata_=None,
+                    is_valid=False,
+                    validation_errors=None,
+                    created_at=now,
+                )
+            )
+            conn.execute(
+                runs_table.insert().values(
+                    id=self.run_id,
+                    session_id=self.session_id,
+                    state_id=state_id,
+                    status=status,
+                    started_at=now,
+                    rows_processed=0,
+                    rows_failed=0,
+                )
+            )
+            conn.execute(
+                blob_run_links_table.insert().values(
+                    blob_id=self.blob_id,
+                    run_id=self.run_id,
+                    direction="input",
+                )
+            )
+
+    def test_delete_succeeds_when_no_runs_linked(self) -> None:
+        state = _empty_state()
+        catalog = _mock_catalog()
+        result = execute_tool(
+            "delete_blob",
+            {"blob_id": self.blob_id},
+            state,
+            catalog,
+            session_engine=self.engine,
+            session_id=self.session_id,
+        )
+        assert result.success is True
+        assert not self.storage_path.exists()
+
+    def test_delete_rejected_when_pending_run_linked(self) -> None:
+        self._insert_run_and_link("pending")
+        state = _empty_state()
+        catalog = _mock_catalog()
+        result = execute_tool(
+            "delete_blob",
+            {"blob_id": self.blob_id},
+            state,
+            catalog,
+            session_engine=self.engine,
+            session_id=self.session_id,
+        )
+        assert result.success is False
+        assert "active run" in result.data["error"].lower()
+        assert self.storage_path.exists(), "File must not be deleted when guard blocks"
+
+    def test_delete_rejected_when_running_run_linked(self) -> None:
+        self._insert_run_and_link("running")
+        state = _empty_state()
+        catalog = _mock_catalog()
+        result = execute_tool(
+            "delete_blob",
+            {"blob_id": self.blob_id},
+            state,
+            catalog,
+            session_engine=self.engine,
+            session_id=self.session_id,
+        )
+        assert result.success is False
+        assert self.storage_path.exists(), "File must not be deleted when guard blocks"
+
+    def test_delete_succeeds_when_completed_run_linked(self) -> None:
+        self._insert_run_and_link("completed")
+        state = _empty_state()
+        catalog = _mock_catalog()
+        result = execute_tool(
+            "delete_blob",
+            {"blob_id": self.blob_id},
+            state,
+            catalog,
+            session_engine=self.engine,
+            session_id=self.session_id,
+        )
+        assert result.success is True
+        assert not self.storage_path.exists()
+
+
+# ---------------------------------------------------------------------------
+# Blob update quota enforcement (Finding 5: 527546bedb)
+# ---------------------------------------------------------------------------
+
+
+class TestUpdateBlobQuota:
+    """update_blob must enforce per-session quota when the blob grows.
+
+    Mirrors _execute_create_blob quota enforcement — the update path must
+    also call _check_blob_quota atomically inside the same transaction as
+    the DB UPDATE.
+    """
+
+    @pytest.fixture(autouse=True)
+    def _setup(self, tmp_path: Path):
+        from datetime import UTC, datetime
+        from uuid import uuid4
+
+        from sqlalchemy import create_engine
+        from sqlalchemy.pool import StaticPool
+
+        from elspeth.web.sessions.models import blobs_table, metadata, sessions_table
+
+        self.engine = create_engine(
+            "sqlite:///:memory:",
+            poolclass=StaticPool,
+            connect_args={"check_same_thread": False},
+        )
+        metadata.create_all(self.engine)
+
+        self.session_id = str(uuid4())
+        self.blob_id = str(uuid4())
+        self.data_dir = str(tmp_path)
+        now = datetime.now(UTC)
+
+        # Create blob on disk with known content
+        storage_dir = tmp_path / "blobs" / self.session_id
+        storage_dir.mkdir(parents=True)
+        self.storage_path = storage_dir / f"{self.blob_id}_data.csv"
+        self.original_content = b"small"
+        self.storage_path.write_bytes(self.original_content)
+
+        with self.engine.begin() as conn:
+            conn.execute(
+                sessions_table.insert().values(
+                    id=self.session_id,
+                    user_id="test-user",
+                    auth_provider_type="local",
+                    title="Test",
+                    created_at=now,
+                    updated_at=now,
+                )
+            )
+            conn.execute(
+                blobs_table.insert().values(
+                    id=self.blob_id,
+                    session_id=self.session_id,
+                    filename="data.csv",
+                    mime_type="text/csv",
+                    size_bytes=len(self.original_content),
+                    content_hash="old_hash",
+                    storage_path=str(self.storage_path),
+                    created_at=now,
+                    created_by="user",
+                    source_description=None,
+                    status="ready",
+                )
+            )
+
+    def test_update_within_quota_succeeds(self) -> None:
+        state = _empty_state()
+        catalog = _mock_catalog()
+        result = execute_tool(
+            "update_blob",
+            {"blob_id": self.blob_id, "content": "slightly larger content"},
+            state,
+            catalog,
+            session_engine=self.engine,
+            session_id=self.session_id,
+        )
+        assert result.success is True
+
+    def test_update_exceeding_quota_rejected(self) -> None:
+        from unittest.mock import patch
+
+        state = _empty_state()
+        catalog = _mock_catalog()
+        # Set quota to a tiny value so any growth exceeds it
+        with patch("elspeth.web.composer.tools._BLOB_QUOTA_BYTES", 10):
+            result = execute_tool(
+                "update_blob",
+                {"blob_id": self.blob_id, "content": "x" * 100},
+                state,
+                catalog,
+                session_engine=self.engine,
+                session_id=self.session_id,
+            )
+        assert result.success is False
+        assert "quota" in result.data["error"].lower()
+
+    def test_update_exceeding_quota_preserves_old_content(self) -> None:
+        from unittest.mock import patch
+
+        state = _empty_state()
+        catalog = _mock_catalog()
+        with patch("elspeth.web.composer.tools._BLOB_QUOTA_BYTES", 10):
+            execute_tool(
+                "update_blob",
+                {"blob_id": self.blob_id, "content": "x" * 100},
+                state,
+                catalog,
+                session_engine=self.engine,
+                session_id=self.session_id,
+            )
+        assert self.storage_path.read_bytes() == self.original_content
+
+    def test_shrink_always_succeeds(self) -> None:
+        from unittest.mock import patch
+
+        # First grow the blob so we have something to shrink
+        state = _empty_state()
+        catalog = _mock_catalog()
+        result = execute_tool(
+            "update_blob",
+            {"blob_id": self.blob_id, "content": "a" * 200},
+            state,
+            catalog,
+            session_engine=self.engine,
+            session_id=self.session_id,
+        )
+        assert result.success is True
+
+        # Now set quota very low — shrinking should still succeed
+        with patch("elspeth.web.composer.tools._BLOB_QUOTA_BYTES", 10):
+            result = execute_tool(
+                "update_blob",
+                {"blob_id": self.blob_id, "content": "tiny"},
+                state,
+                catalog,
+                session_engine=self.engine,
+                session_id=self.session_id,
+            )
+        assert result.success is True
+
+    def test_delta_boundary_case(self) -> None:
+        """Update that fits when measured by delta but not by absolute new size.
+
+        Session total = 490 (including current blob at old_size=5).
+        New content = 15 bytes. Delta = 10. Total after = 490 + 10 = 500.
+        Must succeed at quota=500 because 500 <= 500.
+        Would fail if check incorrectly used full len(content_bytes)=15.
+        """
+        from datetime import UTC, datetime
+        from unittest.mock import patch
+        from uuid import uuid4
+
+        from elspeth.web.sessions.models import blobs_table
+
+        # Add a second blob to bring session total to 490
+        filler_id = str(uuid4())
+        now = datetime.now(UTC)
+        filler_path = Path(self.data_dir) / "blobs" / self.session_id / f"{filler_id}_filler.bin"
+        filler_path.write_bytes(b"x" * 485)
+
+        with self.engine.begin() as conn:
+            conn.execute(
+                blobs_table.insert().values(
+                    id=filler_id,
+                    session_id=self.session_id,
+                    filename="filler.bin",
+                    mime_type="application/octet-stream",
+                    size_bytes=485,
+                    content_hash="filler",
+                    storage_path=str(filler_path),
+                    created_at=now,
+                    created_by="user",
+                    source_description=None,
+                    status="ready",
+                )
+            )
+        # Session total is now 5 (original) + 485 (filler) = 490
+
+        state = _empty_state()
+        catalog = _mock_catalog()
+        # New content: 15 bytes. Delta = 15 - 5 = 10. Total after = 490 + 10 = 500.
+        with patch("elspeth.web.composer.tools._BLOB_QUOTA_BYTES", 500):
+            result = execute_tool(
+                "update_blob",
+                {"blob_id": self.blob_id, "content": "x" * 15},
+                state,
+                catalog,
+                session_engine=self.engine,
+                session_id=self.session_id,
+            )
+        assert result.success is True, f"Delta-based quota check should pass at boundary: {result.data}"
+
+    def test_shrink_on_at_quota_session_succeeds(self) -> None:
+        """Shrinking a blob on a session exactly at quota must succeed."""
+        from unittest.mock import patch
+
+        state = _empty_state()
+        catalog = _mock_catalog()
+        # Quota exactly matches current total (5 bytes)
+        with patch("elspeth.web.composer.tools._BLOB_QUOTA_BYTES", len(self.original_content)):
+            result = execute_tool(
+                "update_blob",
+                {"blob_id": self.blob_id, "content": "x"},  # 1 byte < 5 bytes
+                state,
+                catalog,
+                session_engine=self.engine,
+                session_id=self.session_id,
+            )
+        assert result.success is True
+
+
+# ---------------------------------------------------------------------------
 # Secret tool tests — composer-level secret reference wiring
 # ---------------------------------------------------------------------------
 
@@ -2755,6 +3149,123 @@ class TestPatchOutputOptions:
         )
         assert result.success is False
         assert "nonexistent" in result.data["error"]
+
+
+# ---------------------------------------------------------------------------
+# Patch output path security (Finding 1: 3554012f39)
+# ---------------------------------------------------------------------------
+
+
+class TestPatchOutputPathSecurity:
+    """S2: Sink path allowlist — patched output paths must be under allowed directories.
+
+    Mirrors TestSetSourcePathSecurity but for the sink/output side.
+    _validate_sink_path() must be called after merge-patching output options.
+    """
+
+    def _state_with_output(self, options: dict[str, Any]) -> CompositionState:
+        state = _empty_state()
+        catalog = _mock_catalog()
+        merged = {"schema": {"mode": "observed"}, **options}
+        r = execute_tool(
+            "set_output",
+            {
+                "sink_name": "main",
+                "plugin": "csv",
+                "options": merged,
+                "on_write_failure": "discard",
+            },
+            state,
+            catalog,
+        )
+        assert r.success is True
+        return r.updated_state
+
+    def test_path_outside_allowlist_rejected(self) -> None:
+        state = self._state_with_output({"path": "/data/outputs/ok.csv"})
+        catalog = _mock_catalog()
+        result = execute_tool(
+            "patch_output_options",
+            {"sink_name": "main", "patch": {"path": "/etc/passwd"}},
+            state,
+            catalog,
+            data_dir="/data",
+        )
+        assert result.success is False
+        assert "path" in result.data["error"].lower()
+
+    def test_traversal_attack_rejected(self) -> None:
+        state = self._state_with_output({"path": "/data/outputs/ok.csv"})
+        catalog = _mock_catalog()
+        result = execute_tool(
+            "patch_output_options",
+            {"sink_name": "main", "patch": {"path": "/data/outputs/../../etc/passwd"}},
+            state,
+            catalog,
+            data_dir="/data",
+        )
+        assert result.success is False
+
+    def test_file_key_also_validated(self) -> None:
+        state = self._state_with_output({"path": "/data/outputs/ok.csv"})
+        catalog = _mock_catalog()
+        result = execute_tool(
+            "patch_output_options",
+            {"sink_name": "main", "patch": {"file": "/tmp/evil.csv"}},
+            state,
+            catalog,
+            data_dir="/data",
+        )
+        assert result.success is False
+
+    def test_file_key_traversal_rejected(self) -> None:
+        state = self._state_with_output({"path": "/data/outputs/ok.csv"})
+        catalog = _mock_catalog()
+        result = execute_tool(
+            "patch_output_options",
+            {"sink_name": "main", "patch": {"file": "/data/outputs/../../etc/shadow"}},
+            state,
+            catalog,
+            data_dir="/data",
+        )
+        assert result.success is False
+
+    def test_relative_path_under_outputs_accepted(self) -> None:
+        state = self._state_with_output({"path": "/data/outputs/ok.csv"})
+        catalog = _mock_catalog()
+        result = execute_tool(
+            "patch_output_options",
+            {"sink_name": "main", "patch": {"path": "outputs/result.csv"}},
+            state,
+            catalog,
+            data_dir="/data",
+        )
+        assert result.success is True
+
+    def test_absolute_path_under_allowed_dir_accepted(self) -> None:
+        state = self._state_with_output({"path": "/data/outputs/ok.csv"})
+        catalog = _mock_catalog()
+        result = execute_tool(
+            "patch_output_options",
+            {"sink_name": "main", "patch": {"path": "/data/outputs/subdir/out.csv"}},
+            state,
+            catalog,
+            data_dir="/data",
+        )
+        assert result.success is True
+
+    def test_data_dir_none_skips_validation(self) -> None:
+        """When data_dir is not configured, any path is accepted."""
+        state = self._state_with_output({"path": "/anywhere/file.csv"})
+        catalog = _mock_catalog()
+        result = execute_tool(
+            "patch_output_options",
+            {"sink_name": "main", "patch": {"path": "/etc/passwd"}},
+            state,
+            catalog,
+            data_dir=None,
+        )
+        assert result.success is True
 
 
 # ---------------------------------------------------------------------------

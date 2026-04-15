@@ -14,6 +14,7 @@ from functools import lru_cache
 from typing import Any
 
 from elspeth.web.catalog.protocol import CatalogService
+from elspeth.web.composer.redaction import redact_source_storage_path
 from elspeth.web.composer.skills import load_deployment_skill, load_skill
 from elspeth.web.composer.state import CompositionState
 
@@ -65,6 +66,7 @@ def build_context_string(
         system prompt.
     """
     serialized = state.to_dict()
+    serialized = redact_source_storage_path(serialized)  # B4: strip blob paths
     validation = state.validate()
     serialized["validation"] = {
         "is_valid": validation.is_valid,

@@ -512,6 +512,81 @@ class TestRecomposeConvergencePartialState:
         assert detail["error_type"] == "convergence"
         assert "partial_state" not in detail
 
+    def test_convergence_redacts_blob_path_from_response_but_preserves_in_db(self, tmp_path) -> None:
+        """When partial_state has a blob-backed source, the HTTP response must
+        redact the internal storage path while the DB copy retains it."""
+        import asyncio
+
+        from elspeth.contracts.freeze import deep_freeze
+        from elspeth.web.composer.protocol import ComposerConvergenceError
+        from elspeth.web.composer.state import SourceSpec
+
+        partial = CompositionState(
+            source=SourceSpec(
+                plugin="csv",
+                options=deep_freeze(
+                    {
+                        "path": "/internal/blobs/data.csv",
+                        "blob_ref": "abc123",
+                        "schema": {"mode": "observed"},
+                    }
+                ),
+                on_success="t1",
+                on_validation_failure="quarantine",
+            ),
+            nodes=(),
+            edges=(),
+            outputs=(),
+            metadata=PipelineMetadata(),
+            version=2,
+        )
+
+        mock_composer = AsyncMock()
+        mock_composer.compose = AsyncMock(
+            side_effect=ComposerConvergenceError(
+                max_turns=5,
+                budget_exhausted="composition",
+                partial_state=partial,
+            ),
+        )
+
+        app, service = _make_app(tmp_path)
+        app.state.composer_service = mock_composer
+        client = TestClient(app, raise_server_exceptions=False)
+
+        # Create session and seed a user message for recompose precondition
+        resp = client.post("/api/sessions", json={"title": "Blob test"})
+        session_id = resp.json()["id"]
+
+        loop = asyncio.new_event_loop()
+        loop.run_until_complete(
+            service.add_message(uuid.UUID(session_id), "user", "Load my CSV"),
+        )
+        loop.close()
+
+        recompose_resp = client.post(f"/api/sessions/{session_id}/recompose")
+
+        assert recompose_resp.status_code == 422
+        detail = recompose_resp.json()["detail"]
+        assert detail["error_type"] == "convergence"
+
+        # HTTP response: path must be redacted, blob_ref must be present
+        response_source_opts = detail["partial_state"]["source"]["options"]
+        assert "path" not in response_source_opts
+        assert response_source_opts["blob_ref"] == "abc123"
+
+        # DB copy: path must be preserved alongside blob_ref
+        loop = asyncio.new_event_loop()
+        db_record = loop.run_until_complete(
+            service.get_current_state(uuid.UUID(session_id)),
+        )
+        loop.close()
+
+        assert db_record is not None
+        db_source_opts = db_record.source["options"]
+        assert db_source_opts["path"] == "/internal/blobs/data.csv"
+        assert db_source_opts["blob_ref"] == "abc123"
+
 
 class TestStateRoutes:
     """Tests for composition state endpoints."""

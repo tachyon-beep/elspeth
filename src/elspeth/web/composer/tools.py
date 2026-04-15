@@ -22,6 +22,7 @@ from sqlalchemy import Engine, delete, func, select, update
 from elspeth.contracts.freeze import deep_thaw, freeze_fields
 from elspeth.web.blobs.service import content_hash, sanitize_filename
 from elspeth.web.catalog.protocol import CatalogService, PluginKind
+from elspeth.web.composer.redaction import redact_source_storage_path
 from elspeth.web.composer.state import (
     CompositionState,
     EdgeSpec,
@@ -34,7 +35,7 @@ from elspeth.web.composer.state import (
     _validate_gate_expression,
 )
 from elspeth.web.paths import allowed_sink_directories, allowed_source_directories
-from elspeth.web.sessions.models import blobs_table
+from elspeth.web.sessions.models import blob_run_links_table, blobs_table, runs_table
 
 
 def _compute_validation_delta(
@@ -218,34 +219,6 @@ def diff_states(
     changes["total_changes"] = total
 
     return changes
-
-
-def redact_source_storage_path(state_dict: dict[str, Any]) -> dict[str, Any]:
-    """Redact internal storage paths from a serialized state dict.
-
-    When source options contain a ``blob_ref``, the ``path`` key is an
-    internal storage detail that should not be exposed to agents or users.
-    This replaces raw paths with the blob ID reference (B4 requirement).
-
-    Returns a shallow copy with source options redacted. Does not mutate
-    the input dict.
-    """
-    source = state_dict.get("source")
-    if source is None:
-        return state_dict
-
-    options = source.get("options")
-    if options is None or "blob_ref" not in options:
-        return state_dict
-
-    # Shallow copy the chain to avoid mutating the original
-    redacted = dict(state_dict)
-    redacted_source = dict(source)
-    redacted_options = dict(options)
-    redacted_options.pop("path", None)
-    redacted_source["options"] = redacted_options
-    redacted["source"] = redacted_source
-    return redacted
 
 
 # --- Expression Grammar (static) ---
@@ -1816,14 +1789,22 @@ def _execute_update_blob(
     content_bytes = content.encode("utf-8")
     file_hash = content_hash(content_bytes)
 
+    old_size = blob["size_bytes"]  # Tier 1: NOT NULL in schema — crash if None
+    size_delta = len(content_bytes) - old_size
+
     # Overwrite storage file — snapshot old content for rollback on DB failure
     storage_path = Path(blob["storage_path"])
     old_content = storage_path.read_bytes()
     storage_path.write_bytes(content_bytes)
 
-    # Update record — include session_id filter for defence in depth
+    # Atomic quota check + update (same pattern as _execute_create_blob)
     try:
         with session_engine.begin() as conn:
+            if size_delta > 0:
+                quota_error = _check_blob_quota(conn, session_id, size_delta)
+                if quota_error is not None:
+                    storage_path.write_bytes(old_content)
+                    return _failure_result(state, quota_error)
             conn.execute(
                 update(blobs_table)
                 .where(blobs_table.c.id == blob_id, blobs_table.c.session_id == session_id)
@@ -1871,13 +1852,34 @@ def _execute_delete_blob(
     if blob is None:
         return _failure_result(state, f"Blob '{blob_id}' not found.")
 
-    # Remove storage file — missing_ok avoids TOCTOU race
     storage_path = Path(blob["storage_path"])
-    storage_path.unlink(missing_ok=True)
 
-    # Delete record — include session_id filter for defence in depth
+    # Single transaction: guard + unlink + delete (matches BlobServiceImpl.delete_blob)
     with session_engine.begin() as conn:
-        conn.execute(delete(blobs_table).where(blobs_table.c.id == blob_id, blobs_table.c.session_id == session_id))
+        # Active-run guard: cannot delete evidence for a live run
+        active_link = conn.execute(
+            select(blob_run_links_table)
+            .join(runs_table, blob_run_links_table.c.run_id == runs_table.c.id)
+            .where(blob_run_links_table.c.blob_id == blob_id)
+            .where(runs_table.c.status.in_(["pending", "running"]))
+        ).first()
+        if active_link is not None:
+            return _failure_result(
+                state,
+                f"Blob '{blob_id}' is linked to active run '{active_link.run_id}' and cannot be deleted.",
+            )
+
+        # Delete backing file first — orphaned DB row is recoverable,
+        # orphaned file with no metadata is not
+        storage_path.unlink(missing_ok=True)
+
+        # Delete record — include session_id filter for defence in depth
+        conn.execute(
+            delete(blobs_table).where(
+                blobs_table.c.id == blob_id,
+                blobs_table.c.session_id == session_id,
+            )
+        )
 
     return _discovery_result(state, {"blob_id": blob_id, "deleted": True})
 
@@ -2311,6 +2313,7 @@ def _handle_patch_node_options(
 def _execute_patch_output_options(
     args: dict[str, Any],
     state: CompositionState,
+    data_dir: str | None = None,
 ) -> ToolResult:
     sink_name = args["sink_name"]
     patch = args["patch"]
@@ -2320,6 +2323,11 @@ def _execute_patch_output_options(
     if current is None:
         return _failure_result(state, f"Output '{sink_name}' not found.")
     new_options = _apply_merge_patch(current.options, patch)
+
+    # S2: Validate patched sink paths against allowlist
+    path_error = _validate_sink_path(new_options, data_dir)
+    if path_error is not None:
+        return _failure_result(state, path_error)
 
     prevalidation_error = _prevalidate_sink(current.plugin, new_options)
     if prevalidation_error is not None:
@@ -2341,7 +2349,7 @@ def _handle_patch_output_options(
     catalog: CatalogService,
     data_dir: str | None = None,
 ) -> ToolResult:
-    return _execute_patch_output_options(arguments, state)
+    return _execute_patch_output_options(arguments, state, data_dir)
 
 
 # --- Wave 4 handlers ---

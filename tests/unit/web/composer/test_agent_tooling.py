@@ -17,6 +17,7 @@ import pytest
 from sqlalchemy import create_engine, select
 
 from elspeth.web.catalog.schemas import PluginSchemaInfo, PluginSummary
+from elspeth.web.composer.redaction import redact_source_storage_path
 from elspeth.web.composer.state import (
     CompositionState,
     NodeSpec,
@@ -29,7 +30,6 @@ from elspeth.web.composer.tools import (
     ToolResult,
     diff_states,
     execute_tool,
-    redact_source_storage_path,
 )
 from elspeth.web.sessions.models import blobs_table, metadata
 

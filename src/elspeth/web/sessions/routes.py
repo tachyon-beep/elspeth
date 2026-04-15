@@ -19,8 +19,8 @@ from elspeth.web.auth.middleware import get_current_user
 from elspeth.web.auth.models import UserIdentity
 from elspeth.web.blobs.protocol import BlobQuotaExceededError, BlobServiceProtocol
 from elspeth.web.composer.protocol import ComposerConvergenceError, ComposerService
+from elspeth.web.composer.redaction import redact_source_storage_path
 from elspeth.web.composer.state import CompositionState, PipelineMetadata, ValidationEntry, ValidationSummary
-from elspeth.web.composer.tools import redact_source_storage_path
 from elspeth.web.composer.yaml_generator import generate_yaml
 from elspeth.web.middleware.rate_limit import ComposerRateLimiter, get_rate_limiter
 from elspeth.web.sessions.converters import state_from_record as _state_from_record
@@ -195,7 +195,7 @@ async def _handle_convergence_error(
                 validation_errors=[e.message for e in validation.errors] if validation.errors else None,
             )
             await service.save_composition_state(session_id, state_data)
-            response_body["partial_state"] = state_d
+            response_body["partial_state"] = redact_source_storage_path(state_d)
         except (ValueError, TypeError, KeyError, IntegrityError) as save_err:
             slog.error(
                 f"{log_prefix}_partial_state_save_failed",

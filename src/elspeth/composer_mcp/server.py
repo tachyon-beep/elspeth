@@ -23,13 +23,13 @@ from pydantic import BaseModel
 
 from elspeth.composer_mcp.session import SessionManager, SessionNotFoundError
 from elspeth.web.catalog.protocol import CatalogService
+from elspeth.web.composer.redaction import redact_source_storage_path
 from elspeth.web.composer.state import CompositionState, PipelineMetadata
 from elspeth.web.composer.tools import (
     _DISCOVERY_TOOLS,
     _MUTATION_TOOLS,
     execute_tool,
     get_tool_definitions,
-    redact_source_storage_path,
 )
 from elspeth.web.composer.yaml_generator import generate_yaml
 

@@ -6,6 +6,7 @@ Verifies:
 - System message injects pipeline state and plugin catalog
 - Empty chat history handled correctly
 - Context string includes validation summary
+- build_context_string redacts blob storage paths
 """
 
 from __future__ import annotations
@@ -14,6 +15,7 @@ import json
 from pathlib import Path
 from typing import Any
 
+from elspeth.contracts.freeze import deep_freeze
 from elspeth.web.catalog.protocol import CatalogService, PluginKind
 from elspeth.web.catalog.schemas import PluginSchemaInfo, PluginSummary
 from elspeth.web.composer.prompts import (
@@ -22,7 +24,7 @@ from elspeth.web.composer.prompts import (
     build_messages,
     build_system_prompt,
 )
-from elspeth.web.composer.state import CompositionState
+from elspeth.web.composer.state import CompositionState, PipelineMetadata, SourceSpec
 
 
 class StubCatalog:
@@ -263,3 +265,67 @@ class TestBuildMessagesWithDataDir:
 
         assert "# Deployment: use ACME provider" in system_content
         assert SYSTEM_PROMPT in system_content
+
+
+def _blob_source_state(
+    *,
+    path: str | None = "/internal/blobs/sess123/blobid_data.csv",
+    blob_ref: str | None = "blobid",
+) -> CompositionState:
+    """Build a CompositionState with a source whose options contain blob fields."""
+    raw_options: dict[str, Any] = {"schema": {"mode": "observed"}}
+    if path is not None:
+        raw_options["path"] = path
+    if blob_ref is not None:
+        raw_options["blob_ref"] = blob_ref
+    return CompositionState(
+        source=SourceSpec(
+            plugin="csv",
+            options=deep_freeze(raw_options),
+            on_success="t1",
+            on_validation_failure="quarantine",
+        ),
+        nodes=(),
+        edges=(),
+        outputs=(),
+        metadata=PipelineMetadata(),
+        version=1,
+    )
+
+
+class TestBuildContextStringRedaction:
+    """Blob storage path redaction in build_context_string."""
+
+    def test_build_context_string_redacts_blob_path(self) -> None:
+        """Blob-backed source: raw path must NOT appear, blob_ref must remain."""
+        state = _blob_source_state(
+            path="/internal/blobs/sess123/blobid_data.csv",
+            blob_ref="blobid",
+        )
+        catalog = _stub_catalog()
+
+        context = build_context_string(state, catalog)
+
+        assert "/internal/blobs/sess123/blobid_data.csv" not in context
+        assert "blobid" in context
+
+    def test_build_context_string_non_blob_source_unaffected(self) -> None:
+        """File-backed source (no blob_ref): path must be preserved."""
+        state = _blob_source_state(
+            path="/data/input/report.csv",
+            blob_ref=None,
+        )
+        catalog = _stub_catalog()
+
+        context = build_context_string(state, catalog)
+
+        assert "/data/input/report.csv" in context
+
+    def test_build_context_string_blob_ref_without_path_no_error(self) -> None:
+        """Source with blob_ref but no path key must not raise."""
+        state = _blob_source_state(path=None, blob_ref="blobid")
+        catalog = _stub_catalog()
+
+        # Should complete without error.
+        context = build_context_string(state, catalog)
+        assert "blobid" in context

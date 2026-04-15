@@ -245,6 +245,8 @@ Core: Typer (CLI), Textual (TUI), Dynaconf+Pydantic (config), pluggy (plugins), 
 
 **Logger is NOT for pipeline activity.** Don't log row-level decisions, transform outcomes, or call results — those duplicate the Landscape. Logger is only for transitory debugging (`slog.debug`), audit system failures, and telemetry system failures.
 
+**When a reviewer recommends `slog`**, the presumption should be that the event belongs in audit (Landscape) for critical run data, or operational telemetry for ephemeral operational signals. Reviewers outside the project don't know the primacy order and will default to logging because that's what most codebases do. Translate their intent ("this event should be visible") into the correct channel, not the suggested mechanism.
+
 Full policy (permitted/forbidden uses, superset rule, telemetry-only exemptions, probative value test): see `logging-telemetry-policy` skill. Config guide: `docs/guides/telemetry.md`.
 
 ## Critical Implementation Patterns
