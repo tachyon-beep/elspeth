@@ -2807,3 +2807,10 @@ filigree create "Expand composer/runtime agreement tests — coalesce and type-l
   --type=task --priority=3 \
   --description="The agreement test in tests/integration/pipeline/test_composer_runtime_agreement.py covers four basic scenarios (node reject, observed-text accept, strict-sink reject, aggregation nested-options reject). Expand it to cover the remaining runtime-only gaps: (1) coalesce-merge branch intersection, (2) type-level schema compatibility (Pydantic schema construction). These are cases where runtime may reject but the composer currently cannot check. See docs/superpowers/specs/2026-04-14-composer-schema-contract-validation-design.md 'What This Doesn't Catch' table."
 ```
+
+- [ ] **Step 7: Final doc + parity reminders**
+
+Before closing the work, do both of these:
+
+1. Update `docs/reference/composer-tools.md` so the reference docs match the new tool behavior (`preview_pipeline.edge_contracts`, the contract-aware `explain_validation_error` path, and the YAML-export refusal for invalid states).
+2. Compare the composer-side connection-namespace checks with the runtime builder/graph behavior in `src/elspeth/core/dag/graph.py` (`_validate_connection_namespaces(...)`). Keep the semantics aligned for the intended subset; if the composer implementation starts carrying a broader independent copy, either re-couple it mechanically or register a follow-up to extract a shared helper instead of letting the two validators drift.
