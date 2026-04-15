@@ -2,7 +2,7 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Add mechanical change detection to all 32 ELSPETH plugins via `source_file_hash` (SHA-256 of entry-point file content), with CI enforcement and landscape audit trail integration.
+**Goal:** Add mechanical change detection to all 28 ELSPETH plugins via `source_file_hash` (SHA-256 of entry-point file content), with CI enforcement and landscape audit trail integration.
 
 **Architecture:** Two-channel versioning — `plugin_version` (human semver) + `source_file_hash` (deterministic file hash). CI script computes hashes via AST extraction, enforces freshness. Landscape stores hash per node for reproducibility audit. See `docs/superpowers/specs/2026-04-15-plugin-version-audit-design.md` for full design.
 
@@ -16,18 +16,18 @@ The hash computation logic is shared between the CI script and the `--fix` mode.
 
 **Files:**
 - Create: `scripts/cicd/plugin_hash.py`
-- Test: `tests/unit/cicd/test_plugin_hash.py`
-- Create: `tests/unit/cicd/__init__.py`
+- Test: `tests/unit/scripts/cicd/test_plugin_hash.py`
+- Create: `tests/unit/scripts/cicd/__init__.py`
 
 - [ ] **Step 1: Write failing tests for hash computation**
 
 ```python
-# tests/unit/cicd/__init__.py
+# tests/unit/scripts/cicd/__init__.py
 # (empty)
 ```
 
 ```python
-# tests/unit/cicd/test_plugin_hash.py
+# tests/unit/scripts/cicd/test_plugin_hash.py
 """Tests for plugin source file hash computation."""
 
 from __future__ import annotations
@@ -244,7 +244,7 @@ def test_fix_is_idempotent(tmp_path: Path) -> None:
 
 - [ ] **Step 2: Run tests to verify they fail**
 
-Run: `.venv/bin/python -m pytest tests/unit/cicd/test_plugin_hash.py -v`
+Run: `.venv/bin/python -m pytest tests/unit/scripts/cicd/test_plugin_hash.py -v`
 Expected: FAIL with `ModuleNotFoundError: No module named 'scripts.cicd.plugin_hash'`
 
 - [ ] **Step 3: Implement the hash computation module**
@@ -376,13 +376,13 @@ def _extract_value(node: ast.expr) -> object:
 
 - [ ] **Step 4: Run tests to verify they pass**
 
-Run: `.venv/bin/python -m pytest tests/unit/cicd/test_plugin_hash.py -v`
+Run: `.venv/bin/python -m pytest tests/unit/scripts/cicd/test_plugin_hash.py -v`
 Expected: All 10 tests PASS
 
 - [ ] **Step 5: Commit**
 
 ```bash
-git add scripts/cicd/plugin_hash.py tests/unit/cicd/__init__.py tests/unit/cicd/test_plugin_hash.py
+git add scripts/cicd/plugin_hash.py tests/unit/scripts/cicd/__init__.py tests/unit/scripts/cicd/test_plugin_hash.py
 git commit -m "feat(cicd): add plugin source file hash computation module
 
 Shared hash computation (SHA-256 of normalized file content), AST
@@ -459,10 +459,10 @@ base class default provides backwards compatibility during rollout."
 
 ### Task 3: Add `source_file_hash` and missing `plugin_version` to all plugins
 
-Use the hash computation module from Task 1 to compute correct hashes, then add the attribute to all 32 plugin files. Also add missing `plugin_version = "1.0.0"` to the 7 plugins that omit it.
+Use the hash computation module from Task 1 to compute correct hashes, then add the attribute to all 28 plugin files. Also add missing `plugin_version = "1.0.0"` to the 9 plugins that omit it.
 
 **Files:**
-- Modify: All 32 plugin files listed in the spec audit (see inventory)
+- Modify: All 28 plugin files listed in the spec audit (see inventory)
 
 - [ ] **Step 1: Write a helper script to compute all hashes**
 
@@ -502,10 +502,12 @@ For each plugin, add `source_file_hash = "sha256:<computed>"` after the `plugin_
     source_file_hash = "sha256:<value-from-step-1>"
 ```
 
-**The 7 plugins that need `plugin_version = "1.0.0"` added:**
+**The 9 plugins that need `plugin_version = "1.0.0"` added:**
 - `sources/azure_blob_source.py` (AzureBlobSource)
 - `sources/dataverse.py` (DataverseSource)
 - `sinks/dataverse.py` (DataverseSink)
+- `transforms/azure/content_safety.py` (AzureContentSafety)
+- `transforms/azure/prompt_shield.py` (AzurePromptShield)
 - `transforms/rag/transform.py` (RAGRetrievalTransform)
 - `transforms/llm/transform.py` (LLMTransform)
 - `transforms/llm/azure_batch.py` (AzureBatchLLMTransform)
@@ -530,13 +532,14 @@ Expected: PASS
 
 ```bash
 git add src/elspeth/plugins/
-git commit -m "feat(plugins): add source_file_hash to all 32 plugins
+git commit -m "feat(plugins): add source_file_hash to all 28 plugins
 
-Adds missing plugin_version='1.0.0' to 7 plugins (AzureBlobSource,
-DataverseSource, DataverseSink, RAGRetrievalTransform, LLMTransform,
-AzureBatchLLMTransform, OpenRouterBatchLLMTransform).
+Adds missing plugin_version='1.0.0' to 9 plugins (AzureBlobSource,
+DataverseSource, DataverseSink, AzureContentSafety, AzurePromptShield,
+RAGRetrievalTransform, LLMTransform, AzureBatchLLMTransform,
+OpenRouterBatchLLMTransform).
 
-Adds source_file_hash with correct SHA-256 truncated hash to all 32
+Adds source_file_hash with correct SHA-256 truncated hash to all 28
 plugin entry-point files."
 ```
 
@@ -549,12 +552,12 @@ Full CLI script with `check` and `check --fix` subcommands.
 **Files:**
 - Create: `scripts/cicd/enforce_plugin_hashes.py`
 - Create: `config/cicd/enforce_plugin_hashes/` (allowlist directory)
-- Test: `tests/unit/cicd/test_enforce_plugin_hashes.py`
+- Test: `tests/unit/scripts/cicd/test_enforce_plugin_hashes.py`
 
 - [ ] **Step 1: Write failing tests for the enforcement script**
 
 ```python
-# tests/unit/cicd/test_enforce_plugin_hashes.py
+# tests/unit/scripts/cicd/test_enforce_plugin_hashes.py
 """Tests for enforce_plugin_hashes.py CI enforcement script."""
 
 from __future__ import annotations
@@ -660,7 +663,7 @@ class TestEnforcePluginHashes:
 
 - [ ] **Step 2: Run tests to verify they fail**
 
-Run: `.venv/bin/python -m pytest tests/unit/cicd/test_enforce_plugin_hashes.py -v`
+Run: `.venv/bin/python -m pytest tests/unit/scripts/cicd/test_enforce_plugin_hashes.py -v`
 Expected: FAIL (script doesn't exist yet)
 
 - [ ] **Step 3: Implement the enforcement script**
@@ -710,7 +713,6 @@ _EXCLUDED_FILES = frozenset({
     "multi_query.py",
     "capacity_errors.py",
     "provider.py",
-    "providers",
 })
 
 
@@ -728,9 +730,26 @@ def _discover_plugin_files(root: Path) -> list[Path]:
     return files
 
 
+EXPECTED_PLUGIN_COUNT = 28
+
+
 def run_check(root: Path, *, fix: bool = False) -> int:
     """Run the enforcement check. Returns 0 on success, 1 on failure."""
     files = _discover_plugin_files(root)
+
+    # Count guard: fail loudly if discovery finds fewer plugins than expected
+    # (guards against wrong --root, missing directories, or scan regressions)
+    plugin_count = sum(
+        len(extract_plugin_attributes(f)) for f in files
+    )
+    if plugin_count < EXPECTED_PLUGIN_COUNT:
+        print(
+            f"DISCOVERY ERROR: found {plugin_count} plugins, "
+            f"expected at least {EXPECTED_PLUGIN_COUNT}. "
+            f"Check --root path and PLUGIN_DIRS."
+        )
+        return 1
+
     violations: list[str] = []
     fixed: list[str] = []
 
@@ -825,18 +844,18 @@ mkdir -p config/cicd/enforce_plugin_hashes
 
 - [ ] **Step 5: Run tests to verify they pass**
 
-Run: `.venv/bin/python -m pytest tests/unit/cicd/ -v`
+Run: `.venv/bin/python -m pytest tests/unit/scripts/cicd/ -v`
 Expected: All tests PASS
 
 - [ ] **Step 6: Run the enforcement script against the real codebase**
 
 Run: `.venv/bin/python scripts/cicd/enforce_plugin_hashes.py check --root src/elspeth`
-Expected: PASS (all 32 plugins have correct hashes from Task 3)
+Expected: PASS (all 28 plugins have correct hashes from Task 3)
 
 - [ ] **Step 7: Commit**
 
 ```bash
-git add scripts/cicd/enforce_plugin_hashes.py config/cicd/enforce_plugin_hashes/ tests/unit/cicd/test_enforce_plugin_hashes.py
+git add scripts/cicd/enforce_plugin_hashes.py config/cicd/enforce_plugin_hashes/ tests/unit/scripts/cicd/test_enforce_plugin_hashes.py
 git commit -m "feat(cicd): add enforce_plugin_hashes.py CI enforcement script
 
 Discovers plugin files, computes SHA-256 source file hashes, verifies
@@ -855,15 +874,18 @@ Add `source_file_hash` column to the landscape nodes table, the `Node` dataclass
 - Modify: `src/elspeth/contracts/audit.py:93-120`
 - Modify: `src/elspeth/core/landscape/model_loaders.py:101-137`
 - Modify: `src/elspeth/core/landscape/data_flow_repository.py:922-1019`
-- Test: `tests/unit/landscape/test_source_file_hash.py` (or extend existing)
+- Test: `tests/unit/core/landscape/test_source_file_hash.py` (or extend existing)
 
 - [ ] **Step 1: Write failing tests for Node validation and landscape round-trip**
 
 ```python
-# tests/unit/landscape/test_source_file_hash.py
+# tests/unit/core/landscape/test_source_file_hash.py
 """Tests for source_file_hash in the landscape audit trail."""
 
 from __future__ import annotations
+
+import re
+from datetime import UTC, datetime
 
 import pytest
 
@@ -879,9 +901,10 @@ def _make_node(**overrides) -> Node:
         node_type=NodeType.TRANSFORM,
         plugin_version="1.0.0",
         determinism=Determinism.DETERMINISTIC,
-        config_hash="abc123",
-        config={},
+        config_hash="a" * 64,
+        config_json="{}",
         sequence_in_pipeline=0,
+        registered_at=datetime.now(tz=UTC),
         source_file_hash=None,
     )
     defaults.update(overrides)
@@ -890,7 +913,7 @@ def _make_node(**overrides) -> Node:
 
 class TestNodeSourceFileHashValidation:
     def test_accepts_none(self) -> None:
-        """None is valid (old runs, engine nodes)."""
+        """None is valid (engine nodes like gates and coalesce)."""
         node = _make_node(source_file_hash=None)
         assert node.source_file_hash is None
 
@@ -918,11 +941,62 @@ class TestNodeSourceFileHashValidation:
         """Must have exactly 16 hex chars after prefix."""
         with pytest.raises((ValueError, AssertionError)):
             _make_node(source_file_hash="sha256:abc")
+
+
+class TestNodeSourceFileHashRoundTrip:
+    """Spec case 12: register_node() stores source_file_hash and
+    NodeLoader.load() reads it back correctly."""
+
+    def test_store_and_retrieve(self, landscape_db) -> None:
+        """source_file_hash survives a register_node → load round-trip."""
+        from elspeth.core.landscape.run_lifecycle_repository import RunLifecycleRepository
+        from elspeth.core.landscape.data_flow_repository import DataFlowRepository
+        from elspeth.contracts.audit import SchemaConfig
+
+        run_repo = RunLifecycleRepository(landscape_db)
+        data_repo = DataFlowRepository(landscape_db)
+
+        run = run_repo.begin_run(pipeline_hash="test", config_json="{}")
+        node = data_repo.register_node(
+            run_id=run.run_id,
+            node_id="transform-1",
+            plugin_name="passthrough",
+            node_type=NodeType.TRANSFORM,
+            plugin_version="1.0.0",
+            config={"on_success": "continue"},
+            determinism=Determinism.DETERMINISTIC,
+            schema_config=SchemaConfig.from_dict({"mode": "observed"}),
+            source_file_hash="sha256:abcdef0123456789",
+        )
+        assert node.source_file_hash == "sha256:abcdef0123456789"
+
+    def test_none_for_engine_nodes(self, landscape_db) -> None:
+        """Engine-internal nodes (gates, coalesce) store None."""
+        from elspeth.core.landscape.run_lifecycle_repository import RunLifecycleRepository
+        from elspeth.core.landscape.data_flow_repository import DataFlowRepository
+        from elspeth.contracts.audit import SchemaConfig
+
+        run_repo = RunLifecycleRepository(landscape_db)
+        data_repo = DataFlowRepository(landscape_db)
+
+        run = run_repo.begin_run(pipeline_hash="test", config_json="{}")
+        node = data_repo.register_node(
+            run_id=run.run_id,
+            node_id="gate-1",
+            plugin_name="config_gate",
+            node_type=NodeType.GATE,
+            plugin_version="engine:0.7.8",
+            config={},
+            determinism=Determinism.DETERMINISTIC,
+            schema_config=SchemaConfig.from_dict({"mode": "observed"}),
+            source_file_hash=None,
+        )
+        assert node.source_file_hash is None
 ```
 
 - [ ] **Step 2: Run tests to verify they fail**
 
-Run: `.venv/bin/python -m pytest tests/unit/landscape/test_source_file_hash.py -v`
+Run: `.venv/bin/python -m pytest tests/unit/core/landscape/test_source_file_hash.py -v`
 Expected: FAIL (Node doesn't have source_file_hash field yet)
 
 - [ ] **Step 3: Add `source_file_hash` to Node dataclass with validation**
@@ -956,10 +1030,10 @@ Column("source_file_hash", String(32), nullable=True),
 In `src/elspeth/core/landscape/model_loaders.py`, update the `NodeLoader.load()` method to read the new column. Add after the `plugin_version` read:
 
 ```python
-source_file_hash=getattr(row, "source_file_hash", None),
+source_file_hash=row.source_file_hash,
 ```
 
-Note: `getattr` with default handles existing databases that lack the column. This is a deliberate Tier 1 boundary exception for backward compatibility — documented in the spec.
+Direct attribute access — no `getattr` fallback. Per the no-legacy-code policy, there are no existing databases to support. The column is always present because `schema.py` defines it.
 
 - [ ] **Step 6: Update `register_node()` signature and write**
 
@@ -973,7 +1047,7 @@ In the database insert dict, add `"source_file_hash": node.source_file_hash`.
 
 - [ ] **Step 7: Run tests to verify they pass**
 
-Run: `.venv/bin/python -m pytest tests/unit/landscape/test_source_file_hash.py -v`
+Run: `.venv/bin/python -m pytest tests/unit/core/landscape/test_source_file_hash.py -v`
 Expected: All 6 tests PASS
 
 Run: `.venv/bin/python -m pytest tests/unit/landscape/ tests/integration/audit/ -x --timeout=60`
@@ -982,12 +1056,12 @@ Expected: PASS (no regressions in existing landscape tests)
 - [ ] **Step 8: Commit**
 
 ```bash
-git add src/elspeth/contracts/audit.py src/elspeth/core/landscape/schema.py src/elspeth/core/landscape/model_loaders.py src/elspeth/core/landscape/data_flow_repository.py tests/unit/landscape/test_source_file_hash.py
+git add src/elspeth/contracts/audit.py src/elspeth/core/landscape/schema.py src/elspeth/core/landscape/model_loaders.py src/elspeth/core/landscape/data_flow_repository.py tests/unit/core/landscape/test_source_file_hash.py
 git commit -m "feat(landscape): add source_file_hash to Node and nodes table
 
-Nullable column for backward compatibility. Format validated in
-Node.__post_init__ (sha256:<16-hex> or None). NodeLoader handles
-missing column in existing databases."
+Nullable column (None for engine-internal nodes). Format validated in
+Node.__post_init__ (sha256:<16-hex> or None). Direct attribute access
+in NodeLoader — no backward-compat fallback per no-legacy-code policy."
 ```
 
 ---
@@ -1058,13 +1132,13 @@ In `tests/fixtures/base_classes.py`, add `source_file_hash` to each test base cl
 
 ```python
 # _TestSourceBase (line 44):
-source_file_hash = "sha256:test000000000000"
+source_file_hash = "sha256:00000000000000a0"
 
 # _TestSinkBase (line 141):
-source_file_hash = "sha256:test000000000001"
+source_file_hash = "sha256:00000000000000b0"
 
 # _TestTransformBase (line 177):
-source_file_hash = "sha256:test000000000002"
+source_file_hash = "sha256:00000000000000c0"
 ```
 
 - [ ] **Step 2: Update landscape test fixture**
