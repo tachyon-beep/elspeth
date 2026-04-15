@@ -95,6 +95,51 @@ def _valid_state_with_no_edge_contracts() -> CompositionState:
     )
 
 
+def _connection_valid_field_mapper_state_without_edges() -> CompositionState:
+    return CompositionState(
+        source=SourceSpec(
+            plugin="text",
+            on_success="mapper_in",
+            options={"path": "/data/in.txt", "column": "text", "schema": {"mode": "observed"}},
+            on_validation_failure="quarantine",
+        ),
+        nodes=(
+            NodeSpec(
+                id="map_body",
+                node_type="transform",
+                plugin="field_mapper",
+                input="mapper_in",
+                on_success="main",
+                on_error=None,
+                options={
+                    "schema": {"mode": "observed"},
+                    "mapping": {"text": "body"},
+                },
+                condition=None,
+                routes=None,
+                fork_to=None,
+                branches=None,
+                policy=None,
+                merge=None,
+            ),
+        ),
+        edges=(),
+        outputs=(
+            OutputSpec(
+                name="main",
+                plugin="csv",
+                options={
+                    "path": "outputs/out.csv",
+                    "schema": {"mode": "observed", "required_fields": ["body"]},
+                },
+                on_write_failure="discard",
+            ),
+        ),
+        metadata=PipelineMetadata(),
+        version=1,
+    )
+
+
 def _mock_catalog() -> CatalogService:
     catalog = MagicMock(spec=CatalogService)
     catalog.list_sources.return_value = []
@@ -282,6 +327,19 @@ class TestDispatchTool:
 
         assert result["success"] is True
         assert isinstance(result["data"], str)
+
+    def test_generate_yaml_allows_connection_valid_state_without_ui_edges(self, scratch_dir: Path) -> None:
+        result = _dispatch_tool(
+            "generate_yaml",
+            {},
+            _connection_valid_field_mapper_state_without_edges(),
+            _mock_catalog(),
+            scratch_dir,
+        )
+
+        assert result["success"] is True
+        assert "field_mapper" in result["data"]
+        assert "body" in result["data"]
 
     def test_unknown_tool_returns_failure(self, scratch_dir: Path) -> None:
         result = _dispatch_tool(

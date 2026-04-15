@@ -2427,8 +2427,8 @@ _VALIDATION_ERROR_PATTERNS: list[tuple[str, str, str]] = [
     ),
     (
         r"input '(.+)' is not reachable",
-        "A node's input connection point is not connected to any edge or the source's on_success target.",
-        "Either add an edge targeting this node, or set the source's on_success to match the node's input.",
+        "A node's input connection point is not produced by the runtime routing fields.",
+        "Set source.on_success or an upstream node's on_success/on_error/route/fork_to so it matches this node's input.",
     ),
     (
         r"Unknown .+ plugin '(.+)'",

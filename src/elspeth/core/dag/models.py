@@ -101,10 +101,12 @@ _NODE_ID_MAX_LENGTH = NODE_ID_COLUMN_LENGTH
 # - Gate: {routes, condition, fork_to?}
 # - Aggregation: {input_schema, trigger, output_mode, options}
 # - Coalesce: {branches, policy, merge, timeout_seconds?, quorum_count?, select_branch?}
-# Schema data is accessed via output_schema_config on NodeInfo, not config["schema"].
-# config["schema"] exists on source/transform/sink nodes for node ID hashing but is
-# not read at runtime for schema semantics. Aggregations use "input_schema" instead
-# to prevent add_node() from auto-populating output_schema_config (see elspeth-c3a98c358c).
+# Schema data is accessed via output_schema_config on NodeInfo, not the raw config
+# keys. Source/transform/sink nodes may retain either "schema" or "schema_config"
+# in config for hashing/audit fidelity; runtime semantics read the parsed
+# output_schema_config instead. Aggregations use "input_schema" on the wrapper
+# config to prevent add_node() from auto-populating output_schema_config (see
+# elspeth-c3a98c358c).
 # dict[str, Any] is intentional: plugin configs are validated by each plugin's
 # Pydantic model, not by the graph. The graph only hashes them for node IDs.
 type NodeConfig = dict[str, Any]

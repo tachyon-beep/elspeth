@@ -21,7 +21,7 @@ from elspeth.contracts import RouteDestination, RoutingMode, error_edge_label
 from elspeth.contracts.enums import NodeType
 from elspeth.contracts.errors import FrameworkBugError
 from elspeth.contracts.freeze import deep_freeze
-from elspeth.contracts.schema import FieldDefinition, SchemaConfig
+from elspeth.contracts.schema import FieldDefinition, SchemaConfig, get_raw_schema_config
 from elspeth.contracts.types import (
     AggregationName,
     BranchName,
@@ -92,6 +92,24 @@ def _validate_output_schema_contract(transform: Any) -> None:
                 f"{sorted(effective)}. "
                 f"declared_output_fields must be a subset of guaranteed_fields."
             )
+
+
+def _parse_contract_schema_config(
+    config: Mapping[str, Any],
+    *,
+    owner: str,
+    component_id: str,
+    component_type: str,
+) -> SchemaConfig | None:
+    """Parse a node schema config using the shared raw-option rules."""
+    try:
+        return get_raw_schema_config(config, owner=owner)
+    except ValueError as exc:
+        raise GraphValidationError(
+            f"Invalid schema config: {exc}",
+            component_id=component_id,
+            component_type=component_type,
+        ) from exc
 
 
 def build_execution_graph(
@@ -184,9 +202,12 @@ def build_execution_graph(
 
     # Add source
     source_config = source.config
-    source_schema_config: SchemaConfig | None = None
-    if "schema" in source_config:
-        source_schema_config = SchemaConfig.from_dict(source_config["schema"])
+    source_schema_config = _parse_contract_schema_config(
+        source_config,
+        owner=f"source:{source.name}",
+        component_id=source.name,
+        component_type="source",
+    )
     source_id = node_id("source", source.name, source_config)
     graph.add_node(
         source_id,
@@ -203,9 +224,12 @@ def build_execution_graph(
         sink_config = sink.config
         sid = node_id("sink", sink_name, sink_config)
         sink_ids[SinkName(sink_name)] = sid
-        sink_schema_config: SchemaConfig | None = None
-        if "schema" in sink_config:
-            sink_schema_config = SchemaConfig.from_dict(sink_config["schema"])
+        sink_schema_config = _parse_contract_schema_config(
+            sink_config,
+            owner=f"sink:{sink_name}",
+            component_id=sink_name,
+            component_type="sink",
+        )
         graph.add_node(
             sid,
             node_type=NodeType.SINK,
@@ -240,9 +264,14 @@ def build_execution_graph(
         output_schema_config = transform._output_schema_config
 
         # Shape-preserving transforms don't compute _output_schema_config.
-        # Parse from config["schema"] so every node has a typed schema.
-        if output_schema_config is None and "schema" in transform_config:
-            output_schema_config = SchemaConfig.from_dict(transform_config["schema"])
+        # Parse the raw schema config so every node has a typed schema.
+        if output_schema_config is None:
+            output_schema_config = _parse_contract_schema_config(
+                transform_config,
+                owner=f"transform:{wired.settings.name}",
+                component_id=wired.settings.name,
+                component_type="transform",
+            )
 
         graph.add_node(
             tid,
@@ -281,11 +310,16 @@ def build_execution_graph(
         # input requirements like group_by). Downstream pass-through nodes
         # (gates, coalesce branches) need output_schema_config for _best_schema_config().
         #
-        # Fallback to config["schema"] for test fixtures that don't compute
-        # _output_schema_config (same pattern as transforms at line 242).
+        # Fallback to the raw schema config for test fixtures that don't
+        # compute _output_schema_config (same pattern as transforms above).
         agg_output_schema_config = transform._output_schema_config
-        if agg_output_schema_config is None and "schema" in transform_config:
-            agg_output_schema_config = SchemaConfig.from_dict(transform_config["schema"])
+        if agg_output_schema_config is None:
+            agg_output_schema_config = _parse_contract_schema_config(
+                transform_config,
+                owner=f"aggregation:{agg_name}",
+                component_id=agg_name,
+                component_type="aggregation",
+            )
 
         graph.add_node(
             aid,

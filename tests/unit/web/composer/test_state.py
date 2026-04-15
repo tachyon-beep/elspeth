@@ -6,6 +6,7 @@ from typing import Any
 
 import pytest
 
+from elspeth.plugins.infrastructure.templates import TemplateError
 from elspeth.web.composer.state import (
     CompositionState,
     EdgeSpec,
@@ -788,11 +789,66 @@ class TestStage1Validation:
         """source -> transform -> sink, fully connected."""
         state = self._empty_state()
         state = state.with_source(self._make_source(on_success="t1"))
-        state = state.with_node(self._make_transform("t1", "source_out", "main"))
+        state = state.with_node(self._make_transform("t1", "t1", "main"))
         state = state.with_output(self._make_output("main"))
         state = state.with_edge(self._make_edge("e1", "source", "t1"))
         state = state.with_edge(self._make_edge("e2", "t1", "main"))
         result = state.validate()
+        assert result.is_valid, result.errors
+
+    def test_connection_only_runtime_pipeline_is_valid_without_ui_edges(self) -> None:
+        """Runtime connection fields, not UI edges, determine Stage 1 validity."""
+        state = self._empty_state()
+        state = state.with_source(self._make_source(on_success="t1"))
+        state = state.with_node(self._make_transform("t1", "t1", "main"))
+        state = state.with_output(self._make_output("main"))
+
+        result = state.validate()
+
+        assert result.is_valid, result.errors
+
+    def test_connection_only_coalesce_pipeline_is_valid_without_ui_edges(self) -> None:
+        """Coalesce terminal routes are valid when declared in runtime fields."""
+        state = self._empty_state()
+        state = state.with_source(self._make_source(on_success="gate_in"))
+        state = state.with_node(
+            NodeSpec(
+                id="fork_gate",
+                node_type="gate",
+                plugin=None,
+                input="gate_in",
+                on_success=None,
+                on_error=None,
+                options={},
+                condition="True",
+                routes={},
+                fork_to=("path_a", "path_b"),
+                branches=None,
+                policy=None,
+                merge=None,
+            )
+        )
+        state = state.with_node(
+            NodeSpec(
+                id="merge_point",
+                node_type="coalesce",
+                plugin=None,
+                input="join",
+                on_success="main",
+                on_error=None,
+                options={},
+                condition=None,
+                routes=None,
+                fork_to=None,
+                branches=("path_a", "path_b"),
+                policy="require_all",
+                merge="nested",
+            )
+        )
+        state = state.with_output(self._make_output("main"))
+
+        result = state.validate()
+
         assert result.is_valid, result.errors
 
     def test_dangling_edge_from_node(self) -> None:
@@ -1142,7 +1198,7 @@ class TestStage1Validation:
         """W-4A-2: validate() on reconstructed state matches original."""
         state = self._empty_state()
         state = state.with_source(self._make_source(on_success="t1"))
-        state = state.with_node(self._make_transform("t1", "source_out", "main"))
+        state = state.with_node(self._make_transform("t1", "t1", "main"))
         state = state.with_output(self._make_output("main"))
         state = state.with_edge(self._make_edge("e1", "source", "t1"))
         state = state.with_edge(self._make_edge("e2", "t1", "main"))
@@ -1150,6 +1206,20 @@ class TestStage1Validation:
         restored = CompositionState.from_dict(state.to_dict())
         result = restored.validate()
         assert result.is_valid, result.errors
+
+    def test_edge_only_pipeline_is_invalid_when_runtime_connections_do_not_match(self) -> None:
+        """UI edges cannot rescue runtime wiring that generate_yaml() will not emit."""
+        state = self._empty_state()
+        state = state.with_source(self._make_source(on_success="wrong_connection"))
+        state = state.with_node(self._make_transform("t1", "t1", "main"))
+        state = state.with_output(self._make_output("main"))
+        state = state.with_edge(self._make_edge("e1", "source", "t1"))
+        state = state.with_edge(self._make_edge("e2", "t1", "main"))
+
+        result = state.validate()
+
+        assert not result.is_valid
+        assert any("runtime connection" in e.message for e in result.errors)
 
     # --- Warning rules (W1-W4) ---
 
@@ -1481,7 +1551,7 @@ class TestStage1Validation:
             on_validation_failure="quarantine",
         )
         state = state.with_source(source)
-        state = state.with_node(self._make_transform("t1", "t1", "gate_1"))
+        state = state.with_node(self._make_transform("t1", "t1", "gate_in"))
         gate = NodeSpec(
             id="gate_1",
             node_type="gate",
@@ -1683,6 +1753,105 @@ class TestSchemaContractValidation:
         state = state.with_edge(self._make_edge("e1", "source", "t1"))
         result = state.validate()
         assert result.is_valid, result.errors
+
+    def test_field_mapper_computed_output_contract_satisfies_sink_requirement(self) -> None:
+        """Composer preview must honor field_mapper's computed output contract."""
+        state = self._empty_state()
+        state = state.with_source(
+            self._make_source(
+                on_success="mapper_in",
+                plugin="text",
+                options={"schema": {"mode": "observed"}},
+            )
+        )
+        state = state.with_node(
+            self._make_transform(
+                "map_body",
+                "mapper_in",
+                "main",
+                plugin="field_mapper",
+                options={
+                    "schema": {"mode": "observed"},
+                    "mapping": {"text": "body"},
+                },
+            )
+        )
+        state = state.with_output(
+            OutputSpec(
+                name="main",
+                plugin="csv",
+                options={
+                    "path": "outputs/main.csv",
+                    "schema": {"mode": "observed", "required_fields": ["body"]},
+                },
+                on_write_failure="discard",
+            )
+        )
+        state = state.with_edge(self._make_edge("e1", "source", "map_body"))
+        state = state.with_edge(self._make_edge("e2", "map_body", "main"))
+
+        result = state.validate()
+
+        assert result.is_valid, result.errors
+        sink_contract = next(ec for ec in result.edge_contracts if ec.to_id == "output:main")
+        assert sink_contract.from_id == "map_body"
+        assert sink_contract.producer_guarantees == ("body",)
+        assert sink_contract.consumer_requires == ("body",)
+        assert sink_contract.satisfied is True
+
+    def test_contract_probe_constructor_exception_falls_back_instead_of_crashing(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Constructor-time probe failures must not escape Stage 1 validation."""
+        state = self._empty_state()
+        state = state.with_source(
+            self._make_source(
+                on_success="mapper_in",
+                plugin="text",
+                options={"schema": {"mode": "observed"}},
+            )
+        )
+        state = state.with_node(
+            self._make_transform(
+                "map_body",
+                "mapper_in",
+                "main",
+                plugin="field_mapper",
+                options={
+                    "schema": {"mode": "observed"},
+                    "mapping": {"text": "body"},
+                },
+            )
+        )
+        state = state.with_output(
+            OutputSpec(
+                name="main",
+                plugin="csv",
+                options={
+                    "path": "outputs/main.csv",
+                    "schema": {"mode": "observed", "required_fields": ["body"]},
+                },
+                on_write_failure="discard",
+            )
+        )
+        state = state.with_edge(self._make_edge("e1", "source", "map_body"))
+        state = state.with_edge(self._make_edge("e2", "map_body", "main"))
+
+        class _BrokenManager:
+            def create_transform(self, plugin_name: str, options: dict[str, Any]) -> object:
+                raise TemplateError("invalid template syntax")
+
+        monkeypatch.setattr(
+            "elspeth.plugins.infrastructure.manager.get_shared_plugin_manager",
+            lambda: _BrokenManager(),
+        )
+
+        result = state.validate()
+
+        assert not result.is_valid
+        assert any("computed contract probe" in warning.message.lower() for warning in result.warnings)
+        sink_contract = next(ec for ec in result.edge_contracts if ec.to_id == "output:main")
+        assert sink_contract.producer_guarantees == ()
+        assert sink_contract.consumer_requires == ("body",)
+        assert sink_contract.satisfied is False
 
     def test_text_heuristic_rescues_original_bug_scenario(self) -> None:
         """Reported text-source scenario passes via the shared observed-text rule."""
@@ -2299,6 +2468,60 @@ class TestSchemaContractValidation:
         assert any("fork" in w.message.lower() and "contract" in w.message.lower() for w in result.warnings)
         assert not any(ec.to_id in {"ta", "tb"} for ec in result.edge_contracts)
 
+    def test_fork_gate_direct_sink_contract_checked(self) -> None:
+        """Fork branches that terminate at sinks stay statically checkable."""
+        state = self._empty_state()
+        state = state.with_source(
+            self._make_source(
+                on_success="gate_in",
+                plugin="text",
+                options={
+                    "path": "/in.txt",
+                    "column": "line",
+                    "schema": {"mode": "observed"},
+                },
+            )
+        )
+        state = state.with_node(
+            NodeSpec(
+                id="g1",
+                node_type="gate",
+                plugin=None,
+                input="gate_in",
+                on_success=None,
+                on_error=None,
+                options={},
+                condition="True",
+                routes={},
+                fork_to=("main",),
+                branches=None,
+                policy=None,
+                merge=None,
+            )
+        )
+        state = state.with_output(
+            OutputSpec(
+                name="main",
+                plugin="csv",
+                options={
+                    "path": "/out.csv",
+                    "schema": {"mode": "fixed", "fields": ["text: str"]},
+                },
+                on_write_failure="discard",
+            )
+        )
+        state = state.with_edge(self._make_edge("e1", "source", "g1"))
+        state = state.with_edge(EdgeSpec(id="e2", from_node="g1", to_node="main", edge_type="fork", label="main"))
+
+        result = state.validate()
+
+        assert not result.is_valid
+        assert not any("fork" in w.message.lower() and "contract" in w.message.lower() for w in result.warnings)
+        sink_contract = next(ec for ec in result.edge_contracts if ec.to_id == "output:main")
+        assert sink_contract.from_id == "source"
+        assert sink_contract.consumer_requires == ("text",)
+        assert sink_contract.satisfied is False
+
     def test_multi_hop_transform_no_schema_breaks_chain(self) -> None:
         """A schema-less transform breaks downstream guarantees across hops."""
         state = self._empty_state()
@@ -2541,6 +2764,48 @@ class TestSchemaContractValidation:
                         "value_field": "value",
                         "required_input_fields": ["value"],
                         "schema": {"mode": "observed"},
+                    }
+                },
+                condition=None,
+                routes=None,
+                fork_to=None,
+                branches=None,
+                policy=None,
+                merge=None,
+            )
+        )
+        state = state.with_output(self._make_output())
+        state = state.with_edge(self._make_edge("e1", "source", "agg1"))
+
+        result = state.validate()
+
+        assert not result.is_valid
+        assert any("value" in e.message for e in result.errors)
+        agg_contract = next(ec for ec in result.edge_contracts if ec.to_id == "agg1")
+        assert agg_contract.consumer_requires == ("value",)
+        assert agg_contract.satisfied is False
+
+    def test_aggregation_nested_wrapper_schema_required_fields_fail(self) -> None:
+        """Aggregation wrapper-shaped options.schema.required_fields is honored."""
+        state = self._empty_state()
+        state = state.with_source(
+            self._make_source(
+                on_success="agg1",
+                options={"schema": {"mode": "fixed", "fields": ["line: str"]}},
+            )
+        )
+        state = state.with_node(
+            NodeSpec(
+                id="agg1",
+                node_type="aggregation",
+                plugin="batch_stats",
+                input="agg1",
+                on_success="main",
+                on_error=None,
+                options={
+                    "options": {
+                        "value_field": "value",
+                        "schema": {"mode": "observed", "required_fields": ["value"]},
                     }
                 },
                 condition=None,

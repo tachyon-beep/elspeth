@@ -3177,12 +3177,7 @@ class TestExplainValidationError:
         catalog = _mock_catalog()
         result = execute_tool(
             "explain_validation_error",
-            {
-                "error_text": (
-                    "Schema contract violation: 'source' -> 'add_world'. "
-                    "Consumer requires ['text']; producer guarantees []."
-                )
-            },
+            {"error_text": ("Schema contract violation: 'source' -> 'add_world'. Consumer requires ['text']; producer guarantees [].")},
             state,
             catalog,
         )

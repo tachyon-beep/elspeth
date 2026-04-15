@@ -30,6 +30,19 @@ class TestContractHelpers:
         result = graph.get_guaranteed_fields("source_1")
         assert result == frozenset({"id", "name"})
 
+    def test_get_guaranteed_fields_from_schema_config_alias(self) -> None:
+        """Alias-form schema_config is honored by direct graph construction."""
+        graph = ExecutionGraph()
+        graph.add_node(
+            "source_1",
+            node_type=NodeType.SOURCE,
+            plugin_name="csv",
+            config={"schema_config": {"mode": "observed", "guaranteed_fields": ["id", "name"]}},
+        )
+
+        result = graph.get_guaranteed_fields("source_1")
+        assert result == frozenset({"id", "name"})
+
     def test_get_guaranteed_fields_from_explicit_schema(self) -> None:
         """Extract guaranteed fields from free mode schema (implicit from declared fields)."""
         graph = ExecutionGraph()
@@ -86,6 +99,26 @@ class TestContractHelpers:
 
         result = graph.get_required_fields("transform_1")
         assert result == frozenset({"x", "y"})
+
+    def test_get_required_fields_from_aggregation_wrapper_schema_required_fields(self) -> None:
+        """Aggregation wrapper config honors nested schema.required_fields."""
+        graph = ExecutionGraph()
+        graph.add_node(
+            "agg_1",
+            node_type=NodeType.AGGREGATION,
+            plugin_name="batch_stats",
+            config={
+                "input_schema": {"mode": "observed"},
+                "options": {
+                    "schema": {"mode": "observed", "required_fields": ["value"]},
+                },
+                "trigger": {"count": 1},
+                "output_mode": "on_trigger",
+            },
+        )
+
+        result = graph.get_required_fields("agg_1")
+        assert result == frozenset({"value"})
 
     def test_get_required_fields_from_explicit_schema(self) -> None:
         """Implicit requirements from strict schema are NOT returned.

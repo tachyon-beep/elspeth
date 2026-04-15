@@ -240,6 +240,7 @@ class TestGenerateYaml:
         assert coal["branches"] == ["path_a", "path_b"]
         assert coal["policy"] == "require_all"
         assert coal["merge"] == "nested"
+        assert coal["on_success"] == "main_output"
 
     def test_deterministic(self) -> None:
         """Same state produces byte-identical YAML."""

@@ -7,6 +7,7 @@ from pathlib import Path
 from unittest.mock import AsyncMock
 
 import pytest
+import yaml
 from fastapi import FastAPI
 from sqlalchemy import create_engine
 from sqlalchemy.pool import StaticPool
@@ -641,6 +642,136 @@ class TestYamlEndpoint:
         body = resp.json()
         assert "yaml" in body
         assert "csv" in body["yaml"]
+
+    @pytest.mark.asyncio
+    async def test_yaml_allows_connection_valid_state_without_ui_edges(self, tmp_path) -> None:
+        """Connection-defined pipelines should export even when the editor graph is incomplete."""
+        app, service = _make_app(tmp_path)
+        client = TestClient(app)
+
+        session = await service.create_session("alice", "Pipeline", "local")
+        await service.save_composition_state(
+            session.id,
+            CompositionStateData(
+                source={
+                    "plugin": "text",
+                    "on_success": "mapper_in",
+                    "options": {
+                        "path": "/data/input.txt",
+                        "column": "text",
+                        "schema": {"mode": "observed"},
+                    },
+                    "on_validation_failure": "quarantine",
+                },
+                nodes=[
+                    {
+                        "id": "map_body",
+                        "node_type": "transform",
+                        "plugin": "field_mapper",
+                        "input": "mapper_in",
+                        "on_success": "main",
+                        "on_error": None,
+                        "options": {
+                            "schema": {"mode": "observed"},
+                            "mapping": {"text": "body"},
+                        },
+                        "condition": None,
+                        "routes": None,
+                        "fork_to": None,
+                        "branches": None,
+                        "policy": None,
+                        "merge": None,
+                    },
+                ],
+                edges=[],
+                outputs=[
+                    {
+                        "name": "main",
+                        "plugin": "csv",
+                        "options": {
+                            "path": "outputs/out.csv",
+                            "schema": {"mode": "observed", "required_fields": ["body"]},
+                        },
+                        "on_write_failure": "discard",
+                    }
+                ],
+                metadata_={"name": "Connection-only Pipeline", "description": ""},
+                is_valid=False,
+            ),
+        )
+
+        resp = client.get(f"/api/sessions/{session.id}/state/yaml")
+        assert resp.status_code == 200
+        assert "field_mapper" in resp.json()["yaml"]
+        assert "body" in resp.json()["yaml"]
+
+    @pytest.mark.asyncio
+    async def test_yaml_serializes_coalesce_on_success_runtime_route(self, tmp_path) -> None:
+        """Coalesce terminal routing must survive export/reload parity checks."""
+        app, service = _make_app(tmp_path)
+        client = TestClient(app)
+
+        session = await service.create_session("alice", "Pipeline", "local")
+        await service.save_composition_state(
+            session.id,
+            CompositionStateData(
+                source={
+                    "plugin": "csv",
+                    "on_success": "gate_in",
+                    "options": {"path": "/data/input.csv"},
+                    "on_validation_failure": "quarantine",
+                },
+                nodes=[
+                    {
+                        "id": "fork_gate",
+                        "node_type": "gate",
+                        "plugin": None,
+                        "input": "gate_in",
+                        "on_success": None,
+                        "on_error": None,
+                        "options": {},
+                        "condition": "True",
+                        "routes": {},
+                        "fork_to": ["path_a", "path_b"],
+                        "branches": None,
+                        "policy": None,
+                        "merge": None,
+                    },
+                    {
+                        "id": "merge_point",
+                        "node_type": "coalesce",
+                        "plugin": None,
+                        "input": "join",
+                        "on_success": "main",
+                        "on_error": None,
+                        "options": {},
+                        "condition": None,
+                        "routes": None,
+                        "fork_to": None,
+                        "branches": ["path_a", "path_b"],
+                        "policy": "require_all",
+                        "merge": "nested",
+                    },
+                ],
+                edges=[],
+                outputs=[
+                    {
+                        "name": "main",
+                        "plugin": "csv",
+                        "options": {"path": "outputs/out.csv"},
+                        "on_write_failure": "discard",
+                    }
+                ],
+                metadata_={"name": "Fork and merge", "description": ""},
+                is_valid=False,
+            ),
+        )
+
+        resp = client.get(f"/api/sessions/{session.id}/state/yaml")
+
+        assert resp.status_code == 200
+        doc = yaml.safe_load(resp.json()["yaml"])
+        assert doc["coalesce"][0]["on_success"] == "main"
 
     @pytest.mark.asyncio
     async def test_yaml_returns_409_when_current_state_is_invalid(self, tmp_path) -> None:

@@ -697,6 +697,30 @@ def parse_raw_schema_config(raw_schema: object, *, owner: str) -> SchemaConfig |
         raise ValueError(f"{owner} schema config: {exc}") from exc
 
 
+def get_raw_schema_config(
+    options: Mapping[str, Any],
+    *,
+    owner: str,
+) -> SchemaConfig | None:
+    """Parse raw schema config from plugin options, honoring both alias names."""
+    return parse_raw_schema_config(_get_raw_schema_value(options), owner=owner)
+
+
+def _get_aggregation_contract_options(
+    options: Mapping[str, Any],
+    *,
+    owner: str,
+) -> tuple[Mapping[str, Any], str]:
+    """Return the mapping that carries an aggregation's input contract."""
+    if "options" not in options:
+        return options, owner
+
+    nested_options = options["options"]
+    if not isinstance(nested_options, Mapping):
+        raise ValueError(f"{owner} aggregation wrapper options must be a mapping, got {type(nested_options).__name__}")
+    return nested_options, f"{owner} options"
+
+
 def _parse_raw_required_input_fields(
     value: object,
     *,
@@ -729,7 +753,7 @@ def get_raw_producer_guaranteed_fields(
     Raises ValueError for conditions that should surface as pipeline
     validation errors, not for programming errors at the call site.
     """
-    schema_config = parse_raw_schema_config(_get_raw_schema_value(options), owner=owner)
+    schema_config = get_raw_schema_config(options, owner=owner)
     if schema_config is None:
         return frozenset()
 
@@ -761,20 +785,20 @@ def get_raw_node_required_fields(
         if required_input is not None:
             return frozenset(required_input)
 
-    if node_type == "aggregation" and "options" in options:
-        nested_options = options["options"]
-        if not isinstance(nested_options, Mapping):
-            raise ValueError(f"{owner} aggregation wrapper options must be a mapping, got {type(nested_options).__name__}")
-        if "required_input_fields" in nested_options:
+    contract_options = options
+    contract_owner = owner
+    if node_type == "aggregation":
+        contract_options, contract_owner = _get_aggregation_contract_options(options, owner=owner)
+        if contract_options is not options and "required_input_fields" in contract_options:
             required_input = _parse_raw_required_input_fields(
-                nested_options["required_input_fields"],
+                contract_options["required_input_fields"],
                 owner=owner,
                 field_name="options.required_input_fields",
             )
             if required_input is not None:
                 return frozenset(required_input)
 
-    schema_config = parse_raw_schema_config(_get_raw_schema_value(options), owner=owner)
+    schema_config = get_raw_schema_config(contract_options, owner=contract_owner)
     if schema_config is None or schema_config.required_fields is None:
         return frozenset()
     return frozenset(schema_config.required_fields)
@@ -790,7 +814,7 @@ def get_raw_sink_required_fields(
     Raises ValueError for conditions that should surface as pipeline
     validation errors, not for programming errors at the call site.
     """
-    schema_config = parse_raw_schema_config(_get_raw_schema_value(options), owner=owner)
+    schema_config = get_raw_schema_config(options, owner=owner)
     if schema_config is None:
         return frozenset()
     return schema_config.get_effective_required_fields()

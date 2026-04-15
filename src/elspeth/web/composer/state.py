@@ -294,6 +294,31 @@ def _source_options_have_schema(options: Mapping[str, Any]) -> bool:
     return raw_options_have_schema(options)
 
 
+def _runtime_connection_targets(
+    source: SourceSpec | None,
+    nodes: tuple[NodeSpec, ...],
+) -> set[str]:
+    """Collect runtime routing targets from connection fields.
+
+    Stage 1 validity must follow the same routing model as generate_yaml()
+    and DAG build: source/node connection fields define runtime topology, while
+    non-sink UI edges are advisory/editor state.
+    """
+    targets: set[str] = set()
+    if source is not None:
+        targets.add(source.on_success)
+    for node in nodes:
+        if node.on_success is not None:
+            targets.add(node.on_success)
+        if node.on_error is not None:
+            targets.add(node.on_error)
+        if node.routes is not None:
+            targets.update(node.routes.values())
+        if node.fork_to is not None:
+            targets.update(node.fork_to)
+    return targets
+
+
 def _validate_gate_expression(condition: str) -> str | None:
     """Validate a gate condition expression at composition time.
 
@@ -332,6 +357,7 @@ def _check_schema_contracts(
     contract_warnings: list[ValidationEntry] = []
     edge_contracts: list[EdgeContract] = []
     parse_failed_producers: set[str] = set()
+    contract_probe_failed_producers: set[str] = set()
     node_by_id = {node.id: node for node in nodes}
     sink_names = {output.name for output in outputs}
     internal_connection_names: set[str] = set()
@@ -526,7 +552,7 @@ def _check_schema_contracts(
                 return None
             if producer_node.node_type != "gate":
                 return current_producer
-            if producer_node.fork_to is not None:
+            if producer_node.fork_to is not None and connection_name not in sink_names:
                 warnings.append(
                     _warn(
                         f"node:{producer_node.id}",
@@ -575,6 +601,58 @@ def _check_schema_contracts(
             return producer.plugin_name
         return node_by_id[producer.producer_id].node_type
 
+    def _effective_producer_guarantees(producer: _ProducerEntry) -> frozenset[str]:
+        """Return the producer guarantees Stage 1 should compare.
+
+        Raw schema blocks are the baseline. For transform/aggregation nodes,
+        prefer the plugin's computed output contract when construction succeeds;
+        this keeps composer preview aligned with runtime for shape-changing
+        producers like field_mapper/json_explode without turning incomplete
+        draft configs into hard Stage 1 errors.
+        """
+        raw_guaranteed = get_raw_producer_guaranteed_fields(
+            producer.plugin_name,
+            producer.options,
+            owner=_producer_owner(producer),
+        )
+
+        if producer.producer_id == "source":
+            return raw_guaranteed
+
+        producer_node = node_by_id[producer.producer_id]
+        if producer_node.node_type not in {"transform", "aggregation"} or producer_node.plugin is None:
+            return raw_guaranteed
+
+        try:
+            from elspeth.plugins.infrastructure.manager import get_shared_plugin_manager
+
+            transform = get_shared_plugin_manager().create_transform(
+                producer_node.plugin,
+                deep_thaw(producer_node.options),
+            )
+        except Exception as exc:
+            # Keep Stage 1 tolerant of partially configured draft nodes.
+            # Constructor-time errors must not crash preview/export endpoints.
+            # Fall back to the raw contract and surface one warning per node.
+            if producer.producer_id not in contract_probe_failed_producers:
+                contract_probe_failed_producers.add(producer.producer_id)
+                detail = str(exc).strip()
+                suffix = f": {detail}" if detail else ""
+                contract_warnings.append(
+                    _warn(
+                        f"node:{producer.producer_id}",
+                        f"Computed contract probe for node '{producer.producer_id}' failed during preview "
+                        f"({type(exc).__name__}{suffix}); falling back to raw schema declarations.",
+                        "medium",
+                    )
+                )
+            return raw_guaranteed
+
+        output_schema_config = transform._output_schema_config
+        if output_schema_config is None:
+            return raw_guaranteed
+        return output_schema_config.get_effective_guaranteed_fields()
+
     def _format_fields(fields: frozenset[str]) -> str:
         return ", ".join(sorted(fields)) if fields else "(none)"
 
@@ -602,11 +680,7 @@ def _check_schema_contracts(
             continue
 
         try:
-            producer_guaranteed = get_raw_producer_guaranteed_fields(
-                actual_producer.plugin_name,
-                actual_producer.options,
-                owner=_producer_owner(actual_producer),
-            )
+            producer_guaranteed = _effective_producer_guarantees(actual_producer)
         except ValueError as exc:
             errors.append(_err(_producer_owner(actual_producer), f"Invalid contract config: {exc}", "high"))
             parse_failed_producers.add(actual_producer.producer_id)
@@ -680,11 +754,7 @@ def _check_schema_contracts(
                 continue
 
             try:
-                producer_guaranteed = get_raw_producer_guaranteed_fields(
-                    actual_producer.plugin_name,
-                    actual_producer.options,
-                    owner=_producer_owner(actual_producer),
-                )
+                producer_guaranteed = _effective_producer_guarantees(actual_producer)
             except ValueError as exc:
                 errors.append(_err(_producer_owner(actual_producer), f"Invalid contract config: {exc}", "high"))
                 parse_failed_producers.add(actual_producer.producer_id)
@@ -925,7 +995,7 @@ class CompositionState:
     def validate(self) -> ValidationSummary:
         """Run Stage 1 composition-time validation.
 
-        Pure function of the current state — no catalog or engine consultation.
+        Pure function of the current state — no DAG build or session mutation.
         Returns ValidationSummary with is_valid and human-readable errors.
         """
         errors: list[ValidationEntry] = []
@@ -1000,15 +1070,27 @@ class CompositionState:
                     errors.append(_err(f"node:{node.id}", f"Aggregation '{node.id}' is missing required field 'plugin'.", "high"))
 
         # 8. Connection completeness
-        edge_destinations = {e.to_node for e in self.edges}
         source_on_success = self.source.on_success if self.source else None
+        runtime_connections = _runtime_connection_targets(self.source, self.nodes)
         for node in self.nodes:
-            reachable = node.id in edge_destinations or node.input == source_on_success
-            if not reachable:
+            if node.node_type == "coalesce":
+                missing_branches = sorted(branch for branch in node.branches or () if branch not in runtime_connections)
+                if missing_branches:
+                    errors.append(
+                        _err(
+                            f"node:{node.id}",
+                            f"Coalesce '{node.id}' branches {missing_branches} are not reachable from any runtime connection.",
+                            "high",
+                        )
+                    )
+                continue
+
+            if node.input not in runtime_connections:
                 errors.append(
                     _err(
                         f"node:{node.id}",
-                        f"Node '{node.id}' input '{node.input}' is not reachable from any edge or the source on_success.",
+                        f"Node '{node.id}' input '{node.input}' is not reachable from any runtime connection "
+                        "(source.on_success, node.on_success/on_error, routes, or fork_to).",
                         "high",
                     )
                 )
@@ -1018,16 +1100,7 @@ class CompositionState:
         _warn = ValidationEntry
 
         # Build connection-field targets (wiring that doesn't require edges)
-        connection_targets: set[str] = set()
-        if source_on_success is not None:
-            connection_targets.add(source_on_success)
-        for node in self.nodes:
-            if node.on_success is not None:
-                connection_targets.add(node.on_success)
-            if node.on_error is not None:
-                connection_targets.add(node.on_error)
-            if node.routes is not None:
-                connection_targets.update(node.routes.values())
+        connection_targets = _runtime_connection_targets(self.source, self.nodes)
 
         # W1: Output has no runtime routing reference (on_success / on_error / routes)
         # Edges are UI-only — generate_yaml() uses only connection fields,

@@ -141,6 +141,8 @@ def generate_yaml(state: CompositionState) -> str:
                 "policy": c["policy"],
                 "merge": c["merge"],
             }
+            if c["on_success"] is not None:
+                entry["on_success"] = c["on_success"]
             doc["coalesce"].append(entry)
 
     # Sinks — always-present fields, direct access.

@@ -24,7 +24,7 @@ from elspeth.contracts import (
     check_compatibility,
 )
 from elspeth.contracts.enums import NodeType
-from elspeth.contracts.schema import FIELD_TYPE_MAP, SchemaConfig, get_raw_node_required_fields
+from elspeth.contracts.schema import FIELD_TYPE_MAP, SchemaConfig, get_raw_node_required_fields, get_raw_schema_config
 from elspeth.contracts.types import (
     AggregationName,
     BranchName,
@@ -188,27 +188,29 @@ class ExecutionGraph:
             output_schema: Output schema Pydantic type (None for dynamic or N/A like sinks)
             input_schema_config: Input schema config for contract validation
             output_schema_config: Output schema config for contract validation.
-                Parsed from config["schema"] when not provided explicitly.
+                Parsed from config["schema"] or config["schema_config"]
+                when not provided explicitly.
             declared_required_fields: For SINK nodes only — the set of fields the
                 sink requires in its input rows. Populated by the builder from
                 SinkProtocol.declared_required_fields. Empty frozenset otherwise.
         """
         resolved_config = config or {}
 
-        # Populate output_schema_config from config["schema"] when the
-        # caller doesn't provide it explicitly.  The builder always passes
-        # it; this ensures the invariant holds for any add_node() caller.
-        if output_schema_config is None and "schema" in resolved_config:
-            schema_dict = resolved_config["schema"]
-            if not isinstance(schema_dict, Mapping):
+        # Populate output_schema_config from the raw config when the caller
+        # doesn't provide it explicitly. The builder always passes it; this
+        # keeps direct add_node() callers aligned with the same alias rules.
+        if output_schema_config is None:
+            try:
+                output_schema_config = get_raw_schema_config(
+                    resolved_config,
+                    owner=f"node:{node_id}",
+                )
+            except ValueError as exc:
                 raise GraphValidationError(
-                    f"Node '{node_id}' has config['schema'] of type "
-                    f"{type(schema_dict).__name__}, expected Mapping. "
-                    f"This is a configuration or graph construction bug.",
+                    f"Invalid schema config: {exc}",
                     component_id=node_id,
                     component_type=node_type.value if isinstance(node_type, NodeType) else str(node_type),
-                )
-            output_schema_config = SchemaConfig.from_dict(schema_dict)
+                ) from exc
 
         info = NodeInfo(
             node_id=NodeID(node_id),
