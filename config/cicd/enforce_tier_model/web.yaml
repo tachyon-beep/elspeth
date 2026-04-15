@@ -219,7 +219,7 @@ allow_hits:
   reason: Tier 3 boundary — request.headers.get('Authorization') reads untrusted HTTP header
   safety: Missing header returns 401; malformed header returns 401; no default fabrication
   expires: null
-- key: web/auth/routes.py:R1:create_auth_router:refresh_token:fp=319f439a08e7dbab
+- key: web/auth/routes.py:R1:create_auth_router:refresh_token:fp=a7449ead0ed7bce8
   owner: web-auth
   reason: Tier 3 boundary — JWT claims dict .get() for optional iat claim
   safety: Missing iat returns None; no fabrication

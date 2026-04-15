@@ -19,6 +19,7 @@ from elspeth.web.auth.middleware import get_current_user
 from elspeth.web.auth.models import AuthenticationError, UserIdentity
 from elspeth.web.auth.protocol import AuthProvider, CredentialAuthProvider
 from elspeth.web.config import WebSettings
+from elspeth.web.validation import has_visible_content
 
 
 class LoginRequest(BaseModel):
@@ -39,8 +40,8 @@ class RegisterRequest(BaseModel):
     @field_validator("username", "password", "display_name")
     @classmethod
     def _must_not_be_blank(cls, v: str) -> str:
-        if not v.strip():
-            raise ValueError("must not be blank")
+        if not has_visible_content(v):
+            raise ValueError("must contain at least one visible character")
         return v
 
 

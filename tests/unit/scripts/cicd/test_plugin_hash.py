@@ -445,3 +445,35 @@ class TestFixSourceFileHash:
         # After fix, re-computing should produce the SAME hash (convergence)
         recomputed = compute_source_file_hash(file_path)
         assert recomputed == correct_hash, f"Fix did not converge: first pass computed {correct_hash}, second pass computed {recomputed}"
+
+
+class TestBOMHandling:
+    """BOM-prefixed files must work through the full extract/fix workflow."""
+
+    def _write_bom_plugin(self, tmp_path: Path) -> Path:
+        file_path = tmp_path / "bom_plugin.py"
+        content = b"\xef\xbb\xbf" + textwrap.dedent("""\
+            class BomPlugin:
+                name = "bom"
+                plugin_version = "1.0.0"
+                source_file_hash: str | None = "sha256:0000000000000000"
+        """).encode("utf-8")
+        file_path.write_bytes(content)
+        return file_path
+
+    def test_extract_plugin_attributes_with_bom(self, tmp_path: Path) -> None:
+        file_path = self._write_bom_plugin(tmp_path)
+        attrs_list = extract_plugin_attributes(file_path)
+        assert len(attrs_list) == 1
+        assert attrs_list[0].class_name == "BomPlugin"
+        assert attrs_list[0].source_file_hash == "sha256:0000000000000000"
+
+    def test_fix_source_file_hash_with_bom(self, tmp_path: Path) -> None:
+        file_path = self._write_bom_plugin(tmp_path)
+        computed = compute_source_file_hash(file_path)
+        fix_source_file_hash(file_path, "BomPlugin", computed)
+
+        # After fix, extract and compute should agree
+        attrs_list = extract_plugin_attributes(file_path)
+        recomputed = compute_source_file_hash(file_path)
+        assert attrs_list[0].source_file_hash == recomputed

@@ -4,12 +4,13 @@ from __future__ import annotations
 
 from unittest.mock import AsyncMock
 
+import pytest
 from fastapi import FastAPI
 from starlette.testclient import TestClient
 
 from elspeth.web.auth.local import LocalAuthProvider
 from elspeth.web.auth.models import AuthenticationError, UserIdentity
-from elspeth.web.auth.routes import create_auth_router
+from elspeth.web.auth.routes import RegisterRequest, create_auth_router
 from elspeth.web.config import WebSettings
 
 _OIDC_FIELDS = {
@@ -440,3 +441,27 @@ class TestMeErrorPath:
         )
         assert response.status_code == 401
         assert response.json()["detail"] == "Profile lookup failed"
+
+
+class TestRegisterRequestValidation:
+    """Registration must reject invisible-only fields to stay aligned with UserIdentity."""
+
+    def test_rejects_zero_width_space_username(self) -> None:
+        with pytest.raises(ValueError, match="visible character"):
+            RegisterRequest(username="\u200b", password="password123", display_name="Test")
+
+    def test_rejects_bom_only_username(self) -> None:
+        with pytest.raises(ValueError, match="visible character"):
+            RegisterRequest(username="\ufeff", password="password123", display_name="Test")
+
+    def test_rejects_invisible_display_name(self) -> None:
+        with pytest.raises(ValueError, match="visible character"):
+            RegisterRequest(username="alice", password="password123", display_name="\u200b")
+
+    def test_rejects_invisible_password(self) -> None:
+        with pytest.raises(ValueError, match="visible character"):
+            RegisterRequest(username="alice", password="\u200b", display_name="Test")
+
+    def test_accepts_normal_registration(self) -> None:
+        req = RegisterRequest(username="alice", password="password123", display_name="Alice")
+        assert req.username == "alice"

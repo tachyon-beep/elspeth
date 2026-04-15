@@ -160,7 +160,7 @@ def extract_plugin_attributes(file_path: Path) -> list[PluginAttributes]:
         List of PluginAttributes, one per plugin class found. Empty list if
         the file contains no plugin classes.
     """
-    source = file_path.read_text(encoding="utf-8")
+    source = file_path.read_text(encoding="utf-8-sig")
     tree = ast.parse(source, filename=str(file_path))
 
     results: list[PluginAttributes] = []
@@ -205,7 +205,7 @@ def fix_source_file_hash(file_path: Path, class_name: str, correct_hash: str) ->
     Raises:
         ValueError: If the class or its source_file_hash assignment cannot be found.
     """
-    source = file_path.read_text(encoding="utf-8")
+    source = file_path.read_text(encoding="utf-8-sig")
     tree = ast.parse(source, filename=str(file_path))
 
     target_line: int | None = None
