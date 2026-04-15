@@ -2370,7 +2370,106 @@ class TestDeleteBlobActiveRunGuard:
                 )
             )
 
+    def _insert_run_without_link(self, status: str) -> None:
+        """Insert a run in the blob's session but omit the blob_run_links row.
+
+        Simulates the pre-link window: _execute_locked() has called
+        create_run() but link_blob_to_run() hasn't fired yet.
+        """
+        from datetime import UTC, datetime
+        from uuid import uuid4
+
+        from elspeth.web.sessions.models import (
+            composition_states_table,
+            runs_table,
+        )
+
+        now = datetime.now(UTC)
+        state_id = str(uuid4())
+        with self.engine.begin() as conn:
+            conn.execute(
+                composition_states_table.insert().values(
+                    id=state_id,
+                    session_id=self.session_id,
+                    version=1,
+                    source=None,
+                    nodes=None,
+                    edges=None,
+                    outputs=None,
+                    metadata_=None,
+                    is_valid=False,
+                    validation_errors=None,
+                    created_at=now,
+                )
+            )
+            conn.execute(
+                runs_table.insert().values(
+                    id=self.run_id,
+                    session_id=self.session_id,
+                    state_id=state_id,
+                    status=status,
+                    started_at=now,
+                    rows_processed=0,
+                    rows_failed=0,
+                )
+            )
+
     def test_delete_succeeds_when_no_runs_linked(self) -> None:
+        state = _empty_state()
+        catalog = _mock_catalog()
+        result = execute_tool(
+            "delete_blob",
+            {"blob_id": self.blob_id},
+            state,
+            catalog,
+            session_engine=self.engine,
+            session_id=self.session_id,
+        )
+        assert result.success is True
+        assert not self.storage_path.exists()
+
+    def test_delete_rejected_when_pending_run_exists_without_link(self) -> None:
+        """Pre-link window: run exists but blob_run_links row hasn't been created yet.
+
+        _execute_locked() creates the run record before link_blob_to_run() inserts
+        the link row.  During that gap, the explicit-link guard sees nothing.
+        The session-level active-run guard must block deletion anyway.
+        """
+        self._insert_run_without_link("pending")
+        state = _empty_state()
+        catalog = _mock_catalog()
+        result = execute_tool(
+            "delete_blob",
+            {"blob_id": self.blob_id},
+            state,
+            catalog,
+            session_engine=self.engine,
+            session_id=self.session_id,
+        )
+        assert result.success is False
+        assert "active run" in result.data["error"].lower()
+        assert self.storage_path.exists(), "File must not be deleted when guard blocks"
+
+    def test_delete_rejected_when_running_run_exists_without_link(self) -> None:
+        """Same as pending — a running run without a link row must also block."""
+        self._insert_run_without_link("running")
+        state = _empty_state()
+        catalog = _mock_catalog()
+        result = execute_tool(
+            "delete_blob",
+            {"blob_id": self.blob_id},
+            state,
+            catalog,
+            session_engine=self.engine,
+            session_id=self.session_id,
+        )
+        assert result.success is False
+        assert "active run" in result.data["error"].lower()
+        assert self.storage_path.exists(), "File must not be deleted when guard blocks"
+
+    def test_delete_succeeds_when_completed_run_exists_without_link(self) -> None:
+        """Completed runs (no link row) must not block deletion."""
+        self._insert_run_without_link("completed")
         state = _empty_state()
         catalog = _mock_catalog()
         result = execute_tool(
@@ -2644,6 +2743,55 @@ class TestUpdateBlobQuota:
                 session_id=self.session_id,
             )
         assert result.success is True
+
+    def test_quota_delta_uses_current_db_size_not_stale_snapshot(self) -> None:
+        """size_delta must be computed from the in-transaction DB row, not the
+        pre-transaction snapshot returned by _sync_get_blob().
+
+        Scenario: blob starts at 5 bytes.  A concurrent writer grows it to 50
+        bytes between the _sync_get_blob() call and the transaction.  Our
+        update writes 60 bytes.  The correct delta is 60 - 50 = 10, not
+        60 - 5 = 55.  With quota set to 70, the stale delta (55) would exceed
+        quota while the correct delta (10) fits.
+        """
+        from unittest.mock import patch
+
+        from sqlalchemy import update as sa_update
+
+        from elspeth.web.sessions.models import blobs_table
+
+        # Simulate concurrent writer: bump DB size_bytes to 50 *after*
+        # _sync_get_blob() has already read 5.  We hook _sync_get_blob to
+        # perform the concurrent write immediately after returning.
+        original_get = __import__("elspeth.web.composer.tools", fromlist=["_sync_get_blob"])._sync_get_blob
+
+        def _get_then_concurrent_write(*args, **kwargs):
+            result = original_get(*args, **kwargs)
+            # Simulate concurrent writer updating size_bytes in the DB
+            with self.engine.begin() as conn:
+                conn.execute(sa_update(blobs_table).where(blobs_table.c.id == self.blob_id).values(size_bytes=50))
+            return result
+
+        state = _empty_state()
+        catalog = _mock_catalog()
+
+        # Quota = 70.  Correct delta: 60 - 50 = 10 → total 70 ≤ 70 → OK.
+        # Stale delta: 60 - 5 = 55 → total 70 (from SUM) + 55 = would exceed.
+        # (But _check_blob_quota reads SUM which already includes the 50,
+        #  so stale delta of 55 → 50 + 55 = 105 > 70 → wrongly rejected.)
+        with (
+            patch("elspeth.web.composer.tools._sync_get_blob", side_effect=_get_then_concurrent_write),
+            patch("elspeth.web.composer.tools._BLOB_QUOTA_BYTES", 70),
+        ):
+            result = execute_tool(
+                "update_blob",
+                {"blob_id": self.blob_id, "content": "x" * 60},
+                state,
+                catalog,
+                session_engine=self.engine,
+                session_id=self.session_id,
+            )
+        assert result.success is True, f"Quota check used stale snapshot instead of current DB size: {result.data}"
 
 
 # ---------------------------------------------------------------------------

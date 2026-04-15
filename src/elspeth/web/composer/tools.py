@@ -1789,17 +1789,23 @@ def _execute_update_blob(
     content_bytes = content.encode("utf-8")
     file_hash = content_hash(content_bytes)
 
-    old_size = blob["size_bytes"]  # Tier 1: NOT NULL in schema — crash if None
-    size_delta = len(content_bytes) - old_size
-
     # Overwrite storage file — snapshot old content for rollback on DB failure
     storage_path = Path(blob["storage_path"])
     old_content = storage_path.read_bytes()
     storage_path.write_bytes(content_bytes)
 
-    # Atomic quota check + update (same pattern as _execute_create_blob)
+    new_size = len(content_bytes)
+
+    # Atomic quota check + update.  size_bytes is re-read inside the
+    # transaction so the delta reflects the current DB row, not the
+    # pre-transaction snapshot (which may be stale under concurrent writes).
     try:
         with session_engine.begin() as conn:
+            current_size: int = conn.execute(
+                select(blobs_table.c.size_bytes).where(blobs_table.c.id == blob_id, blobs_table.c.session_id == session_id)
+            ).scalar_one()
+            size_delta = new_size - current_size
+
             if size_delta > 0:
                 quota_error = _check_blob_quota(conn, session_id, size_delta)
                 if quota_error is not None:
@@ -1809,7 +1815,7 @@ def _execute_update_blob(
                 update(blobs_table)
                 .where(blobs_table.c.id == blob_id, blobs_table.c.session_id == session_id)
                 .values(
-                    size_bytes=len(content_bytes),
+                    size_bytes=new_size,
                     content_hash=file_hash,
                 )
             )
@@ -1856,7 +1862,9 @@ def _execute_delete_blob(
 
     # Single transaction: guard + unlink + delete (matches BlobServiceImpl.delete_blob)
     with session_engine.begin() as conn:
-        # Active-run guard: cannot delete evidence for a live run
+        # Active-run guard (two checks):
+        #
+        # 1. Explicit link: blob_run_links already points at an active run.
         active_link = conn.execute(
             select(blob_run_links_table)
             .join(runs_table, blob_run_links_table.c.run_id == runs_table.c.id)
@@ -1867,6 +1875,21 @@ def _execute_delete_blob(
             return _failure_result(
                 state,
                 f"Blob '{blob_id}' is linked to active run '{active_link.run_id}' and cannot be deleted.",
+            )
+
+        # 2. Pre-link window: _execute_locked() creates the run record before
+        #    link_blob_to_run() inserts the blob_run_links row.  During that
+        #    gap the explicit-link check above sees nothing, but the backing
+        #    file is about to be needed.  The partial unique index guarantees
+        #    at most one active run per session, so checking for *any* active
+        #    run in this blob's session is both safe and sufficient.
+        active_run = conn.execute(
+            select(runs_table.c.id).where(runs_table.c.session_id == session_id).where(runs_table.c.status.in_(["pending", "running"]))
+        ).first()
+        if active_run is not None:
+            return _failure_result(
+                state,
+                f"Blob '{blob_id}' cannot be deleted while session has active run '{active_run.id}'.",
             )
 
         # Delete backing file first — orphaned DB row is recoverable,

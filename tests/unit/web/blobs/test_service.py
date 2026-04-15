@@ -371,6 +371,105 @@ class TestDeleteBlob:
         with pytest.raises(BlobNotFoundError):
             await blob_service.get_blob(record.id)
 
+    @pytest.mark.asyncio
+    async def test_delete_blob_rejects_when_active_run_exists_without_link(self, blob_service, session_id, db_engine) -> None:
+        """Pre-link window: active run exists but blob_run_links row hasn't been created yet.
+
+        _execute_locked() creates the run record before link_blob_to_run()
+        inserts the link row.  During that gap, the explicit-link guard sees
+        nothing.  The session-level active-run guard must block deletion anyway.
+        """
+        from elspeth.web.sessions.models import (
+            composition_states_table,
+            runs_table,
+        )
+
+        record = await blob_service.create_blob(
+            session_id=session_id,
+            filename="pre-link.csv",
+            content=b"important",
+            mime_type="text/csv",
+            created_by="user",
+        )
+
+        state_id = str(uuid4())
+        session_id_str = str(session_id)
+        run_id = str(uuid4())
+
+        with db_engine.begin() as conn:
+            conn.execute(
+                composition_states_table.insert().values(
+                    id=state_id,
+                    session_id=session_id_str,
+                    version=1,
+                    is_valid=True,
+                    created_at=datetime(2026, 1, 1, tzinfo=UTC),
+                )
+            )
+            conn.execute(
+                runs_table.insert().values(
+                    id=run_id,
+                    session_id=session_id_str,
+                    state_id=state_id,
+                    status="pending",
+                    started_at=datetime(2026, 1, 1, tzinfo=UTC),
+                    rows_processed=0,
+                    rows_failed=0,
+                )
+            )
+            # Deliberately NO blob_run_links row — simulating the pre-link window
+
+        with pytest.raises(BlobActiveRunError):
+            await blob_service.delete_blob(record.id)
+
+    @pytest.mark.asyncio
+    async def test_delete_blob_allows_when_completed_run_exists_without_link(self, blob_service, session_id, db_engine) -> None:
+        """Completed runs (without link row) must not block deletion."""
+        from elspeth.web.sessions.models import (
+            composition_states_table,
+            runs_table,
+        )
+
+        record = await blob_service.create_blob(
+            session_id=session_id,
+            filename="completed-no-link.csv",
+            content=b"done",
+            mime_type="text/csv",
+            created_by="user",
+        )
+
+        state_id = str(uuid4())
+        session_id_str = str(session_id)
+        run_id = str(uuid4())
+
+        with db_engine.begin() as conn:
+            conn.execute(
+                composition_states_table.insert().values(
+                    id=state_id,
+                    session_id=session_id_str,
+                    version=1,
+                    is_valid=True,
+                    created_at=datetime(2026, 1, 1, tzinfo=UTC),
+                )
+            )
+            conn.execute(
+                runs_table.insert().values(
+                    id=run_id,
+                    session_id=session_id_str,
+                    state_id=state_id,
+                    status="completed",
+                    started_at=datetime(2026, 1, 1, tzinfo=UTC),
+                    rows_processed=0,
+                    rows_failed=0,
+                )
+            )
+
+        # Should succeed — completed run does not block deletion
+        await blob_service.delete_blob(record.id)
+
+        with pytest.raises(BlobNotFoundError):
+            await blob_service.get_blob(record.id)
+
 
 # ---------------------------------------------------------------------------
 # finalize_blob — pending lifecycle transitions

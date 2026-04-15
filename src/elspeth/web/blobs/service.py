@@ -320,7 +320,9 @@ class BlobServiceImpl:
                 if row is None:
                     raise BlobNotFoundError(blob_id_str)
 
-                # Check for active run links
+                # Active-run guard (two checks):
+                #
+                # 1. Explicit link: blob_run_links already points at an active run.
                 active_link = conn.execute(
                     select(blob_run_links_table)
                     .join(
@@ -332,6 +334,21 @@ class BlobServiceImpl:
                 ).first()
                 if active_link is not None:
                     raise BlobActiveRunError(blob_id_str, active_link.run_id)
+
+                # 2. Pre-link window: _execute_locked() creates the run record
+                #    before link_blob_to_run() inserts the blob_run_links row.
+                #    During that gap the explicit-link check above sees nothing,
+                #    but the backing file is about to be needed.  The partial
+                #    unique index guarantees at most one active run per session,
+                #    so checking for *any* active run in this blob's session is
+                #    both safe and sufficient.
+                active_run = conn.execute(
+                    select(runs_table.c.id)
+                    .where(runs_table.c.session_id == row.session_id)
+                    .where(runs_table.c.status.in_(["pending", "running"]))
+                ).first()
+                if active_run is not None:
+                    raise BlobActiveRunError(blob_id_str, active_run.id)
 
                 # Delete backing file first — orphaned DB row is recoverable,
                 # orphaned file with no metadata is not
