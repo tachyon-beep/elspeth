@@ -155,7 +155,7 @@ class TestComposerRuntimeAgreement:
                 plugin="value_transform",
                 input="t1",
                 on_success="main",
-                on_error=None,
+                on_error="discard",
                 options={
                     "required_input_fields": ["text"],
                     "operations": [
@@ -254,7 +254,7 @@ class TestComposerRuntimeAgreement:
                 plugin="value_transform",
                 input="t1",
                 on_success="main",
-                on_error=None,
+                on_error="discard",
                 options={
                     "required_input_fields": ["text"],
                     "operations": [
@@ -350,7 +350,7 @@ class TestComposerRuntimeAgreement:
                 plugin="value_transform",
                 input="t1",
                 on_success="main",
-                on_error=None,
+                on_error="discard",
                 options={
                     "required_input_fields": ["text"],
                     "operations": [
@@ -446,7 +446,7 @@ class TestComposerRuntimeAgreement:
                 plugin="value_transform",
                 input="t1",
                 on_success="main",
-                on_error=None,
+                on_error="discard",
                 options={
                     "required_input_fields": ["class"],
                     "operations": [
@@ -599,7 +599,7 @@ class TestComposerRuntimeAgreement:
                 plugin="batch_stats",
                 input="agg1",
                 on_success="main",
-                on_error=None,
+                on_error="discard",
                 options={
                     "value_field": "value",
                     "required_input_fields": ["value"],
@@ -688,7 +688,7 @@ class TestComposerRuntimeAgreement:
                 plugin="batch_stats",
                 input="agg1",
                 on_success="main",
-                on_error=None,
+                on_error="discard",
                 options={
                     "options": {
                         "value_field": "value",
@@ -910,7 +910,7 @@ class TestComposerRuntimeAgreement:
                 plugin="value_transform",
                 input="path_b",
                 on_success="path_b_done",
-                on_error=None,
+                on_error="discard",
                 options={
                     "operations": [
                         {

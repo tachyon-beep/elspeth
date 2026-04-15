@@ -44,7 +44,7 @@ def _invalid_contract_state() -> CompositionState:
                 plugin="value_transform",
                 input="t1",
                 on_success="main",
-                on_error=None,
+                on_error="discard",
                 options={
                     "required_input_fields": ["text"],
                     "operations": [{"target": "out", "expression": "row['text']"}],
@@ -110,7 +110,7 @@ def _connection_valid_field_mapper_state_without_edges() -> CompositionState:
                 plugin="field_mapper",
                 input="mapper_in",
                 on_success="main",
-                on_error=None,
+                on_error="discard",
                 options={
                     "schema": {"mode": "observed"},
                     "mapping": {"text": "body"},

@@ -31,7 +31,7 @@ def _make_linear_pipeline() -> CompositionState:
                 plugin="uppercase",
                 input="source_out",
                 on_success="main_output",
-                on_error=None,
+                on_error="discard",
                 options={"field": "name"},
                 condition=None,
                 routes=None,
@@ -110,7 +110,7 @@ def _make_aggregation_pipeline() -> CompositionState:
                 plugin="batch_counter",
                 input="source_out",
                 on_success="main_output",
-                on_error=None,
+                on_error="discard",
                 options={"batch_size": 10},
                 condition=None,
                 routes=None,
@@ -118,6 +118,7 @@ def _make_aggregation_pipeline() -> CompositionState:
                 branches=None,
                 policy=None,
                 merge=None,
+                trigger={"count": 10},
             ),
         ),
         edges=(),
@@ -194,6 +195,7 @@ class TestGenerateYaml:
         assert t["plugin"] == "uppercase"
         assert t["input"] == "source_out"
         assert t["on_success"] == "main_output"
+        assert t["on_error"] == "discard"
         assert t["options"]["field"] == "name"
 
         # Sink
@@ -224,6 +226,8 @@ class TestGenerateYaml:
         a = parsed["aggregations"][0]
         assert a["name"] == "batch_agg"
         assert a["plugin"] == "batch_counter"
+        assert a["trigger"] == {"count": 10}
+        assert a["on_error"] == "discard"
         assert a["options"]["batch_size"] == 10
 
     def test_fork_coalesce_pipeline(self) -> None:
@@ -325,6 +329,114 @@ class TestGenerateYaml:
         yaml_str = generate_yaml(state)
         parsed = yaml.safe_load(yaml_str)
         assert parsed["transforms"][0]["on_error"] == "error_sink"
+
+    def test_on_error_discard_emitted_for_transform(self) -> None:
+        """on_error='discard' must appear in generated YAML, not be omitted."""
+        state = CompositionState(
+            source=SourceSpec(
+                plugin="csv",
+                on_success="t1",
+                options={},
+                on_validation_failure="quarantine",
+            ),
+            nodes=(
+                NodeSpec(
+                    id="t1",
+                    node_type="transform",
+                    plugin="uppercase",
+                    input="in",
+                    on_success="out",
+                    on_error="discard",
+                    options={},
+                    condition=None,
+                    routes=None,
+                    fork_to=None,
+                    branches=None,
+                    policy=None,
+                    merge=None,
+                ),
+            ),
+            edges=(),
+            outputs=(OutputSpec(name="out", plugin="csv", options={}, on_write_failure="discard"),),
+            metadata=PipelineMetadata(),
+            version=1,
+        )
+        yaml_str = generate_yaml(state)
+        parsed = yaml.safe_load(yaml_str)
+        assert parsed["transforms"][0]["on_error"] == "discard"
+
+    def test_on_error_discard_emitted_for_aggregation(self) -> None:
+        """Aggregation on_error='discard' must appear in generated YAML."""
+        state = CompositionState(
+            source=SourceSpec(
+                plugin="csv",
+                on_success="agg1",
+                options={},
+                on_validation_failure="quarantine",
+            ),
+            nodes=(
+                NodeSpec(
+                    id="agg1",
+                    node_type="aggregation",
+                    plugin="batch_counter",
+                    input="in",
+                    on_success="out",
+                    on_error="discard",
+                    options={"batch_size": 10},
+                    condition=None,
+                    routes=None,
+                    fork_to=None,
+                    branches=None,
+                    policy=None,
+                    merge=None,
+                    trigger={"count": 5},
+                ),
+            ),
+            edges=(),
+            outputs=(OutputSpec(name="out", plugin="csv", options={}, on_write_failure="discard"),),
+            metadata=PipelineMetadata(),
+            version=1,
+        )
+        yaml_str = generate_yaml(state)
+        parsed = yaml.safe_load(yaml_str)
+        assert parsed["aggregations"][0]["on_error"] == "discard"
+
+    def test_aggregation_without_trigger_omits_key(self) -> None:
+        """Aggregation with trigger=None must not crash yaml_generator."""
+        state = CompositionState(
+            source=SourceSpec(
+                plugin="csv",
+                on_success="agg1",
+                options={},
+                on_validation_failure="quarantine",
+            ),
+            nodes=(
+                NodeSpec(
+                    id="agg1",
+                    node_type="aggregation",
+                    plugin="batch_counter",
+                    input="in",
+                    on_success="out",
+                    on_error="discard",
+                    options={},
+                    condition=None,
+                    routes=None,
+                    fork_to=None,
+                    branches=None,
+                    policy=None,
+                    merge=None,
+                    trigger=None,
+                ),
+            ),
+            edges=(),
+            outputs=(OutputSpec(name="out", plugin="csv", options={}, on_write_failure="discard"),),
+            metadata=PipelineMetadata(),
+            version=1,
+        )
+        yaml_str = generate_yaml(state)
+        parsed = yaml.safe_load(yaml_str)
+        # trigger absent from YAML — engine will reject, but yaml_generator must not crash
+        assert "trigger" not in parsed["aggregations"][0]
 
     def test_frozen_state_serializes_without_error(self) -> None:
         """generate_yaml() handles frozen state objects (MappingProxyType, tuple).

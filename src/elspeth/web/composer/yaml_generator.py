@@ -86,10 +86,8 @@ def generate_yaml(state: CompositionState) -> str:
                 "plugin": t["plugin"],
                 "input": t["input"],
                 "on_success": t["on_success"],
+                "on_error": t["on_error"],
             }
-            # on_error is always present in to_dict() output (may be None)
-            if t["on_error"] is not None:
-                entry["on_error"] = t["on_error"]
             if t["options"]:
                 entry["options"] = t["options"]
             doc["transforms"].append(entry)
@@ -122,9 +120,18 @@ def generate_yaml(state: CompositionState) -> str:
                 "plugin": a["plugin"],
                 "input": a["input"],
                 "on_success": a["on_success"],
+                "on_error": a["on_error"],
             }
-            if a["on_error"] is not None:
-                entry["on_error"] = a["on_error"]
+            # trigger, output_mode, expected_output_count are conditionally
+            # emitted by to_dict() (only when non-None).  Use "in" checks to
+            # match the to_dict() contract — a missing key is not an error
+            # here; the engine's Pydantic model will reject the absence.
+            if "trigger" in a:
+                entry["trigger"] = a["trigger"]
+            if "output_mode" in a:
+                entry["output_mode"] = a["output_mode"]
+            if "expected_output_count" in a:
+                entry["expected_output_count"] = a["expected_output_count"]
             if a["options"]:
                 entry["options"] = a["options"]
             doc["aggregations"].append(entry)

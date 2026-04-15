@@ -3547,7 +3547,7 @@ def _valid_pipeline_args() -> dict[str, Any]:
                 "plugin": "uppercase",
                 "input": "source_out",
                 "on_success": "main",
-                "on_error": None,
+                "on_error": "discard",
                 "options": {},
             }
         ],
@@ -4109,6 +4109,7 @@ class TestPreviewPipeline:
                 "plugin": "value_transform",
                 "input": "t1",
                 "on_success": "main",
+                "on_error": "discard",
                 "options": {
                     "required_input_fields": ["text"],
                     "operations": [{"target": "out", "expression": "row['text']"}],

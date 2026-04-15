@@ -750,14 +750,20 @@ class TestStage1Validation:
             on_validation_failure=on_validation_failure,
         )
 
-    def _make_transform(self, id: str, input: str, on_success: str) -> NodeSpec:
+    def _make_transform(
+        self,
+        id: str,
+        input: str,
+        on_success: str,
+        on_error: str = "discard",
+    ) -> NodeSpec:
         return NodeSpec(
             id=id,
             node_type="transform",
             plugin="uppercase",
             input=input,
             on_success=on_success,
-            on_error=None,
+            on_error=on_error,
             options={},
             condition=None,
             routes=None,
@@ -1276,7 +1282,7 @@ class TestStage1Validation:
             plugin="value_transform",
             input="t1",
             on_success="main",
-            on_error=None,
+            on_error="discard",
             options={},  # Empty - should trigger warning
             condition=None,
             routes=None,
@@ -1305,7 +1311,7 @@ class TestStage1Validation:
             plugin="value_transform",
             input="t1",
             on_success="main",
-            on_error=None,
+            on_error="discard",
             options={"operations": []},  # Empty list - should trigger warning
             condition=None,
             routes=None,
@@ -1492,16 +1498,18 @@ class TestStage1Validation:
     # --- Suggestion rules (S1-S3) ---
 
     def test_validate_no_error_routing_suggests(self) -> None:
-        """S1: Pipeline with no gates and no on_error edges gets a suggestion."""
+        """S1: Transforms now require on_error (section 7), so a valid pipeline
+        always has explicit error routing and S1 cannot fire.  Verify S1 is
+        absent when on_error='discard' is set."""
         state = self._empty_state()
         state = state.with_source(self._make_source(on_success="t1"))
-        state = state.with_node(self._make_transform("t1", "t1", "main"))
+        state = state.with_node(self._make_transform("t1", "t1", "main", on_error="discard"))
         state = state.with_output(self._make_output("main"))
         state = state.with_edge(self._make_edge("e1", "source", "t1"))
         state = state.with_edge(self._make_edge("e2", "t1", "main"))
         result = state.validate()
         assert result.is_valid
-        assert any("error routing" in s.message for s in result.suggestions)
+        assert not any("error routing" in s.message for s in result.suggestions)
 
     def test_validate_single_output_suggests(self) -> None:
         """S2: Pipeline with single EXTERNAL output gets a backup suggestion.
@@ -1577,6 +1585,264 @@ class TestStage1Validation:
         assert result.is_valid is False
         assert len(result.errors) > 0
         assert any("never receive data" in w.message for w in result.warnings)
+
+    # --- Mandatory field enforcement (section 7 positive checks) ---
+
+    def test_validate_transform_missing_plugin_errors(self) -> None:
+        """Transform with plugin=None must fail validation."""
+        state = self._empty_state()
+        state = state.with_source(self._make_source(on_success="t1"))
+        node = NodeSpec(
+            id="t1",
+            node_type="transform",
+            plugin=None,
+            input="t1",
+            on_success="main",
+            on_error="discard",
+            options={},
+            condition=None,
+            routes=None,
+            fork_to=None,
+            branches=None,
+            policy=None,
+            merge=None,
+        )
+        state = state.with_node(node)
+        state = state.with_output(self._make_output("main"))
+        result = state.validate()
+        assert not result.is_valid
+        assert any("plugin" in e.message.lower() and "t1" in e.message for e in result.errors)
+
+    def test_validate_transform_missing_on_success_errors(self) -> None:
+        """Transform with on_success=None must fail validation."""
+        state = self._empty_state()
+        state = state.with_source(self._make_source(on_success="t1"))
+        node = NodeSpec(
+            id="t1",
+            node_type="transform",
+            plugin="uppercase",
+            input="t1",
+            on_success=None,
+            on_error="discard",
+            options={},
+            condition=None,
+            routes=None,
+            fork_to=None,
+            branches=None,
+            policy=None,
+            merge=None,
+        )
+        state = state.with_node(node)
+        state = state.with_output(self._make_output("main"))
+        result = state.validate()
+        assert not result.is_valid
+        assert any("on_success" in e.message and "t1" in e.message for e in result.errors)
+
+    def test_validate_transform_blank_on_success_errors(self) -> None:
+        """Transform with on_success='' must fail validation (engine rejects blank)."""
+        state = self._empty_state()
+        state = state.with_source(self._make_source(on_success="t1"))
+        node = NodeSpec(
+            id="t1",
+            node_type="transform",
+            plugin="uppercase",
+            input="t1",
+            on_success="",
+            on_error="discard",
+            options={},
+            condition=None,
+            routes=None,
+            fork_to=None,
+            branches=None,
+            policy=None,
+            merge=None,
+        )
+        state = state.with_node(node)
+        state = state.with_output(self._make_output("main"))
+        result = state.validate()
+        assert not result.is_valid
+        assert any("on_success" in e.message and "t1" in e.message for e in result.errors)
+
+    def test_validate_transform_blank_on_error_errors(self) -> None:
+        """Transform with on_error='  ' must fail validation (engine rejects blank)."""
+        state = self._empty_state()
+        state = state.with_source(self._make_source(on_success="t1"))
+        node = NodeSpec(
+            id="t1",
+            node_type="transform",
+            plugin="uppercase",
+            input="t1",
+            on_success="main",
+            on_error="  ",
+            options={},
+            condition=None,
+            routes=None,
+            fork_to=None,
+            branches=None,
+            policy=None,
+            merge=None,
+        )
+        state = state.with_node(node)
+        state = state.with_output(self._make_output("main"))
+        result = state.validate()
+        assert not result.is_valid
+        assert any("on_error" in e.message and "t1" in e.message for e in result.errors)
+
+    def test_validate_transform_missing_on_error_errors(self) -> None:
+        """Transform with on_error=None must fail validation."""
+        state = self._empty_state()
+        state = state.with_source(self._make_source(on_success="t1"))
+        node = NodeSpec(
+            id="t1",
+            node_type="transform",
+            plugin="uppercase",
+            input="t1",
+            on_success="main",
+            on_error=None,
+            options={},
+            condition=None,
+            routes=None,
+            fork_to=None,
+            branches=None,
+            policy=None,
+            merge=None,
+        )
+        state = state.with_node(node)
+        state = state.with_output(self._make_output("main"))
+        result = state.validate()
+        assert not result.is_valid
+        assert any("on_error" in e.message and "t1" in e.message for e in result.errors)
+
+    def test_validate_aggregation_missing_trigger_errors(self) -> None:
+        """Aggregation with trigger=None must fail validation."""
+        state = self._empty_state()
+        state = state.with_source(self._make_source(on_success="agg1"))
+        node = NodeSpec(
+            id="agg1",
+            node_type="aggregation",
+            plugin="batch_counter",
+            input="agg1",
+            on_success="main",
+            on_error="discard",
+            options={},
+            condition=None,
+            routes=None,
+            fork_to=None,
+            branches=None,
+            policy=None,
+            merge=None,
+            trigger=None,
+        )
+        state = state.with_node(node)
+        state = state.with_output(self._make_output("main"))
+        result = state.validate()
+        assert not result.is_valid
+        assert any("trigger" in e.message and "agg1" in e.message for e in result.errors)
+
+    def test_validate_aggregation_empty_trigger_errors(self) -> None:
+        """Aggregation with trigger={} must fail — at least one trigger type required."""
+        state = self._empty_state()
+        state = state.with_source(self._make_source(on_success="agg1"))
+        node = NodeSpec(
+            id="agg1",
+            node_type="aggregation",
+            plugin="batch_counter",
+            input="agg1",
+            on_success="main",
+            on_error="discard",
+            options={},
+            condition=None,
+            routes=None,
+            fork_to=None,
+            branches=None,
+            policy=None,
+            merge=None,
+            trigger={},
+        )
+        state = state.with_node(node)
+        state = state.with_output(self._make_output("main"))
+        result = state.validate()
+        assert not result.is_valid
+        assert any("at least one" in e.message and "agg1" in e.message for e in result.errors)
+
+    def test_validate_aggregation_invalid_output_mode_errors(self) -> None:
+        """Aggregation with invalid output_mode must fail validation."""
+        state = self._empty_state()
+        state = state.with_source(self._make_source(on_success="agg1"))
+        node = NodeSpec(
+            id="agg1",
+            node_type="aggregation",
+            plugin="batch_counter",
+            input="agg1",
+            on_success="main",
+            on_error="discard",
+            options={},
+            condition=None,
+            routes=None,
+            fork_to=None,
+            branches=None,
+            policy=None,
+            merge=None,
+            trigger={"count": 10},
+            output_mode="invalid_mode",
+        )
+        state = state.with_node(node)
+        state = state.with_output(self._make_output("main"))
+        result = state.validate()
+        assert not result.is_valid
+        assert any("output_mode" in e.message and "agg1" in e.message for e in result.errors)
+
+    def test_validate_aggregation_with_trigger_passes(self) -> None:
+        """Aggregation with all required fields passes validation."""
+        state = self._empty_state()
+        state = state.with_source(self._make_source(on_success="agg1"))
+        node = NodeSpec(
+            id="agg1",
+            node_type="aggregation",
+            plugin="batch_counter",
+            input="agg1",
+            on_success="main",
+            on_error="discard",
+            options={},
+            condition=None,
+            routes=None,
+            fork_to=None,
+            branches=None,
+            policy=None,
+            merge=None,
+            trigger={"count": 100},
+        )
+        state = state.with_node(node)
+        state = state.with_output(self._make_output("main"))
+        state = state.with_edge(self._make_edge("e1", "source", "agg1"))
+        state = state.with_edge(self._make_edge("e2", "agg1", "main"))
+        result = state.validate()
+        assert result.is_valid, result.errors
+
+    def test_validate_aggregation_missing_on_error_errors(self) -> None:
+        """Aggregation with on_error=None must fail validation."""
+        state = self._empty_state()
+        state = state.with_source(self._make_source(on_success="agg1"))
+        node = NodeSpec(
+            id="agg1",
+            node_type="aggregation",
+            plugin="batch_counter",
+            input="agg1",
+            on_success="main",
+            on_error=None,
+            options={},
+            condition=None,
+            routes=None,
+            fork_to=None,
+            branches=None,
+            policy=None,
+            merge=None,
+        )
+        state = state.with_node(node)
+        state = state.with_output(self._make_output("main"))
+        result = state.validate()
+        assert not result.is_valid
+        assert any("on_error" in e.message and "agg1" in e.message for e in result.errors)
 
     def test_validate_clean_pipeline_no_warnings(self) -> None:
         """Well-formed pipeline with gates, error routing, schema, and
@@ -1664,7 +1930,7 @@ class TestSchemaContractValidation:
         on_success: str,
         plugin: str = "value_transform",
         options: dict[str, Any] | None = None,
-        on_error: str | None = None,
+        on_error: str = "discard",
     ) -> NodeSpec:
         opts = dict(options or {})
         if plugin == "value_transform":

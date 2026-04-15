@@ -97,6 +97,9 @@ class NodeSpec:
         branches: Branch inputs for coalesce nodes. None for non-coalesce nodes.
         policy: Coalesce policy. None for non-coalesce nodes.
         merge: Coalesce merge strategy. None for non-coalesce nodes.
+        trigger: Aggregation batch trigger config. None for non-aggregation nodes.
+        output_mode: Aggregation output mode ("passthrough" or "transform"). None for non-aggregation nodes.
+        expected_output_count: Aggregation expected output count. None for non-aggregation nodes.
     """
 
     id: str
@@ -112,19 +115,27 @@ class NodeSpec:
     branches: tuple[str, ...] | None
     policy: str | None
     merge: str | None
+    trigger: Mapping[str, Any] | None = None
+    output_mode: str | None = None
+    expected_output_count: int | None = None
 
     def __post_init__(self) -> None:
+        # Mapping fields must be deep-frozen. Scalar, enum, and tuple fields
+        # (fork_to, branches) are already immutable and need no guard.
         freeze_fields(self, "options")
         if self.routes is not None:
             freeze_fields(self, "routes")
+        if self.trigger is not None:
+            freeze_fields(self, "trigger")
 
     @classmethod
     def from_dict(cls, d: dict[str, Any]) -> Self:
         """Reconstruct from a plain dict (inverse of to_dict serialisation).
 
-        Optional fields (condition, routes, fork_to, branches, policy, merge)
-        default to None when absent from the dict. fork_to and branches are
-        converted from list to tuple since to_dict() serialises tuples as lists.
+        Optional fields (condition, routes, fork_to, branches, policy, merge,
+        trigger, output_mode, expected_output_count) default to None when
+        absent from the dict. fork_to and branches are converted from list to
+        tuple since to_dict() serialises tuples as lists.
         """
         fork_to = d["fork_to"] if "fork_to" in d else None
         branches = d["branches"] if "branches" in d else None
@@ -142,6 +153,9 @@ class NodeSpec:
             branches=tuple(branches) if branches is not None else None,
             policy=d["policy"] if "policy" in d else None,
             merge=d["merge"] if "merge" in d else None,
+            trigger=d["trigger"] if "trigger" in d else None,
+            output_mode=d["output_mode"] if "output_mode" in d else None,
+            expected_output_count=d["expected_output_count"] if "expected_output_count" in d else None,
         )
 
 
@@ -310,7 +324,7 @@ def _runtime_connection_targets(
     for node in nodes:
         if node.on_success is not None:
             targets.add(node.on_success)
-        if node.on_error is not None:
+        if node.on_error is not None and node.on_error != "discard":
             targets.add(node.on_error)
         if node.routes is not None:
             targets.update(node.routes.values())
@@ -448,7 +462,7 @@ def _check_schema_contracts(
                     node.options,
                     f"node '{node.id}' on_success",
                 )
-        if node.on_error is not None:
+        if node.on_error is not None and node.on_error != "discard":
             if node.on_error in sink_names:
                 _register_direct_sink_producer(
                     node.on_error,
@@ -946,6 +960,12 @@ class CompositionState:
                 node_dict["policy"] = node.policy
             if node.merge is not None:
                 node_dict["merge"] = node.merge
+            if node.trigger is not None:
+                node_dict["trigger"] = deep_thaw(node.trigger)
+            if node.output_mode is not None:
+                node_dict["output_mode"] = node.output_mode
+            if node.expected_output_count is not None:
+                node_dict["expected_output_count"] = node.expected_output_count
             result["nodes"].append(node_dict)
 
         for edge in self.edges:
@@ -1056,18 +1076,53 @@ class CompositionState:
                 if node.routes is None:
                     errors.append(_err(f"node:{node.id}", f"Gate '{node.id}' is missing required field 'routes'.", "high"))
             elif node.node_type == "transform":
+                # Negative constraints — transforms must not have gate fields
                 if node.condition is not None:
                     errors.append(_err(f"node:{node.id}", f"Transform '{node.id}' must not have 'condition' field.", "high"))
                 if node.routes is not None:
                     errors.append(_err(f"node:{node.id}", f"Transform '{node.id}' must not have 'routes' field.", "high"))
+                # Positive constraints — engine requires these as non-empty strings
+                # (TransformSettings.plugin, .on_success, .on_error in config.py
+                #  — field validators call .strip() and reject empty/blank)
+                if not node.plugin:
+                    errors.append(_err(f"node:{node.id}", f"Transform '{node.id}' is missing required field 'plugin'.", "high"))
+                if not node.on_success or not node.on_success.strip():
+                    errors.append(_err(f"node:{node.id}", f"Transform '{node.id}' is missing required field 'on_success'.", "high"))
+                if not node.on_error or not node.on_error.strip():
+                    errors.append(_err(f"node:{node.id}", f"Transform '{node.id}' is missing required field 'on_error'.", "high"))
             elif node.node_type == "coalesce":
                 if node.branches is None:
                     errors.append(_err(f"node:{node.id}", f"Coalesce '{node.id}' is missing required field 'branches'.", "high"))
                 if node.policy is None:
                     errors.append(_err(f"node:{node.id}", f"Coalesce '{node.id}' is missing required field 'policy'.", "high"))
             elif node.node_type == "aggregation":
-                if node.plugin is None:
+                if not node.plugin:
                     errors.append(_err(f"node:{node.id}", f"Aggregation '{node.id}' is missing required field 'plugin'.", "high"))
+                # Engine requires on_error as non-empty string
+                # (AggregationSettings.on_error in config.py)
+                if not node.on_error or not node.on_error.strip():
+                    errors.append(_err(f"node:{node.id}", f"Aggregation '{node.id}' is missing required field 'on_error'.", "high"))
+                # Engine requires trigger config
+                # (AggregationSettings.trigger: TriggerConfig in config.py)
+                if node.trigger is None:
+                    errors.append(_err(f"node:{node.id}", f"Aggregation '{node.id}' is missing required field 'trigger'.", "high"))
+                elif not any(k in node.trigger and node.trigger[k] is not None for k in ("count", "timeout_seconds", "condition")):
+                    errors.append(
+                        _err(
+                            f"node:{node.id}",
+                            f"Aggregation '{node.id}' trigger must specify at least one of: count, timeout_seconds, condition.",
+                            "high",
+                        )
+                    )
+                # output_mode must be a valid OutputMode value when present
+                if node.output_mode is not None and node.output_mode not in ("passthrough", "transform"):
+                    errors.append(
+                        _err(
+                            f"node:{node.id}",
+                            f"Aggregation '{node.id}' output_mode must be 'passthrough' or 'transform', got '{node.output_mode}'.",
+                            "high",
+                        )
+                    )
 
         # 8. Connection completeness
         source_on_success = self.source.on_success if self.source else None

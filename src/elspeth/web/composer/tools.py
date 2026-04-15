@@ -381,6 +381,19 @@ def get_tool_definitions() -> list[dict[str, Any]]:
                     },
                     "policy": {"type": ["string", "null"], "description": "Merge trigger policy (coalesce only)."},
                     "merge": {"type": ["string", "null"], "description": "Field merge strategy (coalesce only)."},
+                    "trigger": {
+                        "type": ["object", "null"],
+                        "description": "Batch trigger config (aggregation only). At least one of: {count: int, timeout_seconds: float, condition: string}.",
+                    },
+                    "output_mode": {
+                        "type": ["string", "null"],
+                        "enum": ["passthrough", "transform", None],
+                        "description": "Aggregation output mode (aggregation only). Defaults to 'transform' if omitted.",
+                    },
+                    "expected_output_count": {
+                        "type": ["integer", "null"],
+                        "description": "Expected number of output rows from aggregation (aggregation only). Optional.",
+                    },
                 },
                 "required": ["id", "node_type", "input"],
             },
@@ -570,10 +583,13 @@ def get_tool_definitions() -> list[dict[str, Any]]:
                                 "branches": {"type": "array"},
                                 "policy": {"type": "string"},
                                 "merge": {"type": "string"},
+                                "trigger": {"type": "object"},
+                                "output_mode": {"type": "string"},
+                                "expected_output_count": {"type": "integer"},
                             },
                             "required": ["id", "node_type", "input"],
                         },
-                        "description": "Array of node specs: [{id, input, plugin?, node_type, options?, on_success?, on_error?, condition?, routes?, fork_to?, branches?, policy?, merge?}]",
+                        "description": "Array of node specs: [{id, input, plugin?, node_type, options?, on_success?, on_error?, condition?, routes?, fork_to?, branches?, policy?, merge?, trigger?, output_mode?, expected_output_count?}]",
                     },
                     "edges": {
                         "type": "array",
@@ -1381,6 +1397,9 @@ def _execute_upsert_node(
         branches=branches,
         policy=args.get("policy"),
         merge=args.get("merge"),
+        trigger=args.get("trigger"),
+        output_mode=args.get("output_mode"),
+        expected_output_count=args.get("expected_output_count"),
     )
 
     node_id = args["id"]
@@ -2062,6 +2081,9 @@ def _execute_wire_secret_ref(
             branches=node.branches,
             policy=node.policy,
             merge=node.merge,
+            trigger=deep_thaw(node.trigger) if node.trigger is not None else None,
+            output_mode=node.output_mode,
+            expected_output_count=node.expected_output_count,
         )
         new_state = state.with_node(new_node)
         return _mutation_result(new_state, (target_id,))
@@ -2184,6 +2206,9 @@ def _execute_set_pipeline(
                     branches=branches,
                     policy=n.get("policy"),
                     merge=n.get("merge"),
+                    trigger=n.get("trigger"),
+                    output_mode=n.get("output_mode"),
+                    expected_output_count=n.get("expected_output_count"),
                 )
             )
 
@@ -2330,6 +2355,9 @@ def _execute_patch_node_options(
         branches=current.branches,
         policy=current.policy,
         merge=current.merge,
+        trigger=current.trigger,
+        output_mode=current.output_mode,
+        expected_output_count=current.expected_output_count,
     )
     new_state = state.with_node(new_node)
     return _mutation_result(new_state, (node_id,))
@@ -2635,6 +2663,9 @@ def _serialize_node(node: NodeSpec) -> dict[str, Any]:
         "branches": list(node.branches) if node.branches else None,
         "policy": node.policy,
         "merge": node.merge,
+        "trigger": deep_thaw(node.trigger) if node.trigger else None,
+        "output_mode": node.output_mode,
+        "expected_output_count": node.expected_output_count,
     }
 
 

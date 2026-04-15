@@ -807,7 +807,7 @@ class TestYamlEndpoint:
                         "plugin": "field_mapper",
                         "input": "mapper_in",
                         "on_success": "main",
-                        "on_error": None,
+                        "on_error": "discard",
                         "options": {
                             "schema": {"mode": "observed"},
                             "mapping": {"text": "body"},
@@ -932,7 +932,7 @@ class TestYamlEndpoint:
                         "plugin": "value_transform",
                         "input": "t1",
                         "on_success": "main",
-                        "on_error": None,
+                        "on_error": "discard",
                         "options": {
                             "required_input_fields": ["text"],
                             "operations": [{"target": "out", "expression": "row['text']"}],
