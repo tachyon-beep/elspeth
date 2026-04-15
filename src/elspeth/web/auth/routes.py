@@ -19,6 +19,7 @@ from elspeth.web.auth.middleware import get_current_user
 from elspeth.web.auth.models import AuthenticationError, UserIdentity
 from elspeth.web.auth.protocol import AuthProvider, CredentialAuthProvider
 from elspeth.web.config import WebSettings
+from elspeth.web.middleware.rate_limit import check_auth_rate_limit
 from elspeth.web.validation import has_visible_content
 
 
@@ -77,7 +78,11 @@ def create_auth_router() -> APIRouter:
     router = APIRouter(prefix="/api/auth", tags=["auth"])
 
     @router.post("/login", response_model=TokenResponse)
-    async def login(body: LoginRequest, request: Request) -> TokenResponse:
+    async def login(
+        body: LoginRequest,
+        request: Request,
+        _rate_limit: None = Depends(check_auth_rate_limit),
+    ) -> TokenResponse:
         """Authenticate with username/password (local auth only).
 
         login() is synchronous (bcrypt is intentionally slow ~200ms),
@@ -100,7 +105,11 @@ def create_auth_router() -> APIRouter:
         return TokenResponse(access_token=token)
 
     @router.post("/register", response_model=TokenResponse)
-    async def register(body: RegisterRequest, request: Request) -> TokenResponse:
+    async def register(
+        body: RegisterRequest,
+        request: Request,
+        _rate_limit: None = Depends(check_auth_rate_limit),
+    ) -> TokenResponse:
         """Register a new user account (local auth, open registration only).
 
         Creates the user with bcrypt-hashed password (offloaded to a thread),

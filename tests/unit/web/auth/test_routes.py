@@ -23,6 +23,8 @@ _ENTRA_FIELDS = {**_OIDC_FIELDS, "entra_tenant_id": "test-tenant-id"}
 
 def _create_test_app(provider, auth_provider_type: str = "local", **settings_overrides) -> FastAPI:
     """Create a FastAPI app with auth routes for testing."""
+    from elspeth.web.middleware.rate_limit import ComposerRateLimiter
+
     app = FastAPI()
     app.state.auth_provider = provider
     app.state.settings = WebSettings(
@@ -34,6 +36,8 @@ def _create_test_app(provider, auth_provider_type: str = "local", **settings_ove
         **settings_overrides,
     )
     app.state.oidc_authorization_endpoint = None
+    # Auth rate limiter — generous limit for tests that aren't testing rate limiting
+    app.state.auth_rate_limiter = ComposerRateLimiter(limit=100)
     router = create_auth_router()
     app.include_router(router)
     return app
@@ -465,3 +469,70 @@ class TestRegisterRequestValidation:
     def test_accepts_normal_registration(self) -> None:
         req = RegisterRequest(username="alice", password="password123", display_name="Alice")
         assert req.username == "alice"
+
+
+class TestAuthRateLimiting:
+    """Tests that auth endpoints are rate-limited by client IP."""
+
+    def test_login_returns_429_when_rate_limited(self, tmp_path) -> None:
+        """Login returns 429 after exceeding per-IP rate limit."""
+        from elspeth.web.middleware.rate_limit import ComposerRateLimiter
+
+        provider = LocalAuthProvider(db_path=tmp_path / "auth.db", secret_key="test-key")
+        provider.create_user("alice", "password123", display_name="Alice")
+        app = _create_test_app(provider)
+        # Override with a very low limit
+        app.state.auth_rate_limiter = ComposerRateLimiter(limit=2)
+        client = TestClient(app)
+
+        # First two requests should succeed
+        for _ in range(2):
+            resp = client.post("/api/auth/login", json={"username": "alice", "password": "password123"})
+            assert resp.status_code == 200
+
+        # Third request should be rate-limited
+        resp = client.post("/api/auth/login", json={"username": "alice", "password": "password123"})
+        assert resp.status_code == 429
+        assert "Retry-After" in resp.headers
+
+    def test_register_returns_429_when_rate_limited(self, tmp_path) -> None:
+        """Register returns 429 after exceeding per-IP rate limit."""
+        from elspeth.web.middleware.rate_limit import ComposerRateLimiter
+
+        provider = LocalAuthProvider(db_path=tmp_path / "auth.db", secret_key="test-key")
+        app = _create_test_app(provider)
+        app.state.auth_rate_limiter = ComposerRateLimiter(limit=1)
+        client = TestClient(app)
+
+        # First registration should succeed
+        resp = client.post(
+            "/api/auth/register",
+            json={"username": "user1", "password": "password123", "display_name": "User 1"},
+        )
+        assert resp.status_code == 200
+
+        # Second registration should be rate-limited (regardless of different username)
+        resp = client.post(
+            "/api/auth/register",
+            json={"username": "user2", "password": "password123", "display_name": "User 2"},
+        )
+        assert resp.status_code == 429
+
+    def test_auth_rate_limit_independent_from_composer(self, tmp_path) -> None:
+        """Auth and composer rate limiters are separate instances."""
+        from elspeth.web.middleware.rate_limit import ComposerRateLimiter
+
+        provider = LocalAuthProvider(db_path=tmp_path / "auth.db", secret_key="test-key")
+        provider.create_user("alice", "password123", display_name="Alice")
+        app = _create_test_app(provider)
+        # Auth limiter at 1, composer limiter stays at default (100)
+        app.state.auth_rate_limiter = ComposerRateLimiter(limit=1)
+        client = TestClient(app)
+
+        # Exhaust auth limit
+        resp = client.post("/api/auth/login", json={"username": "alice", "password": "password123"})
+        assert resp.status_code == 200
+
+        # Second should be rate-limited
+        resp = client.post("/api/auth/login", json={"username": "alice", "password": "password123"})
+        assert resp.status_code == 429

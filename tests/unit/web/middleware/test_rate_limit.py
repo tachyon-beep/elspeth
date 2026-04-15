@@ -12,6 +12,29 @@ from fastapi import HTTPException
 from elspeth.web.middleware.rate_limit import ComposerRateLimiter
 
 
+class TestRateLimiterConstruction:
+    """Tests that the rate limiter can be constructed in sync context."""
+
+    def test_construction_without_running_event_loop(self) -> None:
+        """ComposerRateLimiter must be constructable in synchronous code.
+
+        Regression test for elspeth-7760c5f5c6: asyncio.Lock() in __init__
+        crashes on Python 3.12+ when no event loop is running. The fix uses
+        lazy initialization — _locks_lock is None until first async use.
+        """
+        # This is a plain def (not async def), so no event loop is running.
+        limiter = ComposerRateLimiter(limit=10)
+        assert limiter._locks_lock is None
+
+    @pytest.mark.asyncio
+    async def test_lazy_lock_created_on_first_use(self) -> None:
+        """_locks_lock is created on the first call to check()."""
+        limiter = ComposerRateLimiter(limit=10)
+        assert limiter._locks_lock is None
+        await limiter.check("user_1")
+        assert limiter._locks_lock is not None
+
+
 class TestRateLimiterAllow:
     """Tests that requests within the limit are allowed."""
 
@@ -83,6 +106,103 @@ class TestRateLimiterConcurrentUsers:
             await limiter.check("user_1")
         # user_2 is not affected
         await limiter.check("user_2")
+
+
+class TestRateLimiterSweep:
+    """Tests that stale entries are evicted by the periodic sweep."""
+
+    @pytest.mark.asyncio
+    async def test_sweep_removes_stale_entries(self) -> None:
+        """Users with expired timestamps are evicted after sweep interval."""
+        limiter = ComposerRateLimiter(limit=5)
+        # Simulate old activity from an inactive user
+        old_ts = time.monotonic() - 120.0  # 2 minutes ago (past 60s window)
+        limiter._buckets["stale_user"] = [old_ts]
+        limiter._user_locks["stale_user"] = asyncio.Lock()
+        # Force sweep by setting last_sweep far in the past
+        limiter._last_sweep = 0.0
+        # Trigger sweep via a check for a different user
+        await limiter.check("active_user")
+        # Stale user should be evicted
+        assert "stale_user" not in limiter._buckets
+        assert "stale_user" not in limiter._user_locks
+        # Active user should still be present
+        assert "active_user" in limiter._buckets
+
+    @pytest.mark.asyncio
+    async def test_sweep_removes_empty_buckets(self) -> None:
+        """Users with empty bucket lists are evicted."""
+        limiter = ComposerRateLimiter(limit=5)
+        limiter._buckets["ghost_user"] = []
+        limiter._user_locks["ghost_user"] = asyncio.Lock()
+        limiter._last_sweep = 0.0
+        await limiter.check("active_user")
+        assert "ghost_user" not in limiter._buckets
+        assert "ghost_user" not in limiter._user_locks
+
+    @pytest.mark.asyncio
+    async def test_sweep_preserves_active_entries(self) -> None:
+        """Users with recent timestamps survive sweep."""
+        limiter = ComposerRateLimiter(limit=5)
+        await limiter.check("active_user")
+        limiter._last_sweep = 0.0  # Force sweep on next check
+        await limiter.check("active_user")
+        assert "active_user" in limiter._buckets
+
+    @pytest.mark.asyncio
+    async def test_sweep_skips_when_interval_not_elapsed(self) -> None:
+        """Sweep does not run when interval hasn't elapsed."""
+        limiter = ComposerRateLimiter(limit=5)
+        old_ts = time.monotonic() - 120.0
+        limiter._buckets["stale_user"] = [old_ts]
+        limiter._user_locks["stale_user"] = asyncio.Lock()
+        limiter._last_sweep = time.monotonic()  # Just swept
+        await limiter.check("other_user")
+        # Stale user should NOT be evicted (sweep interval not elapsed)
+        assert "stale_user" in limiter._buckets
+
+    @pytest.mark.asyncio
+    async def test_sweep_boundary_exact_cutoff_evicts(self) -> None:
+        """A bucket whose last entry is exactly at the cutoff is evicted."""
+        limiter = ComposerRateLimiter(limit=5)
+        # Place timestamp exactly at the window boundary
+        boundary_ts = time.monotonic() - ComposerRateLimiter._WINDOW_SECONDS
+        limiter._buckets["boundary_user"] = [boundary_ts]
+        limiter._user_locks["boundary_user"] = asyncio.Lock()
+        limiter._last_sweep = 0.0
+        await limiter.check("trigger_user")
+        # <= means exactly-at-cutoff IS evicted
+        assert "boundary_user" not in limiter._buckets
+
+    @pytest.mark.asyncio
+    async def test_sweep_preserves_bucket_with_recent_last_entry(self) -> None:
+        """A bucket with old + recent entries survives (last entry is recent)."""
+        limiter = ComposerRateLimiter(limit=5)
+        old_ts = time.monotonic() - 120.0
+        recent_ts = time.monotonic()
+        limiter._buckets["mixed_user"] = [old_ts, recent_ts]
+        limiter._user_locks["mixed_user"] = asyncio.Lock()
+        limiter._last_sweep = 0.0
+        await limiter.check("trigger_user")
+        # Last entry is recent — user survives sweep
+        assert "mixed_user" in limiter._buckets
+
+    @pytest.mark.asyncio
+    async def test_swept_user_re_acquires_lock_on_next_check(self) -> None:
+        """After being swept, a user's next check() recreates lock and bucket."""
+        limiter = ComposerRateLimiter(limit=5)
+        old_ts = time.monotonic() - 120.0
+        limiter._buckets["returning_user"] = [old_ts]
+        limiter._user_locks["returning_user"] = asyncio.Lock()
+        limiter._last_sweep = 0.0
+        # First check triggers sweep, evicting returning_user
+        await limiter.check("other_user")
+        assert "returning_user" not in limiter._buckets
+        # Now returning_user makes a new request — should work normally
+        limiter._last_sweep = time.monotonic()  # Prevent re-sweep
+        await limiter.check("returning_user")
+        assert "returning_user" in limiter._buckets
+        assert "returning_user" in limiter._user_locks
 
 
 class TestRateLimiterPerUserLocks:

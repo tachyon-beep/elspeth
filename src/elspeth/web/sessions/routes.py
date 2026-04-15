@@ -279,7 +279,14 @@ def create_session_router() -> APIRouter:
                 detail="Cannot delete session while a pipeline run is active. Cancel the run first.",
             )
 
-        await service.archive_session(session.id)
+        try:
+            await service.archive_session(session.id)
+        finally:
+            # Clean up ephemeral per-session state regardless of archive outcome.
+            # If archive fails, the session still exists and a retry will re-enter
+            # this path. The lock cleanup is idempotent (pop with default).
+            execution_service = request.app.state.execution_service
+            execution_service.cleanup_session_lock(str(session.id))
 
     @router.post(
         "/{session_id}/messages",

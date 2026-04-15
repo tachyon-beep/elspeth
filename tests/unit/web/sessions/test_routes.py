@@ -87,9 +87,15 @@ def _make_app(
     # must replace it with a mock before sending requests.
     app.state.composer_service = None
 
+    from unittest.mock import MagicMock
+
     from elspeth.web.middleware.rate_limit import ComposerRateLimiter
 
     app.state.rate_limiter = ComposerRateLimiter(limit=100)
+
+    # Minimal mock for execution service — delete_session calls
+    # cleanup_session_lock() after archiving.
+    app.state.execution_service = MagicMock()
 
     router = create_session_router()
     app.include_router(router)
@@ -167,6 +173,9 @@ class TestSessionCRUDRoutes:
 
         del_resp = client.delete(f"/api/sessions/{session_id}")
         assert del_resp.status_code == 204
+
+        # Verify cleanup_session_lock was called with the correct session ID
+        app.state.execution_service.cleanup_session_lock.assert_called_once_with(session_id)
 
         # Verify it's gone
         get_resp = client.get(f"/api/sessions/{session_id}")

@@ -296,8 +296,16 @@ def create_app(settings: WebSettings | None = None) -> FastAPI:
     app.state.composer_availability = app.state.composer_service.get_availability()
 
     # --- Rate limiter (per-process in-memory) ---
+    # ComposerRateLimiter is safe to construct in sync context because
+    # _locks_lock is lazily created on first async use (Python 3.12+
+    # requires asyncio.Lock() inside a running event loop).
     app.state.rate_limiter = ComposerRateLimiter(
         limit=settings.composer_rate_limit_per_minute,
+    )
+
+    # --- Auth rate limiter (per-IP, unauthenticated endpoints) ---
+    app.state.auth_rate_limiter = ComposerRateLimiter(
+        limit=settings.auth_rate_limit_per_minute,
     )
 
     # --- Multi-worker enforcement (W10 -> R6) ---

@@ -1742,3 +1742,31 @@ class TestTerminalOrderingInvariant:
             "not 'completed' followed by 'cancelled'."
         )
         assert terminals[0] == "cancelled", f"Terminal should be 'cancelled' (DB is authoritative), got '{terminals[0]}'."
+
+
+# ── Session Lock Cleanup ──────────────────────────────────────────────
+
+
+class TestSessionLockCleanup:
+    """Tests that cleanup_session_lock removes per-session asyncio.Lock entries."""
+
+    def test_cleanup_removes_existing_lock(self, service: ExecutionServiceImpl) -> None:
+        """cleanup_session_lock removes the lock for a known session."""
+        session_id = str(uuid4())
+        service._session_locks[session_id] = asyncio.Lock()
+        service.cleanup_session_lock(session_id)
+        assert session_id not in service._session_locks
+
+    def test_cleanup_noop_for_unknown_session(self, service: ExecutionServiceImpl) -> None:
+        """cleanup_session_lock is a no-op for an unknown session."""
+        service.cleanup_session_lock("nonexistent")  # Should not raise
+
+    def test_cleanup_does_not_affect_other_sessions(self, service: ExecutionServiceImpl) -> None:
+        """Cleaning up one session leaves other sessions' locks intact."""
+        session_a = str(uuid4())
+        session_b = str(uuid4())
+        service._session_locks[session_a] = asyncio.Lock()
+        service._session_locks[session_b] = asyncio.Lock()
+        service.cleanup_session_lock(session_a)
+        assert session_a not in service._session_locks
+        assert session_b in service._session_locks

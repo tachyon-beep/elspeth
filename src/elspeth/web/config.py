@@ -34,6 +34,7 @@ class WebSettings(BaseModel):
     composer_max_discovery_turns: int = Field(..., ge=1)
     composer_timeout_seconds: float = Field(..., gt=0)
     composer_rate_limit_per_minute: int = Field(..., ge=1)
+    auth_rate_limit_per_minute: int = Field(default=20, ge=1)
     secret_key: str = (
         "change-me-in-production"  # Security rule S3 (seam-contracts.md): Sub-2 startup guard enforces non-default in production
     )

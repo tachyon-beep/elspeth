@@ -110,7 +110,8 @@ class ExecutionServiceImpl:
         self._shutdown_events: dict[str, threading.Event] = {}
         self._shutdown_events_lock = threading.Lock()
         # Per-session asyncio lock to prevent TOCTOU on the active-run check.
-        # Keyed by session_id string; lazily created, never cleaned up (lightweight).
+        # Keyed by session_id string; lazily created, cleaned up on session
+        # deletion via cleanup_session_lock().
         self._session_locks: dict[str, asyncio.Lock] = {}
 
     def _call_async(self, coro: Coroutine[Any, Any, T]) -> T:
@@ -143,6 +144,14 @@ class ExecutionServiceImpl:
         """
         with self._shutdown_events_lock:
             return frozenset(self._shutdown_events)
+
+    def cleanup_session_lock(self, session_id: str) -> None:
+        """Remove the per-session asyncio lock for a deleted session.
+
+        Called from the delete_session route after archive_session()
+        completes. Matches the ProgressBroadcaster.cleanup_run() pattern.
+        """
+        self._session_locks.pop(session_id, None)
 
     def shutdown(self) -> None:
         """Shut down the thread pool. Called during app shutdown.
