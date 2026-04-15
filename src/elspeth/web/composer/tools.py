@@ -328,8 +328,8 @@ def get_tool_definitions() -> list[dict[str, Any]]:
                     "options": {"type": "object", "description": "Plugin-specific config."},
                     "on_validation_failure": {
                         "type": "string",
-                        "enum": ["discard", "quarantine"],
-                        "description": "How to handle validation failures.",
+                        "description": "How to handle validation failures. Use 'discard' to drop invalid rows, "
+                        "'quarantine' for the built-in quarantine sink, or a sink name to divert failed rows.",
                     },
                 },
                 "required": ["plugin", "on_success", "options", "on_validation_failure"],
@@ -546,7 +546,8 @@ def get_tool_definitions() -> list[dict[str, Any]]:
                             "on_success": {"type": "string"},
                             "on_validation_failure": {
                                 "type": "string",
-                                "enum": ["quarantine", "discard"],
+                                "description": "How to handle validation failures. Use 'discard' to drop invalid rows, "
+                                "'quarantine' for the built-in quarantine sink, or a sink name to divert failed rows.",
                             },
                         },
                         "required": ["plugin", "options", "on_success"],
@@ -717,8 +718,8 @@ def get_tool_definitions() -> list[dict[str, Any]]:
                     "on_success": {"type": "string", "description": "Node ID to route rows to after source."},
                     "on_validation_failure": {
                         "type": "string",
-                        "enum": ["quarantine", "discard"],
-                        "description": "How to handle validation failures.",
+                        "description": "How to handle validation failures. Use 'discard' to drop invalid rows, "
+                        "'quarantine' for the built-in quarantine sink, or a sink name to divert failed rows.",
                         "default": "quarantine",
                     },
                     "options": {

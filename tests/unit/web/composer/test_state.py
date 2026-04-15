@@ -742,12 +742,12 @@ class TestStage1Validation:
             version=1,
         )
 
-    def _make_source(self, on_success: str = "t1") -> SourceSpec:
+    def _make_source(self, on_success: str = "t1", on_validation_failure: str = "quarantine") -> SourceSpec:
         return SourceSpec(
             plugin="csv",
             on_success=on_success,
             options={},
-            on_validation_failure="quarantine",
+            on_validation_failure=on_validation_failure,
         )
 
     def _make_transform(self, id: str, input: str, on_success: str) -> NodeSpec:
@@ -1451,6 +1451,44 @@ class TestStage1Validation:
         result = state.validate()
         assert not any("on_write_failure" in w.message for w in result.warnings)
 
+    # --- W8: on_validation_failure reference validation ---
+
+    def test_validate_on_validation_failure_nonexistent_output_warns(self) -> None:
+        """W8: on_validation_failure references output that doesn't exist."""
+        state = self._empty_state()
+        state = state.with_source(self._make_source(on_success="t1", on_validation_failure="nonexistent_sink"))
+        state = state.with_node(self._make_transform("t1", "t1", "main"))
+        state = state.with_output(OutputSpec(name="main", plugin="csv", options={"path": "/out.csv"}, on_write_failure="discard"))
+        state = state.with_edge(self._make_edge("e1", "source", "t1"))
+        state = state.with_edge(self._make_edge("e2", "t1", "main"))
+        result = state.validate()
+        assert any("not a configured output" in w.message for w in result.warnings)
+
+    def test_validate_on_validation_failure_discard_no_warning(self) -> None:
+        """W8: on_validation_failure='discard' is always valid, no warning."""
+        state = self._empty_state()
+        state = state.with_source(self._make_source(on_success="t1", on_validation_failure="discard"))
+        state = state.with_node(self._make_transform("t1", "t1", "main"))
+        state = state.with_output(OutputSpec(name="main", plugin="csv", options={"path": "/out.csv"}, on_write_failure="discard"))
+        state = state.with_edge(self._make_edge("e1", "source", "t1"))
+        state = state.with_edge(self._make_edge("e2", "t1", "main"))
+        result = state.validate()
+        assert not any("on_validation_failure" in w.message for w in result.warnings)
+
+    def test_validate_on_validation_failure_valid_output_no_warning(self) -> None:
+        """W8: on_validation_failure references a valid output, no warning."""
+        state = self._empty_state()
+        state = state.with_source(self._make_source(on_success="t1", on_validation_failure="quarantine"))
+        state = state.with_node(self._make_transform("t1", "t1", "main"))
+        state = state.with_output(OutputSpec(name="main", plugin="csv", options={"path": "/out.csv"}, on_write_failure="discard"))
+        state = state.with_output(
+            OutputSpec(name="quarantine", plugin="csv", options={"path": "/quarantine.csv"}, on_write_failure="discard")
+        )
+        state = state.with_edge(self._make_edge("e1", "source", "t1"))
+        state = state.with_edge(self._make_edge("e2", "t1", "main"))
+        result = state.validate()
+        assert not any("on_validation_failure" in w.message for w in result.warnings)
+
     # --- Suggestion rules (S1-S3) ---
 
     def test_validate_no_error_routing_suggests(self) -> None:
@@ -1571,8 +1609,12 @@ class TestStage1Validation:
         # Use properly configured outputs with paths (W6 semantic completeness)
         main_output = OutputSpec(name="main", plugin="csv", options={"path": "outputs/main.csv"}, on_write_failure="discard")
         errors_output = OutputSpec(name="errors", plugin="csv", options={"path": "outputs/errors.csv"}, on_write_failure="discard")
+        quarantine_output = OutputSpec(
+            name="quarantine", plugin="csv", options={"path": "outputs/quarantine.csv"}, on_write_failure="discard"
+        )
         state = state.with_output(main_output)
         state = state.with_output(errors_output)
+        state = state.with_output(quarantine_output)
         state = state.with_edge(self._make_edge("e1", "source", "t1"))
         state = state.with_edge(self._make_edge("e2", "t1", "gate_1"))
         state = state.with_edge(self._make_edge("e3", "gate_1", "main"))
@@ -1601,6 +1643,7 @@ class TestSchemaContractValidation:
         on_success: str = "t1",
         plugin: str = "csv",
         options: dict[str, Any] | None = None,
+        on_validation_failure: str = "quarantine",
     ) -> SourceSpec:
         opts = dict(options or {})
         if plugin == "csv":
@@ -1611,7 +1654,7 @@ class TestSchemaContractValidation:
             plugin=plugin,
             on_success=on_success,
             options=opts,
-            on_validation_failure="quarantine",
+            on_validation_failure=on_validation_failure,
         )
 
     def _make_transform(

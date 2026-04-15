@@ -7,12 +7,6 @@ from typing import Any
 from elspeth.contracts.plugin_protocols import PluginConfigProtocol
 from elspeth.plugins.infrastructure.discovery import get_plugin_description
 from elspeth.plugins.infrastructure.manager import PluginManager
-from elspeth.plugins.infrastructure.validation import (
-    UnknownPluginTypeError,
-    get_sink_config_model,
-    get_source_config_model,
-    get_transform_config_model,
-)
 from elspeth.web.catalog.schemas import (
     ConfigFieldSummary,
     PluginSchemaInfo,
@@ -134,23 +128,21 @@ class CatalogServiceImpl:
     def _resolve_config_model(self, plugin_type: str, name: str) -> type[PluginConfigProtocol] | None:
         """Resolve plugin name to its Pydantic config model class.
 
-        Returns None for plugins with no config model. This includes both
-        intentionally config-less plugins (e.g., null source, where the
-        validator returns None) and plugins whose config model is not yet
-        wired into validation module's dispatch functions (e.g., dataverse).
-        The validator raises UnknownPluginTypeError for the latter case.
+        Uses the injected PluginManager (not the global shared singleton)
+        so that catalogs built from non-shared managers see their own
+        plugin set.
+
+        Returns None for plugins with no config model (e.g., null source,
+        where ``get_config_model()`` returns None).
         """
-        try:
-            if plugin_type == "source":
-                return get_source_config_model(name)
-            elif plugin_type == "transform":
-                return get_transform_config_model(name)
-            elif plugin_type == "sink":
-                return get_sink_config_model(name)
-            else:
-                raise ValueError(f"Bug: _resolve_config_model called with invalid plugin_type: {plugin_type!r}")
-        except UnknownPluginTypeError:
-            return None
+        if plugin_type == "source":
+            return self._pm.get_source_by_name(name).get_config_model()
+        elif plugin_type == "transform":
+            return self._pm.get_transform_by_name(name).get_config_model()
+        elif plugin_type == "sink":
+            return self._pm.get_sink_by_name(name).get_config_model()
+        else:
+            raise ValueError(f"Bug: _resolve_config_model called with invalid plugin_type: {plugin_type!r}")
 
     def _get_json_schema(self, plugin_type: str, name: str) -> dict[str, Any]:
         """Get full JSON schema for a plugin's config model."""

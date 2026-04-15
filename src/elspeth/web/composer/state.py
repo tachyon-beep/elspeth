@@ -1106,8 +1106,18 @@ class CompositionState:
         # Edges are UI-only — generate_yaml() uses only connection fields,
         # so an edge to a sink without a matching connection field is a
         # false positive for reachability.
+        #
+        # Also count implicit engine-level routes: on_validation_failure
+        # and on_write_failure route data to outputs without explicit
+        # connection fields.
+        implicit_targets: set[str] = set()
+        if self.source is not None and self.source.on_validation_failure != "discard":
+            implicit_targets.add(self.source.on_validation_failure)
         for output in self.outputs:
-            if output.name not in connection_targets:
+            if output.on_write_failure != "discard":
+                implicit_targets.add(output.on_write_failure)
+        for output in self.outputs:
+            if output.name not in connection_targets and output.name not in implicit_targets:
                 warnings.append(
                     _warn(
                         f"output:{output.name}",
@@ -1271,6 +1281,21 @@ class CompositionState:
                         f"output:{output.name}",
                         f"Output '{output.name}' on_write_failure references '{dest}', but '{dest}' has on_write_failure='{target.on_write_failure}' — failsink targets must use 'discard' (no chains).",
                         "medium",
+                    )
+                )
+
+        # W8: Source on_validation_failure reference validation
+        # Mirrors rules from engine/orchestrator/validation.py so LLMs get
+        # early feedback instead of failing at pipeline build time.
+        if self.source is not None:
+            vf_dest = self.source.on_validation_failure
+            if vf_dest != "discard" and vf_dest not in output_name_set:
+                warnings.append(
+                    _warn(
+                        "source",
+                        f"Source on_validation_failure references '{vf_dest}' which is not a configured output — "
+                        "validation failures will cause a pipeline build error.",
+                        "high",
                     )
                 )
 

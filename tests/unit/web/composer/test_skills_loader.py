@@ -5,13 +5,14 @@ Verifies:
 - load_skill raises FileNotFoundError for missing skills
 - load_deployment_skill returns "" when data_dir is None
 - load_deployment_skill returns "" when skill file does not exist
-- load_deployment_skill returns "" on OSError (permissions, directory)
+- load_deployment_skill raises on PermissionError/IsADirectoryError (operator misconfiguration)
 - load_deployment_skill returns content when skill file exists
 - load_deployment_skill rejects oversized files with ValueError
 """
 
 from __future__ import annotations
 
+import os
 from pathlib import Path
 
 import pytest
@@ -73,15 +74,27 @@ class TestLoadDeploymentSkill:
         result = load_deployment_skill("pipeline_composer", tmp_path)
         assert result == ""
 
-    def test_returns_empty_when_path_is_directory(self, tmp_path: Path) -> None:
-        """If the skill 'file' is actually a directory, return "" (OSError)."""
+    def test_raises_when_path_is_directory(self, tmp_path: Path) -> None:
+        """If the skill 'file' is actually a directory, crash — operator misconfiguration."""
         skills_dir = tmp_path / "skills"
         skills_dir.mkdir()
         # Create a directory where the file should be.
         (skills_dir / "pipeline_composer.md").mkdir()
 
-        result = load_deployment_skill("pipeline_composer", tmp_path)
-        assert result == ""
+        with pytest.raises(IsADirectoryError):
+            load_deployment_skill("pipeline_composer", tmp_path)
+
+    @pytest.mark.skipif(os.geteuid() == 0, reason="root ignores file permissions")
+    def test_raises_on_permission_error(self, tmp_path: Path) -> None:
+        """Unreadable skill file must crash — not silently degrade to no overlay."""
+        skills_dir = tmp_path / "skills"
+        skills_dir.mkdir()
+        skill_file = skills_dir / "pipeline_composer.md"
+        skill_file.write_text("# Should not be readable\n")
+        skill_file.chmod(0o000)
+
+        with pytest.raises(PermissionError):
+            load_deployment_skill("pipeline_composer", tmp_path)
 
     def test_rejects_oversized_file(self, tmp_path: Path) -> None:
         """Files exceeding MAX_DEPLOYMENT_SKILL_BYTES raise ValueError."""

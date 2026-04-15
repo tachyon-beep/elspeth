@@ -4,47 +4,42 @@ allow_hits:
   reason: Tier 3 boundary — plugin_type from URL path parameter, lookup in constant dict
   safety: Returns None on miss, handled by 404 response
   expires: null
-- key: web/catalog/service.py:R6:CatalogServiceImpl:_resolve_config_model:fp=5e0056175f439976
-  owner: web-catalog
-  reason: Expected error path — UnknownPluginTypeError caught and returns None to caller
-  safety: Caller checks None return and skips config extraction; no silent data loss
-  expires: null
-- key: web/catalog/service.py:R1:CatalogServiceImpl:_extract_config_fields:fp=4ff2ba785b505451
+- key: web/catalog/service.py:R1:CatalogServiceImpl:_extract_config_fields:fp=a4fc164d81a7bd32
   owner: web-catalog
   reason: Tier 3 boundary — Pydantic-generated JSON schema 'properties' key may be absent
   safety: Default empty dict; no properties means no config fields
   expires: null
-- key: web/catalog/service.py:R1:CatalogServiceImpl:_extract_config_fields:fp=1f5f1cda6e9c0466
+- key: web/catalog/service.py:R1:CatalogServiceImpl:_extract_config_fields:fp=00c1d258db1f18ce
   owner: web-catalog
   reason: Tier 3 boundary — Pydantic JSON schema 'required' key may be absent
   safety: Default empty list; no required fields
   expires: null
-- key: web/catalog/service.py:R1:CatalogServiceImpl:_extract_config_fields:fp=1de9302972b26a3a
+- key: web/catalog/service.py:R1:CatalogServiceImpl:_extract_config_fields:fp=6da4c2b8bd13866e
   owner: web-catalog
   reason: Tier 3 boundary — JSON schema field 'type' may be absent (e.g. anyOf unions)
   safety: Default 'object'; conservative fallback
   expires: null
-- key: web/catalog/service.py:R1:CatalogServiceImpl:_extract_config_fields:fp=ff5c2a0e7c73ce66
+- key: web/catalog/service.py:R1:CatalogServiceImpl:_extract_config_fields:fp=1fef4e7bbe2af58d
   owner: web-catalog
   reason: Tier 3 boundary — JSON schema anyOf branch may lack 'type'
   safety: Checked before use; null branch skipped
   expires: null
-- key: web/catalog/service.py:R1:CatalogServiceImpl:_extract_config_fields:fp=e3cf8be3854ff16b
+- key: web/catalog/service.py:R1:CatalogServiceImpl:_extract_config_fields:fp=c5c54daa5941fa74
   owner: web-catalog
   reason: Tier 3 boundary — JSON schema branch 'type' checked for null filtering
   safety: Skips null branches; extracts real type from remaining
   expires: null
-- key: web/catalog/service.py:R1:CatalogServiceImpl:_extract_config_fields:fp=eddfe72d549a8215
+- key: web/catalog/service.py:R1:CatalogServiceImpl:_extract_config_fields:fp=f0048b9a822b5637
   owner: web-catalog
   reason: Tier 3 boundary — fallback type extraction from anyOf branch
   safety: Default 'object'; conservative
   expires: null
-- key: web/catalog/service.py:R1:CatalogServiceImpl:_extract_config_fields:fp=4fcdbac964375893
+- key: web/catalog/service.py:R1:CatalogServiceImpl:_extract_config_fields:fp=108c65f165dcf187
   owner: web-catalog
   reason: Tier 3 boundary — JSON schema field 'description' is optional
   safety: Returns None; ConfigFieldInfo.description accepts None
   expires: null
-- key: web/catalog/service.py:R1:CatalogServiceImpl:_extract_config_fields:fp=a288b28b42de381b
+- key: web/catalog/service.py:R1:CatalogServiceImpl:_extract_config_fields:fp=fa7f298d91356d0e
   owner: web-catalog
   reason: Tier 3 boundary — JSON schema field 'default' is optional
   safety: Returns None; ConfigFieldInfo.default accepts None
@@ -570,12 +565,12 @@ allow_hits:
   reason: Tier 3 boundary — persisted blob_ref may be non-UUID string; skip rewrite gracefully
   safety: Falls through to use original ref unchanged
   expires: null
-- key: web/composer/skills/__init__.py:R6:load_deployment_skill:fp=b40811887f05a95b
+- key: web/composer/skills/__init__.py:R6:load_deployment_skill:fp=a7cf6bcf22cab117
   owner: web-composer
-  reason: Deployment skill is optional — OSError (FileNotFoundError, PermissionError, IsADirectoryError) is expected
-    when deployment skill is absent or inaccessible. Operator-controlled filesystem path (Tier 3-like boundary).
-  safety: Returns empty string, not a fabricated default. Core skill always loads (crash on missing). Only the
-    deployment overlay is optional. Size guard rejects oversized files with ValueError.
+  reason: Deployment skill is optional — FileNotFoundError is expected when deployment skill is absent.
+    PermissionError/IsADirectoryError now propagate (operator misconfiguration).
+  safety: Returns empty string for absent file only (not a fabricated default). Core skill always loads
+    (crash on missing). Only the deployment overlay is optional. Size guard rejects oversized files.
   expires: null
 # Group E: blob service Tier 1 read guards — isinstance assertions on COALESCE(SUM()) output
 - key: web/blobs/service.py:R5:BlobServiceImpl:create_blob:_sync:fp=9cd0efcb6f15ae2d

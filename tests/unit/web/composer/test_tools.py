@@ -185,6 +185,30 @@ class TestSetSource:
         assert result.updated_state.version == 2
         assert "source" in result.affected_nodes
 
+    def test_on_validation_failure_accepts_sink_name(self) -> None:
+        """on_validation_failure can be a sink name — not just 'discard'/'quarantine'.
+
+        Regression guard: the tool schema must not constrain on_validation_failure
+        to an enum. The runtime accepts any valid sink name for routing validation
+        failures (e.g. 'bad_rows_sink'). If an enum constraint is re-added, the
+        LLM cannot build source-level failsink routes.
+        """
+        state = _empty_state()
+        catalog = _mock_catalog()
+        result = execute_tool(
+            "set_source",
+            {
+                "plugin": "csv",
+                "on_success": "t1",
+                "options": {"path": "/data/in.csv", "schema": {"mode": "observed"}},
+                "on_validation_failure": "bad_rows_sink",
+            },
+            state,
+            catalog,
+        )
+        assert result.success is True
+        assert result.updated_state.source.on_validation_failure == "bad_rows_sink"
+
     def test_unknown_plugin_fails(self) -> None:
         state = _empty_state()
         catalog = _mock_catalog()
@@ -1071,6 +1095,30 @@ class TestToolDefinitions:
             assert "name" in defn
             assert "description" in defn
             assert "parameters" in defn
+
+    def test_on_validation_failure_has_no_enum_constraint(self) -> None:
+        """Regression: on_validation_failure must accept any sink name, not just enum values.
+
+        The runtime accepts 'discard' or any valid sink name for source
+        validation failure routing.  A hard-coded enum blocks LLMs from
+        building source-level failsink pipelines.
+        """
+        for defn in get_tool_definitions():
+            self._assert_no_enum_on_validation_failure(defn.get("parameters", {}), defn["name"])
+
+    def _assert_no_enum_on_validation_failure(self, schema: dict, tool_name: str) -> None:
+        """Recursively walk a JSON schema and assert no on_validation_failure has enum."""
+        if isinstance(schema, dict):
+            for key, value in schema.items():
+                if key == "on_validation_failure" and isinstance(value, dict):
+                    assert "enum" not in value, (
+                        f"Tool {tool_name!r} constrains on_validation_failure to enum {value.get('enum')} — runtime accepts any sink name"
+                    )
+                elif isinstance(value, (dict, list)):
+                    self._assert_no_enum_on_validation_failure(value, tool_name)
+        elif isinstance(schema, list):
+            for item in schema:
+                self._assert_no_enum_on_validation_failure(item, tool_name)
 
 
 class TestToolResultValidation:

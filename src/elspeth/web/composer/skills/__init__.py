@@ -44,7 +44,7 @@ def load_deployment_skill(name: str, data_dir: str | Path | None = None) -> str:
     """Load an optional deployment-specific skill overlay.
 
     Looks for ``{data_dir}/skills/{name}.md``.  Returns an empty string
-    if the file does not exist, is unreadable, or *data_dir* is ``None``.
+    if the file does not exist or *data_dir* is ``None``.
 
     Raises ``ValueError`` if the file exceeds ``MAX_DEPLOYMENT_SKILL_BYTES``
     — this prevents accidental context window exhaustion from oversized
@@ -56,20 +56,21 @@ def load_deployment_skill(name: str, data_dir: str | Path | None = None) -> str:
             the function returns ``""`` immediately.
 
     Returns:
-        The deployment skill content, or ``""`` if absent/unreadable.
+        The deployment skill content, or ``""`` if absent.
 
     Raises:
         ValueError: If the deployment skill file exceeds the size limit.
+        OSError: If the file exists but cannot be read (e.g.
+            ``PermissionError``, ``IsADirectoryError``).  These indicate
+            operator misconfiguration and must not be silenced.
     """
     if data_dir is None:
         return ""
     path = Path(data_dir) / "skills" / f"{name}.md"
     try:
         content = path.read_text(encoding="utf-8")
-    except OSError:
-        # FileNotFoundError (absent), PermissionError (unreadable),
-        # IsADirectoryError (misconfigured) — all treated as "no
-        # deployment skill available".
+    except FileNotFoundError:
+        # File does not exist — no deployment skill configured.
         return ""
     if len(content.encode("utf-8")) > MAX_DEPLOYMENT_SKILL_BYTES:
         raise ValueError(

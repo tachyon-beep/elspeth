@@ -493,14 +493,21 @@ class ComposerServiceImpl:
         This is critical: the tool-use loop appends to this list during
         iteration. Returning a cached reference would cause cross-turn
         contamination.
+
+        OSError from deployment skill loading (PermissionError,
+        IsADirectoryError) is translated into ComposerServiceError so
+        the route handler returns a structured 502 rather than a raw 500.
         """
-        return build_messages(
-            chat_history=chat_history,
-            state=state,
-            user_message=user_message,
-            catalog=self._catalog,
-            data_dir=self._data_dir,
-        )
+        try:
+            return build_messages(
+                chat_history=chat_history,
+                state=state,
+                user_message=user_message,
+                catalog=self._catalog,
+                data_dir=self._data_dir,
+            )
+        except OSError as exc:
+            raise ComposerServiceError(f"Failed to load deployment skill: {exc}") from exc
 
     def _get_litellm_tools(self) -> list[dict[str, Any]]:
         """Convert tool definitions to LiteLLM function format."""

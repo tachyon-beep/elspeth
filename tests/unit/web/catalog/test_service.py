@@ -187,3 +187,32 @@ class TestGetSchema:
     def test_unknown_name_includes_available(self, catalog: CatalogServiceImpl) -> None:
         with pytest.raises(ValueError, match="Available:"):
             catalog.get_schema("source", "nonexistent_plugin_xyz")
+
+
+class TestTransformConfigVisibility:
+    """Regression: transforms with config models must expose config fields.
+
+    Prior bug: _resolve_config_model() caught UnknownPluginTypeError and
+    returned None, silently downgrading transforms like type_coerce and
+    value_transform to "no config" in the catalog.
+    """
+
+    def test_type_coerce_has_config_fields(self, catalog: CatalogServiceImpl) -> None:
+        transforms = catalog.list_transforms()
+        entry = next((t for t in transforms if t.name == "type_coerce"), None)
+        assert entry is not None, "type_coerce not found in registered transforms"
+        assert len(entry.config_fields) > 0
+
+    def test_value_transform_has_config_fields(self, catalog: CatalogServiceImpl) -> None:
+        transforms = catalog.list_transforms()
+        entry = next((t for t in transforms if t.name == "value_transform"), None)
+        assert entry is not None, "value_transform not found in registered transforms"
+        assert len(entry.config_fields) > 0
+
+    def test_type_coerce_schema_has_properties(self, catalog: CatalogServiceImpl) -> None:
+        info = catalog.get_schema("transform", "type_coerce")
+        assert "properties" in info.json_schema
+
+    def test_value_transform_schema_has_properties(self, catalog: CatalogServiceImpl) -> None:
+        info = catalog.get_schema("transform", "value_transform")
+        assert "properties" in info.json_schema
