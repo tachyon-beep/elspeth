@@ -377,7 +377,8 @@ class TestDeleteBlob:
 
         _execute_locked() creates the run record before link_blob_to_run()
         inserts the link row.  During that gap, the explicit-link guard sees
-        nothing.  The session-level active-run guard must block deletion anyway.
+        nothing.  The composition-state guard must block deletion because
+        the run's source references this blob via blob_ref.
         """
         from elspeth.web.sessions.models import (
             composition_states_table,
@@ -402,6 +403,12 @@ class TestDeleteBlob:
                     id=state_id,
                     session_id=session_id_str,
                     version=1,
+                    # Source references this blob via blob_ref — the run is
+                    # about to link it once link_blob_to_run() fires.
+                    source={
+                        "plugin": "csv",
+                        "options": {"blob_ref": str(record.id), "path": str(record.storage_path)},
+                    },
                     is_valid=True,
                     created_at=datetime(2026, 1, 1, tzinfo=UTC),
                 )
@@ -418,6 +425,121 @@ class TestDeleteBlob:
                 )
             )
             # Deliberately NO blob_run_links row — simulating the pre-link window
+
+        with pytest.raises(BlobActiveRunError):
+            await blob_service.delete_blob(record.id)
+
+    @pytest.mark.asyncio
+    async def test_delete_blob_allows_when_active_run_uses_different_source(self, blob_service, session_id, db_engine) -> None:
+        """Active run using source.path (no blob_ref) must not block unrelated blob deletion.
+
+        Regression test: the original session-level guard blocked ALL blobs
+        when ANY run was active, even if that run used a file-path source
+        with no blob_ref.  The scoped guard checks the composition state's
+        source.options.blob_ref and only blocks if it matches this blob.
+        """
+        from elspeth.web.sessions.models import (
+            composition_states_table,
+            runs_table,
+        )
+
+        record = await blob_service.create_blob(
+            session_id=session_id,
+            filename="unrelated.csv",
+            content=b"not used by run",
+            mime_type="text/csv",
+            created_by="user",
+        )
+
+        state_id = str(uuid4())
+        session_id_str = str(session_id)
+        run_id = str(uuid4())
+
+        with db_engine.begin() as conn:
+            conn.execute(
+                composition_states_table.insert().values(
+                    id=state_id,
+                    session_id=session_id_str,
+                    version=1,
+                    # Source uses file path, NOT blob_ref — run is unrelated
+                    # to the blob being deleted.
+                    source={
+                        "plugin": "csv",
+                        "options": {"path": "/data/external/other.csv"},
+                    },
+                    is_valid=True,
+                    created_at=datetime(2026, 1, 1, tzinfo=UTC),
+                )
+            )
+            conn.execute(
+                runs_table.insert().values(
+                    id=run_id,
+                    session_id=session_id_str,
+                    state_id=state_id,
+                    status="pending",
+                    started_at=datetime(2026, 1, 1, tzinfo=UTC),
+                    rows_processed=0,
+                    rows_failed=0,
+                )
+            )
+
+        # Should succeed — active run does not reference this blob
+        await blob_service.delete_blob(record.id)
+
+        with pytest.raises(BlobNotFoundError):
+            await blob_service.get_blob(record.id)
+
+    @pytest.mark.asyncio
+    async def test_delete_blob_rejects_when_active_run_path_matches_storage(self, blob_service, session_id, db_engine) -> None:
+        """Active run using source.path matching this blob's storage_path must block.
+
+        A run can read a blob's backing file via plain set_source with
+        options.path (no blob_ref).  The guard must check path/file matches
+        in addition to blob_ref.
+        """
+        from elspeth.web.sessions.models import (
+            composition_states_table,
+            runs_table,
+        )
+
+        record = await blob_service.create_blob(
+            session_id=session_id,
+            filename="path-backed.csv",
+            content=b"path match",
+            mime_type="text/csv",
+            created_by="user",
+        )
+
+        state_id = str(uuid4())
+        session_id_str = str(session_id)
+        run_id = str(uuid4())
+
+        with db_engine.begin() as conn:
+            conn.execute(
+                composition_states_table.insert().values(
+                    id=state_id,
+                    session_id=session_id_str,
+                    version=1,
+                    # Source references this blob via path, NOT blob_ref.
+                    source={
+                        "plugin": "csv",
+                        "options": {"path": record.storage_path},
+                    },
+                    is_valid=True,
+                    created_at=datetime(2026, 1, 1, tzinfo=UTC),
+                )
+            )
+            conn.execute(
+                runs_table.insert().values(
+                    id=run_id,
+                    session_id=session_id_str,
+                    state_id=state_id,
+                    status="pending",
+                    started_at=datetime(2026, 1, 1, tzinfo=UTC),
+                    rows_processed=0,
+                    rows_failed=0,
+                )
+            )
 
         with pytest.raises(BlobActiveRunError):
             await blob_service.delete_blob(record.id)

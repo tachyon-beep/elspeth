@@ -15,12 +15,13 @@ from elspeth.web.catalog.schemas import (
     PluginSchemaInfo,
     PluginSummary,
 )
-from elspeth.web.composer.protocol import ComposerConvergenceError, ComposerResult
+from elspeth.web.composer.protocol import ComposerConvergenceError, ComposerResult, ComposerServiceError
 from elspeth.web.composer.service import ComposerServiceImpl
 from elspeth.web.composer.state import (
     CompositionState,
     PipelineMetadata,
 )
+from elspeth.web.composer.tools import ToolResult
 from elspeth.web.config import WebSettings
 
 
@@ -943,3 +944,199 @@ class TestPartialStatePreservation:
                 await service.compose("Just looking", [], state)
 
             assert exc_info.value.partial_state is None
+
+
+class TestEmptyChoicesValidation:
+    """Tier 3 boundary: LiteLLM can return empty choices."""
+
+    @pytest.mark.asyncio
+    async def test_empty_choices_raises_service_error(self) -> None:
+        """LiteLLM returning empty choices must raise ComposerServiceError.
+
+        Empty choices can occur on content-filter blocks, rate-limit
+        responses, or malformed upstream responses.  Without validation,
+        this causes an IndexError at response.choices[0].message.
+        """
+        catalog = _mock_catalog()
+        settings = _make_settings()
+        service = ComposerServiceImpl(catalog=catalog, settings=settings)
+        state = _empty_state()
+
+        # Patch litellm.acompletion (not _call_llm) so the validation
+        # inside _call_llm is exercised through the production code path.
+        empty_response = FakeLLMResponse(choices=[])
+        with (
+            patch(
+                "elspeth.web.composer.service.litellm.acompletion",
+                new_callable=AsyncMock,
+                return_value=empty_response,
+            ),
+            pytest.raises(ComposerServiceError, match="empty choices"),
+        ):
+            await service.compose("Hello", [], state)
+
+    @pytest.mark.asyncio
+    async def test_empty_choices_on_bonus_turn_raises_service_error(self) -> None:
+        """Empty choices on the bonus turn (budget exhaustion) also raises.
+
+        The bonus turn at composition budget exhaustion goes through the
+        same _call_llm() path, so the validation protects both sites.
+        """
+        catalog = _mock_catalog()
+        # Budget of 1 composition turn — first mutation exhausts it,
+        # then the bonus _call_llm returns empty choices.
+        settings = _make_settings(composer_max_composition_turns=1)
+        service = ComposerServiceImpl(catalog=catalog, settings=settings)
+        state = _empty_state()
+
+        # First call: valid response with a mutation tool call
+        mutation_call = _make_llm_response(
+            tool_calls=[
+                {
+                    "id": "c1",
+                    "name": "set_source",
+                    "arguments": {
+                        "plugin": "csv",
+                        "on_success": "out",
+                        "options": {},
+                        "on_validation_failure": "quarantine",
+                    },
+                }
+            ],
+        )
+        # Second call (bonus turn): empty choices
+        empty_response = FakeLLMResponse(choices=[])
+
+        with (
+            patch(
+                "elspeth.web.composer.service.litellm.acompletion",
+                new_callable=AsyncMock,
+                side_effect=[mutation_call, empty_response],
+            ) as mock_acomp,
+            pytest.raises(ComposerServiceError, match="empty choices"),
+        ):
+            await service.compose("Setup CSV", [], state)
+
+        # Confirm both LLM calls happened — the error is from the bonus
+        # turn (second call), not from a tool handler fault on the first.
+        assert mock_acomp.call_count == 2
+
+
+class TestValueErrorFromToolExecution:
+    """ValueError from execute_tool is Tier 3 — caught, not 500."""
+
+    @pytest.mark.asyncio
+    async def test_value_error_returns_error_to_llm(self) -> None:
+        """ValueError from tool handler is caught and fed back to the LLM.
+
+        Mirrors test_internal_key_error_is_not_swallowed but with the
+        opposite assertion: ValueError is a Tier 3 boundary issue (LLM
+        provided semantically invalid values that passed structural
+        validation), NOT an internal bug.
+        """
+        catalog = _mock_catalog()
+        settings = _make_settings()
+        service = ComposerServiceImpl(catalog=catalog, settings=settings)
+        state = _empty_state()
+
+        # Provide all required arguments so pre-validation passes
+        valid_call = _make_llm_response(
+            tool_calls=[
+                {
+                    "id": "c1",
+                    "name": "set_source",
+                    "arguments": {
+                        "plugin": "csv",
+                        "on_success": "out",
+                        "options": {},
+                        "on_validation_failure": "quarantine",
+                    },
+                }
+            ],
+        )
+        text = _make_llm_response(content="Got it, trying again.")
+
+        with (
+            patch.object(service, "_call_llm", new_callable=AsyncMock) as mock_llm,
+            patch(
+                "elspeth.web.composer.service.execute_tool",
+                side_effect=ValueError("invalid expression syntax"),
+            ),
+        ):
+            mock_llm.side_effect = [valid_call, text]
+            result = await service.compose("Setup", [], state)
+
+        # Compose succeeded — ValueError was caught, not propagated as 500
+        assert isinstance(result, ComposerResult)
+
+        # Verify the error was sent back to the LLM as a tool message
+        second_call_messages = mock_llm.call_args_list[1].args[0]
+        tool_messages = [m for m in second_call_messages if m.get("role") == "tool"]
+        assert len(tool_messages) == 1
+        error_payload = json.loads(tool_messages[0]["content"])
+        assert "invalid expression syntax" in error_payload["error"]
+
+
+class TestToolExecutionThreadOffloading:
+    """execute_tool() must run in a worker thread, not the event loop thread."""
+
+    @pytest.mark.asyncio
+    async def test_tool_execution_runs_off_event_loop_thread(self) -> None:
+        """Verify execute_tool() runs in a worker thread.
+
+        Tool handlers perform synchronous file I/O, DB queries, and path
+        operations that would block the event loop for concurrent users.
+        The correct fix offloads them to the thread pool.
+
+        This test captures the actual thread identity rather than checking
+        whether asyncio.to_thread was called — it tests the behavioral
+        property (event loop not blocked) regardless of the offloading
+        mechanism used.
+        """
+        import threading
+
+        catalog = _mock_catalog()
+        settings = _make_settings()
+        service = ComposerServiceImpl(catalog=catalog, settings=settings)
+        state = _empty_state()
+
+        event_loop_thread = threading.current_thread()
+        tool_execution_thread: threading.Thread | None = None
+
+        def _capture_thread_and_return(
+            _tool_name: str,
+            _arguments: dict[str, Any],
+            current_state: CompositionState,
+            _catalog: Any,
+            **kwargs: Any,
+        ) -> ToolResult:
+            nonlocal tool_execution_thread
+            tool_execution_thread = threading.current_thread()
+            return ToolResult(
+                success=True,
+                updated_state=current_state,
+                validation=current_state.validate(),
+                affected_nodes=(),
+                data={"sources": []},
+            )
+
+        disc_call = _make_llm_response(
+            tool_calls=[{"id": "c1", "name": "list_sources", "arguments": {}}],
+        )
+        text = _make_llm_response(content="Here are the sources.")
+
+        with (
+            patch.object(service, "_call_llm", new_callable=AsyncMock) as mock_llm,
+            patch(
+                "elspeth.web.composer.service.execute_tool",
+                side_effect=_capture_thread_and_return,
+            ),
+        ):
+            mock_llm.side_effect = [disc_call, text]
+            result = await service.compose("List sources", [], state)
+
+        assert result.message == "Here are the sources."
+        assert tool_execution_thread is not None, "execute_tool was never called"
+        assert tool_execution_thread is not event_loop_thread, (
+            "execute_tool ran on the event loop thread — must be offloaded to a worker thread to avoid blocking"
+        )

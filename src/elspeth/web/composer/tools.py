@@ -20,7 +20,7 @@ from uuid import uuid4
 from sqlalchemy import Engine, delete, func, select, update
 
 from elspeth.contracts.freeze import deep_thaw, freeze_fields
-from elspeth.web.blobs.service import content_hash, sanitize_filename
+from elspeth.web.blobs.service import _source_references_blob, content_hash, sanitize_filename
 from elspeth.web.catalog.protocol import CatalogService, PluginKind
 from elspeth.web.composer.redaction import redact_source_storage_path
 from elspeth.web.composer.state import (
@@ -35,7 +35,7 @@ from elspeth.web.composer.state import (
     _validate_gate_expression,
 )
 from elspeth.web.paths import allowed_sink_directories, allowed_source_directories
-from elspeth.web.sessions.models import blob_run_links_table, blobs_table, runs_table
+from elspeth.web.sessions.models import blob_run_links_table, blobs_table, composition_states_table, runs_table
 
 
 def _compute_validation_delta(
@@ -1880,16 +1880,26 @@ def _execute_delete_blob(
         # 2. Pre-link window: _execute_locked() creates the run record before
         #    link_blob_to_run() inserts the blob_run_links row.  During that
         #    gap the explicit-link check above sees nothing, but the backing
-        #    file is about to be needed.  The partial unique index guarantees
-        #    at most one active run per session, so checking for *any* active
-        #    run in this blob's session is both safe and sufficient.
+        #    file is about to be needed.
+        #
+        #    Scoped to THIS blob: join runs → composition_states and check
+        #    whether the active run's source references this blob via
+        #    blob_ref OR via a path/file matching this blob's storage_path.
+        #    Runs whose source doesn't touch this blob must not block
+        #    unrelated blob deletions.
         active_run = conn.execute(
-            select(runs_table.c.id).where(runs_table.c.session_id == session_id).where(runs_table.c.status.in_(["pending", "running"]))
+            select(runs_table.c.id, composition_states_table.c.source)
+            .join(
+                composition_states_table,
+                runs_table.c.state_id == composition_states_table.c.id,
+            )
+            .where(runs_table.c.session_id == session_id)
+            .where(runs_table.c.status.in_(["pending", "running"]))
         ).first()
-        if active_run is not None:
+        if active_run is not None and _source_references_blob(active_run.source, blob_id, blob["storage_path"]):
             return _failure_result(
                 state,
-                f"Blob '{blob_id}' cannot be deleted while session has active run '{active_run.id}'.",
+                f"Blob '{blob_id}' cannot be deleted while active run '{active_run.id}' references it.",
             )
 
         # Delete backing file first — orphaned DB row is recoverable,

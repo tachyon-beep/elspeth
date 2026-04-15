@@ -29,6 +29,7 @@ from elspeth.web.composer.prompts import build_messages
 from elspeth.web.composer.protocol import (
     ComposerConvergenceError,
     ComposerResult,
+    ComposerServiceError,
     ComposerSettings,
 )
 from elspeth.web.composer.state import CompositionState, ValidationSummary
@@ -357,24 +358,54 @@ class ComposerServiceImpl:
                     )
                     continue
 
-                # TypeError is still caught because LLM can provide wrong
-                # value types (e.g. string where list expected → tuple()
-                # fails).  KeyError is NOT caught — after required-arg
-                # validation above, any KeyError is an internal bug.
+                # Discovery tools are read-only — safe to offload to
+                # the thread pool to avoid blocking the event loop, and
+                # safe to abandon on timeout (no side effects).
+                #
+                # Mutation tools have filesystem/DB side effects that
+                # cannot be rolled back if asyncio.wait_for cancels the
+                # coroutine.  asyncio.to_thread cannot cancel worker
+                # threads, so a cancelled mutation would run to
+                # completion in the background while the client receives
+                # a timeout error with stale state.  Mutation tools run
+                # synchronously to guarantee side effects and state_ref
+                # stay consistent.
+                #
+                # TypeError/ValueError are caught because the LLM can
+                # provide wrong value types (e.g. string where list
+                # expected → tuple() fails) or semantically invalid values
+                # (e.g. invalid expression syntax).  KeyError is NOT
+                # caught — after required-arg validation above, any
+                # KeyError is an internal bug.
                 try:
-                    result = execute_tool(
-                        tool_name,
-                        arguments,
-                        state,
-                        self._catalog,
-                        data_dir=self._data_dir,
-                        session_engine=self._session_engine,
-                        session_id=session_id,
-                        secret_service=self._secret_service,
-                        user_id=user_id,
-                        prior_validation=last_validation,
-                    )
-                except TypeError as exc:
+                    if is_discovery_tool(tool_name):
+                        result = await asyncio.to_thread(
+                            execute_tool,
+                            tool_name,
+                            arguments,
+                            state,
+                            self._catalog,
+                            data_dir=self._data_dir,
+                            session_engine=self._session_engine,
+                            session_id=session_id,
+                            secret_service=self._secret_service,
+                            user_id=user_id,
+                            prior_validation=last_validation,
+                        )
+                    else:
+                        result = execute_tool(
+                            tool_name,
+                            arguments,
+                            state,
+                            self._catalog,
+                            data_dir=self._data_dir,
+                            session_engine=self._session_engine,
+                            session_id=session_id,
+                            secret_service=self._secret_service,
+                            user_id=user_id,
+                            prior_validation=last_validation,
+                        )
+                except (TypeError, ValueError) as exc:
                     if not is_discovery_tool(tool_name):
                         turn_has_mutation = True
                     llm_messages.append(
@@ -492,11 +523,17 @@ class ComposerServiceImpl:
         tools: list[dict[str, Any]],
     ) -> litellm.ModelResponse:
         """Call the LLM via LiteLLM. Separated for test mocking."""
-        return await litellm.acompletion(
+        response = await litellm.acompletion(
             model=self._model,
             messages=messages,
             tools=tools,
         )
+        # Tier 3 boundary: LiteLLM can return empty choices on content-filter,
+        # rate-limit, or malformed upstream responses.  Validate before callers
+        # index into choices[0].
+        if not response.choices:
+            raise ComposerServiceError("LLM returned empty choices array — cannot continue composition")
+        return response
 
     def _compute_availability(self) -> ComposerAvailability:
         """Infer whether the configured model has the required env at boot.

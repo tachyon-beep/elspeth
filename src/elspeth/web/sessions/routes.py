@@ -18,7 +18,7 @@ from elspeth.contracts.freeze import deep_thaw
 from elspeth.web.auth.middleware import get_current_user
 from elspeth.web.auth.models import UserIdentity
 from elspeth.web.blobs.protocol import BlobQuotaExceededError, BlobServiceProtocol
-from elspeth.web.composer.protocol import ComposerConvergenceError, ComposerService
+from elspeth.web.composer.protocol import ComposerConvergenceError, ComposerService, ComposerServiceError
 from elspeth.web.composer.redaction import redact_source_storage_path
 from elspeth.web.composer.state import CompositionState, PipelineMetadata, ValidationEntry, ValidationSummary
 from elspeth.web.composer.yaml_generator import generate_yaml
@@ -387,6 +387,11 @@ def create_session_router() -> APIRouter:
                 status_code=502,
                 detail={"error_type": "llm_unavailable", "detail": str(exc)},
             ) from exc
+        except ComposerServiceError as exc:
+            raise HTTPException(
+                status_code=502,
+                detail={"error_type": "composer_error", "detail": str(exc)},
+            ) from exc
 
         # 5. Save state if version changed — post-compose provenance
         state_response: CompositionStateResponse | None = None
@@ -496,6 +501,11 @@ def create_session_router() -> APIRouter:
             raise HTTPException(
                 status_code=502,
                 detail={"error_type": "llm_unavailable", "detail": str(exc)},
+            ) from exc
+        except ComposerServiceError as exc:
+            raise HTTPException(
+                status_code=502,
+                detail={"error_type": "composer_error", "detail": str(exc)},
             ) from exc
 
         # Save state if version changed

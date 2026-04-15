@@ -2370,11 +2370,17 @@ class TestDeleteBlobActiveRunGuard:
                 )
             )
 
-    def _insert_run_without_link(self, status: str) -> None:
+    def _insert_run_without_link(self, status: str, *, source: dict[str, Any] | None = None) -> None:
         """Insert a run in the blob's session but omit the blob_run_links row.
 
         Simulates the pre-link window: _execute_locked() has called
         create_run() but link_blob_to_run() hasn't fired yet.
+
+        Args:
+            source: Composition state source dict.  Defaults to a source
+                that references self.blob_id via blob_ref (the typical
+                pre-link scenario).  Pass a different dict to simulate
+                runs that use file-path sources with no blob_ref.
         """
         from datetime import UTC, datetime
         from uuid import uuid4
@@ -2384,6 +2390,12 @@ class TestDeleteBlobActiveRunGuard:
             runs_table,
         )
 
+        if source is None:
+            source = {
+                "plugin": "csv",
+                "options": {"blob_ref": self.blob_id, "path": str(self.storage_path)},
+            }
+
         now = datetime.now(UTC)
         state_id = str(uuid4())
         with self.engine.begin() as conn:
@@ -2392,7 +2404,7 @@ class TestDeleteBlobActiveRunGuard:
                     id=state_id,
                     session_id=self.session_id,
                     version=1,
-                    source=None,
+                    source=source,
                     nodes=None,
                     edges=None,
                     outputs=None,
@@ -2433,7 +2445,8 @@ class TestDeleteBlobActiveRunGuard:
 
         _execute_locked() creates the run record before link_blob_to_run() inserts
         the link row.  During that gap, the explicit-link guard sees nothing.
-        The session-level active-run guard must block deletion anyway.
+        The composition-state guard must block deletion because the run's source
+        references this blob via blob_ref.
         """
         self._insert_run_without_link("pending")
         state = _empty_state()
@@ -2453,6 +2466,55 @@ class TestDeleteBlobActiveRunGuard:
     def test_delete_rejected_when_running_run_exists_without_link(self) -> None:
         """Same as pending — a running run without a link row must also block."""
         self._insert_run_without_link("running")
+        state = _empty_state()
+        catalog = _mock_catalog()
+        result = execute_tool(
+            "delete_blob",
+            {"blob_id": self.blob_id},
+            state,
+            catalog,
+            session_engine=self.engine,
+            session_id=self.session_id,
+        )
+        assert result.success is False
+        assert "active run" in result.data["error"].lower()
+        assert self.storage_path.exists(), "File must not be deleted when guard blocks"
+
+    def test_delete_succeeds_when_active_run_uses_different_source(self) -> None:
+        """Active run using source.path (no blob_ref) must not block unrelated blob deletion.
+
+        Regression test: the original session-level guard blocked ALL blobs
+        when ANY run was active, even if that run used a file-path source.
+        The scoped guard checks source.options.blob_ref and only blocks
+        if it matches this blob.
+        """
+        self._insert_run_without_link(
+            "pending",
+            source={"plugin": "csv", "options": {"path": "/data/external/other.csv"}},
+        )
+        state = _empty_state()
+        catalog = _mock_catalog()
+        result = execute_tool(
+            "delete_blob",
+            {"blob_id": self.blob_id},
+            state,
+            catalog,
+            session_engine=self.engine,
+            session_id=self.session_id,
+        )
+        assert result.success is True
+        assert not self.storage_path.exists()
+
+    def test_delete_rejected_when_active_run_path_matches_storage(self) -> None:
+        """Active run using source.path matching this blob's storage_path must block.
+
+        A run can read a blob's backing file via plain set_source with
+        options.path (no blob_ref).  The guard must check path/file matches.
+        """
+        self._insert_run_without_link(
+            "pending",
+            source={"plugin": "csv", "options": {"path": str(self.storage_path)}},
+        )
         state = _empty_state()
         catalog = _mock_catalog()
         result = execute_tool(

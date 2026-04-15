@@ -28,6 +28,7 @@ from elspeth.web.blobs.protocol import (
 from elspeth.web.sessions.models import (
     blob_run_links_table,
     blobs_table,
+    composition_states_table,
     runs_table,
 )
 
@@ -62,6 +63,35 @@ def sanitize_filename(filename: str) -> str:
         max_stem = 200 - len(suffix.encode("utf-8"))
         sanitized = stem.encode("utf-8")[:max_stem].decode("utf-8", errors="ignore") + suffix
     return sanitized
+
+
+def _source_references_blob(
+    source: Any,
+    blob_id: str,
+    storage_path: str,
+) -> bool:
+    """Check whether a composition state source references a specific blob.
+
+    Returns True if the source's options contain a matching ``blob_ref``
+    OR a ``path``/``file`` that matches the blob's storage_path.
+
+    Tier 1 assertions: if source or options have wrong types, that is DB
+    corruption — crash immediately rather than silently passing the guard.
+    """
+    if source is None:
+        return False
+    assert isinstance(source, dict), f"Tier 1: composition_states.source is {type(source).__name__}, expected dict"
+    options = source.get("options")
+    if options is None:
+        return False
+    assert isinstance(options, dict), f"Tier 1: composition_states.source.options is {type(options).__name__}, expected dict"
+    # Check blob_ref (canonical blob reference)
+    if options.get("blob_ref") == blob_id:
+        return True
+    # Check path/file (a run can read a blob's backing file via plain
+    # set_source without blob_ref — the execution service only creates
+    # blob_run_links when blob_ref is present)
+    return any(options.get(key) == storage_path for key in ("path", "file"))
 
 
 class BlobServiceImpl:
@@ -338,16 +368,23 @@ class BlobServiceImpl:
                 # 2. Pre-link window: _execute_locked() creates the run record
                 #    before link_blob_to_run() inserts the blob_run_links row.
                 #    During that gap the explicit-link check above sees nothing,
-                #    but the backing file is about to be needed.  The partial
-                #    unique index guarantees at most one active run per session,
-                #    so checking for *any* active run in this blob's session is
-                #    both safe and sufficient.
+                #    but the backing file is about to be needed.
+                #
+                #    Scoped to THIS blob: join runs → composition_states and
+                #    check whether the active run's source references this
+                #    blob via blob_ref OR via a path/file that matches this
+                #    blob's storage_path.  Runs whose source doesn't touch
+                #    this blob must not block unrelated blob deletions.
                 active_run = conn.execute(
-                    select(runs_table.c.id)
+                    select(runs_table.c.id, composition_states_table.c.source)
+                    .join(
+                        composition_states_table,
+                        runs_table.c.state_id == composition_states_table.c.id,
+                    )
                     .where(runs_table.c.session_id == row.session_id)
                     .where(runs_table.c.status.in_(["pending", "running"]))
                 ).first()
-                if active_run is not None:
+                if active_run is not None and _source_references_blob(active_run.source, blob_id_str, row.storage_path):
                     raise BlobActiveRunError(blob_id_str, active_run.id)
 
                 # Delete backing file first — orphaned DB row is recoverable,
