@@ -21,6 +21,7 @@ import sys
 from dataclasses import dataclass, field
 from datetime import UTC, date, datetime
 from pathlib import Path
+from typing import Any
 
 import yaml
 
@@ -154,13 +155,13 @@ class FreezeGuardVisitor(ast.NodeVisitor):
             return self.source_lines[lineno - 1].strip()
         return "<source unavailable>"
 
-    def _fingerprint(self, rule_id: str, node: ast.AST) -> str:
+    def _fingerprint(self, rule_id: str, node: ast.expr | ast.stmt) -> str:
         node_dump = ast.dump(node, include_attributes=False, annotate_fields=True)
         context = ":".join(self.symbol_stack) if self.symbol_stack else "_module_"
         payload = f"{rule_id}|{self.file_path}|{context}|{node_dump}"
         return hashlib.sha256(payload.encode("utf-8")).hexdigest()[:16]
 
-    def _add_finding(self, rule_id: str, node: ast.AST, message: str) -> None:
+    def _add_finding(self, rule_id: str, node: ast.expr | ast.stmt, message: str) -> None:
         self.findings.append(
             Finding(
                 rule_id=rule_id,
@@ -247,14 +248,14 @@ class FreezeGuardVisitor(ast.NodeVisitor):
                 container_fields.append(item.target.id)
         return container_fields
 
-    def _find_post_init(self, node: ast.ClassDef) -> ast.FunctionDef | None:
+    def _find_post_init(self, node: ast.ClassDef) -> ast.FunctionDef | ast.AsyncFunctionDef | None:
         """Find __post_init__ method in class body, if present."""
         for item in node.body:
             if isinstance(item, (ast.FunctionDef, ast.AsyncFunctionDef)) and item.name == "__post_init__":
                 return item
         return None
 
-    def _post_init_has_freeze_calls(self, post_init: ast.FunctionDef) -> bool:
+    def _post_init_has_freeze_calls(self, post_init: ast.FunctionDef | ast.AsyncFunctionDef) -> bool:
         """Check if __post_init__ contains freeze_fields(), deep_freeze(), or MappingProxyType calls.
 
         MappingProxyType is included because it IS a freeze mechanism (albeit shallow).
@@ -307,7 +308,7 @@ class FreezeGuardVisitor(ast.NodeVisitor):
         """Check if the immediate enclosing scope is a class definition."""
         return len(self._scope_is_class) >= 2 and self._scope_is_class[-2]
 
-    def visit_FunctionDef(self, node: ast.FunctionDef) -> None:
+    def visit_FunctionDef(self, node: ast.FunctionDef | ast.AsyncFunctionDef) -> None:
         self.symbol_stack.append(node.name)
         self._scope_is_class.append(False)
         was_in_post_init = self._in_post_init
@@ -416,7 +417,7 @@ def scan_directory(root: Path) -> list[Finding]:
 # =============================================================================
 
 
-def _load_yaml_file(path: Path) -> dict:
+def _load_yaml_file(path: Path) -> dict[str, Any]:
     try:
         with path.open() as f:
             return yaml.safe_load(f) or {}
@@ -425,7 +426,7 @@ def _load_yaml_file(path: Path) -> dict:
         sys.exit(1)
 
 
-def _parse_per_file_rules(data: dict, source_file: str = "") -> list[PerFileRule]:
+def _parse_per_file_rules(data: dict[str, Any], source_file: str = "") -> list[PerFileRule]:
     rules: list[PerFileRule] = []
     for item in data.get("per_file_rules", []):
         rule_ids = set(item.get("rules", []))

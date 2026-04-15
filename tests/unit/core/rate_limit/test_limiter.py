@@ -711,7 +711,7 @@ class TestRateLimiterWeightValidation:
             RateLimiter(name="wv_bool_test", requests_per_minute=60) as limiter,
             pytest.raises(TypeError, match="weight must be int"),
         ):
-            limiter.acquire(weight=True)  # type: ignore[arg-type]
+            limiter.acquire(weight=True)
 
     def test_valid_weight_accepted(self) -> None:
         from elspeth.core.rate_limit import RateLimiter

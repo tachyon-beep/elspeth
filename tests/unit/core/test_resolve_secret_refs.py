@@ -21,7 +21,7 @@ class FakeResolver:
     def resolve(self, user_id: str, name: str) -> ResolvedSecret | None:
         if name not in self._secrets:
             return None
-        return ResolvedSecret(name=name, value=self._secrets[name], scope="test", fingerprint="fp")
+        return ResolvedSecret(name=name, value=self._secrets[name], scope="user", fingerprint="fp")
 
 
 def test_replaces_secret_ref_in_flat_dict() -> None:

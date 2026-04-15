@@ -161,7 +161,7 @@ class OpenRouterBatchLLMTransform(BaseTransform):
 
     name = "openrouter_batch_llm"
     plugin_version = "1.0.0"
-    source_file_hash = "sha256:7d29661842dce0a4"
+    source_file_hash: str | None = "sha256:5b653dc8662fc700"
     is_batch_aware = True  # Engine passes list[dict] for batch processing
     config_model = OpenRouterBatchConfig
 

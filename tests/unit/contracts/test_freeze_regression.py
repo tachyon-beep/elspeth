@@ -534,5 +534,6 @@ class TestReplayedCallNestedMutationRejected:
             was_error=True,
             error_data={"detail": {"code": 500}},
         )
+        assert call.error_data is not None
         with pytest.raises(TypeError):
             call.error_data["detail"]["code"] = 999

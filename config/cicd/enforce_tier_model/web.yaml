@@ -64,37 +64,37 @@ allow_hits:
   reason: Tier 3 boundary — JWT header kid field is optional per RFC 7515
   safety: Missing kid falls through to first key in JWKS; AuthenticationError on decode failure
   expires: null
-- key: web/auth/oidc.py:R1:OIDCAuthProvider:authenticate:fp=a8c6a2b695a3d754
+- key: web/auth/oidc.py:R1:OIDCAuthProvider:authenticate:fp=56d6ede6a5a01482
   owner: web-auth
   reason: Tier 3 boundary — preferred_username is optional in OIDC tokens, falls back to sub
   safety: Default is payload['sub'] which is required; absence of optional claim is expected
   expires: null
-- key: web/auth/oidc.py:R1:OIDCAuthProvider:get_user_info:fp=a3787dad45249f67
+- key: web/auth/oidc.py:R1:OIDCAuthProvider:get_user_info:fp=24fb0246e990256e
   owner: web-auth
   reason: Tier 3 boundary — groups claim is optional in OIDC tokens; None = no groups
   safety: None returns empty groups; non-list raises AuthenticationError; no silent discard
   expires: null
-- key: web/auth/oidc.py:R5:OIDCAuthProvider:get_user_info:fp=8ca64d6c43cc262d
+- key: web/auth/oidc.py:R5:OIDCAuthProvider:get_user_info:fp=d2ad336dcf552e41
   owner: web-auth
   reason: Tier 3 boundary — groups claim type is not guaranteed by external IdP
   safety: Non-list raises AuthenticationError with type info for debugging
   expires: null
-- key: web/auth/oidc.py:R1:OIDCAuthProvider:get_user_info:fp=e9a89464d499fed3
+- key: web/auth/oidc.py:R1:OIDCAuthProvider:get_user_info:fp=9647be9ddf3bba1e
   owner: web-auth
   reason: Tier 3 boundary — preferred_username is optional in OIDC tokens, falls back to sub
   safety: Default is payload['sub'] which is required
   expires: null
-- key: web/auth/oidc.py:R1:OIDCAuthProvider:get_user_info:fp=50e2c5aea8128cfe
+- key: web/auth/oidc.py:R1:OIDCAuthProvider:get_user_info:fp=15578810c280421f
   owner: web-auth
   reason: Tier 3 boundary — name claim is optional, falls back to preferred_username
   safety: Falls back to preferred_username or 'Unknown'; never to opaque sub UUID
   expires: null
-- key: web/auth/oidc.py:R1:OIDCAuthProvider:get_user_info:fp=f282dc24e18a46ae
+- key: web/auth/oidc.py:R1:OIDCAuthProvider:get_user_info:fp=ac9682cd438a4599
   owner: web-auth
   reason: Tier 3 boundary — preferred_username fallback in display_name chain
   safety: Falls back to None (honest absence) when IdP provides neither name nor preferred_username
   expires: null
-- key: web/auth/oidc.py:R1:OIDCAuthProvider:get_user_info:fp=f2a1b1758a966c9d
+- key: web/auth/oidc.py:R1:OIDCAuthProvider:get_user_info:fp=ae969490ec4ac6b7
   owner: web-auth
   reason: Tier 3 boundary — email claim is optional in OIDC tokens
   safety: Default None; UserProfile.email accepts None; absence is honest representation
@@ -119,37 +119,57 @@ allow_hits:
   reason: Tier 3 boundary — roles claim type is not guaranteed by external IdP
   safety: Non-list raises AuthenticationError with type info
   expires: null
-- key: web/auth/entra.py:R1:EntraAuthProvider:authenticate:fp=fd48174d76f75c9d
+- key: web/auth/entra.py:R1:EntraAuthProvider:authenticate:fp=564181fecfacb986
   owner: web-auth
   reason: Tier 3 boundary — preferred_username is optional in Entra tokens, falls back to sub
   safety: Default is payload['sub'] which is required; absence of optional claim is expected
   expires: null
-- key: web/auth/entra.py:R1:EntraAuthProvider:get_user_info:fp=011fa8f44233c8e6
+- key: web/auth/entra.py:R1:EntraAuthProvider:get_user_info:fp=3b33e715a472f615
   owner: web-auth
   reason: Tier 3 boundary — preferred_username is optional in Entra tokens, falls back to sub
   safety: Default is payload['sub'] which is required
   expires: null
-- key: web/auth/entra.py:R1:EntraAuthProvider:get_user_info:fp=cf8febe0ecd5d91c
+- key: web/auth/entra.py:R1:EntraAuthProvider:get_user_info:fp=eb6da577b2a7f803
   owner: web-auth
   reason: Tier 3 boundary — email claim is optional in Entra tokens
   safety: Default None; UserProfile.email accepts None
   expires: null
-- key: web/auth/entra.py:R1:EntraAuthProvider:get_user_info:fp=b006a5696f76b645
+- key: web/auth/entra.py:R1:EntraAuthProvider:get_user_info:fp=acbe593064c48d9c
   owner: web-auth
   reason: Tier 3 boundary — name claim is optional, falls back to preferred_username
   safety: Falls back to preferred_username or 'Unknown'; never to opaque sub UUID
   expires: null
-- key: web/auth/entra.py:R1:EntraAuthProvider:get_user_info:fp=39816a1f66fe4e8e
+- key: web/auth/entra.py:R1:EntraAuthProvider:get_user_info:fp=656288e79c8eb5cc
   owner: web-auth
   reason: Tier 3 boundary — preferred_username fallback in display_name chain
   safety: Falls back to None (honest absence) when IdP provides neither name nor preferred_username
   expires: null
-- key: web/app.py:R5:_settings_from_env:fp=3543b5388bbd89c8
+- key: web/auth/models.py:R5:UserIdentity:__post_init__:fp=085af69aa85f4acc
+  owner: web-auth
+  reason: Tier 3 boundary — isinstance check on user_id from external IdP JWT payload (sub claim is Any)
+  safety: Raises AuthenticationError on non-string; validated at construction time
+  expires: null
+- key: web/auth/models.py:R5:UserIdentity:__post_init__:fp=fc1331f656d792bc
+  owner: web-auth
+  reason: Tier 3 boundary — isinstance check on username from external IdP JWT payload (preferred_username is Any)
+  safety: Raises AuthenticationError on non-string; validated at construction time
+  expires: null
+- key: web/auth/models.py:R5:UserProfile:__post_init__:fp=1e107c02a0aae95c
+  owner: web-auth
+  reason: Tier 3 boundary — isinstance check on user_id from external IdP JWT payload (sub claim is Any)
+  safety: Raises AuthenticationError on non-string; validated at construction time
+  expires: null
+- key: web/auth/models.py:R5:UserProfile:__post_init__:fp=94dab5ba5bbf7397
+  owner: web-auth
+  reason: Tier 3 boundary — isinstance check on username from external IdP JWT payload (preferred_username is Any)
+  safety: Raises AuthenticationError on non-string; validated at construction time
+  expires: null
+- key: web/app.py:R5:_settings_from_env:fp=2063fc070e2ddebb
   owner: web-app
   reason: Tier 3 boundary — JSON-parsed env var may be a list; isinstance check classifies for tuple conversion
   safety: isinstance used only for type dispatch; no contract masking
   expires: null
-- key: web/app.py:R6:_settings_from_env:fp=e0121f43a0f71805
+- key: web/app.py:R6:_settings_from_env:fp=00f64552ccea22e2
   owner: web-app
   reason: Tier 3 boundary — env var value that isn't valid JSON is treated as plain string (the common case)
   safety: JSONDecodeError caught only to fall back to raw string; no silent data loss
@@ -259,17 +279,17 @@ allow_hits:
   reason: Validation checks optional output path/file keys supplied by composition state
   safety: Absent keys treated as 'no path provided'; check recorded as skipped/passed
   expires: null
-- key: web/secrets/server_store.py:R1:ServerSecretStore:has_secret:fp=4c611b234b52a51a
+- key: web/secrets/server_store.py:R1:ServerSecretStore:has_secret:fp=3874995dd6ced3e4
   owner: web-secrets
   reason: Tier 3 boundary — os.environ.get() checks env var presence for has_secret fast path
   safety: Returns bool only; no secret value exposed; no default fabrication
   expires: null
-- key: web/secrets/server_store.py:R1:ServerSecretStore:get_secret:fp=baad87e6c2e61bb4
+- key: web/secrets/server_store.py:R1:ServerSecretStore:get_secret:fp=c42047652ee9cba0
   owner: web-secrets
   reason: Tier 3 boundary — os.environ.get() reads external env var; unset/empty raises SecretNotFoundError
   safety: Missing env var raises SecretNotFoundError; no default fabrication
   expires: null
-- key: web/secrets/server_store.py:R1:ServerSecretStore:list_secrets:fp=a12f8cf908d2c98d
+- key: web/secrets/server_store.py:R1:ServerSecretStore:list_secrets:fp=40afd310d4708c15
   owner: web-secrets
   reason: Tier 3 boundary — os.environ.get() checks env var presence for availability metadata
   safety: Only produces bool available flag; no secret value exposed
@@ -299,27 +319,27 @@ allow_hits:
   reason: Tree-walk — isinstance() dispatches list/tuple branch in recursive config traversal
   safety: No contract masking; structural dispatch on deserialized YAML (Tier 3 data)
   expires: null
-- key: web/app.py:R1:create_app:fp=9a9986b798142b46
+- key: web/app.py:R1:create_app:fp=26dab69c5c887b69
   owner: web-app
   reason: Tier 3 — os.environ.get() for optional WEB_CONCURRENCY env var
   safety: Defaults to "1" when absent
   expires: null
-- key: web/app.py:R6:create_app:fp=0c136ddff17c147d
+- key: web/app.py:R6:create_app:fp=350990b09ac2ff55
   owner: web-app
   reason: ValueError from int() on non-numeric WEB_CONCURRENCY
   safety: Defaults to single worker
   expires: null
-- key: web/app.py:R6:create_app:fp=3cc82995d5cccf16
+- key: web/app.py:R6:create_app:fp=59314782e7bc053e
   owner: web-app
   reason: ValueError from int() on non-numeric --workers arg
   safety: Skips this argv entry
   expires: null
-- key: web/app.py:R6:create_app:fp=ada7cbb80ca41e8a
+- key: web/app.py:R6:create_app:fp=e1ab2f8c3a797616
   owner: web-app
   reason: ValueError from int() on non-numeric --workers=N
   safety: Skips this argv entry
   expires: null
-- key: web/app.py:R6:create_app:fp=80275bf75517b7c1
+- key: web/app.py:R6:create_app:fp=cf4e1d215d330728
   owner: web-app
   reason: ValueError from int() on non-numeric -w arg
   safety: Skips this argv entry
@@ -429,7 +449,7 @@ allow_hits:
   reason: Error classification for sanitized client messaging
   safety: SecretResolutionError triggers safe message
   expires: null
-- key: web/app.py:R1:create_app:fp=cfb13d8719047b82
+- key: web/app.py:R1:create_app:fp=cf131f7973937aad
   owner: web-app
   reason: Tier 3 — os.environ.get() for optional ELSPETH_ENV
   safety: Returns None when absent; only used for test guard
@@ -484,17 +504,17 @@ allow_hits:
   reason: TOCTOU guard — run may be deleted between verify_run_ownership and get_status
   safety: Only not-found errors close with 4004; returns immediately
   expires: null
-- key: web/app.py:R1:lifespan:fp=7317e899dc6e7cef
+- key: web/app.py:R1:lifespan:fp=00b963adef49b433
   owner: web-app
   reason: False positive — httpx.AsyncClient.get() is an HTTP GET request, not dict.get()
   safety: HTTP errors caught by raise_for_status(); failure now raises SystemExit
   expires: null
-- key: web/app.py:R4:_periodic_orphan_cleanup:fp=e4768cd759483d19
+- key: web/app.py:R4:_periodic_orphan_cleanup:fp=519e5bde4a392bc6
   owner: web-execution
   reason: Periodic background task must survive transient DB errors to retry on next interval
   safety: Logged with exc_info=True; loop continues; no silent data loss
   expires: null
-- key: web/app.py:R7:lifespan:fp=c41afb76623eb969
+- key: web/app.py:R7:lifespan:fp=b6d6c73feb2d0bf0
   owner: web-execution
   reason: contextlib.suppress(CancelledError) is the expected shutdown path for the periodic orphan cleanup task
   safety: Clean cancellation during app shutdown; no error suppression

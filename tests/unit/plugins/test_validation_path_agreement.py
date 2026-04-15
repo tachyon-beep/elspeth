@@ -22,7 +22,7 @@ from elspeth.plugins.infrastructure.validation import (
 )
 
 
-def _make_observed_schema() -> dict:
+def _make_observed_schema() -> dict[str, str]:
     return {"mode": "observed"}
 
 
@@ -413,7 +413,7 @@ def test_all_plugins_with_model_validators_have_agreement_cases():
     for plugin_type, plugins in discovered.items():
         tested_names = type_to_tested[plugin_type]
         for cls in plugins:
-            plugin_name: str = cls.name  # type: ignore[attr-defined]
+            plugin_name: str = cls.name
             if plugin_name in EXEMPT or plugin_name in tested_names:
                 continue
 

@@ -3,6 +3,7 @@
 
 import json
 import logging
+from collections.abc import Iterator
 
 import pytest
 
@@ -11,7 +12,7 @@ class TestLoggingConfig:
     """Tests for logging configuration."""
 
     @pytest.fixture(autouse=True)
-    def _restore_root_logger(self) -> None:
+    def _restore_root_logger(self) -> Iterator[None]:
         """Save/restore root logger handlers so configure_logging() doesn't leak.
 
         configure_logging() adds a StreamHandler(sys.stdout) to the root logger.

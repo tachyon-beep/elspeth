@@ -231,6 +231,7 @@ class TestCSVSinkWriteModeRollback:
         # the binary-mode hash read raises, while leaving the file handle
         # methods untouched (avoids tell/flush interactions).
         original_file = sink._file
+        assert original_file is not None
         real_open = open
 
         def open_that_fails_on_binary_read(*args, **kwargs):
@@ -247,7 +248,7 @@ class TestCSVSinkWriteModeRollback:
         def failing_seek(pos):
             raise OSError("seek failed during rollback")
 
-        original_file.seek = failing_seek
+        original_file.seek = failing_seek  # type: ignore[method-assign,assignment]  # intentional monkey-patch for test
 
         with (
             patch("builtins.open", side_effect=open_that_fails_on_binary_read),
@@ -260,7 +261,7 @@ class TestCSVSinkWriteModeRollback:
         assert isinstance(exc_info.value.__cause__, OSError)
 
         # Restore original methods for cleanup
-        original_file.seek = original_seek
+        original_file.seek = original_seek  # type: ignore[method-assign]  # restoring original method
         sink.close()
 
 

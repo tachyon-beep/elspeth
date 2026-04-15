@@ -97,7 +97,7 @@ class DatabaseSink(BaseSink):
 
     name = "database"
     plugin_version = "1.0.0"
-    source_file_hash = "sha256:0bb8146be188329f"
+    source_file_hash: str | None = "sha256:2bb13107950caab9"
     config_model = DatabaseSinkConfig
     # determinism inherited from BaseSink (IO_WRITE)
 

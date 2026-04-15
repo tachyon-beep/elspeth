@@ -45,7 +45,7 @@ class TestBatchPendingError:
         exc = BatchPendingError(
             "batch-1",
             "submitted",
-            checkpoint=sentinel,
+            checkpoint=sentinel,  # type: ignore[arg-type]  # deliberate: tests that arbitrary values are stored as-is
             node_id="transform-llm",
         )
         assert exc.checkpoint is sentinel

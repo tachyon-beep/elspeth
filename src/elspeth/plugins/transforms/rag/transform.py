@@ -56,7 +56,7 @@ class RAGRetrievalTransform(BaseTransform):
 
     name = "rag_retrieval"
     plugin_version = "1.0.0"
-    source_file_hash = "sha256:35d2801f3b99a2fa"
+    source_file_hash: str | None = "sha256:d0f56ea598f29948"
     determinism: Determinism = Determinism.EXTERNAL_CALL
     config_model = RAGRetrievalConfig
 

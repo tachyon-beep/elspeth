@@ -11,6 +11,7 @@ Security boundaries tested:
 from __future__ import annotations
 
 import io
+from typing import Any
 
 from fastapi import FastAPI
 from sqlalchemy import create_engine
@@ -81,7 +82,8 @@ def _create_session(client: TestClient, title: str = "Test") -> str:
     """Create a session and return its ID."""
     resp = client.post("/api/sessions", json={"title": title})
     assert resp.status_code == 201
-    return resp.json()["id"]
+    session_id: str = resp.json()["id"]
+    return session_id
 
 
 def _upload_blob(
@@ -90,14 +92,15 @@ def _upload_blob(
     content: bytes = b"col1,col2\na,b",
     filename: str = "data.csv",
     content_type: str = "text/csv",
-) -> dict:
+) -> dict[str, Any]:
     """Upload a blob and return the response body."""
     resp = client.post(
         f"/api/sessions/{session_id}/blobs",
         files={"file": (filename, io.BytesIO(content), content_type)},
     )
     assert resp.status_code == 201
-    return resp.json()
+    body: dict[str, Any] = resp.json()
+    return body
 
 
 # ---------------------------------------------------------------------------
@@ -266,7 +269,7 @@ class TestIDORProtection:
     404 (not 403) prevents information leakage about blob existence.
     """
 
-    def _make_two_session_app(self, tmp_path):
+    def _make_two_session_app(self, tmp_path) -> tuple[TestClient, TestClient]:
         """Create shared-DB app with two users, each with a session."""
         engine = create_engine(
             "sqlite:///:memory:",

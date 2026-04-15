@@ -8,7 +8,7 @@ union merge.
 
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, Literal
 
 import pytest
 
@@ -29,7 +29,7 @@ class TestCoalesceUnionMergeObservedShortCircuit:
         branch_schemas: dict[str, SchemaConfig],
     ) -> SchemaConfig:
         """Simulate the builder's union merge logic with SchemaConfig objects."""
-        seen_types: dict[str, tuple[str, bool, str]] = {}
+        seen_types: dict[str, tuple[Literal["str", "int", "float", "bool", "any"], bool, str]] = {}
         all_observed = False
         for branch_name, schema_cfg in branch_schemas.items():
             if schema_cfg.is_observed:

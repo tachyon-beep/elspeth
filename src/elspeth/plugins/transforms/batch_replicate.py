@@ -94,7 +94,7 @@ class BatchReplicate(BaseTransform):
 
     name = "batch_replicate"
     plugin_version = "1.0.0"
-    source_file_hash = "sha256:9a8ff693883da8f1"
+    source_file_hash: str | None = "sha256:c25559b694fee5dc"
     config_model = BatchReplicateConfig
     is_batch_aware = True  # CRITICAL: Engine buffers rows for batch processing
 

@@ -215,7 +215,7 @@ class TestNodeLoader:
     """Tests for NodeLoader.load()."""
 
     def _make_node_row(self, **overrides: object) -> SARow[Any]:
-        defaults = {
+        defaults: dict[str, object] = {
             "node_id": "node-1",
             "run_id": "run-1",
             "plugin_name": "csv",

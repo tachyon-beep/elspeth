@@ -573,11 +573,13 @@ class TestForkEndpoint:
             ),
         )
 
+        current_state = await service.get_current_state(session.id)
+        assert current_state is not None
         msg = await service.add_message(
             session.id,
             "user",
             "Hello",
-            composition_state_id=(await service.get_current_state(session.id)).id,
+            composition_state_id=current_state.id,
         )
 
         # Create a blob so blob_map is non-empty (triggers the rewrite path)

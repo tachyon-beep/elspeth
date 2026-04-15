@@ -68,6 +68,8 @@ class TestMakeContext:
         assert isinstance(ctx.landscape, PluginAuditWriter)
         # get_node_state must return a mock with token_id matching the token
         node_state = ctx.landscape.get_node_state("any-state-id")
+        assert node_state is not None
+        assert ctx.token is not None
         assert node_state.token_id == ctx.token.token_id
 
     def test_explicit_landscape_replaces_mock(self) -> None:

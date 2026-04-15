@@ -1,6 +1,7 @@
 """Tests for database sink plugin."""
 
 from pathlib import Path
+from typing import Any
 
 import pytest
 from sqlalchemy import MetaData, Table, create_engine, select
@@ -978,7 +979,7 @@ class TestDDLAuditRecording:
         )
 
         original_record_call = ctx.record_call
-        recorded_calls: list[dict] = []
+        recorded_calls: list[dict[str, Any]] = []
 
         def tracking_record_call(**kwargs: object) -> None:
             recorded_calls.append(dict(kwargs))
@@ -1046,7 +1047,7 @@ class TestDDLAuditRecording:
         )
 
         original_record_call = ctx2.record_call
-        recorded_calls: list[dict] = []
+        recorded_calls: list[dict[str, Any]] = []
 
         def tracking_record_call(**kwargs: object) -> None:
             recorded_calls.append(dict(kwargs))

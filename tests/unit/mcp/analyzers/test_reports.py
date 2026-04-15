@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import json
 import re
+from typing import Any, cast
 from unittest.mock import MagicMock
 
 import pytest
@@ -26,6 +27,7 @@ from elspeth.mcp.analyzers.reports import (
     get_outcome_analysis,
     get_performance_report,
 )
+from elspeth.mcp.types import ErrorAnalysisReport, ErrorResult, LLMUsageReport
 
 
 def _make_node(node_id: str, plugin_name: str, node_type: NodeType) -> MagicMock:
@@ -315,7 +317,7 @@ def _make_db_and_factory(run_exists: bool = True) -> tuple[MagicMock, MagicMock]
     return db, factory
 
 
-def _wire_conn(db: MagicMock, val_rows: list, trans_rows: list, sample_val: list, sample_trans: list) -> None:
+def _wire_conn(db: MagicMock, val_rows: list[Any], trans_rows: list[Any], sample_val: list[Any], sample_trans: list[Any]) -> None:
     """Wire up mock connection with 4 sequential execute().fetchall() calls."""
     mock_conn = MagicMock()
     call_count = 0
@@ -414,8 +416,9 @@ class TestErrorAnalysisValidationGrouping:
 
         result = get_error_analysis(db, factory, "run-empty")
 
-        assert result["validation_errors"]["total"] == 0
-        assert result["validation_errors"]["by_source"] == []
+        report = cast(ErrorAnalysisReport, result)
+        assert report["validation_errors"]["total"] == 0
+        assert report["validation_errors"]["by_source"] == []
 
 
 class TestErrorAnalysisTransformGrouping:
@@ -449,7 +452,8 @@ class TestErrorAnalysisSampleData:
 
         result = get_error_analysis(db, factory, "run-sample")
 
-        assert result["validation_errors"]["sample_data"] == [{"field": "age", "value": "not_a_number"}]
+        report = cast(ErrorAnalysisReport, result)
+        assert report["validation_errors"]["sample_data"] == [{"field": "age", "value": "not_a_number"}]
 
     def test_parses_sample_transform_details(self) -> None:
         db, factory = _make_db_and_factory()
@@ -460,7 +464,8 @@ class TestErrorAnalysisSampleData:
 
         result = get_error_analysis(db, factory, "run-sample-trans")
 
-        assert result["transform_errors"]["sample_details"] == [{"error": "division by zero", "node": "calc"}]
+        report = cast(ErrorAnalysisReport, result)
+        assert report["transform_errors"]["sample_details"] == [{"error": "division by zero", "node": "calc"}]
 
     def test_none_sample_data_preserved_as_none(self) -> None:
         """When row_data_json is NULL/None, the sample entry should be None, not crash."""
@@ -471,7 +476,8 @@ class TestErrorAnalysisSampleData:
 
         result = get_error_analysis(db, factory, "run-null-sample")
 
-        assert result["validation_errors"]["sample_data"] == [None]
+        report = cast(ErrorAnalysisReport, result)
+        assert report["validation_errors"]["sample_data"] == [None]
 
 
 # ---------------------------------------------------------------------------
@@ -559,7 +565,8 @@ class TestLLMUsageReportRunNotFound:
         result = get_llm_usage_report(db, factory, "nonexistent-run")
 
         assert "error" in result
-        assert "nonexistent-run" in result["error"]
+        error_result = cast(ErrorResult, result)
+        assert "nonexistent-run" in error_result["error"]
 
 
 class TestLLMUsageReportNoLLMCalls:
@@ -578,10 +585,11 @@ class TestLLMUsageReportNoLLMCalls:
 
         result = get_llm_usage_report(db, factory, "test-run")
 
-        assert result["message"] == "No LLM calls found in this run"
-        assert result["call_types"] == {"http": 5, "database": 3}
-        assert "llm_summary" not in result
-        assert "by_plugin" not in result
+        report = cast(LLMUsageReport, result)
+        assert report["message"] == "No LLM calls found in this run"
+        assert report["call_types"] == {"http": 5, "database": 3}
+        assert "llm_summary" not in report
+        assert "by_plugin" not in report
 
     def test_returns_empty_call_types_when_no_calls_at_all(self) -> None:
         db, factory = _make_llm_db_and_factory()
@@ -589,8 +597,9 @@ class TestLLMUsageReportNoLLMCalls:
 
         result = get_llm_usage_report(db, factory, "test-run")
 
-        assert result["message"] == "No LLM calls found in this run"
-        assert result["call_types"] == {}
+        report = cast(LLMUsageReport, result)
+        assert report["message"] == "No LLM calls found in this run"
+        assert report["call_types"] == {}
 
 
 class TestLLMUsageReportSinglePlugin:
@@ -619,19 +628,20 @@ class TestLLMUsageReportSinglePlugin:
 
         result = get_llm_usage_report(db, factory, "test-run")
 
-        assert result["run_id"] == "test-run"
-        assert result["call_types"] == {"llm": 10}
+        report = cast(LLMUsageReport, result)
+        assert report["run_id"] == "test-run"
+        assert report["call_types"] == {"llm": 10}
 
-        plugin_stats = result["by_plugin"]["llm_classifier"]
+        plugin_stats = report["by_plugin"]["llm_classifier"]
         assert plugin_stats["total_calls"] == 10
         assert plugin_stats["successful"] == 10
         assert plugin_stats["failed"] == 0
         assert plugin_stats["avg_latency_ms"] == 150.0
         assert plugin_stats["total_latency_ms"] == 1500.0
 
-        assert result["llm_summary"]["total_calls"] == 10
-        assert result["llm_summary"]["total_latency_ms"] == 1500.0
-        assert result["llm_summary"]["avg_latency_ms"] == 150.0
+        assert report["llm_summary"]["total_calls"] == 10
+        assert report["llm_summary"]["total_latency_ms"] == 1500.0
+        assert report["llm_summary"]["avg_latency_ms"] == 150.0
 
 
 class TestLLMUsageReportSuccessFailureSplit:
@@ -670,7 +680,8 @@ class TestLLMUsageReportSuccessFailureSplit:
 
         result = get_llm_usage_report(db, factory, "test-run")
 
-        plugin_stats = result["by_plugin"]["llm_classifier"]
+        report = cast(LLMUsageReport, result)
+        plugin_stats = report["by_plugin"]["llm_classifier"]
         assert plugin_stats["total_calls"] == 10
         assert plugin_stats["successful"] == 8
         assert plugin_stats["failed"] == 2
@@ -701,11 +712,12 @@ class TestLLMUsageReportAverageLatency:
 
         result = get_llm_usage_report(db, factory, "test-run")
 
-        plugin_stats = result["by_plugin"]["llm_summarizer"]
+        report = cast(LLMUsageReport, result)
+        plugin_stats = report["by_plugin"]["llm_summarizer"]
         # 333.33 / 3 = 111.11
         assert plugin_stats["avg_latency_ms"] == 111.11
 
-        assert result["llm_summary"]["avg_latency_ms"] == 111.11
+        assert report["llm_summary"]["avg_latency_ms"] == 111.11
 
     def test_average_latency_rounds_to_two_decimals(self) -> None:
         db, factory = _make_llm_db_and_factory()
@@ -728,9 +740,10 @@ class TestLLMUsageReportAverageLatency:
 
         result = get_llm_usage_report(db, factory, "test-run")
 
+        report = cast(LLMUsageReport, result)
         # 1000.0 / 7 = 142.857142... -> 142.86
-        assert result["by_plugin"]["llm_router"]["avg_latency_ms"] == 142.86
-        assert result["llm_summary"]["avg_latency_ms"] == 142.86
+        assert report["by_plugin"]["llm_router"]["avg_latency_ms"] == 142.86
+        assert report["llm_summary"]["avg_latency_ms"] == 142.86
 
 
 class TestLLMUsageReportMultiplePlugins:
@@ -780,8 +793,9 @@ class TestLLMUsageReportMultiplePlugins:
 
         result = get_llm_usage_report(db, factory, "test-run")
 
+        report = cast(LLMUsageReport, result)
         # Classifier: 5 success + 1 error = 6 total, 1300ms total latency
-        classifier = result["by_plugin"]["llm_classifier"]
+        classifier = report["by_plugin"]["llm_classifier"]
         assert classifier["total_calls"] == 6
         assert classifier["successful"] == 5
         assert classifier["failed"] == 1
@@ -789,7 +803,7 @@ class TestLLMUsageReportMultiplePlugins:
         assert classifier["avg_latency_ms"] == round(1300.0 / 6, 2)
 
         # Summarizer: 10 success, 2000ms total latency
-        summarizer = result["by_plugin"]["llm_summarizer"]
+        summarizer = report["by_plugin"]["llm_summarizer"]
         assert summarizer["total_calls"] == 10
         assert summarizer["successful"] == 10
         assert summarizer["failed"] == 0
@@ -797,9 +811,9 @@ class TestLLMUsageReportMultiplePlugins:
         assert summarizer["avg_latency_ms"] == 200.0
 
         # Overall summary: 16 total calls, 3300ms total latency
-        assert result["llm_summary"]["total_calls"] == 16
-        assert result["llm_summary"]["total_latency_ms"] == 3300.0
-        assert result["llm_summary"]["avg_latency_ms"] == round(3300.0 / 16, 2)
+        assert report["llm_summary"]["total_calls"] == 16
+        assert report["llm_summary"]["total_latency_ms"] == 3300.0
+        assert report["llm_summary"]["avg_latency_ms"] == round(3300.0 / 16, 2)
 
         # Call types include non-LLM types
-        assert result["call_types"] == {"llm": 16, "http": 4}
+        assert report["call_types"] == {"llm": 16, "http": 4}

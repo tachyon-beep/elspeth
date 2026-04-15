@@ -38,8 +38,9 @@ def _load_tier_allowlist(repo_root: Path) -> list[dict[str, Any]]:
     path = repo_root / "config" / "cicd" / "enforce_tier_model" / "contracts.yaml"
     if not path.exists():
         return []
-    data = yaml.safe_load(path.read_text(encoding="utf-8"))
-    return data.get("per_file_rules", [])
+    data: dict[str, Any] = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
+    rules: list[dict[str, Any]] = data.get("per_file_rules", [])
+    return rules
 
 
 def _allowlist_entries_for_file(file_path: Path, root_dir: Path, allowlist: list[dict[str, Any]]) -> str | None:

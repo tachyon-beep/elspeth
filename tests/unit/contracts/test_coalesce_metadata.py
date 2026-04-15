@@ -153,14 +153,14 @@ class TestCoalesceMetadataFreezeGuards:
         """Even if someone bypasses factories, freeze_fields catches it."""
         meta = CoalesceMetadata(
             policy=CoalescePolicy.REQUIRE_ALL,
-            branches_lost={"a": "timeout"},  # type: ignore[arg-type]
+            branches_lost={"a": "timeout"},
         )
         assert isinstance(meta.branches_lost, MappingProxyType)
 
     def test_direct_construction_with_raw_collisions_freezes(self) -> None:
         meta = CoalesceMetadata(
             policy=CoalescePolicy.REQUIRE_ALL,
-            union_field_collisions={"x": ("a", "b")},  # type: ignore[arg-type]
+            union_field_collisions={"x": ("a", "b")},
         )
         assert isinstance(meta.union_field_collisions, MappingProxyType)
 

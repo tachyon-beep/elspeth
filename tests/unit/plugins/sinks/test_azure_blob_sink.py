@@ -18,6 +18,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
+from elspeth.contracts.plugin_context import PluginContext
 from elspeth.plugins.infrastructure.config_base import PluginConfigError
 from elspeth.plugins.sinks.azure_blob_sink import AzureBlobSink
 from tests.fixtures.base_classes import inject_write_failure
@@ -55,7 +56,7 @@ def _mock_blob_upload() -> tuple[MagicMock, MagicMock]:
     return mock_service, mock_blob_client
 
 
-def _make_sink_ctx():
+def _make_sink_ctx() -> PluginContext:
     """Build a PluginContext suitable for sink.write() calls."""
     from tests.fixtures.factories import make_operation_context
 
@@ -146,7 +147,7 @@ class TestAzureBlobSinkLifecycle:
 
         mock_client.close.assert_called_once()
         assert sink._container_client is None
-        assert sink._buffered_rows == []
+        assert sink._buffered_rows == []  # type: ignore[unreachable]  # close() mutates _container_client; mypy can't track cross-method state change
         assert sink._resolved_blob_path is None
         assert sink._has_uploaded is False
 
@@ -420,7 +421,7 @@ class TestAzureBlobSinkAudit:
         def failing_record_call(**kwargs: Any) -> Any:
             raise RuntimeError("DB write failed")
 
-        ctx.record_call = failing_record_call  # type: ignore[assignment]
+        ctx.record_call = failing_record_call  # type: ignore[method-assign,assignment]  # intentional monkey-patch for test
 
         with patch(PATCH_AUTH, return_value=mock_service), pytest.raises(AuditIntegrityError, match="Failed to record"):
             sink.write([{"x": 1}], ctx)

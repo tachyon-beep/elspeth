@@ -7,7 +7,9 @@ in a response model.  ``CreateSecretRequest`` accepts a value on the way *in*;
 
 from __future__ import annotations
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
+
+from elspeth.web.validation import has_visible_content
 
 
 class SecretInventoryResponse(BaseModel):
@@ -24,6 +26,15 @@ class CreateSecretRequest(BaseModel):
 
     name: str = Field(min_length=1, max_length=256, pattern=r"^[A-Za-z][A-Za-z0-9_]*$")
     value: str = Field(min_length=1, max_length=65536)
+
+    @field_validator("value")
+    @classmethod
+    def reject_invisible_only(cls, v: str) -> str:
+        if not has_visible_content(v):
+            raise ValueError(
+                "Secret value must contain at least one visible character"
+            )
+        return v
 
 
 class CreateSecretResponse(BaseModel):

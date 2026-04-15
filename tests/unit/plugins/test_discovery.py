@@ -293,7 +293,7 @@ class TestDiscoverAllPlugins:
                 plugin_name: str = cls.name  # type: ignore[attr-defined]
                 if plugin_name in EXEMPT:
                     continue
-                model = cls.get_config_model()
+                model = cls.get_config_model()  # type: ignore[attr-defined]  # discovered plugin classes have this method
                 if model is None:
                     missing.append(f"{plugin_type}/{plugin_name} ({cls.__qualname__})")
 

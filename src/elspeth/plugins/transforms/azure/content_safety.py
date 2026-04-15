@@ -107,7 +107,7 @@ class AzureContentSafety(BaseAzureSafetyTransform):
 
     name = "azure_content_safety"
     plugin_version = "1.0.0"
-    source_file_hash = "sha256:ec8b6fd765fd015d"
+    source_file_hash: str | None = "sha256:e6aed8e68e4e8fe2"
     config_model = AzureContentSafetyConfig
 
     def __init__(self, config: dict[str, Any]) -> None:

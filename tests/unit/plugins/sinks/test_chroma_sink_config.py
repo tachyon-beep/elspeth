@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from typing import Any
+
 import pytest
 
 from elspeth.plugins.infrastructure.config_base import PluginConfigError
@@ -109,7 +111,7 @@ class TestFieldMappingSchemaValidation:
         document_field: str = "text",
         id_field: str = "id",
         metadata_fields: list[str] | None = None,
-    ) -> dict:
+    ) -> dict[str, Any]:
         return {
             "collection": "test",
             "mode": "persistent",

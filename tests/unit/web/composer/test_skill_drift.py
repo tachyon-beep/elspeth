@@ -72,9 +72,9 @@ class TestPluginNameDrift:
     def _discover(self) -> None:
         """Discover all plugins once for the test class."""
         discovered = discover_all_plugins()
-        self.source_names = {cls.name for cls in discovered["sources"]}
-        self.transform_names = {cls.name for cls in discovered["transforms"]}
-        self.sink_names = {cls.name for cls in discovered["sinks"]}
+        self.source_names = {cls.name for cls in discovered["sources"]}  # type: ignore[attr-defined]
+        self.transform_names = {cls.name for cls in discovered["transforms"]}  # type: ignore[attr-defined]
+        self.sink_names = {cls.name for cls in discovered["sinks"]}  # type: ignore[attr-defined]
 
     def test_web_skill_lists_all_sources(self) -> None:
         """Every registered source plugin appears in the web skill."""

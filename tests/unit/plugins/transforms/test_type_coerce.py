@@ -441,6 +441,7 @@ class TestTypeCoerceBehavior:
         assert result.row is not None
         assert result.row["quantity"] == 42
         # Check audit shows unchanged in metadata
+        assert result.success_reason is not None
         assert "quantity" in result.success_reason["metadata"]["fields_unchanged"]
 
     def test_missing_field_errors(self, ctx: "PluginContext") -> None:
@@ -456,6 +457,7 @@ class TestTypeCoerceBehavior:
         row = make_pipeline_row({"other": 42})
         result = transform.process(row, ctx)
         assert result.status == "error"
+        assert result.reason is not None
         assert result.reason["reason"] == "missing_field"
         assert result.reason["field"] == "missing"
 
@@ -472,6 +474,7 @@ class TestTypeCoerceBehavior:
         row = make_pipeline_row({"active": "maybe"})
         result = transform.process(row, ctx)
         assert result.status == "error"
+        assert result.reason is not None
         assert result.reason["reason"] == "type_mismatch"
         assert "maybe" in result.reason.get("message", "")
 
@@ -510,6 +513,7 @@ class TestTypeCoerceBehavior:
         row = make_pipeline_row({"price": "12.50", "quantity": 3})  # quantity already int
         result = transform.process(row, ctx)
         assert result.status == "success"
+        assert result.success_reason is not None
         assert result.success_reason["action"] == "coerced"
         assert result.success_reason["fields_modified"] == ["price"]
         # Plugin-specific audit details in metadata

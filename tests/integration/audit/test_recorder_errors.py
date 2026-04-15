@@ -235,7 +235,7 @@ class TestTransformErrorRecording:
             ref=TokenRef(token_id="tok_nan", run_id=run.run_id),
             transform_id="processor",
             row_data=row_data,
-            error_details={"reason": "float_overflow", "error": "Cannot divide by zero"},  # type: ignore[typeddict-item]  # intentionally invalid reason
+            error_details={"reason": "float_overflow", "error": "Cannot divide by zero"},
             destination="error_sink",
         )
 
@@ -276,7 +276,7 @@ class TestTransformErrorRecording:
             ref=TokenRef(token_id="tok_inf", run_id=run.run_id),
             transform_id="processor",
             row_data=row_data,
-            error_details={"reason": "float_overflow", "error": "Value too large"},  # type: ignore[typeddict-item]  # intentionally invalid reason
+            error_details={"reason": "float_overflow", "error": "Value too large"},
             destination="discard",
         )
 

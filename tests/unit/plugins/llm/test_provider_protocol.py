@@ -118,7 +118,7 @@ class TestLLMQueryResult:
                 content="hello",
                 usage=TokenUsage.unknown(),
                 model="gpt-4o",
-                finish_reason="stop",  # type: ignore[arg-type] — must use FinishReason.STOP
+                finish_reason="stop",  # type: ignore[arg-type]  # deliberate: tests rejection of raw string (must use FinishReason.STOP)
             )
 
 

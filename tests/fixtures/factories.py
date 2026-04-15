@@ -30,8 +30,52 @@ if TYPE_CHECKING:
     from elspeth.contracts.plugin_context import PluginContext
     from elspeth.core.dag import ExecutionGraph, WiredTransform
 
+__all__ = [
+    "make_artifact",
+    "make_batch_checkpoint",
+    "make_coalesce_metadata",
+    "make_context",
+    "make_contract",
+    "make_contract_audit_record",
+    "make_error",
+    "make_error_reason",
+    "make_exception_result",
+    "make_execution_counters",
+    "make_external_call_completed",
+    "make_failure_info",
+    "make_field",
+    "make_flush_result",
+    "make_gate_continue",
+    "make_gate_fork",
+    "make_gate_route",
+    "make_graph_fork",
+    "make_graph_linear",
+    "make_operation_context",
+    "make_phase_completed",
+    "make_phase_started",
+    "make_pipeline_config",
+    "make_pipeline_row",
+    "make_pool_execution_context",
+    "make_row",
+    "make_row_result",
+    "make_run_result",
+    "make_run_summary",
+    "make_source_context",
+    "make_source_row",
+    "make_source_row_quarantined",
+    "make_success",
+    "make_success_multi",
+    "make_success_reason",
+    "make_token_completed",
+    "make_token_info",
+    "make_transform_completed",
+    "make_transform_error_token",
+    "make_validation_error_token",
+    "wire_transforms",
+]
+
 # --- Re-export all production factories for single-import convenience ---
-from elspeth.testing import (  # noqa: F401
+from elspeth.testing import (
     make_artifact,
     make_contract,
     make_contract_audit_record,
@@ -60,12 +104,10 @@ from elspeth.testing import (  # noqa: F401
     make_success_multi,
     make_success_reason,
     make_token_completed,
+    make_token_info,
     make_transform_completed,
     make_transform_error_token,
     make_validation_error_token,
-)
-from elspeth.testing import (
-    make_token_info as make_token_info,
 )
 
 # =============================================================================

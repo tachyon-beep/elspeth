@@ -194,7 +194,7 @@ class WebScrapeTransform(BaseTransform):
     name = "web_scrape"
     determinism = Determinism.EXTERNAL_CALL
     plugin_version = "1.0.0"
-    source_file_hash = "sha256:4ad7984cafa2505f"
+    source_file_hash: str | None = "sha256:ac691495c23d2754"
     config_model = WebScrapeConfig
 
     def __init__(self, options: dict[str, Any]) -> None:

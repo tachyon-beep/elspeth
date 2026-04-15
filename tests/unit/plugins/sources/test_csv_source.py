@@ -441,6 +441,7 @@ class TestCSVSourceQuarantineYielding:
         assert not results[0].is_quarantined
         assert results[0].row["name"] == "alice"
         assert results[1].is_quarantined is True
+        assert results[1].quarantine_error is not None
         assert "corrupted parser" in results[1].quarantine_error.lower()
 
     def test_skip_rows_line_numbers_are_accurate(self, tmp_path: Path, ctx: PluginContext) -> None:

@@ -558,6 +558,30 @@ class TestNodeRecords:
         assert n["registered_at"] is not None
         assert isinstance(n["registered_at"], str)
         assert n["registered_at"] == _DT.isoformat()
+        assert n["source_file_hash"] is None
+
+    def test_node_source_file_hash_propagated(self) -> None:
+        node_with_hash = Node(
+            node_id="node-hash",
+            run_id="run-1",
+            plugin_name="csv",
+            node_type=NodeType.SOURCE,
+            plugin_version="1.0",
+            determinism=Determinism.DETERMINISTIC,
+            config_hash="node-cfg-hash",
+            config_json='{"path": "data.csv"}',
+            registered_at=_DT,
+            schema_hash="schema-hash",
+            sequence_in_pipeline=0,
+            schema_mode="observed",
+            schema_fields=[{"name": "id", "type": "int"}],
+            source_file_hash="sha256:abcdef0123456789",
+        )
+        exporter = _make_exporter(nodes=[node_with_hash])
+        records = list(exporter.export_run("run-1"))
+        nodes = [r for r in records if r["record_type"] == "node"]
+        assert len(nodes) == 1
+        assert nodes[0]["source_file_hash"] == "sha256:abcdef0123456789"
 
 
 class TestEdgeRecords:

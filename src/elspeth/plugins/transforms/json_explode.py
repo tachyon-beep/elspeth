@@ -112,7 +112,7 @@ class JSONExplode(BaseTransform):
 
     name = "json_explode"
     plugin_version = "1.0.0"
-    source_file_hash = "sha256:254c237e0513170f"
+    source_file_hash: str | None = "sha256:02918e61771e0c8a"
     config_model = JSONExplodeConfig
     creates_tokens = True  # CRITICAL: enables new token creation for deaggregation
 

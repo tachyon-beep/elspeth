@@ -29,7 +29,7 @@ class TestResolvedSecret:
 
         rs = ResolvedSecret(name="KEY", value="val", scope="server", fingerprint="fp")
         with pytest.raises(AttributeError):
-            rs.value = "new"  # type: ignore[misc]
+            rs.value = "new"
 
 
 class TestSecretInventoryItem:

@@ -846,7 +846,7 @@ class TestDiversionIndexValidation:
         with pytest.raises(PluginContractViolation, match=r"row_index=5.*batch has only 2 rows"):
             executor.write(
                 sink,
-                tokens,
+                tokens,  # type: ignore[arg-type]  # MagicMock(spec=TokenInfo) satisfies runtime checks
                 MagicMock(),
                 step_in_pipeline=0,
                 sink_name="out",

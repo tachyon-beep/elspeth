@@ -722,7 +722,7 @@ class TestAzureBlobSourceAuditAndErrors:
         mock_service = _mock_blob_download(blob_bytes)
 
         # Make record_call raise to simulate audit failure
-        ctx.record_call = MagicMock(side_effect=Exception("db write failed"))  # type: ignore[assignment]
+        ctx.record_call = MagicMock(side_effect=Exception("db write failed"))  # type: ignore[method-assign]
 
         with (
             patch(PATCH_AUTH, return_value=mock_service),

@@ -313,7 +313,7 @@ class TestCompleteNodeStateForbiddenFields:
         _db, repo, _fac, tok = _make_repo_with_token()
         repo.begin_node_state(tok, "transform-1", "run-1", 1, {"a": 1}, state_id="s-1")
         with pytest.raises(ValueError, match=r"PENDING.*must not have success_reason"):
-            repo.complete_node_state("s-1", NodeStateStatus.PENDING, success_reason={"reason": "ok"}, duration_ms=5.0)
+            repo.complete_node_state("s-1", NodeStateStatus.PENDING, success_reason={"reason": "ok"}, duration_ms=5.0)  # type: ignore[call-overload]  # intentionally invalid: testing rejection of success_reason with PENDING
 
     def test_completed_rejects_error(self) -> None:
         from elspeth.contracts.errors import ExecutionError
@@ -331,7 +331,7 @@ class TestCompleteNodeStateForbiddenFields:
         repo.begin_node_state(tok, "transform-1", "run-1", 1, {"a": 1}, state_id="s-1")
         err = ExecutionError(exception="oops", exception_type="ValueError")
         with pytest.raises(ValueError, match=r"FAILED.*must not have success_reason"):
-            repo.complete_node_state("s-1", NodeStateStatus.FAILED, error=err, success_reason={"reason": "ok"}, duration_ms=5.0)
+            repo.complete_node_state("s-1", NodeStateStatus.FAILED, error=err, success_reason={"reason": "ok"}, duration_ms=5.0)  # type: ignore[call-overload]  # intentionally invalid: testing rejection of success_reason with FAILED
 
 
 # ---------------------------------------------------------------------------

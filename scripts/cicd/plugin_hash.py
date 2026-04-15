@@ -1,7 +1,7 @@
 """Shared hash computation logic for plugin source file hashing.
 
 Provides three operations:
-1. compute_source_file_hash — SHA-256 of file content with self-referential normalization
+1. compute_source_file_hash — SHA-256 of file content with cross-platform and self-referential normalization
 2. extract_plugin_attributes — AST extraction of plugin class attributes
 3. fix_source_file_hash — in-place line rewrite to update a stale hash
 
@@ -30,11 +30,14 @@ from dataclasses import dataclass
 from pathlib import Path
 
 # Regex for normalizing source_file_hash lines in raw bytes.
-# Matches both plain assignment and annotated assignment forms:
+# Matches both plain assignment and annotated assignment forms,
+# with any content after "sha256:" (not just hex — handles placeholders
+# like "sha256:stale_stale_stale" and "sha256:<computed>"):
 #   source_file_hash = "sha256:abcdef0123456789"
 #   source_file_hash: str = "sha256:abcdef0123456789"
 #   source_file_hash: str | None = "sha256:abcdef0123456789"
-_HASH_LINE_PATTERN = re.compile(rb'(\s*source_file_hash\s*(?::[^=]+=\s*|=\s*))"sha256:[0-9a-f]+"')
+#   source_file_hash = "sha256:stale_stale_stale"
+_HASH_LINE_PATTERN = re.compile(rb'(\s*source_file_hash\s*(?::[^=]+=\s*|=\s*))"sha256:[^"]+"')
 
 # The normalized placeholder value used during hashing.
 _NORMALIZED_HASH_VALUE = b'"sha256:0000000000000000"'
@@ -69,11 +72,13 @@ class PluginAttributes:
 
 
 def compute_source_file_hash(file_path: Path) -> str:
-    """Compute SHA-256 hash of file content with self-referential normalization.
+    """Compute SHA-256 hash of file content with cross-platform normalization.
 
-    Reads raw bytes (preserving encoding, line endings, BOM, etc.), normalizes
-    any ``source_file_hash = "sha256:..."`` line to a fixed placeholder, then
-    returns the hash as ``sha256:<first-16-hex-chars>``.
+    Reads raw bytes, normalizes line endings (CRLF/CR → LF) and strips
+    UTF-8 BOM, then normalizes any ``source_file_hash = "sha256:..."``
+    line to a fixed placeholder.  This ensures the same committed file
+    produces the same hash regardless of checkout line-ending settings
+    (``core.autocrlf``, ``.gitattributes``).
 
     Args:
         file_path: Path to the Python source file.
@@ -82,7 +87,12 @@ def compute_source_file_hash(file_path: Path) -> str:
         Hash string in the format ``sha256:<16-hex-chars>``.
     """
     raw = file_path.read_bytes()
-    normalized = _HASH_LINE_PATTERN.sub(lambda m: m.group(1) + _NORMALIZED_HASH_VALUE, raw)
+    # Normalize line endings: CRLF → LF, then lone CR → LF.
+    # Strip UTF-8 BOM if present.
+    normalized = raw.replace(b"\r\n", b"\n").replace(b"\r", b"\n")
+    if normalized.startswith(b"\xef\xbb\xbf"):
+        normalized = normalized[3:]
+    normalized = _HASH_LINE_PATTERN.sub(lambda m: m.group(1) + _NORMALIZED_HASH_VALUE, normalized)
     digest = hashlib.sha256(normalized).hexdigest()[:16]
     return f"sha256:{digest}"
 
@@ -221,8 +231,9 @@ def fix_source_file_hash(file_path: Path, class_name: str, correct_hash: str) ->
     indent = old_line[: len(old_line) - len(old_line.lstrip())]
 
     # Detect whether the original uses annotation form
-    # Match: source_file_hash: str = "..." or source_file_hash = "..."
-    ann_match = re.match(r"(\s*source_file_hash\s*:\s*\w+\s*=\s*)", old_line)
+    # Match: source_file_hash: str = "...", source_file_hash: str | None = "...",
+    # or source_file_hash = "..."
+    ann_match = re.match(r"(\s*source_file_hash\s*:[^=]+=\s*)", old_line)
     plain_match = re.match(r"(\s*source_file_hash\s*=\s*)", old_line)
 
     if ann_match:

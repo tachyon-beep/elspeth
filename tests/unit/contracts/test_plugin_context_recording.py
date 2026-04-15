@@ -108,7 +108,7 @@ class TestRecordTransformErrorGuards:
                 token_id="tok-1",
                 transform_id="transform-1",
                 row={"data": "test"},
-                error_details={"action": "quarantine", "reason": "API returned 500"},
+                error_details={"reason": "api_error", "error": "API returned 500"},
                 destination="discard",
             )
 
@@ -136,7 +136,7 @@ class TestRecordTransformErrorHappyPath:
             token_id="tok-1",
             transform_id="transform-1",
             row={"data": "test"},
-            error_details={"action": "quarantine", "reason": "API returned 500"},
+            error_details={"reason": "api_error", "error": "API returned 500"},
             destination="error_sink",
         )
         assert isinstance(token, TransformErrorToken)
@@ -148,6 +148,6 @@ class TestRecordTransformErrorHappyPath:
             ref=TokenRef(token_id="tok-1", run_id="run-1"),
             transform_id="transform-1",
             row_data={"data": "test"},
-            error_details={"action": "quarantine", "reason": "API returned 500"},
+            error_details={"reason": "api_error", "error": "API returned 500"},
             destination="error_sink",
         )

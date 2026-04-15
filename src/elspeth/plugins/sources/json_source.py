@@ -136,7 +136,7 @@ class JSONSource(BaseSource):
 
     name = "json"
     plugin_version = "1.0.0"
-    source_file_hash = "sha256:84cc403e8ce6ac5b"
+    source_file_hash: str | None = "sha256:d6e36969964d3c46"
     config_model = JSONSourceConfig
     # Override parent type - SourceDataConfig requires this to be set
     _on_validation_failure: str

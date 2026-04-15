@@ -121,11 +121,14 @@ class TestExplainScreenLoading:
         mock_db = MagicMock()
 
         with patch("elspeth.tui.screens.explain_screen.RecorderFactory") as MockFactory:
-            MockFactory.return_value.data_flow.get_nodes.side_effect = OperationalError("connection refused", {}, None)
+            MockFactory.return_value.data_flow.get_nodes.side_effect = OperationalError(
+                "connection refused", {}, Exception("connection refused")
+            )
             screen = ExplainScreen(db=mock_db, run_id="run-123")
 
         assert isinstance(screen.state, LoadingFailedState)
         assert screen.state.run_id == "run-123"
+        assert screen.state.error is not None
         assert "connection refused" in screen.state.error
         assert screen.state.db is mock_db
 
@@ -184,8 +187,8 @@ class TestExplainScreenLoading:
             MockFactory.return_value.data_flow.get_nodes.return_value = nodes
             screen.load(mock_db, "run-789")
 
-        assert isinstance(screen.state, LoadedState)
-        assert screen.get_lineage_data()["run_id"] == "run-789"
+        assert isinstance(screen.state, LoadedState)  # type: ignore[unreachable]  # load() mutates state; mypy can't track cross-method mutation
+        assert screen.get_lineage_data()["run_id"] == "run-789"  # type: ignore[unreachable]
 
     def test_load_from_loaded_state_raises(self) -> None:
         """load() from LoadedState raises InvalidStateTransitionError."""
@@ -273,7 +276,9 @@ class TestExplainScreenNodeSelection:
 
         # Create a screen that enters LoadingFailedState
         with patch("elspeth.tui.screens.explain_screen.RecorderFactory") as MockFactory:
-            MockFactory.return_value.data_flow.get_nodes.side_effect = OperationalError("connection refused", {}, None)
+            MockFactory.return_value.data_flow.get_nodes.side_effect = OperationalError(
+                "connection refused", {}, Exception("connection refused")
+            )
             screen = ExplainScreen(db=mock_db, run_id="run-failed")
 
         assert isinstance(screen.state, LoadingFailedState)

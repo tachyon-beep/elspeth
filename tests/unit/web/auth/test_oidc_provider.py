@@ -184,6 +184,62 @@ class TestOIDCTokenValidation:
         with mock_httpx_discovery, pytest.raises(AuthenticationError):
             await provider.authenticate(token)
 
+    @pytest.mark.asyncio
+    async def test_missing_sub_claim_raises_authentication_error(
+        self,
+        rsa_keypair,
+        mock_httpx_discovery,
+    ) -> None:
+        """Token without sub claim must raise AuthenticationError, not KeyError."""
+        private_key, _ = rsa_keypair
+        provider = OIDCAuthProvider(issuer=ISSUER, audience=AUDIENCE)
+        claims = _valid_claims()
+        del claims["sub"]
+        token = make_rs256_token(private_key, claims)
+        with mock_httpx_discovery, pytest.raises(AuthenticationError, match="Missing required 'sub' claim"):
+            await provider.authenticate(token)
+
+    @pytest.mark.asyncio
+    async def test_blank_sub_claim_raises_authentication_error(
+        self,
+        rsa_keypair,
+        mock_httpx_discovery,
+    ) -> None:
+        """Token with blank sub must raise AuthenticationError."""
+        private_key, _ = rsa_keypair
+        provider = OIDCAuthProvider(issuer=ISSUER, audience=AUDIENCE)
+        token = make_rs256_token(private_key, _valid_claims({"sub": ""}))
+        with mock_httpx_discovery, pytest.raises(AuthenticationError, match="user_id"):
+            await provider.authenticate(token)
+
+    @pytest.mark.asyncio
+    async def test_null_preferred_username_authenticate_falls_back_to_sub(
+        self,
+        rsa_keypair,
+        mock_httpx_discovery,
+    ) -> None:
+        """authenticate() with null preferred_username falls back to sub."""
+        private_key, _ = rsa_keypair
+        provider = OIDCAuthProvider(issuer=ISSUER, audience=AUDIENCE)
+        token = make_rs256_token(private_key, _valid_claims({"preferred_username": None}))
+        with mock_httpx_discovery:
+            identity = await provider.authenticate(token)
+        assert identity.username == "user-123"
+
+    @pytest.mark.asyncio
+    async def test_empty_preferred_username_authenticate_falls_back_to_sub(
+        self,
+        rsa_keypair,
+        mock_httpx_discovery,
+    ) -> None:
+        """authenticate() with empty preferred_username falls back to sub."""
+        private_key, _ = rsa_keypair
+        provider = OIDCAuthProvider(issuer=ISSUER, audience=AUDIENCE)
+        token = make_rs256_token(private_key, _valid_claims({"preferred_username": ""}))
+        with mock_httpx_discovery:
+            identity = await provider.authenticate(token)
+        assert identity.username == "user-123"
+
 
 class TestOIDCGetUserInfo:
     """Tests for full profile retrieval from OIDC claims."""
@@ -278,6 +334,62 @@ class TestOIDCGetUserInfo:
             identity = await provider.authenticate(token)
         assert identity.username == identity.user_id
         assert identity.username == "user-123"
+
+    @pytest.mark.asyncio
+    async def test_get_user_info_missing_sub_raises(
+        self,
+        rsa_keypair,
+        mock_httpx_discovery,
+    ) -> None:
+        """get_user_info must also reject tokens without sub claim."""
+        private_key, _ = rsa_keypair
+        provider = OIDCAuthProvider(issuer=ISSUER, audience=AUDIENCE)
+        claims = _valid_claims()
+        del claims["sub"]
+        token = make_rs256_token(private_key, claims)
+        with mock_httpx_discovery, pytest.raises(AuthenticationError, match="Missing required 'sub' claim"):
+            await provider.get_user_info(token)
+
+    @pytest.mark.asyncio
+    async def test_get_user_info_blank_sub_raises(
+        self,
+        rsa_keypair,
+        mock_httpx_discovery,
+    ) -> None:
+        """get_user_info with blank sub must raise AuthenticationError."""
+        private_key, _ = rsa_keypair
+        provider = OIDCAuthProvider(issuer=ISSUER, audience=AUDIENCE)
+        token = make_rs256_token(private_key, _valid_claims({"sub": ""}))
+        with mock_httpx_discovery, pytest.raises(AuthenticationError, match="user_id"):
+            await provider.get_user_info(token)
+
+    @pytest.mark.asyncio
+    async def test_null_preferred_username_falls_back_to_sub(
+        self,
+        rsa_keypair,
+        mock_httpx_discovery,
+    ) -> None:
+        """IdP may send preferred_username: null — username must fall back to sub."""
+        private_key, _ = rsa_keypair
+        provider = OIDCAuthProvider(issuer=ISSUER, audience=AUDIENCE)
+        token = make_rs256_token(private_key, _valid_claims({"preferred_username": None}))
+        with mock_httpx_discovery:
+            profile = await provider.get_user_info(token)
+        assert profile.username == "user-123"
+
+    @pytest.mark.asyncio
+    async def test_empty_preferred_username_falls_back_to_sub(
+        self,
+        rsa_keypair,
+        mock_httpx_discovery,
+    ) -> None:
+        """IdP may send preferred_username: "" — username must fall back to sub."""
+        private_key, _ = rsa_keypair
+        provider = OIDCAuthProvider(issuer=ISSUER, audience=AUDIENCE)
+        token = make_rs256_token(private_key, _valid_claims({"preferred_username": ""}))
+        with mock_httpx_discovery:
+            profile = await provider.get_user_info(token)
+        assert profile.username == "user-123"
 
 
 class TestOIDCJWKSFailures:

@@ -42,6 +42,7 @@ class NodeExportRecord(TypedDict):
     plugin_name: str
     node_type: str
     plugin_version: str | None
+    source_file_hash: str | None
     determinism: str
     config_hash: str
     config: Any  # Resolved config — structure varies by plugin

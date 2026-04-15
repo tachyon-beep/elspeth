@@ -9,7 +9,7 @@ Security boundaries tested:
 
 from __future__ import annotations
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 from sqlalchemy import create_engine
 from sqlalchemy.pool import StaticPool
 from starlette.testclient import TestClient
@@ -149,6 +149,46 @@ class TestCreateSecret:
         resp2 = client.post("/api/secrets", json={"name": "KEY", "value": "v2"})
         assert resp2.status_code == 201
         assert resp2.json()["name"] == "KEY"
+
+    def test_rejects_whitespace_only_value(self) -> None:
+        """SECURITY: whitespace-only secret values must be rejected."""
+        app = _make_app()
+        client = TestClient(app)
+
+        resp = client.post("/api/secrets", json={"name": "KEY", "value": "   "})
+        assert resp.status_code == 422
+
+    def test_accepts_value_with_leading_whitespace(self) -> None:
+        """Values with mixed content (whitespace + non-whitespace) are fine."""
+        app = _make_app()
+        client = TestClient(app)
+
+        resp = client.post("/api/secrets", json={"name": "KEY", "value": "  real-key"})
+        assert resp.status_code == 201
+
+    def test_rejects_zero_width_space_only_value(self) -> None:
+        """SECURITY: zero-width spaces (U+200B) alone have no visible content."""
+        app = _make_app()
+        client = TestClient(app)
+
+        resp = client.post("/api/secrets", json={"name": "KEY", "value": "\u200b"})
+        assert resp.status_code == 422
+
+    def test_rejects_bom_only_value(self) -> None:
+        """SECURITY: BOM character (U+FEFF) alone has no visible content."""
+        app = _make_app()
+        client = TestClient(app)
+
+        resp = client.post("/api/secrets", json={"name": "KEY", "value": "\ufeff"})
+        assert resp.status_code == 422
+
+    def test_accepts_value_with_visible_and_invisible_chars(self) -> None:
+        """Values mixing visible and invisible characters are acceptable."""
+        app = _make_app()
+        client = TestClient(app)
+
+        resp = client.post("/api/secrets", json={"name": "KEY", "value": "\u200breal-secret"})
+        assert resp.status_code == 201
 
 
 # ---------------------------------------------------------------------------
@@ -305,3 +345,76 @@ class TestCrossUserIsolation:
         resp = client_b.post("/api/secrets/ALICE_ONLY/validate")
         assert resp.status_code == 200
         assert resp.json()["available"] is False
+
+
+# ---------------------------------------------------------------------------
+# 422 validation response redaction
+# ---------------------------------------------------------------------------
+
+
+class TestSecretValidationRedaction:
+    """SECURITY: 422 responses must never echo sensitive request values."""
+
+    _SAFE_KEYS = frozenset({"type", "loc", "msg"})
+
+    @staticmethod
+    def _make_app_with_redaction() -> FastAPI:
+        """Test app with the global allowlist-based 422 handler."""
+        from fastapi.exceptions import RequestValidationError
+        from fastapi.responses import JSONResponse
+
+        app = _make_app()
+        safe_keys = frozenset({"type", "loc", "msg"})
+
+        @app.exception_handler(RequestValidationError)
+        async def handle_validation_error(
+            request: Request,
+            exc: RequestValidationError,
+        ) -> JSONResponse:
+            safe_errors = [
+                {k: v for k, v in error.items() if k in safe_keys}
+                for error in exc.errors()
+            ]
+            return JSONResponse(status_code=422, content={"detail": safe_errors})
+
+        return app
+
+    def test_422_does_not_echo_secret_value(self) -> None:
+        """SECURITY: a 422 must not contain the submitted value."""
+        app = self._make_app_with_redaction()
+        client = TestClient(app)
+
+        secret_value = "super-secret-hunter2"
+        resp = client.post(
+            "/api/secrets",
+            json={"name": "API_KEY", "value": {"nested": secret_value}},
+        )
+        assert resp.status_code == 422
+
+        body_text = resp.text
+        assert secret_value not in body_text, (
+            "SECURITY: secret value must never appear in 422 response"
+        )
+        for error in resp.json()["detail"]:
+            assert "input" not in error
+            assert "ctx" not in error
+            assert "url" not in error
+
+    def test_422_preserves_error_structure(self) -> None:
+        """Redacted errors still have type, loc, msg for client debugging."""
+        app = self._make_app_with_redaction()
+        client = TestClient(app)
+
+        resp = client.post(
+            "/api/secrets",
+            json={"name": "API_KEY", "value": {"bad": "type"}},
+        )
+        assert resp.status_code == 422
+
+        errors = resp.json()["detail"]
+        assert len(errors) > 0
+        for error in errors:
+            assert "type" in error
+            assert "loc" in error
+            assert "msg" in error
+            assert set(error.keys()) <= self._SAFE_KEYS

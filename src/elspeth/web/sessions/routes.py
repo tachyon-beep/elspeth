@@ -329,7 +329,7 @@ def create_session_router() -> APIRouter:
             # what the user was looking at, which may differ from current if
             # another tab mutated state.
             if body.state_id is not None:
-                client_state_id = UUID(body.state_id)
+                client_state_id = body.state_id
                 try:
                     client_state = await service.get_state(client_state_id)
                 except ValueError:

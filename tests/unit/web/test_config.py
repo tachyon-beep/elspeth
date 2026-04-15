@@ -102,7 +102,7 @@ class TestWebSettingsValidation:
     def test_composer_fields_required_no_defaults(self) -> None:
         """Regression: composer fields must be explicitly configured — no silent defaults."""
         with pytest.raises(ValidationError):
-            WebSettings()  # No composer fields provided → validation error
+            WebSettings()  # type: ignore[call-arg]  # intentionally omitted to test validation
 
     def test_max_upload_bytes_zero_rejected(self) -> None:
         with pytest.raises(ValueError):

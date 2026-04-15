@@ -352,7 +352,7 @@ class TestRedactStoragePaths:
         assert redacted["source"]["options"]["path"] == "/data/blobs/manual.csv"
 
     def test_no_source_passthrough(self) -> None:
-        state_dict = {"source": None, "nodes": []}
+        state_dict: dict[str, Any] = {"source": None, "nodes": []}
         assert redact_source_storage_path(state_dict) is state_dict
 
     def test_does_not_mutate_original(self) -> None:

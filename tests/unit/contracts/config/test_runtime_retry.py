@@ -452,4 +452,4 @@ class TestValidateIntFieldFractionalFloats:
         from elspeth.contracts.config.runtime import RuntimeRetryConfig
 
         with pytest.raises(ValueError, match="must be an integer"):
-            RuntimeRetryConfig.from_policy({"max_attempts": 2.7})
+            RuntimeRetryConfig.from_policy({"max_attempts": 2.7})  # type: ignore[arg-type]  # deliberate: tests rejection of fractional float in int field

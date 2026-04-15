@@ -275,7 +275,7 @@ class TypeCoerce(BaseTransform):
 
     name = "type_coerce"
     plugin_version = "1.0.0"
-    source_file_hash = "sha256:15fc571ccd82af82"
+    source_file_hash: str | None = "sha256:c7d0cfe6731d1b01"
     config_model = TypeCoerceConfig
 
     def __init__(self, config: dict[str, Any]) -> None:

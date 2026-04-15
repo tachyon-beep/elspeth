@@ -12,6 +12,7 @@ from contextlib import asynccontextmanager
 from pathlib import Path
 
 from fastapi import FastAPI, Request
+from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from sqlalchemy import create_engine
@@ -361,6 +362,23 @@ def create_app(settings: WebSettings | None = None) -> FastAPI:
             status_code=409,
             content={"detail": str(exc), "error_type": "run_already_active"},
         )
+
+    # --- 422 input redaction (all routes) ---
+    # FastAPI's default RequestValidationError handler echoes the ``input``
+    # field, which leaks plaintext values from the request body (secret
+    # values on /api/secrets, passwords on /api/auth/login, etc.).
+    # We allowlist only the structurally safe keys: type, loc, msg.
+    # This is deliberately global — any route can carry sensitive fields,
+    # and callers can reconstruct the failing input from their own request.
+    _SAFE_VALIDATION_ERROR_KEYS = frozenset({"type", "loc", "msg"})
+
+    @app.exception_handler(RequestValidationError)
+    async def handle_validation_error(
+        request: Request,
+        exc: RequestValidationError,
+    ) -> JSONResponse:
+        safe_errors = [{k: v for k, v in error.items() if k in _SAFE_VALIDATION_ERROR_KEYS} for error in exc.errors()]
+        return JSONResponse(status_code=422, content={"detail": safe_errors})
 
     @app.get("/api/health")
     async def health() -> dict[str, str]:

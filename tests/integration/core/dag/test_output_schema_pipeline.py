@@ -132,7 +132,7 @@ class TestRealTransformPropagation:
             source=source,  # type: ignore[arg-type]  # test fixture
             source_settings=source_settings,
             transforms=wired_transforms,
-            sinks={sink_name: sink},  # type: ignore[dict-item]
+            sinks={sink_name: sink},
             aggregations={},
             gates=[],
         )
@@ -188,7 +188,7 @@ def _build_producer_consumer_graph(
         source=source,  # type: ignore[arg-type]  # test fixture
         source_settings=source_settings,
         transforms=[producer_wired, consumer_wired],
-        sinks={"output": CollectSink("output")},  # type: ignore[dict-item]
+        sinks={"output": CollectSink("output")},
         aggregations={},
         gates=[],
     )
@@ -266,7 +266,7 @@ class TestEdgeValidationWithOutputSchemaContract:
                 source=source,  # type: ignore[arg-type]  # test fixture
                 source_settings=SourceSettings(plugin="mock_source", on_success="source_out", options={}),
                 transforms=[wired],
-                sinks={"output": CollectSink("output")},  # type: ignore[dict-item]
+                sinks={"output": CollectSink("output")},
                 aggregations={},
                 gates=[],
             )

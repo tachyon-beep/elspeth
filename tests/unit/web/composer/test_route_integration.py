@@ -244,7 +244,7 @@ class TestStateToStateData:
             outputs=state_d["outputs"],
             metadata_=state_d["metadata"],
             is_valid=validation.is_valid,
-            validation_errors=list(validation.errors) if validation.errors else None,
+            validation_errors=[e.message for e in validation.errors] if validation.errors else None,
         )
         assert data.source is None
         assert not data.is_valid  # No source, no sinks
@@ -262,7 +262,7 @@ class TestStateToStateData:
             outputs=state_d["outputs"],
             metadata_=state_d["metadata"],
             is_valid=validation.is_valid,
-            validation_errors=list(validation.errors) if validation.errors else None,
+            validation_errors=[e.message for e in validation.errors] if validation.errors else None,
         )
         assert data.source is not None
         assert data.metadata_ is not None

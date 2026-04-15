@@ -172,7 +172,7 @@ class TestChromaSearchProvider:
             collection.add(
                 documents=[d["content"] for d in documents],
                 ids=[d["id"] for d in documents],
-                metadatas=metadatas,  # type: ignore[arg-type]  # chromadb stubs expect Mapping but we pass list[str | None]
+                metadatas=metadatas,
             )
 
         config = ChromaSearchProviderConfig(

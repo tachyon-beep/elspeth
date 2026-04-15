@@ -574,6 +574,7 @@ class TestUpsertEdge:
             catalog,
         )
         assert r3.success is True
+        assert r3.updated_state.source is not None
         assert r3.updated_state.source.on_success == "main"
 
     def test_edge_to_node_does_not_sync(self) -> None:
@@ -2568,7 +2569,7 @@ class TestMergePatch:
 
 
 class TestPatchSourceOptions:
-    def _state_with_source(self, options: dict) -> CompositionState:
+    def _state_with_source(self, options: dict[str, Any]) -> CompositionState:
         state = _empty_state()
         catalog = _mock_catalog()
         merged = {"schema": {"mode": "observed"}, **options}
@@ -2612,6 +2613,7 @@ class TestPatchSourceOptions:
         )
         assert result.success is True
 
+        assert result.updated_state.source is not None
         opts = deep_thaw(result.updated_state.source.options)
         assert opts["path"] == "/a"
         assert opts["encoding"] == "utf-8"
@@ -2627,6 +2629,7 @@ class TestPatchSourceOptions:
         )
         assert result.success is True
 
+        assert result.updated_state.source is not None
         opts = deep_thaw(result.updated_state.source.options)
         assert opts["path"] == "/a"
         assert "encoding" not in opts
@@ -2651,7 +2654,7 @@ class TestPatchSourceOptions:
 
 
 class TestPatchNodeOptions:
-    def _state_with_node(self, options: dict) -> CompositionState:
+    def _state_with_node(self, options: dict[str, Any]) -> CompositionState:
         state = _empty_state()
         catalog = _mock_catalog()
         r = execute_tool(
@@ -2708,7 +2711,7 @@ class TestPatchNodeOptions:
 
 
 class TestPatchOutputOptions:
-    def _state_with_output(self, options: dict) -> CompositionState:
+    def _state_with_output(self, options: dict[str, Any]) -> CompositionState:
         state = _empty_state()
         catalog = _mock_catalog()
         merged = {"schema": {"mode": "observed"}, **options}
@@ -2759,7 +2762,7 @@ class TestPatchOutputOptions:
 # ---------------------------------------------------------------------------
 
 
-def _valid_pipeline_args() -> dict:
+def _valid_pipeline_args() -> dict[str, Any]:
     """Return a minimal valid set_pipeline args dict."""
     return {
         "source": {
@@ -3170,7 +3173,7 @@ class TestExplainValidationError:
             catalog,
         )
         assert result.success is True
-        assert "edge" in result.data["suggested_fix"].lower()
+        assert "on_success" in result.data["suggested_fix"].lower()
 
     def test_explains_schema_contract_violation(self) -> None:
         state = _empty_state()

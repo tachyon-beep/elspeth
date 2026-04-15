@@ -25,13 +25,13 @@ from pyrate_limiter import Limiter
 from tenacity import retry, retry_if_exception_type, stop_after_attempt, wait_exponential
 
 try:
-    from tqdm.asyncio import tqdm as async_tqdm
+    from tqdm.asyncio import tqdm as async_tqdm  # type: ignore[import-untyped]
 
     HAS_TQDM = True
 except ImportError:
     HAS_TQDM = False
 
-    class AsyncTqdm:  # type: ignore
+    class AsyncTqdm:
         """Fallback progress bar when tqdm is not available."""
 
         def __init__(self, *args: Any, **kwargs: Any):

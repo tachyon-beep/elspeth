@@ -12,6 +12,8 @@ would cause transforms to execute out of order or produce corrupt audit trails.
 
 from __future__ import annotations
 
+from typing import Literal
+
 import networkx as nx
 from hypothesis import assume, given, settings
 from hypothesis import strategies as st
@@ -26,6 +28,9 @@ from elspeth.core.dag import (
     merge_union_fields,
 )
 from tests.helpers.coalesce import _add_coalesce_with_computed_schema
+
+# Type alias matching FieldDefinition.field_type
+_FieldType = Literal["str", "int", "float", "bool", "any"]
 
 # =============================================================================
 # Strategies for generating valid DAG structures
@@ -909,7 +914,7 @@ class TestGuaranteedFieldsProperties:
 
 
 # Strategies for field definitions with mixed required/optional
-valid_field_types = st.sampled_from(["int", "str", "float", "bool"])
+valid_field_types: st.SearchStrategy[_FieldType] = st.sampled_from(["int", "str", "float", "bool"])
 
 
 @st.composite

@@ -95,9 +95,16 @@ class EntraAuthProvider:
 
         self._validate_tenant(payload)
 
+        try:
+            sub = payload["sub"]
+        except KeyError as exc:
+            raise AuthenticationError("Missing required 'sub' claim in token") from exc
+
         return UserIdentity(
-            user_id=payload["sub"],
-            username=payload.get("preferred_username", payload["sub"]),
+            user_id=sub,
+            # preferred_username is optional — fall back to sub if absent,
+            # null, or empty.
+            username=payload.get("preferred_username") or sub,
         )
 
     async def get_user_info(self, token: str) -> UserProfile:
@@ -107,9 +114,14 @@ class EntraAuthProvider:
 
         self._validate_tenant(payload)
 
+        try:
+            sub = payload["sub"]
+        except KeyError as exc:
+            raise AuthenticationError("Missing required 'sub' claim in token") from exc
+
         return UserProfile(
-            user_id=payload["sub"],
-            username=payload.get("preferred_username", payload["sub"]),
+            user_id=sub,
+            username=payload.get("preferred_username") or sub,
             display_name=payload.get("name") or payload.get("preferred_username"),
             email=payload.get("email"),
             groups=self._extract_groups(payload),

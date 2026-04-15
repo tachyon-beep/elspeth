@@ -142,7 +142,8 @@ class _TestSinkBase:
     plugin_version = "1.0.0"
     source_file_hash: str | None = None
     declared_required_fields: frozenset[str] = frozenset()
-    _on_write_failure: str = "discard"
+    _on_write_failure: str | None = "discard"
+    supports_resume: bool = False
 
     def __init__(self) -> None:
         self.config: dict[str, Any] = {"schema": {"mode": "observed"}}
@@ -162,6 +163,25 @@ class _TestSinkBase:
 
     def close(self) -> None:
         pass
+
+    def configure_for_resume(self) -> None:
+        raise NotImplementedError("Test sinks do not support resume")
+
+    def validate_output_target(self) -> Any:
+        from elspeth.contracts.sink import OutputValidationResult
+
+        return OutputValidationResult.success()
+
+    @property
+    def needs_resume_field_resolution(self) -> bool:
+        return False
+
+    def set_resume_field_resolution(self, resolution_mapping: dict[str, str]) -> None:
+        pass
+
+    @classmethod
+    def get_config_model(cls, config: dict[str, Any] | None = None) -> None:
+        return None
 
 
 class _TestTransformBase(BaseTransform):
@@ -211,8 +231,11 @@ def inject_write_failure[S](sink: S, value: str = "discard") -> S:
 
     Returns the same sink for call-chaining.
     """
-    if sink._on_write_failure is None:  # type: ignore[union-attr]
-        sink._on_write_failure = value  # type: ignore[union-attr]
+    # Access via Any — S is always a concrete sink with _on_write_failure,
+    # but the generic type parameter can't express the SinkProtocol bound.
+    s: Any = sink
+    if s._on_write_failure is None:
+        s._on_write_failure = value
     return sink
 
 

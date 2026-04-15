@@ -116,7 +116,7 @@ class TestBatchTransformMixinTokenValidation:
         ctx = PluginContext(
             run_id="test-run",
             config={},
-            landscape=_make_factory(),
+            landscape=None,
             token=None,  # Explicitly None - contract violation
         )
 

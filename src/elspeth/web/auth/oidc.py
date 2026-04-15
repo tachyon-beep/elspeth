@@ -130,17 +130,27 @@ class OIDCAuthProvider:
         jwks = await self._validator.ensure_jwks()
         payload = self._validator.decode_token(token, jwks)
 
+        try:
+            sub = payload["sub"]
+        except KeyError as exc:
+            raise AuthenticationError("Missing required 'sub' claim in token") from exc
+
         return UserIdentity(
-            user_id=payload["sub"],
-            # sub is OIDC-required (crash on absence); preferred_username is
-            # optional (fall back to sub if absent)
-            username=payload.get("preferred_username", payload["sub"]),
+            user_id=sub,
+            # preferred_username is optional — fall back to sub if absent,
+            # null, or empty.
+            username=payload.get("preferred_username") or sub,
         )
 
     async def get_user_info(self, token: str) -> UserProfile:
         """Decode the OIDC token and extract profile claims."""
         jwks = await self._validator.ensure_jwks()
         payload = self._validator.decode_token(token, jwks)
+
+        try:
+            sub = payload["sub"]
+        except KeyError as exc:
+            raise AuthenticationError("Missing required 'sub' claim in token") from exc
 
         raw_groups = payload.get("groups")
         if raw_groups is None:
@@ -155,10 +165,10 @@ class OIDCAuthProvider:
             )
 
         return UserProfile(
-            user_id=payload["sub"],
-            # sub is OIDC-required (crash on absence); preferred_username is
-            # optional (fall back to sub if absent)
-            username=payload.get("preferred_username", payload["sub"]),
+            user_id=sub,
+            # preferred_username is optional — fall back to sub if absent,
+            # null, or empty. IdPs may send null for this optional claim.
+            username=payload.get("preferred_username") or sub,
             display_name=payload.get("name") or payload.get("preferred_username"),
             email=payload.get("email"),
             groups=tuple(groups),

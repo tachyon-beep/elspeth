@@ -20,6 +20,14 @@ from elspeth.contracts.secrets import ResolvedSecret
 from elspeth.core.dag.models import GraphValidationError
 from elspeth.plugins.infrastructure.config_base import PluginConfigError
 from elspeth.plugins.infrastructure.manager import PluginNotFoundError
+from elspeth.web.composer.state import (
+    CompositionState,
+    NodeSpec,
+    OutputSpec,
+    PipelineMetadata,
+    SourceSpec,
+)
+from elspeth.web.config import WebSettings
 from elspeth.web.execution.validation import (
     _collect_secret_refs,
     _infer_component_type_from_plugin_error,
@@ -27,53 +35,78 @@ from elspeth.web.execution.validation import (
 )
 
 
-class FakeSourceSpec:
-    """Minimal stand-in for SourceSpec during validation tests."""
-
-    def __init__(self, options: dict[str, Any] | None = None) -> None:
-        self.options = options or {}
-
-
-class FakeNodeSpec:
-    """Minimal stand-in for NodeSpec during validation tests."""
-
-    def __init__(self, options: dict[str, Any] | None = None) -> None:
-        self.options = options or {}
+def _make_source(options: dict[str, Any] | None = None) -> SourceSpec:
+    """Build a SourceSpec with sensible defaults for validation tests."""
+    return SourceSpec(
+        plugin="csv",
+        on_success="transform_in",
+        options=options or {},
+        on_validation_failure="discard",
+    )
 
 
-class FakeOutputSpec:
-    """Minimal stand-in for OutputSpec during validation tests."""
+def _make_node(options: dict[str, Any] | None = None) -> NodeSpec:
+    """Build a NodeSpec with sensible defaults for validation tests."""
+    return NodeSpec(
+        id="test_node",
+        node_type="transform",
+        plugin="value_transform",
+        input="transform_in",
+        on_success="results",
+        on_error=None,
+        options=options or {},
+        condition=None,
+        routes=None,
+        fork_to=None,
+        branches=None,
+        policy=None,
+        merge=None,
+    )
 
-    def __init__(self, options: dict[str, Any] | None = None, name: str = "primary") -> None:
-        self.name = name
-        self.options = options or {}
+
+def _make_output(
+    options: dict[str, Any] | None = None,
+    name: str = "primary",
+) -> OutputSpec:
+    """Build an OutputSpec with sensible defaults for validation tests."""
+    return OutputSpec(
+        name=name,
+        plugin="csv",
+        options=options or {},
+        on_write_failure="discard",
+    )
 
 
-class FakeCompositionState:
-    """Minimal stand-in for CompositionState during validation tests.
+def _make_state(
+    source_options: dict[str, Any] | None = None,
+    nodes: tuple[NodeSpec, ...] | None = None,
+    outputs: tuple[OutputSpec, ...] | None = None,
+) -> CompositionState:
+    """Build a CompositionState with sensible defaults for validation tests.
 
-    Mimics the typed CompositionState domain object — source is a SourceSpec-like
-    object with an .options attribute, not a raw dict.
+    When source_options is not None, a SourceSpec is created with those options.
+    When source_options is None, source is set to None.
     """
-
-    def __init__(
-        self,
-        yaml_content: str = "",
-        source_options: dict[str, Any] | None = None,
-        nodes: tuple[FakeNodeSpec, ...] | None = None,
-        outputs: tuple[FakeOutputSpec, ...] | None = None,
-    ) -> None:
-        self.yaml_content = yaml_content
-        self.source: FakeSourceSpec | None = FakeSourceSpec(source_options) if source_options is not None else None
-        self.nodes = nodes or ()
-        self.outputs = outputs or ()
+    source = _make_source(source_options) if source_options is not None else None
+    return CompositionState(
+        source=source,
+        nodes=nodes or (),
+        edges=(),
+        outputs=outputs or (),
+        metadata=PipelineMetadata(),
+        version=1,
+    )
 
 
-class FakeWebSettings:
-    """Minimal stand-in for WebSettings during validation tests."""
-
-    def __init__(self, data_dir: str = "/tmp/test_data") -> None:
-        self.data_dir = data_dir
+def _make_settings(data_dir: str = "/tmp/test_data") -> WebSettings:
+    """Build a WebSettings with sensible defaults for validation tests."""
+    return WebSettings(
+        data_dir=Path(data_dir),
+        composer_max_composition_turns=10,
+        composer_max_discovery_turns=5,
+        composer_timeout_seconds=30.0,
+        composer_rate_limit_per_minute=60,
+    )
 
 
 def _check(result, name: str):
@@ -85,10 +118,10 @@ class TestValidatePipelinePathAllowlist:
     """C3/S2: Source path allowlist check — defense-in-depth."""
 
     def test_path_within_blobs_passes(self) -> None:
-        state = FakeCompositionState(
+        state = _make_state(
             source_options={"path": "/tmp/test_data/blobs/data.csv"},
         )
-        settings = FakeWebSettings(data_dir="/tmp/test_data")
+        settings = _make_settings(data_dir="/tmp/test_data")
         mock_yaml_gen = MagicMock()
         mock_yaml_gen.generate_yaml.return_value = "source:\n  plugin: csv_source"
         with patch("elspeth.web.execution.validation.load_settings") as mock_load:
@@ -99,10 +132,10 @@ class TestValidatePipelinePathAllowlist:
         assert path_check.passed is True
 
     def test_path_outside_blobs_blocked(self) -> None:
-        state = FakeCompositionState(
+        state = _make_state(
             source_options={"path": "/etc/passwd"},
         )
-        settings = FakeWebSettings(data_dir="/tmp/test_data")
+        settings = _make_settings(data_dir="/tmp/test_data")
         mock_yaml_gen = MagicMock()
         result = validate_pipeline(state, settings, mock_yaml_gen)
         assert result.is_valid is False
@@ -110,18 +143,18 @@ class TestValidatePipelinePathAllowlist:
         assert any("Path traversal" in e.message for e in result.errors)
 
     def test_path_traversal_via_dotdot_blocked(self) -> None:
-        state = FakeCompositionState(
+        state = _make_state(
             source_options={"path": "/tmp/test_data/blobs/../../secret.csv"},
         )
-        settings = FakeWebSettings(data_dir="/tmp/test_data")
+        settings = _make_settings(data_dir="/tmp/test_data")
         mock_yaml_gen = MagicMock()
         result = validate_pipeline(state, settings, mock_yaml_gen)
         assert result.is_valid is False
 
     def test_no_path_option_records_skipped_check(self) -> None:
         """B11 fix: path allowlist check is always recorded, even when skipped."""
-        state = FakeCompositionState(source_options={})
-        settings = FakeWebSettings(data_dir="/tmp/test_data")
+        state = _make_state(source_options={})
+        settings = _make_settings(data_dir="/tmp/test_data")
         mock_yaml_gen = MagicMock()
         mock_yaml_gen.generate_yaml.return_value = "source:\n  plugin: csv_source"
         with patch("elspeth.web.execution.validation.load_settings") as mock_load:
@@ -137,11 +170,11 @@ class TestValidatePipelineSinkPathAllowlist:
     """Sink path allowlist — prevents arbitrary file writes via sink options."""
 
     def test_sink_path_outside_outputs_blocked(self) -> None:
-        state = FakeCompositionState(
+        state = _make_state(
             source_options={},
-            outputs=(FakeOutputSpec(name="evil_sink", options={"path": "/etc/cron.d/backdoor.csv"}),),
+            outputs=(_make_output(name="evil_sink", options={"path": "/etc/cron.d/backdoor.csv"}),),
         )
-        settings = FakeWebSettings(data_dir="/tmp/test_data")
+        settings = _make_settings(data_dir="/tmp/test_data")
         mock_yaml_gen = MagicMock()
         result = validate_pipeline(state, settings, mock_yaml_gen)
         assert result.is_valid is False
@@ -149,21 +182,21 @@ class TestValidatePipelineSinkPathAllowlist:
         assert any("evil_sink" in e.message for e in result.errors)
 
     def test_sink_path_traversal_blocked(self) -> None:
-        state = FakeCompositionState(
+        state = _make_state(
             source_options={},
-            outputs=(FakeOutputSpec(name="tricky", options={"path": "/tmp/test_data/outputs/../../etc/passwd"}),),
+            outputs=(_make_output(name="tricky", options={"path": "/tmp/test_data/outputs/../../etc/passwd"}),),
         )
-        settings = FakeWebSettings(data_dir="/tmp/test_data")
+        settings = _make_settings(data_dir="/tmp/test_data")
         mock_yaml_gen = MagicMock()
         result = validate_pipeline(state, settings, mock_yaml_gen)
         assert result.is_valid is False
 
     def test_sink_path_under_outputs_passes(self) -> None:
-        state = FakeCompositionState(
+        state = _make_state(
             source_options={},
-            outputs=(FakeOutputSpec(name="primary", options={"path": "/tmp/test_data/outputs/result.csv"}),),
+            outputs=(_make_output(name="primary", options={"path": "/tmp/test_data/outputs/result.csv"}),),
         )
-        settings = FakeWebSettings(data_dir="/tmp/test_data")
+        settings = _make_settings(data_dir="/tmp/test_data")
         mock_yaml_gen = MagicMock()
         mock_yaml_gen.generate_yaml.return_value = "source:\n  plugin: csv_source"
         with patch("elspeth.web.execution.validation.load_settings") as mock_load:
@@ -174,11 +207,11 @@ class TestValidatePipelineSinkPathAllowlist:
         assert "All paths within allowed directories" in path_check.detail
 
     def test_sink_path_under_blobs_passes(self) -> None:
-        state = FakeCompositionState(
+        state = _make_state(
             source_options={},
-            outputs=(FakeOutputSpec(name="blob_out", options={"path": "/tmp/test_data/blobs/out.json"}),),
+            outputs=(_make_output(name="blob_out", options={"path": "/tmp/test_data/blobs/out.json"}),),
         )
-        settings = FakeWebSettings(data_dir="/tmp/test_data")
+        settings = _make_settings(data_dir="/tmp/test_data")
         mock_yaml_gen = MagicMock()
         mock_yaml_gen.generate_yaml.return_value = "source:\n  plugin: csv_source"
         with patch("elspeth.web.execution.validation.load_settings") as mock_load:
@@ -189,11 +222,11 @@ class TestValidatePipelineSinkPathAllowlist:
 
     def test_sink_without_path_passes(self) -> None:
         """Sinks without path/file options (e.g. database) skip the check."""
-        state = FakeCompositionState(
+        state = _make_state(
             source_options={},
-            outputs=(FakeOutputSpec(name="db_sink", options={"connection_string": "sqlite:///out.db"}),),
+            outputs=(_make_output(name="db_sink", options={"connection_string": "sqlite:///out.db"}),),
         )
-        settings = FakeWebSettings(data_dir="/tmp/test_data")
+        settings = _make_settings(data_dir="/tmp/test_data")
         mock_yaml_gen = MagicMock()
         mock_yaml_gen.generate_yaml.return_value = "source:\n  plugin: csv_source"
         with patch("elspeth.web.execution.validation.load_settings") as mock_load:
@@ -208,11 +241,11 @@ class TestValidatePipelineRelativePaths:
 
     def test_relative_sink_path_resolves_against_data_dir(self) -> None:
         """outputs/result.csv should resolve under {data_dir}/outputs/."""
-        state = FakeCompositionState(
+        state = _make_state(
             source_options={},
-            outputs=(FakeOutputSpec(name="primary", options={"path": "outputs/result.csv"}),),
+            outputs=(_make_output(name="primary", options={"path": "outputs/result.csv"}),),
         )
-        settings = FakeWebSettings(data_dir="/tmp/test_data")
+        settings = _make_settings(data_dir="/tmp/test_data")
         mock_yaml_gen = MagicMock()
         mock_yaml_gen.generate_yaml.return_value = "source:\n  plugin: csv_source"
         with patch("elspeth.web.execution.validation.load_settings") as mock_load:
@@ -223,10 +256,10 @@ class TestValidatePipelineRelativePaths:
 
     def test_relative_source_path_resolves_against_data_dir(self) -> None:
         """blobs/data.csv should resolve under {data_dir}/blobs/."""
-        state = FakeCompositionState(
+        state = _make_state(
             source_options={"path": "blobs/data.csv"},
         )
-        settings = FakeWebSettings(data_dir="/tmp/test_data")
+        settings = _make_settings(data_dir="/tmp/test_data")
         mock_yaml_gen = MagicMock()
         mock_yaml_gen.generate_yaml.return_value = "source:\n  plugin: csv_source"
         with patch("elspeth.web.execution.validation.load_settings") as mock_load:
@@ -237,11 +270,11 @@ class TestValidatePipelineRelativePaths:
 
     def test_relative_traversal_still_blocked(self) -> None:
         """../etc/passwd relative to data_dir must still be blocked."""
-        state = FakeCompositionState(
+        state = _make_state(
             source_options={},
-            outputs=(FakeOutputSpec(name="evil", options={"path": "../etc/passwd"}),),
+            outputs=(_make_output(name="evil", options={"path": "../etc/passwd"}),),
         )
-        settings = FakeWebSettings(data_dir="/tmp/test_data")
+        settings = _make_settings(data_dir="/tmp/test_data")
         mock_yaml_gen = MagicMock()
         result = validate_pipeline(state, settings, mock_yaml_gen)
         assert result.is_valid is False
@@ -249,11 +282,11 @@ class TestValidatePipelineRelativePaths:
 
     def test_relative_sink_path_under_blobs(self) -> None:
         """blobs/out.json should resolve under {data_dir}/blobs/."""
-        state = FakeCompositionState(
+        state = _make_state(
             source_options={},
-            outputs=(FakeOutputSpec(name="blob_out", options={"path": "blobs/out.json"}),),
+            outputs=(_make_output(name="blob_out", options={"path": "blobs/out.json"}),),
         )
-        settings = FakeWebSettings(data_dir="/tmp/test_data")
+        settings = _make_settings(data_dir="/tmp/test_data")
         mock_yaml_gen = MagicMock()
         mock_yaml_gen.generate_yaml.return_value = "source:\n  plugin: csv_source"
         with patch("elspeth.web.execution.validation.load_settings") as mock_load:
@@ -289,8 +322,8 @@ class TestValidatePipelineSuccess:
         mock_graph = MagicMock()
         mock_graph_cls.from_plugin_instances.return_value = mock_graph
 
-        state = FakeCompositionState()
-        settings = FakeWebSettings()
+        state = _make_state()
+        settings = _make_settings()
         result = validate_pipeline(state, settings, mock_yaml_gen)
 
         assert result.is_valid is True
@@ -331,8 +364,8 @@ class TestValidatePipelineSettingsFailure:
             ],
         )
 
-        state = FakeCompositionState()
-        settings = FakeWebSettings()
+        state = _make_state()
+        settings = _make_settings()
         result = validate_pipeline(state, settings, mock_yaml_gen)
 
         assert result.is_valid is False
@@ -354,8 +387,8 @@ class TestValidatePipelineSettingsFailure:
         mock_yaml_gen.generate_yaml.return_value = "source: {}"
         mock_load.side_effect = FileNotFoundError("temp file missing")
 
-        state = FakeCompositionState()
-        settings = FakeWebSettings()
+        state = _make_state()
+        settings = _make_settings()
         result = validate_pipeline(state, settings, mock_yaml_gen)
 
         assert result.is_valid is False
@@ -377,8 +410,8 @@ class TestValidatePipelinePluginFailure:
 
         mock_instantiate.side_effect = PluginNotFoundError("Unknown source plugin: 'unknown'")
 
-        state = FakeCompositionState()
-        settings = FakeWebSettings()
+        state = _make_state()
+        settings = _make_settings()
         result = validate_pipeline(state, settings, mock_yaml_gen)
 
         assert result.is_valid is False
@@ -423,8 +456,8 @@ sinks:
       mode: write
 """
 
-        state = FakeCompositionState()
-        settings = FakeWebSettings()
+        state = _make_state()
+        settings = _make_settings()
         result = validate_pipeline(state, settings, mock_yaml_gen)
 
         assert result.is_valid is False
@@ -461,8 +494,8 @@ class TestValidatePipelineGraphFailure:
         mock_graph_cls.from_plugin_instances.return_value = mock_graph
         mock_graph.validate.side_effect = GraphValidationError("Route destination 'nonexistent' in gate_1 not found")
 
-        state = FakeCompositionState()
-        settings = FakeWebSettings()
+        state = _make_state()
+        settings = _make_settings()
         result = validate_pipeline(state, settings, mock_yaml_gen)
 
         assert result.is_valid is False
@@ -494,8 +527,8 @@ class TestValidatePipelineGraphFailure:
         mock_graph.validate.return_value = None  # structural check passes
         mock_graph.validate_edge_compatibility.side_effect = GraphValidationError("Schema mismatch on edge transform_1 -> sink_primary")
 
-        state = FakeCompositionState()
-        settings = FakeWebSettings()
+        state = _make_state()
+        settings = _make_settings()
         result = validate_pipeline(state, settings, mock_yaml_gen)
 
         assert result.is_valid is False
@@ -515,8 +548,8 @@ class TestValidatePipelineNoBareCatch:
         mock_yaml_gen.generate_yaml.return_value = "source:\n  plugin: csv_source"
         mock_load.side_effect = RuntimeError("Unexpected engine bug")
 
-        state = FakeCompositionState()
-        settings = FakeWebSettings()
+        state = _make_state()
+        settings = _make_settings()
         # RuntimeError is NOT in the typed exception list — it must propagate
         with pytest.raises(RuntimeError, match="Unexpected engine bug"):
             validate_pipeline(state, settings, mock_yaml_gen)
@@ -549,8 +582,8 @@ class TestValidatePipelineTempFileCleanup:
         mock_graph = MagicMock()
         mock_graph_cls.from_plugin_instances.return_value = mock_graph
 
-        state = FakeCompositionState()
-        settings = FakeWebSettings()
+        state = _make_state()
+        settings = _make_settings()
         validate_pipeline(state, settings, mock_yaml_gen)
 
         # load_settings was called with a Path, not YAML content
@@ -625,10 +658,10 @@ class TestValidatePipelineSecretRefs:
 
     def test_missing_refs_fail_validation(self) -> None:
         """Validation fails when secret refs can't be resolved."""
-        state = FakeCompositionState(
+        state = _make_state(
             source_options={"api_key": {"secret_ref": "MISSING_KEY"}},
         )
-        settings = FakeWebSettings()
+        settings = _make_settings()
         mock_yaml_gen = MagicMock()
         secret_svc = FakeSecretService(available_refs=set())
 
@@ -650,10 +683,10 @@ class TestValidatePipelineSecretRefs:
 
     def test_all_refs_present_passes(self) -> None:
         """Validation passes when all secret refs are resolvable."""
-        state = FakeCompositionState(
+        state = _make_state(
             source_options={"api_key": {"secret_ref": "MY_KEY"}},
         )
-        settings = FakeWebSettings()
+        settings = _make_settings()
         mock_yaml_gen = MagicMock()
         mock_yaml_gen.generate_yaml.return_value = "source:\n  plugin: csv_source"
         secret_svc = FakeSecretService(available_refs={"MY_KEY"})
@@ -674,10 +707,10 @@ class TestValidatePipelineSecretRefs:
 
     def test_no_secret_service_skips_check(self) -> None:
         """Without secret_service, the check is skipped (passed=True)."""
-        state = FakeCompositionState(
+        state = _make_state(
             source_options={"api_key": {"secret_ref": "KEY"}},
         )
-        settings = FakeWebSettings()
+        settings = _make_settings()
         mock_yaml_gen = MagicMock()
         mock_yaml_gen.generate_yaml.return_value = "source:\n  plugin: csv_source"
 
@@ -691,11 +724,11 @@ class TestValidatePipelineSecretRefs:
 
     def test_refs_in_node_options_detected(self) -> None:
         """Secret refs in node options are found and validated."""
-        state = FakeCompositionState(
+        state = _make_state(
             source_options={},
-            nodes=(FakeNodeSpec(options={"token": {"secret_ref": "NODE_TOKEN"}}),),
+            nodes=(_make_node(options={"token": {"secret_ref": "NODE_TOKEN"}}),),
         )
-        settings = FakeWebSettings()
+        settings = _make_settings()
         mock_yaml_gen = MagicMock()
         secret_svc = FakeSecretService(available_refs=set())
 
@@ -712,11 +745,11 @@ class TestValidatePipelineSecretRefs:
 
     def test_refs_in_output_options_detected(self) -> None:
         """Secret refs in output options are found and validated."""
-        state = FakeCompositionState(
+        state = _make_state(
             source_options={},
-            outputs=(FakeOutputSpec(options={"password": {"secret_ref": "DB_PASS"}}),),
+            outputs=(_make_output(options={"password": {"secret_ref": "DB_PASS"}}),),
         )
-        settings = FakeWebSettings()
+        settings = _make_settings()
         mock_yaml_gen = MagicMock()
         secret_svc = FakeSecretService(available_refs=set())
 
@@ -733,13 +766,13 @@ class TestValidatePipelineSecretRefs:
 
     def test_multiple_missing_refs_listed(self) -> None:
         """All missing refs are collected and reported at once."""
-        state = FakeCompositionState(
+        state = _make_state(
             source_options={
                 "key1": {"secret_ref": "REF_A"},
                 "key2": {"secret_ref": "REF_B"},
             },
         )
-        settings = FakeWebSettings()
+        settings = _make_settings()
         mock_yaml_gen = MagicMock()
         secret_svc = FakeSecretService(available_refs={"REF_A"})  # REF_B missing
 

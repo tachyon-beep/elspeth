@@ -335,3 +335,88 @@ class TestDataDirCreation:
         create_app(settings)
         assert fresh_dir.exists()
         assert fresh_dir.is_dir()
+
+
+class TestValidationErrorRedaction:
+    """SECURITY: 422 responses must never echo sensitive request body values.
+
+    The global RequestValidationError handler registered in create_app()
+    allowlists only {type, loc, msg} — stripping ``input``, ``ctx``, and
+    ``url`` to prevent credential leakage on any route.
+
+    These tests exercise the *real* handler wired by create_app(), unlike the
+    unit tests in test_routes.py which register a local duplicate.
+    """
+
+    _SAFE_KEYS = frozenset({"type", "loc", "msg"})
+
+    @staticmethod
+    def _authed_client(tmp_path: Path) -> TestClient:
+        """Build a TestClient against create_app() with auth bypassed."""
+        from elspeth.web.auth.middleware import get_current_user
+        from elspeth.web.auth.models import UserIdentity
+
+        app = create_app(_settings(tmp_path))
+
+        identity = UserIdentity(user_id="test-user", username="test-user")
+
+        async def _mock_user() -> UserIdentity:
+            return identity
+
+        app.dependency_overrides[get_current_user] = _mock_user
+        return TestClient(app, raise_server_exceptions=False)
+
+    def test_secrets_route_redacts_input(self, tmp_path) -> None:
+        """POST /api/secrets with wrong value type must not echo the value."""
+        client = self._authed_client(tmp_path)
+        resp = client.post(
+            "/api/secrets",
+            json={"name": "API_KEY", "value": {"nested": "super-secret-hunter2"}},
+        )
+        assert resp.status_code == 422
+        body = resp.json()
+        body_text = resp.text
+        assert "super-secret-hunter2" not in body_text
+        for error in body["detail"]:
+            assert set(error.keys()) <= self._SAFE_KEYS
+
+    def test_redaction_preserves_error_structure(self, tmp_path) -> None:
+        """Redacted errors retain type, loc, msg for client debugging."""
+        client = self._authed_client(tmp_path)
+        resp = client.post(
+            "/api/secrets",
+            json={"name": "API_KEY", "value": {"bad": "type"}},
+        )
+        assert resp.status_code == 422
+        errors = resp.json()["detail"]
+        assert len(errors) > 0
+        for error in errors:
+            assert "type" in error
+            assert "loc" in error
+            assert "msg" in error
+
+    def test_redaction_strips_input_ctx_url_keys(self, tmp_path) -> None:
+        """Forbidden keys (input, ctx, url) must never appear in 422 detail."""
+        client = self._authed_client(tmp_path)
+        resp = client.post(
+            "/api/secrets",
+            json={"name": "API_KEY", "value": 12345},
+        )
+        assert resp.status_code == 422
+        _FORBIDDEN_KEYS = {"input", "ctx", "url"}
+        for error in resp.json()["detail"]:
+            assert not _FORBIDDEN_KEYS & set(error.keys()), f"Forbidden keys leaked in 422 response: {_FORBIDDEN_KEYS & set(error.keys())}"
+
+    def test_sessions_message_route_redacts_input(self, tmp_path) -> None:
+        """POST to a session message route with invalid body must not echo content."""
+        client = self._authed_client(tmp_path)
+        # Send a message with state_id as a non-UUID string — triggers 422
+        resp = client.post(
+            "/api/sessions/00000000-0000-0000-0000-000000000000/messages",
+            json={"content": "leaked-password-value", "state_id": "not-a-uuid"},
+        )
+        assert resp.status_code == 422
+        body_text = resp.text
+        assert "leaked-password-value" not in body_text
+        for error in resp.json()["detail"]:
+            assert set(error.keys()) <= self._SAFE_KEYS

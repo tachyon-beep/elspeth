@@ -254,6 +254,7 @@ class LandscapeExporter:
                 "plugin_name": node.plugin_name,
                 "node_type": node.node_type.value,
                 "plugin_version": node.plugin_version,
+                "source_file_hash": node.source_file_hash,
                 "determinism": node.determinism.value,
                 "config_hash": node.config_hash,
                 # Full resolved config for audit trail portability (not just hash)

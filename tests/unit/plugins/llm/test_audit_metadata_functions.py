@@ -184,6 +184,7 @@ class TestSchemaFieldTypesAreReal:
         # Response field itself → str
         assert "llm_response" in fields
         annotation = fields["llm_response"].annotation
+        assert annotation is not None
         # Optional str is str | None
         assert str in (annotation.__args__ if hasattr(annotation, "__args__") else (annotation,))
 
@@ -201,6 +202,7 @@ class TestSchemaFieldTypesAreReal:
         fields = schema_cls.model_fields
         assert "llm_response_model" in fields
         annotation = fields["llm_response_model"].annotation
+        assert annotation is not None
         assert str in (annotation.__args__ if hasattr(annotation, "__args__") else (annotation,))
 
     def test_multi_query_response_fields_are_str(self) -> None:
@@ -219,6 +221,7 @@ class TestSchemaFieldTypesAreReal:
         for name in ("quality_llm_response", "quality_llm_response_model"):
             assert name in fields, f"Missing field {name}"
             annotation = fields[name].annotation
+            assert annotation is not None
             assert str in (annotation.__args__ if hasattr(annotation, "__args__") else (annotation,)), (
                 f"Field {name} should be str-typed, got {annotation}"
             )
@@ -240,12 +243,14 @@ class TestSchemaFieldTypesAreReal:
         # quality_score should be int-typed
         assert "quality_score" in fields
         score_annotation = fields["quality_score"].annotation
+        assert score_annotation is not None
         assert int in (score_annotation.__args__ if hasattr(score_annotation, "__args__") else (score_annotation,)), (
             f"quality_score should be int-typed, got {score_annotation}"
         )
         # quality_label should be str-typed
         assert "quality_label" in fields
         label_annotation = fields["quality_label"].annotation
+        assert label_annotation is not None
         assert str in (label_annotation.__args__ if hasattr(label_annotation, "__args__") else (label_annotation,)), (
             f"quality_label should be str-typed, got {label_annotation}"
         )

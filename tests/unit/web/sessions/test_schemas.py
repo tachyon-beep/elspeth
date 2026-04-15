@@ -33,6 +33,28 @@ class TestSendMessageRequest:
         req = SendMessageRequest(content="hello")
         assert req.content == "hello"
 
+    def test_rejects_invalid_state_id(self) -> None:
+        with pytest.raises(ValidationError):
+            SendMessageRequest(content="hello", state_id="not-a-uuid")
+
+    def test_accepts_valid_uuid_state_id(self) -> None:
+        import uuid
+
+        sid = uuid.uuid4()
+        req = SendMessageRequest(content="hello", state_id=sid)
+        assert req.state_id == sid
+
+    def test_accepts_string_uuid_state_id(self) -> None:
+        req = SendMessageRequest(
+            content="hello",
+            state_id="550e8400-e29b-41d4-a716-446655440000",
+        )
+        assert str(req.state_id) == "550e8400-e29b-41d4-a716-446655440000"
+
+    def test_accepts_none_state_id(self) -> None:
+        req = SendMessageRequest(content="hello", state_id=None)
+        assert req.state_id is None
+
 
 class TestForkSessionRequest:
     def test_rejects_invalid_uuid(self) -> None:

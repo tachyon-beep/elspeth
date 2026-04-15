@@ -6,6 +6,7 @@ and freeze_fields on routed_destinations.
 """
 
 from types import MappingProxyType
+from typing import Any
 
 import pytest
 
@@ -46,7 +47,7 @@ class TestRunResultValidation:
     )
     def test_negative_value_rejected(self, field: str) -> None:
         """Every numeric field must be >= 0."""
-        kwargs = {
+        kwargs: dict[str, Any] = {
             "run_id": "run-1",
             "status": RunStatus.COMPLETED,
             "rows_processed": 0,
@@ -76,7 +77,7 @@ class TestRunResultValidation:
     )
     def test_bool_rejected(self, field: str) -> None:
         """Bool must not be accepted as int (Python subclass trap)."""
-        kwargs = {
+        kwargs: dict[str, Any] = {
             "run_id": "run-1",
             "status": RunStatus.COMPLETED,
             "rows_processed": 0,
@@ -99,7 +100,7 @@ class TestRunResultValidation:
     )
     def test_float_rejected(self, field: str) -> None:
         """Float must not be silently accepted for int fields."""
-        kwargs = {
+        kwargs: dict[str, Any] = {
             "run_id": "run-1",
             "status": RunStatus.COMPLETED,
             "rows_processed": 0,

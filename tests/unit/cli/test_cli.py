@@ -7,6 +7,7 @@ verify_audit_trail are deferred to integration tier.
 """
 
 from pathlib import Path
+from typing import Any
 from unittest.mock import patch
 
 from typer.testing import CliRunner
@@ -901,7 +902,7 @@ class TestHealthCommand:
         monkeypatch.setenv("HTTPS_PROXY", "http://corporate-proxy.example.com:8080")
 
         # Track what handlers are passed to build_opener
-        captured_handlers: list = []
+        captured_handlers: list[Any] = []
 
         def capturing_build_opener(*handlers):
             captured_handlers.extend(handlers)
@@ -928,7 +929,7 @@ class TestHealthCommand:
         # ProxyHandler({}) creates a handler with no proxies configured
         # This bypasses the environment variable proxies
         handler = proxy_handlers[0]
-        assert handler.proxies == {}, f"ProxyHandler should have empty proxies dict, got {handler.proxies}"
+        assert handler.proxies == {}, f"ProxyHandler should have empty proxies dict, got {handler.proxies}"  # type: ignore[attr-defined]  # proxies is set dynamically by ProxyHandler.__init__
 
     def test_health_remote_host_honors_proxy_env_vars(self, monkeypatch) -> None:
         """Health probe must honor HTTP_PROXY for remote (non-loopback) hosts.
@@ -947,7 +948,7 @@ class TestHealthCommand:
         monkeypatch.setenv("HTTP_PROXY", "http://corporate-proxy.example.com:8080")
 
         # Track what handlers are passed to build_opener
-        captured_handlers: list = []
+        captured_handlers: list[Any] = []
 
         def capturing_build_opener(*handlers):
             captured_handlers.extend(handlers)

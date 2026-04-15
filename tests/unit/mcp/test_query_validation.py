@@ -267,6 +267,7 @@ class TestReadOnlyConnectionDefenseInDepth:
             from sqlalchemy import text
 
             result = conn.execute(text("SELECT 1 AS val")).fetchone()
+            assert result is not None
             assert result[0] == 1
         db.close()
 
@@ -314,6 +315,7 @@ class TestReadOnlyConnectionDefenseInDepth:
         # Normal connection still works after read-only was used
         with db.connection() as conn:
             conn.execute(text("INSERT INTO test_rw VALUES (2)"))
-            result = conn.execute(text("SELECT COUNT(*) FROM test_rw")).fetchone()
-            assert result[0] == 2
+            count_row = conn.execute(text("SELECT COUNT(*) FROM test_rw")).fetchone()
+            assert count_row is not None
+            assert count_row[0] == 2
         db.close()

@@ -336,6 +336,59 @@ class TestMessageRoutes:
         # State unchanged (version stayed at 1) -> no state in response
         assert body["state"] is None
 
+    def test_send_message_with_state_id(self, tmp_path) -> None:
+        """Message with state_id references a specific composition state snapshot.
+
+        Exercises the UUID-typed state_id field in SendMessageRequest end-to-end:
+        FastAPI parses the JSON string into a UUID, the route validates the state
+        belongs to the session, and the user message is persisted with the
+        client-asserted state_id as its composition_state_id (AD-2 provenance).
+        """
+        import asyncio
+
+        mock_composer = _make_composer_mock(response_text="Acknowledged")
+
+        app, service = _make_app(tmp_path)
+        app.state.composer_service = mock_composer
+        client = TestClient(app)
+
+        # Create a session
+        resp = client.post("/api/sessions", json={"title": "Chat"})
+        session_id = resp.json()["id"]
+
+        # Create a composition state via the service (the mock composer
+        # returns version=1 which won't trigger state persistence in the
+        # route, so we seed one directly).
+        loop = asyncio.new_event_loop()
+        state_record = loop.run_until_complete(
+            service.save_composition_state(
+                uuid.UUID(session_id),
+                CompositionStateData(
+                    metadata_={"name": "Test", "description": ""},
+                    is_valid=True,
+                ),
+            ),
+        )
+        loop.close()
+        state_id = str(state_record.id)
+
+        # Send message WITH state_id as UUID string in JSON body
+        msg_resp = client.post(
+            f"/api/sessions/{session_id}/messages",
+            json={"content": "Hello", "state_id": state_id},
+        )
+        assert msg_resp.status_code == 200
+        body = msg_resp.json()
+        assert body["message"]["role"] == "assistant"
+        assert body["message"]["content"] == "Acknowledged"
+
+        # Verify provenance: the user message was persisted with the
+        # client-asserted state_id as its composition_state_id.
+        msgs_resp = client.get(f"/api/sessions/{session_id}/messages")
+        messages = msgs_resp.json()
+        user_msg = next(m for m in messages if m["role"] == "user")
+        assert user_msg["composition_state_id"] == state_id
+
     def test_get_messages(self, tmp_path) -> None:
         mock_composer = _make_composer_mock()
 

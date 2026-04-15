@@ -13,7 +13,7 @@ one schema could behave differently at runtime.
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
+from typing import Literal
 
 from hypothesis import given, settings
 from hypothesis import strategies as st
@@ -23,8 +23,8 @@ from elspeth.contracts.schema_contract import SchemaContract
 from elspeth.contracts.schema_contract_factory import create_contract_from_config
 from elspeth.core.dag.coalesce_merge import merge_union_fields
 
-if TYPE_CHECKING:
-    pass
+# Type alias matching FieldDefinition.field_type
+_FieldType = Literal["str", "int", "float", "bool", "any"]
 
 
 # =============================================================================
@@ -88,7 +88,7 @@ def assert_contracts_equivalent(
 # =============================================================================
 
 
-field_types = st.sampled_from(["int", "str", "float", "bool"])
+field_types: st.SearchStrategy[_FieldType] = st.sampled_from(["int", "str", "float", "bool"])
 
 
 @st.composite

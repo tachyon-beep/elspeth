@@ -186,7 +186,7 @@ class TestSinkDurability:
             checkpoint_created = True
 
         # Patch real sink's flush to fail
-        real_sink.flush = Mock(side_effect=OSError("Disk full - simulated crash"))
+        real_sink.flush = Mock(side_effect=OSError("Disk full - simulated crash"))  # type: ignore[method-assign]  # intentional monkey-patch for test
 
         # Execute sink write - should fail on flush
         tokens = [token]
@@ -350,7 +350,7 @@ class TestSinkDurability:
                 graph=mock_graph,
             )
 
-        real_sink.flush = Mock(side_effect=tracking_flush)
+        real_sink.flush = Mock(side_effect=tracking_flush)  # type: ignore[method-assign]  # intentional monkey-patch for test
 
         # Execute sink write
         tokens = [token]

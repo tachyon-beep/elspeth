@@ -88,8 +88,12 @@ class TestGetRunWhereExactness:
         assert run is not None
         assert run.run_id == "run-B"
         # Adjacent runs exist but are distinct — inequality would merge them
-        assert fix.factory.run_lifecycle.get_run("run-A").run_id == "run-A"
-        assert fix.factory.run_lifecycle.get_run("run-C").run_id == "run-C"
+        run_a = fix.factory.run_lifecycle.get_run("run-A")
+        assert run_a is not None
+        assert run_a.run_id == "run-A"
+        run_c = fix.factory.run_lifecycle.get_run("run-C")
+        assert run_c is not None
+        assert run_c.run_id == "run-C"
 
 
 class TestCompleteRunWhereExactness:
@@ -104,8 +108,12 @@ class TestCompleteRunWhereExactness:
         assert run_b is not None
         assert run_b.status == RunStatus.COMPLETED
         # Adjacent runs must be unaffected
-        assert fix.factory.run_lifecycle.get_run("run-A").status == RunStatus.RUNNING
-        assert fix.factory.run_lifecycle.get_run("run-C").status == RunStatus.RUNNING
+        run_a = fix.factory.run_lifecycle.get_run("run-A")
+        assert run_a is not None
+        assert run_a.status == RunStatus.RUNNING
+        run_c = fix.factory.run_lifecycle.get_run("run-C")
+        assert run_c is not None
+        assert run_c.status == RunStatus.RUNNING
 
 
 class TestUpdateRunStatusWhereExactness:
@@ -119,8 +127,12 @@ class TestUpdateRunStatusWhereExactness:
         run_b = fix.factory.run_lifecycle.get_run("run-B")
         assert run_b is not None
         assert run_b.status == RunStatus.INTERRUPTED
-        assert fix.factory.run_lifecycle.get_run("run-A").status == RunStatus.RUNNING
-        assert fix.factory.run_lifecycle.get_run("run-C").status == RunStatus.RUNNING
+        run_a = fix.factory.run_lifecycle.get_run("run-A")
+        assert run_a is not None
+        assert run_a.status == RunStatus.RUNNING
+        run_c = fix.factory.run_lifecycle.get_run("run-C")
+        assert run_c is not None
+        assert run_c.status == RunStatus.RUNNING
 
 
 class TestUpdateRunContractWhereExactness:
@@ -163,8 +175,12 @@ class TestSetExportStatusWhereExactness:
         run_b = fix.factory.run_lifecycle.get_run("run-B")
         assert run_b is not None
         assert run_b.export_status == ExportStatus.COMPLETED
-        assert fix.factory.run_lifecycle.get_run("run-A").export_status != ExportStatus.COMPLETED
-        assert fix.factory.run_lifecycle.get_run("run-C").export_status != ExportStatus.COMPLETED
+        run_a = fix.factory.run_lifecycle.get_run("run-A")
+        assert run_a is not None
+        assert run_a.export_status != ExportStatus.COMPLETED
+        run_c = fix.factory.run_lifecycle.get_run("run-C")
+        assert run_c is not None
+        assert run_c.export_status != ExportStatus.COMPLETED
 
 
 class TestGetSecretResolutionsForRunWhereExactness:

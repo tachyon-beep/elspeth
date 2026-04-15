@@ -38,7 +38,7 @@ class PassThrough(BaseTransform):
 
     name = "passthrough"
     plugin_version = "1.0.0"
-    source_file_hash = "sha256:fd062e9db41d165e"
+    source_file_hash: str | None = "sha256:da68366cb9cbcdd1"
     config_model = PassThroughConfig
 
     def __init__(self, config: dict[str, Any]) -> None:

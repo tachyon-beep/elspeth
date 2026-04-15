@@ -28,6 +28,7 @@ import sys
 from dataclasses import dataclass, field
 from datetime import UTC, date, datetime
 from pathlib import Path
+from typing import Any
 
 import yaml
 
@@ -243,7 +244,7 @@ def scan_all(root: Path, files: list[Path] | None = None) -> list[Finding]:
 # =============================================================================
 
 
-def _load_yaml_file(path: Path) -> dict:
+def _load_yaml_file(path: Path) -> dict[str, Any]:
     try:
         with path.open() as f:
             return yaml.safe_load(f) or {}
@@ -252,7 +253,7 @@ def _load_yaml_file(path: Path) -> dict:
         sys.exit(1)
 
 
-def _parse_per_file_rules(data: dict, source_file: str = "") -> list[PerFileRule]:
+def _parse_per_file_rules(data: dict[str, Any], source_file: str = "") -> list[PerFileRule]:
     rules: list[PerFileRule] = []
     for item in data.get("per_file_rules", []):
         rule_ids = set(item.get("rules", []))

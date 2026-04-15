@@ -86,7 +86,7 @@ class Truncate(BaseTransform):
 
     name = "truncate"
     plugin_version = "1.0.0"
-    source_file_hash = "sha256:3c3ebc816f985254"
+    source_file_hash: str | None = "sha256:7e72fd6a6ab417ae"
     config_model = TruncateConfig
 
     def __init__(self, config: dict[str, Any]) -> None:

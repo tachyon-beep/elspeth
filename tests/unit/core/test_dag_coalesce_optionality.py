@@ -967,7 +967,7 @@ class _TransformWithTypedSchema:
 
     input_schema = None
     output_schema = None
-    config: ClassVar[dict[str, Any]] = {"schema": {"mode": "flexible"}}
+    config: ClassVar[dict[str, Any]] = {"schema": {"mode": "observed"}}
     on_error: str | None = None
     on_success: str | None = "output"
     declared_output_fields: frozenset[str] = frozenset()
@@ -2094,6 +2094,7 @@ class TestCollisionPolicyNullableSemantics:
             collision_policy="first_wins",
             branch_order=["a", "b"],
         )
+        assert merged_a_first.fields is not None
         x_a_first = next(f for f in merged_a_first.fields if f.name == "x")
         assert x_a_first.nullable is True, "A is first, A is nullable"
 
@@ -2104,6 +2105,7 @@ class TestCollisionPolicyNullableSemantics:
             collision_policy="first_wins",
             branch_order=["b", "a"],
         )
+        assert merged_b_first.fields is not None
         x_b_first = next(f for f in merged_b_first.fields if f.name == "x")
         assert x_b_first.nullable is False, "B is first, B is non-nullable"
 

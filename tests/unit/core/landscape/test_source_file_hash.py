@@ -8,6 +8,7 @@ Per Data Manifesto: The audit database is OUR data. Bad data = crash.
 """
 
 from datetime import UTC, datetime
+from typing import Any
 
 import pytest
 
@@ -15,9 +16,9 @@ from elspeth.contracts.audit import Node
 from elspeth.contracts.enums import Determinism, NodeType
 
 
-def _make_node(**overrides: object) -> Node:
+def _make_node(**overrides: Any) -> Node:
     """Build a Node with sensible defaults for testing."""
-    defaults: dict[str, object] = {
+    defaults: dict[str, Any] = {
         "node_id": "node-1",
         "run_id": "run-1",
         "plugin_name": "test",

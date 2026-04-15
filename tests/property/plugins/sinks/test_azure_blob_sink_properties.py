@@ -14,6 +14,7 @@ from unittest.mock import MagicMock, patch
 from hypothesis import given
 from hypothesis import strategies as st
 
+from elspeth.contracts.plugin_context import PluginContext
 from elspeth.plugins.sinks.azure_blob_sink import AzureBlobSink
 from tests.fixtures.base_classes import inject_write_failure
 from tests.fixtures.factories import make_operation_context
@@ -86,7 +87,7 @@ def _mock_blob_upload() -> tuple[MagicMock, MagicMock]:
     return mock_service, mock_blob_client
 
 
-def _make_sink_ctx():
+def _make_sink_ctx() -> PluginContext:
     """Build a PluginContext suitable for sink.write() calls."""
     return make_operation_context(
         operation_type="sink_write",
@@ -98,7 +99,8 @@ def _make_sink_ctx():
 
 def _get_uploaded_bytes(mock_blob: MagicMock) -> bytes:
     """Extract the bytes passed to upload_blob."""
-    return mock_blob.upload_blob.call_args[0][0]
+    data: bytes = mock_blob.upload_blob.call_args[0][0]
+    return data
 
 
 # ---------------------------------------------------------------------------

@@ -50,6 +50,8 @@ _REQUIRED_COLUMNS: tuple[tuple[str, str], ...] = (
     ("operations", "output_data_hash"),
     # Coalesce state for checkpoint recovery - serialized pending merge state
     ("checkpoints", "coalesce_state_json"),
+    # Mechanical change detection — hash of plugin source file at registration
+    ("nodes", "source_file_hash"),
 )
 
 # Required foreign keys for audit integrity (Tier 1 trust).

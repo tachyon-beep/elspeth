@@ -1,5 +1,7 @@
 """Tests for identity contracts."""
 
+from typing import Any
+
 import pytest
 
 from elspeth.contracts.identity import TokenInfo
@@ -139,10 +141,11 @@ class TestTokenInfoLineageFieldGuards:
 
     @pytest.mark.parametrize("field", ["branch_name", "fork_group_id", "join_group_id", "expand_group_id"])
     def test_rejects_empty_string_lineage_field(self, field: str) -> None:
-        kwargs = {
+        contract = _make_contract()
+        kwargs: dict[str, Any] = {
             "row_id": "r1",
             "token_id": "t1",
-            "row_data": PipelineRow({"x": 1}, contract=None),
+            "row_data": PipelineRow({"x": 1}, contract=contract),
         }
         kwargs[field] = ""
         with pytest.raises(ValueError, match=f"TokenInfo.{field} must be None or non-empty string"):
@@ -150,10 +153,11 @@ class TestTokenInfoLineageFieldGuards:
 
     @pytest.mark.parametrize("field", ["branch_name", "fork_group_id", "join_group_id", "expand_group_id"])
     def test_accepts_none_lineage_field(self, field: str) -> None:
-        kwargs = {
+        contract = _make_contract()
+        kwargs: dict[str, Any] = {
             "row_id": "r1",
             "token_id": "t1",
-            "row_data": PipelineRow({"x": 1}, contract=None),
+            "row_data": PipelineRow({"x": 1}, contract=contract),
         }
         kwargs[field] = None
         t = TokenInfo(**kwargs)
@@ -161,10 +165,11 @@ class TestTokenInfoLineageFieldGuards:
 
     @pytest.mark.parametrize("field", ["branch_name", "fork_group_id", "join_group_id", "expand_group_id"])
     def test_accepts_non_empty_lineage_field(self, field: str) -> None:
-        kwargs = {
+        contract = _make_contract()
+        kwargs: dict[str, Any] = {
             "row_id": "r1",
             "token_id": "t1",
-            "row_data": PipelineRow({"x": 1}, contract=None),
+            "row_data": PipelineRow({"x": 1}, contract=contract),
         }
         kwargs[field] = "valid_value"
         t = TokenInfo(**kwargs)

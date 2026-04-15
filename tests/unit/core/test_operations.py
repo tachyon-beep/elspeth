@@ -8,7 +8,7 @@ from typing import Any, cast
 import pytest
 
 from elspeth.contracts import BatchPendingError
-from elspeth.core.landscape.factory import RecorderFactory
+from elspeth.core.landscape.execution_repository import ExecutionRepository
 from elspeth.core.operations import track_operation
 from tests.fixtures.factories import make_context
 
@@ -70,7 +70,7 @@ def test_track_operation_records_completed_status_and_output_data() -> None:
     assert ctx.operation_id is None
 
     with track_operation(
-        recorder=cast(RecorderFactory, factory),
+        recorder=cast(ExecutionRepository, factory),
         run_id="run-001",
         node_id="node-001",
         operation_type="source_load",
@@ -93,7 +93,7 @@ def test_track_operation_marks_pending_for_batch_pending_error() -> None:
     with (
         pytest.raises(BatchPendingError),
         track_operation(
-            recorder=cast(RecorderFactory, factory),
+            recorder=cast(ExecutionRepository, factory),
             run_id="run-001",
             node_id="node-001",
             operation_type="sink_write",
@@ -114,7 +114,7 @@ def test_track_operation_marks_failed_for_exception() -> None:
     with (
         pytest.raises(ValueError, match="boom"),
         track_operation(
-            recorder=cast(RecorderFactory, factory),
+            recorder=cast(ExecutionRepository, factory),
             run_id="run-001",
             node_id="node-001",
             operation_type="source_load",
@@ -138,7 +138,7 @@ def test_track_operation_marks_failed_for_base_exception() -> None:
     with (
         pytest.raises(_Fatal, match="stop-now"),
         track_operation(
-            recorder=cast(RecorderFactory, factory),
+            recorder=cast(ExecutionRepository, factory),
             run_id="run-001",
             node_id="node-001",
             operation_type="source_load",
@@ -159,7 +159,7 @@ def test_track_operation_raises_db_error_if_completion_fails_after_success() -> 
     with (
         pytest.raises(RuntimeError, match="db write failed"),
         track_operation(
-            recorder=cast(RecorderFactory, factory),
+            recorder=cast(ExecutionRepository, factory),
             run_id="run-001",
             node_id="node-001",
             operation_type="sink_write",
@@ -179,7 +179,7 @@ def test_track_operation_does_not_mask_original_exception_when_completion_fails(
     with (
         pytest.raises(ValueError, match="original failure"),
         track_operation(
-            recorder=cast(RecorderFactory, factory),
+            recorder=cast(ExecutionRepository, factory),
             run_id="run-001",
             node_id="node-001",
             operation_type="source_load",
@@ -207,7 +207,7 @@ def test_track_operation_reraises_framework_bug_error_even_with_original_excepti
     with (
         pytest.raises(FrameworkBugError, match="audit corruption"),
         track_operation(
-            recorder=cast(RecorderFactory, factory),
+            recorder=cast(ExecutionRepository, factory),
             run_id="run-001",
             node_id="node-001",
             operation_type="source_load",
@@ -229,7 +229,7 @@ def test_track_operation_reraises_audit_integrity_error_even_with_original_excep
     with (
         pytest.raises(AuditIntegrityError, match="DB corrupted"),
         track_operation(
-            recorder=cast(RecorderFactory, factory),
+            recorder=cast(ExecutionRepository, factory),
             run_id="run-001",
             node_id="node-001",
             operation_type="sink_write",
@@ -251,7 +251,7 @@ def test_track_operation_tier1_error_chains_original_exception() -> None:
     with (
         pytest.raises(FrameworkBugError) as exc_info,
         track_operation(
-            recorder=cast(RecorderFactory, factory),
+            recorder=cast(ExecutionRepository, factory),
             run_id="run-001",
             node_id="node-001",
             operation_type="source_load",

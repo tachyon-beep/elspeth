@@ -128,3 +128,52 @@ class TestListSecrets:
         items = store.list_secrets()
         assert items  # Ensure at least one secret is listed
         assert "value" not in SecretInventoryItem.__slots__
+
+
+class TestReservedSecretNames:
+    """ELSPETH internal secrets must never be exposed through the server store."""
+
+    def test_construction_rejects_fingerprint_key(self, _fingerprint_key: None) -> None:
+        with pytest.raises(ValueError, match="ELSPETH internal"):
+            ServerSecretStore(allowlist=("ELSPETH_FINGERPRINT_KEY",))
+
+    def test_construction_rejects_any_elspeth_prefix(self, _fingerprint_key: None) -> None:
+        with pytest.raises(ValueError, match="ELSPETH_WEB__SECRET_KEY"):
+            ServerSecretStore(allowlist=("VALID_KEY", "ELSPETH_WEB__SECRET_KEY"))
+
+    def test_construction_rejects_audit_key(self, _fingerprint_key: None) -> None:
+        with pytest.raises(ValueError, match="ELSPETH_AUDIT_KEY"):
+            ServerSecretStore(allowlist=("ELSPETH_AUDIT_KEY",))
+
+    def test_construction_accepts_non_reserved(self, _fingerprint_key: None) -> None:
+        store = ServerSecretStore(allowlist=("OPENAI_API_KEY",))
+        assert store._allowlist == ("OPENAI_API_KEY",)
+
+    def test_reserved_prefix_is_case_sensitive(self, _fingerprint_key: None) -> None:
+        """Lowercase 'elspeth_' is NOT reserved — only uppercase ELSPETH_ is.
+
+        This documents the intentional case-sensitivity decision.  If
+        case-insensitive blocking is ever required, this test should be
+        updated to reflect the new behaviour.
+        """
+        store = ServerSecretStore(allowlist=("elspeth_lowercase_key",))
+        assert store._allowlist == ("elspeth_lowercase_key",)
+
+    def test_has_secret_raises_for_reserved_even_if_in_env(
+        self, empty_store: ServerSecretStore, monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        monkeypatch.setenv("ELSPETH_FINGERPRINT_KEY", "secret-fp-key")
+        with pytest.raises(SecretNotFoundError):
+            empty_store.has_secret("ELSPETH_FINGERPRINT_KEY")
+
+    def test_get_secret_rejects_reserved_name(self, store: ServerSecretStore) -> None:
+        with pytest.raises(SecretNotFoundError):
+            store.get_secret("ELSPETH_FINGERPRINT_KEY")
+
+    def test_list_secrets_excludes_reserved(self, _fingerprint_key: None, monkeypatch: pytest.MonkeyPatch) -> None:
+        store = ServerSecretStore(allowlist=("VALID_KEY",))
+        monkeypatch.setenv("VALID_KEY", "val")
+        items = store.list_secrets()
+        names = {item.name for item in items}
+        assert "ELSPETH_FINGERPRINT_KEY" not in names
+        assert "VALID_KEY" in names

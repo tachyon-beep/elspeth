@@ -560,7 +560,7 @@ class TestCopyBlobsForForkRollback:
                 raise RuntimeError("Simulated disk failure on second blob")
             return await original_create(*args, **kwargs)
 
-        blob_service.create_blob = _failing_create  # type: ignore[assignment]
+        blob_service.create_blob = _failing_create  # type: ignore[method-assign]
 
         with pytest.raises(RuntimeError, match="Simulated disk failure"):
             await blob_service.copy_blobs_for_fork(session_id, target_session_id)

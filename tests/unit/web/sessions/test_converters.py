@@ -11,6 +11,7 @@ from __future__ import annotations
 
 from datetime import UTC, datetime
 from types import MappingProxyType
+from typing import Any
 from uuid import uuid4
 
 import pytest
@@ -19,9 +20,9 @@ from elspeth.web.sessions.converters import state_from_record
 from elspeth.web.sessions.protocol import CompositionStateRecord
 
 
-def _make_record(**overrides) -> CompositionStateRecord:
+def _make_record(**overrides: Any) -> CompositionStateRecord:
     """Build a CompositionStateRecord with sensible defaults."""
-    defaults = {
+    defaults: dict[str, Any] = {
         "id": uuid4(),
         "session_id": uuid4(),
         "version": 1,

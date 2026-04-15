@@ -345,7 +345,7 @@ class TestChromaSinkAuditIntegrity:
         def failing_record_call(**kwargs: Any) -> Any:
             raise RuntimeError("DB write failed")
 
-        ctx.record_call = failing_record_call  # type: ignore[assignment]
+        ctx.record_call = failing_record_call
 
         rows = [{"doc_id": "d1", "text": "Hello", "topic": "t"}]
 
@@ -396,7 +396,7 @@ class TestChromaSinkAuditIntegrity:
         def failing_record_call(**kwargs: Any) -> Any:
             raise RuntimeError("audit also broken")
 
-        ctx.record_call = failing_record_call  # type: ignore[assignment]
+        ctx.record_call = failing_record_call
 
         with pytest.raises(AuditIntegrityError, match="audit") as exc_info:
             sink.write([{"doc_id": "d1", "text": "A", "topic": "t"}], ctx)

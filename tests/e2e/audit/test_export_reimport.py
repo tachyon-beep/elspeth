@@ -112,6 +112,7 @@ class TestExportReimport:
             assert "node_id" in node_record
             assert "plugin_name" in node_record
             assert "node_type" in node_record
+            assert "source_file_hash" in node_record
             assert node_record["run_id"] == run_id
 
         # Verify row records have required fields

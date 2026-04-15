@@ -97,7 +97,7 @@ class TestPluginConfig:
             name: str
 
         with pytest.raises(PluginConfigError, match=rf"config must be a dict, got {type_name}"):
-            MyConfig.from_dict(payload)  # type: ignore[arg-type]
+            MyConfig.from_dict(payload)
 
 
 class TestPathConfig:

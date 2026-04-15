@@ -32,7 +32,7 @@ class SendMessageRequest(BaseModel):
     """Request body for POST /api/sessions/{id}/messages."""
 
     content: str = pydantic.Field(min_length=1)
-    state_id: str | None = None
+    state_id: UUID | None = None
 
 
 class ChatMessageResponse(BaseModel):
@@ -50,9 +50,8 @@ class ChatMessageResponse(BaseModel):
 class MessageWithStateResponse(BaseModel):
     """Response for POST /api/sessions/{id}/messages.
 
-    In Phase 2, state is always null. In Phase 4, it will contain
-    the updated CompositionState after the ComposerService processes
-    the message.
+    State is null when the composition version is unchanged; populated
+    with the updated CompositionState when composition changes occur.
     """
 
     message: ChatMessageResponse

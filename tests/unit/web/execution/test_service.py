@@ -16,7 +16,7 @@ import asyncio
 import concurrent.futures
 import contextlib
 import threading
-from collections.abc import Coroutine
+from collections.abc import Callable, Coroutine
 from concurrent.futures import Future
 from datetime import UTC, datetime
 from pathlib import Path
@@ -1501,7 +1501,7 @@ class TestEdgeCompatibility:
 # ── Blob Finalization Catch Widening ──────────────────────────────────
 
 
-def _make_strict_call_async():
+def _make_strict_call_async() -> tuple[Callable[[Coroutine[Any, Any, Any]], Any], asyncio.AbstractEventLoop]:
     """Create a _call_async bridge that propagates all exceptions faithfully.
 
     The standard test fixture's _mock_call_async catches RuntimeError to
@@ -1511,7 +1511,7 @@ def _make_strict_call_async():
     """
     loop = asyncio.new_event_loop()
 
-    def _call_async(coro):
+    def _call_async(coro: Coroutine[Any, Any, Any]) -> Any:
         return loop.run_until_complete(coro)
 
     return _call_async, loop

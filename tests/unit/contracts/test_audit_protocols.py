@@ -175,7 +175,7 @@ class TestTransformErrorRoutesToDataFlow:
         data_flow.record_transform_error.return_value = "err-1"
 
         ref = TokenRef(token_id="tok-1", run_id="run-1")
-        reason = TransformErrorReason(error_type="ValueError", message="bad", retryable=False)
+        reason = TransformErrorReason(reason="api_error", error_type="ValueError", message="bad")
         result = writer.record_transform_error(ref, "xform-1", {"field": "val"}, reason, "sink-1")
 
         assert result == "err-1"

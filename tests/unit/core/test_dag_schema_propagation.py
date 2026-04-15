@@ -406,7 +406,7 @@ class TestGuaranteedFieldsWithSchemaConfig:
             "sink",
             node_type=NodeType.SINK,
             plugin_name="csv",
-            config={},
+            config={"schema": {"mode": "observed", "required_fields": ["result_template_hash"]}},
             output_schema_config=sink_schema,
         )
 
