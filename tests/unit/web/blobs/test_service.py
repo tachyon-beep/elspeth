@@ -686,11 +686,12 @@ class TestFinalizeRunOutputBlobs:
                 )
             )
 
-        finalized = await blob_service.finalize_run_output_blobs(run_id, success=True)
-        assert len(finalized) == 1
-        assert finalized[0].status == "ready"
-        assert finalized[0].size_bytes == len(file_content)
-        assert finalized[0].content_hash == content_hash(file_content)
+        result = await blob_service.finalize_run_output_blobs(run_id, success=True)
+        assert len(result.finalized) == 1
+        assert len(result.errors) == 0
+        assert result.finalized[0].status == "ready"
+        assert result.finalized[0].size_bytes == len(file_content)
+        assert result.finalized[0].content_hash == content_hash(file_content)
 
     @pytest.mark.asyncio
     async def test_file_not_written_sets_error(self, blob_service, session_id, db_engine, run_env) -> None:
@@ -717,9 +718,10 @@ class TestFinalizeRunOutputBlobs:
                 )
             )
 
-        finalized = await blob_service.finalize_run_output_blobs(run_id, success=True)
-        assert len(finalized) == 1
-        assert finalized[0].status == "error"
+        result = await blob_service.finalize_run_output_blobs(run_id, success=True)
+        assert len(result.finalized) == 1
+        assert len(result.errors) == 0
+        assert result.finalized[0].status == "error"
 
     @pytest.mark.asyncio
     async def test_run_failed_sets_error(self, blob_service, session_id, db_engine, run_env) -> None:
@@ -749,6 +751,332 @@ class TestFinalizeRunOutputBlobs:
                 )
             )
 
-        finalized = await blob_service.finalize_run_output_blobs(run_id, success=False)
-        assert len(finalized) == 1
-        assert finalized[0].status == "error"
+        result = await blob_service.finalize_run_output_blobs(run_id, success=False)
+        assert len(result.finalized) == 1
+        assert len(result.errors) == 0
+        assert result.finalized[0].status == "error"
+
+
+# ---------------------------------------------------------------------------
+# Partial-failure resilience — elspeth-9f31c32cce
+# ---------------------------------------------------------------------------
+
+
+class TestFinalizeRunOutputBlobsPartialFailure:
+    """Per-blob errors must not abort finalization of remaining blobs.
+
+    Bug: elspeth-9f31c32cce — finalize_run_output_blobs aborts on per-blob
+    failure, leaving remaining blobs permanently pending for terminal runs.
+    """
+
+    @pytest.fixture()
+    def run_env(self, blob_service, session_id, db_engine):
+        """Set up a composition state and run, return (run_id, session_id_str)."""
+        from elspeth.web.sessions.models import (
+            composition_states_table,
+            runs_table,
+        )
+
+        state_id = str(uuid4())
+        session_id_str = str(session_id)
+        run_id = str(uuid4())
+
+        with db_engine.begin() as conn:
+            conn.execute(
+                composition_states_table.insert().values(
+                    id=state_id,
+                    session_id=session_id_str,
+                    version=1,
+                    is_valid=True,
+                    created_at=datetime(2026, 1, 1, tzinfo=UTC),
+                )
+            )
+            conn.execute(
+                runs_table.insert().values(
+                    id=run_id,
+                    session_id=session_id_str,
+                    state_id=state_id,
+                    status="running",
+                    started_at=datetime(2026, 1, 1, tzinfo=UTC),
+                    rows_processed=0,
+                    rows_failed=0,
+                )
+            )
+        return UUID(run_id), session_id_str
+
+    async def _create_linked_blob(
+        self,
+        blob_service,
+        session_id: UUID,
+        run_id: UUID,
+        db_engine,
+        filename: str,
+        content: bytes | None = None,
+    ):
+        """Create a pending blob, optionally write content, and link to run."""
+        from elspeth.web.sessions.models import blob_run_links_table
+
+        pending = await blob_service.create_pending_blob(
+            session_id=session_id,
+            filename=filename,
+            mime_type="text/csv",
+            created_by="pipeline",
+        )
+        if content is not None:
+            from pathlib import Path as _Path
+
+            _Path(pending.storage_path).write_bytes(content)
+
+        with db_engine.begin() as conn:
+            conn.execute(
+                blob_run_links_table.insert().values(
+                    blob_id=str(pending.id),
+                    run_id=str(run_id),
+                    direction="output",
+                )
+            )
+        return pending
+
+    @pytest.mark.asyncio
+    async def test_continues_after_concurrent_deletion(
+        self,
+        blob_service,
+        session_id,
+        db_engine,
+        run_env,
+    ) -> None:
+        """When blob 2 of 3 is concurrently deleted (between initial query
+        and per-blob finalize), blobs 1 and 3 still finalize."""
+        from elspeth.web.blobs.protocol import BlobNotFoundError
+
+        run_id, _ = run_env
+
+        b1 = await self._create_linked_blob(blob_service, session_id, run_id, db_engine, "b1.csv", b"data1")
+        b2 = await self._create_linked_blob(blob_service, session_id, run_id, db_engine, "b2.csv", b"data2")
+        b3 = await self._create_linked_blob(blob_service, session_id, run_id, db_engine, "b3.csv", b"data3")
+
+        # Patch _finalize_blob_sync to simulate concurrent deletion of b2
+        # in the window between the initial SELECT and per-blob finalize.
+        original = blob_service._finalize_blob_sync
+
+        def _patched(blob_id, *args, **kwargs):
+            if blob_id == b2.id:
+                raise BlobNotFoundError(str(blob_id))
+            return original(blob_id, *args, **kwargs)
+
+        blob_service._finalize_blob_sync = _patched
+        try:
+            result = await blob_service.finalize_run_output_blobs(run_id, success=True)
+        finally:
+            blob_service._finalize_blob_sync = original
+
+        assert len(result.finalized) == 2, f"Expected 2 finalized, got {len(result.finalized)}"
+        assert len(result.errors) == 1, f"Expected 1 error, got {len(result.errors)}"
+        assert result.errors[0].blob_id == b2.id
+        assert result.errors[0].exc_type == "BlobNotFoundError"
+        finalized_ids = {r.id for r in result.finalized}
+        assert b1.id in finalized_ids
+        assert b3.id in finalized_ids
+
+    @pytest.mark.asyncio
+    async def test_continues_after_already_finalized(
+        self,
+        blob_service,
+        session_id,
+        db_engine,
+        run_env,
+    ) -> None:
+        """When blob 2 raises BlobStateError (already finalized), loop continues."""
+        from elspeth.web.blobs.protocol import BlobStateError
+
+        run_id, _ = run_env
+
+        await self._create_linked_blob(blob_service, session_id, run_id, db_engine, "b1.csv", b"data1")
+        b2 = await self._create_linked_blob(blob_service, session_id, run_id, db_engine, "b2.csv", b"data2")
+        await self._create_linked_blob(blob_service, session_id, run_id, db_engine, "b3.csv", b"data3")
+
+        # Patch _finalize_blob_sync to simulate b2 already finalized
+        original = blob_service._finalize_blob_sync
+
+        def _patched(blob_id, *args, **kwargs):
+            if blob_id == b2.id:
+                raise BlobStateError(str(blob_id), "Cannot finalize — status is 'ready', expected 'pending'")
+            return original(blob_id, *args, **kwargs)
+
+        blob_service._finalize_blob_sync = _patched
+        try:
+            result = await blob_service.finalize_run_output_blobs(run_id, success=True)
+        finally:
+            blob_service._finalize_blob_sync = original
+
+        assert len(result.finalized) == 2
+        assert len(result.errors) == 1
+        assert result.errors[0].blob_id == b2.id
+        assert result.errors[0].exc_type == "BlobStateError"
+
+    @pytest.mark.asyncio
+    async def test_continues_after_os_error_reading_file(
+        self,
+        blob_service,
+        session_id,
+        db_engine,
+        run_env,
+        tmp_path,
+    ) -> None:
+        """When file read raises OSError, loop continues to next blob."""
+        run_id, _ = run_env
+
+        await self._create_linked_blob(blob_service, session_id, run_id, db_engine, "b1.csv", b"data1")
+        b2 = await self._create_linked_blob(blob_service, session_id, run_id, db_engine, "b2.csv", b"data2")
+
+        # Make b2's backing file unreadable
+        from pathlib import Path as _Path
+
+        b2_path = _Path(b2.storage_path)
+        b2_path.chmod(0o000)
+
+        try:
+            result = await blob_service.finalize_run_output_blobs(run_id, success=True)
+        finally:
+            # Restore permissions for cleanup
+            b2_path.chmod(0o644)
+
+        assert len(result.finalized) == 1
+        assert len(result.errors) == 1
+        assert result.errors[0].blob_id == b2.id
+        assert "OSError" in result.errors[0].exc_type or "PermissionError" in result.errors[0].exc_type
+
+    @pytest.mark.asyncio
+    async def test_propagates_type_error(
+        self,
+        blob_service,
+        session_id,
+        db_engine,
+        run_env,
+    ) -> None:
+        """Programmer bugs (TypeError) must crash, not be caught."""
+        run_id, _ = run_env
+
+        await self._create_linked_blob(blob_service, session_id, run_id, db_engine, "b1.csv", b"data1")
+
+        # Inject a TypeError via patching _finalize_blob_sync
+        original = blob_service._finalize_blob_sync
+
+        def _broken_finalize(*args, **kwargs):
+            raise TypeError("unexpected keyword argument")
+
+        blob_service._finalize_blob_sync = _broken_finalize
+        try:
+            with pytest.raises(TypeError, match="unexpected keyword argument"):
+                await blob_service.finalize_run_output_blobs(run_id, success=True)
+        finally:
+            blob_service._finalize_blob_sync = original
+
+    @pytest.mark.asyncio
+    async def test_all_blobs_fail_returns_empty_finalized_with_errors(
+        self,
+        blob_service,
+        session_id,
+        db_engine,
+        run_env,
+    ) -> None:
+        """When all blobs fail, result has empty finalized and N errors."""
+        from elspeth.web.blobs.protocol import BlobNotFoundError
+
+        run_id, _ = run_env
+
+        await self._create_linked_blob(blob_service, session_id, run_id, db_engine, "b1.csv", b"data1")
+        await self._create_linked_blob(blob_service, session_id, run_id, db_engine, "b2.csv", b"data2")
+
+        # Patch to simulate all blobs concurrently deleted
+        original = blob_service._finalize_blob_sync
+
+        def _all_missing(blob_id, *args, **kwargs):
+            raise BlobNotFoundError(str(blob_id))
+
+        blob_service._finalize_blob_sync = _all_missing
+        try:
+            result = await blob_service.finalize_run_output_blobs(run_id, success=True)
+        finally:
+            blob_service._finalize_blob_sync = original
+
+        assert len(result.finalized) == 0
+        assert len(result.errors) == 2
+
+    @pytest.mark.asyncio
+    async def test_zero_pending_blobs_returns_empty_result(
+        self,
+        blob_service,
+        session_id,
+        db_engine,
+        run_env,
+    ) -> None:
+        """Run with no pending output blobs returns empty result."""
+        run_id, _ = run_env
+
+        result = await blob_service.finalize_run_output_blobs(run_id, success=True)
+
+        assert len(result.finalized) == 0
+        assert len(result.errors) == 0
+
+    @pytest.mark.asyncio
+    async def test_best_effort_error_recovery_marks_blob_as_error(
+        self,
+        blob_service,
+        session_id,
+        db_engine,
+        run_env,
+    ) -> None:
+        """When per-blob catch fires, the failed blob is set to 'error' status."""
+        from elspeth.web.sessions.models import blobs_table as bt
+
+        run_id, _ = run_env
+
+        b1 = await self._create_linked_blob(blob_service, session_id, run_id, db_engine, "b1.csv", b"data1")
+        b2 = await self._create_linked_blob(blob_service, session_id, run_id, db_engine, "b2.csv", b"data2")
+
+        # Make b1's file unreadable — triggers OSError, caught per-blob
+        from pathlib import Path as _Path
+
+        b1_path = _Path(b1.storage_path)
+        b1_path.chmod(0o000)
+
+        try:
+            result = await blob_service.finalize_run_output_blobs(run_id, success=True)
+        finally:
+            b1_path.chmod(0o644)
+
+        # b1 should have been moved to "error" by the best-effort recovery
+        with db_engine.connect() as conn:
+            row = conn.execute(bt.select().where(bt.c.id == str(b1.id))).first()
+        assert row is not None
+        assert row.status == "error", f"Expected 'error', got '{row.status}' — recovery should mark failed blobs"
+
+        # b2 should be finalized normally
+        assert len(result.finalized) == 1
+        assert result.finalized[0].id == b2.id
+
+    @pytest.mark.asyncio
+    async def test_runtime_error_from_vanished_blob_propagates(
+        self,
+        blob_service,
+        session_id,
+        db_engine,
+        run_env,
+    ) -> None:
+        """RuntimeError (Tier 1 anomaly: blob vanished mid-transaction) propagates."""
+        run_id, _ = run_env
+
+        await self._create_linked_blob(blob_service, session_id, run_id, db_engine, "b1.csv", b"data1")
+
+        original = blob_service._finalize_blob_sync
+
+        def _vanishing_finalize(*args, **kwargs):
+            raise RuntimeError("Blob abc vanished during finalize — concurrent deletion?")
+
+        blob_service._finalize_blob_sync = _vanishing_finalize
+        try:
+            with pytest.raises(RuntimeError, match="vanished during finalize"):
+                await blob_service.finalize_run_output_blobs(run_id, success=True)
+        finally:
+            blob_service._finalize_blob_sync = original

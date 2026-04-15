@@ -11,15 +11,19 @@ from typing import Any, Literal, TypeVar
 from uuid import UUID, uuid4
 
 from sqlalchemy import Engine, func, select
+from sqlalchemy.exc import SQLAlchemyError
 
 from elspeth.web.blobs.protocol import (
     ALLOWED_MIME_TYPES,
     BLOB_CREATORS,
     BlobActiveRunError,
+    BlobFinalizationError,
+    BlobFinalizationResult,
     BlobNotFoundError,
     BlobQuotaExceededError,
     BlobRecord,
     BlobRunLinkRecord,
+    BlobStateError,
 )
 from elspeth.web.sessions.models import (
     blob_run_links_table,
@@ -391,23 +395,42 @@ class BlobServiceImpl:
 
         return await self._run_sync(_sync)
 
+    # Per-blob operational errors that should not abort the finalization
+    # loop.  BlobStateError covers status-guard conditions (blob already
+    # finalized by a concurrent call).  RuntimeError is deliberately
+    # excluded — it covers the Tier 1 "blob vanished mid-transaction"
+    # anomaly, which must propagate.  Programmer bugs (TypeError,
+    # AttributeError, AssertionError) also propagate per offensive
+    # programming policy.
+    _PER_BLOB_SUPPRESSED: tuple[type[BaseException], ...] = (
+        BlobNotFoundError,
+        BlobStateError,
+        OSError,
+        SQLAlchemyError,
+    )
+
     async def finalize_run_output_blobs(
         self,
         run_id: UUID,
         success: bool,
-    ) -> list[BlobRecord]:
-        """Finalize all pending output blobs for a completed/failed run.
+    ) -> BlobFinalizationResult:
+        """Finalize pending output blobs for a completed/failed run.
 
         On success: compute content_hash and size_bytes from the backing
         file, set status to 'ready'. If the file wasn't written, mark
         as 'error'.
         On failure: set status to 'error', leave size/hash as None.
 
-        Returns the list of finalized blob records.
+        Processes each blob independently — a per-blob operational error
+        does not abort finalization of remaining blobs.  Failed blobs are
+        transitioned to ``error`` status on a best-effort basis.
+
+        Returns a BlobFinalizationResult with both successfully finalized
+        blobs and per-blob error records.
         """
         run_id_str = str(run_id)
 
-        def _sync() -> list[BlobRecord]:
+        def _sync() -> BlobFinalizationResult:
             with self._engine.connect() as conn:
                 rows = conn.execute(
                     select(blobs_table)
@@ -421,34 +444,60 @@ class BlobServiceImpl:
                 ).fetchall()
 
             finalized: list[BlobRecord] = []
+            errors: list[BlobFinalizationError] = []
             for row in rows:
                 blob_id = UUID(row.id)
-                if success:
-                    storage = Path(row.storage_path)
-                    if storage.exists():
-                        file_bytes = storage.read_bytes()
-                        try:
-                            record = self._finalize_blob_sync(
-                                blob_id,
-                                "ready",
-                                size_bytes=len(file_bytes),
-                                content_hash_val=content_hash(file_bytes),
-                            )
-                        except BlobQuotaExceededError:
-                            # Run succeeded but this blob would breach the
-                            # session quota — mark as error so the run
-                            # finalization isn't aborted entirely.
-                            # Delete the backing file to prevent untracked
-                            # disk growth from repeated over-quota outputs.
-                            if storage.exists():
-                                storage.unlink()
+                try:
+                    if success:
+                        storage = Path(row.storage_path)
+                        if storage.exists():
+                            file_bytes = storage.read_bytes()
+                            try:
+                                record = self._finalize_blob_sync(
+                                    blob_id,
+                                    "ready",
+                                    size_bytes=len(file_bytes),
+                                    content_hash_val=content_hash(file_bytes),
+                                )
+                            except BlobQuotaExceededError:
+                                # Run succeeded but this blob would breach the
+                                # session quota — mark as error so the run
+                                # finalization isn't aborted entirely.
+                                # Delete the backing file to prevent untracked
+                                # disk growth from repeated over-quota outputs.
+                                if storage.exists():
+                                    storage.unlink()
+                                record = self._finalize_blob_sync(blob_id, "error")
+                        else:
                             record = self._finalize_blob_sync(blob_id, "error")
                     else:
                         record = self._finalize_blob_sync(blob_id, "error")
-                else:
-                    record = self._finalize_blob_sync(blob_id, "error")
-                finalized.append(record)
-            return finalized
+                    finalized.append(record)
+                except self._PER_BLOB_SUPPRESSED as exc:
+                    # Best-effort: transition the failed blob to "error"
+                    # so it doesn't remain permanently pending.  The WHERE
+                    # on status='pending' makes this a no-op if already
+                    # finalized or deleted.
+                    try:
+                        with self._engine.begin() as err_conn:
+                            err_conn.execute(
+                                blobs_table.update()
+                                .where(blobs_table.c.id == str(blob_id))
+                                .where(blobs_table.c.status == "pending")
+                                .values(status="error")
+                            )
+                    except Exception:
+                        # Recovery failed — DB may be down.  The blob stays
+                        # pending; callers see it in result.errors.
+                        pass
+                    errors.append(
+                        BlobFinalizationError(
+                            blob_id=blob_id,
+                            exc_type=type(exc).__name__,
+                            detail=str(exc),
+                        )
+                    )
+            return BlobFinalizationResult(finalized=finalized, errors=errors)
 
         return await self._run_sync(_sync)
 
@@ -537,9 +586,9 @@ class BlobServiceImpl:
             if row is None:
                 raise BlobNotFoundError(blob_id_str)
             if row.status != "pending":
-                raise RuntimeError(f"Cannot finalize blob {blob_id_str} — status is '{row.status}', expected 'pending'")
+                raise BlobStateError(blob_id_str, f"Cannot finalize blob {blob_id_str} — status is '{row.status}', expected 'pending'")
             if status not in ("ready", "error"):
-                raise RuntimeError(f"Invalid finalize status '{status}' — must be 'ready' or 'error'")
+                raise BlobStateError(blob_id_str, f"Invalid finalize status '{status}' — must be 'ready' or 'error'")
 
             # Enforce quota when finalizing with a real size — pending blobs
             # were reserved at size_bytes=0, so this is the first time the

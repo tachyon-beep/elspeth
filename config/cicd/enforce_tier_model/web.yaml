@@ -344,10 +344,15 @@ allow_hits:
   reason: ValueError from int() on non-numeric -w arg
   safety: Skips this argv entry
   expires: null
-- key: web/blobs/service.py:R4:BlobServiceImpl:copy_blobs_for_fork:fp=d8b44ad06e9e270b
+- key: web/blobs/service.py:R4:BlobServiceImpl:copy_blobs_for_fork:fp=0ccbda6befbd63a3
   owner: web-blobs
   reason: Best-effort cleanup on fork failure — delete_blob may fail if DB disconnected
   safety: Falls back to file unlink; original error re-raised
+  expires: null
+- key: web/blobs/service.py:R4:BlobServiceImpl:finalize_run_output_blobs:_sync:fp=587f10c3ec6fdd82
+  owner: web-blobs
+  reason: Best-effort recovery — marks failed blob as "error" to prevent permanent pending state
+  safety: WHERE status='pending' is a no-op if already finalized; failure is recorded in BlobFinalizationResult.errors
   expires: null
 - key: web/sessions/service.py:R5:SessionServiceImpl:_unwrap_envelope:fp=a45b7c9e7eabfd38
   owner: web-sessions
@@ -439,10 +444,10 @@ allow_hits:
   reason: Final shutdown-event cleanup is intentionally idempotent
   safety: Pop is idempotent
   expires: null
-- key: web/execution/service.py:R6:ExecutionServiceImpl:_finalize_output_blobs:fp=21974b7a3bace9b5
+- key: web/execution/service.py:R6:ExecutionServiceImpl:_finalize_output_blobs:fp=2a73f4f1a77fc178
   owner: web-execution
   reason: Blob finalization before terminal broadcast — failure must not mask run outcome
-  safety: _FINALIZE_SUPPRESSED covers blob-domain exceptions (OSError, SQLAlchemyError, BlobNotFoundError, BlobQuotaExceededError, RuntimeError); programmer bugs (TypeError, AttributeError) still propagate; logged with slog.error
+  safety: _FINALIZE_SUPPRESSED covers blob-domain exceptions (OSError, SQLAlchemyError, BlobNotFoundError, BlobQuotaExceededError, BlobStateError, RuntimeError); programmer bugs (TypeError, AttributeError) still propagate; partial failures logged from structured result
   expires: null
 - key: web/execution/service.py:R5:ExecutionServiceImpl:_on_pipeline_done:fp=f99ccb7d89e9af03
   owner: web-execution
@@ -454,10 +459,15 @@ allow_hits:
   reason: Tier 3 — os.environ.get() for optional ELSPETH_ENV
   safety: Returns None when absent; only used for test guard
   expires: null
-- key: web/blobs/service.py:R6:BlobServiceImpl:finalize_run_output_blobs:_sync:fp=c09366e02831de24
+- key: web/blobs/service.py:R6:BlobServiceImpl:finalize_run_output_blobs:_sync:fp=ea031a03b9b9368f
   owner: web-blobs
   reason: Quota exceeded during finalization marks blob as error instead of crashing run
   safety: Over-quota file deleted; blob marked error; run still finalized
+  expires: null
+- key: web/blobs/service.py:R6:BlobServiceImpl:finalize_run_output_blobs:_sync:fp=de8de9d15599907c
+  owner: web-blobs
+  reason: Per-blob operational errors caught to prevent one failure from aborting remaining blobs
+  safety: Failed blobs moved to "error" status best-effort; errors returned in BlobFinalizationResult
   expires: null
 - key: web/execution/routes.py:R1:create_execution_router:websocket_run_progress:fp=6c0b765eeb7a2af4
   owner: web-execution
@@ -568,17 +578,17 @@ allow_hits:
     deployment overlay is optional. Size guard rejects oversized files with ValueError.
   expires: null
 # Group E: blob service Tier 1 read guards — isinstance assertions on COALESCE(SUM()) output
-- key: web/blobs/service.py:R5:BlobServiceImpl:create_blob:_sync:fp=5fd6338d390a751d
+- key: web/blobs/service.py:R5:BlobServiceImpl:create_blob:_sync:fp=75ab6ffada1aa4fe
   owner: web-blobs
   reason: Tier 1 read guard — COALESCE(SUM()) must return int; isinstance assertion crashes on anomaly instead of silent coercion
   safety: Assert crashes immediately with diagnostic message; no silent handling
   expires: null
-- key: web/blobs/service.py:R5:BlobServiceImpl:copy_blobs_for_fork:_check_quota:fp=157021998c1d231a
+- key: web/blobs/service.py:R5:BlobServiceImpl:copy_blobs_for_fork:_check_quota:fp=264ef6902c027cfe
   owner: web-blobs
   reason: Tier 1 read guard — COALESCE(SUM()) must return int; isinstance assertion crashes on anomaly instead of silent coercion
   safety: Assert crashes immediately with diagnostic message; no silent handling
   expires: null
-- key: web/blobs/service.py:R5:BlobServiceImpl:_finalize_blob_sync:fp=28a6713f0bbc8130
+- key: web/blobs/service.py:R5:BlobServiceImpl:_finalize_blob_sync:fp=778ae8bf238e973c
   owner: web-blobs
   reason: Tier 1 read guard — COALESCE(SUM()) must return int; isinstance assertion crashes on anomaly instead of silent coercion
   safety: Assert crashes immediately with diagnostic message; no silent handling

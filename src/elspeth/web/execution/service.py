@@ -41,7 +41,7 @@ from elspeth.core.secrets import SecretResolutionError
 from elspeth.engine.orchestrator.core import Orchestrator
 from elspeth.engine.orchestrator.types import PipelineConfig
 from elspeth.web.auth.models import UserIdentity
-from elspeth.web.blobs.protocol import BlobNotFoundError, BlobQuotaExceededError, BlobServiceProtocol
+from elspeth.web.blobs.protocol import BlobNotFoundError, BlobQuotaExceededError, BlobServiceProtocol, BlobStateError
 from elspeth.web.config import WebSettings
 from elspeth.web.execution.progress import ProgressBroadcaster
 from elspeth.web.execution.protocol import ExecutionService, YamlGenerator
@@ -749,11 +749,19 @@ class ExecutionServiceImpl:
                 landscape_db.close()
             self._broadcaster.cleanup_run(run_id)
 
+    # Exceptions that can escape finalize_run_output_blobs itself
+    # (not per-blob errors, which are captured in the result).
+    # Covers: initial query failure (SQLAlchemyError), Tier 1 "blob
+    # vanished mid-transaction" anomaly (RuntimeError), and any OS-level
+    # failure outside the per-blob loop (OSError).  BlobStateError is
+    # belt-and-suspenders — caught per-blob inside the service, but
+    # included here in case of a code path change.
     _FINALIZE_SUPPRESSED: tuple[type[BaseException], ...] = (
         OSError,
         SQLAlchemyError,
         BlobNotFoundError,
         BlobQuotaExceededError,
+        BlobStateError,
         RuntimeError,
     )
 
@@ -768,18 +776,26 @@ class ExecutionServiceImpl:
         if self._blob_service is None:
             return
         try:
-            self._call_async(
+            result = self._call_async(
                 self._blob_service.finalize_run_output_blobs(
                     UUID(run_id),
                     success=success,
                 )
             )
+            if result.errors:
+                slog.error(
+                    "blob_finalization_partial_failure",
+                    run_id=run_id,
+                    success=success,
+                    finalized_count=len(result.finalized),
+                    error_count=len(result.errors),
+                    errors=[{"blob_id": str(e.blob_id), "exc_type": e.exc_type} for e in result.errors],
+                )
         except self._FINALIZE_SUPPRESSED as blob_err:
             slog.error(
                 "blob_finalization_failed",
                 run_id=run_id,
                 success=success,
-                error=str(blob_err),
                 exc_type=type(blob_err).__name__,
             )
 

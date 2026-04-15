@@ -6,10 +6,13 @@ BlobCreateData is the input DTO for creating new blobs.
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from dataclasses import dataclass
 from datetime import datetime
 from typing import Literal, Protocol, runtime_checkable
 from uuid import UUID
+
+from elspeth.contracts.freeze import freeze_fields
 
 # Valid blob statuses and their meanings:
 #   ready   — content is available for download/use
@@ -102,6 +105,50 @@ class BlobQuotaExceededError(Exception):
         self.current_bytes = current_bytes
         self.limit_bytes = limit_bytes
         super().__init__(f"Session {session_id} blob storage ({current_bytes} bytes) would exceed quota ({limit_bytes} bytes)")
+
+
+class BlobStateError(Exception):
+    """Raised when a blob's status precludes the requested operation.
+
+    Distinct from RuntimeError so per-blob catch clauses can be precise:
+    BlobStateError is an operational condition (concurrent finalization,
+    status already terminal), while RuntimeError indicates a code-level
+    anomaly (e.g. row vanishing mid-transaction) that should propagate.
+    """
+
+    def __init__(self, blob_id: str, message: str) -> None:
+        self.blob_id = blob_id
+        super().__init__(message)
+
+
+@dataclass(frozen=True, slots=True)
+class BlobFinalizationError:
+    """Record of a per-blob finalization failure.
+
+    Returned in BlobFinalizationResult.errors so callers can decide
+    how to surface failures (telemetry, logging, or corrective action)
+    without the blob service owning that decision.
+    """
+
+    blob_id: UUID
+    exc_type: str
+    detail: str
+
+
+@dataclass(frozen=True, slots=True)
+class BlobFinalizationResult:
+    """Result of batch blob finalization — successes and errors.
+
+    Partial failure is expected: one blob's operational error (concurrent
+    deletion, I/O failure) must not prevent finalization of remaining
+    blobs.  Callers inspect ``errors`` to determine severity.
+    """
+
+    finalized: Sequence[BlobRecord]
+    errors: Sequence[BlobFinalizationError]
+
+    def __post_init__(self) -> None:
+        freeze_fields(self, "finalized", "errors")
 
 
 @runtime_checkable
@@ -211,6 +258,16 @@ class BlobServiceProtocol(Protocol):
         self,
         run_id: UUID,
         success: bool,
-    ) -> list[BlobRecord]:
-        """Finalize all pending output blobs for a completed/failed run."""
+    ) -> BlobFinalizationResult:
+        """Finalize pending output blobs for a completed/failed run.
+
+        Processes each blob independently — a per-blob operational error
+        (concurrent deletion, I/O failure, DB hiccup) does not abort
+        finalization of remaining blobs.  Failed blobs are transitioned
+        to ``error`` status on a best-effort basis.
+
+        Returns a BlobFinalizationResult with both successfully finalized
+        blobs and per-blob error records.  Callers inspect ``result.errors``
+        to decide how to surface failures.
+        """
         ...
