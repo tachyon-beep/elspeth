@@ -279,3 +279,75 @@ class TestProgressBroadcasterCleanup:
             broadcaster.cleanup_run("nonexistent")  # Should not raise
         finally:
             loop.close()
+
+
+class TestBroadcasterSingleTerminalGuard:
+    """Defense-in-depth: once a terminal event has been broadcast for a run,
+    subsequent terminal broadcasts for that run are dropped with a warning.
+
+    Bug: elspeth-25df1be367 — contradictory terminal events (completed then
+    failed). The broadcaster must enforce "at most one terminal per run" as
+    a policy, not rely on callers to get ordering right.
+    """
+
+    def test_duplicate_terminal_is_suppressed(self) -> None:
+        """Second terminal broadcast for the same run must not reach subscribers."""
+        loop = MagicMock(spec=asyncio.AbstractEventLoop)
+        broadcaster = ProgressBroadcaster(loop)
+        broadcaster.subscribe("run-1")
+
+        completed = _make_event(run_id="run-1", event_type="completed")
+        failed = _make_event(run_id="run-1", event_type="failed")
+
+        broadcaster.broadcast("run-1", completed)
+        calls_after_first = loop.call_soon_threadsafe.call_count
+
+        broadcaster.broadcast("run-1", failed)
+        assert loop.call_soon_threadsafe.call_count == calls_after_first, (
+            "Duplicate terminal event must be suppressed — only the first terminal per run should reach call_soon_threadsafe."
+        )
+
+    def test_non_terminal_after_terminal_still_delivered(self) -> None:
+        """Progress events should not be suppressed by the terminal guard."""
+        loop = MagicMock(spec=asyncio.AbstractEventLoop)
+        broadcaster = ProgressBroadcaster(loop)
+        broadcaster.subscribe("run-1")
+
+        completed = _make_event(run_id="run-1", event_type="completed")
+        progress = _make_event(run_id="run-1", event_type="progress")
+
+        broadcaster.broadcast("run-1", completed)
+        calls_after_terminal = loop.call_soon_threadsafe.call_count
+
+        broadcaster.broadcast("run-1", progress)
+        assert loop.call_soon_threadsafe.call_count == calls_after_terminal + 1, (
+            "Non-terminal events must not be blocked by the terminal guard."
+        )
+
+    def test_cleanup_run_clears_terminal_tracking(self) -> None:
+        """cleanup_run must remove terminal tracking state to prevent leaks."""
+        loop = MagicMock(spec=asyncio.AbstractEventLoop)
+        broadcaster = ProgressBroadcaster(loop)
+        broadcaster.subscribe("run-1")
+
+        completed = _make_event(run_id="run-1", event_type="completed")
+        broadcaster.broadcast("run-1", completed)
+
+        assert "run-1" in broadcaster._terminalized, "Terminal tracking state must be present after terminal broadcast."
+
+        broadcaster.cleanup_run("run-1")
+        assert "run-1" not in broadcaster._terminalized, "cleanup_run must remove terminal tracking state."
+
+    def test_different_runs_have_independent_terminal_tracking(self) -> None:
+        """Terminal guard must be per-run, not global."""
+        loop = MagicMock(spec=asyncio.AbstractEventLoop)
+        broadcaster = ProgressBroadcaster(loop)
+        broadcaster.subscribe("run-1")
+        broadcaster.subscribe("run-2")
+
+        c1 = _make_event(run_id="run-1", event_type="completed")
+        c2 = _make_event(run_id="run-2", event_type="completed")
+
+        broadcaster.broadcast("run-1", c1)
+        broadcaster.broadcast("run-2", c2)
+        assert loop.call_soon_threadsafe.call_count == 2, "Different runs must have independent terminal guards."

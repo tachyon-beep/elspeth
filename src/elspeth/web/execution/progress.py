@@ -46,10 +46,13 @@ class ProgressBroadcaster:
       GIL presence (safe under PEP 703 / free-threaded Python).
     """
 
+    _TERMINAL_EVENT_TYPES = frozenset({"completed", "failed", "cancelled"})
+
     def __init__(self, loop: asyncio.AbstractEventLoop) -> None:
         self._loop = loop
         self._lock = threading.Lock()
         self._subscribers: dict[str, set[asyncio.Queue[RunEvent]]] = {}
+        self._terminalized: set[str] = set()
 
     def subscribe(self, run_id: str) -> asyncio.Queue[RunEvent]:
         """Create and register a subscriber queue for a run.
@@ -83,6 +86,15 @@ class ProgressBroadcaster:
         so concurrent subscribe/unsubscribe cannot cause RuntimeError.
         """
         with self._lock:
+            if event.event_type in self._TERMINAL_EVENT_TYPES:
+                if run_id in self._terminalized:
+                    slog.error(
+                        "duplicate_terminal_broadcast_suppressed",
+                        run_id=run_id,
+                        event_type=event.event_type,
+                    )
+                    return
+                self._terminalized.add(run_id)
             subs = set(self._subscribers.get(run_id, ()))
         for queue in subs:
             self._loop.call_soon_threadsafe(self._safe_put, queue, event, run_id)
@@ -130,3 +142,4 @@ class ProgressBroadcaster:
         """
         with self._lock:
             self._subscribers.pop(run_id, None)
+            self._terminalized.discard(run_id)

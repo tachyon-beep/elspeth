@@ -41,7 +41,7 @@ from elspeth.core.secrets import SecretResolutionError
 from elspeth.engine.orchestrator.core import Orchestrator
 from elspeth.engine.orchestrator.types import PipelineConfig
 from elspeth.web.auth.models import UserIdentity
-from elspeth.web.blobs.protocol import BlobServiceProtocol
+from elspeth.web.blobs.protocol import BlobNotFoundError, BlobQuotaExceededError, BlobServiceProtocol
 from elspeth.web.config import WebSettings
 from elspeth.web.execution.progress import ProgressBroadcaster
 from elspeth.web.execution.protocol import ExecutionService, YamlGenerator
@@ -432,6 +432,7 @@ class ExecutionServiceImpl:
             # Early shutdown check: if cancel()/shutdown() fired before we
             # start setup, skip the expensive LandscapeDB/plugin/graph work.
             if shutdown_event.is_set():
+                self._finalize_output_blobs(run_id, success=False)
                 self._call_async(self._session_service.update_run_status(run_uuid, status="cancelled"))
                 self._broadcaster.broadcast(
                     run_id,
@@ -442,7 +443,6 @@ class ExecutionServiceImpl:
                         data={},
                     ),
                 )
-                self._finalize_output_blobs(run_id, success=False)
                 return
 
             # B8/C1: SessionService is async — bridge from background thread.
@@ -454,6 +454,7 @@ class ExecutionServiceImpl:
             except ValueError:
                 current = self._call_async(self._session_service.get_run(run_uuid))
                 if current.status == "cancelled":
+                    self._finalize_output_blobs(run_id, success=False)
                     self._broadcaster.broadcast(
                         run_id,
                         RunEvent(
@@ -463,9 +464,8 @@ class ExecutionServiceImpl:
                             data={},
                         ),
                     )
-                    self._finalize_output_blobs(run_id, success=False)
-                    return  # Graceful exit — finally block still runs
-                raise  # Non-cancelled ValueError — crash per offensive programming
+                    return
+                raise
 
             # B3 fix: construct from WebSettings, not hardcoded paths
             # NOTE: LandscapeDB is constructed per-run, not shared. This is safe
@@ -604,26 +604,16 @@ class ExecutionServiceImpl:
             # cancel() can set the event after processing finishes but
             # before we persist status, causing a completed run to be
             # misclassified as cancelled.
-            self._broadcaster.broadcast(
-                run_id,
-                RunEvent(
-                    run_id=run_id,
-                    timestamp=datetime.now(tz=UTC),
-                    event_type="completed",
-                    data={
-                        "rows_processed": result.rows_processed,
-                        "rows_succeeded": result.rows_succeeded,
-                        "rows_failed": result.rows_failed,
-                        "rows_quarantined": result.rows_quarantined,
-                        "landscape_run_id": result.run_id,
-                    },
-                ),
-            )
+
+            # Finalize blobs BEFORE any external surface sees the terminal
+            # state. A finalize failure is logged but must not trigger a
+            # second terminal event (elspeth-25df1be367).
+            self._finalize_output_blobs(run_id, success=True)
+
             # Race defence: if orphan cleanup (or another actor) set DB
             # status to "cancelled" while the pipeline was running, this
-            # transition raises ValueError. Detect that specific case and
-            # exit gracefully — the pipeline completed but the external
-            # decision stands. Log landscape_run_id for cross-reference.
+            # transition raises ValueError. The DB state is authoritative —
+            # emit a single "cancelled" terminal, not "completed".
             try:
                 self._call_async(
                     self._session_service.update_run_status(
@@ -644,10 +634,7 @@ class ExecutionServiceImpl:
                         rows_processed=result.rows_processed,
                         rows_failed=result.rows_failed,
                     )
-                    # Compensating event: the "completed" event was already
-                    # broadcast (line above), but the DB says "cancelled".
-                    # Send a "cancelled" event so WebSocket clients converge
-                    # with the database state.
+                    self._finalize_output_blobs(run_id, success=False)
                     self._broadcaster.broadcast(
                         run_id,
                         RunEvent(
@@ -657,15 +644,35 @@ class ExecutionServiceImpl:
                             data={},
                         ),
                     )
-                    self._finalize_output_blobs(run_id, success=False)
-                    return  # Graceful exit — finally block still runs
-                raise  # Non-cancelled ValueError — crash per offensive programming
-            self._finalize_output_blobs(run_id, success=True)
+                    return
+                raise
+
+            self._broadcaster.broadcast(
+                run_id,
+                RunEvent(
+                    run_id=run_id,
+                    timestamp=datetime.now(tz=UTC),
+                    event_type="completed",
+                    data={
+                        "rows_processed": result.rows_processed,
+                        "rows_succeeded": result.rows_succeeded,
+                        "rows_failed": result.rows_failed,
+                        "rows_quarantined": result.rows_quarantined,
+                        "landscape_run_id": result.run_id,
+                    },
+                ),
+            )
 
         except GracefulShutdownError:
             # Orchestrator detected shutdown during processing and raised
-            # after flushing in-progress work. This is the ONLY path that
-            # should classify a run as cancelled.
+            # after flushing in-progress work. Finalize → status → broadcast.
+            self._finalize_output_blobs(run_id, success=False)
+            self._call_async(
+                self._session_service.update_run_status(
+                    run_uuid,
+                    status="cancelled",
+                )
+            )
             self._broadcaster.broadcast(
                 run_id,
                 RunEvent(
@@ -675,21 +682,14 @@ class ExecutionServiceImpl:
                     data={},
                 ),
             )
-            self._call_async(
-                self._session_service.update_run_status(
-                    run_uuid,
-                    status="cancelled",
-                )
-            )
-            self._finalize_output_blobs(run_id, success=False)
 
         except BaseException as exc:
             # B7 fix: Catch BaseException (not Exception) to handle
             # KeyboardInterrupt, SystemExit, and OOM-triggered exceptions.
             # Without this, the Run record stays in 'running' forever.
-            # Broadcast "failed" (terminal) not "error" (non-terminal).
-            # "error" is for per-row exceptions during processing;
-            # "failed" means the pipeline itself crashed.
+
+            # Finalize blobs first — before any terminal event surfaces.
+            self._finalize_output_blobs(run_id, success=False)
 
             # Sanitize error messages — SecretResolutionError may contain
             # secret names that should not leak to WebSocket clients or
@@ -699,19 +699,6 @@ class ExecutionServiceImpl:
             else:
                 client_msg = str(exc)
 
-            self._broadcaster.broadcast(
-                run_id,
-                RunEvent(
-                    run_id=run_id,
-                    timestamp=datetime.now(tz=UTC),
-                    event_type="failed",
-                    data={
-                        "detail": client_msg,
-                        "node_id": None,
-                        "row_id": None,
-                    },
-                ),
-            )
             # R6 fix: Skip _call_async for KeyboardInterrupt/SystemExit — the event
             # loop is likely shutting down. Let orphan cleanup handle the status.
             if not isinstance(exc, (KeyboardInterrupt, SystemExit)):
@@ -730,9 +717,21 @@ class ExecutionServiceImpl:
                     run_id=run_id,
                     exc_type=type(exc).__name__,
                 )
-            # Finalize output blobs as error (run failed)
-            self._finalize_output_blobs(run_id, success=False)
-            raise  # Re-raise so future.add_done_callback sees it
+
+            self._broadcaster.broadcast(
+                run_id,
+                RunEvent(
+                    run_id=run_id,
+                    timestamp=datetime.now(tz=UTC),
+                    event_type="failed",
+                    data={
+                        "detail": client_msg,
+                        "node_id": None,
+                        "row_id": None,
+                    },
+                ),
+            )
+            raise
         finally:
             # Always clean up, regardless of success or failure
             with self._shutdown_events_lock:
@@ -741,12 +740,21 @@ class ExecutionServiceImpl:
                 landscape_db.close()
             self._broadcaster.cleanup_run(run_id)
 
+    _FINALIZE_SUPPRESSED: tuple[type[BaseException], ...] = (
+        OSError,
+        SQLAlchemyError,
+        BlobNotFoundError,
+        BlobQuotaExceededError,
+        RuntimeError,
+    )
+
     def _finalize_output_blobs(self, run_id: str, *, success: bool) -> None:
         """Finalize pending output blobs after a run completes/fails/cancels.
 
         Uses _call_async to bridge from the background thread to the async
         blob service. Failure here must not mask the original run outcome —
-        errors are logged, not raised.
+        errors are logged, not raised. Programmer bugs (TypeError,
+        AttributeError) are deliberately not caught.
         """
         if self._blob_service is None:
             return
@@ -757,12 +765,13 @@ class ExecutionServiceImpl:
                     success=success,
                 )
             )
-        except (OSError, SQLAlchemyError) as blob_err:
+        except self._FINALIZE_SUPPRESSED as blob_err:
             slog.error(
                 "blob_finalization_failed",
                 run_id=run_id,
                 success=success,
                 error=str(blob_err),
+                exc_type=type(blob_err).__name__,
             )
 
     def _on_pipeline_done(self, future: Future[None]) -> None:

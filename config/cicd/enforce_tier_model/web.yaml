@@ -154,37 +154,37 @@ allow_hits:
   reason: Tier 3 boundary — env var value that isn't valid JSON is treated as plain string (the common case)
   safety: JSONDecodeError caught only to fall back to raw string; no silent data loss
   expires: null
-- key: web/execution/progress.py:R8:ProgressBroadcaster:subscribe:fp=e8ef5588226d0270
+- key: web/execution/progress.py:R8:ProgressBroadcaster:subscribe:fp=eee81154a0e859d0
   owner: web-execution
   reason: Subscriber map creates the per-run queue set lazily on first subscription
   safety: Mutation is guarded by the broadcaster lock and only initializes empty internal state
   expires: null
-- key: web/execution/progress.py:R1:ProgressBroadcaster:broadcast:fp=3a209ff2d0c9740c
+- key: web/execution/progress.py:R1:ProgressBroadcaster:broadcast:fp=6e11678254f558d4
   owner: web-execution
   reason: Broadcast treats an absent run entry as 'no subscribers' for that run
   safety: A missing subscriber set results in a no-op broadcast, which is the correct behavior
   expires: null
-- key: web/execution/progress.py:R6:ProgressBroadcaster:_safe_put:fp=a242edd0100e11b4
+- key: web/execution/progress.py:R6:ProgressBroadcaster:_safe_put:fp=bb8b519dfa2f28f2
   owner: web-execution
   reason: QueueFull for terminal events — drains queue and retries (terminal events must never be dropped)
   safety: Terminal events guaranteed delivered; progress events use drop-oldest backpressure
   expires: null
-- key: web/execution/progress.py:R7:ProgressBroadcaster:_safe_put:fp=bb1f85282ba3f763
+- key: web/execution/progress.py:R7:ProgressBroadcaster:_safe_put:fp=17b62f55090a5b22
   owner: web-execution
   reason: QueueEmpty suppressed during terminal event drain — queue may have been consumed concurrently
   safety: Race-safe no-op; no data loss
   expires: null
-- key: web/execution/progress.py:R7:ProgressBroadcaster:_safe_put:fp=b085fda7b77dd327
+- key: web/execution/progress.py:R7:ProgressBroadcaster:_safe_put:fp=60537202986af777
   owner: web-execution
   reason: QueueEmpty suppressed during progress event drop-oldest — queue may have been consumed between full check and drain
   safety: Race-safe no-op; no data loss
   expires: null
-- key: web/execution/progress.py:R6:ProgressBroadcaster:_safe_put:fp=e628c7c24fa8f80b
+- key: web/execution/progress.py:R6:ProgressBroadcaster:_safe_put:fp=f6f40e5a148cdd41
   owner: web-execution
   reason: QueueFull after drop-oldest retry for non-terminal events — event dropped rather than blocking pipeline thread
   safety: Best-effort delivery for progress events; terminal events use separate drain path
   expires: null
-- key: web/execution/progress.py:R9:ProgressBroadcaster:cleanup_run:fp=7c47e683391777b0
+- key: web/execution/progress.py:R9:ProgressBroadcaster:cleanup_run:fp=df372b3a50327d9d
   owner: web-execution
   reason: Run cleanup is idempotent because unsubscribe and explicit cleanup can both remove the same run entry
   safety: Missing key simply means there are no remaining subscribers to clean up
@@ -394,12 +394,12 @@ allow_hits:
   reason: Progress broadcasting may fail with transport exceptions
   safety: Logged; pipeline continues
   expires: null
-- key: web/execution/service.py:R6:ExecutionServiceImpl:_run_pipeline:fp=8f9e8f3c5491bd68
+- key: web/execution/service.py:R6:ExecutionServiceImpl:_run_pipeline:fp=84b5d124ef0a6cf5
   owner: web-execution
   reason: GracefulShutdownError is an expected control-flow signal from orchestrator cancellation
   safety: Classified as cancelled; separated from BaseException failure path
   expires: null
-- key: web/execution/service.py:R5:ExecutionServiceImpl:_run_pipeline:fp=63dbff30d4e5ebcd
+- key: web/execution/service.py:R5:ExecutionServiceImpl:_run_pipeline:fp=db868b59860c341f
   owner: web-execution
   reason: Error classification — SecretResolutionError triggers safe message
   safety: Secret names not leaked to client
@@ -419,12 +419,12 @@ allow_hits:
   reason: Final shutdown-event cleanup is intentionally idempotent
   safety: Pop is idempotent
   expires: null
-- key: web/execution/service.py:R6:ExecutionServiceImpl:_finalize_output_blobs:fp=062931caddff8fd1
+- key: web/execution/service.py:R6:ExecutionServiceImpl:_finalize_output_blobs:fp=41346d96e86c574c
   owner: web-execution
-  reason: Blob finalization after terminal status — failure must not mask run outcome
-  safety: Narrowed to (OSError, SQLAlchemyError); logged with slog.error; run status preserved
+  reason: Blob finalization before terminal broadcast — failure must not mask run outcome
+  safety: _FINALIZE_SUPPRESSED covers blob-domain exceptions (OSError, SQLAlchemyError, BlobNotFoundError, BlobQuotaExceededError, RuntimeError); programmer bugs (TypeError, AttributeError) still propagate; logged with slog.error
   expires: null
-- key: web/execution/service.py:R5:ExecutionServiceImpl:_on_pipeline_done:fp=23dadf69cf235148
+- key: web/execution/service.py:R5:ExecutionServiceImpl:_on_pipeline_done:fp=2c9c28da1ff16abc
   owner: web-execution
   reason: Error classification for sanitized client messaging
   safety: SecretResolutionError triggers safe message

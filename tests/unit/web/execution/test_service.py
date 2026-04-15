@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import asyncio
 import concurrent.futures
+import contextlib
 import threading
 from collections.abc import Coroutine
 from concurrent.futures import Future
@@ -726,9 +727,10 @@ class TestCompletionPathExternalCancellation:
         service: ExecutionServiceImpl,
         mock_session_service: MagicMock,
     ) -> None:
-        """When pipeline completes but DB says 'cancelled', a compensating
-        'cancelled' event must be broadcast after the 'completed' event so
-        WebSocket clients converge with the database state."""
+        """When pipeline completes but DB says 'cancelled', exactly one
+        terminal event must be broadcast: 'cancelled' (the DB is authoritative).
+        No 'completed' event should be emitted — finalize-first ordering
+        ensures the terminal broadcast reflects the actual DB state."""
         mock_bundle = MagicMock()
         mock_bundle.aggregations = {}
         mock_instantiate.return_value = mock_bundle
@@ -756,7 +758,6 @@ class TestCompletionPathExternalCancellation:
         mock_session_service.update_run_status = AsyncMock(side_effect=status_side_effect)
         mock_session_service.get_run.return_value = MagicMock(status="cancelled")
 
-        # Spy on broadcaster to capture broadcast calls
         broadcast_calls: list[tuple[str, Any]] = []
         original_broadcast = service._broadcaster.broadcast
 
@@ -768,14 +769,9 @@ class TestCompletionPathExternalCancellation:
 
         service._run_pipeline(run_id, "source:\n  plugin: csv", threading.Event())
 
-        # Extract event types in order
         event_types = [call[1].event_type for call in broadcast_calls]
-        # Must see "completed" followed by "cancelled" (compensating event)
-        assert "completed" in event_types, f"Expected 'completed' event, got: {event_types}"
-        assert "cancelled" in event_types, f"Expected compensating 'cancelled' event, got: {event_types}"
-        completed_idx = event_types.index("completed")
-        cancelled_idx = event_types.index("cancelled")
-        assert cancelled_idx > completed_idx, f"'cancelled' must come after 'completed': {event_types}"
+        terminal_types = [et for et in event_types if et in ("completed", "failed", "cancelled")]
+        assert terminal_types == ["cancelled"], f"Expected exactly one 'cancelled' terminal, got: {terminal_types}"
 
     @patch("elspeth.web.execution.service.Orchestrator")
     @patch("elspeth.web.execution.service.ExecutionGraph")
@@ -1500,3 +1496,249 @@ class TestEdgeCompatibility:
 
         with pytest.raises(GraphValidationError, match="Schema mismatch"):
             service._run_pipeline(str(uuid4()), "yaml", threading.Event())
+
+
+# ── Blob Finalization Catch Widening ──────────────────────────────────
+
+
+def _make_strict_call_async():
+    """Create a _call_async bridge that propagates all exceptions faithfully.
+
+    The standard test fixture's _mock_call_async catches RuntimeError to
+    handle "event loop is closed" issues. For finalize tests, that masks
+    the exact exception we're trying to test. This version propagates
+    everything.
+    """
+    loop = asyncio.new_event_loop()
+
+    def _call_async(coro):
+        return loop.run_until_complete(coro)
+
+    return _call_async, loop
+
+
+class TestFinalizeOutputBlobsCatchWidening:
+    """Bug: elspeth-25df1be367 — _finalize_output_blobs only catches
+    OSError and SQLAlchemyError, but finalize_run_output_blobs can raise
+    BlobNotFoundError and RuntimeError from _finalize_blob_sync.
+
+    These escaping exceptions trigger a second terminal event via the
+    outer except BaseException, violating the "exactly one terminal state"
+    invariant.
+
+    Uses a strict _call_async that does NOT swallow RuntimeError (unlike
+    the standard test fixture).
+    """
+
+    def _make_service_with_blob(
+        self, blob_service: MagicMock, mock_settings: MagicMock, mock_session_service: MagicMock
+    ) -> ExecutionServiceImpl:
+        svc = ExecutionServiceImpl(
+            loop=MagicMock(spec=asyncio.AbstractEventLoop),
+            broadcaster=MagicMock(spec=ProgressBroadcaster),
+            settings=mock_settings,
+            session_service=mock_session_service,
+            yaml_generator=MagicMock(),
+            blob_service=blob_service,
+        )
+        call_async, _ = _make_strict_call_async()
+        cast(Any, svc)._call_async = call_async
+        return svc
+
+    def test_suppresses_blob_not_found_error(self, mock_settings: MagicMock, mock_session_service: MagicMock) -> None:
+        from elspeth.web.blobs.protocol import BlobNotFoundError
+
+        blob_service = MagicMock()
+        blob_service.finalize_run_output_blobs = AsyncMock(side_effect=BlobNotFoundError("missing-blob"))
+        svc = self._make_service_with_blob(blob_service, mock_settings, mock_session_service)
+        svc._finalize_output_blobs(str(uuid4()), success=True)
+
+    def test_suppresses_runtime_error_from_blob_lifecycle(self, mock_settings: MagicMock, mock_session_service: MagicMock) -> None:
+        blob_service = MagicMock()
+        blob_service.finalize_run_output_blobs = AsyncMock(
+            side_effect=RuntimeError("Cannot finalize — status is 'ready', expected 'pending'")
+        )
+        svc = self._make_service_with_blob(blob_service, mock_settings, mock_session_service)
+        svc._finalize_output_blobs(str(uuid4()), success=True)
+
+    def test_suppresses_blob_quota_exceeded_error(self, mock_settings: MagicMock, mock_session_service: MagicMock) -> None:
+        from elspeth.web.blobs.protocol import BlobQuotaExceededError
+
+        blob_service = MagicMock()
+        blob_service.finalize_run_output_blobs = AsyncMock(side_effect=BlobQuotaExceededError("sess-1", 100, 50))
+        svc = self._make_service_with_blob(blob_service, mock_settings, mock_session_service)
+        svc._finalize_output_blobs(str(uuid4()), success=True)
+
+    def test_propagates_type_error(self, mock_settings: MagicMock, mock_session_service: MagicMock) -> None:
+        """Programmer bugs (TypeError, AttributeError, etc.) must still crash."""
+        blob_service = MagicMock()
+        blob_service.finalize_run_output_blobs = AsyncMock(side_effect=TypeError("unexpected keyword argument"))
+        svc = self._make_service_with_blob(blob_service, mock_settings, mock_session_service)
+        with pytest.raises(TypeError, match="unexpected keyword argument"):
+            svc._finalize_output_blobs(str(uuid4()), success=True)
+
+    def test_propagates_attribute_error(self, mock_settings: MagicMock, mock_session_service: MagicMock) -> None:
+        """AttributeError is a programmer bug — must crash."""
+        blob_service = MagicMock()
+        blob_service.finalize_run_output_blobs = AsyncMock(side_effect=AttributeError("'NoneType' object has no attribute 'id'"))
+        svc = self._make_service_with_blob(blob_service, mock_settings, mock_session_service)
+        with pytest.raises(AttributeError):
+            svc._finalize_output_blobs(str(uuid4()), success=True)
+
+
+# ── Terminal Ordering Invariant ───────────────────────────────────────
+
+
+def _collect_terminal_types(mock_broadcaster: MagicMock) -> list[str]:
+    """Extract terminal event types from a mock broadcaster's call log."""
+    terminals = []
+    for call in mock_broadcaster.broadcast.call_args_list:
+        _, event = call[0]
+        if event.event_type in ("completed", "failed", "cancelled"):
+            terminals.append(event.event_type)
+    return terminals
+
+
+class TestTerminalOrderingInvariant:
+    """Bug: elspeth-25df1be367 — run termination is published before output
+    blob finalization. A late finalize failure triggers a second terminal event
+    via except BaseException.
+
+    CLAUDE.md invariant: "Every row reaches exactly one terminal state."
+    """
+
+    @patch("elspeth.web.execution.service.Orchestrator")
+    @patch("elspeth.web.execution.service.load_settings_from_yaml_string")
+    @patch("elspeth.web.execution.service.instantiate_plugins_from_config")
+    @patch("elspeth.web.execution.service.ExecutionGraph")
+    @patch("elspeth.web.execution.service.LandscapeDB")
+    @patch("elspeth.web.execution.service.FilesystemPayloadStore")
+    def test_single_terminal_when_finalize_raises_blob_not_found(
+        self,
+        mock_payload: MagicMock,
+        mock_landscape: MagicMock,
+        mock_graph_cls: MagicMock,
+        mock_instantiate: MagicMock,
+        mock_load: MagicMock,
+        mock_orch_cls: MagicMock,
+        mock_settings: MagicMock,
+        mock_session_service: MagicMock,
+    ) -> None:
+        """When finalize_run_output_blobs raises BlobNotFoundError after
+        a successful orchestrator.run(), exactly one terminal event must
+        be broadcast — not completed-then-failed."""
+        from elspeth.web.blobs.protocol import BlobNotFoundError
+
+        mock_load.return_value = MagicMock()
+        mock_bundle = MagicMock()
+        mock_bundle.source = MagicMock()
+        mock_bundle.source_settings = MagicMock()
+        mock_bundle.transforms = ()
+        mock_bundle.sinks = {"primary": MagicMock()}
+        mock_bundle.aggregations = {}
+        mock_instantiate.return_value = mock_bundle
+        mock_graph_cls.from_plugin_instances.return_value = MagicMock()
+        mock_orch = MagicMock()
+        mock_orch_cls.return_value = mock_orch
+        mock_result = MagicMock()
+        mock_result.run_id = "landscape-run-1"
+        mock_result.rows_processed = 10
+        mock_result.rows_succeeded = 9
+        mock_result.rows_failed = 1
+        mock_result.rows_quarantined = 0
+        mock_orch.run.return_value = mock_result
+
+        mock_broadcaster = MagicMock(spec=ProgressBroadcaster)
+        blob_service = MagicMock()
+        blob_service.finalize_run_output_blobs = AsyncMock(side_effect=BlobNotFoundError("blob-vanished"))
+
+        svc = ExecutionServiceImpl(
+            loop=MagicMock(spec=asyncio.AbstractEventLoop),
+            broadcaster=mock_broadcaster,
+            settings=mock_settings,
+            session_service=mock_session_service,
+            yaml_generator=MagicMock(),
+            blob_service=blob_service,
+        )
+        _real_loop = asyncio.new_event_loop()
+        cast(Any, svc)._call_async = lambda coro: _real_loop.run_until_complete(coro)
+
+        with contextlib.suppress(Exception):
+            svc._run_pipeline(str(uuid4()), "yaml", threading.Event())
+
+        terminals = _collect_terminal_types(mock_broadcaster)
+        assert len(terminals) == 1, (
+            f"Exactly one terminal event expected, got {terminals}. A finalize failure must not trigger a second terminal broadcast."
+        )
+
+    @patch("elspeth.web.execution.service.Orchestrator")
+    @patch("elspeth.web.execution.service.load_settings_from_yaml_string")
+    @patch("elspeth.web.execution.service.instantiate_plugins_from_config")
+    @patch("elspeth.web.execution.service.ExecutionGraph")
+    @patch("elspeth.web.execution.service.LandscapeDB")
+    @patch("elspeth.web.execution.service.FilesystemPayloadStore")
+    def test_externally_cancelled_run_emits_single_cancelled_terminal(
+        self,
+        mock_payload: MagicMock,
+        mock_landscape: MagicMock,
+        mock_graph_cls: MagicMock,
+        mock_instantiate: MagicMock,
+        mock_load: MagicMock,
+        mock_orch_cls: MagicMock,
+        mock_settings: MagicMock,
+        mock_session_service: MagicMock,
+    ) -> None:
+        """When a run completes but the DB status is already 'cancelled'
+        (external orphan cleanup raced), exactly one terminal event must
+        be emitted — not completed-then-cancelled."""
+        mock_load.return_value = MagicMock()
+        mock_bundle = MagicMock()
+        mock_bundle.source = MagicMock()
+        mock_bundle.source_settings = MagicMock()
+        mock_bundle.transforms = ()
+        mock_bundle.sinks = {"primary": MagicMock()}
+        mock_bundle.aggregations = {}
+        mock_instantiate.return_value = mock_bundle
+        mock_graph_cls.from_plugin_instances.return_value = MagicMock()
+        mock_orch = MagicMock()
+        mock_orch_cls.return_value = mock_orch
+        mock_result = MagicMock()
+        mock_result.run_id = "landscape-run-2"
+        mock_result.rows_processed = 5
+        mock_result.rows_succeeded = 5
+        mock_result.rows_failed = 0
+        mock_result.rows_quarantined = 0
+        mock_orch.run.return_value = mock_result
+
+        mock_broadcaster = MagicMock(spec=ProgressBroadcaster)
+
+        # Simulate external cancel: update_run_status("running") succeeds,
+        # then update_run_status("completed") raises ValueError because
+        # orphan cleanup already set the DB status to "cancelled".
+        async def _selective_update(run_id, *, status="", **kwargs):
+            if status == "completed":
+                raise ValueError("Invalid transition: cancelled -> completed")
+            return None
+
+        mock_session_service.update_run_status = AsyncMock(side_effect=_selective_update)
+        mock_session_service.get_run = AsyncMock(return_value=MagicMock(status="cancelled"))
+
+        svc = ExecutionServiceImpl(
+            loop=MagicMock(spec=asyncio.AbstractEventLoop),
+            broadcaster=mock_broadcaster,
+            settings=mock_settings,
+            session_service=mock_session_service,
+            yaml_generator=MagicMock(),
+        )
+        _real_loop = asyncio.new_event_loop()
+        cast(Any, svc)._call_async = lambda coro: _real_loop.run_until_complete(coro)
+
+        svc._run_pipeline(str(uuid4()), "yaml", threading.Event())
+
+        terminals = _collect_terminal_types(mock_broadcaster)
+        assert len(terminals) == 1, (
+            f"Exactly one terminal event expected, got {terminals}. "
+            "External cancellation must produce a single 'cancelled', "
+            "not 'completed' followed by 'cancelled'."
+        )
+        assert terminals[0] == "cancelled", f"Terminal should be 'cancelled' (DB is authoritative), got '{terminals[0]}'."
