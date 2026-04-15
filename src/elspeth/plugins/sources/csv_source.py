@@ -76,6 +76,7 @@ class CSVSource(BaseSource):
 
     name = "csv"
     plugin_version = "1.0.0"
+    source_file_hash = "sha256:fe2d9b4c931da651"
     config_model = CSVSourceConfig
     # Override parent type - SourceDataConfig requires this to be set
     _on_validation_failure: str

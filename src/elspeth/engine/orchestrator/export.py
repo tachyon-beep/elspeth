@@ -106,6 +106,7 @@ def export_landscape(
         config=dict(sink.config),
         schema_config=SchemaConfig.from_dict({"mode": "observed"}),
         determinism=Determinism.IO_WRITE,
+        source_file_hash=sink.source_file_hash,
     )
 
     if export_config.format == "csv":

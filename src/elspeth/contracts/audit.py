@@ -7,6 +7,7 @@ Per Data Manifesto: The audit database is OUR data. If we read
 garbage from it, something catastrophic happened - crash immediately.
 """
 
+import re
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from datetime import datetime
@@ -48,6 +49,9 @@ class TokenRef:
 
     token_id: str
     run_id: str
+
+
+_SOURCE_FILE_HASH_PATTERN = re.compile(r"sha256:[0-9a-f]{16}")
 
 
 def _validate_enum(value: object, enum_type: type, field_name: str) -> None:
@@ -105,6 +109,7 @@ class Node:
     config_hash: str
     config_json: str
     registered_at: datetime
+    source_file_hash: str | None = None
     schema_hash: str | None = None
     sequence_in_pipeline: int | None = None
     # Schema configuration for audit trail (WP-11.99)
@@ -116,6 +121,10 @@ class Node:
         require_int(self.sequence_in_pipeline, "sequence_in_pipeline", optional=True, min_value=0)
         _validate_enum(self.node_type, NodeType, "node_type")
         _validate_enum(self.determinism, Determinism, "determinism")
+        if self.source_file_hash is not None and not _SOURCE_FILE_HASH_PATTERN.fullmatch(self.source_file_hash):
+            raise ValueError(
+                f"Tier 1: source_file_hash must match 'sha256:<16-hex>' or be None, got {self.source_file_hash!r} for node {self.node_id!r}"
+            )
         freeze_fields(self, "schema_fields")
 
 

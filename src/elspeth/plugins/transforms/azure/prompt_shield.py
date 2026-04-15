@@ -75,6 +75,8 @@ class AzurePromptShield(BaseAzureSafetyTransform):
     """
 
     name = "azure_prompt_shield"
+    plugin_version = "1.0.0"
+    source_file_hash = "sha256:b9ace2343b6e606a"
     config_model = AzurePromptShieldConfig
 
     def __init__(self, config: dict[str, Any]) -> None:

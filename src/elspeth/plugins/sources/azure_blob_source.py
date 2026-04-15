@@ -317,6 +317,8 @@ class AzureBlobSource(BaseSource):
     """
 
     name = "azure_blob"
+    plugin_version = "1.0.0"
+    source_file_hash = "sha256:e5143f647bdf768c"
     config_model = AzureBlobSourceConfig
 
     def __init__(self, config: dict[str, Any]) -> None:

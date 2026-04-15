@@ -82,6 +82,7 @@ class FieldMapper(BaseTransform):
 
     name = "field_mapper"
     plugin_version = "1.0.0"
+    source_file_hash = "sha256:116a00b04666ca24"
     config_model = FieldMapperConfig
 
     def __init__(self, config: dict[str, Any]) -> None:

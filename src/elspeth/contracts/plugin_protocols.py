@@ -91,6 +91,7 @@ class SourceProtocol(Protocol):
     # Audit metadata
     determinism: Determinism
     plugin_version: str
+    source_file_hash: str | None
 
     # Sink name for quarantined rows, or "discard" to drop invalid rows
     # All sources must set this - config-based sources get it from SourceDataConfig
@@ -222,6 +223,7 @@ class TransformProtocol(Protocol):
     # Audit metadata
     determinism: Determinism
     plugin_version: str
+    source_file_hash: str | None
 
     # Lifecycle guard (set by BaseTransform.on_start()).
     # The TransformExecutor checks this before process() to ensure on_start()
@@ -366,6 +368,7 @@ class BatchTransformProtocol(Protocol):
     # Audit metadata
     determinism: Determinism
     plugin_version: str
+    source_file_hash: str | None
 
     # Batch support flag (must be True for BatchTransformProtocol)
     is_batch_aware: bool
@@ -479,6 +482,7 @@ class SinkProtocol(Protocol):
     # Audit metadata
     determinism: Determinism
     plugin_version: str
+    source_file_hash: str | None
 
     # Resume capability
     supports_resume: bool  # Can this sink append to existing output on resume?

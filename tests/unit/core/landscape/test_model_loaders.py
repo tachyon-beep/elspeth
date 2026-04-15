@@ -221,6 +221,7 @@ class TestNodeLoader:
             "plugin_name": "csv",
             "node_type": "source",
             "plugin_version": "1.0.0",
+            "source_file_hash": None,
             "determinism": "deterministic",
             "config_hash": "cfg123",
             "config_json": "{}",

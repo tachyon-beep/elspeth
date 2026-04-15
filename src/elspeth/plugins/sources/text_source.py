@@ -58,6 +58,7 @@ class TextSource(BaseSource):
 
     name = "text"
     plugin_version = "1.0.0"
+    source_file_hash = "sha256:0d05f6f1df3b9297"
     config_model = TextSourceConfig
     _on_validation_failure: str
 

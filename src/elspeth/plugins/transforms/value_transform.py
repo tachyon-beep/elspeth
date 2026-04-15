@@ -111,6 +111,7 @@ class ValueTransform(BaseTransform):
 
     name = "value_transform"
     plugin_version = "1.0.0"
+    source_file_hash = "sha256:9b5247bb226419fd"
     config_model = ValueTransformConfig
 
     def __init__(self, config: dict[str, Any]) -> None:

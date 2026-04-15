@@ -1371,11 +1371,13 @@ class Orchestrator:
                 # Use engine version to track which version of ExpressionParser was used
                 plugin_version = f"engine:{ENGINE_VERSION}"
                 determinism = Determinism.DETERMINISTIC
+                source_file_hash = None  # Engine-internal nodes have no source file
             elif node_id in coalesce_node_ids:
                 # Coalesce nodes merge tokens from parallel paths - deterministic operation
                 # Use engine version to track which version of the coalesce logic was used
                 plugin_version = f"engine:{ENGINE_VERSION}"
                 determinism = Determinism.DETERMINISTIC
+                source_file_hash = None  # Engine-internal nodes have no source file
             else:
                 # Direct access - if node_id is in execution_order (from graph.topological_order()),
                 # it MUST be in node_to_plugin (built from the same graph's source, transforms, sinks).
@@ -1386,6 +1388,7 @@ class Orchestrator:
                 # all base classes provide defaults. Direct access is safe.
                 plugin_version = plugin.plugin_version
                 determinism = plugin.determinism
+                source_file_hash = plugin.source_file_hash
 
             # Schema config is always available via output_schema_config —
             # populated at construction time for all node types.
@@ -1413,6 +1416,7 @@ class Orchestrator:
                 determinism=determinism,
                 schema_config=schema_config,
                 output_contract=output_contract,
+                source_file_hash=source_file_hash,
             )
 
     def _register_graph_nodes_and_edges(

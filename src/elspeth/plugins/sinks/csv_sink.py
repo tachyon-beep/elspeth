@@ -95,6 +95,7 @@ class CSVSink(BaseSink):
 
     name = "csv"
     plugin_version = "1.0.0"
+    source_file_hash = "sha256:7e35d5384fe2c96c"
     config_model = CSVSinkConfig
     # determinism inherited from BaseSink (IO_WRITE)
 

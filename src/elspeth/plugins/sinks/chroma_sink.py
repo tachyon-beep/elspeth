@@ -169,6 +169,7 @@ class ChromaSink(BaseSink):
 
     name = "chroma_sink"
     plugin_version = "1.0.0"
+    source_file_hash = "sha256:7622bc539658e2ff"
     config_model = ChromaSinkConfig
     supports_resume = False
 

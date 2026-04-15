@@ -964,6 +964,8 @@ class LLMTransform(BaseTransform, BatchTransformMixin):
     """
 
     name = "llm"
+    plugin_version = "1.0.0"
+    source_file_hash = "sha256:2773e5a5923d0d7e"
     determinism: Determinism = Determinism.NON_DETERMINISTIC
     config_model = LLMConfig  # Base; get_config_model dispatches to provider-specific
 

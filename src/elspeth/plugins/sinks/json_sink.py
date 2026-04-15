@@ -81,6 +81,7 @@ class JSONSink(BaseSink):
 
     name = "json"
     plugin_version = "1.0.0"
+    source_file_hash = "sha256:baf8875450ed07cb"
     config_model = JSONSinkConfig
     # determinism inherited from BaseSink (IO_WRITE)
 

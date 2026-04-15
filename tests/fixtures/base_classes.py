@@ -42,6 +42,7 @@ class _TestSourceBase:
     node_id: str | None = None
     determinism = Determinism.DETERMINISTIC
     plugin_version = "1.0.0"
+    source_file_hash: str | None = None
     _on_validation_failure: str = "discard"
     on_success: str = "default"
 
@@ -139,6 +140,7 @@ class _TestSinkBase:
     node_id: str | None = None
     determinism = Determinism.DETERMINISTIC
     plugin_version = "1.0.0"
+    source_file_hash: str | None = None
     declared_required_fields: frozenset[str] = frozenset()
     _on_write_failure: str = "discard"
 

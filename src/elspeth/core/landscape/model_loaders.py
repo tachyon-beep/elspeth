@@ -126,6 +126,7 @@ class NodeLoader:
             plugin_name=row.plugin_name,
             node_type=NodeType(row.node_type),  # Convert HERE
             plugin_version=row.plugin_version,
+            source_file_hash=row.source_file_hash,
             determinism=Determinism(row.determinism),  # Convert HERE
             config_hash=row.config_hash,
             config_json=row.config_json,

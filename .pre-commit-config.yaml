@@ -58,3 +58,10 @@ repos:
         language: system
         types: [python]
         pass_filenames: false
+
+      - id: enforce-plugin-hashes
+        name: Enforce Plugin Hashes
+        entry: .venv/bin/python -m scripts.cicd.enforce_plugin_hashes check --root src/elspeth
+        language: system
+        types: [python]
+        pass_filenames: false

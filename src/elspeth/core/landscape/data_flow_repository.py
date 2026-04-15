@@ -932,6 +932,7 @@ class DataFlowRepository:
         schema_hash: str | None = None,
         determinism: Determinism = Determinism.DETERMINISTIC,
         schema_config: SchemaConfig,
+        source_file_hash: str | None = None,
         input_contract: SchemaContract | None = None,
         output_contract: SchemaContract | None = None,
     ) -> Node:
@@ -948,6 +949,7 @@ class DataFlowRepository:
             schema_hash: Optional input/output schema hash
             determinism: Determinism enum (defaults to DETERMINISTIC)
             schema_config: Schema configuration for audit trail (WP-11.99)
+            source_file_hash: Optional truncated SHA-256 hash of the plugin source file
             input_contract: Optional input schema contract (what node requires)
             output_contract: Optional output schema contract (what node guarantees)
 
@@ -989,6 +991,7 @@ class DataFlowRepository:
             determinism=determinism,
             config_hash=config_hash,
             config_json=config_json,
+            source_file_hash=source_file_hash,
             schema_hash=schema_hash,
             sequence_in_pipeline=sequence,
             registered_at=timestamp,
@@ -1006,6 +1009,7 @@ class DataFlowRepository:
                 determinism=node.determinism,
                 config_hash=node.config_hash,
                 config_json=node.config_json,
+                source_file_hash=node.source_file_hash,
                 schema_hash=node.schema_hash,
                 sequence_in_pipeline=node.sequence_in_pipeline,
                 registered_at=node.registered_at,

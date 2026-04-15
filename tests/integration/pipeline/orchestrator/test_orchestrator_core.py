@@ -503,6 +503,7 @@ class TestOrchestratorAcceptsGraph:
         mock_source.name = "csv"
         mock_source.determinism = Determinism.IO_READ
         mock_source.plugin_version = "1.0.0"
+        mock_source.source_file_hash = None
         mock_source._on_validation_failure = "discard"
 
         source_node_id_setter = PropertyMock()
@@ -519,6 +520,7 @@ class TestOrchestratorAcceptsGraph:
         mock_sink.name = "csv"
         mock_sink.determinism = Determinism.IO_WRITE
         mock_sink.plugin_version = "1.0.0"
+        mock_sink.source_file_hash = None
         mock_sink._on_write_failure = "discard"
         mock_sink._reset_diversion_log = MagicMock()
 
@@ -592,6 +594,7 @@ class TestOrchestratorAcceptsGraph:
         mock_source.name = "csv"
         mock_source.determinism = Determinism.IO_READ
         mock_source.plugin_version = "1.0.0"
+        mock_source.source_file_hash = None
         mock_source._on_validation_failure = "discard"
 
         source_node_id_setter = PropertyMock()
@@ -608,6 +611,7 @@ class TestOrchestratorAcceptsGraph:
         mock_sink_a.name = "output_a"
         mock_sink_a.determinism = Determinism.IO_WRITE
         mock_sink_a.plugin_version = "1.0.0"
+        mock_sink_a.source_file_hash = None
         mock_sink_a._on_write_failure = "discard"
         mock_sink_a._reset_diversion_log = MagicMock()
 
@@ -622,6 +626,7 @@ class TestOrchestratorAcceptsGraph:
         mock_sink_b.name = "output_b"
         mock_sink_b.determinism = Determinism.IO_WRITE
         mock_sink_b.plugin_version = "1.0.0"
+        mock_sink_b.source_file_hash = None
         mock_sink_b._on_write_failure = "discard"
         mock_sink_b._reset_diversion_log = MagicMock()
 

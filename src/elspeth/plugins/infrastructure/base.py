@@ -140,6 +140,7 @@ class BaseTransform(ABC):
     # Audit metadata
     determinism: Determinism = Determinism.DETERMINISTIC
     plugin_version: str = "0.0.0"
+    source_file_hash: str | None = None
 
     # Config model — each subclass sets this to its Pydantic config class.
     # get_config_model() is the public API; override it for dynamic dispatch
@@ -421,6 +422,7 @@ class BaseSink(ABC):
     # Audit metadata
     determinism: Determinism = Determinism.IO_WRITE
     plugin_version: str = "0.0.0"
+    source_file_hash: str | None = None
 
     # Config model — each subclass sets this to its Pydantic config class.
     config_model: ClassVar[type[PluginConfig] | None] = None
@@ -687,6 +689,7 @@ class BaseSource(ABC):
     # Audit metadata
     determinism: Determinism = Determinism.IO_READ
     plugin_version: str = "0.0.0"
+    source_file_hash: str | None = None
 
     # Config model — each subclass sets this to its Pydantic config class.
     # NullSource sets this to None (no config validation needed).

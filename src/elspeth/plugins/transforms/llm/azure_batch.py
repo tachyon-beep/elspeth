@@ -155,6 +155,8 @@ class AzureBatchLLMTransform(BaseTransform):
     """
 
     name = "azure_batch_llm"
+    plugin_version = "1.0.0"
+    source_file_hash = "sha256:4852d5e8f39d410f"
     is_batch_aware = True  # Engine passes list[dict] for batch processing
     config_model = AzureBatchConfig
 

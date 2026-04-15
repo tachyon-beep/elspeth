@@ -161,6 +161,7 @@ class TestTransformProtocol:
             node_id: str | None = None  # Set by orchestrator
             determinism = Determinism.DETERMINISTIC
             plugin_version = "1.0.0"
+            source_file_hash: str | None = None
             is_batch_aware = False  # Batch support (structural aggregation)
             creates_tokens = False  # Deaggregation (multi-row output)
             declared_output_fields: frozenset[str] = frozenset()  # Collision detection
