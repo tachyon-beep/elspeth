@@ -228,10 +228,11 @@ user_secrets_table = Table(
     Column("id", String, primary_key=True),
     Column("name", String, nullable=False),
     Column("user_id", String, nullable=False),
+    Column("auth_provider_type", String, nullable=False, server_default="local"),
     Column("encrypted_value", LargeBinary, nullable=False),
     Column("salt", LargeBinary, nullable=False),
     Column("created_at", DateTime(timezone=True), nullable=False),
     Column("updated_at", DateTime(timezone=True), nullable=False),
-    UniqueConstraint("name", "user_id", name="uq_user_secret_name_user"),
+    UniqueConstraint("name", "user_id", "auth_provider_type", name="uq_user_secret_name_user_provider"),
 )
-Index("ix_user_secrets_user_id", user_secrets_table.c.user_id)
+Index("ix_user_secrets_user_provider", user_secrets_table.c.user_id, user_secrets_table.c.auth_provider_type)

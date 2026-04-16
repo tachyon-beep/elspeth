@@ -19,6 +19,7 @@ from fastapi import APIRouter, Depends, HTTPException, Request
 
 from elspeth.web.auth.middleware import get_current_user
 from elspeth.web.auth.models import UserIdentity
+from elspeth.web.config import WebSettings
 from elspeth.web.secrets.schemas import (
     CreateSecretRequest,
     CreateSecretResponse,
@@ -39,6 +40,10 @@ def create_secrets_router() -> APIRouter:
         service: WebSecretService = request.app.state.secret_service
         return service
 
+    def _get_settings(request: Request) -> WebSettings:
+        settings: WebSettings = request.app.state.settings
+        return settings
+
     @router.get("", response_model=list[SecretInventoryResponse])
     async def list_secrets(
         request: Request,
@@ -49,7 +54,10 @@ def create_secrets_router() -> APIRouter:
         SECURITY: returns metadata only -- no values.
         """
         service = _get_service(request)
-        items = service.list_refs(user.user_id)
+        settings = _get_settings(request)
+        items = await asyncio.to_thread(
+            service.list_refs, user.user_id, auth_provider_type=settings.auth_provider
+        )
         return [
             SecretInventoryResponse(
                 name=item.name,
@@ -72,11 +80,21 @@ def create_secrets_router() -> APIRouter:
         the value.
         """
         service = _get_service(request)
-        await asyncio.to_thread(service.set_user_secret, user.user_id, body.name, body.value)
+        settings = _get_settings(request)
+        await asyncio.to_thread(
+            service.set_user_secret,
+            user.user_id,
+            body.name,
+            body.value,
+            auth_provider_type=settings.auth_provider,
+        )
+        available = await asyncio.to_thread(
+            service.has_ref, user.user_id, body.name, auth_provider_type=settings.auth_provider
+        )
         return CreateSecretResponse(
             name=body.name,
             scope="user",
-            available=True,
+            available=available,
         )
 
     @router.delete("/{name}", status_code=204)
@@ -90,7 +108,13 @@ def create_secrets_router() -> APIRouter:
         Returns 204 on success, 404 if the secret does not exist for this user.
         """
         service = _get_service(request)
-        deleted = await asyncio.to_thread(service.delete_user_secret, user.user_id, name)
+        settings = _get_settings(request)
+        deleted = await asyncio.to_thread(
+            service.delete_user_secret,
+            user.user_id,
+            name,
+            auth_provider_type=settings.auth_provider,
+        )
         if not deleted:
             raise HTTPException(status_code=404, detail=f"Secret {name!r} not found")
 
@@ -102,10 +126,13 @@ def create_secrets_router() -> APIRouter:
     ) -> ValidateSecretResponse:
         """Check whether a named secret reference is resolvable.
 
-        SECURITY: does NOT return the value -- only existence.
+        SECURITY: does NOT return the value -- only resolvability status.
         """
         service = _get_service(request)
-        available = service.has_ref(user.user_id, name)
+        settings = _get_settings(request)
+        available = await asyncio.to_thread(
+            service.has_ref, user.user_id, name, auth_provider_type=settings.auth_provider
+        )
         return ValidateSecretResponse(name=name, available=available)
 
     return router

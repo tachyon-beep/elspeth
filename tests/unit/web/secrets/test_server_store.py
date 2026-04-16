@@ -177,3 +177,39 @@ class TestReservedSecretNames:
         names = {item.name for item in items}
         assert "ELSPETH_FINGERPRINT_KEY" not in names
         assert "VALID_KEY" in names
+
+
+class TestFingerprintKeyAvailability:
+    """has_secret and list_secrets must reflect fingerprint key readiness."""
+
+    def test_has_secret_false_when_fingerprint_key_missing(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """has_secret returns False even if env var is set when fingerprint key is missing."""
+        monkeypatch.setenv("ALLOWED_KEY", "value")
+        monkeypatch.delenv("ELSPETH_FINGERPRINT_KEY", raising=False)
+        store = ServerSecretStore(allowlist=("ALLOWED_KEY",))
+        assert store.has_secret("ALLOWED_KEY") is False
+
+    def test_has_secret_true_when_fingerprint_key_set(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """has_secret returns True when both env var and fingerprint key are set."""
+        monkeypatch.setenv("ALLOWED_KEY", "value")
+        monkeypatch.setenv("ELSPETH_FINGERPRINT_KEY", "fp-key")
+        store = ServerSecretStore(allowlist=("ALLOWED_KEY",))
+        assert store.has_secret("ALLOWED_KEY") is True
+
+    def test_list_secrets_unavailable_when_fingerprint_key_missing(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """list_secrets marks available=False when fingerprint key is missing."""
+        monkeypatch.setenv("ALLOWED_KEY", "value")
+        monkeypatch.delenv("ELSPETH_FINGERPRINT_KEY", raising=False)
+        store = ServerSecretStore(allowlist=("ALLOWED_KEY",))
+        items = store.list_secrets()
+        item = next(i for i in items if i.name == "ALLOWED_KEY")
+        assert item.available is False
+
+    def test_list_secrets_available_when_fingerprint_key_set(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """list_secrets marks available=True when both env var and fingerprint key set."""
+        monkeypatch.setenv("ALLOWED_KEY", "value")
+        monkeypatch.setenv("ELSPETH_FINGERPRINT_KEY", "fp-key")
+        store = ServerSecretStore(allowlist=("ALLOWED_KEY",))
+        items = store.list_secrets()
+        item = next(i for i in items if i.name == "ALLOWED_KEY")
+        assert item.available is True

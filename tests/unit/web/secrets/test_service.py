@@ -53,9 +53,9 @@ class TestResolve:
     ) -> None:
         """When the same secret exists in both user and server stores, user wins."""
         monkeypatch.setenv("TEST_KEY", "server-value")
-        user_store.set_secret("TEST_KEY", value="user-value", user_id="user-1")
+        user_store.set_secret("TEST_KEY", value="user-value", user_id="user-1", auth_provider_type="local")
 
-        result = service.resolve("user-1", "TEST_KEY")
+        result = service.resolve("user-1", "TEST_KEY", auth_provider_type="local")
 
         assert result is not None
         assert result.value == "user-value"
@@ -69,7 +69,7 @@ class TestResolve:
         """When user has no secret, falls back to server store."""
         monkeypatch.setenv("TEST_KEY", "env-value")
 
-        result = service.resolve("user-1", "TEST_KEY")
+        result = service.resolve("user-1", "TEST_KEY", auth_provider_type="local")
 
         assert result is not None
         assert result.value == "env-value"
@@ -77,7 +77,7 @@ class TestResolve:
 
     def test_resolve_returns_none_when_missing(self, service: WebSecretService) -> None:
         """Returns None when secret is not in either store."""
-        result = service.resolve("user-1", "NONEXISTENT")
+        result = service.resolve("user-1", "NONEXISTENT", auth_provider_type="local")
 
         assert result is None
 
@@ -89,14 +89,14 @@ class TestResolve:
     ) -> None:
         """has_ref returns True for secrets in either scope."""
         monkeypatch.setenv("TEST_KEY", "env-value")
-        user_store.set_secret("USER_ONLY", value="val", user_id="user-1")
+        user_store.set_secret("USER_ONLY", value="val", user_id="user-1", auth_provider_type="local")
 
         # Server scope
-        assert service.has_ref("user-1", "TEST_KEY") is True
+        assert service.has_ref("user-1", "TEST_KEY", auth_provider_type="local") is True
         # User scope
-        assert service.has_ref("user-1", "USER_ONLY") is True
+        assert service.has_ref("user-1", "USER_ONLY", auth_provider_type="local") is True
         # Neither
-        assert service.has_ref("user-1", "NONEXISTENT") is False
+        assert service.has_ref("user-1", "NONEXISTENT", auth_provider_type="local") is False
 
 
 class TestListRefs:
@@ -108,9 +108,9 @@ class TestListRefs:
     ) -> None:
         """list_refs returns items from both user and server stores."""
         monkeypatch.setenv("TEST_KEY", "env-value")
-        user_store.set_secret("MY_SECRET", value="user-val", user_id="user-1")
+        user_store.set_secret("MY_SECRET", value="user-val", user_id="user-1", auth_provider_type="local")
 
-        refs = service.list_refs("user-1")
+        refs = service.list_refs("user-1", auth_provider_type="local")
         names = [r.name for r in refs]
 
         assert "TEST_KEY" in names
@@ -124,9 +124,9 @@ class TestListRefs:
     ) -> None:
         """When same name exists in both scopes, user scope wins in listing."""
         monkeypatch.setenv("TEST_KEY", "env-value")
-        user_store.set_secret("TEST_KEY", value="user-value", user_id="user-1")
+        user_store.set_secret("TEST_KEY", value="user-value", user_id="user-1", auth_provider_type="local")
 
-        refs = service.list_refs("user-1")
+        refs = service.list_refs("user-1", auth_provider_type="local")
         test_key_items = [r for r in refs if r.name == "TEST_KEY"]
 
         assert len(test_key_items) == 1
@@ -140,23 +140,23 @@ class TestCrud:
     ) -> None:
         """CRUD pass-through to user store works correctly."""
         # Set
-        service.set_user_secret("user-1", "MY_KEY", "my-value")
+        service.set_user_secret("user-1", "MY_KEY", "my-value", auth_provider_type="local")
 
-        result = service.resolve("user-1", "MY_KEY")
+        result = service.resolve("user-1", "MY_KEY", auth_provider_type="local")
         assert result is not None
         assert result.value == "my-value"
         assert result.scope == "user"
 
         # Delete
-        deleted = service.delete_user_secret("user-1", "MY_KEY")
+        deleted = service.delete_user_secret("user-1", "MY_KEY", auth_provider_type="local")
         assert deleted is True
 
         # Gone
-        result = service.resolve("user-1", "MY_KEY")
+        result = service.resolve("user-1", "MY_KEY", auth_provider_type="local")
         assert result is None
 
         # Double delete
-        deleted = service.delete_user_secret("user-1", "MY_KEY")
+        deleted = service.delete_user_secret("user-1", "MY_KEY", auth_provider_type="local")
         assert deleted is False
 
 
@@ -195,3 +195,154 @@ class TestServerStore:
         assert by_name["UNSET_KEY"].available is False
         assert by_name["SET_KEY"].scope == "server"
         assert by_name["SET_KEY"].source_kind == "env"
+
+
+class TestScopedSecretResolver:
+    """ScopedSecretResolver binds auth_provider_type for the protocol."""
+
+    def test_satisfies_protocol(
+        self,
+        service: WebSecretService,
+    ) -> None:
+        """ScopedSecretResolver must satisfy WebSecretResolver protocol."""
+        from elspeth.contracts.secrets import WebSecretResolver
+        from elspeth.web.secrets.service import ScopedSecretResolver
+
+        resolver = ScopedSecretResolver(service, auth_provider_type="local")
+        assert isinstance(resolver, WebSecretResolver)
+
+    def test_binds_auth_provider_for_has_ref(
+        self,
+        service: WebSecretService,
+        user_store: UserSecretStore,
+    ) -> None:
+        """has_ref through scoped resolver uses the bound auth_provider_type."""
+        from elspeth.web.secrets.service import ScopedSecretResolver
+
+        user_store.set_secret("KEY", value="val", user_id="u1", auth_provider_type="oidc")
+        oidc_resolver = ScopedSecretResolver(service, auth_provider_type="oidc")
+        local_resolver = ScopedSecretResolver(service, auth_provider_type="local")
+
+        assert oidc_resolver.has_ref("u1", "KEY") is True
+        assert local_resolver.has_ref("u1", "KEY") is False
+
+    def test_binds_auth_provider_for_resolve(
+        self,
+        service: WebSecretService,
+        user_store: UserSecretStore,
+    ) -> None:
+        """resolve through scoped resolver uses the bound auth_provider_type."""
+        from elspeth.web.secrets.service import ScopedSecretResolver
+
+        user_store.set_secret("KEY", value="secret-val", user_id="u1", auth_provider_type="oidc")
+        oidc_resolver = ScopedSecretResolver(service, auth_provider_type="oidc")
+        local_resolver = ScopedSecretResolver(service, auth_provider_type="local")
+
+        result = oidc_resolver.resolve("u1", "KEY")
+        assert result is not None
+        assert result.value == "secret-val"
+
+        assert local_resolver.resolve("u1", "KEY") is None
+
+    def test_binds_auth_provider_for_list_refs(
+        self,
+        service: WebSecretService,
+        user_store: UserSecretStore,
+    ) -> None:
+        """list_refs through scoped resolver uses the bound auth_provider_type."""
+        from elspeth.web.secrets.service import ScopedSecretResolver
+
+        user_store.set_secret("A", value="v", user_id="u1", auth_provider_type="local")
+        user_store.set_secret("B", value="v", user_id="u1", auth_provider_type="oidc")
+        local_resolver = ScopedSecretResolver(service, auth_provider_type="local")
+
+        refs = local_resolver.list_refs("u1")
+        user_names = [r.name for r in refs if r.scope == "user"]
+        assert "A" in user_names
+        assert "B" not in user_names
+
+
+class TestHasRefResolveInvariant:
+    """Contract invariant: has_ref()==True implies resolve()!=None.
+
+    This is the load-bearing contract of the availability/resolvability
+    alignment fix.  If has_ref reports available but resolve fails, the
+    pipeline will pass validation then fail at execution time.
+    """
+
+    def test_user_scope_has_ref_implies_resolve(
+        self,
+        service: WebSecretService,
+        user_store: UserSecretStore,
+    ) -> None:
+        """has_ref==True for a user secret must mean resolve returns a result."""
+        user_store.set_secret("CONTRACT", value="val", user_id="u1", auth_provider_type="local")
+        assert service.has_ref("u1", "CONTRACT", auth_provider_type="local") is True
+        result = service.resolve("u1", "CONTRACT", auth_provider_type="local")
+        assert result is not None
+        assert result.value == "val"
+
+    def test_server_scope_has_ref_implies_resolve(
+        self,
+        service: WebSecretService,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """has_ref==True for a server secret must mean resolve returns a result."""
+        monkeypatch.setenv("TEST_KEY", "server-val")
+        assert service.has_ref("u1", "TEST_KEY", auth_provider_type="local") is True
+        result = service.resolve("u1", "TEST_KEY", auth_provider_type="local")
+        assert result is not None
+        assert result.value == "server-val"
+
+    def test_missing_fingerprint_key_breaks_both(
+        self,
+        service: WebSecretService,
+        user_store: UserSecretStore,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """When fingerprint key is missing, has_ref must return False (not True with resolve failing)."""
+        user_store.set_secret("KEY", value="val", user_id="u1", auth_provider_type="local")
+        monkeypatch.delenv("ELSPETH_FINGERPRINT_KEY")
+        # has_ref must be False — secret exists but is not resolvable
+        assert service.has_ref("u1", "KEY", auth_provider_type="local") is False
+
+    def test_has_ref_false_implies_resolve_none_or_raises(
+        self,
+        service: WebSecretService,
+    ) -> None:
+        """has_ref==False for a missing secret must mean resolve returns None."""
+        assert service.has_ref("u1", "NONEXISTENT", auth_provider_type="local") is False
+        result = service.resolve("u1", "NONEXISTENT", auth_provider_type="local")
+        assert result is None
+
+    def test_resolve_returns_none_when_user_secret_exists_but_fingerprint_key_missing(
+        self,
+        service: WebSecretService,
+        user_store: UserSecretStore,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """resolve() must return None (not crash) when fingerprint key is missing.
+
+        Regression: get_secret() used to raise RuntimeError via
+        _compute_fingerprint() — resolve() only caught SecretNotFoundError,
+        so the RuntimeError propagated uncaught through the pipeline.
+        """
+        user_store.set_secret("KEY", value="val", user_id="u1", auth_provider_type="local")
+        monkeypatch.delenv("ELSPETH_FINGERPRINT_KEY")
+
+        assert service.has_ref("u1", "KEY", auth_provider_type="local") is False
+        result = service.resolve("u1", "KEY", auth_provider_type="local")
+        assert result is None
+
+    def test_resolve_returns_none_when_server_secret_exists_but_fingerprint_key_missing(
+        self,
+        service: WebSecretService,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """Server-scope resolve() must also return None when fingerprint key is missing."""
+        monkeypatch.setenv("TEST_KEY", "env-value")
+        monkeypatch.delenv("ELSPETH_FINGERPRINT_KEY")
+
+        assert service.has_ref("u1", "TEST_KEY", auth_provider_type="local") is False
+        result = service.resolve("u1", "TEST_KEY", auth_provider_type="local")
+        assert result is None

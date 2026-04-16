@@ -33,7 +33,7 @@ from elspeth.web.execution.service import ExecutionServiceImpl
 from elspeth.web.middleware.rate_limit import ComposerRateLimiter
 from elspeth.web.secrets.routes import create_secrets_router
 from elspeth.web.secrets.server_store import ServerSecretStore
-from elspeth.web.secrets.service import WebSecretService
+from elspeth.web.secrets.service import ScopedSecretResolver, WebSecretService
 from elspeth.web.secrets.user_store import UserSecretStore
 from elspeth.web.sessions.migrations import run_migrations
 from elspeth.web.sessions.protocol import RunAlreadyActiveError
@@ -141,7 +141,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         session_service=session_service,
         yaml_generator=yaml_generator_module,
         blob_service=app.state.blob_service,
-        secret_service=app.state.secret_service,
+        secret_service=app.state.scoped_secret_resolver,
     )
     app.state.execution_service = execution_service
 
@@ -282,7 +282,7 @@ def create_app(settings: WebSettings | None = None) -> FastAPI:
     # --- Session database setup ---
     session_db_url = settings.get_session_db_url()
     session_engine = create_engine(session_db_url)
-    run_migrations(session_engine)
+    run_migrations(session_engine, auth_provider=settings.auth_provider)
 
     session_service = SessionServiceImpl(session_engine, data_dir=settings.data_dir)
     app.state.session_service = session_service
@@ -298,13 +298,14 @@ def create_app(settings: WebSettings | None = None) -> FastAPI:
     user_secret_store = UserSecretStore(session_engine, settings.secret_key)
     server_secret_store = ServerSecretStore(settings.server_secret_allowlist)
     app.state.secret_service = WebSecretService(user_secret_store, server_secret_store)
+    app.state.scoped_secret_resolver = ScopedSecretResolver(app.state.secret_service, settings.auth_provider)
 
     # --- Composer service (singleton, not per-request) ---
     app.state.composer_service = ComposerServiceImpl(
         catalog=app.state.catalog_service,
         settings=settings,
         session_engine=session_engine,
-        secret_service=app.state.secret_service,
+        secret_service=app.state.scoped_secret_resolver,
     )
     app.state.composer_availability = app.state.composer_service.get_availability()
 

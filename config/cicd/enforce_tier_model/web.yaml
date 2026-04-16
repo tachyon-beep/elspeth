@@ -284,10 +284,20 @@ allow_hits:
   reason: Tier 3 boundary — os.environ.get() reads external env var; unset/empty raises SecretNotFoundError
   safety: Missing env var raises SecretNotFoundError; no default fabrication
   expires: null
-- key: web/secrets/server_store.py:R1:ServerSecretStore:list_secrets:fp=40afd310d4708c15
+- key: web/secrets/server_store.py:R1:ServerSecretStore:list_secrets:fp=acbdbe3aaa0b7b00
   owner: web-secrets
   reason: Tier 3 boundary — os.environ.get() checks env var presence for availability metadata
   safety: Only produces bool available flag; no secret value exposed
+  expires: null
+- key: web/secrets/user_store.py:R1:_fingerprint_key_available:fp=21bde14fd102f73d
+  owner: web-secrets
+  reason: Tier 3 boundary — os.environ.get() checks deployment env var presence for fingerprint key
+  safety: Returns bool only; deployment readiness check; no default fabrication
+  expires: null
+- key: web/sessions/migrations/versions/006_add_auth_provider_to_secrets.py:R1:upgrade:fp=03f9253399e57f35
+  owner: web-secrets
+  reason: Alembic config attributes.get() — fallback for CLI-driven or test migrations where run_migrations() did not set auth_provider
+  safety: Falls back to "local" (the default auth_provider in WebSettings); no silent data loss
   expires: null
 - key: web/secrets/service.py:R6:WebSecretService:resolve:fp=9c915e3f931310ca
   owner: web-secrets
@@ -319,27 +329,27 @@ allow_hits:
   reason: isinstance(config_dict, dict) validates YAML parse output before resolve_secret_refs — yaml.safe_load can return non-dict for malformed input
   safety: Raises TypeError with diagnostic message; no error suppression
   expires: null
-- key: web/app.py:R1:create_app:fp=33496637a90d0d60
+- key: web/app.py:R1:create_app:fp=05fe816d6a6d068a
   owner: web-app
   reason: Tier 3 — os.environ.get() for optional WEB_CONCURRENCY env var
   safety: Defaults to "1" when absent
   expires: null
-- key: web/app.py:R6:create_app:fp=15a7ddc7d1db4ea8
+- key: web/app.py:R6:create_app:fp=a52c209119113022
   owner: web-app
   reason: ValueError from int() on non-numeric WEB_CONCURRENCY
   safety: Defaults to single worker
   expires: null
-- key: web/app.py:R6:create_app:fp=e6645fd5a0801ce8
+- key: web/app.py:R6:create_app:fp=e1bf11c7034d1cff
   owner: web-app
   reason: ValueError from int() on non-numeric --workers arg
   safety: Skips this argv entry
   expires: null
-- key: web/app.py:R6:create_app:fp=e5c502663606619c
+- key: web/app.py:R6:create_app:fp=9b29576594c75d01
   owner: web-app
   reason: ValueError from int() on non-numeric --workers=N
   safety: Skips this argv entry
   expires: null
-- key: web/app.py:R6:create_app:fp=e8bae6dac9624528
+- key: web/app.py:R6:create_app:fp=229707e273052e47
   owner: web-app
   reason: ValueError from int() on non-numeric -w arg
   safety: Skips this argv entry

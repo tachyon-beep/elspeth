@@ -15,9 +15,9 @@ import hashlib
 import os
 import uuid
 from datetime import UTC, datetime
+from typing import Any
 
 import sqlalchemy as sa
-import structlog
 from cryptography.fernet import Fernet
 from sqlalchemy.engine import Engine
 
@@ -26,10 +26,19 @@ from elspeth.contracts.security import secret_fingerprint
 from elspeth.core.security.secret_loader import SecretNotFoundError, SecretRef
 from elspeth.web.sessions.models import user_secrets_table
 
-slog = structlog.get_logger()
-
 _PBKDF2_ITERATIONS = 480_000
 _SALT_BYTES = 16
+
+
+def _fingerprint_key_available() -> bool:
+    """Check whether ELSPETH_FINGERPRINT_KEY is set.
+
+    Required for audit fingerprint computation.  Without it, get_secret()
+    will raise RuntimeError, so has_secret() and list_secrets() must
+    reflect the same availability — a secret that cannot be fingerprinted
+    is not resolvable.
+    """
+    return bool(os.environ.get("ELSPETH_FINGERPRINT_KEY"))
 
 
 def _compute_fingerprint(name: str, value: str) -> str:
@@ -61,6 +70,30 @@ def _derive_fernet_key(master_key: str, salt: bytes) -> bytes:
     return base64.urlsafe_b64encode(raw)
 
 
+def _resolve_dialect_insert(engine: Engine) -> Any:
+    """Resolve the dialect-specific ``insert`` function for atomic upsert.
+
+    Both SQLite and PostgreSQL support ``INSERT ... ON CONFLICT DO UPDATE``
+    through SQLAlchemy, but require dialect-specific import paths.  Resolved
+    once at construction time so unsupported dialects fail fast at startup
+    rather than silently at first write.
+    """
+    dialect = engine.dialect.name
+    if dialect == "sqlite":
+        from sqlalchemy.dialects.sqlite import insert as _sqlite_insert
+
+        return _sqlite_insert
+    if dialect == "postgresql":
+        from sqlalchemy.dialects.postgresql import insert as _pg_insert
+
+        return _pg_insert
+    raise NotImplementedError(
+        f"UserSecretStore requires INSERT ... ON CONFLICT DO UPDATE, "
+        f"which is not available for session database dialect {dialect!r}. "
+        f"Supported dialects: sqlite, postgresql."
+    )
+
+
 class UserSecretStore:
     """Encrypted persistence for user-scoped secrets.
 
@@ -76,19 +109,35 @@ class UserSecretStore:
     def __init__(self, engine: Engine, master_key: str) -> None:
         self._engine = engine
         self._master_key = master_key
+        self._dialect_insert = _resolve_dialect_insert(engine)
 
     # ------------------------------------------------------------------
     # Public API
     # ------------------------------------------------------------------
 
-    def has_secret(self, name: str, *, user_id: str) -> bool:
-        """Check if a user secret exists without decrypting."""
+    def has_secret(self, name: str, *, user_id: str, auth_provider_type: str) -> bool:
+        """Check if a user secret is resolvable.
+
+        Returns True only when the secret exists AND the deployment is
+        configured for fingerprint computation (ELSPETH_FINGERPRINT_KEY).
+        This aligns with get_secret(), which requires both conditions.
+        """
+        if not _fingerprint_key_available():
+            return False
         t = user_secrets_table
         with self._engine.connect() as conn:
-            row = conn.execute(sa.select(t.c.id).where(sa.and_(t.c.name == name, t.c.user_id == user_id))).first()
+            row = conn.execute(
+                sa.select(t.c.id).where(
+                    sa.and_(
+                        t.c.name == name,
+                        t.c.user_id == user_id,
+                        t.c.auth_provider_type == auth_provider_type,
+                    )
+                )
+            ).first()
             return row is not None
 
-    def get_secret(self, name: str, *, user_id: str) -> tuple[str, SecretRef]:
+    def get_secret(self, name: str, *, user_id: str, auth_provider_type: str) -> tuple[str, SecretRef]:
         """Retrieve and decrypt a user secret.
 
         Returns
@@ -99,10 +148,22 @@ class UserSecretStore:
         Raises
         ------
         SecretNotFoundError
-            If no secret with *name* exists for *user_id*.
+            If no secret with *name* exists for *user_id* and
+            *auth_provider_type*, or if ELSPETH_FINGERPRINT_KEY is not set
+            (the secret exists but cannot be fingerprinted for audit).
         """
+        if not _fingerprint_key_available():
+            raise SecretNotFoundError(
+                f"Secret {name!r} is not resolvable — ELSPETH_FINGERPRINT_KEY is not set"
+            )
         t = user_secrets_table
-        stmt = sa.select(t.c.encrypted_value, t.c.salt).where(sa.and_(t.c.name == name, t.c.user_id == user_id))
+        stmt = sa.select(t.c.encrypted_value, t.c.salt).where(
+            sa.and_(
+                t.c.name == name,
+                t.c.user_id == user_id,
+                t.c.auth_provider_type == auth_provider_type,
+            )
+        )
 
         with self._engine.connect() as conn:
             row = conn.execute(stmt).first()
@@ -116,11 +177,12 @@ class UserSecretStore:
         ref = SecretRef(name=name, fingerprint=fp, source="user")
         return plaintext, ref
 
-    def set_secret(self, name: str, *, value: str, user_id: str) -> None:
-        """Create or update a user secret (upsert semantics).
+    def set_secret(self, name: str, *, value: str, user_id: str, auth_provider_type: str) -> None:
+        """Create or update a user secret (atomic upsert).
 
         A fresh random salt is generated on every write so that updating a
-        secret also rotates the derived key.
+        secret also rotates the derived key.  Uses INSERT ... ON CONFLICT
+        DO UPDATE to prevent race conditions under concurrent writes.
         """
         salt = os.urandom(_SALT_BYTES)
         key = _derive_fernet_key(self._master_key, salt)
@@ -128,35 +190,28 @@ class UserSecretStore:
         now = datetime.now(UTC)
 
         t = user_secrets_table
-
+        stmt = self._dialect_insert(t).values(
+            id=str(uuid.uuid4()),
+            name=name,
+            user_id=user_id,
+            auth_provider_type=auth_provider_type,
+            encrypted_value=encrypted,
+            salt=salt,
+            created_at=now,
+            updated_at=now,
+        )
+        stmt = stmt.on_conflict_do_update(
+            index_elements=["name", "user_id", "auth_provider_type"],
+            set_={
+                "encrypted_value": stmt.excluded.encrypted_value,
+                "salt": stmt.excluded.salt,
+                "updated_at": stmt.excluded.updated_at,
+            },
+        )
         with self._engine.begin() as conn:
-            # Check for existing row
-            existing = conn.execute(sa.select(t.c.id).where(sa.and_(t.c.name == name, t.c.user_id == user_id))).first()
+            conn.execute(stmt)
 
-            if existing is not None:
-                conn.execute(
-                    t.update()
-                    .where(t.c.id == existing.id)
-                    .values(
-                        encrypted_value=encrypted,
-                        salt=salt,
-                        updated_at=now,
-                    )
-                )
-            else:
-                conn.execute(
-                    t.insert().values(
-                        id=str(uuid.uuid4()),
-                        name=name,
-                        user_id=user_id,
-                        encrypted_value=encrypted,
-                        salt=salt,
-                        created_at=now,
-                        updated_at=now,
-                    )
-                )
-
-    def delete_secret(self, name: str, *, user_id: str) -> bool:
+    def delete_secret(self, name: str, *, user_id: str, auth_provider_type: str) -> bool:
         """Delete a user secret.
 
         Returns ``True`` if a row was deleted, ``False`` if it did not exist.
@@ -164,22 +219,45 @@ class UserSecretStore:
         t = user_secrets_table
 
         with self._engine.begin() as conn:
-            result = conn.execute(t.delete().where(sa.and_(t.c.name == name, t.c.user_id == user_id)))
+            result = conn.execute(
+                t.delete().where(
+                    sa.and_(
+                        t.c.name == name,
+                        t.c.user_id == user_id,
+                        t.c.auth_provider_type == auth_provider_type,
+                    )
+                )
+            )
         return result.rowcount > 0
 
-    def list_secrets(self, *, user_id: str) -> list[SecretInventoryItem]:
-        """List secret metadata for a user (no values returned)."""
+    def list_secrets(self, *, user_id: str, auth_provider_type: str) -> list[SecretInventoryItem]:
+        """List secret metadata for a user (no values returned).
+
+        The ``available`` flag reflects whether the deployment has the
+        fingerprint key configured — without it, secrets exist but cannot
+        be resolved (get_secret would raise RuntimeError).
+        """
         t = user_secrets_table
-        stmt = sa.select(t.c.name).where(t.c.user_id == user_id).order_by(t.c.name)
+        stmt = (
+            sa.select(t.c.name)
+            .where(
+                sa.and_(
+                    t.c.user_id == user_id,
+                    t.c.auth_provider_type == auth_provider_type,
+                )
+            )
+            .order_by(t.c.name)
+        )
 
         with self._engine.connect() as conn:
             rows = conn.execute(stmt).fetchall()
 
+        can_resolve = _fingerprint_key_available()
         return [
             SecretInventoryItem(
                 name=row.name,
                 scope="user",
-                available=True,
+                available=can_resolve,
                 source_kind="user_store",
             )
             for row in rows

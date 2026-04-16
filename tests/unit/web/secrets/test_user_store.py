@@ -3,15 +3,18 @@
 Verifies:
 - Round-trip encrypt/decrypt integrity
 - User-scoped isolation (user A cannot see user B's secrets)
-- Upsert semantics (second set overwrites first)
+- Provider-scoped isolation (same user, different auth_provider_type)
+- Upsert semantics (second set overwrites first, atomic via ON CONFLICT)
 - Delete lifecycle
 - List returns metadata only (no values)
 - SecretNotFoundError on missing secrets
+- Graceful degradation when ELSPETH_FINGERPRINT_KEY is unset
 """
 
 from __future__ import annotations
 
 import os
+import threading
 
 import pytest
 from cryptography.fernet import Fernet, InvalidToken
@@ -57,8 +60,8 @@ def _ensure_fingerprint_key(monkeypatch: pytest.MonkeyPatch) -> None:
 class TestUserSecretStore:
     def test_store_and_retrieve_roundtrip(self, store: UserSecretStore) -> None:
         """Set a secret then get it back — value must match."""
-        store.set_secret("API_KEY", value="sk-secret-123", user_id="user-1")
-        value, ref = store.get_secret("API_KEY", user_id="user-1")
+        store.set_secret("API_KEY", value="sk-secret-123", user_id="user-1", auth_provider_type="local")
+        value, ref = store.get_secret("API_KEY", user_id="user-1", auth_provider_type="local")
 
         assert value == "sk-secret-123"
         assert ref.name == "API_KEY"
@@ -67,43 +70,43 @@ class TestUserSecretStore:
 
     def test_different_users_isolated(self, store: UserSecretStore) -> None:
         """User A's secret must not be visible to user B."""
-        store.set_secret("API_KEY", value="alice-key", user_id="alice")
-        store.set_secret("API_KEY", value="bob-key", user_id="bob")
+        store.set_secret("API_KEY", value="alice-key", user_id="alice", auth_provider_type="local")
+        store.set_secret("API_KEY", value="bob-key", user_id="bob", auth_provider_type="local")
 
-        alice_val, _ = store.get_secret("API_KEY", user_id="alice")
-        bob_val, _ = store.get_secret("API_KEY", user_id="bob")
+        alice_val, _ = store.get_secret("API_KEY", user_id="alice", auth_provider_type="local")
+        bob_val, _ = store.get_secret("API_KEY", user_id="bob", auth_provider_type="local")
 
         assert alice_val == "alice-key"
         assert bob_val == "bob-key"
 
     def test_upsert_updates_existing(self, store: UserSecretStore) -> None:
         """Setting the same name twice must overwrite the first value."""
-        store.set_secret("TOKEN", value="old-value", user_id="user-1")
-        store.set_secret("TOKEN", value="new-value", user_id="user-1")
+        store.set_secret("TOKEN", value="old-value", user_id="user-1", auth_provider_type="local")
+        store.set_secret("TOKEN", value="new-value", user_id="user-1", auth_provider_type="local")
 
-        value, _ = store.get_secret("TOKEN", user_id="user-1")
+        value, _ = store.get_secret("TOKEN", user_id="user-1", auth_provider_type="local")
         assert value == "new-value"
 
     def test_delete_removes_secret(self, store: UserSecretStore) -> None:
         """Delete then get must raise SecretNotFoundError."""
-        store.set_secret("TEMP", value="ephemeral", user_id="user-1")
-        result = store.delete_secret("TEMP", user_id="user-1")
+        store.set_secret("TEMP", value="ephemeral", user_id="user-1", auth_provider_type="local")
+        result = store.delete_secret("TEMP", user_id="user-1", auth_provider_type="local")
         assert result is True
 
         with pytest.raises(SecretNotFoundError):
-            store.get_secret("TEMP", user_id="user-1")
+            store.get_secret("TEMP", user_id="user-1", auth_provider_type="local")
 
     def test_delete_nonexistent_returns_false(self, store: UserSecretStore) -> None:
         """Deleting a secret that doesn't exist returns False."""
-        result = store.delete_secret("NOPE", user_id="user-1")
+        result = store.delete_secret("NOPE", user_id="user-1", auth_provider_type="local")
         assert result is False
 
     def test_list_returns_metadata_only(self, store: UserSecretStore) -> None:
         """List must return names and scope, never values."""
-        store.set_secret("KEY_A", value="val-a", user_id="user-1")
-        store.set_secret("KEY_B", value="val-b", user_id="user-1")
+        store.set_secret("KEY_A", value="val-a", user_id="user-1", auth_provider_type="local")
+        store.set_secret("KEY_B", value="val-b", user_id="user-1", auth_provider_type="local")
 
-        items = store.list_secrets(user_id="user-1")
+        items = store.list_secrets(user_id="user-1", auth_provider_type="local")
         assert len(items) == 2
 
         names = {item.name for item in items}
@@ -119,38 +122,128 @@ class TestUserSecretStore:
     def test_get_nonexistent_raises(self, store: UserSecretStore) -> None:
         """Getting a secret that doesn't exist must raise SecretNotFoundError."""
         with pytest.raises(SecretNotFoundError):
-            store.get_secret("MISSING", user_id="user-1")
+            store.get_secret("MISSING", user_id="user-1", auth_provider_type="local")
 
     def test_has_secret_true(self, store: UserSecretStore) -> None:
         """has_secret returns True for existing secrets without decrypting."""
-        store.set_secret("EXISTS", value="val", user_id="user-1")
-        assert store.has_secret("EXISTS", user_id="user-1") is True
+        store.set_secret("EXISTS", value="val", user_id="user-1", auth_provider_type="local")
+        assert store.has_secret("EXISTS", user_id="user-1", auth_provider_type="local") is True
 
     def test_has_secret_false(self, store: UserSecretStore) -> None:
         """has_secret returns False for non-existent secrets."""
-        assert store.has_secret("NOPE", user_id="user-1") is False
+        assert store.has_secret("NOPE", user_id="user-1", auth_provider_type="local") is False
 
     def test_has_secret_user_scoped(self, store: UserSecretStore) -> None:
         """has_secret is user-scoped — user B cannot see user A's secret."""
-        store.set_secret("SCOPED", value="val", user_id="alice")
-        assert store.has_secret("SCOPED", user_id="alice") is True
-        assert store.has_secret("SCOPED", user_id="bob") is False
+        store.set_secret("SCOPED", value="val", user_id="alice", auth_provider_type="local")
+        assert store.has_secret("SCOPED", user_id="alice", auth_provider_type="local") is True
+        assert store.has_secret("SCOPED", user_id="bob", auth_provider_type="local") is False
 
     def test_fingerprint_populated_when_key_set(self, store: UserSecretStore, monkeypatch: pytest.MonkeyPatch) -> None:
         """get_secret returns a non-empty fingerprint when ELSPETH_FINGERPRINT_KEY is set."""
         monkeypatch.setenv("ELSPETH_FINGERPRINT_KEY", "test-fp-key")
-        store.set_secret("FP_TEST", value="my-secret", user_id="user-1")
-        _, ref = store.get_secret("FP_TEST", user_id="user-1")
+        store.set_secret("FP_TEST", value="my-secret", user_id="user-1", auth_provider_type="local")
+        _, ref = store.get_secret("FP_TEST", user_id="user-1", auth_provider_type="local")
         assert len(ref.fingerprint) == 64
         assert all(c in "0123456789abcdef" for c in ref.fingerprint)
 
     def test_fingerprint_missing_key_raises(self, store: UserSecretStore, monkeypatch: pytest.MonkeyPatch) -> None:
-        """get_secret raises RuntimeError when ELSPETH_FINGERPRINT_KEY is not set."""
+        """get_secret raises SecretNotFoundError when ELSPETH_FINGERPRINT_KEY is not set.
+
+        The secret exists but is not resolvable — aligns get_secret() with
+        has_secret() which also returns False when the fingerprint key is missing.
+        """
         monkeypatch.setenv("ELSPETH_FINGERPRINT_KEY", "temp-for-set")
-        store.set_secret("FP_EMPTY", value="val", user_id="user-1")
+        store.set_secret("FP_EMPTY", value="val", user_id="user-1", auth_provider_type="local")
         monkeypatch.delenv("ELSPETH_FINGERPRINT_KEY")
-        with pytest.raises(RuntimeError, match="ELSPETH_FINGERPRINT_KEY is not set"):
-            store.get_secret("FP_EMPTY", user_id="user-1")
+        with pytest.raises(SecretNotFoundError, match="ELSPETH_FINGERPRINT_KEY is not set"):
+            store.get_secret("FP_EMPTY", user_id="user-1", auth_provider_type="local")
+
+    # -- Regression: provider namespace isolation (Bug 4) --
+
+    def test_different_providers_isolated(self, store: UserSecretStore) -> None:
+        """Secrets scoped by auth_provider_type — same user_id, different providers."""
+        store.set_secret("API_KEY", value="local-key", user_id="alice", auth_provider_type="local")
+        store.set_secret("API_KEY", value="oidc-key", user_id="alice", auth_provider_type="oidc")
+
+        local_val, _ = store.get_secret("API_KEY", user_id="alice", auth_provider_type="local")
+        oidc_val, _ = store.get_secret("API_KEY", user_id="alice", auth_provider_type="oidc")
+
+        assert local_val == "local-key"
+        assert oidc_val == "oidc-key"
+
+    def test_has_secret_respects_provider(self, store: UserSecretStore) -> None:
+        """has_secret is provider-scoped — different providers see different secrets."""
+        store.set_secret("KEY", value="val", user_id="alice", auth_provider_type="local")
+        assert store.has_secret("KEY", user_id="alice", auth_provider_type="local") is True
+        assert store.has_secret("KEY", user_id="alice", auth_provider_type="oidc") is False
+
+    def test_list_secrets_filtered_by_provider(self, store: UserSecretStore) -> None:
+        """list_secrets only returns secrets matching the provider."""
+        store.set_secret("A", value="v", user_id="alice", auth_provider_type="local")
+        store.set_secret("B", value="v", user_id="alice", auth_provider_type="oidc")
+        items = store.list_secrets(user_id="alice", auth_provider_type="local")
+        assert len(items) == 1
+        assert items[0].name == "A"
+
+    def test_delete_secret_provider_scoped(self, store: UserSecretStore) -> None:
+        """Deleting from one provider does not affect another."""
+        store.set_secret("KEY", value="v1", user_id="alice", auth_provider_type="local")
+        store.set_secret("KEY", value="v2", user_id="alice", auth_provider_type="oidc")
+        deleted = store.delete_secret("KEY", user_id="alice", auth_provider_type="local")
+        assert deleted is True
+        # OIDC copy still exists
+        val, _ = store.get_secret("KEY", user_id="alice", auth_provider_type="oidc")
+        assert val == "v2"
+
+    # -- Regression: concurrent upsert must not raise IntegrityError (Bug 3) --
+
+    def test_concurrent_set_secret_no_integrity_error(self, tmp_path) -> None:
+        """Simultaneous set_secret() for same key must not raise IntegrityError.
+
+        Uses a file-backed SQLite database instead of in-memory + StaticPool
+        because the latter shares a single connection across threads and
+        raises InterfaceError on concurrent access — which is a test
+        infrastructure issue, not a code bug.
+        """
+        db_path = tmp_path / "test_concurrent.db"
+        engine = create_engine(f"sqlite:///{db_path}")
+        metadata.create_all(engine)
+        store = UserSecretStore(engine=engine, master_key=TEST_MASTER_KEY)
+        errors: list[Exception] = []
+
+        def writer(value: str) -> None:
+            try:
+                store.set_secret("RACE", value=value, user_id="u1", auth_provider_type="local")
+            except Exception as exc:
+                errors.append(exc)
+
+        threads = [threading.Thread(target=writer, args=(f"v{i}",)) for i in range(5)]
+        for t in threads:
+            t.start()
+        for t in threads:
+            t.join()
+
+        assert errors == [], f"Concurrent writes failed: {errors}"
+        # One value should have won
+        val, _ = store.get_secret("RACE", user_id="u1", auth_provider_type="local")
+        assert val.startswith("v")
+
+    # -- Regression: fingerprint key availability (Bugs 1 & 2) --
+
+    def test_has_secret_false_when_fingerprint_key_missing(self, store: UserSecretStore, monkeypatch: pytest.MonkeyPatch) -> None:
+        """has_secret returns False when ELSPETH_FINGERPRINT_KEY is unset."""
+        store.set_secret("KEY", value="val", user_id="u1", auth_provider_type="local")
+        monkeypatch.delenv("ELSPETH_FINGERPRINT_KEY")
+        assert store.has_secret("KEY", user_id="u1", auth_provider_type="local") is False
+
+    def test_list_secrets_unavailable_when_fingerprint_key_missing(self, store: UserSecretStore, monkeypatch: pytest.MonkeyPatch) -> None:
+        """list_secrets marks available=False when fingerprint key is missing."""
+        store.set_secret("KEY", value="val", user_id="u1", auth_provider_type="local")
+        monkeypatch.delenv("ELSPETH_FINGERPRINT_KEY")
+        items = store.list_secrets(user_id="u1", auth_provider_type="local")
+        assert len(items) == 1
+        assert items[0].available is False
 
 
 class TestDeriveFernetKey:

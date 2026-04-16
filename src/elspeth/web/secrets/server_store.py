@@ -10,7 +10,7 @@ import os
 
 from elspeth.contracts.secrets import SecretInventoryItem
 from elspeth.core.security.secret_loader import SecretNotFoundError, SecretRef
-from elspeth.web.secrets.user_store import _compute_fingerprint
+from elspeth.web.secrets.user_store import _compute_fingerprint, _fingerprint_key_available
 
 _RESERVED_PREFIX = "ELSPETH_"
 """Server secrets are for third-party API keys, not ELSPETH internals.
@@ -42,21 +42,26 @@ class ServerSecretStore:
         self._allowlist = allowlist
 
     def has_secret(self, name: str) -> bool:
-        """Check if an allowlisted env var secret exists without reading the value.
+        """Check if an allowlisted env var secret is resolvable.
+
+        Returns True only when the name is allowlisted, the env var is
+        set, AND the fingerprint key is available.  This aligns with
+        get_secret(), which requires all three conditions.
 
         Raises:
             SecretNotFoundError: If *name* is reserved (ELSPETH_* prefix).
         """
         if _is_reserved(name):
             raise SecretNotFoundError(name)
-        return name in self._allowlist and bool(os.environ.get(name))
+        return name in self._allowlist and bool(os.environ.get(name)) and _fingerprint_key_available()
 
     def get_secret(self, name: str) -> tuple[str, SecretRef]:
         """Resolve an allowlisted env var.
 
         Raises:
             SecretNotFoundError: If *name* is not in the allowlist,
-                is reserved, or the env var is unset / empty.
+                is reserved, the env var is unset / empty, or
+                ELSPETH_FINGERPRINT_KEY is not set.
         """
         if _is_reserved(name):
             raise SecretNotFoundError(name)
@@ -65,16 +70,26 @@ class ServerSecretStore:
         value = os.environ.get(name)  # Tier 3: env vars are external input
         if not value:
             raise SecretNotFoundError(name)
+        if not _fingerprint_key_available():
+            raise SecretNotFoundError(
+                f"Secret {name!r} is not resolvable — ELSPETH_FINGERPRINT_KEY is not set"
+            )
         fp = _compute_fingerprint(name, value)
         return value, SecretRef(name=name, fingerprint=fp, source="env")
 
     def list_secrets(self) -> list[SecretInventoryItem]:
-        """Return metadata for every allowlisted name (never exposes values)."""
+        """Return metadata for every allowlisted name (never exposes values).
+
+        The ``available`` flag requires both the env var being set AND
+        the fingerprint key being configured — without the latter,
+        get_secret() would raise RuntimeError on fingerprint computation.
+        """
+        can_fingerprint = _fingerprint_key_available()
         return [
             SecretInventoryItem(
                 name=name,
                 scope="server",
-                available=bool(os.environ.get(name)),  # Tier 3: env vars
+                available=bool(os.environ.get(name)) and can_fingerprint,
                 source_kind="env",
             )
             for name in self._allowlist

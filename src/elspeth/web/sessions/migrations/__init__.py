@@ -21,7 +21,7 @@ def _alembic_config(engine: Engine) -> Config:
     return cfg
 
 
-def run_migrations(engine: Engine) -> None:
+def run_migrations(engine: Engine, *, auth_provider: str = "local") -> None:
     """Run all pending migrations against the given engine.
 
     For fresh databases, this creates all tables from scratch.
@@ -30,6 +30,16 @@ def run_migrations(engine: Engine) -> None:
     without re-creating them.
 
     Called from create_app() at startup.
+
+    Parameters
+    ----------
+    auth_provider:
+        The deployment's configured auth provider type (e.g. "local",
+        "oidc", "entra").  Passed through to migrations that need to
+        backfill provider-scoped data — migration 006 uses this to stamp
+        existing user_secrets rows with the correct provider instead of
+        unconditionally defaulting to "local".
     """
     cfg = _alembic_config(engine)
+    cfg.attributes["auth_provider"] = auth_provider
     command.upgrade(cfg, "head")

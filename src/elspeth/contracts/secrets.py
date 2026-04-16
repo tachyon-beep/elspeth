@@ -45,6 +45,20 @@ class WebSecretResolver(Protocol):
 
     def list_refs(self, user_id: str) -> list[SecretInventoryItem]: ...
 
-    def has_ref(self, user_id: str, name: str) -> bool: ...
+    def has_ref(self, user_id: str, name: str) -> bool:
+        """Check whether *name* is resolvable — not merely whether it exists.
+
+        Implementations MUST return True only when all prerequisites for
+        ``resolve()`` are met: the secret exists, any required encryption
+        keys are available, and any deployment-level configuration (e.g.
+        ELSPETH_FINGERPRINT_KEY for audit fingerprints) is present.
+
+        Callers (pipeline validation, composer tools) treat ``has_ref()``
+        as a preflight guarantee that ``resolve()`` will succeed.  If
+        ``has_ref()`` returns True but ``resolve()`` later fails, the
+        pipeline passes validation and fails at execution — a contract
+        violation.
+        """
+        ...
 
     def resolve(self, user_id: str, name: str) -> ResolvedSecret | None: ...

@@ -9,6 +9,7 @@ Security boundaries tested:
 
 from __future__ import annotations
 
+import pytest
 from fastapi import FastAPI, Request
 from sqlalchemy import create_engine
 from sqlalchemy.pool import StaticPool
@@ -22,11 +23,29 @@ from elspeth.web.secrets.service import WebSecretService
 from elspeth.web.secrets.user_store import UserSecretStore
 from elspeth.web.sessions.models import metadata
 
+
+@pytest.fixture(autouse=True)
+def _ensure_fingerprint_key(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Ensure ELSPETH_FINGERPRINT_KEY is set for all route tests.
+
+    Without it, has_ref() and list_secrets() report secrets as unavailable,
+    which is the correct production behaviour but would fail route-level
+    assertions that expect available=True after a successful create.
+    """
+    monkeypatch.setenv("ELSPETH_FINGERPRINT_KEY", "test-routes-fp-key")
+
+
 # ---------------------------------------------------------------------------
 # Test app factory
 # ---------------------------------------------------------------------------
 
 _TEST_MASTER_KEY = "test-master-key-for-unit-tests"
+
+
+class _MockSettings:
+    """Minimal mock providing the auth_provider field routes need."""
+
+    auth_provider: str = "local"
 
 
 def _make_app(
@@ -54,6 +73,7 @@ def _make_app(
 
     app.dependency_overrides[get_current_user] = mock_user
     app.state.secret_service = secret_service
+    app.state.settings = _MockSettings()
 
     app.include_router(create_secrets_router())
     return app
@@ -295,11 +315,14 @@ class TestCrossUserIsolation:
         server_store = ServerSecretStore(())
         secret_service = WebSecretService(user_store, server_store)
 
+        mock_settings = _MockSettings()
+
         # App for User A
         app_a = FastAPI()
         identity_a = UserIdentity(user_id="alice", username="alice")
         app_a.dependency_overrides[get_current_user] = lambda: identity_a
         app_a.state.secret_service = secret_service
+        app_a.state.settings = mock_settings
         app_a.include_router(create_secrets_router())
 
         # App for User B — same service, different identity
@@ -307,6 +330,7 @@ class TestCrossUserIsolation:
         identity_b = UserIdentity(user_id="bob", username="bob")
         app_b.dependency_overrides[get_current_user] = lambda: identity_b
         app_b.state.secret_service = secret_service
+        app_b.state.settings = mock_settings
         app_b.include_router(create_secrets_router())
 
         return TestClient(app_a), TestClient(app_b)
