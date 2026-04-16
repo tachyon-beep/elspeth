@@ -27,7 +27,15 @@ from elspeth.web.auth.protocol import AuthProvider
 from elspeth.web.config import WebSettings
 from elspeth.web.execution.progress import ProgressBroadcaster
 from elspeth.web.execution.protocol import ExecutionService
-from elspeth.web.execution.schemas import RunResultsResponse, RunStatusResponse, ValidationResult
+from elspeth.web.execution.schemas import (
+    CancelledData,
+    CompletedData,
+    FailedData,
+    RunEvent,
+    RunResultsResponse,
+    RunStatusResponse,
+    ValidationResult,
+)
 from elspeth.web.sessions.protocol import SessionServiceProtocol
 
 slog = structlog.get_logger()
@@ -186,7 +194,9 @@ def create_execution_router() -> APIRouter:
             run_id=status.run_id,
             status=status.status,
             rows_processed=status.rows_processed,
+            rows_succeeded=status.rows_succeeded,
             rows_failed=status.rows_failed,
+            rows_quarantined=status.rows_quarantined,
             landscape_run_id=status.landscape_run_id,
             error=status.error,
         )
@@ -246,21 +256,44 @@ def create_execution_router() -> APIRouter:
                 await websocket.close(code=4004, reason="Run not found")
                 return
             if current.status in ("completed", "failed", "cancelled"):
-                await websocket.send_json(
-                    {
-                        "run_id": run_id,
-                        "timestamp": current.finished_at.isoformat()
-                        if current.finished_at
-                        else current.started_at.isoformat()
-                        if current.started_at
-                        else "",
-                        "event_type": current.status,
-                        "data": {
-                            "rows_processed": current.rows_processed,
-                            "rows_failed": current.rows_failed,
-                        },
-                    }
+                if current.status == "completed":
+                    if current.landscape_run_id is None:
+                        raise RuntimeError(
+                            f"Completed run {current.run_id} has no landscape_run_id — Tier 1 anomaly (audit trail incomplete)"
+                        )
+                    payload: CompletedData | FailedData | CancelledData = CompletedData(
+                        rows_processed=current.rows_processed,
+                        rows_succeeded=current.rows_succeeded,
+                        rows_failed=current.rows_failed,
+                        rows_quarantined=current.rows_quarantined,
+                        landscape_run_id=current.landscape_run_id,
+                    )
+                elif current.status == "failed":
+                    if current.error is None:
+                        raise RuntimeError(
+                            f"Failed run {current.run_id} has no error message — Tier 1 anomaly (error column NULL on terminal failure)"
+                        )
+                    payload = FailedData(
+                        detail=current.error,
+                        node_id=None,
+                    )
+                else:
+                    payload = CancelledData(
+                        rows_processed=current.rows_processed,
+                        rows_failed=current.rows_failed,
+                    )
+                timestamp = current.finished_at or current.started_at
+                if timestamp is None:
+                    raise RuntimeError(
+                        f"Terminal run {current.run_id} has no timestamps — Tier 1 anomaly (both finished_at and started_at are NULL)"
+                    )
+                event = RunEvent(
+                    run_id=current.run_id,
+                    timestamp=timestamp,
+                    event_type=current.status,
+                    data=payload,
                 )
+                await websocket.send_json(event.model_dump(mode="json"))
                 await websocket.close(code=1000)
                 return
             while True:

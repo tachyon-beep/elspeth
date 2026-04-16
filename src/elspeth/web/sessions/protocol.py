@@ -152,7 +152,9 @@ class RunRecord:
     started_at: datetime
     finished_at: datetime | None
     rows_processed: int
+    rows_succeeded: int
     rows_failed: int
+    rows_quarantined: int
     error: str | None
     landscape_run_id: str | None
     pipeline_yaml: str | None
@@ -270,11 +272,13 @@ class SessionServiceProtocol(Protocol):
     async def update_run_status(
         self,
         run_id: UUID,
-        status: str,
+        status: Literal["pending", "running", "completed", "failed", "cancelled"],
         error: str | None = None,
         landscape_run_id: str | None = None,
         rows_processed: int | None = None,
+        rows_succeeded: int | None = None,
         rows_failed: int | None = None,
+        rows_quarantined: int | None = None,
     ) -> None:
         """Update a run's status and metadata.
 

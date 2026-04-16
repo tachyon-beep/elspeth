@@ -16,7 +16,7 @@ import asyncio
 import concurrent.futures
 import contextlib
 import threading
-from collections.abc import Callable, Coroutine
+from collections.abc import Callable, Coroutine, Iterator
 from concurrent.futures import Future
 from datetime import UTC, datetime
 from pathlib import Path
@@ -31,6 +31,8 @@ from elspeth.web.execution.service import ExecutionServiceImpl
 from elspeth.web.sessions.protocol import RunAlreadyActiveError
 
 # ── Fixtures ───────────────────────────────────────────────────────────
+
+_TEST_PIPELINE_YAML = "source:\n  plugin: csv\n"
 
 
 @pytest.fixture
@@ -82,14 +84,16 @@ def service(
     broadcaster: ProgressBroadcaster,
     mock_settings: MagicMock,
     mock_session_service: MagicMock,
-) -> ExecutionServiceImpl:
+) -> Iterator[ExecutionServiceImpl]:
     # AC #17: All Run CRUD goes through SessionService — no direct DB access.
+    mock_yaml_generator = MagicMock()
+    mock_yaml_generator.generate_yaml.return_value = _TEST_PIPELINE_YAML
     svc = ExecutionServiceImpl(
         loop=mock_loop,
         broadcaster=broadcaster,
         settings=mock_settings,
         session_service=mock_session_service,
-        yaml_generator=MagicMock(),
+        yaml_generator=mock_yaml_generator,
     )
     # Patch _call_async for tests that call _run_pipeline directly (sync).
     # The real _call_async uses asyncio.run_coroutine_threadsafe which needs
@@ -107,7 +111,8 @@ def service(
             return None
 
     cast(Any, svc)._call_async = _mock_call_async
-    return svc
+    yield svc
+    _real_loop.close()
 
 
 # ── Basic Lifecycle ────────────────────────────────────────────────────
@@ -120,6 +125,14 @@ class TestExecutionFlow:
         with patch.object(service, "_run_pipeline"):
             run_id = await service.execute(session_id=uuid4())
         assert isinstance(run_id, UUID)
+
+    @pytest.mark.asyncio
+    async def test_execute_rejects_non_string_yaml_generator_output(self, service: ExecutionServiceImpl) -> None:
+        """YamlGenerator contract violations must fail fast, not spin in PyYAML."""
+        service._yaml_generator.generate_yaml.return_value = MagicMock()
+
+        with pytest.raises(TypeError, match="must return str"):
+            await service.execute(session_id=uuid4())
 
     @pytest.mark.asyncio
     async def test_execute_creates_run_via_session_service(self, service: ExecutionServiceImpl, mock_session_service: MagicMock) -> None:
@@ -141,7 +154,9 @@ class TestExecutionFlow:
             started_at=datetime.now(tz=UTC),
             finished_at=None,
             rows_processed=50,
+            rows_succeeded=48,
             rows_failed=2,
+            rows_quarantined=0,
             error=None,
             landscape_run_id=None,
         )
@@ -190,6 +205,10 @@ class TestB2ShutdownEvent:
         mock_orch_cls.return_value = mock_orch
         mock_result = MagicMock()
         mock_result.run_id = "landscape-run-123"
+        mock_result.rows_processed = 10
+        mock_result.rows_succeeded = 10
+        mock_result.rows_failed = 0
+        mock_result.rows_quarantined = 0
         mock_orch.run.return_value = mock_result
 
         shutdown_event = threading.Event()
@@ -242,7 +261,13 @@ class TestB3Construction:
         mock_graph_cls.from_plugin_instances.return_value = MagicMock()
         mock_orch = MagicMock()
         mock_orch_cls.return_value = mock_orch
-        mock_orch.run.return_value = MagicMock(run_id="r1")
+        mock_orch.run.return_value = MagicMock(
+            run_id="r1",
+            rows_processed=10,
+            rows_succeeded=10,
+            rows_failed=0,
+            rows_quarantined=0,
+        )
 
         service._run_pipeline(str(uuid4()), "yaml", threading.Event())
 
@@ -323,14 +348,20 @@ class TestB7ExceptionHandling:
         # finally must have removed the event
         assert run_id not in service._shutdown_events
 
-    def test_done_callback_logs_unhandled_exception(self, service: ExecutionServiceImpl) -> None:
-        """future.add_done_callback fires when _run_pipeline raises."""
+    def test_done_callback_logs_last_resort_on_exception(self, service: ExecutionServiceImpl) -> None:
+        """Callback logs a last-resort diagnostic when the pipeline future
+        carries an exception.  This covers the edge case where _run_pipeline's
+        own except block failed (e.g. update_run_status raised).
+        """
         future: Future[None] = Future()
         future.set_exception(RuntimeError("unhandled"))
 
         with patch("elspeth.web.execution.service.slog") as mock_slog:
             service._on_pipeline_done(future)
             mock_slog.error.assert_called_once()
+            call_kwargs = mock_slog.error.call_args
+            assert call_kwargs[0][0] == "pipeline_done_callback_exception"
+            assert call_kwargs[1]["exc_type"] == "RuntimeError"
 
     def test_done_callback_noop_on_success(self, service: ExecutionServiceImpl) -> None:
         """done_callback does not log on successful completion."""
@@ -428,7 +459,9 @@ class TestCancelMechanism:
         mock_orch.run.side_effect = GracefulShutdownError(
             rows_processed=50,
             run_id="test-run-001",
+            rows_succeeded=48,
             rows_failed=2,
+            rows_quarantined=0,
         )
 
         shutdown_event = threading.Event()
@@ -437,10 +470,72 @@ class TestCancelMechanism:
 
         service._run_pipeline(run_id, "source:\n  plugin: csv", shutdown_event)
 
-        # Verify status updated to "cancelled" (not "completed" or "failed")
+        # The test sets shutdown_event BEFORE _run_pipeline, so the early
+        # shutdown check (line 534) fires — no orchestrator runs, no row counts.
+        # Verify status updated to "cancelled" via the early-exit path.
         status_calls = mock_session_service.update_run_status.call_args_list
         final_status_call = status_calls[-1]
-        assert "cancelled" in str(final_status_call), f"Expected 'cancelled' status update, got: {final_status_call}"
+        assert final_status_call.kwargs["status"] == "cancelled"
+
+    @patch("elspeth.web.execution.service.Orchestrator")
+    @patch("elspeth.web.execution.service.load_settings_from_yaml_string")
+    @patch("elspeth.web.execution.service.instantiate_plugins_from_config")
+    @patch("elspeth.web.execution.service.ExecutionGraph")
+    @patch("elspeth.web.execution.service.LandscapeDB")
+    @patch("elspeth.web.execution.service.FilesystemPayloadStore")
+    def test_graceful_shutdown_forwards_row_counts(
+        self,
+        mock_payload: MagicMock,
+        mock_landscape: MagicMock,
+        mock_graph_cls: MagicMock,
+        mock_instantiate: MagicMock,
+        mock_load: MagicMock,
+        mock_orch_cls: MagicMock,
+        service: ExecutionServiceImpl,
+        mock_session_service: MagicMock,
+    ) -> None:
+        """GracefulShutdownError row counts are forwarded to update_run_status.
+
+        Regression: prior test only asserted status=='cancelled' but did
+        not verify that rows_processed, rows_succeeded, rows_failed, and
+        rows_quarantined were propagated from the GSE to the session service.
+        """
+        from elspeth.contracts.errors import GracefulShutdownError
+
+        mock_load.return_value = MagicMock()
+        mock_bundle = MagicMock()
+        mock_bundle.source = MagicMock()
+        mock_bundle.source_settings = MagicMock()
+        mock_bundle.transforms = ()
+        mock_bundle.sinks = {"primary": MagicMock()}
+        mock_bundle.aggregations = {}
+        mock_instantiate.return_value = mock_bundle
+        mock_graph_cls.from_plugin_instances.return_value = MagicMock()
+        mock_orch = MagicMock()
+        mock_orch_cls.return_value = mock_orch
+        mock_orch.run.side_effect = GracefulShutdownError(
+            rows_processed=50,
+            run_id="test-run-gse",
+            rows_succeeded=48,
+            rows_failed=2,
+            rows_quarantined=0,
+        )
+
+        # Do NOT set shutdown_event — let _run_pipeline proceed past the
+        # early check so orchestrator.run() fires and raises the GSE.
+        shutdown_event = threading.Event()
+        run_id = str(uuid4())
+
+        service._run_pipeline(run_id, "source:\n  plugin: csv", shutdown_event)
+
+        status_calls = mock_session_service.update_run_status.call_args_list
+        # Second call is the GSE handler (first is running transition)
+        gse_call = status_calls[-1]
+        assert gse_call.kwargs["status"] == "cancelled"
+        assert gse_call.kwargs["rows_processed"] == 50
+        assert gse_call.kwargs["rows_succeeded"] == 48
+        assert gse_call.kwargs["rows_failed"] == 2
+        assert gse_call.kwargs["rows_quarantined"] == 0
 
     @patch("elspeth.web.execution.service.Orchestrator")
     @patch("elspeth.web.execution.service.load_settings_from_yaml_string")
@@ -475,7 +570,10 @@ class TestCancelMechanism:
         mock_orch_cls.return_value = mock_orch
         mock_result = MagicMock()
         mock_result.rows_processed = 50
+        mock_result.rows_succeeded = 48
         mock_result.rows_failed = 2
+        mock_result.rows_quarantined = 0
+        mock_result.run_id = "landscape-late-cancel"
         mock_orch.run.return_value = mock_result
 
         # Simulate late cancel: event is set DURING orchestrator.run()
@@ -1071,8 +1169,8 @@ class TestEventBusBridge:
         run_event = service._to_run_event(run_id, progress)
 
         assert run_event.event_type == "progress"
-        assert run_event.data["rows_processed"] == 100
-        assert run_event.data["rows_failed"] == 5
+        assert run_event.data.rows_processed == 100
+        assert run_event.data.rows_failed == 5
         assert run_event.run_id == "run-123"
 
 
@@ -1419,6 +1517,90 @@ class TestSinkPathRestriction:
         assert isinstance(run_id, UUID)
 
 
+# ── Relative Path Resolution ──────────────────────────────────────────
+
+
+class TestRelativePathResolution:
+    """Path resolution must use data_dir as the base for relative paths.
+
+    Without this, ``Path(value).resolve()`` resolves against the server's CWD,
+    which diverges from the validation layer's behaviour.
+    """
+
+    @pytest.mark.asyncio
+    async def test_relative_sink_path_resolves_against_data_dir(
+        self,
+        service: ExecutionServiceImpl,
+        mock_session_service: MagicMock,
+        mock_settings: MagicMock,
+    ) -> None:
+        """Sink with a relative path under outputs/ passes when resolved against data_dir."""
+        mock_settings.data_dir = "/tmp/elspeth_data"
+        state = mock_session_service.get_current_state.return_value
+        state.source = None
+        state.outputs = [
+            {
+                "name": "primary",
+                "plugin": "csv",
+                "options": {"path": "outputs/result.csv"},
+                "on_write_failure": "discard",
+            }
+        ]
+        state.nodes = None
+        state.edges = None
+
+        with patch.object(service, "_run_pipeline"):
+            run_id = await service.execute(session_id=uuid4())
+        assert isinstance(run_id, UUID)
+
+    @pytest.mark.asyncio
+    async def test_relative_source_path_resolves_against_data_dir(
+        self,
+        service: ExecutionServiceImpl,
+        mock_session_service: MagicMock,
+        mock_settings: MagicMock,
+    ) -> None:
+        """Source with a relative path under blobs/ passes when resolved against data_dir."""
+        mock_settings.data_dir = "/tmp/elspeth_data"
+        state = mock_session_service.get_current_state.return_value
+        state.source = {
+            "plugin": "csv",
+            "on_success": "continue",
+            "options": {"path": "blobs/data.csv"},
+            "on_validation_failure": "quarantine",
+        }
+        state.outputs = None
+        state.nodes = None
+        state.edges = None
+
+        with patch.object(service, "_run_pipeline"):
+            run_id = await service.execute(session_id=uuid4())
+        assert isinstance(run_id, UUID)
+
+    @pytest.mark.asyncio
+    async def test_relative_traversal_still_blocked(
+        self,
+        service: ExecutionServiceImpl,
+        mock_session_service: MagicMock,
+        mock_settings: MagicMock,
+    ) -> None:
+        """Source with ../ traversal is rejected even when relative."""
+        mock_settings.data_dir = "/tmp/elspeth_data"
+        state = mock_session_service.get_current_state.return_value
+        state.source = {
+            "plugin": "csv",
+            "on_success": "continue",
+            "options": {"path": "../etc/passwd"},
+            "on_validation_failure": "quarantine",
+        }
+        state.outputs = None
+        state.nodes = None
+        state.edges = None
+
+        with pytest.raises(ValueError, match="resolves outside allowed directories"):
+            await service.execute(session_id=uuid4())
+
+
 # ── Edge Compatibility in _run_pipeline ───────────────────────────────
 
 
@@ -1456,7 +1638,13 @@ class TestEdgeCompatibility:
         mock_graph_cls.from_plugin_instances.return_value = mock_graph
         mock_orch = MagicMock()
         mock_orch_cls.return_value = mock_orch
-        mock_orch.run.return_value = MagicMock(run_id="r1")
+        mock_orch.run.return_value = MagicMock(
+            run_id="r1",
+            rows_processed=10,
+            rows_succeeded=10,
+            rows_failed=0,
+            rows_quarantined=0,
+        )
 
         service._run_pipeline(str(uuid4()), "source:\n  plugin: csv", threading.Event())
 
@@ -1530,6 +1718,13 @@ class TestFinalizeOutputBlobsCatchWidening:
     the standard test fixture).
     """
 
+    @pytest.fixture(autouse=True)
+    def _cleanup_loops(self) -> Iterator[None]:
+        self._loops_to_close: list[asyncio.AbstractEventLoop] = []
+        yield
+        for loop in self._loops_to_close:
+            loop.close()
+
     def _make_service_with_blob(
         self, blob_service: MagicMock, mock_settings: MagicMock, mock_session_service: MagicMock
     ) -> ExecutionServiceImpl:
@@ -1541,7 +1736,8 @@ class TestFinalizeOutputBlobsCatchWidening:
             yaml_generator=MagicMock(),
             blob_service=blob_service,
         )
-        call_async, _ = _make_strict_call_async()
+        call_async, loop = _make_strict_call_async()
+        self._loops_to_close.append(loop)
         cast(Any, svc)._call_async = call_async
         return svc
 
@@ -1553,13 +1749,18 @@ class TestFinalizeOutputBlobsCatchWidening:
         svc = self._make_service_with_blob(blob_service, mock_settings, mock_session_service)
         svc._finalize_output_blobs(str(uuid4()), success=True)
 
-    def test_suppresses_runtime_error_from_blob_lifecycle(self, mock_settings: MagicMock, mock_session_service: MagicMock) -> None:
+    def test_propagates_runtime_error_from_blob_lifecycle(self, mock_settings: MagicMock, mock_session_service: MagicMock) -> None:
+        """RuntimeError is no longer suppressed — it's too broad and would
+        catch Tier 1 anomaly signals.  Blob lifecycle errors should use
+        BlobStateError or BlobNotFoundError instead.
+        """
         blob_service = MagicMock()
         blob_service.finalize_run_output_blobs = AsyncMock(
             side_effect=RuntimeError("Cannot finalize — status is 'ready', expected 'pending'")
         )
         svc = self._make_service_with_blob(blob_service, mock_settings, mock_session_service)
-        svc._finalize_output_blobs(str(uuid4()), success=True)
+        with pytest.raises(RuntimeError, match="Cannot finalize"):
+            svc._finalize_output_blobs(str(uuid4()), success=True)
 
     def test_suppresses_blob_quota_exceeded_error(self, mock_settings: MagicMock, mock_session_service: MagicMock) -> None:
         from elspeth.web.blobs.protocol import BlobQuotaExceededError
@@ -1661,15 +1862,18 @@ class TestTerminalOrderingInvariant:
             blob_service=blob_service,
         )
         _real_loop = asyncio.new_event_loop()
-        cast(Any, svc)._call_async = lambda coro: _real_loop.run_until_complete(coro)
+        try:
+            cast(Any, svc)._call_async = lambda coro: _real_loop.run_until_complete(coro)
 
-        with contextlib.suppress(Exception):
-            svc._run_pipeline(str(uuid4()), "yaml", threading.Event())
+            with contextlib.suppress(Exception):
+                svc._run_pipeline(str(uuid4()), "yaml", threading.Event())
 
-        terminals = _collect_terminal_types(mock_broadcaster)
-        assert len(terminals) == 1, (
-            f"Exactly one terminal event expected, got {terminals}. A finalize failure must not trigger a second terminal broadcast."
-        )
+            terminals = _collect_terminal_types(mock_broadcaster)
+            assert len(terminals) == 1, (
+                f"Exactly one terminal event expected, got {terminals}. A finalize failure must not trigger a second terminal broadcast."
+            )
+        finally:
+            _real_loop.close()
 
     @patch("elspeth.web.execution.service.Orchestrator")
     @patch("elspeth.web.execution.service.load_settings_from_yaml_string")
@@ -1731,17 +1935,20 @@ class TestTerminalOrderingInvariant:
             yaml_generator=MagicMock(),
         )
         _real_loop = asyncio.new_event_loop()
-        cast(Any, svc)._call_async = lambda coro: _real_loop.run_until_complete(coro)
+        try:
+            cast(Any, svc)._call_async = lambda coro: _real_loop.run_until_complete(coro)
 
-        svc._run_pipeline(str(uuid4()), "yaml", threading.Event())
+            svc._run_pipeline(str(uuid4()), "yaml", threading.Event())
 
-        terminals = _collect_terminal_types(mock_broadcaster)
-        assert len(terminals) == 1, (
-            f"Exactly one terminal event expected, got {terminals}. "
-            "External cancellation must produce a single 'cancelled', "
-            "not 'completed' followed by 'cancelled'."
-        )
-        assert terminals[0] == "cancelled", f"Terminal should be 'cancelled' (DB is authoritative), got '{terminals[0]}'."
+            terminals = _collect_terminal_types(mock_broadcaster)
+            assert len(terminals) == 1, (
+                f"Exactly one terminal event expected, got {terminals}. "
+                "External cancellation must produce a single 'cancelled', "
+                "not 'completed' followed by 'cancelled'."
+            )
+            assert terminals[0] == "cancelled", f"Terminal should be 'cancelled' (DB is authoritative), got '{terminals[0]}'."
+        finally:
+            _real_loop.close()
 
 
 # ── Session Lock Cleanup ──────────────────────────────────────────────
@@ -1770,3 +1977,119 @@ class TestSessionLockCleanup:
         service.cleanup_session_lock(session_a)
         assert session_a not in service._session_locks
         assert session_b in service._session_locks
+
+
+# ── T1: _sanitize_error_for_client ────────────────────────────────────
+
+
+class TestSanitizeErrorForClient:
+    """Security boundary: error messages exposed to WebSocket clients
+    and persisted in runs.error must not leak internal details."""
+
+    def test_secret_resolution_error_returns_safe_message(self) -> None:
+        """SecretResolutionError must NEVER leak secret names."""
+        from elspeth.core.secrets import SecretResolutionError
+        from elspeth.web.execution.service import _sanitize_error_for_client
+
+        exc = SecretResolutionError(["DB_PASSWORD", "API_KEY"])
+        result = _sanitize_error_for_client(exc)
+        assert "DB_PASSWORD" not in result
+        assert "API_KEY" not in result
+        assert "secret" in result.lower()
+
+    def test_value_error_passes_through(self) -> None:
+        """ValueError is allowlisted — user-actionable config errors."""
+        from elspeth.web.execution.service import _sanitize_error_for_client
+
+        exc = ValueError("Invalid source path: /tmp/data.csv")
+        assert _sanitize_error_for_client(exc) == "Invalid source path: /tmp/data.csv"
+
+    def test_type_error_passes_through(self) -> None:
+        """TypeError is allowlisted — type mismatches in config/YAML."""
+        from elspeth.web.execution.service import _sanitize_error_for_client
+
+        exc = TypeError("Expected str, got int")
+        assert _sanitize_error_for_client(exc) == "Expected str, got int"
+
+    def test_key_error_does_not_leak_internal_names(self) -> None:
+        """KeyError is NOT allowlisted — str(KeyError) leaks dict key names."""
+        from elspeth.web.execution.service import _sanitize_error_for_client
+
+        exc = KeyError("_SCOPE_TO_AUDIT_SOURCE")
+        result = _sanitize_error_for_client(exc)
+        assert "_SCOPE_TO_AUDIT_SOURCE" not in result
+        assert "KeyError" in result
+
+    def test_runtime_error_returns_generic_message(self) -> None:
+        """Unexpected exceptions get a generic message with class name only."""
+        from elspeth.web.execution.service import _sanitize_error_for_client
+
+        exc = RuntimeError("internal traceback details here /home/john/elspeth/src")
+        result = _sanitize_error_for_client(exc)
+        assert "/home/john" not in result
+        assert "RuntimeError" in result
+
+    def test_os_error_returns_generic_message(self) -> None:
+        """OSError with file paths must not leak."""
+        from elspeth.web.execution.service import _sanitize_error_for_client
+
+        exc = OSError("[Errno 13] Permission denied: '/var/secrets/key.pem'")
+        result = _sanitize_error_for_client(exc)
+        assert "/var/secrets" not in result
+        assert "OSError" in result
+
+
+# ── T2: _resolve_yaml_paths ───────────────────────────────────────────
+
+
+class TestResolveYamlPaths:
+    """Path rewriting from relative to absolute before YAML reaches plugins."""
+
+    def test_source_relative_path_rewritten(self) -> None:
+        from elspeth.web.execution.service import _resolve_yaml_paths
+
+        yaml_str = "source:\n  plugin: csv\n  options:\n    path: data/input.csv\n"
+        result = _resolve_yaml_paths(yaml_str, "/srv/data")
+        assert "/srv/data/data/input.csv" in result
+
+    def test_source_absolute_path_unchanged(self) -> None:
+        from elspeth.web.execution.service import _resolve_yaml_paths
+
+        yaml_str = "source:\n  plugin: csv\n  options:\n    path: /absolute/input.csv\n"
+        result = _resolve_yaml_paths(yaml_str, "/srv/data")
+        assert "/absolute/input.csv" in result
+
+    def test_sink_relative_path_rewritten(self) -> None:
+        from elspeth.web.execution.service import _resolve_yaml_paths
+
+        yaml_str = "source:\n  plugin: csv\n  options:\n    path: /abs/in.csv\nsinks:\n  primary:\n    plugin: csv\n    options:\n      file: output/results.csv\n"
+        result = _resolve_yaml_paths(yaml_str, "/srv/data")
+        assert "/srv/data/output/results.csv" in result
+
+    def test_non_string_input_raises_type_error(self) -> None:
+        from elspeth.web.execution.service import _resolve_yaml_paths
+
+        with pytest.raises(TypeError, match="must return str"):
+            _resolve_yaml_paths(123, "/srv/data")  # type: ignore[arg-type]
+
+    def test_non_dict_yaml_raises_type_error(self) -> None:
+        """YAML that parses to a scalar (not a dict) is a generator bug."""
+        from elspeth.web.execution.service import _resolve_yaml_paths
+
+        with pytest.raises(TypeError, match="non-dict top-level"):
+            _resolve_yaml_paths("just a string", "/srv/data")
+
+    def test_no_source_or_sinks_is_noop(self) -> None:
+        """YAML with no source/sinks passes through without error."""
+        from elspeth.web.execution.service import _resolve_yaml_paths
+
+        yaml_str = "metadata:\n  name: test\n"
+        result = _resolve_yaml_paths(yaml_str, "/srv/data")
+        assert "name: test" in result
+
+    def test_source_without_options_is_noop(self) -> None:
+        from elspeth.web.execution.service import _resolve_yaml_paths
+
+        yaml_str = "source:\n  plugin: csv\n"
+        result = _resolve_yaml_paths(yaml_str, "/srv/data")
+        assert "plugin: csv" in result

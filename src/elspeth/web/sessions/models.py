@@ -125,7 +125,9 @@ runs_table = Table(
     Column("started_at", DateTime(timezone=True), nullable=False),
     Column("finished_at", DateTime(timezone=True), nullable=True),
     Column("rows_processed", Integer, nullable=False, default=0),
+    Column("rows_succeeded", Integer, nullable=False, default=0),
     Column("rows_failed", Integer, nullable=False, default=0),
+    Column("rows_quarantined", Integer, nullable=False, default=0),
     Column("error", Text, nullable=True),
     Column("landscape_run_id", String, nullable=True),
     Column("pipeline_yaml", Text, nullable=True),
@@ -215,7 +217,7 @@ run_events_table = Table(
     Column("event_type", String, nullable=False),
     Column("data", JSON, nullable=False),
     CheckConstraint(
-        "event_type IN ('progress', 'error', 'completed', 'cancelled')",
+        "event_type IN ('progress', 'error', 'completed', 'cancelled', 'failed')",
         name="ck_run_events_type",
     ),
 )

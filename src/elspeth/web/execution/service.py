@@ -46,6 +46,10 @@ from elspeth.web.config import WebSettings
 from elspeth.web.execution.progress import ProgressBroadcaster
 from elspeth.web.execution.protocol import ExecutionService, YamlGenerator
 from elspeth.web.execution.schemas import (
+    CancelledData,
+    CompletedData,
+    FailedData,
+    ProgressData,
     RunEvent,
     RunStatusResponse,
     ValidationCheck,
@@ -58,6 +62,88 @@ from elspeth.web.sessions.protocol import RunAlreadyActiveError, SessionServiceP
 slog = structlog.get_logger()
 
 T = TypeVar("T")
+
+# Exception types whose str() is safe to expose to WebSocket clients and
+# persist in runs.error.  These produce user-actionable messages (config
+# errors, validation failures) without leaking internal paths or class
+# hierarchies.  Everything else gets a generic message — the full
+# exception is recorded in runs.error by _run_pipeline's except block.
+_CLIENT_SAFE_EXCEPTIONS: tuple[type[BaseException], ...] = (
+    ValueError,  # config validation, illegal transitions
+    TypeError,  # type mismatches in config/YAML
+    # KeyError deliberately excluded: str(KeyError) exposes internal dict
+    # key names (e.g., '_SCOPE_TO_AUDIT_SOURCE') — the generic fallback
+    # message with the class name is safer for the client surface.
+)
+
+
+def _sanitize_error_for_client(exc: BaseException) -> str:
+    """Return a client-safe error message for a pipeline failure.
+
+    Allowlists exception types that produce user-actionable messages.
+    All others are reduced to a generic message with the exception
+    class name (no internal details).  The full exception is recorded
+    in runs.error by _run_pipeline's except-BaseException block.
+    """
+    if isinstance(exc, SecretResolutionError):
+        return "One or more secret references could not be resolved. Check the Secrets panel."
+    if isinstance(exc, _CLIENT_SAFE_EXCEPTIONS):
+        return str(exc)
+    return f"Pipeline execution failed ({type(exc).__name__})"
+
+
+def _resolve_yaml_paths(pipeline_yaml: str, data_dir: str) -> str:
+    """Rewrite relative source/sink paths in pipeline YAML to absolute.
+
+    Plugins call PathConfig.resolved_path() with no base_dir, so relative
+    paths resolve against CWD.  The allowlist check approves paths relative
+    to data_dir.  This function closes the gap by making all paths absolute
+    before the YAML reaches the plugin layer.
+    """
+    import yaml as _yaml
+
+    from elspeth.web.paths import resolve_data_path
+
+    if not isinstance(pipeline_yaml, str):
+        raise TypeError(f"YamlGenerator.generate_yaml() must return str; got {type(pipeline_yaml).__name__}")
+
+    config = _yaml.safe_load(pipeline_yaml)
+    if not isinstance(config, dict):
+        raise TypeError(f"YAML generator produced non-dict top-level value (got {type(config).__name__})")
+
+    # Source path — None means no source configured (skip); non-dict is a
+    # generator bug (offensive programming: explicit type assertion).
+    source = config.get("source")
+    if source is not None:
+        if not isinstance(source, dict):
+            raise TypeError(f"YAML generator produced non-dict 'source' value (got {type(source).__name__})")
+        opts = source.get("options")
+        if opts is not None:
+            if not isinstance(opts, dict):
+                raise TypeError(f"YAML generator produced non-dict 'source.options' value (got {type(opts).__name__})")
+            for key in ("path", "file"):
+                if key in opts and not Path(str(opts[key])).is_absolute():
+                    opts[key] = str(resolve_data_path(str(opts[key]), data_dir))
+
+    # Sink paths — same pattern with explicit type assertions.
+    sinks = config.get("sinks")
+    if sinks is not None:
+        if not isinstance(sinks, dict):
+            raise TypeError(f"YAML generator produced non-dict 'sinks' value (got {type(sinks).__name__})")
+        for sink_name, sink_cfg in sinks.items():
+            if sink_cfg is not None:
+                if not isinstance(sink_cfg, dict):
+                    raise TypeError(f"YAML generator produced non-dict sink '{sink_name}' value (got {type(sink_cfg).__name__})")
+                opts = sink_cfg.get("options")
+                if opts is not None:
+                    if not isinstance(opts, dict):
+                        raise TypeError(f"YAML generator produced non-dict 'sinks.{sink_name}.options' value (got {type(opts).__name__})")
+                    for key in ("path", "file"):
+                        if key in opts and not Path(str(opts[key])).is_absolute():
+                            opts[key] = str(resolve_data_path(str(opts[key]), data_dir))
+
+    return _yaml.dump(config, default_flow_style=False)
+
 
 # B1 fix: RunAlreadyActiveError is NOT defined here — imported from
 # sessions.protocol where the canonical definition lives. Defining a
@@ -220,13 +306,13 @@ class ExecutionServiceImpl:
         # authenticated user could skip validation and execute a state that
         # reads files outside the allowed directories.
         if composition_state.source is not None:
-            from elspeth.web.paths import allowed_source_directories
+            from elspeth.web.paths import allowed_source_directories, resolve_data_path
 
             allowed_dirs = allowed_source_directories(str(self._settings.data_dir))
             for key in ("path", "file"):
                 value = composition_state.source.options.get(key)
                 if value is not None:
-                    resolved = Path(value).resolve()
+                    resolved = resolve_data_path(value, str(self._settings.data_dir))
                     if not any(resolved.is_relative_to(d) for d in allowed_dirs):
                         raise ValueError(f"Source {key}='{value}' resolves outside allowed directories")
 
@@ -234,18 +320,24 @@ class ExecutionServiceImpl:
         # Without this, a client can set sink options.path to any absolute or
         # ../ path and /execute will write there.
         if composition_state.outputs:
-            from elspeth.web.paths import allowed_sink_directories
+            from elspeth.web.paths import allowed_sink_directories, resolve_data_path
 
             allowed_sink_dirs = allowed_sink_directories(str(self._settings.data_dir))
             for output in composition_state.outputs:
                 for key in ("path", "file"):
                     value = output.options.get(key)
                     if value is not None:
-                        resolved = Path(value).resolve()
+                        resolved = resolve_data_path(value, str(self._settings.data_dir))
                         if not any(resolved.is_relative_to(d) for d in allowed_sink_dirs):
                             raise ValueError(f"Sink '{output.name}' {key}='{value}' resolves outside allowed output directories")
 
         pipeline_yaml = self._yaml_generator.generate_yaml(composition_state)
+
+        # Resolve relative source/sink paths to absolute in the YAML so
+        # plugins see the same paths the allowlist approved.  Without this,
+        # plugins call PathConfig.resolved_path() with no base_dir, which
+        # resolves relative paths against CWD — not data_dir.
+        pipeline_yaml = _resolve_yaml_paths(pipeline_yaml, str(self._settings.data_dir))
 
         # Pre-validate blob_ref UUID before creating the run record.
         # UUID() can raise ValueError on malformed strings; if that happens
@@ -300,7 +392,9 @@ class ExecutionServiceImpl:
             # Transition run out of pending so the one-active-run constraint
             # doesn't permanently block this session.
             try:
-                await self._session_service.update_run_status(run_id, status="failed", error=f"Setup failed: {exc}")
+                await self._session_service.update_run_status(
+                    run_id, status="failed", error=f"Setup failed: {_sanitize_error_for_client(exc)}"
+                )
             except Exception as cleanup_err:
                 slog.error(
                     "run_cleanup_status_update_failed",
@@ -323,7 +417,9 @@ class ExecutionServiceImpl:
             started_at=run.started_at,
             finished_at=run.finished_at,
             rows_processed=run.rows_processed,
+            rows_succeeded=run.rows_succeeded,
             rows_failed=run.rows_failed,
+            rows_quarantined=run.rows_quarantined,
             error=run.error,
             landscape_run_id=run.landscape_run_id,
         )
@@ -449,7 +545,7 @@ class ExecutionServiceImpl:
                         run_id=run_id,
                         timestamp=datetime.now(tz=UTC),
                         event_type="cancelled",
-                        data={},
+                        data=CancelledData(rows_processed=0, rows_failed=0),
                     ),
                 )
                 return
@@ -470,7 +566,7 @@ class ExecutionServiceImpl:
                             run_id=run_id,
                             timestamp=datetime.now(tz=UTC),
                             event_type="cancelled",
-                            data={},
+                            data=CancelledData(rows_processed=0, rows_failed=0),
                         ),
                     )
                     return
@@ -575,12 +671,16 @@ class ExecutionServiceImpl:
 
             # Set up EventBus to bridge ProgressEvent -> RunEvent -> broadcaster.
             # _to_run_event is a pure mapping (system code) — let it crash.
-            # broadcast() pushes to async queues — catch network/client errors.
+            # broadcast() uses call_soon_threadsafe → RuntimeError if the
+            # event loop is closed during shutdown.  Only catch that specific
+            # infrastructure failure; let programmer bugs (TypeError, etc.) crash.
             def _safe_broadcast(evt: ProgressEvent) -> None:
                 run_event = self._to_run_event(run_id, evt)
                 try:
                     self._broadcaster.broadcast(run_id, run_event)
-                except Exception as broadcast_err:
+                except RuntimeError as broadcast_err:
+                    # call_soon_threadsafe raises RuntimeError when the
+                    # event loop is closed — expected during shutdown.
                     slog.error(
                         "progress_broadcast_failed",
                         run_id=run_id,
@@ -630,7 +730,9 @@ class ExecutionServiceImpl:
                         status="completed",
                         landscape_run_id=result.run_id,
                         rows_processed=result.rows_processed,
+                        rows_succeeded=result.rows_succeeded,
                         rows_failed=result.rows_failed,
+                        rows_quarantined=result.rows_quarantined,
                     )
                 )
             except ValueError:
@@ -650,7 +752,10 @@ class ExecutionServiceImpl:
                             run_id=run_id,
                             timestamp=datetime.now(tz=UTC),
                             event_type="cancelled",
-                            data={},
+                            data=CancelledData(
+                                rows_processed=result.rows_processed,
+                                rows_failed=result.rows_failed,
+                            ),
                         ),
                     )
                     return
@@ -662,17 +767,17 @@ class ExecutionServiceImpl:
                     run_id=run_id,
                     timestamp=datetime.now(tz=UTC),
                     event_type="completed",
-                    data={
-                        "rows_processed": result.rows_processed,
-                        "rows_succeeded": result.rows_succeeded,
-                        "rows_failed": result.rows_failed,
-                        "rows_quarantined": result.rows_quarantined,
-                        "landscape_run_id": result.run_id,
-                    },
+                    data=CompletedData(
+                        rows_processed=result.rows_processed,
+                        rows_succeeded=result.rows_succeeded,
+                        rows_failed=result.rows_failed,
+                        rows_quarantined=result.rows_quarantined,
+                        landscape_run_id=result.run_id,
+                    ),
                 ),
             )
 
-        except GracefulShutdownError:
+        except GracefulShutdownError as gse:
             # Orchestrator detected shutdown during processing and raised
             # after flushing in-progress work. Finalize → status → broadcast.
             self._finalize_output_blobs(run_id, success=False)
@@ -680,6 +785,10 @@ class ExecutionServiceImpl:
                 self._session_service.update_run_status(
                     run_uuid,
                     status="cancelled",
+                    rows_processed=gse.rows_processed,
+                    rows_succeeded=gse.rows_succeeded,
+                    rows_failed=gse.rows_failed,
+                    rows_quarantined=gse.rows_quarantined,
                 )
             )
             self._broadcaster.broadcast(
@@ -688,7 +797,10 @@ class ExecutionServiceImpl:
                     run_id=run_id,
                     timestamp=datetime.now(tz=UTC),
                     event_type="cancelled",
-                    data={},
+                    data=CancelledData(
+                        rows_processed=gse.rows_processed,
+                        rows_failed=gse.rows_failed,
+                    ),
                 ),
             )
 
@@ -700,13 +812,7 @@ class ExecutionServiceImpl:
             # Finalize blobs first — before any terminal event surfaces.
             self._finalize_output_blobs(run_id, success=False)
 
-            # Sanitize error messages — SecretResolutionError may contain
-            # secret names that should not leak to WebSocket clients or
-            # be persisted in run records.
-            if isinstance(exc, SecretResolutionError):
-                client_msg = "One or more secret references could not be resolved. Check the Secrets panel."
-            else:
-                client_msg = str(exc)
+            client_msg = _sanitize_error_for_client(exc)
 
             # R6 fix: Skip _call_async for KeyboardInterrupt/SystemExit — the event
             # loop is likely shutting down. Let orphan cleanup handle the status.
@@ -733,11 +839,7 @@ class ExecutionServiceImpl:
                     run_id=run_id,
                     timestamp=datetime.now(tz=UTC),
                     event_type="failed",
-                    data={
-                        "detail": client_msg,
-                        "node_id": None,
-                        "row_id": None,
-                    },
+                    data=FailedData(detail=client_msg, node_id=None),
                 ),
             )
             raise
@@ -751,18 +853,22 @@ class ExecutionServiceImpl:
 
     # Exceptions that can escape finalize_run_output_blobs itself
     # (not per-blob errors, which are captured in the result).
-    # Covers: initial query failure (SQLAlchemyError), Tier 1 "blob
-    # vanished mid-transaction" anomaly (RuntimeError), and any OS-level
-    # failure outside the per-blob loop (OSError).  BlobStateError is
-    # belt-and-suspenders — caught per-blob inside the service, but
-    # included here in case of a code path change.
+    # Covers: initial query failure (SQLAlchemyError), any OS-level
+    # failure outside the per-blob loop (OSError), and blob lifecycle
+    # errors from the service layer.  BlobStateError is belt-and-
+    # suspenders — caught per-blob inside the service, but included
+    # here in case of a code path change.
+    #
+    # RuntimeError deliberately excluded — too broad.  It would
+    # suppress Tier 1 anomaly signals, asyncio errors, and recursion
+    # failures.  If the blob service needs a "vanished mid-transaction"
+    # signal, it should raise BlobNotFoundError or BlobStateError.
     _FINALIZE_SUPPRESSED: tuple[type[BaseException], ...] = (
         OSError,
         SQLAlchemyError,
         BlobNotFoundError,
         BlobQuotaExceededError,
         BlobStateError,
-        RuntimeError,
     )
 
     def _finalize_output_blobs(self, run_id: str, *, success: bool) -> None:
@@ -802,41 +908,45 @@ class ExecutionServiceImpl:
     def _on_pipeline_done(self, future: Future[None]) -> None:
         """B7 Layer 2: Safety net callback.
 
-        Fires when the Future completes, regardless of how. Logs any
-        exception that _run_pipeline() raised. Does NOT update the Run
-        record — that's Layer 1's job. This is purely diagnostic.
+        Fires when the Future completes. Retrieves (and suppresses) any
+        exception so the thread pool doesn't log it to stderr.
 
-        Sanitizes SecretResolutionError to avoid leaking secret names
-        into logs.
+        Normal case: _run_pipeline() already recorded the error to the
+        audit trail (runs.error) — no duplicate logging needed.
+
+        Edge case: if _run_pipeline's own except-BaseException handler
+        failed (e.g. update_run_status raised), the audit trail write
+        never completed. In that case this callback is the ONLY place
+        the failure surfaces, so we log as a last-resort safety net.
         """
         exc = future.exception()
-        if exc is not None:
-            if isinstance(exc, SecretResolutionError):
-                slog.error(
-                    "pipeline_secret_resolution_failed",
-                    missing_count=len(exc.missing),
-                )
-            else:
-                slog.error(
-                    "pipeline_thread_failed",
-                    exc_type=type(exc).__name__,
-                    exc_message=str(exc),
-                )
+        if exc is not None and not isinstance(exc, (KeyboardInterrupt, SystemExit)):
+            # _run_pipeline's except block logs via slog when the status
+            # update itself fails.  If we reach here with an exception,
+            # it means _run_pipeline re-raised — the slog call may or
+            # may not have succeeded.  One extra last-resort log line is
+            # acceptable to ensure the failure is never invisible.
+            slog.error(
+                "pipeline_done_callback_exception",
+                exc_type=type(exc).__name__,
+                exc_msg=str(exc)[:200],
+            )
 
     def _to_run_event(self, run_id: str, progress: ProgressEvent) -> RunEvent:
         """Translate engine ProgressEvent to web RunEvent.
 
-        Explicit mapping — unknown event types raise ValueError
-        (offensive programming, not silent drop).
+        Only handles progress events — terminal events (completed, failed,
+        cancelled) are constructed inline in _run_pipeline where the full
+        run result is available.
         """
         return RunEvent(
             run_id=run_id,
             timestamp=datetime.now(tz=UTC),
             event_type="progress",
-            data={
-                "rows_processed": progress.rows_processed,
-                "rows_failed": progress.rows_failed,
-            },
+            data=ProgressData(
+                rows_processed=progress.rows_processed,
+                rows_failed=progress.rows_failed,
+            ),
         )
 
 

@@ -487,7 +487,9 @@ class SessionServiceImpl:
             started_at=now,
             finished_at=None,
             rows_processed=0,
+            rows_succeeded=0,
             rows_failed=0,
+            rows_quarantined=0,
             error=None,
             landscape_run_id=None,
             pipeline_yaml=pipeline_yaml,
@@ -523,11 +525,13 @@ class SessionServiceImpl:
     async def update_run_status(
         self,
         run_id: UUID,
-        status: str,
+        status: Literal["pending", "running", "completed", "failed", "cancelled"],
         error: str | None = None,
         landscape_run_id: str | None = None,
         rows_processed: int | None = None,
+        rows_succeeded: int | None = None,
         rows_failed: int | None = None,
+        rows_quarantined: int | None = None,
     ) -> None:
         """Update a run's status and optional fields.
 
@@ -572,8 +576,12 @@ class SessionServiceImpl:
                     values["landscape_run_id"] = landscape_run_id
                 if rows_processed is not None:
                     values["rows_processed"] = rows_processed
+                if rows_succeeded is not None:
+                    values["rows_succeeded"] = rows_succeeded
                 if rows_failed is not None:
                     values["rows_failed"] = rows_failed
+                if rows_quarantined is not None:
+                    values["rows_quarantined"] = rows_quarantined
 
                 conn.execute(update(runs_table).where(runs_table.c.id == rid).values(**values))
 
@@ -732,7 +740,9 @@ class SessionServiceImpl:
                             started_at=self._ensure_utc(row.started_at),
                             finished_at=now,
                             rows_processed=row.rows_processed,
+                            rows_succeeded=row.rows_succeeded,
                             rows_failed=row.rows_failed,
+                            rows_quarantined=row.rows_quarantined,
                             error=row.error,
                             landscape_run_id=row.landscape_run_id,
                             pipeline_yaml=row.pipeline_yaml,
@@ -1079,7 +1089,9 @@ class SessionServiceImpl:
             started_at=self._ensure_utc(row.started_at),
             finished_at=self._ensure_utc(row.finished_at) if row.finished_at is not None else None,
             rows_processed=row.rows_processed,
+            rows_succeeded=row.rows_succeeded,
             rows_failed=row.rows_failed,
+            rows_quarantined=row.rows_quarantined,
             error=row.error,
             landscape_run_id=row.landscape_run_id,
             pipeline_yaml=row.pipeline_yaml,

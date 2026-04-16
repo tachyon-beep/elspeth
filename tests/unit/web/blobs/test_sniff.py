@@ -58,12 +58,43 @@ class TestCsvDetection:
     def test_csv_with_bom(self) -> None:
         assert detect_mime_type(b"\xef\xbb\xbf" + b"a,b,c\n1,2,3") == "text/csv"
 
+    def test_three_column_multi_row_csv(self) -> None:
+        """Multi-line content with consistent 3+ columns is CSV."""
+        assert detect_mime_type(b"a,b,c\n1,2,3\n4,5,6") == "text/csv"
+
+    def test_single_line_csv_header_is_ambiguous(self) -> None:
+        """Single-line CSV (header only) is ambiguous — returns None so
+        caller can fall back to browser-declared MIME.
+        """
+        assert detect_mime_type(b"name,age,city") is None
+
+    def test_two_column_csv_is_ambiguous(self) -> None:
+        """Two-column CSV (1 delimiter per line) below threshold — returns None.
+
+        The browser's declared MIME (e.g. text/csv) is preserved by the caller.
+        """
+        assert detect_mime_type(b"name,age\nAlice,30") is None
+
+    def test_csv_with_quoted_fields_containing_commas(self) -> None:
+        """RFC 4180: commas inside quoted fields must not inflate field count.
+
+        Without quote-aware parsing, '"Smith, John",30,Boston' has 3 raw
+        commas vs 2 in the header — causing a false mismatch.
+        """
+        content = b'name,age,city\n"Smith, John",30,Boston'
+        assert detect_mime_type(content) == "text/csv"
+
 
 class TestPlainText:
     """Plain text: valid UTF-8 without JSON or CSV markers."""
 
-    def test_plain_text(self) -> None:
-        assert detect_mime_type(b"Hello, world!") == "text/csv"  # has comma → CSV
+    def test_single_line_with_comma_is_ambiguous(self) -> None:
+        """Single-line content with commas is ambiguous — returns None."""
+        assert detect_mime_type(b"Hello, world!") is None
+
+    def test_multi_line_prose_with_commas_is_ambiguous(self) -> None:
+        """Prose with commas below CSV threshold — returns None."""
+        assert detect_mime_type(b"Hello, world!\nGoodbye, world!") is None
 
     def test_no_delimiters(self) -> None:
         assert detect_mime_type(b"Just some plain text") == "text/plain"
@@ -94,3 +125,17 @@ class TestEdgeCases:
     def test_bom_only(self) -> None:
         """BOM with no content after stripping."""
         assert detect_mime_type(b"\xef\xbb\xbf") == "text/plain"
+
+    def test_inconsistent_field_counts_not_csv(self) -> None:
+        """Rows with different field counts are not treated as CSV.
+
+        The consistency check requires all rows to have the same field count.
+        A header with 3 fields and a data row with 2 means the file is not
+        structured CSV — it should be ambiguous (None) so the browser MIME
+        is preserved.
+        """
+        assert detect_mime_type(b"a,b,c\n1,2") is None
+
+    def test_two_column_tab_delimited_is_ambiguous(self) -> None:
+        """Two-column tab-delimited is below the 3-field threshold."""
+        assert detect_mime_type(b"name\tage\nAlice\t30") is None

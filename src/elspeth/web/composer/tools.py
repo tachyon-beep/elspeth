@@ -34,7 +34,7 @@ from elspeth.web.composer.state import (
     _source_options_have_schema,
     _validate_gate_expression,
 )
-from elspeth.web.paths import allowed_sink_directories, allowed_source_directories
+from elspeth.web.paths import allowed_sink_directories, allowed_source_directories, resolve_data_path
 from elspeth.web.sessions.models import blob_run_links_table, blobs_table, composition_states_table, runs_table
 
 
@@ -1165,8 +1165,7 @@ def _validate_source_path(
 
     for key in ("path", "file"):
         if key in options:
-            raw = Path(options[key])
-            resolved = (Path(data_dir).resolve() / raw).resolve() if not raw.is_absolute() else raw.resolve()
+            resolved = resolve_data_path(options[key], data_dir)
             if not any(resolved.is_relative_to(d) for d in allowed):
                 return (
                     f"Path violation (S2): '{options[key]}' is outside the "
@@ -1192,8 +1191,7 @@ def _validate_sink_path(
 
     for key in ("path", "file"):
         if key in options:
-            raw = Path(options[key])
-            resolved = (Path(data_dir).resolve() / raw).resolve() if not raw.is_absolute() else raw.resolve()
+            resolved = resolve_data_path(options[key], data_dir)
             if not any(resolved.is_relative_to(d) for d in allowed):
                 return (
                     f"Path violation (S2): '{options[key]}' is outside the "

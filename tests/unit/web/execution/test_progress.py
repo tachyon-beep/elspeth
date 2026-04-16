@@ -15,7 +15,24 @@ from unittest.mock import MagicMock
 import pytest
 
 from elspeth.web.execution.progress import ProgressBroadcaster
-from elspeth.web.execution.schemas import RunEvent
+from elspeth.web.execution.schemas import (
+    CancelledData,
+    CompletedData,
+    ErrorData,
+    FailedData,
+    ProgressData,
+    RunEvent,
+)
+
+_EVENT_DATA = {
+    "progress": lambda: ProgressData(rows_processed=10, rows_failed=0),
+    "error": lambda: ErrorData(message="test error", node_id=None, row_id=None),
+    "completed": lambda: CompletedData(
+        rows_processed=10, rows_succeeded=10, rows_failed=0, rows_quarantined=0, landscape_run_id="lscape-1"
+    ),
+    "cancelled": lambda: CancelledData(rows_processed=10, rows_failed=0),
+    "failed": lambda: FailedData(detail="test failure", node_id=None),
+}
 
 
 def _make_event(
@@ -26,7 +43,7 @@ def _make_event(
         run_id=run_id,
         timestamp=datetime.now(tz=UTC),
         event_type=event_type,
-        data={"rows_processed": 10, "rows_failed": 0},
+        data=_EVENT_DATA[event_type](),
     )
 
 
@@ -136,7 +153,7 @@ class TestProgressBroadcasterThreadSafety:
         received = await asyncio.wait_for(queue.get(), timeout=5.0)
         assert received.run_id == "run-1"
         assert received.event_type == "progress"
-        assert received.data["rows_processed"] == 10
+        assert received.data.rows_processed == 10
 
     @pytest.mark.asyncio
     async def test_multiple_broadcasts_from_thread_arrive_in_order(self) -> None:
@@ -150,7 +167,7 @@ class TestProgressBroadcasterThreadSafety:
                 run_id="run-1",
                 timestamp=datetime.now(tz=UTC),
                 event_type="progress",
-                data={"rows_processed": i, "rows_failed": 0},
+                data=ProgressData(rows_processed=i, rows_failed=0),
             )
             for i in range(5)
         ]
@@ -166,7 +183,7 @@ class TestProgressBroadcasterThreadSafety:
         received = []
         for _ in range(5):
             item = await asyncio.wait_for(queue.get(), timeout=5.0)
-            received.append(item.data["rows_processed"])
+            received.append(item.data.rows_processed)
 
         assert received == [0, 1, 2, 3, 4]
 

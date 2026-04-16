@@ -112,10 +112,8 @@ class TestBuildProcessorCallsCleanupOnFailure:
     _cleanup_plugins(config, ctx, include_source=True) on failure.
     """
 
-    def test_build_processor_failure_triggers_cleanup(self) -> None:
-        """When _build_processor raises, _cleanup_plugins is called before propagation.
-
-        Verifies that _cleanup_plugins cleans up all plugin types:
+    def test_cleanup_plugins_runs_full_teardown(self) -> None:
+        """Verify _cleanup_plugins cleans up all plugin types:
         transforms get on_complete + close, sinks get close, source gets close.
         """
         from elspeth.contracts.plugin_context import PluginContext
@@ -131,13 +129,82 @@ class TestBuildProcessorCallsCleanupOnFailure:
         config.sinks = {}
         config.source = MagicMock()
 
-        # Call _cleanup_plugins directly — verifies it runs the full
-        # cleanup path (on_complete + close for transforms, close for source).
         orch._cleanup_plugins(config, ctx)
 
         tracked_transform.on_complete.assert_called_once()
         tracked_transform.close.assert_called_once()
         config.source.close.assert_called_once()
+
+    def test_build_processor_failure_path_cleans_up_with_source(self) -> None:
+        """When _build_processor raises inside _initialize_run_context,
+        _cleanup_plugins must be called with include_source matching the
+        run path.
+
+        This test exercises the actual except handler in _initialize_run_context
+        (line 1665-1667), not just _cleanup_plugins in isolation. The original
+        bug leaked already-started plugins — especially the source — because
+        the except block didn't exist. A regression to include_source=False
+        or removal of the except block will cause this test to fail.
+        """
+        from elspeth.engine.orchestrator.types import GraphArtifacts
+
+        db = make_landscape_db()
+        orch = _make_orchestrator(db)
+
+        # Minimal config with trackable plugins
+        config = MagicMock()
+        tracked_source = MagicMock()
+        tracked_transform = MagicMock()
+        tracked_transform.name = "tracked"
+        tracked_transform.node_id = None
+        config.source = tracked_source
+        config.transforms = [tracked_transform]
+        config.sinks = {}
+        config.config = {}
+
+        graph = MagicMock()
+        graph.get_route_resolution_map.return_value = {}
+        settings = MagicMock()
+        payload_store = MagicMock()
+        mock_factory = MagicMock(spec=RecorderFactory)
+
+        artifacts = GraphArtifacts(
+            edge_map={},
+            source_id="source-1",
+            sink_id_map={},
+            transform_id_map={0: "transform-1"},
+            config_gate_id_map={},
+            coalesce_id_map={},
+        )
+
+        # _build_processor fails after on_start has been called on all plugins
+        with (
+            patch.object(orch, "_build_processor", side_effect=RuntimeError("processor build failed")),
+            patch.object(orch, "_cleanup_plugins", wraps=orch._cleanup_plugins) as spy_cleanup,
+            pytest.raises(RuntimeError, match="processor build failed"),
+        ):
+            orch._initialize_run_context(
+                mock_factory,
+                "test-run",
+                config,
+                graph,
+                settings,
+                artifacts,
+                None,  # batch_checkpoints
+                payload_store,
+                include_source_on_start=True,
+            )
+
+        # Verify _cleanup_plugins was called with include_source=True.
+        # This is the key assertion: if someone changes the except handler
+        # to pass include_source=False, or removes it, this fails.
+        spy_cleanup.assert_called_once()
+        call_kwargs = spy_cleanup.call_args
+        assert call_kwargs.kwargs.get("include_source") is True, (
+            f"_cleanup_plugins must be called with include_source=True when source was started. Got: {call_kwargs}"
+        )
+        # The config passed must be the same config object
+        assert call_kwargs.args[0] is config
 
 
 class TestCleanupPluginsReRaisesSystemExceptions:

@@ -89,7 +89,7 @@ def _create_session(client: TestClient, title: str = "Test") -> str:
 def _upload_blob(
     client: TestClient,
     session_id: str,
-    content: bytes = b"col1,col2\na,b",
+    content: bytes = b"col1,col2,col3\na,b,c",
     filename: str = "data.csv",
     content_type: str = "text/csv",
 ) -> dict[str, Any]:
@@ -149,7 +149,7 @@ class TestUploadBlob:
 
         resp = client.post(
             f"/api/sessions/{session_id}/blobs",
-            files={"file": ("data.csv", io.BytesIO(b"name,age\nAlice,30"), "application/vnd.ms-excel")},
+            files={"file": ("data.csv", io.BytesIO(b"name,age,city\nAlice,30,London"), "application/vnd.ms-excel")},
         )
         assert resp.status_code == 201
         body = resp.json()

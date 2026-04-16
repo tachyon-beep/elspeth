@@ -16,7 +16,6 @@ same code path as execution, and resolved secrets never touch disk.
 from __future__ import annotations
 
 from collections.abc import Mapping
-from pathlib import Path
 from typing import Any
 
 import yaml
@@ -136,9 +135,8 @@ def validate_pipeline(
     # Step 1: Source + sink path allowlist check (C3/S2 defense-in-depth)
     # Any `path` or `file` key in source/sink options must resolve under
     # an allowed directory. Uses the shared helpers from AD-4.
-    from elspeth.web.paths import allowed_sink_directories, allowed_source_directories
+    from elspeth.web.paths import allowed_sink_directories, allowed_source_directories, resolve_data_path
 
-    data_dir_resolved = Path(settings.data_dir).resolve()
     allowed_source_dirs = allowed_source_directories(str(settings.data_dir))
     allowed_sink_dirs = allowed_sink_directories(str(settings.data_dir))
     # state is a CompositionState (typed domain object). state.source is a
@@ -149,8 +147,7 @@ def validate_pipeline(
         value = source_options.get(key)
         if value is not None:
             path_checked = True
-            raw = Path(value)
-            resolved = (data_dir_resolved / raw).resolve() if not raw.is_absolute() else raw.resolve()
+            resolved = resolve_data_path(value, str(settings.data_dir))
             if not any(resolved.is_relative_to(d) for d in allowed_source_dirs):
                 return ValidationResult(
                     is_valid=False,
@@ -178,8 +175,7 @@ def validate_pipeline(
             value = output.options.get(key)
             if value is not None:
                 path_checked = True
-                raw = Path(value)
-                resolved = (data_dir_resolved / raw).resolve() if not raw.is_absolute() else raw.resolve()
+                resolved = resolve_data_path(value, str(settings.data_dir))
                 if not any(resolved.is_relative_to(d) for d in allowed_sink_dirs):
                     return ValidationResult(
                         is_valid=False,
@@ -272,7 +268,7 @@ def validate_pipeline(
     # Step 3: Settings loading
     #
     # Always uses load_settings_from_yaml_string() — the same loader the
-    # execution service uses (service.py:537).  This ensures validation
+    # execution service uses (in _run_pipeline).  This ensures validation
     # exercises the exact same code path as execution, preventing
     # false-pass or false-fail results from loader differences.
     #

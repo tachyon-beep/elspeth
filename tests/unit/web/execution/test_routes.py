@@ -214,6 +214,113 @@ class TestExecuteIDORAndPathTraversal:
             assert "resolves outside" in resp.json()["detail"]
 
 
+class TestWebSocketReconnectTier1Guards:
+    """WebSocket reconnect path must crash on Tier 1 audit trail anomalies.
+
+    When a client connects to a terminal run, the handler reconstructs
+    a typed event payload from the DB record. Impossible states in the
+    DB must raise RuntimeError, not silently degrade.
+
+    Uses Starlette's sync TestClient which provides built-in WebSocket
+    support without requiring httpx-ws.
+    """
+
+    @staticmethod
+    def _make_ws_app(
+        status_response: RunStatusResponse,
+    ) -> FastAPI:
+        """Build a minimal app wired for WebSocket reconnect testing."""
+        import asyncio
+
+        app = _create_test_app(execution_service=MagicMock())
+        app.state.execution_service.get_status = AsyncMock(return_value=status_response)
+        app.state.execution_service.verify_run_ownership = AsyncMock(return_value=True)
+        app.state.auth_provider.authenticate = AsyncMock(return_value=MagicMock(user_id=_TEST_USER_ID, username="testuser"))
+        broadcaster = MagicMock()
+        broadcaster.subscribe = MagicMock(return_value=asyncio.Queue())
+        broadcaster.unsubscribe = MagicMock()
+        app.state.broadcaster = broadcaster
+        return app
+
+    def test_completed_run_without_landscape_run_id_raises(self) -> None:
+        """Tier 1 anomaly: completed run with NULL landscape_run_id."""
+        from starlette.testclient import TestClient
+
+        run_id = uuid4()
+        app = self._make_ws_app(
+            RunStatusResponse(
+                run_id=str(run_id),
+                status="completed",
+                started_at=datetime.now(tz=UTC),
+                finished_at=datetime.now(tz=UTC),
+                rows_processed=10,
+                rows_succeeded=10,
+                rows_failed=0,
+                rows_quarantined=0,
+                error=None,
+                landscape_run_id=None,
+            )
+        )
+        with (
+            pytest.raises(RuntimeError, match="landscape_run_id"),
+            TestClient(app) as client,
+            client.websocket_connect(f"/ws/runs/{run_id}?token=fake"),
+        ):
+            pass
+
+    def test_failed_run_without_error_raises(self) -> None:
+        """Tier 1 anomaly: failed run with NULL error column."""
+        from starlette.testclient import TestClient
+
+        run_id = uuid4()
+        app = self._make_ws_app(
+            RunStatusResponse(
+                run_id=str(run_id),
+                status="failed",
+                started_at=datetime.now(tz=UTC),
+                finished_at=datetime.now(tz=UTC),
+                rows_processed=5,
+                rows_succeeded=5,
+                rows_failed=0,
+                rows_quarantined=0,
+                error=None,
+                landscape_run_id=None,
+            )
+        )
+        with (
+            pytest.raises(RuntimeError, match="error column NULL"),
+            TestClient(app) as client,
+            client.websocket_connect(f"/ws/runs/{run_id}?token=fake"),
+        ):
+            pass
+
+    def test_terminal_run_without_timestamps_raises(self) -> None:
+        """Tier 1 anomaly: terminal run with both timestamps NULL."""
+        from starlette.testclient import TestClient
+
+        run_id = uuid4()
+        app = self._make_ws_app(
+            RunStatusResponse(
+                run_id=str(run_id),
+                status="cancelled",
+                started_at=None,
+                finished_at=None,
+                rows_processed=0,
+                rows_succeeded=0,
+                rows_failed=0,
+                rows_quarantined=0,
+                error=None,
+                landscape_run_id=None,
+            )
+        )
+        with (
+            pytest.raises(RuntimeError, match="both finished_at and started_at are NULL"),
+            TestClient(app) as client,
+            client.websocket_connect(f"/ws/runs/{run_id}?token=fake"),
+        ):
+            pass
+
+
 class TestRunStatusEndpoint:
     """GET /api/runs/{run_id}"""
 
@@ -228,7 +335,9 @@ class TestRunStatusEndpoint:
                 started_at=datetime.now(tz=UTC),
                 finished_at=datetime.now(tz=UTC),
                 rows_processed=10,
+                rows_succeeded=10,
                 rows_failed=0,
+                rows_quarantined=0,
                 error=None,
                 landscape_run_id="lscape-1",
             )
@@ -257,7 +366,9 @@ class TestCancelEndpoint:
                 started_at=datetime.now(tz=UTC),
                 finished_at=datetime.now(tz=UTC),
                 rows_processed=5,
+                rows_succeeded=5,
                 rows_failed=0,
+                rows_quarantined=0,
                 error=None,
                 landscape_run_id="lscape-1",
             )
@@ -284,7 +395,9 @@ class TestResultsEndpoint:
                 started_at=datetime.now(tz=UTC),
                 finished_at=datetime.now(tz=UTC),
                 rows_processed=10,
+                rows_succeeded=10,
                 rows_failed=0,
+                rows_quarantined=0,
                 error=None,
                 landscape_run_id="lscape-1",
             )
@@ -308,7 +421,9 @@ class TestResultsEndpoint:
                 started_at=datetime.now(tz=UTC),
                 finished_at=None,
                 rows_processed=5,
+                rows_succeeded=5,
                 rows_failed=0,
+                rows_quarantined=0,
                 error=None,
                 landscape_run_id=None,
             )
