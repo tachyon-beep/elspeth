@@ -392,6 +392,26 @@ def create_session_router() -> APIRouter:
                 status_code=502,
                 detail={"error_type": "composer_error", "detail": str(exc)},
             ) from exc
+        except (TypeError, ValueError, UnicodeError, KeyError, AttributeError) as exc:
+            # Plugin-crash path: after Task 4 narrowed the service catch,
+            # these classes escape _compose_loop unhandled (plugin bug per
+            # CLAUDE.md). Do NOT echo the exception message — it may
+            # contain secret fragments from __cause__-chained exceptions
+            # in deeper layers.
+            slog.error(
+                "compose_plugin_crash",
+                session_id=str(session_id),
+                user_id=str(user.user_id),
+                exc_class=type(exc).__name__,
+                exc_info=True,
+            )
+            raise HTTPException(
+                status_code=500,
+                detail={
+                    "error_type": "composer_plugin_error",
+                    "detail": ("A composer plugin crashed; see server logs for the traceback. This is not a user-retryable error."),
+                },
+            ) from exc
 
         # 5. Save state if version changed — post-compose provenance
         state_response: CompositionStateResponse | None = None
@@ -506,6 +526,24 @@ def create_session_router() -> APIRouter:
             raise HTTPException(
                 status_code=502,
                 detail={"error_type": "composer_error", "detail": str(exc)},
+            ) from exc
+        except (TypeError, ValueError, UnicodeError, KeyError, AttributeError) as exc:
+            # Plugin-crash path: mirror /messages handler.  See comment
+            # there for the rationale — exception message is NOT echoed
+            # because it may carry secret fragments from __cause__ chains.
+            slog.error(
+                "recompose_plugin_crash",
+                session_id=str(session_id),
+                user_id=str(user.user_id),
+                exc_class=type(exc).__name__,
+                exc_info=True,
+            )
+            raise HTTPException(
+                status_code=500,
+                detail={
+                    "error_type": "composer_plugin_error",
+                    "detail": ("A composer plugin crashed; see server logs for the traceback. This is not a user-retryable error."),
+                },
             ) from exc
 
         # Save state if version changed

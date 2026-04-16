@@ -566,19 +566,20 @@ class TestComposerErrorHandling:
 
     @pytest.mark.asyncio
     async def test_wrong_type_tool_arg_returns_error(self) -> None:
-        """TypeError from Tier 3 type guard in tool handler is caught, not crash.
+        """ToolArgumentError from Tier 3 type guard in tool handler is caught, not crash.
 
         Tool handlers validate LLM-provided argument types at the Tier 3
-        boundary, raising TypeError for wrong types (e.g. int where str
-        expected). This converts ambiguous AttributeError into an
-        explicit boundary failure that the compose loop can safely catch.
+        boundary, raising ToolArgumentError for wrong types (e.g. int where
+        str expected). The compose loop catches this typed exception and
+        feeds the error back to the LLM so it can retry with a corrected
+        argument.
         """
         catalog = _mock_catalog()
         settings = _make_settings()
         service = ComposerServiceImpl(catalog=catalog, settings=settings)
         state = _empty_state()
 
-        # Turn 1: tool call that triggers TypeError from Tier 3 type guard
+        # Turn 1: tool call that triggers ToolArgumentError from Tier 3 type guard
         bad_call = _make_llm_response(
             tool_calls=[
                 {
@@ -594,7 +595,7 @@ class TestComposerErrorHandling:
         with (
             patch(
                 "elspeth.web.composer.service.execute_tool",
-                side_effect=TypeError("content must be a string, got int"),
+                side_effect=ToolArgumentError("content must be a string, got int"),
             ),
             patch.object(service, "_call_llm", new_callable=AsyncMock) as mock_llm,
         ):
@@ -1161,24 +1162,125 @@ class TestEmptyChoicesValidation:
         assert mock_acomp.call_count == 2
 
 
-class TestValueErrorFromToolExecution:
-    """ValueError from execute_tool is Tier 3 — caught, not 500."""
+class TestPluginBugCrashesFromToolExecution:
+    """Plugin-internal TypeError/ValueError/UnicodeError must crash.
+
+    The compose loop catches ONLY ToolArgumentError around execute_tool.
+    Any other TypeError/ValueError/UnicodeError is a plugin bug — per
+    CLAUDE.md, silently laundering a plugin bug as an LLM-argument error
+    is worse than crashing, because the audit trail records a confident
+    but wrong Tier-3 story.
+
+    Mirrors test_internal_key_error_is_not_swallowed.
+    """
 
     @pytest.mark.asyncio
-    async def test_value_error_returns_error_to_llm(self) -> None:
-        """ValueError from tool handler is caught and fed back to the LLM.
-
-        Mirrors test_internal_key_error_is_not_swallowed but with the
-        opposite assertion: ValueError is a Tier 3 boundary issue (LLM
-        provided semantically invalid values that passed structural
-        validation), NOT an internal bug.
-        """
+    async def test_plugin_value_error_is_not_swallowed(self) -> None:
         catalog = _mock_catalog()
         settings = _make_settings()
         service = ComposerServiceImpl(catalog=catalog, settings=settings)
         state = _empty_state()
 
-        # Provide all required arguments so pre-validation passes
+        valid_call = _make_llm_response(
+            tool_calls=[
+                {
+                    "id": "c1",
+                    "name": "set_source",
+                    "arguments": {
+                        "plugin": "csv",
+                        "on_success": "out",
+                        "options": {},
+                        "on_validation_failure": "quarantine",
+                    },
+                }
+            ],
+        )
+
+        with (
+            patch.object(service, "_call_llm", new_callable=AsyncMock) as mock_llm,
+            patch(
+                "elspeth.web.composer.service.execute_tool",
+                side_effect=ValueError("invalid expression syntax — plugin bug"),
+            ),
+        ):
+            mock_llm.return_value = valid_call
+            with pytest.raises(ValueError, match="plugin bug"):
+                await service.compose("Setup", [], state)
+
+    @pytest.mark.asyncio
+    async def test_plugin_type_error_is_not_swallowed(self) -> None:
+        catalog = _mock_catalog()
+        settings = _make_settings()
+        service = ComposerServiceImpl(catalog=catalog, settings=settings)
+        state = _empty_state()
+
+        valid_call = _make_llm_response(
+            tool_calls=[
+                {
+                    "id": "c1",
+                    "name": "set_source",
+                    "arguments": {
+                        "plugin": "csv",
+                        "on_success": "out",
+                        "options": {},
+                        "on_validation_failure": "quarantine",
+                    },
+                }
+            ],
+        )
+
+        with (
+            patch.object(service, "_call_llm", new_callable=AsyncMock) as mock_llm,
+            patch(
+                "elspeth.web.composer.service.execute_tool",
+                side_effect=TypeError("NoneType + int — plugin bug"),
+            ),
+        ):
+            mock_llm.return_value = valid_call
+            with pytest.raises(TypeError, match="plugin bug"):
+                await service.compose("Setup", [], state)
+
+    @pytest.mark.asyncio
+    async def test_plugin_unicode_error_is_not_swallowed(self) -> None:
+        catalog = _mock_catalog()
+        settings = _make_settings()
+        service = ComposerServiceImpl(catalog=catalog, settings=settings)
+        state = _empty_state()
+
+        valid_call = _make_llm_response(
+            tool_calls=[
+                {
+                    "id": "c1",
+                    "name": "set_source",
+                    "arguments": {
+                        "plugin": "csv",
+                        "on_success": "out",
+                        "options": {},
+                        "on_validation_failure": "quarantine",
+                    },
+                }
+            ],
+        )
+
+        with (
+            patch.object(service, "_call_llm", new_callable=AsyncMock) as mock_llm,
+            patch(
+                "elspeth.web.composer.service.execute_tool",
+                side_effect=UnicodeDecodeError("utf-8", b"\xff", 0, 1, "plugin bug"),
+            ),
+        ):
+            mock_llm.return_value = valid_call
+            with pytest.raises(UnicodeDecodeError):
+                await service.compose("Setup", [], state)
+
+    @pytest.mark.asyncio
+    async def test_tool_argument_error_is_caught_and_fed_to_llm(self) -> None:
+        """Positive case: ToolArgumentError IS caught, error fed back for LLM retry."""
+        catalog = _mock_catalog()
+        settings = _make_settings()
+        service = ComposerServiceImpl(catalog=catalog, settings=settings)
+        state = _empty_state()
+
         valid_call = _make_llm_response(
             tool_calls=[
                 {
@@ -1199,21 +1301,317 @@ class TestValueErrorFromToolExecution:
             patch.object(service, "_call_llm", new_callable=AsyncMock) as mock_llm,
             patch(
                 "elspeth.web.composer.service.execute_tool",
-                side_effect=ValueError("invalid expression syntax"),
+                side_effect=ToolArgumentError("plugin expected str, got int"),
             ),
         ):
             mock_llm.side_effect = [valid_call, text]
             result = await service.compose("Setup", [], state)
 
-        # Compose succeeded — ValueError was caught, not propagated as 500
         assert isinstance(result, ComposerResult)
-
-        # Verify the error was sent back to the LLM as a tool message
         second_call_messages = mock_llm.call_args_list[1].args[0]
         tool_messages = [m for m in second_call_messages if m.get("role") == "tool"]
         assert len(tool_messages) == 1
         error_payload = json.loads(tool_messages[0]["content"])
-        assert "invalid expression syntax" in error_payload["error"]
+        assert "plugin expected str, got int" in error_payload["error"]
+
+    @pytest.mark.asyncio
+    async def test_tool_argument_error_subclass_cannot_leak_cause_to_llm(self) -> None:
+        """Defense-in-depth: if a subclass overrides __str__ to embed the
+        __cause__ chain, the LLM-echo path must still use args[0] only.
+
+        Simulates a future regression where a helpful-looking subclass does
+        `def __str__(self): return f"{self.args[0]}: caused by {self.__cause__}"`.
+        A DB URL or file path leaked through __cause__ would then reach the
+        LLM API. The compose loop MUST short-circuit __str__ and emit
+        args[0] verbatim, isolating the cause chain to __cause__ (audit-only).
+        """
+
+        class LeakyToolArgumentError(ToolArgumentError):
+            def __str__(self) -> str:
+                return f"{self.args[0]}: caused by {self.__cause__}"
+
+        catalog = _mock_catalog()
+        settings = _make_settings()
+        service = ComposerServiceImpl(catalog=catalog, settings=settings)
+        state = _empty_state()
+
+        secret_path = "/etc/elspeth/secrets/bootstrap.key"
+        secret_cause = ValueError(f"bad path: {secret_path}")
+        leaky = LeakyToolArgumentError("content must be a string, got int")
+        leaky.__cause__ = secret_cause
+
+        valid_call = _make_llm_response(
+            tool_calls=[
+                {
+                    "id": "c1",
+                    "name": "set_source",
+                    "arguments": {
+                        "plugin": "csv",
+                        "on_success": "out",
+                        "options": {},
+                        "on_validation_failure": "quarantine",
+                    },
+                }
+            ],
+        )
+        text = _make_llm_response(content="Got it.")
+
+        with (
+            patch.object(service, "_call_llm", new_callable=AsyncMock) as mock_llm,
+            patch(
+                "elspeth.web.composer.service.execute_tool",
+                side_effect=leaky,
+            ),
+        ):
+            mock_llm.side_effect = [valid_call, text]
+            await service.compose("Setup", [], state)
+
+        second_call_messages = mock_llm.call_args_list[1].args[0]
+        tool_messages = [m for m in second_call_messages if m.get("role") == "tool"]
+        assert len(tool_messages) == 1
+        error_payload = json.loads(tool_messages[0]["content"])
+        assert "content must be a string, got int" in error_payload["error"]
+        # The crucial assertion: the cause-chain content NEVER appears.
+        assert secret_path not in error_payload["error"]
+        assert "caused by" not in error_payload["error"]
+
+
+class TestPluginCrashSessionPersistence:
+    """Plugin-bug crash must leave a durable session-row breadcrumb.
+
+    "No silent drops" for session records: a plugin crash that leaves
+    the session in no recorded terminal state is as bad for audit
+    integrity as the laundering behaviour this plan eliminates.
+
+    Given the current sessions_table schema (no status / crashed_at /
+    last_exc_class columns), the breadcrumb is a bump of updated_at.
+    This test asserts that bump, plus the invariant that NO exception
+    message leaks into any column. The follow-up filigree issue tracks
+    the schema migration that adds richer crash markers.
+    """
+
+    @pytest.fixture(autouse=True)
+    def _setup(self, tmp_path: Path) -> None:
+        from datetime import UTC, datetime
+        from uuid import uuid4
+
+        from sqlalchemy.pool import StaticPool
+
+        from elspeth.web.sessions.engine import create_session_engine
+        from elspeth.web.sessions.migrations import run_migrations
+        from elspeth.web.sessions.models import sessions_table
+
+        self.engine = create_session_engine(
+            "sqlite:///:memory:",
+            poolclass=StaticPool,
+            connect_args={"check_same_thread": False},
+        )
+        run_migrations(self.engine)
+
+        self.session_id = str(uuid4())
+        self.data_dir = tmp_path
+        # Seed the sessions row with a DELIBERATELY OLD updated_at so the
+        # crash-path bump is unambiguously distinguishable from the seed.
+        self.seeded_at = datetime(2020, 1, 1, tzinfo=UTC)
+        with self.engine.begin() as conn:
+            conn.execute(
+                sessions_table.insert().values(
+                    id=self.session_id,
+                    user_id="test-user",
+                    auth_provider_type="local",
+                    title="Test",
+                    created_at=self.seeded_at,
+                    updated_at=self.seeded_at,
+                )
+            )
+
+    @pytest.mark.asyncio
+    async def test_plugin_crash_bumps_session_updated_at(self) -> None:
+        from elspeth.web.sessions.models import sessions_table
+
+        catalog = _mock_catalog()
+        settings = _make_settings(data_dir=self.data_dir)
+        service = ComposerServiceImpl(
+            catalog=catalog,
+            settings=settings,
+            session_engine=self.engine,
+        )
+        state = _empty_state()
+
+        valid_call = _make_llm_response(
+            tool_calls=[
+                {
+                    "id": "c1",
+                    "name": "set_source",
+                    "arguments": {
+                        "plugin": "csv",
+                        "on_success": "out",
+                        "options": {},
+                        "on_validation_failure": "quarantine",
+                    },
+                }
+            ],
+        )
+
+        with (
+            patch.object(service, "_call_llm", new_callable=AsyncMock) as mock_llm,
+            patch(
+                "elspeth.web.composer.service.execute_tool",
+                side_effect=ValueError("plugin bug: /etc/secrets/bootstrap.key is bad"),
+            ),
+        ):
+            mock_llm.return_value = valid_call
+            with pytest.raises(ValueError, match="plugin bug"):
+                await service.compose("Setup", [], state, session_id=self.session_id)
+
+        # Assertion 1: session row was touched on the crash path.
+        with self.engine.begin() as conn:
+            row = conn.execute(sessions_table.select().where(sessions_table.c.id == self.session_id)).one()
+
+        # SQLite DateTime(timezone=True) strips tzinfo on read — normalize
+        # both sides of the comparison to the same tz-naive representation.
+        row_updated_at = row.updated_at
+        if row_updated_at.tzinfo is None:
+            seed_for_compare = self.seeded_at.replace(tzinfo=None)
+        else:
+            seed_for_compare = self.seeded_at
+        assert row_updated_at > seed_for_compare, "crash path must bump updated_at as audit breadcrumb"
+
+        # Assertion 2: NO column holds the exception message. Stringify
+        # the entire row and verify secret fragments / class hints are
+        # absent. This is the load-bearing audit-integrity invariant —
+        # if a future refactor adds a 'last_error' column, the assertion
+        # will catch any attempt to persist the raw message.
+        row_text = " | ".join(str(v) for v in row._mapping.values())
+        assert "plugin bug" not in row_text
+        assert "/etc/secrets" not in row_text
+        assert "ValueError" not in row_text
+
+    @pytest.mark.asyncio
+    async def test_persist_crashed_session_failure_does_not_mask_plugin_bug(
+        self,
+    ) -> None:
+        """If _persist_crashed_session itself raises, slog.error fires and
+        the original plugin-bug exception still propagates unchanged.
+
+        Two invariants asserted:
+        1. The ORIGINAL ValueError reaches the caller (not the RuntimeError
+           from the persistence failure).
+        2. slog.error is called with the `composer_crash_persistence_failed`
+           event — guarantees that an accidental removal of Step 4a-pre's
+           structlog import would be caught (without this assertion, a
+           regression where slog.error silently fails as NameError would
+           pass the test because the original exception still propagates).
+        """
+        from structlog.testing import capture_logs
+
+        catalog = _mock_catalog()
+        settings = _make_settings(data_dir=self.data_dir)
+        service = ComposerServiceImpl(
+            catalog=catalog,
+            settings=settings,
+            session_engine=self.engine,
+        )
+        state = _empty_state()
+
+        valid_call = _make_llm_response(
+            tool_calls=[
+                {
+                    "id": "c1",
+                    "name": "set_source",
+                    "arguments": {
+                        "plugin": "csv",
+                        "on_success": "out",
+                        "options": {},
+                        "on_validation_failure": "quarantine",
+                    },
+                }
+            ],
+        )
+
+        with (
+            patch.object(service, "_call_llm", new_callable=AsyncMock) as mock_llm,
+            patch(
+                "elspeth.web.composer.service.execute_tool",
+                side_effect=ValueError("original plugin bug"),
+            ),
+            patch.object(
+                service,
+                "_persist_crashed_session",
+                side_effect=RuntimeError("persistence failed"),
+            ),
+            capture_logs() as cap_logs,
+        ):
+            mock_llm.return_value = valid_call
+            with pytest.raises(ValueError, match="original plugin bug"):
+                await service.compose("Setup", [], state, session_id=self.session_id)
+
+        # The crash-persistence-failure slog.error MUST fire. This closes
+        # the regression risk where Step 4a-pre's structlog import is
+        # accidentally removed — the method would then raise NameError
+        # inside the except, masking the original ValueError.
+        persistence_failure_events = [entry for entry in cap_logs if entry.get("event") == "composer_crash_persistence_failed"]
+        assert len(persistence_failure_events) == 1, cap_logs
+        event = persistence_failure_events[0]
+        assert event["session_id"] == self.session_id
+        assert event["original_exc_class"] == "ValueError"
+        # Exception message MUST NOT appear in structured fields — only
+        # in exc_info (stderr traceback).
+        assert "original plugin bug" not in str(event)
+
+    @pytest.mark.asyncio
+    async def test_persist_crashed_session_real_path_slog_emission(self) -> None:
+        """Smoke test for Step 4a-pre: exercise the real _persist_crashed_session
+        path (no patching of the private method).  If structlog is not
+        imported in service.py, this test will surface the NameError that
+        `test_persist_crashed_session_failure_does_not_mask_plugin_bug`
+        misses (because that test patches the method itself).
+
+        The real _persist_crashed_session should succeed here (the sessions
+        engine is live), so we assert the crash propagates without any
+        persistence-failure slog event.
+        """
+        from structlog.testing import capture_logs
+
+        catalog = _mock_catalog()
+        settings = _make_settings(data_dir=self.data_dir)
+        service = ComposerServiceImpl(
+            catalog=catalog,
+            settings=settings,
+            session_engine=self.engine,
+        )
+        state = _empty_state()
+
+        valid_call = _make_llm_response(
+            tool_calls=[
+                {
+                    "id": "c1",
+                    "name": "set_source",
+                    "arguments": {
+                        "plugin": "csv",
+                        "on_success": "out",
+                        "options": {},
+                        "on_validation_failure": "quarantine",
+                    },
+                }
+            ],
+        )
+
+        with (
+            patch.object(service, "_call_llm", new_callable=AsyncMock) as mock_llm,
+            patch(
+                "elspeth.web.composer.service.execute_tool",
+                side_effect=ValueError("plugin bug"),
+            ),
+            capture_logs() as cap_logs,
+        ):
+            mock_llm.return_value = valid_call
+            with pytest.raises(ValueError, match="plugin bug"):
+                await service.compose("Setup", [], state, session_id=self.session_id)
+
+        # No persistence-failure event — the real path succeeded.
+        persistence_failure_events = [entry for entry in cap_logs if entry.get("event") == "composer_crash_persistence_failed"]
+        assert persistence_failure_events == [], cap_logs
 
 
 class TestToolExecutionThreadOffloading:

@@ -1163,3 +1163,116 @@ class TestPaginationRoutes:
             f"/api/sessions/{session_id}/state/versions?limit=201",
         )
         assert resp.status_code == 422
+
+
+class TestComposePluginCrashResponse:
+    """Plugin TypeError/ValueError from compose() must produce a structured 500.
+
+    After the Task 4 narrowing, plugin bugs escape the service layer instead
+    of being laundered as LLM retries. The route handler MUST shape these
+    into a documented response rather than letting FastAPI's default handler
+    emit an arbitrary traceback.
+
+    Audit-integrity invariant: exception message content — especially
+    fragments from __cause__-chained exceptions that may include DB URLs,
+    filesystem paths, or secret material — MUST NOT appear in the response
+    body. Only the documented error_type + generic detail string is echoed.
+    """
+
+    SECRET_PATH = "/etc/elspeth/secrets/bootstrap.key"
+
+    def test_compose_plugin_value_error_returns_structured_500(self, tmp_path) -> None:
+        mock_composer = AsyncMock()
+        mock_composer.compose = AsyncMock(
+            side_effect=ValueError(f"plugin bug: {self.SECRET_PATH}"),
+        )
+
+        app, _ = _make_app(tmp_path)
+        app.state.composer_service = mock_composer
+        client = TestClient(app, raise_server_exceptions=False)
+
+        resp = client.post("/api/sessions", json={"title": "Test"})
+        session_id = resp.json()["id"]
+
+        response = client.post(
+            f"/api/sessions/{session_id}/messages",
+            json={"content": "Build me a pipeline"},
+        )
+
+        assert response.status_code == 500
+        body = response.json()
+        # FastAPI serializes HTTPException(detail={...}) as {"detail": {...}}.
+        assert isinstance(body.get("detail"), dict), body
+        assert body["detail"]["error_type"] == "composer_plugin_error"
+        assert "user-retryable" in body["detail"]["detail"].lower()
+
+        # Audit-integrity: exception message and cause content MUST NOT leak.
+        body_text = response.text
+        assert "plugin bug" not in body_text
+        assert self.SECRET_PATH not in body_text
+        assert "ValueError" not in body_text  # exception class also redacted
+
+    def test_recompose_plugin_type_error_returns_structured_500(self, tmp_path) -> None:
+        import asyncio
+
+        mock_composer = AsyncMock()
+        mock_composer.compose = AsyncMock(
+            side_effect=TypeError(f"plugin bug: NoneType has no attribute 'read' from {self.SECRET_PATH}"),
+        )
+
+        app, service = _make_app(tmp_path)
+        app.state.composer_service = mock_composer
+        client = TestClient(app, raise_server_exceptions=False)
+
+        resp = client.post("/api/sessions", json={"title": "Test"})
+        session_id = resp.json()["id"]
+
+        # Recompose requires a pre-existing trailing user message (see
+        # TestRecomposeConvergencePartialState for the template).
+        loop = asyncio.new_event_loop()
+        loop.run_until_complete(service.add_message(uuid.UUID(session_id), "user", "Build something"))
+        loop.close()
+
+        response = client.post(f"/api/sessions/{session_id}/recompose")
+
+        assert response.status_code == 500
+        body = response.json()
+        assert isinstance(body.get("detail"), dict), body
+        assert body["detail"]["error_type"] == "composer_plugin_error"
+
+        body_text = response.text
+        assert "plugin bug" not in body_text
+        assert self.SECRET_PATH not in body_text
+        assert "NoneType" not in body_text
+        assert "TypeError" not in body_text
+
+    def test_compose_unknown_exception_class_is_not_absorbed(self, tmp_path) -> None:
+        """Deliberately narrow typed catch: RuntimeError (not in the handler's
+        catch list) must propagate past the composer_plugin_error handler.
+        With raise_server_exceptions=False, TestClient returns FastAPI's
+        default 500 response; the critical invariant is that the structured
+        composer_plugin_error body is NOT produced for unknown classes.
+        """
+        mock_composer = AsyncMock()
+        mock_composer.compose = AsyncMock(
+            side_effect=RuntimeError("unknown failure class"),
+        )
+
+        app, _ = _make_app(tmp_path)
+        app.state.composer_service = mock_composer
+        client = TestClient(app, raise_server_exceptions=False)
+
+        resp = client.post("/api/sessions", json={"title": "Test"})
+        session_id = resp.json()["id"]
+
+        response = client.post(
+            f"/api/sessions/{session_id}/messages",
+            json={"content": "Build me a pipeline"},
+        )
+
+        assert response.status_code == 500
+        # Unconditional: the composer_plugin_error marker MUST NOT appear
+        # anywhere in the response body, regardless of whether FastAPI
+        # renders detail as a dict or a string.  This closes the vacuous-
+        # pass risk of an `if isinstance(...)` guard.
+        assert "composer_plugin_error" not in response.text

@@ -21,6 +21,7 @@ from dataclasses import dataclass
 from typing import Any, cast
 
 import litellm
+import structlog
 from litellm.exceptions import BadRequestError as LiteLLMBadRequestError
 from sqlalchemy import Engine
 
@@ -31,6 +32,7 @@ from elspeth.web.composer.protocol import (
     ComposerResult,
     ComposerServiceError,
     ComposerSettings,
+    ToolArgumentError,
 )
 from elspeth.web.composer.state import CompositionState, ValidationSummary
 from elspeth.web.composer.tools import (
@@ -39,6 +41,8 @@ from elspeth.web.composer.tools import (
     is_cacheable_discovery_tool,
     is_discovery_tool,
 )
+
+slog = structlog.get_logger()
 
 _ARRAY_ITEM_SEGMENT = "[]"
 type RequiredPath = tuple[str, ...]
@@ -206,7 +210,38 @@ class ComposerServiceImpl:
                 the timeout is exceeded.
         """
         deadline = asyncio.get_event_loop().time() + self._timeout_seconds
-        return await self._compose_loop(message, messages, state, session_id, user_id, deadline)
+        try:
+            return await self._compose_loop(message, messages, state, session_id, user_id, deadline)
+        except ComposerConvergenceError:
+            # Has its own partial_state; route handler persists. Do not intercept.
+            raise
+        except Exception as exc:
+            # Plugin-bug crash path. Bump the session's updated_at as an audit
+            # breadcrumb (richer crash-marker columns tracked as a follow-up
+            # migration), then re-raise the ORIGINAL exception class unchanged
+            # so the route layer's final handler (Task 4.5) sees a bare
+            # TypeError/ValueError/etc.
+            #
+            # Note: last-known-state tracking is intentionally NOT threaded
+            # through the loop for now — the current schema has nowhere to
+            # persist it. The follow-up schema migration will add the columns
+            # and re-introduce the tracking at that point.
+            if self._session_engine is not None and session_id is not None:
+                try:
+                    self._persist_crashed_session(session_id)
+                except Exception:
+                    # Audit-persistence is best-effort on the crash path —
+                    # failure to persist MUST NOT mask the original plugin
+                    # bug. Log via slog.error (audit system itself is failing
+                    # here, which is one of the three permitted slog use
+                    # cases per the logging-telemetry-policy skill).
+                    slog.error(
+                        "composer_crash_persistence_failed",
+                        session_id=session_id,
+                        original_exc_class=type(exc).__name__,
+                        exc_info=True,
+                    )
+            raise
 
     async def _compose_loop(
         self,
@@ -372,14 +407,19 @@ class ComposerServiceImpl:
                 # per-call wait_for because they are pure network I/O
                 # with no side effects.
                 #
-                # TypeError/ValueError are caught because the LLM can
-                # provide wrong value types (e.g. string where list
-                # expected → tuple() fails) or semantically invalid values
-                # (e.g. invalid expression syntax).  UnicodeError covers
-                # encoding failures on malformed string data from the LLM.
-                # KeyError and AttributeError are NOT caught — after
-                # required-arg validation above and Tier 3 type guards
-                # in tool handlers, either would be an internal bug.
+                # Tool handlers raise ToolArgumentError at Tier-3 boundaries
+                # (LLM supplied wrong types, semantically invalid values,
+                # or malformed encodings that cannot be coerced).  The
+                # compose loop catches ONLY that class and feeds the error
+                # back to the LLM for retry.
+                #
+                # Any other exception — TypeError, ValueError, UnicodeError,
+                # KeyError, AttributeError — escaping execute_tool() is a
+                # plugin bug (Tier 1/2) and MUST crash.  Per CLAUDE.md,
+                # silently laundering a plugin bug as an LLM-argument error
+                # is worse than crashing: it pollutes the audit trail with
+                # a confident but wrong Tier-3 story, and the LLM's "retry"
+                # cannot correct a fault in our own code.
                 try:
                     result = await asyncio.to_thread(
                         execute_tool,
@@ -394,16 +434,26 @@ class ComposerServiceImpl:
                         user_id=user_id,
                         prior_validation=last_validation,
                     )
-                except (TypeError, ValueError, UnicodeError) as exc:
+                except ToolArgumentError as exc:
                     if not is_discovery_tool(tool_name):
                         turn_has_mutation = True
+                    # Trust-boundary redaction: the echoed message reaches the
+                    # LLM API and (via audit) the Landscape. Use exc.args[0]
+                    # rather than str(exc) so a future subclass that overrides
+                    # __str__ to include __cause__ context (which may carry DB
+                    # URLs, filesystem paths, or secret fragments from deeper
+                    # layers) cannot leak through this path. Handlers that
+                    # use `raise ToolArgumentError(msg) from exc` get the
+                    # cause preserved on __cause__ for debug/audit but NOT
+                    # echoed to the LLM.
+                    safe_message = exc.args[0] if exc.args else "tool argument error"
                     llm_messages.append(
                         {
                             "role": "tool",
                             "tool_call_id": tool_call.id,
                             "content": json.dumps(
                                 {
-                                    "error": f"Tool '{tool_name}' failed: {exc}",
+                                    "error": f"Tool '{tool_name}' failed: {safe_message}",
                                 }
                             ),
                         }
@@ -475,6 +525,41 @@ class ComposerServiceImpl:
                         budget_exhausted="discovery",
                         partial_state=partial,
                     )
+
+    def _persist_crashed_session(self, session_id: str) -> None:
+        """Best-effort timestamp bump to mark that a compose session crashed.
+
+        NOTE: The sessions-table schema does not yet have a dedicated crash
+        marker column. Bumping updated_at is the minimum viable breadcrumb
+        until a migration adds (e.g.) a ``status`` or ``crashed_at`` column.
+        A follow-up issue tracks the schema addition; do NOT introduce the
+        migration as part of this PR (scope creep).
+
+        The crash's exc_class is NOT written to the session row — no column
+        exists to hold it. The operator correlates the updated_at bump with
+        the crash via the slog.error emission at the call site, which
+        includes session_id and exc_class in structured fields.
+
+        Signature intentionally minimal — only the data that actually gets
+        persisted is accepted. When the schema migration lands, this
+        method's signature expands to take last_state and exc_class, and
+        callers are updated at that point. Today, the caller passes
+        session_id and logs the rest via slog.
+
+        The caller's outer try/except absorbs any failure — this method
+        MUST NOT mask the original plugin-bug exception if persistence
+        itself fails.
+        """
+        from datetime import UTC, datetime
+
+        from sqlalchemy import update
+
+        from elspeth.web.sessions.models import sessions_table
+
+        assert self._session_engine is not None, "_persist_crashed_session must only be called when session_engine is set"
+        now = datetime.now(UTC)
+        with self._session_engine.begin() as conn:
+            conn.execute(update(sessions_table).where(sessions_table.c.id == session_id).values(updated_at=now))
 
     def _build_messages(
         self,
