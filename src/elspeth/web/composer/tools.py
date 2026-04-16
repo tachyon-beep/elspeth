@@ -1844,8 +1844,13 @@ def _execute_update_blob(
     content = arguments["content"]
 
     # Tier 3 boundary: LLM can pass wrong types (e.g. int for content).
+    # ToolArgumentError (not TypeError) so the compose loop can distinguish
+    # this LLM-side error from plugin-internal type errors.
+    #
+    # IMPORTANT: this guard MUST remain BEFORE the `try: with session_engine.begin()`
+    # cleanup block below (same rationale as _execute_create_blob's guard).
     if not isinstance(content, str):
-        raise TypeError(f"content must be a string, got {type(content).__name__}")
+        raise ToolArgumentError(f"content must be a string, got {type(content).__name__}")
 
     blob = _sync_get_blob(session_engine, blob_id, session_id)
     if blob is None:

@@ -4727,3 +4727,82 @@ class TestCreateBlobTypeGuard:
                 session_engine=self.engine,
                 session_id=self.session_id,
             )
+
+
+# ---------------------------------------------------------------------------
+# update_blob Tier-3 type guard (elspeth-7a26880c65, Task 3)
+# ---------------------------------------------------------------------------
+
+
+class TestUpdateBlobTypeGuard:
+    """Parallels TestCreateBlobTypeGuard for _execute_update_blob.
+
+    The fixture is deliberately copy-pasted from TestCreateBlobTypeGuard
+    rather than factored into a shared helper: the two guards are
+    independent raise sites and one should be moveable without the other.
+    """
+
+    @pytest.fixture(autouse=True)
+    def _setup(self, tmp_path: Path) -> None:
+        from datetime import UTC, datetime
+        from uuid import uuid4
+
+        from sqlalchemy.pool import StaticPool
+
+        from elspeth.web.sessions.engine import create_session_engine
+        from elspeth.web.sessions.migrations import run_migrations
+        from elspeth.web.sessions.models import sessions_table
+
+        self.engine = create_session_engine(
+            "sqlite:///:memory:",
+            poolclass=StaticPool,
+            connect_args={"check_same_thread": False},
+        )
+        run_migrations(self.engine)
+
+        self.session_id = str(uuid4())
+        self.data_dir = tmp_path
+        now = datetime.now(UTC)
+        with self.engine.begin() as conn:
+            conn.execute(
+                sessions_table.insert().values(
+                    id=self.session_id,
+                    user_id="test-user",
+                    auth_provider_type="local",
+                    title="Test",
+                    created_at=now,
+                    updated_at=now,
+                )
+            )
+
+    def test_non_string_content_raises_tool_argument_error(self) -> None:
+        from elspeth.web.composer.protocol import ToolArgumentError
+
+        catalog = _mock_catalog()
+        state = _empty_state()
+
+        # Seed a real blob so the handler reaches the content guard before
+        # the "blob not found" check.  Use the create path end-to-end so
+        # the row is persisted by the same code path production uses.
+        create_result = execute_tool(
+            "create_blob",
+            {"filename": "a.txt", "mime_type": "text/plain", "content": "initial"},
+            state,
+            catalog,
+            data_dir=str(self.data_dir),
+            session_engine=self.engine,
+            session_id=self.session_id,
+        )
+        blob_id = create_result.data["blob_id"]
+        state = create_result.updated_state
+
+        with pytest.raises(ToolArgumentError, match="content must be a string, got int"):
+            execute_tool(
+                "update_blob",
+                {"blob_id": blob_id, "content": 42},
+                state,
+                catalog,
+                data_dir=str(self.data_dir),
+                session_engine=self.engine,
+                session_id=self.session_id,
+            )
