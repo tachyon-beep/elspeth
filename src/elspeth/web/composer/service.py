@@ -205,41 +205,30 @@ class ComposerServiceImpl:
             ComposerConvergenceError: If a budget is exhausted or
                 the timeout is exceeded.
         """
-        # Mutable container so _compose_loop can publish its latest
-        # state to the outer scope. On TimeoutError, compose() reads
-        # this to build partial_state — the local `state` variable
-        # inside _compose_loop is unreachable after cancellation.
-        state_ref: list[CompositionState] = [state]
-        initial_version = state.version
-        try:
-            return await asyncio.wait_for(
-                self._compose_loop(message, messages, state, state_ref, session_id, user_id),
-                timeout=self._timeout_seconds,
-            )
-        except TimeoutError:
-            latest = state_ref[0]
-            partial = latest if latest.version > initial_version else None
-            raise ComposerConvergenceError(
-                max_turns=0,
-                budget_exhausted="timeout",
-                partial_state=partial,
-            ) from None
+        deadline = asyncio.get_event_loop().time() + self._timeout_seconds
+        return await self._compose_loop(message, messages, state, session_id, user_id, deadline)
 
     async def _compose_loop(
         self,
         message: str,
         messages: list[dict[str, Any]],
         state: CompositionState,
-        state_ref: list[CompositionState],
         session_id: str | None = None,
         user_id: str | None = None,
+        deadline: float = 0.0,
     ) -> ComposerResult:
         """Inner composition loop with dual-counter budget tracking.
 
-        Args:
-            state_ref: Single-element mutable list. Updated after every
-                successful tool execution so the outer compose() can
-                read the latest state on timeout.
+        Uses cooperative timeout: the deadline is checked at safe
+        checkpoints (before LLM calls, after tool batches) rather
+        than using asyncio.wait_for() cancellation.  This ensures
+        tool calls that have filesystem/DB side effects always run
+        to completion with their state published — no split between
+        committed side effects and the response.
+
+        LLM calls are wrapped in per-call asyncio.wait_for(remaining)
+        because they are pure network I/O with no side effects and
+        can be safely cancelled.
         """
         initial_version = state.version
         llm_messages = self._build_messages(messages, state, message)
@@ -260,7 +249,13 @@ class ComposerServiceImpl:
         last_validation: ValidationSummary | None = None
 
         while True:
-            response = await self._call_llm(llm_messages, tools)
+            response = await self._call_llm_before_deadline(
+                llm_messages,
+                tools,
+                state,
+                initial_version,
+                deadline,
+            )
             assistant_message = response.choices[0].message
 
             # If no tool calls, the LLM is done — return text response
@@ -358,18 +353,24 @@ class ComposerServiceImpl:
                     )
                     continue
 
-                # Discovery tools are read-only — safe to offload to
-                # the thread pool to avoid blocking the event loop, and
-                # safe to abandon on timeout (no side effects).
+                # All tool calls are offloaded to the thread pool via
+                # asyncio.to_thread() to avoid blocking the event loop.
+                # to_thread (not run_in_executor) because it propagates
+                # contextvars into the worker thread automatically —
+                # OpenTelemetry span context follows tool execution.
+                # Blob and secret tools perform synchronous filesystem
+                # writes and SQLAlchemy transactions that would otherwise
+                # stall the single-process web server for all concurrent
+                # requests (rate-limit checks, websocket heartbeats,
+                # progress broadcasts).
                 #
-                # Mutation tools have filesystem/DB side effects that
-                # cannot be rolled back if asyncio.wait_for cancels the
-                # coroutine.  asyncio.to_thread cannot cancel worker
-                # threads, so a cancelled mutation would run to
-                # completion in the background while the client receives
-                # a timeout error with stale state.  Mutation tools run
-                # synchronously to guarantee side effects and state_ref
-                # stay consistent.
+                # Cancel-safety: tool calls are NOT wrapped in
+                # asyncio.wait_for — they always run to completion.
+                # The cooperative deadline is checked BETWEEN operations
+                # (before LLM calls, after tool batches), so side effects
+                # and state publication are never split.  LLM calls use
+                # per-call wait_for because they are pure network I/O
+                # with no side effects.
                 #
                 # TypeError/ValueError are caught because the LLM can
                 # provide wrong value types (e.g. string where list
@@ -380,33 +381,19 @@ class ComposerServiceImpl:
                 # required-arg validation above and Tier 3 type guards
                 # in tool handlers, either would be an internal bug.
                 try:
-                    if is_discovery_tool(tool_name):
-                        result = await asyncio.to_thread(
-                            execute_tool,
-                            tool_name,
-                            arguments,
-                            state,
-                            self._catalog,
-                            data_dir=self._data_dir,
-                            session_engine=self._session_engine,
-                            session_id=session_id,
-                            secret_service=self._secret_service,
-                            user_id=user_id,
-                            prior_validation=last_validation,
-                        )
-                    else:
-                        result = execute_tool(
-                            tool_name,
-                            arguments,
-                            state,
-                            self._catalog,
-                            data_dir=self._data_dir,
-                            session_engine=self._session_engine,
-                            session_id=session_id,
-                            secret_service=self._secret_service,
-                            user_id=user_id,
-                            prior_validation=last_validation,
-                        )
+                    result = await asyncio.to_thread(
+                        execute_tool,
+                        tool_name,
+                        arguments,
+                        state,
+                        self._catalog,
+                        data_dir=self._data_dir,
+                        session_engine=self._session_engine,
+                        session_id=session_id,
+                        secret_service=self._secret_service,
+                        user_id=user_id,
+                        prior_validation=last_validation,
+                    )
                 except (TypeError, ValueError, UnicodeError) as exc:
                     if not is_discovery_tool(tool_name):
                         turn_has_mutation = True
@@ -424,7 +411,6 @@ class ComposerServiceImpl:
                     continue
 
                 state = result.updated_state
-                state_ref[0] = state  # Publish for timeout capture
                 last_validation = result.validation
                 result_json = _serialize_tool_result(result)
 
@@ -461,7 +447,13 @@ class ComposerServiceImpl:
                 if composition_turns_used >= self._max_composition_turns:
                     # B-4D-3 fix: give the LLM one last chance to see the
                     # tool results and produce a text response.
-                    response = await self._call_llm(llm_messages, tools)
+                    response = await self._call_llm_before_deadline(
+                        llm_messages,
+                        tools,
+                        state,
+                        initial_version,
+                        deadline,
+                    )
                     assistant_message = response.choices[0].message
                     if not assistant_message.tool_calls:
                         return ComposerResult(
@@ -543,6 +535,42 @@ class ComposerServiceImpl:
         if not response.choices:
             raise ComposerServiceError("LLM returned empty choices array — cannot continue composition")
         return response
+
+    async def _call_llm_before_deadline(
+        self,
+        messages: list[dict[str, Any]],
+        tools: list[dict[str, Any]],
+        state: CompositionState,
+        initial_version: int,
+        deadline: float,
+    ) -> litellm.ModelResponse:
+        """Call the LLM with a per-call timeout derived from the deadline.
+
+        LLM calls are pure network I/O with no side effects, so they
+        are safe to cancel via asyncio.wait_for.  If the deadline has
+        already passed or the call exceeds the remaining budget, raise
+        ComposerConvergenceError with the current partial state.
+        """
+        remaining = deadline - asyncio.get_event_loop().time()
+        if remaining <= 0:
+            partial = state if state.version > initial_version else None
+            raise ComposerConvergenceError(
+                max_turns=0,
+                budget_exhausted="timeout",
+                partial_state=partial,
+            )
+        try:
+            return await asyncio.wait_for(
+                self._call_llm(messages, tools),
+                timeout=remaining,
+            )
+        except TimeoutError:
+            partial = state if state.version > initial_version else None
+            raise ComposerConvergenceError(
+                max_turns=0,
+                budget_exhausted="timeout",
+                partial_state=partial,
+            ) from None
 
     def _compute_availability(self) -> ComposerAvailability:
         """Infer whether the configured model has the required env at boot.

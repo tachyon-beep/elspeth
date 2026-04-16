@@ -597,5 +597,7 @@ allowed_dict_patterns:
   - "src/elspeth/web/composer/service.py:ComposerServiceImpl._get_litellm_tools:return (list)"
   - "src/elspeth/web/composer/service.py:ComposerServiceImpl._call_llm:messages (list)"
   - "src/elspeth/web/composer/service.py:ComposerServiceImpl._call_llm:tools (list)"
+  - "src/elspeth/web/composer/service.py:ComposerServiceImpl._call_llm_before_deadline:messages (list)"
+  - "src/elspeth/web/composer/service.py:ComposerServiceImpl._call_llm_before_deadline:tools (list)"
   - "src/elspeth/web/composer/prompts.py:build_messages:chat_history (list)"
   - "src/elspeth/web/composer/prompts.py:build_messages:return (list)"

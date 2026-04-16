@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import asyncio
+import contextlib
 import json
 from dataclasses import dataclass
 from pathlib import Path
@@ -913,6 +915,99 @@ class TestComposeTimeout:
                 await service.compose("Slow pipeline", [], state)
             assert exc_info.value.budget_exhausted == "timeout"
 
+    @pytest.mark.asyncio
+    async def test_mutation_tool_state_preserved_on_timeout(self) -> None:
+        """Mutation tools that complete before timeout must have their
+        state reflected in partial_state.
+
+        Regression test for the cancel-safety concern: with cooperative
+        timeout, the deadline is checked AFTER tool execution completes,
+        so side effects and state publication are never split. The
+        partial_state must include the mutation that completed.
+        """
+        import time
+
+        catalog = _mock_catalog()
+        # Very tight timeout — tool execution will consume most of it
+        settings = _make_settings(composer_timeout_seconds=0.5)
+        service = ComposerServiceImpl(catalog=catalog, settings=settings)
+        state = _empty_state()
+
+        call_count = 0
+
+        def _slow_mutation_tool(
+            _tool_name: str,
+            _arguments: dict[str, Any],
+            current_state: CompositionState,
+            _catalog: Any,
+            **kwargs: Any,
+        ) -> ToolResult:
+            # Simulate a blob mutation that takes time
+            time.sleep(0.2)
+            from elspeth.web.composer.state import SourceSpec
+
+            new_state = current_state.with_source(
+                SourceSpec(
+                    plugin="csv",
+                    on_success="out",
+                    options={"path": "/data/blobs/f.csv", "schema": {"mode": "observed"}},
+                    on_validation_failure="quarantine",
+                )
+            )
+            return ToolResult(
+                success=True,
+                updated_state=new_state,
+                validation=new_state.validate(),
+                affected_nodes=("source",),
+                data=None,
+            )
+
+        async def slow_then_timeout_llm(*args: Any, **kwargs: Any) -> Any:
+            nonlocal call_count
+            call_count += 1
+            if call_count == 1:
+                # First call: return tool call (fast)
+                return _make_llm_response(
+                    tool_calls=[
+                        {
+                            "id": "c1",
+                            "name": "set_source",
+                            "arguments": {
+                                "plugin": "csv",
+                                "on_success": "out",
+                                "options": {"path": "/data/blobs/f.csv", "schema": {"mode": "observed"}},
+                                "on_validation_failure": "quarantine",
+                            },
+                        }
+                    ],
+                )
+            # Second call: will exceed remaining deadline
+            await asyncio.sleep(5.0)
+            return _make_llm_response(content="Too late.")
+
+        with (
+            patch.object(service, "_call_llm", new_callable=AsyncMock) as mock_llm,
+            patch(
+                "elspeth.web.composer.service.execute_tool",
+                side_effect=_slow_mutation_tool,
+            ),
+        ):
+            mock_llm.side_effect = slow_then_timeout_llm
+            with pytest.raises(ComposerConvergenceError) as exc_info:
+                await service.compose("Build pipeline", [], state)
+
+        assert exc_info.value.budget_exhausted == "timeout"
+        # The mutation tool completed BEFORE the timeout fired on the
+        # second LLM call.  With cooperative timeout, partial_state must
+        # reflect the completed mutation.
+        assert exc_info.value.partial_state is not None, (
+            "partial_state is None — mutation tool's state was lost on timeout. "
+            "This is the cancel-safety regression: side effects committed but "
+            "state was not published."
+        )
+        assert exc_info.value.partial_state.source is not None
+        assert exc_info.value.partial_state.source.plugin == "csv"
+
 
 class TestPartialStatePreservation:
     """Tests for partial state preservation on convergence failure (F2)."""
@@ -1117,21 +1212,20 @@ class TestValueErrorFromToolExecution:
 
 
 class TestToolExecutionThreadOffloading:
-    """execute_tool() must run in a worker thread, not the event loop thread."""
+    """execute_tool() must run in a worker thread, not the event loop thread.
 
-    @pytest.mark.asyncio
-    async def test_tool_execution_runs_off_event_loop_thread(self) -> None:
-        """Verify execute_tool() runs in a worker thread.
+    Tests capture actual thread identity rather than checking whether
+    asyncio.to_thread was called — testing the behavioral property
+    (event loop not blocked) regardless of the offloading mechanism.
+    """
 
-        Tool handlers perform synchronous file I/O, DB queries, and path
-        operations that would block the event loop for concurrent users.
-        The correct fix offloads them to the thread pool.
-
-        This test captures the actual thread identity rather than checking
-        whether asyncio.to_thread was called — it tests the behavioral
-        property (event loop not blocked) regardless of the offloading
-        mechanism used.
-        """
+    @staticmethod
+    async def _assert_tool_runs_off_event_loop(
+        tool_call_response: FakeLLMResponse,
+        text_response: FakeLLMResponse,
+        user_message: str,
+    ) -> None:
+        """Shared helper: verify a tool call executes in a worker thread."""
         import threading
 
         catalog = _mock_catalog()
@@ -1142,7 +1236,7 @@ class TestToolExecutionThreadOffloading:
         event_loop_thread = threading.current_thread()
         tool_execution_thread: threading.Thread | None = None
 
-        def _capture_thread_and_return(
+        def _capture_thread(
             _tool_name: str,
             _arguments: dict[str, Any],
             current_state: CompositionState,
@@ -1159,23 +1253,151 @@ class TestToolExecutionThreadOffloading:
                 data={"sources": []},
             )
 
-        disc_call = _make_llm_response(
-            tool_calls=[{"id": "c1", "name": "list_sources", "arguments": {}}],
+        with (
+            patch.object(service, "_call_llm", new_callable=AsyncMock) as mock_llm,
+            patch(
+                "elspeth.web.composer.service.execute_tool",
+                side_effect=_capture_thread,
+            ),
+        ):
+            mock_llm.side_effect = [tool_call_response, text_response]
+            await service.compose(user_message, [], state)
+
+        assert tool_execution_thread is not None, "execute_tool was never called"
+        assert tool_execution_thread is not event_loop_thread, (
+            "execute_tool ran on the event loop thread — must be offloaded to a worker thread to avoid blocking"
         )
-        text = _make_llm_response(content="Here are the sources.")
+
+    @pytest.mark.asyncio
+    async def test_discovery_tool_runs_off_event_loop_thread(self) -> None:
+        """Discovery tools run in a worker thread (read-only I/O)."""
+        await self._assert_tool_runs_off_event_loop(
+            tool_call_response=_make_llm_response(
+                tool_calls=[{"id": "c1", "name": "list_sources", "arguments": {}}],
+            ),
+            text_response=_make_llm_response(content="Here are the sources."),
+            user_message="List sources",
+        )
+
+    @pytest.mark.asyncio
+    async def test_mutation_tool_runs_off_event_loop_thread(self) -> None:
+        """Mutation tools run in a worker thread (blob/secret I/O).
+
+        Previously only discovery tools were offloaded; mutation tools
+        ran synchronously on the event loop, blocking all concurrent
+        requests in the single-process server.
+        """
+        await self._assert_tool_runs_off_event_loop(
+            tool_call_response=_make_llm_response(
+                tool_calls=[
+                    {
+                        "id": "c1",
+                        "name": "set_source",
+                        "arguments": {
+                            "plugin": "csv",
+                            "on_success": "out",
+                            "options": {"path": "/data/blobs/f.csv", "schema": {"mode": "observed"}},
+                            "on_validation_failure": "quarantine",
+                        },
+                    }
+                ],
+            ),
+            text_response=_make_llm_response(content="Source configured."),
+            user_message="Set CSV source",
+        )
+
+    @pytest.mark.asyncio
+    async def test_event_loop_not_blocked_during_tool_execution(self) -> None:
+        """Heartbeat regression: compose() must not block the event loop.
+
+        Runs compose() alongside an async heartbeat coroutine. If the
+        heartbeat fires on schedule (not delayed by blocking tool work),
+        the event loop was free during tool execution.
+        """
+        import time
+
+        catalog = _mock_catalog()
+        settings = _make_settings()
+        service = ComposerServiceImpl(catalog=catalog, settings=settings)
+        state = _empty_state()
+
+        # Blocking duration must be much larger than the gap threshold
+        # to avoid false positives on slow/shared CI runners where OS
+        # scheduler jitter can delay asyncio.sleep wakeups by 50-100ms.
+        tool_block_seconds = 1.0
+        heartbeat_interval = 0.05
+
+        def _blocking_tool(
+            _tool_name: str,
+            _arguments: dict[str, Any],
+            current_state: CompositionState,
+            _catalog: Any,
+            **kwargs: Any,
+        ) -> ToolResult:
+            time.sleep(tool_block_seconds)
+            return ToolResult(
+                success=True,
+                updated_state=current_state,
+                validation=current_state.validate(),
+                affected_nodes=("source",),
+                data=None,
+            )
+
+        heartbeat_times: list[float] = []
+
+        async def heartbeat() -> None:
+            while True:
+                heartbeat_times.append(time.monotonic())
+                await asyncio.sleep(heartbeat_interval)
+
+        # Use a mutation tool — the original bug was specifically about
+        # mutation tools running synchronously on the event loop.
+        tool_call = _make_llm_response(
+            tool_calls=[
+                {
+                    "id": "c1",
+                    "name": "set_source",
+                    "arguments": {
+                        "plugin": "csv",
+                        "on_success": "out",
+                        "options": {"path": "/data/blobs/f.csv", "schema": {"mode": "observed"}},
+                        "on_validation_failure": "quarantine",
+                    },
+                }
+            ],
+        )
+        text = _make_llm_response(content="Done.")
 
         with (
             patch.object(service, "_call_llm", new_callable=AsyncMock) as mock_llm,
             patch(
                 "elspeth.web.composer.service.execute_tool",
-                side_effect=_capture_thread_and_return,
+                side_effect=_blocking_tool,
             ),
         ):
-            mock_llm.side_effect = [disc_call, text]
-            result = await service.compose("List sources", [], state)
+            mock_llm.side_effect = [tool_call, text]
+            hb_task = asyncio.create_task(heartbeat())
+            try:
+                await service.compose("List sources", [], state)
+            finally:
+                hb_task.cancel()
+                with contextlib.suppress(asyncio.CancelledError):
+                    await hb_task
 
-        assert result.message == "Here are the sources."
-        assert tool_execution_thread is not None, "execute_tool was never called"
-        assert tool_execution_thread is not event_loop_thread, (
-            "execute_tool ran on the event loop thread — must be offloaded to a worker thread to avoid blocking"
+        # With 1.0s block and 50ms interval we expect ~20 heartbeats.
+        # Require at least 4 to catch partial stalls, not just total seizure.
+        min_expected = int(tool_block_seconds / heartbeat_interval) - 2
+        assert len(heartbeat_times) >= min(min_expected, 4), (
+            f"Only {len(heartbeat_times)} heartbeat(s) fired during {tool_block_seconds}s tool execution — event loop was likely blocked"
         )
+
+        # Check that no heartbeat interval exceeds a generous threshold.
+        # If the event loop were blocked, one interval would be ≈ tool_block_seconds.
+        # The 5x multiplier (250ms) gives wide margin for OS scheduler jitter
+        # on shared CI runners while still catching a 1.0s event loop block.
+        max_allowed_gap = heartbeat_interval * 5  # 250ms threshold vs 1.0s block (4x safety)
+        for i in range(1, len(heartbeat_times)):
+            gap = heartbeat_times[i] - heartbeat_times[i - 1]
+            assert gap < max_allowed_gap, (
+                f"Heartbeat gap {gap:.3f}s exceeds {max_allowed_gap:.3f}s — event loop was blocked (tool takes {tool_block_seconds}s)"
+            )
