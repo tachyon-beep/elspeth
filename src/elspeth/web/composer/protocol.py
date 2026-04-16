@@ -57,6 +57,40 @@ class ComposerConvergenceError(ComposerServiceError):
         self.partial_state = partial_state
 
 
+class ToolArgumentError(Exception):
+    """Raised by a tool handler when LLM-supplied arguments are unusable.
+
+    Signals a Tier-3 boundary failure: the LLM provided arguments of the
+    wrong type, or semantically invalid values that the handler cannot
+    coerce. The compose loop catches this exception and returns the
+    message to the LLM as a tool error so it can retry.
+
+    This is the ONLY exception class the compose loop catches around
+    execute_tool(). Any other TypeError/ValueError/UnicodeError/KeyError
+    escaping a tool handler is a plugin bug and MUST crash — per
+    CLAUDE.md, plugin bugs that silently produce wrong results are worse
+    than a crash because they pollute the audit trail with confidently
+    wrong data.
+
+    Inheritance rationale: this class inherits from ``Exception`` directly,
+    NOT from ``ComposerServiceError``. A handler-internal signal caught by
+    the compose loop must not be absorbed by the route-level
+    ``except ComposerServiceError`` block (routes.py:390/505), which would
+    silently convert an escaped ToolArgumentError into a 502 — recreating
+    the laundering pattern the compose-loop narrowing is designed to
+    eliminate. If a ToolArgumentError ever escapes ``_compose_loop``, that
+    is a compose-loop bug: FastAPI's default handler will surface it as
+    an unstructured 500 for investigation, which is the correct failure
+    mode for an invariant violation.
+
+    Handlers that wrap an underlying exception should use::
+
+        raise ToolArgumentError("descriptive message") from exc
+
+    so the cause chain survives ``asyncio.to_thread`` re-raise for audit.
+    """
+
+
 class ComposerSettings(Protocol):
     """Protocol for the settings the composer service needs.
 

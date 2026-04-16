@@ -17,7 +17,12 @@ from elspeth.web.catalog.schemas import (
     PluginSchemaInfo,
     PluginSummary,
 )
-from elspeth.web.composer.protocol import ComposerConvergenceError, ComposerResult, ComposerServiceError
+from elspeth.web.composer.protocol import (
+    ComposerConvergenceError,
+    ComposerResult,
+    ComposerServiceError,
+    ToolArgumentError,
+)
 from elspeth.web.composer.service import ComposerServiceImpl
 from elspeth.web.composer.state import (
     CompositionState,
@@ -1401,3 +1406,46 @@ class TestToolExecutionThreadOffloading:
             assert gap < max_allowed_gap, (
                 f"Heartbeat gap {gap:.3f}s exceeds {max_allowed_gap:.3f}s — event loop was blocked (tool takes {tool_block_seconds}s)"
             )
+
+
+class TestToolArgumentError:
+    """ToolArgumentError is a composer-domain exception for Tier-3 boundary failures.
+
+    It signals that a tool handler received arguments of the wrong type or
+    with semantically invalid values that could not be coerced. The compose
+    loop catches this and feeds the message back to the LLM for retry. Any
+    OTHER exception escaping execute_tool is a plugin bug and must crash.
+    """
+
+    def test_inherits_from_exception_directly_not_composer_service_error(self) -> None:
+        """ToolArgumentError must NOT inherit from ComposerServiceError.
+
+        If it did, the route-level `except ComposerServiceError` block at
+        routes.py:390 would silently absorb any escaped ToolArgumentError
+        as a 502, recreating the silent-laundering channel this plan closes.
+        Inheriting from Exception directly ensures an escaped
+        ToolArgumentError (a compose-loop bug) surfaces loudly via FastAPI's
+        default handler rather than being masked.
+        """
+        assert issubclass(ToolArgumentError, Exception)
+        assert not issubclass(ToolArgumentError, ComposerServiceError)
+
+    def test_message_preserved(self) -> None:
+        """Constructor accepts a message string; str() returns it unchanged."""
+        exc = ToolArgumentError("content must be a string, got int")
+        assert str(exc) == "content must be a string, got int"
+
+    def test_supports_exception_chaining(self) -> None:
+        """raise ToolArgumentError(...) from exc must preserve __cause__.
+
+        Audit-grade error reporting depends on the cause chain surviving
+        asyncio.to_thread re-raise and the service-level catch.
+        """
+        original = ValueError("bad input")
+        try:
+            try:
+                raise original
+            except ValueError as exc:
+                raise ToolArgumentError("wrapped") from exc
+        except ToolArgumentError as wrapped:
+            assert wrapped.__cause__ is original
