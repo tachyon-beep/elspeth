@@ -273,12 +273,12 @@ allow_hits:
   reason: Sink-side producer parse failures are intentionally converted into blocking ValidationEntry results and the producer is marked uncheckable
   safety: The pipeline remains invalid and downstream sink contract evidence is suppressed for the bad producer
   expires: null
-- key: web/composer/tools.py:R6:_execute_list_models:fp=db8ee148444b8acb
+- key: web/composer/tools.py:R6:_execute_list_models:fp=ddb5ccdd22ed6a5e
   owner: web-composer
   reason: list_models gracefully handles missing litellm — returns empty model list
   safety: ImportError/AttributeError returns empty list; no data fabrication
   expires: null
-- key: web/composer/tools.py:R6:_prevalidate_plugin_options:fp=c56322cf44d1e4b9
+- key: web/composer/tools.py:R6:_prevalidate_plugin_options:fp=a2e85097063154c5
   owner: web-composer
   reason: UnknownPluginTypeError is expected for unrecognised plugin names — lets engine validation catch it later
   safety: Returns None (no pre-validation result); plugin name still validated during full pipeline instantiation

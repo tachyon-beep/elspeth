@@ -22,6 +22,7 @@ from sqlalchemy import Engine, delete, func, select, update
 from elspeth.contracts.freeze import deep_thaw, freeze_fields
 from elspeth.web.blobs.service import _source_references_blob, content_hash, sanitize_filename
 from elspeth.web.catalog.protocol import CatalogService, PluginKind
+from elspeth.web.composer.protocol import ToolArgumentError
 from elspeth.web.composer.redaction import redact_source_storage_path
 from elspeth.web.composer.state import (
     CompositionState,
@@ -1748,9 +1749,18 @@ def _execute_create_blob(
 
     # Tier 3 boundary: LLM can pass wrong types (e.g. int for content).
     # Validate here so .encode() doesn't raise AttributeError, which is
-    # ambiguous (could also mean an internal bug).
+    # ambiguous (could also mean an internal bug). Raise ToolArgumentError
+    # (not TypeError) so the compose loop can distinguish this LLM-side
+    # error from plugin-internal type errors — see protocol.ToolArgumentError.
+    #
+    # IMPORTANT: this guard MUST remain BEFORE the `try: with session_engine.begin()`
+    # block below. The `except Exception: ... raise` cleanup guard inside that
+    # block catches any exception including ToolArgumentError; if this guard
+    # moved inside the try, the cleanup code would run on pure argument
+    # validation failures (no file has been written at that point — cleanup
+    # is a no-op but semantically wrong).
     if not isinstance(content, str):
-        raise TypeError(f"content must be a string, got {type(content).__name__}")
+        raise ToolArgumentError(f"content must be a string, got {type(content).__name__}")
 
     if mime_type not in _ALLOWED_BLOB_MIME_TYPES:
         return _failure_result(
