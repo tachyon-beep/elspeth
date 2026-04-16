@@ -344,12 +344,12 @@ allow_hits:
   reason: ValueError from int() on non-numeric -w arg
   safety: Skips this argv entry
   expires: null
-- key: web/blobs/service.py:R4:BlobServiceImpl:copy_blobs_for_fork:fp=454c0277d0aaa305
+- key: web/blobs/service.py:R4:BlobServiceImpl:copy_blobs_for_fork:fp=3016b298e0ed2afc
   owner: web-blobs
   reason: Best-effort cleanup on fork failure — delete_blob may fail if DB disconnected
   safety: Falls back to file unlink; original error re-raised
   expires: null
-- key: web/blobs/service.py:R4:BlobServiceImpl:finalize_run_output_blobs:_sync:fp=731ad121a5ad872f
+- key: web/blobs/service.py:R4:BlobServiceImpl:finalize_run_output_blobs:_sync:fp=d10df85f1a12eb55
   owner: web-blobs
   reason: Best-effort recovery — marks failed blob as "error" to prevent permanent pending state
   safety: WHERE status='pending' is a no-op if already finalized; failure is recorded in BlobFinalizationResult.errors
@@ -454,12 +454,12 @@ allow_hits:
   reason: Tier 3 — os.environ.get() for optional ELSPETH_ENV
   safety: Returns None when absent; only used for test guard
   expires: null
-- key: web/blobs/service.py:R6:BlobServiceImpl:finalize_run_output_blobs:_sync:fp=cab8aa4ecc87b4bf
+- key: web/blobs/service.py:R6:BlobServiceImpl:finalize_run_output_blobs:_sync:fp=5e84572db8da6697
   owner: web-blobs
   reason: Quota exceeded during finalization marks blob as error instead of crashing run
   safety: Over-quota file deleted; blob marked error; run still finalized
   expires: null
-- key: web/blobs/service.py:R6:BlobServiceImpl:finalize_run_output_blobs:_sync:fp=4beef7e3367f6820
+- key: web/blobs/service.py:R6:BlobServiceImpl:finalize_run_output_blobs:_sync:fp=7fef573079ab5d13
   owner: web-blobs
   reason: Per-blob operational errors caught to prevent one failure from aborting remaining blobs
   safety: Failed blobs moved to "error" status best-effort; errors returned in BlobFinalizationResult
@@ -583,17 +583,17 @@ allow_hits:
     (crash on missing). Only the deployment overlay is optional. Size guard rejects oversized files.
   expires: null
 # Group E: blob service Tier 1 read guards — isinstance assertions on COALESCE(SUM()) output
-- key: web/blobs/service.py:R5:BlobServiceImpl:create_blob:_sync:fp=9cd0efcb6f15ae2d
+- key: web/blobs/service.py:R5:BlobServiceImpl:create_blob:_sync:fp=bccbcb00a0c8b38d
   owner: web-blobs
   reason: Tier 1 read guard — COALESCE(SUM()) must return int; isinstance assertion crashes on anomaly instead of silent coercion
   safety: Assert crashes immediately with diagnostic message; no silent handling
   expires: null
-- key: web/blobs/service.py:R5:BlobServiceImpl:copy_blobs_for_fork:_check_quota:fp=be32f189f8e19d8f
+- key: web/blobs/service.py:R5:BlobServiceImpl:copy_blobs_for_fork:_check_quota:fp=e8d852fa052be572
   owner: web-blobs
   reason: Tier 1 read guard — COALESCE(SUM()) must return int; isinstance assertion crashes on anomaly instead of silent coercion
   safety: Assert crashes immediately with diagnostic message; no silent handling
   expires: null
-- key: web/blobs/service.py:R5:BlobServiceImpl:_finalize_blob_sync:fp=333f52f1782e0edd
+- key: web/blobs/service.py:R5:BlobServiceImpl:_finalize_blob_sync:fp=e0488570dd51d9cf
   owner: web-blobs
   reason: Tier 1 read guard — COALESCE(SUM()) must return int; isinstance assertion crashes on anomaly instead of silent coercion
   safety: Assert crashes immediately with diagnostic message; no silent handling
@@ -640,27 +640,27 @@ allow_hits:
     Cleanup is called on every session delete regardless. Matches ProgressBroadcaster.cleanup_run() pattern.
   safety: Missing key means session was never executed against; no cleanup needed
   expires: null
-- key: web/blobs/service.py:R5:_source_references_blob:fp=c88177a03499a0d7
+- key: web/blobs/service.py:R5:_source_references_blob:fp=b4161741519ddd70
   owner: web-blobs
   reason: Tier 1 assertion — composition_states.source JSON must be dict when non-None; crashes on DB corruption
   safety: Assert raises immediately on type mismatch; not a silent recovery
   expires: null
-- key: web/blobs/service.py:R1:_source_references_blob:fp=7ae5cb7b07e9f3fa
+- key: web/blobs/service.py:R1:_source_references_blob:fp=da241e087c56b7fd
   owner: web-blobs
   reason: JSON column navigation — source.options is optional (file-path sources omit it)
   safety: Returns False (no match) when absent; Tier 1 assert on wrong type if present
   expires: null
-- key: web/blobs/service.py:R5:_source_references_blob:fp=2ae3249836901e23
+- key: web/blobs/service.py:R5:_source_references_blob:fp=ec8a162014a7af20
   owner: web-blobs
   reason: Tier 1 assertion — source.options must be dict when non-None; crashes on DB corruption
   safety: Assert raises immediately on type mismatch; not a silent recovery
   expires: null
-- key: web/blobs/service.py:R1:_source_references_blob:fp=182b044f49852df8
+- key: web/blobs/service.py:R1:_source_references_blob:fp=a69672ebbed320f1
   owner: web-blobs
   reason: JSON column navigation — blob_ref is optional (only present for blob-backed sources)
   safety: Returns False (no match) when absent; correct for file-path sources
   expires: null
-- key: web/blobs/service.py:R1:_source_references_blob:fp=43933fe184389b9e
+- key: web/blobs/service.py:R1:_source_references_blob:fp=46c8fb587764da44
   owner: web-blobs
   reason: JSON column navigation — path/file keys are optional in source options
   safety: Returns False (no match) when absent; correct for sources without path

@@ -345,3 +345,127 @@ class TestIDORProtection:
 
         resp = bob.get(f"/api/sessions/{bob_session}/blobs/{blob['id']}/content")
         assert resp.status_code == 404
+
+
+# ---------------------------------------------------------------------------
+# Blob lifecycle enforcement — download guard (elspeth-182cbb262b)
+# ---------------------------------------------------------------------------
+
+
+class TestDownloadLifecycleGuard:
+    """Download route must reject non-ready blobs with 409 Conflict.
+
+    Bug: elspeth-182cbb262b — download_blob_content serves blobs that
+    are still pending or already error, because the route never enforces
+    the blob lifecycle before reading storage.
+
+    Uses direct DB seeding (not asyncio service calls) to create
+    non-ready blobs — avoids the deprecated asyncio.get_event_loop()
+    pattern and matches the established test style in test_service.py.
+    """
+
+    @staticmethod
+    def _seed_blob(
+        engine,
+        session_id: str,
+        blob_id: str,
+        status: str,
+        storage_path: str,
+        content_hash: str | None = None,
+        size_bytes: int = 0,
+    ) -> None:
+        """Insert a blob row directly into the DB for test setup."""
+        from datetime import UTC, datetime
+
+        from elspeth.web.sessions.models import blobs_table
+
+        with engine.begin() as conn:
+            conn.execute(
+                blobs_table.insert().values(
+                    id=blob_id,
+                    session_id=session_id,
+                    filename="output.csv",
+                    mime_type="text/csv",
+                    size_bytes=size_bytes,
+                    content_hash=content_hash,
+                    storage_path=storage_path,
+                    created_at=datetime.now(UTC),
+                    created_by="pipeline",
+                    source_description="test",
+                    status=status,
+                )
+            )
+
+    def test_download_pending_blob_returns_409(self, tmp_path) -> None:
+        """Pending blob: content not finalized, download must be rejected."""
+        from uuid import uuid4
+
+        app, _, blob_service = _make_app(tmp_path)
+        client = TestClient(app)
+        session_id = _create_session(client)
+
+        blob_id = str(uuid4())
+        storage = tmp_path / "blobs" / session_id / f"{blob_id}_output.csv"
+        storage.parent.mkdir(parents=True, exist_ok=True)
+        storage.write_bytes(b"not-yet-finalized")
+
+        self._seed_blob(blob_service._engine, session_id, blob_id, "pending", str(storage))
+
+        resp = client.get(f"/api/sessions/{session_id}/blobs/{blob_id}/content")
+        assert resp.status_code == 409, f"Expected 409 Conflict for pending blob, got {resp.status_code}"
+        assert "pending" in resp.json()["detail"]
+
+    def test_download_error_blob_returns_409(self, tmp_path) -> None:
+        """Error blob: run failed, content must not be served."""
+        from uuid import uuid4
+
+        app, _, blob_service = _make_app(tmp_path)
+        client = TestClient(app)
+        session_id = _create_session(client)
+
+        blob_id = str(uuid4())
+        storage = tmp_path / "blobs" / session_id / f"{blob_id}_output.csv"
+        storage.parent.mkdir(parents=True, exist_ok=True)
+        storage.write_bytes(b"partial-output")
+
+        self._seed_blob(blob_service._engine, session_id, blob_id, "error", str(storage))
+
+        resp = client.get(f"/api/sessions/{session_id}/blobs/{blob_id}/content")
+        assert resp.status_code == 409, f"Expected 409 Conflict for error blob, got {resp.status_code}"
+        assert "error" in resp.json()["detail"]
+
+    def test_download_ready_blob_still_works(self, tmp_path) -> None:
+        """Sanity check: ready blobs are still downloadable after the guard."""
+        app, _, _ = _make_app(tmp_path)
+        client = TestClient(app)
+        session_id = _create_session(client)
+
+        content = b"col1,col2\n1,2"
+        blob = _upload_blob(client, session_id, content=content)
+
+        resp = client.get(f"/api/sessions/{session_id}/blobs/{blob['id']}/content")
+        assert resp.status_code == 200
+        assert resp.content == content
+
+    def test_download_tampered_blob_returns_500(self, tmp_path) -> None:
+        """Integrity failure: tampered file on disk returns 500, not content."""
+        from pathlib import Path
+
+        app, _, blob_service = _make_app(tmp_path)
+        client = TestClient(app)
+        session_id = _create_session(client)
+
+        # Upload a valid blob, then tamper with the backing file
+        blob = _upload_blob(client, session_id, content=b"original-content")
+        blob_id = blob["id"]
+
+        # Find and tamper the backing file
+        from elspeth.web.sessions.models import blobs_table
+
+        with blob_service._engine.connect() as conn:
+            row = conn.execute(blobs_table.select().where(blobs_table.c.id == blob_id)).first()
+        Path(row.storage_path).write_bytes(b"tampered-content")
+
+        resp = client.get(f"/api/sessions/{session_id}/blobs/{blob_id}/content")
+        assert resp.status_code == 500, f"Expected 500 for tampered blob, got {resp.status_code}"
+        assert "integrity" in resp.json()["detail"].lower()

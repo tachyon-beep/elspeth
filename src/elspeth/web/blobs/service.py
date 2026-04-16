@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import hashlib
+import hmac
 from collections.abc import Callable
 from datetime import UTC, datetime
 from pathlib import Path
@@ -19,6 +20,7 @@ from elspeth.web.blobs.protocol import (
     BlobActiveRunError,
     BlobFinalizationError,
     BlobFinalizationResult,
+    BlobIntegrityError,
     BlobNotFoundError,
     BlobQuotaExceededError,
     BlobRecord,
@@ -285,7 +287,7 @@ class BlobServiceImpl:
                     raise BlobNotFoundError(blob_id_str)
 
                 if row.status != "pending":
-                    raise RuntimeError(f"Cannot finalize blob {blob_id_str} — status is '{row.status}', expected 'pending'")
+                    raise BlobStateError(blob_id_str, f"Cannot finalize blob {blob_id_str} — status is '{row.status}', expected 'pending'")
                 if status not in ("ready", "error"):
                     raise RuntimeError(f"Invalid finalize status '{status}' — must be 'ready' or 'error'")
 
@@ -399,7 +401,19 @@ class BlobServiceImpl:
         await self._run_sync(_sync)
 
     async def read_blob_content(self, blob_id: UUID) -> bytes:
-        """Read the raw content of a blob."""
+        """Read the raw content of a blob.
+
+        Enforces two invariants before returning bytes:
+
+        1. **Lifecycle guard**: only ``ready`` blobs are readable.
+           Pending blobs have no finalized content; error blobs
+           represent failed runs whose output is not trustworthy.
+
+        2. **Integrity verification**: recomputes SHA-256 from the
+           file on disk and compares it to the stored ``content_hash``.
+           A mismatch indicates filesystem corruption, tampering, or
+           a write-path bug — all Tier 1 anomalies.
+        """
         blob_id_str = str(blob_id)
 
         def _sync() -> bytes:
@@ -408,10 +422,31 @@ class BlobServiceImpl:
                 if row is None:
                     raise BlobNotFoundError(blob_id_str)
 
+                # Lifecycle guard — only ready blobs have finalized content
+                if row.status != "ready":
+                    raise BlobStateError(
+                        blob_id_str,
+                        f"Cannot read blob {blob_id_str} — status is '{row.status}', expected 'ready'",
+                    )
+
                 storage = Path(row.storage_path)
                 if not storage.exists():
                     raise BlobNotFoundError(blob_id_str)
-                return storage.read_bytes()
+
+                data = storage.read_bytes()
+
+                # Integrity verification — Tier 1: our data must be pristine.
+                # A ready blob must always have a content_hash — it is set
+                # by create_blob() and required by _finalize_blob_sync()
+                # when transitioning to ready.  NULL here is a DB anomaly.
+                assert row.content_hash is not None, (
+                    f"Tier 1: ready blob {blob_id_str} has NULL content_hash — DB integrity anomaly, cannot verify"
+                )
+                actual = content_hash(data)
+                if not hmac.compare_digest(actual, row.content_hash):
+                    raise BlobIntegrityError(blob_id_str, row.content_hash, actual)
+
+                return data
 
         return await self._run_sync(_sync)
 
@@ -473,7 +508,10 @@ class BlobServiceImpl:
         On success: compute content_hash and size_bytes from the backing
         file, set status to 'ready'. If the file wasn't written, mark
         as 'error'.
-        On failure: set status to 'error', leave size/hash as None.
+        On failure: delete the backing file (if any) and set status to
+        'error', leaving size/hash as None.  This ensures the filesystem
+        matches the DB metadata and prevents orphaned files from escaping
+        quota accounting.
 
         Processes each blob independently — a per-blob operational error
         does not abort finalization of remaining blobs.  Failed blobs are
@@ -525,6 +563,15 @@ class BlobServiceImpl:
                         else:
                             record = self._finalize_blob_sync(blob_id, "error")
                     else:
+                        # Run failed — delete the backing file so the
+                        # filesystem matches the DB metadata (size_bytes=0,
+                        # content_hash=None).  Without this, repeated
+                        # failed runs can grow disk usage without bound
+                        # while quota accounting sees only zero-byte
+                        # error rows.
+                        failed_storage = Path(row.storage_path)
+                        if failed_storage.exists():
+                            failed_storage.unlink()
                         record = self._finalize_blob_sync(blob_id, "error")
                     finalized.append(record)
                 except self._PER_BLOB_SUPPRESSED as exc:
@@ -643,6 +690,14 @@ class BlobServiceImpl:
                 raise BlobStateError(blob_id_str, f"Cannot finalize blob {blob_id_str} — status is '{row.status}', expected 'pending'")
             if status not in ("ready", "error"):
                 raise BlobStateError(blob_id_str, f"Invalid finalize status '{status}' — must be 'ready' or 'error'")
+
+            # A ready blob must carry a content_hash — this is the
+            # write-side invariant that guarantees read_blob_content()
+            # can always verify integrity.
+            if status == "ready":
+                assert content_hash_val is not None, (
+                    f"Tier 1: finalizing blob {blob_id_str} as ready without content_hash — audit integrity requires a hash"
+                )
 
             # Enforce quota when finalizing with a real size — pending blobs
             # were reserved at size_bytes=0, so this is the first time the

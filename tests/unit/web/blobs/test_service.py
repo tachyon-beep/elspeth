@@ -633,7 +633,9 @@ class TestFinalizeBlob:
         )
         assert record.status == "ready"
 
-        with pytest.raises(RuntimeError, match="expected 'pending'"):
+        from elspeth.web.blobs.protocol import BlobStateError
+
+        with pytest.raises(BlobStateError, match="expected 'pending'"):
             await blob_service.finalize_blob(
                 blob_id=record.id,
                 status="ready",
@@ -1301,3 +1303,231 @@ class TestFinalizeRunOutputBlobsPartialFailure:
                 await blob_service.finalize_run_output_blobs(run_id, success=True)
         finally:
             blob_service._finalize_blob_sync = original
+
+
+# ---------------------------------------------------------------------------
+# read_blob_content — lifecycle and integrity guards (elspeth-6082ad9636)
+# ---------------------------------------------------------------------------
+
+
+class TestReadBlobContentLifecycleGuard:
+    """read_blob_content must enforce blob lifecycle state and content integrity.
+
+    Bug: elspeth-6082ad9636 — read_blob_content() returns bytes without
+    checking blob status or verifying the stored content_hash.
+    """
+
+    @pytest.mark.asyncio
+    async def test_rejects_pending_blob(self, blob_service, session_id) -> None:
+        """Pending blobs have no finalized content — reading must fail."""
+        from pathlib import Path as _Path
+
+        from elspeth.web.blobs.protocol import BlobStateError
+
+        pending = await blob_service.create_pending_blob(
+            session_id=session_id,
+            filename="output.csv",
+            mime_type="text/csv",
+            created_by="pipeline",
+        )
+        # Write a file so the only guard is status, not file existence
+        _Path(pending.storage_path).write_bytes(b"partial-content")
+
+        with pytest.raises(BlobStateError):
+            await blob_service.read_blob_content(pending.id)
+
+    @pytest.mark.asyncio
+    async def test_rejects_error_blob(self, blob_service, session_id) -> None:
+        """Error blobs represent failed runs — content must not be served."""
+        from pathlib import Path as _Path
+
+        from elspeth.web.blobs.protocol import BlobStateError
+
+        pending = await blob_service.create_pending_blob(
+            session_id=session_id,
+            filename="output.csv",
+            mime_type="text/csv",
+            created_by="pipeline",
+        )
+        _Path(pending.storage_path).write_bytes(b"partial-content")
+        await blob_service.finalize_blob(pending.id, status="error")
+
+        with pytest.raises(BlobStateError):
+            await blob_service.read_blob_content(pending.id)
+
+    @pytest.mark.asyncio
+    async def test_detects_content_hash_mismatch(self, blob_service, session_id) -> None:
+        """Tier 1 integrity: if stored hash doesn't match file bytes, crash."""
+        from pathlib import Path as _Path
+
+        from elspeth.web.blobs.protocol import BlobIntegrityError
+
+        record = await blob_service.create_blob(
+            session_id=session_id,
+            filename="tampered.csv",
+            content=b"original-content",
+            mime_type="text/csv",
+            created_by="user",
+        )
+        assert record.status == "ready"
+        assert record.content_hash is not None
+
+        # Tamper with the file on disk after creation
+        _Path(record.storage_path).write_bytes(b"tampered-content")
+
+        with pytest.raises(BlobIntegrityError):
+            await blob_service.read_blob_content(record.id)
+
+    @pytest.mark.asyncio
+    async def test_rejects_pending_blob_without_file(self, blob_service, session_id) -> None:
+        """Pending blob with no file must raise BlobStateError, not BlobNotFoundError.
+
+        Guards exception ordering: the status check must fire before
+        the file-existence check, otherwise a missing file would mask
+        the lifecycle violation.
+        """
+        from elspeth.web.blobs.protocol import BlobStateError
+
+        pending = await blob_service.create_pending_blob(
+            session_id=session_id,
+            filename="no-file.csv",
+            mime_type="text/csv",
+            created_by="pipeline",
+        )
+        # Deliberately do NOT write a file
+
+        with pytest.raises(BlobStateError, match="expected 'ready'"):
+            await blob_service.read_blob_content(pending.id)
+
+    @pytest.mark.asyncio
+    async def test_ready_blob_with_valid_hash_succeeds(self, blob_service, session_id) -> None:
+        """Ready blob with matching hash returns content normally."""
+        content = b"valid-content"
+        record = await blob_service.create_blob(
+            session_id=session_id,
+            filename="good.csv",
+            content=content,
+            mime_type="text/csv",
+            created_by="user",
+        )
+
+        result = await blob_service.read_blob_content(record.id)
+        assert result == content
+
+
+# ---------------------------------------------------------------------------
+# finalize_run_output_blobs — error path file cleanup (elspeth-0a2644dcb9)
+# ---------------------------------------------------------------------------
+
+
+class TestFinalizeRunOutputBlobsErrorCleanup:
+    """Failed run outputs must not leave orphaned backing files.
+
+    Bug: elspeth-0a2644dcb9 — finalize to "error" only updates metadata,
+    leaving the backing file on disk while size_bytes=0 and content_hash=None.
+    """
+
+    @pytest.fixture()
+    def run_env(self, blob_service, session_id, db_engine):
+        """Set up a composition state and run, return (run_id, session_id_str)."""
+        from elspeth.web.sessions.models import (
+            composition_states_table,
+            runs_table,
+        )
+
+        state_id = str(uuid4())
+        session_id_str = str(session_id)
+        run_id = str(uuid4())
+
+        with db_engine.begin() as conn:
+            conn.execute(
+                composition_states_table.insert().values(
+                    id=state_id,
+                    session_id=session_id_str,
+                    version=1,
+                    is_valid=True,
+                    created_at=datetime(2026, 1, 1, tzinfo=UTC),
+                )
+            )
+            conn.execute(
+                runs_table.insert().values(
+                    id=run_id,
+                    session_id=session_id_str,
+                    state_id=state_id,
+                    status="running",
+                    started_at=datetime(2026, 1, 1, tzinfo=UTC),
+                    rows_processed=0,
+                    rows_failed=0,
+                )
+            )
+        return UUID(run_id), session_id_str
+
+    @pytest.mark.asyncio
+    async def test_failure_deletes_backing_file(self, blob_service, session_id, db_engine, run_env) -> None:
+        """When run fails, backing file must be deleted — not left orphaned."""
+        from pathlib import Path as _Path
+
+        from elspeth.web.sessions.models import blob_run_links_table
+
+        run_id, _ = run_env
+
+        pending = await blob_service.create_pending_blob(
+            session_id=session_id,
+            filename="output.csv",
+            mime_type="text/csv",
+            created_by="pipeline",
+        )
+
+        # Simulate sink writing partial output before run failure
+        storage = _Path(pending.storage_path)
+        storage.write_bytes(b"partial-output-before-crash")
+        assert storage.exists()
+
+        with db_engine.begin() as conn:
+            conn.execute(
+                blob_run_links_table.insert().values(
+                    blob_id=str(pending.id),
+                    run_id=str(run_id),
+                    direction="output",
+                )
+            )
+
+        result = await blob_service.finalize_run_output_blobs(run_id, success=False)
+        assert len(result.finalized) == 1
+        blob_result = result.finalized[0]
+        assert blob_result.status == "error"
+
+        # THE BUG: file must NOT exist after error finalization
+        assert not storage.exists(), "Backing file still exists after error finalization — orphaned file will escape quota accounting"
+
+        # Metadata must reflect no content — size_bytes=0, content_hash=None.
+        # If these don't match, quota accounting diverges from filesystem.
+        assert blob_result.size_bytes == 0, f"Expected size_bytes=0 for error blob, got {blob_result.size_bytes}"
+        assert blob_result.content_hash is None, f"Expected content_hash=None for error blob, got {blob_result.content_hash}"
+
+    @pytest.mark.asyncio
+    async def test_failure_without_file_still_sets_error(self, blob_service, session_id, db_engine, run_env) -> None:
+        """When run fails and no file was written, status is still error (no crash)."""
+        from elspeth.web.sessions.models import blob_run_links_table
+
+        run_id, _ = run_env
+
+        pending = await blob_service.create_pending_blob(
+            session_id=session_id,
+            filename="never-written.csv",
+            mime_type="text/csv",
+            created_by="pipeline",
+        )
+
+        with db_engine.begin() as conn:
+            conn.execute(
+                blob_run_links_table.insert().values(
+                    blob_id=str(pending.id),
+                    run_id=str(run_id),
+                    direction="output",
+                )
+            )
+
+        result = await blob_service.finalize_run_output_blobs(run_id, success=False)
+        assert len(result.finalized) == 1
+        assert result.finalized[0].status == "error"

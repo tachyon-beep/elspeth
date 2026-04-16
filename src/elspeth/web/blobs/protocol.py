@@ -121,6 +121,24 @@ class BlobStateError(Exception):
         super().__init__(message)
 
 
+class BlobIntegrityError(Exception):
+    """Raised when a blob's on-disk content does not match its stored hash.
+
+    This is a Tier 1 integrity violation: we wrote both the file and the
+    hash, so a mismatch means filesystem corruption, tampering, or a bug
+    in our write path.  The web layer should return 500 (not suppress it).
+
+    Deliberately NOT in BlobServiceImpl._PER_BLOB_SUPPRESSED — integrity
+    failures must propagate, never be swallowed.
+    """
+
+    def __init__(self, blob_id: str, expected: str, actual: str) -> None:
+        self.blob_id = blob_id
+        self.expected_hash = expected
+        self.actual_hash = actual
+        super().__init__(f"Blob {blob_id} content integrity failure: stored hash {expected[:16]}... != computed hash {actual[:16]}...")
+
+
 @dataclass(frozen=True, slots=True)
 class BlobFinalizationError:
     """Record of a per-blob finalization failure.
@@ -219,7 +237,12 @@ class BlobServiceProtocol(Protocol):
     async def read_blob_content(self, blob_id: UUID) -> bytes:
         """Read the raw content of a blob.
 
+        Only ``ready`` blobs are readable.  Verifies the stored
+        ``content_hash`` against the bytes on disk before returning.
+
         Raises BlobNotFoundError if the blob doesn't exist.
+        Raises BlobStateError if the blob is not in ``ready`` status.
+        Raises BlobIntegrityError if the content hash doesn't match.
         """
         ...
 

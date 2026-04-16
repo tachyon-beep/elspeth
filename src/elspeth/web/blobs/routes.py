@@ -18,9 +18,11 @@ from elspeth.web.auth.models import UserIdentity
 from elspeth.web.blobs.protocol import (
     ALLOWED_MIME_TYPES,
     BlobActiveRunError,
+    BlobIntegrityError,
     BlobNotFoundError,
     BlobQuotaExceededError,
     BlobRecord,
+    BlobStateError,
 )
 from elspeth.web.blobs.schemas import BlobMetadataResponse, CreateInlineBlobRequest
 from elspeth.web.blobs.service import BlobServiceImpl
@@ -224,14 +226,39 @@ def create_blobs_router() -> APIRouter:
         request: Request,
         user: UserIdentity = Depends(get_current_user),  # noqa: B008
     ) -> Response:
-        """Download blob content."""
+        """Download blob content.
+
+        Enforces lifecycle state before reading: only ``ready`` blobs
+        are downloadable.  Pending/error blobs return 409 (the resource
+        exists but its state precludes the operation).
+        """
         blob_service = await _verify_session_and_get_blob_service(session_id, user, request)
         blob = await _get_owned_blob(blob_service, session_id, blob_id)
+
+        # Lifecycle guard — defense-in-depth (service layer also checks)
+        if blob.status != "ready":
+            raise HTTPException(
+                status_code=409,
+                detail=f"Blob is in '{blob.status}' state and is not downloadable",
+            )
 
         try:
             content = await blob_service.read_blob_content(blob_id)
         except BlobNotFoundError:
             raise HTTPException(status_code=404, detail="Blob content not found") from None
+        except BlobStateError:
+            # Use a generic message — blob.status was fetched before the
+            # service call and may be stale if a concurrent transition
+            # happened between the route guard and the service read.
+            raise HTTPException(
+                status_code=409,
+                detail="Blob is not in a downloadable state",
+            ) from None
+        except BlobIntegrityError:
+            raise HTTPException(
+                status_code=500,
+                detail="Blob content integrity verification failed",
+            ) from None
 
         return Response(
             content=content,
