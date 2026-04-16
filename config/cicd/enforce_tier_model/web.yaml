@@ -244,32 +244,32 @@ allow_hits:
   reason: Sink-side producer parse failures are intentionally converted into blocking ValidationEntry results and the producer is marked uncheckable
   safety: The pipeline remains invalid and downstream sink contract evidence is suppressed for the bad producer
   expires: null
-- key: web/composer/tools.py:R6:_execute_list_models:fp=4ea514a3ac1f2655
+- key: web/composer/tools.py:R6:_execute_list_models:fp=db8ee148444b8acb
   owner: web-composer
   reason: list_models gracefully handles missing litellm — returns empty model list
   safety: ImportError/AttributeError returns empty list; no data fabrication
   expires: null
-- key: web/composer/tools.py:R6:_prevalidate_plugin_options:fp=fc8016eaf9c18704
+- key: web/composer/tools.py:R6:_prevalidate_plugin_options:fp=c56322cf44d1e4b9
   owner: web-composer
   reason: UnknownPluginTypeError is expected for unrecognised plugin names — lets engine validation catch it later
   safety: Returns None (no pre-validation result); plugin name still validated during full pipeline instantiation
   expires: null
-- key: web/execution/validation.py:R5:validate_pipeline:fp=819a97f2df35d76b
+- key: web/execution/validation.py:R5:validate_pipeline:fp=1a3761bc5c7fc2ba
   owner: web-execution
   reason: isinstance(exc, PluginConfigError) discriminates exception type to extract plugin_name attribute
   safety: Type dispatch for error formatting, not contract masking; both branches produce validation checks
   expires: null
-- key: web/execution/validation.py:R5:validate_pipeline:fp=76fa971fbe4cd0b1
+- key: web/execution/validation.py:R5:validate_pipeline:fp=07b9929a118bfbfa
   owner: web-execution
   reason: isinstance(exc, PluginConfigError) discriminates exception type to prefer cause detail over generic str(exc)
   safety: Type dispatch for error formatting, not contract masking; both branches produce validation checks
   expires: null
-- key: web/execution/validation.py:R1:validate_pipeline:fp=06ac41f797c829ef
+- key: web/execution/validation.py:R1:validate_pipeline:fp=c047b60f14a6dd4c
   owner: web-execution
   reason: Validation checks optional source path/file keys supplied by composition state
   safety: Absent keys are treated honestly as 'no path provided' and the check is recorded as skipped/passed
   expires: null
-- key: web/execution/validation.py:R1:validate_pipeline:fp=ce10014d671ac83f
+- key: web/execution/validation.py:R1:validate_pipeline:fp=16a1203d7e78bd8f
   owner: web-execution
   reason: Validation checks optional output path/file keys supplied by composition state
   safety: Absent keys treated as 'no path provided'; check recorded as skipped/passed
@@ -299,20 +299,25 @@ allow_hits:
   reason: Chained resolution — server store miss returns None; SecretNotFoundError is the expected miss signal
   safety: Only SecretNotFoundError is caught; caller receives None for genuine absence
   expires: null
-- key: web/execution/validation.py:R5:_collect_secret_refs:fp=960090b735d7640d
+- key: web/execution/validation.py:R5:_collect_secret_refs:fp=378ee82e6cb5afc2
   owner: web-execution
   reason: Tree-walk — isinstance(Mapping) dispatches dict/list/scalar branches in recursive config traversal
   safety: No contract masking; structural dispatch on deserialized YAML (Tier 3 data)
   expires: null
-- key: web/execution/validation.py:R5:_collect_secret_refs:fp=d6e0cb4ecbe3b083
+- key: web/execution/validation.py:R5:_collect_secret_refs:fp=80fa6b9d1af5d420
   owner: web-execution
   reason: Tree-walk — isinstance(ref, str) validates secret_ref marker value type
   safety: Non-string ref is silently skipped (malformed marker); no crash masking
   expires: null
-- key: web/execution/validation.py:R5:_collect_secret_refs:fp=99c2c0044b696b0b
+- key: web/execution/validation.py:R5:_collect_secret_refs:fp=a63c32d5ce6bbef3
   owner: web-execution
   reason: Tree-walk — isinstance() dispatches list/tuple branch in recursive config traversal
   safety: No contract masking; structural dispatch on deserialized YAML (Tier 3 data)
+  expires: null
+- key: web/execution/validation.py:R5:validate_pipeline:fp=4fda2e4c93eca3d8
+  owner: web-execution
+  reason: isinstance(config_dict, dict) validates YAML parse output before resolve_secret_refs — yaml.safe_load can return non-dict for malformed input
+  safety: Raises TypeError with diagnostic message; no error suppression
   expires: null
 - key: web/app.py:R1:create_app:fp=ad5b8e95fea97d8c
   owner: web-app
@@ -613,7 +618,7 @@ allow_hits:
   reason: Unwrapping redact_source_storage_path() output — helper returns dict with "source" key; .get() with fallback to original is defensive against helper contract change
   safety: Falls back to unredacted source_data (less privacy, not less safety)
   expires: null
-- key: web/execution/validation.py:R5:_infer_component_type_from_plugin_error:fp=13660ad4db709533
+- key: web/execution/validation.py:R5:_infer_component_type_from_plugin_error:fp=5d76165931060571
   owner: web-validation
   reason: Union type dispatch — function receives PluginNotFoundError | PluginConfigError, isinstance needed to read component_type attribute only present on PluginConfigError
   safety: Returns None for non-matching type; no error suppression

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import pytest
 import yaml
 
 from elspeth.web.composer.state import (
@@ -400,6 +401,80 @@ class TestGenerateYaml:
         yaml_str = generate_yaml(state)
         parsed = yaml.safe_load(yaml_str)
         assert parsed["aggregations"][0]["on_error"] == "discard"
+
+    def test_on_error_none_raises_for_transform(self) -> None:
+        """on_error=None on a transform is a contract violation — generator must crash.
+
+        The "discard" default belongs at the mutation boundary (upsert_node),
+        not at the serialization layer. If on_error is still None here,
+        upstream code has a bug.
+        """
+        state = CompositionState(
+            source=SourceSpec(
+                plugin="csv",
+                on_success="t1",
+                options={},
+                on_validation_failure="quarantine",
+            ),
+            nodes=(
+                NodeSpec(
+                    id="t1",
+                    node_type="transform",
+                    plugin="uppercase",
+                    input="in",
+                    on_success="out",
+                    on_error=None,
+                    options={},
+                    condition=None,
+                    routes=None,
+                    fork_to=None,
+                    branches=None,
+                    policy=None,
+                    merge=None,
+                ),
+            ),
+            edges=(),
+            outputs=(OutputSpec(name="out", plugin="csv", options={}, on_write_failure="discard"),),
+            metadata=PipelineMetadata(),
+            version=1,
+        )
+        with pytest.raises(ValueError, match="on_error=None"):
+            generate_yaml(state)
+
+    def test_on_error_none_raises_for_aggregation(self) -> None:
+        """on_error=None on an aggregation is a contract violation — generator must crash."""
+        state = CompositionState(
+            source=SourceSpec(
+                plugin="csv",
+                on_success="agg1",
+                options={},
+                on_validation_failure="quarantine",
+            ),
+            nodes=(
+                NodeSpec(
+                    id="agg1",
+                    node_type="aggregation",
+                    plugin="batch_counter",
+                    input="in",
+                    on_success="out",
+                    on_error=None,
+                    options={"batch_size": 10},
+                    condition=None,
+                    routes=None,
+                    fork_to=None,
+                    branches=None,
+                    policy=None,
+                    merge=None,
+                    trigger={"count": 5},
+                ),
+            ),
+            edges=(),
+            outputs=(OutputSpec(name="out", plugin="csv", options={}, on_write_failure="discard"),),
+            metadata=PipelineMetadata(),
+            version=1,
+        )
+        with pytest.raises(ValueError, match="on_error=None"):
+            generate_yaml(state)
 
     def test_aggregation_without_trigger_omits_key(self) -> None:
         """Aggregation with trigger=None must not crash yaml_generator."""

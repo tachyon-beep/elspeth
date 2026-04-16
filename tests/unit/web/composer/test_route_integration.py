@@ -65,7 +65,7 @@ def _make_populated_state() -> CompositionState:
         plugin="uppercase",
         input="source_out",
         on_success="sink_out",
-        on_error=None,
+        on_error="discard",
         options={"field": "name"},
         condition=None,
         routes=None,

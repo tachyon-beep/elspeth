@@ -1029,6 +1029,7 @@ def _mutation_result(
     affected: tuple[str, ...],
     *,
     prior_validation: ValidationSummary | None = None,
+    data: Any = None,
 ) -> ToolResult:
     """Build a ToolResult for a successful mutation."""
     validation = new_state.validate()
@@ -1038,7 +1039,33 @@ def _mutation_result(
         validation=validation,
         affected_nodes=affected,
         prior_validation=prior_validation,
+        data=data,
     )
+
+
+def _vf_destination_note(
+    state: CompositionState,
+    on_vf: str,
+) -> dict[str, str] | None:
+    """Advisory note when on_validation_failure references an unknown output.
+
+    Returns a dict with a ``note`` key suitable for ``ToolResult.data``,
+    or ``None`` when no advisory is needed (destination is ``"discard"``
+    or matches a configured output).
+    """
+    if on_vf == "discard":
+        return None
+    output_names = {o.name for o in state.outputs}
+    if on_vf not in output_names:
+        current = sorted(output_names) if output_names else "(none)"
+        return {
+            "note": (
+                f"on_validation_failure='{on_vf}' does not match any configured output. "
+                f"Add an output named '{on_vf}' before running the pipeline. "
+                f"Current outputs: {current}."
+            ),
+        }
+    return None
 
 
 def _apply_merge_patch(
@@ -1341,7 +1368,7 @@ def _execute_set_source(
         on_validation_failure=on_vf,
     )
     new_state = state.with_source(source)
-    return _mutation_result(new_state, ("source",))
+    return _mutation_result(new_state, ("source",), data=_vf_destination_note(new_state, on_vf))
 
 
 def _execute_upsert_node(
@@ -1389,7 +1416,7 @@ def _execute_upsert_node(
         plugin=plugin,
         input=args["input"],
         on_success=args.get("on_success"),
-        on_error=args.get("on_error"),
+        on_error=args.get("on_error") or ("discard" if node_type in ("transform", "aggregation") else None),
         options=args.get("options", {}),
         condition=args.get("condition"),
         routes=args.get("routes"),
@@ -1656,7 +1683,7 @@ def _execute_set_source_from_blob(
         on_validation_failure=on_vf,
     )
     new_state = state.with_source(source)
-    return _mutation_result(new_state, ("source",))
+    return _mutation_result(new_state, ("source",), data=_vf_destination_note(new_state, on_vf))
 
 
 _ALLOWED_BLOB_MIME_TYPES: frozenset[str] = frozenset(
@@ -1720,6 +1747,12 @@ def _execute_create_blob(
     filename = arguments["filename"]
     mime_type = arguments["mime_type"]
     content = arguments["content"]
+
+    # Tier 3 boundary: LLM can pass wrong types (e.g. int for content).
+    # Validate here so .encode() doesn't raise AttributeError, which is
+    # ambiguous (could also mean an internal bug).
+    if not isinstance(content, str):
+        raise TypeError(f"content must be a string, got {type(content).__name__}")
 
     if mime_type not in _ALLOWED_BLOB_MIME_TYPES:
         return _failure_result(
@@ -1801,6 +1834,10 @@ def _execute_update_blob(
 
     blob_id = arguments["blob_id"]
     content = arguments["content"]
+
+    # Tier 3 boundary: LLM can pass wrong types (e.g. int for content).
+    if not isinstance(content, str):
+        raise TypeError(f"content must be a string, got {type(content).__name__}")
 
     blob = _sync_get_blob(session_engine, blob_id, session_id)
     if blob is None:
@@ -2191,14 +2228,15 @@ def _execute_set_pipeline(
             branches = n.get("branches")
             if branches is not None:
                 branches = tuple(branches)
+            nt = n["node_type"]
             node_specs.append(
                 NodeSpec(
                     id=n["id"],
-                    node_type=n["node_type"],
+                    node_type=nt,
                     plugin=n.get("plugin"),
                     input=n["input"],
                     on_success=n.get("on_success"),
-                    on_error=n.get("on_error"),
+                    on_error=n.get("on_error") or ("discard" if nt in ("transform", "aggregation") else None),
                     options=n.get("options", {}),
                     condition=n.get("condition"),
                     routes=n.get("routes"),
@@ -2263,7 +2301,11 @@ def _execute_set_pipeline(
 
     # 6. Report all nodes + source + outputs as affected
     affected = ("source", *(n.id for n in node_specs), *(o.name for o in output_specs))
-    return _mutation_result(new_state, affected)
+    return _mutation_result(
+        new_state,
+        affected,
+        data=_vf_destination_note(new_state, src_on_vf),
+    )
 
 
 def _handle_set_pipeline(

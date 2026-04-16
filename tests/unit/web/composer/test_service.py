@@ -558,6 +558,45 @@ class TestComposerErrorHandling:
         assert result.message == "Fixed."
 
     @pytest.mark.asyncio
+    async def test_wrong_type_tool_arg_returns_error(self) -> None:
+        """TypeError from Tier 3 type guard in tool handler is caught, not crash.
+
+        Tool handlers validate LLM-provided argument types at the Tier 3
+        boundary, raising TypeError for wrong types (e.g. int where str
+        expected). This converts ambiguous AttributeError into an
+        explicit boundary failure that the compose loop can safely catch.
+        """
+        catalog = _mock_catalog()
+        settings = _make_settings()
+        service = ComposerServiceImpl(catalog=catalog, settings=settings)
+        state = _empty_state()
+
+        # Turn 1: tool call that triggers TypeError from Tier 3 type guard
+        bad_call = _make_llm_response(
+            tool_calls=[
+                {
+                    "id": "call_bad",
+                    "name": "set_source",
+                    "arguments": {"plugin": "csv", "on_success": "out"},
+                }
+            ],
+        )
+        # Turn 2: LLM self-corrects
+        text = _make_llm_response(content="Fixed.")
+
+        with (
+            patch(
+                "elspeth.web.composer.service.execute_tool",
+                side_effect=TypeError("content must be a string, got int"),
+            ),
+            patch.object(service, "_call_llm", new_callable=AsyncMock) as mock_llm,
+        ):
+            mock_llm.side_effect = [bad_call, text]
+            result = await service.compose("Setup", [], state)
+
+        assert result.message == "Fixed."
+
+    @pytest.mark.asyncio
     async def test_malformed_set_pipeline_nested_required_field_returns_error(self) -> None:
         """Nested required fields in set_pipeline stay recoverable tool errors."""
         catalog = _mock_catalog()

@@ -8,25 +8,26 @@ W18 fix: Only typed exceptions are caught. Bare except Exception is forbidden.
 Unknown exception types propagate as 500 Internal Server Error, signalling
 that this function needs updating — not that the error should be swallowed.
 
-Temp file pattern: load_settings() takes a file path, NOT yaml content.
-YAML is written to a NamedTemporaryFile, the path is passed to load_settings(),
-and the file is deleted in a finally block.
+Settings loading uses load_settings_from_yaml_string() — the same in-memory
+loader as the execution service. This ensures validation exercises the exact
+same code path as execution, and resolved secrets never touch disk.
 """
 
 from __future__ import annotations
 
-import tempfile
 from collections.abc import Mapping
 from pathlib import Path
 from typing import Any
 
+import yaml
 from pydantic import ValidationError as PydanticValidationError
 
 from elspeth.cli_helpers import instantiate_plugins_from_config
 from elspeth.contracts.secrets import WebSecretResolver
-from elspeth.core.config import load_settings
+from elspeth.core.config import load_settings_from_yaml_string
 from elspeth.core.dag.graph import ExecutionGraph
 from elspeth.core.dag.models import GraphValidationError
+from elspeth.core.secrets import resolve_secret_refs
 from elspeth.plugins.infrastructure.config_base import PluginConfigError
 from elspeth.plugins.infrastructure.manager import PluginNotFoundError
 from elspeth.web.composer.state import CompositionState
@@ -113,7 +114,8 @@ def validate_pipeline(
     1. Source path allowlist check (C3/S2 defense-in-depth)
     1b. Secret ref validation (all referenced secrets exist)
     2. Generate YAML from CompositionState
-    3. Write to temp file, load_settings(path) — NOT yaml content
+    3. Load settings via load_settings_from_yaml_string() — resolve secret
+       refs first if present, matching the execution service path exactly
     4. instantiate_plugins_from_config(settings)
     5. ExecutionGraph.from_plugin_instances(bundle fields)
     6. graph.validate() + graph.validate_edge_compatibility()
@@ -130,7 +132,6 @@ def validate_pipeline(
     """
     checks: list[ValidationCheck] = []
     errors: list[ValidationError] = []
-    tmp_path: Path | None = None
 
     # Step 1: Source + sink path allowlist check (C3/S2 defense-in-depth)
     # Any `path` or `file` key in source/sink options must resolve under
@@ -219,9 +220,9 @@ def validate_pipeline(
         )
 
     # Step 1b: Secret ref validation — check all refs are resolvable
+    all_refs: list[str] = []
     if secret_service is not None and user_id is not None:
         # Walk source options, node configs, and output options for secret refs
-        all_refs: list[str] = []
         if state.source is not None:
             all_refs.extend(_collect_secret_refs(state.source.options))
         for node in state.nodes or ():
@@ -269,13 +270,34 @@ def validate_pipeline(
     pipeline_yaml = yaml_generator.generate_yaml(state)
 
     # Step 3: Settings loading
+    #
+    # Always uses load_settings_from_yaml_string() — the same loader the
+    # execution service uses (service.py:537).  This ensures validation
+    # exercises the exact same code path as execution, preventing
+    # false-pass or false-fail results from loader differences.
+    #
+    # When secret refs are present, resolve them before loading.
+    # Resolved secrets stay in process memory — never written to disk.
+    #
+    # SecretResolutionError is NOT caught: if a ref is missing here,
+    # Step 1b's existence check was wrong — that's an internal bug
+    # and must crash per the W18 rule.
     try:
-        tmp_file = tempfile.NamedTemporaryFile(mode="w", suffix=".yaml", delete=False)  # noqa: SIM115
-        tmp_path = Path(tmp_file.name)
-        tmp_file.write(pipeline_yaml)
-        tmp_file.close()
+        settings_yaml = pipeline_yaml
+        if secret_service is not None and user_id is not None and all_refs:
+            config_dict = yaml.safe_load(pipeline_yaml)
+            if not isinstance(config_dict, dict):
+                raise TypeError(
+                    f"generate_yaml() produced non-dict YAML (got {type(config_dict).__name__}) — this is a bug in the YAML generator"
+                )
+            resolved_dict, _resolutions = resolve_secret_refs(
+                config_dict,
+                secret_service,
+                user_id,
+            )
+            settings_yaml = yaml.dump(resolved_dict, default_flow_style=False)
 
-        elspeth_settings = load_settings(tmp_path)
+        elspeth_settings = load_settings_from_yaml_string(settings_yaml)
         checks.append(
             ValidationCheck(
                 name=_CHECK_SETTINGS,
@@ -283,7 +305,7 @@ def validate_pipeline(
                 detail="Settings loaded successfully",
             )
         )
-    except (PydanticValidationError, FileNotFoundError, ValueError) as exc:
+    except (PydanticValidationError, ValueError, TypeError) as exc:
         checks.append(
             ValidationCheck(
                 name=_CHECK_SETTINGS,
@@ -301,9 +323,6 @@ def validate_pipeline(
         )
         checks.extend(_skipped_checks(_CHECK_SETTINGS))
         return ValidationResult(is_valid=False, checks=checks, errors=errors)
-    finally:
-        if tmp_path is not None and tmp_path.exists():
-            tmp_path.unlink()
 
     # Step 4: Plugin instantiation
     try:

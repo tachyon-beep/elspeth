@@ -374,9 +374,11 @@ class ComposerServiceImpl:
                 # TypeError/ValueError are caught because the LLM can
                 # provide wrong value types (e.g. string where list
                 # expected → tuple() fails) or semantically invalid values
-                # (e.g. invalid expression syntax).  KeyError is NOT
-                # caught — after required-arg validation above, any
-                # KeyError is an internal bug.
+                # (e.g. invalid expression syntax).  UnicodeError covers
+                # encoding failures on malformed string data from the LLM.
+                # KeyError and AttributeError are NOT caught — after
+                # required-arg validation above and Tier 3 type guards
+                # in tool handlers, either would be an internal bug.
                 try:
                     if is_discovery_tool(tool_name):
                         result = await asyncio.to_thread(
@@ -405,7 +407,7 @@ class ComposerServiceImpl:
                             user_id=user_id,
                             prior_validation=last_validation,
                         )
-                except (TypeError, ValueError) as exc:
+                except (TypeError, ValueError, UnicodeError) as exc:
                     if not is_discovery_tool(tool_name):
                         turn_has_mutation = True
                     llm_messages.append(

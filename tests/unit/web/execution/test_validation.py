@@ -1,6 +1,6 @@
 """Tests for dry-run validation using real engine code paths.
 
-Validation calls the actual engine functions: load_settings(),
+Validation calls the actual engine functions: load_settings_from_yaml_string(),
 instantiate_plugins_from_config(), ExecutionGraph.from_plugin_instances(),
 graph.validate(). No parallel validation logic exists.
 
@@ -14,6 +14,7 @@ from typing import Any
 from unittest.mock import MagicMock, patch
 
 import pytest
+import yaml
 from pydantic import ValidationError as PydanticValidationError
 
 from elspeth.contracts.secrets import ResolvedSecret
@@ -53,7 +54,7 @@ def _make_node(options: dict[str, Any] | None = None) -> NodeSpec:
         plugin="value_transform",
         input="transform_in",
         on_success="results",
-        on_error=None,
+        on_error="discard",
         options=options or {},
         condition=None,
         routes=None,
@@ -124,8 +125,8 @@ class TestValidatePipelinePathAllowlist:
         settings = _make_settings(data_dir="/tmp/test_data")
         mock_yaml_gen = MagicMock()
         mock_yaml_gen.generate_yaml.return_value = "source:\n  plugin: csv_source"
-        with patch("elspeth.web.execution.validation.load_settings") as mock_load:
-            mock_load.side_effect = FileNotFoundError("no temp file")
+        with patch("elspeth.web.execution.validation.load_settings_from_yaml_string") as mock_load:
+            mock_load.side_effect = ValueError("invalid settings")
             result = validate_pipeline(state, settings, mock_yaml_gen)
         # B11: path check is always recorded — verify it passed
         path_check = next(c for c in result.checks if c.name == "path_allowlist")
@@ -157,8 +158,8 @@ class TestValidatePipelinePathAllowlist:
         settings = _make_settings(data_dir="/tmp/test_data")
         mock_yaml_gen = MagicMock()
         mock_yaml_gen.generate_yaml.return_value = "source:\n  plugin: csv_source"
-        with patch("elspeth.web.execution.validation.load_settings") as mock_load:
-            mock_load.side_effect = FileNotFoundError("no temp file")
+        with patch("elspeth.web.execution.validation.load_settings_from_yaml_string") as mock_load:
+            mock_load.side_effect = ValueError("invalid settings")
             result = validate_pipeline(state, settings, mock_yaml_gen)
         # B11: check IS recorded with passed=True and "skipped" detail
         path_check = next(c for c in result.checks if c.name == "path_allowlist")
@@ -199,8 +200,8 @@ class TestValidatePipelineSinkPathAllowlist:
         settings = _make_settings(data_dir="/tmp/test_data")
         mock_yaml_gen = MagicMock()
         mock_yaml_gen.generate_yaml.return_value = "source:\n  plugin: csv_source"
-        with patch("elspeth.web.execution.validation.load_settings") as mock_load:
-            mock_load.side_effect = FileNotFoundError("no temp file")
+        with patch("elspeth.web.execution.validation.load_settings_from_yaml_string") as mock_load:
+            mock_load.side_effect = ValueError("invalid settings")
             result = validate_pipeline(state, settings, mock_yaml_gen)
         path_check = next(c for c in result.checks if c.name == "path_allowlist")
         assert path_check.passed is True
@@ -214,8 +215,8 @@ class TestValidatePipelineSinkPathAllowlist:
         settings = _make_settings(data_dir="/tmp/test_data")
         mock_yaml_gen = MagicMock()
         mock_yaml_gen.generate_yaml.return_value = "source:\n  plugin: csv_source"
-        with patch("elspeth.web.execution.validation.load_settings") as mock_load:
-            mock_load.side_effect = FileNotFoundError("no temp file")
+        with patch("elspeth.web.execution.validation.load_settings_from_yaml_string") as mock_load:
+            mock_load.side_effect = ValueError("invalid settings")
             result = validate_pipeline(state, settings, mock_yaml_gen)
         path_check = next(c for c in result.checks if c.name == "path_allowlist")
         assert path_check.passed is True
@@ -229,8 +230,8 @@ class TestValidatePipelineSinkPathAllowlist:
         settings = _make_settings(data_dir="/tmp/test_data")
         mock_yaml_gen = MagicMock()
         mock_yaml_gen.generate_yaml.return_value = "source:\n  plugin: csv_source"
-        with patch("elspeth.web.execution.validation.load_settings") as mock_load:
-            mock_load.side_effect = FileNotFoundError("no temp file")
+        with patch("elspeth.web.execution.validation.load_settings_from_yaml_string") as mock_load:
+            mock_load.side_effect = ValueError("invalid settings")
             result = validate_pipeline(state, settings, mock_yaml_gen)
         path_check = next(c for c in result.checks if c.name == "path_allowlist")
         assert path_check.passed is True
@@ -248,8 +249,8 @@ class TestValidatePipelineRelativePaths:
         settings = _make_settings(data_dir="/tmp/test_data")
         mock_yaml_gen = MagicMock()
         mock_yaml_gen.generate_yaml.return_value = "source:\n  plugin: csv_source"
-        with patch("elspeth.web.execution.validation.load_settings") as mock_load:
-            mock_load.side_effect = FileNotFoundError("no temp file")
+        with patch("elspeth.web.execution.validation.load_settings_from_yaml_string") as mock_load:
+            mock_load.side_effect = ValueError("invalid settings")
             result = validate_pipeline(state, settings, mock_yaml_gen)
         path_check = next(c for c in result.checks if c.name == "path_allowlist")
         assert path_check.passed is True
@@ -262,8 +263,8 @@ class TestValidatePipelineRelativePaths:
         settings = _make_settings(data_dir="/tmp/test_data")
         mock_yaml_gen = MagicMock()
         mock_yaml_gen.generate_yaml.return_value = "source:\n  plugin: csv_source"
-        with patch("elspeth.web.execution.validation.load_settings") as mock_load:
-            mock_load.side_effect = FileNotFoundError("no temp file")
+        with patch("elspeth.web.execution.validation.load_settings_from_yaml_string") as mock_load:
+            mock_load.side_effect = ValueError("invalid settings")
             result = validate_pipeline(state, settings, mock_yaml_gen)
         path_check = next(c for c in result.checks if c.name == "path_allowlist")
         assert path_check.passed is True
@@ -289,15 +290,15 @@ class TestValidatePipelineRelativePaths:
         settings = _make_settings(data_dir="/tmp/test_data")
         mock_yaml_gen = MagicMock()
         mock_yaml_gen.generate_yaml.return_value = "source:\n  plugin: csv_source"
-        with patch("elspeth.web.execution.validation.load_settings") as mock_load:
-            mock_load.side_effect = FileNotFoundError("no temp file")
+        with patch("elspeth.web.execution.validation.load_settings_from_yaml_string") as mock_load:
+            mock_load.side_effect = ValueError("invalid settings")
             result = validate_pipeline(state, settings, mock_yaml_gen)
         path_check = next(c for c in result.checks if c.name == "path_allowlist")
         assert path_check.passed is True
 
 
 class TestValidatePipelineSuccess:
-    @patch("elspeth.web.execution.validation.load_settings")
+    @patch("elspeth.web.execution.validation.load_settings_from_yaml_string")
     @patch("elspeth.web.execution.validation.instantiate_plugins_from_config")
     @patch("elspeth.web.execution.validation.ExecutionGraph")
     def test_valid_pipeline_returns_all_checks_passed(
@@ -343,7 +344,7 @@ class TestValidatePipelineSuccess:
 
 
 class TestValidatePipelineSettingsFailure:
-    @patch("elspeth.web.execution.validation.load_settings")
+    @patch("elspeth.web.execution.validation.load_settings_from_yaml_string")
     def test_pydantic_validation_error_short_circuits(
         self,
         mock_load: MagicMock,
@@ -378,14 +379,14 @@ class TestValidatePipelineSettingsFailure:
         assert all(not c.passed for c in skipped)
         assert len(result.errors) >= 1
 
-    @patch("elspeth.web.execution.validation.load_settings")
+    @patch("elspeth.web.execution.validation.load_settings_from_yaml_string")
     def test_file_not_found_error_from_settings(
         self,
         mock_load: MagicMock,
     ) -> None:
         mock_yaml_gen = MagicMock()
         mock_yaml_gen.generate_yaml.return_value = "source: {}"
-        mock_load.side_effect = FileNotFoundError("temp file missing")
+        mock_load.side_effect = ValueError("invalid settings")
 
         state = _make_state()
         settings = _make_settings()
@@ -396,7 +397,7 @@ class TestValidatePipelineSettingsFailure:
 
 
 class TestValidatePipelinePluginFailure:
-    @patch("elspeth.web.execution.validation.load_settings")
+    @patch("elspeth.web.execution.validation.load_settings_from_yaml_string")
     @patch("elspeth.web.execution.validation.instantiate_plugins_from_config")
     def test_unknown_plugin_returns_attributed_error(
         self,
@@ -470,7 +471,7 @@ sinks:
 
 
 class TestValidatePipelineGraphFailure:
-    @patch("elspeth.web.execution.validation.load_settings")
+    @patch("elspeth.web.execution.validation.load_settings_from_yaml_string")
     @patch("elspeth.web.execution.validation.instantiate_plugins_from_config")
     @patch("elspeth.web.execution.validation.ExecutionGraph")
     def test_graph_validation_error_attributed_to_node(
@@ -502,7 +503,7 @@ class TestValidatePipelineGraphFailure:
         assert _check(result, "graph_structure").passed is False
         assert len(result.errors) >= 1
 
-    @patch("elspeth.web.execution.validation.load_settings")
+    @patch("elspeth.web.execution.validation.load_settings_from_yaml_string")
     @patch("elspeth.web.execution.validation.instantiate_plugins_from_config")
     @patch("elspeth.web.execution.validation.ExecutionGraph")
     def test_edge_compatibility_error(
@@ -539,7 +540,7 @@ class TestValidatePipelineGraphFailure:
 class TestValidatePipelineNoBareCatch:
     """W18 fix: unexpected exceptions propagate — no bare except Exception."""
 
-    @patch("elspeth.web.execution.validation.load_settings")
+    @patch("elspeth.web.execution.validation.load_settings_from_yaml_string")
     def test_unexpected_exception_propagates(
         self,
         mock_load: MagicMock,
@@ -555,19 +556,19 @@ class TestValidatePipelineNoBareCatch:
             validate_pipeline(state, settings, mock_yaml_gen)
 
 
-class TestValidatePipelineTempFileCleanup:
-    """Verify temp file is created and cleaned up in finally block."""
+class TestValidatePipelineInMemoryLoading:
+    """Verify settings loading uses in-memory loader, matching execution service."""
 
-    @patch("elspeth.web.execution.validation.load_settings")
+    @patch("elspeth.web.execution.validation.load_settings_from_yaml_string")
     @patch("elspeth.web.execution.validation.instantiate_plugins_from_config")
     @patch("elspeth.web.execution.validation.ExecutionGraph")
-    def test_temp_file_cleaned_up_on_success(
+    def test_settings_loaded_from_yaml_string(
         self,
         mock_graph_cls: MagicMock,
         mock_instantiate: MagicMock,
         mock_load: MagicMock,
-        tmp_path: Path,
     ) -> None:
+        """Settings are loaded via load_settings_from_yaml_string, not file-based."""
         mock_yaml_gen = MagicMock()
         mock_yaml_gen.generate_yaml.return_value = "source:\n  plugin: csv_source"
         mock_settings = MagicMock()
@@ -586,13 +587,11 @@ class TestValidatePipelineTempFileCleanup:
         settings = _make_settings()
         validate_pipeline(state, settings, mock_yaml_gen)
 
-        # load_settings was called with a Path, not YAML content
-        call_args = mock_load.call_args
-        arg = call_args[0][0] if call_args[0] else call_args[1].get("config_path")
-        assert isinstance(arg, Path)
-
-        # The temp file should have been cleaned up
-        assert not arg.exists()
+        # In-memory loader called with YAML string content
+        mock_load.assert_called_once()
+        loaded_yaml = mock_load.call_args.args[0]
+        assert isinstance(loaded_yaml, str)
+        assert "csv_source" in loaded_yaml
 
 
 # ── Secret Ref Helpers ────────────────────────────────────────────────
@@ -691,8 +690,8 @@ class TestValidatePipelineSecretRefs:
         mock_yaml_gen.generate_yaml.return_value = "source:\n  plugin: csv_source"
         secret_svc = FakeSecretService(available_refs={"MY_KEY"})
 
-        with patch("elspeth.web.execution.validation.load_settings") as mock_load:
-            mock_load.side_effect = FileNotFoundError("no temp file")
+        with patch("elspeth.web.execution.validation.load_settings_from_yaml_string") as mock_load:
+            mock_load.side_effect = ValueError("invalid settings")
             result = validate_pipeline(
                 state,
                 settings,
@@ -714,8 +713,8 @@ class TestValidatePipelineSecretRefs:
         mock_yaml_gen = MagicMock()
         mock_yaml_gen.generate_yaml.return_value = "source:\n  plugin: csv_source"
 
-        with patch("elspeth.web.execution.validation.load_settings") as mock_load:
-            mock_load.side_effect = FileNotFoundError("no temp file")
+        with patch("elspeth.web.execution.validation.load_settings_from_yaml_string") as mock_load:
+            mock_load.side_effect = ValueError("invalid settings")
             result = validate_pipeline(state, settings, mock_yaml_gen)
 
         secret_check = next(c for c in result.checks if c.name == "secret_refs")
@@ -788,6 +787,103 @@ class TestValidatePipelineSecretRefs:
         secret_check = next(c for c in result.checks if c.name == "secret_refs")
         assert "REF_B" in secret_check.detail
         assert "REF_A" not in secret_check.detail  # REF_A resolved fine
+
+
+class TestSecretRefResolutionBeforeSettingsLoad:
+    """Regression: secret_ref markers must be resolved before settings loading.
+
+    Without resolution, raw {"secret_ref": "NAME"} markers reach plugin
+    instantiation and fail with PluginConfigError because plugin configs
+    expect string values, not dicts.
+    """
+
+    @patch("elspeth.web.execution.validation.load_settings_from_yaml_string")
+    @patch("elspeth.web.execution.validation.instantiate_plugins_from_config")
+    @patch("elspeth.web.execution.validation.ExecutionGraph")
+    def test_secret_refs_resolved_before_settings_load(
+        self,
+        mock_graph_cls: MagicMock,
+        mock_instantiate: MagicMock,
+        mock_load_string: MagicMock,
+    ) -> None:
+        """When secrets are present, validation resolves them in-memory."""
+        state = _make_state(
+            source_options={"api_key": {"secret_ref": "MY_KEY"}},
+        )
+        settings = _make_settings()
+        mock_yaml_gen = MagicMock()
+        mock_yaml_gen.generate_yaml.return_value = (
+            "source:\n  plugin: csv\n  on_success: transform_in\n"
+            "  on_validation_failure: discard\n  options:\n"
+            "    api_key:\n      secret_ref: MY_KEY\n"
+        )
+        secret_svc = FakeSecretService(available_refs={"MY_KEY"})
+
+        mock_settings = MagicMock()
+        mock_load_string.return_value = mock_settings
+        mock_bundle = MagicMock()
+        mock_instantiate.return_value = mock_bundle
+        mock_graph = MagicMock()
+        mock_graph_cls.from_plugin_instances.return_value = mock_graph
+
+        result = validate_pipeline(
+            state,
+            settings,
+            mock_yaml_gen,
+            secret_service=secret_svc,
+            user_id="user-1",
+        )
+
+        # In-memory loader was used
+        mock_load_string.assert_called_once()
+        # Parse the resolved YAML to verify secret was replaced (not string-scan)
+        resolved_yaml = mock_load_string.call_args.args[0]
+        parsed = yaml.safe_load(resolved_yaml)
+        assert parsed["source"]["options"]["api_key"] == "fake"
+        # Settings load check passed
+        assert _check(result, "settings_load").passed is True
+
+    @patch("elspeth.web.execution.validation.load_settings_from_yaml_string")
+    @patch("elspeth.web.execution.validation.instantiate_plugins_from_config")
+    @patch("elspeth.web.execution.validation.ExecutionGraph")
+    def test_no_secrets_also_uses_in_memory_loader(
+        self,
+        mock_graph_cls: MagicMock,
+        mock_instantiate: MagicMock,
+        mock_load_string: MagicMock,
+    ) -> None:
+        """Without secret refs, validation still uses load_settings_from_yaml_string.
+
+        Both paths (with and without secrets) use the same in-memory loader
+        to ensure validation exercises the exact same code path as execution.
+        """
+        state = _make_state(source_options={"url": "https://example.com/data"})
+        settings = _make_settings()
+        mock_yaml_gen = MagicMock()
+        mock_yaml_gen.generate_yaml.return_value = (
+            "source:\n  plugin: csv\n  on_success: transform_in\n"
+            "  on_validation_failure: discard\n  options:\n"
+            "    url: https://example.com/data\n"
+        )
+
+        mock_settings = MagicMock()
+        mock_load_string.return_value = mock_settings
+        mock_bundle = MagicMock()
+        mock_instantiate.return_value = mock_bundle
+        mock_graph = MagicMock()
+        mock_graph_cls.from_plugin_instances.return_value = mock_graph
+
+        result = validate_pipeline(
+            state,
+            settings,
+            mock_yaml_gen,
+            secret_service=FakeSecretService(available_refs=set()),
+            user_id="user-1",
+        )
+
+        # In-memory loader was used — same path as execution service
+        mock_load_string.assert_called_once()
+        assert _check(result, "settings_load").passed is True
 
 
 class TestInferComponentTypeFromPluginError:

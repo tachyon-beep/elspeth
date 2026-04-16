@@ -231,6 +231,117 @@ class TestSetSource:
         assert "foobar" in result.data["error"].lower()
 
 
+class TestVfDestinationAdvisory:
+    """Advisory note when on_validation_failure references an unknown output.
+
+    The set_source tool schema accepts any string for on_validation_failure
+    (not just 'discard'/'quarantine'). When the value doesn't match a
+    configured output, ToolResult.data includes a note so the LLM can
+    self-correct before pipeline validation fails at engine startup.
+    """
+
+    def test_set_source_unknown_vf_sink_includes_note(self) -> None:
+        """Unknown on_validation_failure destination produces advisory note."""
+        state = _empty_state()
+        catalog = _mock_catalog()
+        result = execute_tool(
+            "set_source",
+            {
+                "plugin": "csv",
+                "on_success": "t1",
+                "options": {"path": "/data/in.csv", "schema": {"mode": "observed"}},
+                "on_validation_failure": "nonexistent",
+            },
+            state,
+            catalog,
+        )
+        assert result.success is True
+        assert result.data is not None
+        assert "nonexistent" in result.data["note"]
+        assert "output" in result.data["note"].lower()
+
+    def test_set_source_discard_vf_no_note(self) -> None:
+        """'discard' is a built-in value — no advisory needed."""
+        state = _empty_state()
+        catalog = _mock_catalog()
+        result = execute_tool(
+            "set_source",
+            {
+                "plugin": "csv",
+                "on_success": "t1",
+                "options": {"path": "/data/in.csv", "schema": {"mode": "observed"}},
+                "on_validation_failure": "discard",
+            },
+            state,
+            catalog,
+        )
+        assert result.success is True
+        assert result.data is None
+
+    def test_set_source_known_vf_sink_no_note(self) -> None:
+        """When the named output exists, no advisory is needed."""
+        state = _empty_state()
+        catalog = _mock_catalog()
+        # First create the output that on_validation_failure will reference.
+        r1 = execute_tool(
+            "set_output",
+            {
+                "sink_name": "quarantine",
+                "plugin": "csv",
+                "options": {"path": "/data/quarantine.csv", "schema": {"mode": "observed"}},
+                "on_write_failure": "discard",
+            },
+            state,
+            catalog,
+        )
+        assert r1.success is True
+        # Now set source referencing the existing output.
+        r2 = execute_tool(
+            "set_source",
+            {
+                "plugin": "csv",
+                "on_success": "t1",
+                "options": {"path": "/data/in.csv", "schema": {"mode": "observed"}},
+                "on_validation_failure": "quarantine",
+            },
+            r1.updated_state,
+            catalog,
+        )
+        assert r2.success is True
+        assert r2.data is None
+
+    def test_set_pipeline_unknown_vf_sink_includes_note(self) -> None:
+        """set_pipeline with unknown on_validation_failure produces advisory."""
+        state = _empty_state()
+        catalog = _mock_catalog()
+        args = _valid_pipeline_args()
+        # Change on_validation_failure to a name that doesn't match any output.
+        args["source"]["on_validation_failure"] = "typo_sink"
+        result = execute_tool("set_pipeline", args, state, catalog)
+        assert result.success is True
+        assert result.data is not None
+        assert "typo_sink" in result.data["note"]
+
+    def test_set_pipeline_vf_matches_output_no_note(self) -> None:
+        """set_pipeline with on_validation_failure matching an output — no note."""
+        state = _empty_state()
+        catalog = _mock_catalog()
+        args = _valid_pipeline_args()
+        # Add a "quarantine" output and reference it from on_validation_failure.
+        args["outputs"].append(
+            {
+                "sink_name": "quarantine",
+                "plugin": "csv",
+                "options": {"path": "/data/quarantine.csv", "schema": {"mode": "observed"}},
+                "on_write_failure": "discard",
+            },
+        )
+        args["source"]["on_validation_failure"] = "quarantine"
+        result = execute_tool("set_pipeline", args, state, catalog)
+        assert result.success is True
+        assert result.data is None
+
+
 class TestUpsertNode:
     def test_adds_new_node(self) -> None:
         state = _empty_state()
@@ -2186,6 +2297,27 @@ class TestBlobTools:
         delta_fresh = result_fresh.to_dict()["validation_delta"]
         delta_threaded = result_threaded.to_dict()["validation_delta"]
         assert delta_fresh == delta_threaded
+
+    def test_set_source_from_blob_unknown_vf_sink_includes_note(self) -> None:
+        """Blob-backed source with unknown on_validation_failure gets advisory note."""
+        state = _empty_state()
+        catalog = _mock_catalog()
+        result = execute_tool(
+            "set_source_from_blob",
+            {
+                "blob_id": self.blob_id,
+                "on_success": "out",
+                "options": {"schema": {"mode": "observed"}},
+                "on_validation_failure": "nonexistent",
+            },
+            state,
+            catalog,
+            session_engine=self.engine,
+            session_id=self.session_id,
+        )
+        assert result.success is True
+        assert result.data is not None
+        assert "nonexistent" in result.data["note"]
 
     def test_create_blob_cleans_file_on_db_failure(self, tmp_path: Path) -> None:
         """DB failure during create_blob must delete the orphaned storage file."""

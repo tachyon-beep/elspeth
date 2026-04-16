@@ -81,6 +81,12 @@ def generate_yaml(state: CompositionState) -> str:
     if transforms:
         doc["transforms"] = []
         for t in transforms:
+            if t["on_error"] is None:
+                raise ValueError(
+                    f"Transform '{t['id']}' has on_error=None — "
+                    f"upsert_node must default this at the mutation boundary, "
+                    f"not leave it for the YAML generator to fabricate"
+                )
             entry: dict[str, Any] = {
                 "name": t["id"],
                 "plugin": t["plugin"],
@@ -115,6 +121,12 @@ def generate_yaml(state: CompositionState) -> str:
     if aggregations:
         doc["aggregations"] = []
         for a in aggregations:
+            if a["on_error"] is None:
+                raise ValueError(
+                    f"Aggregation '{a['id']}' has on_error=None — "
+                    f"upsert_node must default this at the mutation boundary, "
+                    f"not leave it for the YAML generator to fabricate"
+                )
             entry = {
                 "name": a["id"],
                 "plugin": a["plugin"],
