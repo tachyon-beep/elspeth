@@ -789,6 +789,75 @@ class TestValidatePipelineSecretRefs:
         assert "REF_A" not in secret_check.detail  # REF_A resolved fine
 
 
+class TestReservedNameSecretRefPreflight:
+    """Regression: pipeline validation must report reserved-name refs as
+    missing, not crash on the raise that used to fall out of
+    ServerSecretStore.has_secret.
+
+    Uses a real WebSecretService (not the FakeSecretService stand-in)
+    because the regression lives in the production composition path:
+    UserSecretStore.has_secret returns False → OR falls through to
+    ServerSecretStore.has_secret → which used to raise for ELSPETH_*
+    names, propagating out of WebSecretService.has_ref and turning this
+    validation pass into an uncaught 500.
+    """
+
+    def test_elspeth_prefixed_secret_ref_surfaces_as_missing(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+        tmp_path: Path,
+    ) -> None:
+        """Reserved-name ref must appear in missing_refs, not raise.
+
+        The pipeline references {"secret_ref": "ELSPETH_FINGERPRINT_KEY"}.
+        Validation should complete with is_valid=False and a
+        missing_refs entry for that name — the same outcome as any
+        other unresolvable ref.
+        """
+        import sqlalchemy as sa
+
+        from elspeth.web.secrets.server_store import ServerSecretStore
+        from elspeth.web.secrets.service import ScopedSecretResolver, WebSecretService
+        from elspeth.web.secrets.user_store import UserSecretStore
+        from elspeth.web.sessions.models import metadata as session_metadata
+
+        monkeypatch.setenv("ELSPETH_FINGERPRINT_KEY", "validation-regression-fp-key")
+
+        # Build a real session DB and real secret service wiring.
+        db_path = tmp_path / "reserved_ref_validation.db"
+        engine = sa.create_engine(f"sqlite:///{db_path}")
+        session_metadata.create_all(engine)
+
+        user_store = UserSecretStore(engine=engine, master_key="master-32-chars-minimum-length!!")
+        # Empty allowlist — the reserved-name path is independent of allowlist,
+        # but keeping it empty focuses the test on the reserved-name branch.
+        server_store = ServerSecretStore(allowlist=())
+        service = WebSecretService(user_store=user_store, server_store=server_store)
+        resolver = ScopedSecretResolver(service, auth_provider_type="local")
+
+        state = _make_state(
+            source_options={"api_key": {"secret_ref": "ELSPETH_FINGERPRINT_KEY"}},
+        )
+        settings = _make_settings()
+        mock_yaml_gen = MagicMock()
+
+        # Must NOT raise — regression would have surfaced as SecretNotFoundError
+        # propagating out of has_ref inside the missing_refs comprehension.
+        result = validate_pipeline(
+            state,
+            settings,
+            mock_yaml_gen,
+            secret_service=resolver,
+            user_id="user-1",
+        )
+
+        assert result.is_valid is False
+        secret_check = next(c for c in result.checks if c.name == "secret_refs")
+        assert secret_check.passed is False
+        assert "ELSPETH_FINGERPRINT_KEY" in secret_check.detail
+        assert any("ELSPETH_FINGERPRINT_KEY" in e.message for e in result.errors)
+
+
 class TestSecretRefResolutionBeforeSettingsLoad:
     """Regression: secret_ref markers must be resolved before settings loading.
 

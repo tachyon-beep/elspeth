@@ -159,12 +159,20 @@ class TestReservedSecretNames:
         store = ServerSecretStore(allowlist=("elspeth_lowercase_key",))
         assert store._allowlist == ("elspeth_lowercase_key",)
 
-    def test_has_secret_raises_for_reserved_even_if_in_env(
+    def test_has_secret_returns_false_for_reserved_even_if_in_env(
         self, empty_store: ServerSecretStore, monkeypatch: pytest.MonkeyPatch,
     ) -> None:
+        """has_secret() returns False (not raise) for reserved names.
+
+        WebSecretService.has_ref() composes user-scope OR server-scope
+        has_secret() calls — if this path raised, a reserved-name probe
+        with no matching user row would propagate as a 500 through the
+        /api/secrets/validate, wire-secret-ref, and pipeline-validation
+        paths.  get_secret() still raises for reserved names
+        (test_get_secret_rejects_reserved_name).
+        """
         monkeypatch.setenv("ELSPETH_FINGERPRINT_KEY", "secret-fp-key")
-        with pytest.raises(SecretNotFoundError):
-            empty_store.has_secret("ELSPETH_FINGERPRINT_KEY")
+        assert empty_store.has_secret("ELSPETH_FINGERPRINT_KEY") is False
 
     def test_get_secret_rejects_reserved_name(self, store: ServerSecretStore) -> None:
         with pytest.raises(SecretNotFoundError):

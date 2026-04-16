@@ -46,13 +46,21 @@ class ServerSecretStore:
 
         Returns True only when the name is allowlisted, the env var is
         set, AND the fingerprint key is available.  This aligns with
-        get_secret(), which requires all three conditions.
+        get_secret() on the success path.
 
-        Raises:
-            SecretNotFoundError: If *name* is reserved (ELSPETH_* prefix).
+        Reserved (ELSPETH_*) names are never resolvable through this
+        store and return False.  get_secret() continues to raise
+        SecretNotFoundError for them — the asymmetry is deliberate:
+        has_secret() participates in WebSecretService.has_ref()'s boolean
+        composition (user-scope OR server-scope), and raising here would
+        turn a probe into a 500 whenever the user-scope lookup returns
+        False for a reserved name.  On the resolve path, get_secret()'s
+        raise is caught by WebSecretService.resolve() (symmetric with
+        allowlist/env-var misses), keeping the has_ref == True ⟺
+        resolve() != None invariant.
         """
         if _is_reserved(name):
-            raise SecretNotFoundError(name)
+            return False
         return name in self._allowlist and bool(os.environ.get(name)) and _fingerprint_key_available()
 
     def get_secret(self, name: str) -> tuple[str, SecretRef]:

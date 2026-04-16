@@ -294,11 +294,6 @@ allow_hits:
   reason: Tier 3 boundary — os.environ.get() checks deployment env var presence for fingerprint key
   safety: Returns bool only; deployment readiness check; no default fabrication
   expires: null
-- key: web/sessions/migrations/versions/006_add_auth_provider_to_secrets.py:R1:upgrade:fp=03f9253399e57f35
-  owner: web-secrets
-  reason: Alembic config attributes.get() — fallback for CLI-driven or test migrations where run_migrations() did not set auth_provider
-  safety: Falls back to "local" (the default auth_provider in WebSettings); no silent data loss
-  expires: null
 - key: web/secrets/service.py:R6:WebSecretService:resolve:fp=9c915e3f931310ca
   owner: web-secrets
   reason: Chained resolution — user store miss falls through to server store; SecretNotFoundError is the expected miss signal

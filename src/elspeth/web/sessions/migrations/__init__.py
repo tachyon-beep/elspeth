@@ -32,7 +32,7 @@ def _alembic_config(engine: Engine) -> Config:
     return cfg
 
 
-def run_migrations(engine: Engine, *, auth_provider: str = "local") -> None:
+def run_migrations(engine: Engine) -> None:
     """Run all pending migrations against the given engine.
 
     For fresh databases, this creates all tables from scratch.
@@ -48,18 +48,8 @@ def run_migrations(engine: Engine, *, auth_provider: str = "local") -> None:
     directly rather than rebuilding a fresh engine from the rendered URL,
     so StaticPool in-memory databases, connection-local PRAGMAs, and
     password-protected DSNs all round-trip correctly.
-
-    Parameters
-    ----------
-    auth_provider:
-        The deployment's configured auth provider type (e.g. "local",
-        "oidc", "entra").  Passed through to migrations that need to
-        backfill provider-scoped data — migration 006 uses this to stamp
-        existing user_secrets rows with the correct provider instead of
-        unconditionally defaulting to "local".
     """
     cfg = _alembic_config(engine)
-    cfg.attributes["auth_provider"] = auth_provider
     with engine.connect() as connection:
         cfg.attributes["connection"] = connection
         command.upgrade(cfg, "head")

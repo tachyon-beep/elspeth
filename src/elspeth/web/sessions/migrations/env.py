@@ -34,8 +34,32 @@ config = context.config
 
 
 def run_migrations_offline() -> None:
-    """Run migrations in 'offline' mode — emit SQL without a live connection."""
+    """Run migrations in 'offline' mode — emit SQL without a live connection.
+
+    Offline mode has no injected connection to preempt, so the env var
+    override applies directly. Without it, ``alembic upgrade head --sql``
+    would render SQL against ``alembic.ini``'s placeholder URL instead of
+    the operator's intended target — silently producing SQL for the
+    wrong database or dialect.
+
+    Raises
+    ------
+    RuntimeError
+        When neither ``ELSPETH_WEB__SESSION_DB_URL`` nor the ini
+        ``sqlalchemy.url`` resolves to a non-empty value.  Tier 1
+        discipline: crash rather than emit dialect-less SQL.
+    """
+    if "ELSPETH_WEB__SESSION_DB_URL" in os.environ:
+        config.set_main_option("sqlalchemy.url", os.environ["ELSPETH_WEB__SESSION_DB_URL"])
+
     url = config.get_main_option("sqlalchemy.url")
+    if not url:
+        raise RuntimeError(
+            "Alembic offline mode: sqlalchemy.url is not configured. Set "
+            "ELSPETH_WEB__SESSION_DB_URL or populate sqlalchemy.url in "
+            "alembic.ini before generating migration SQL."
+        )
+
     context.configure(
         url=url,
         target_metadata=target_metadata,

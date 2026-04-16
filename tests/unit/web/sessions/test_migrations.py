@@ -98,7 +98,6 @@ def _alembic_config_for(engine) -> Config:
         "sqlalchemy.url",
         engine.url.render_as_string(hide_password=False).replace("%", "%%"),
     )
-    cfg.attributes["auth_provider"] = "local"
     return cfg
 
 
@@ -483,6 +482,261 @@ class TestMigration007IntegrityScan:
 
 
 # ---------------------------------------------------------------------------
+# Migration 006: refuse to fabricate auth_provider ownership on legacy rows
+# ---------------------------------------------------------------------------
+
+
+class TestMigration006RefusesFabrication:
+    """006 must add auth_provider_type without fabricating ownership.
+
+    Pre-006 rows have no auth_provider_type. Backfilling them from the
+    deployment's current auth_provider would assert an ownership the
+    original rows never claimed — a fabrication per CLAUDE.md's
+    fabrication decision test. If an installation changed provider
+    between writing the legacy rows and running the migration, the
+    backfill would silently transfer secrets into the wrong auth
+    namespace. The migration now aborts when legacy rows exist,
+    forcing explicit remediation.
+    """
+
+    def _upgrade_to_005(self, engine: Engine) -> Config:
+        """Bring engine to revision 005 (pre-006 user_secrets shape)."""
+        from alembic import command
+
+        cfg = _alembic_config_for(engine)
+        with engine.connect() as connection:
+            cfg.attributes["connection"] = connection
+            command.upgrade(cfg, "005")
+        return cfg
+
+    def test_upgrade_006_succeeds_on_empty_user_secrets(self) -> None:
+        """Fresh DB: 005 → 006 adds column, unique constraint, and composite index."""
+        from alembic import command
+
+        engine = _fresh_engine()
+        cfg = self._upgrade_to_005(engine)
+        with engine.connect() as connection:
+            cfg.attributes["connection"] = connection
+            command.upgrade(cfg, "006")
+
+        inspector = inspect(engine)
+        cols = {c["name"] for c in inspector.get_columns("user_secrets")}
+        assert "auth_provider_type" in cols
+
+        # New composite unique constraint replaces the name+user_id one.
+        unique_names = {c["name"] for c in inspector.get_unique_constraints("user_secrets")}
+        assert "uq_user_secret_name_user_provider" in unique_names
+        assert "uq_user_secret_name_user" not in unique_names
+
+        # New composite index replaces the user_id-only one.
+        index_names = {idx["name"] for idx in inspector.get_indexes("user_secrets")}
+        assert "ix_user_secrets_user_provider" in index_names
+        assert "ix_user_secrets_user_id" not in index_names
+
+        with engine.connect() as conn:
+            rev = conn.execute(text("SELECT version_num FROM alembic_version")).scalar_one()
+        assert rev == "006"
+
+    def test_upgrade_006_aborts_when_legacy_rows_exist(self) -> None:
+        """Legacy row in user_secrets must cause 006 to raise, not backfill.
+
+        At revision 005 the table has no auth_provider_type column, so a
+        direct INSERT using the 005-shape is accepted. 006's upgrade
+        checks for non-zero row count before altering the schema.
+        """
+        from alembic import command
+
+        engine = _fresh_engine()
+        cfg = self._upgrade_to_005(engine)
+
+        # Raw text() INSERT bypasses SQLAlchemy's DateTime type handler,
+        # so serialize to ISO 8601 ourselves — Python 3.12 deprecated the
+        # default sqlite3 datetime adapter. SQLite stores DateTime columns
+        # as ISO TEXT anyway, so this is identical to what the SA
+        # insert(table).values(...) path produces.
+        now_iso = datetime.now(UTC).isoformat()
+        with engine.begin() as conn:
+            conn.execute(
+                text(
+                    "INSERT INTO user_secrets "
+                    "(id, name, user_id, encrypted_value, salt, created_at, updated_at) "
+                    "VALUES (:id, :name, :user_id, :encrypted_value, :salt, :created_at, :updated_at)"
+                ),
+                {
+                    "id": str(uuid.uuid4()),
+                    "name": "legacy-secret",
+                    "user_id": "u-legacy",
+                    "encrypted_value": b"\x00",
+                    "salt": b"\x00",
+                    "created_at": now_iso,
+                    "updated_at": now_iso,
+                },
+            )
+
+        with pytest.raises(RuntimeError, match=r"Cannot migrate 1 pre-existing user_secrets"), engine.connect() as connection:
+            cfg.attributes["connection"] = connection
+            command.upgrade(cfg, "006")
+
+        # Schema remained at 005 — no silent backfill, no half-migrated state.
+        with engine.connect() as conn:
+            rev = conn.execute(text("SELECT version_num FROM alembic_version")).scalar_one()
+        assert rev == "005"
+        cols_post = {c["name"] for c in inspect(engine).get_columns("user_secrets")}
+        assert "auth_provider_type" not in cols_post
+
+    def test_error_message_names_row_count_and_remediation(self) -> None:
+        """Operator-facing error must disclose count and how to recover.
+
+        A bare 'refused' message leaves the operator guessing. The
+        message must state how many rows are affected and point at
+        delete/remap remediations so recovery is self-service.
+        """
+        from alembic import command
+
+        engine = _fresh_engine()
+        cfg = self._upgrade_to_005(engine)
+
+        # Raw text() INSERT bypasses SQLAlchemy's DateTime type handler,
+        # so serialize to ISO 8601 ourselves — Python 3.12 deprecated the
+        # default sqlite3 datetime adapter.
+        now_iso = datetime.now(UTC).isoformat()
+        with engine.begin() as conn:
+            for i in range(3):
+                conn.execute(
+                    text(
+                        "INSERT INTO user_secrets "
+                        "(id, name, user_id, encrypted_value, salt, created_at, updated_at) "
+                        "VALUES (:id, :name, :user_id, :encrypted_value, :salt, :created_at, :updated_at)"
+                    ),
+                    {
+                        "id": str(uuid.uuid4()),
+                        "name": f"k{i}",
+                        "user_id": "u-legacy",
+                        "encrypted_value": b"\x00",
+                        "salt": b"\x00",
+                        "created_at": now_iso,
+                        "updated_at": now_iso,
+                    },
+                )
+
+        with pytest.raises(RuntimeError) as exc_info, engine.connect() as connection:
+            cfg.attributes["connection"] = connection
+            command.upgrade(cfg, "006")
+
+        msg = str(exc_info.value)
+        assert "3" in msg, f"row count missing from error: {msg!r}"
+        assert "DELETE FROM user_secrets" in msg
+        assert "auth_provider_type" in msg
+
+    def test_downgrade_006_restores_pre_006_shape(self) -> None:
+        """006 → 005 round-trip removes the column and restores constraints."""
+        from alembic import command
+
+        engine = _fresh_engine()
+        run_migrations(engine)  # to head (007)
+
+        cfg = _alembic_config_for(engine)
+        with engine.connect() as connection:
+            cfg.attributes["connection"] = connection
+            command.downgrade(cfg, "005")
+
+        inspector = inspect(engine)
+        cols = {c["name"] for c in inspector.get_columns("user_secrets")}
+        assert "auth_provider_type" not in cols
+        unique_names = {c["name"] for c in inspector.get_unique_constraints("user_secrets")}
+        assert "uq_user_secret_name_user" in unique_names
+        assert "uq_user_secret_name_user_provider" not in unique_names
+
+    def test_post_head_insert_without_auth_provider_type_is_rejected(self) -> None:
+        """NOT NULL (no server default) on auth_provider_type must bite.
+
+        ``models.py`` deliberately removed ``server_default="local"`` so
+        callers cannot silently rely on the fabrication-prone default.
+        The only guarantee stopping a future refactor from quietly
+        reintroducing that default is the INSERT-level NOT NULL
+        constraint.  A raw INSERT omitting ``auth_provider_type`` must
+        raise ``IntegrityError`` — that is the mechanical enforcement of
+        the "no fabrication" invariant.
+        """
+        engine = _fresh_engine()
+        run_migrations(engine)  # to head; post-006 shape is active.
+
+        now_iso = datetime.now(UTC).isoformat()
+        with pytest.raises(IntegrityError), engine.begin() as conn:
+            conn.execute(
+                text(
+                    "INSERT INTO user_secrets "
+                    "(id, name, user_id, encrypted_value, salt, created_at, updated_at) "
+                    "VALUES (:id, :name, :user_id, :encrypted_value, :salt, :created_at, :updated_at)"
+                ),
+                {
+                    "id": str(uuid.uuid4()),
+                    "name": "no-provider",
+                    "user_id": "u-1",
+                    "encrypted_value": b"\x00",
+                    "salt": b"\x00",
+                    "created_at": now_iso,
+                    "updated_at": now_iso,
+                },
+            )
+
+    def test_abort_then_delete_then_rerun_reaches_head(self) -> None:
+        """Operator's documented remediation path must actually work.
+
+        The 006 abort error instructs the operator: "DELETE FROM
+        user_secrets; re-run migrations."  End-to-end proof that this
+        recovers cleanly is load-bearing — if the schema were left in
+        an awkward state by the aborted 006 run, the re-run would fail
+        and the guidance would be a lie.  Sequence:
+          (1) upgrade to 005, insert a legacy row;
+          (2) attempt upgrade to head — RuntimeError from 006;
+          (3) DELETE FROM user_secrets;
+          (4) run_migrations(engine) — must now reach head (007) with
+              the post-006 schema intact.
+        """
+        from alembic import command
+
+        engine = _fresh_engine()
+        cfg = self._upgrade_to_005(engine)
+
+        now_iso = datetime.now(UTC).isoformat()
+        with engine.begin() as conn:
+            conn.execute(
+                text(
+                    "INSERT INTO user_secrets "
+                    "(id, name, user_id, encrypted_value, salt, created_at, updated_at) "
+                    "VALUES (:id, :name, :user_id, :encrypted_value, :salt, :created_at, :updated_at)"
+                ),
+                {
+                    "id": str(uuid.uuid4()),
+                    "name": "legacy",
+                    "user_id": "u-legacy",
+                    "encrypted_value": b"\x00",
+                    "salt": b"\x00",
+                    "created_at": now_iso,
+                    "updated_at": now_iso,
+                },
+            )
+
+        with pytest.raises(RuntimeError), engine.connect() as connection:
+            cfg.attributes["connection"] = connection
+            command.upgrade(cfg, "head")
+
+        # Follow the remediation text literally.
+        with engine.begin() as conn:
+            conn.execute(text("DELETE FROM user_secrets"))
+
+        # Production entry point — must reach head from wherever we are.
+        run_migrations(engine)
+
+        with engine.connect() as conn:
+            rev = conn.execute(text("SELECT version_num FROM alembic_version")).scalar_one()
+        assert rev == "007"
+        cols = {c["name"] for c in inspect(engine).get_columns("user_secrets")}
+        assert "auth_provider_type" in cols
+
+
+# ---------------------------------------------------------------------------
 # Bug 6: migration 007 must preserve all pre-existing indexes
 # ---------------------------------------------------------------------------
 
@@ -686,7 +940,6 @@ class TestCliMigrationPathUsesEngineFactory:
 
         ini_path = Path(__file__).parent.parent.parent.parent.parent / "src" / "elspeth" / "web" / "sessions" / "alembic.ini"
         cfg = Config(str(ini_path))
-        cfg.attributes["auth_provider"] = "local"
         # Deliberately DO NOT set sqlalchemy.url or attributes["connection"]
         # — env.py must resolve from ELSPETH_WEB__SESSION_DB_URL instead.
 
@@ -698,6 +951,129 @@ class TestCliMigrationPathUsesEngineFactory:
         observed_url, _ = observed[0]
         assert str(db_path) in observed_url, (
             f"CLI path built engine with wrong URL: {observed_url!r} does not contain expected path {str(db_path)!r}"
+        )
+
+    def test_offline_mode_honours_env_var_url(self, monkeypatch: pytest.MonkeyPatch, tmp_path) -> None:
+        """``alembic upgrade ... --sql`` must target the env-var URL.
+
+        Regression guard: the env-var override was previously applied at
+        env.py module scope, covering both modes. When it was tightened
+        to live inside ``run_migrations_online()`` to fix the
+        programmatic-override bug, the offline branch stopped honouring
+        the env var and silently rendered SQL against ``alembic.ini``'s
+        placeholder URL instead. Operators generating migration SQL for
+        review would have received output for the wrong database or
+        dialect.
+
+        Detection strategy: spy on ``alembic.context.configure`` — env.py
+        calls it exactly once, passing the URL it resolved. We assert
+        that URL is the env-var value, not the ini fallback. We invoke
+        ``command.upgrade(cfg, 'head:head', sql=True)`` so that no
+        migration ``upgrade()`` body actually runs (offline SQL for an
+        empty delta skips migration bodies — 001's ``sa.inspect()`` on
+        ``op.get_bind()`` would otherwise blow up against Alembic's
+        ``MockConnection``, an orthogonal online-only constraint).
+        """
+        from pathlib import Path
+
+        import alembic.context as alembic_context_mod
+        from alembic import command
+
+        unique_path = tmp_path / "offline-target-sentinel.db"
+        expected_url = f"sqlite:///{unique_path}"
+        monkeypatch.setenv("ELSPETH_WEB__SESSION_DB_URL", expected_url)
+
+        observed: list[dict] = []
+        original_configure = alembic_context_mod.configure
+
+        def spy(*args, **kwargs):
+            observed.append(dict(kwargs))
+            return original_configure(*args, **kwargs)
+
+        monkeypatch.setattr(alembic_context_mod, "configure", spy)
+
+        ini_path = Path(__file__).parent.parent.parent.parent.parent / "src" / "elspeth" / "web" / "sessions" / "alembic.ini"
+        cfg = Config(str(ini_path))
+        # Do NOT override sqlalchemy.url or inject a connection — the
+        # offline branch must resolve from the env var by itself.
+
+        # head:head is a zero-step delta; alembic still invokes env.py
+        # (so context.configure runs and we can spy on the URL), but no
+        # migration upgrade() bodies execute.
+        command.upgrade(cfg, "head:head", sql=True)
+
+        assert observed, "context.configure was never invoked — env.py did not run in offline mode"
+        url_passed = observed[0].get("url")
+        assert url_passed == expected_url, (
+            f"Offline mode ignored ELSPETH_WEB__SESSION_DB_URL. Expected URL passed "
+            f"to context.configure: {expected_url!r}, got: {url_passed!r}. This "
+            f"would emit SQL for the wrong database or dialect."
+        )
+
+    def test_offline_mode_raises_when_no_url_configured(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Offline mode must fail loudly if neither env var nor ini provides a URL.
+
+        Silent fallback to an empty URL would let Alembic emit garbage
+        SQL for an unresolved dialect. Tier 1 discipline: crash with a
+        remediation-pointing message.
+        """
+        from pathlib import Path
+
+        from alembic import command
+
+        monkeypatch.delenv("ELSPETH_WEB__SESSION_DB_URL", raising=False)
+
+        ini_path = Path(__file__).parent.parent.parent.parent.parent / "src" / "elspeth" / "web" / "sessions" / "alembic.ini"
+        cfg = Config(str(ini_path))
+        # Blank out the ini fallback so offline mode has nothing to fall back on.
+        cfg.set_main_option("sqlalchemy.url", "")
+
+        with pytest.raises(RuntimeError, match=r"offline mode: sqlalchemy\.url is not configured"):
+            command.upgrade(cfg, "head:head", sql=True)
+
+    def test_offline_mode_env_var_overrides_ini_url(self, monkeypatch: pytest.MonkeyPatch, tmp_path) -> None:
+        """When both env var and ini provide a URL, env var must win.
+
+        ``run_migrations_offline`` calls ``config.set_main_option`` on
+        the env var unconditionally when the var is set — so env should
+        shadow an ini-provided URL.  Pinning this prevents a future
+        refactor (e.g., "only override when ini is empty") from
+        silently reintroducing ini-as-source-of-truth, which would
+        mean operators generating SQL in environments that *also*
+        have a populated ini file (e.g., a deployment template) would
+        target the wrong database.
+        """
+        from pathlib import Path
+
+        import alembic.context as alembic_context_mod
+        from alembic import command
+
+        env_url = f"sqlite:///{tmp_path / 'env-wins.db'}"
+        ini_url = f"sqlite:///{tmp_path / 'ini-loses.db'}"
+        monkeypatch.setenv("ELSPETH_WEB__SESSION_DB_URL", env_url)
+
+        observed: list[dict] = []
+        original_configure = alembic_context_mod.configure
+
+        def spy(*args, **kwargs):
+            observed.append(dict(kwargs))
+            return original_configure(*args, **kwargs)
+
+        monkeypatch.setattr(alembic_context_mod, "configure", spy)
+
+        ini_path = Path(__file__).parent.parent.parent.parent.parent / "src" / "elspeth" / "web" / "sessions" / "alembic.ini"
+        cfg = Config(str(ini_path))
+        # Populate ini with a different URL — env must shadow it.
+        cfg.set_main_option("sqlalchemy.url", ini_url)
+
+        command.upgrade(cfg, "head:head", sql=True)
+
+        assert observed, "context.configure was never invoked"
+        url_passed = observed[0].get("url")
+        assert url_passed == env_url, (
+            f"ini URL leaked through despite env override. Expected env "
+            f"URL {env_url!r}, got {url_passed!r} — env_var-over-ini "
+            f"precedence regressed."
         )
 
     def test_cli_path_migration_has_foreign_keys_enabled(self, monkeypatch: pytest.MonkeyPatch, tmp_path) -> None:
@@ -718,7 +1094,6 @@ class TestCliMigrationPathUsesEngineFactory:
 
         ini_path = Path(__file__).parent.parent.parent.parent.parent / "src" / "elspeth" / "web" / "sessions" / "alembic.ini"
         cfg = Config(str(ini_path))
-        cfg.attributes["auth_provider"] = "local"
 
         command.upgrade(cfg, "head")
 

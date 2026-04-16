@@ -347,3 +347,96 @@ class TestHasRefResolveInvariant:
         assert service.has_ref("u1", "TEST_KEY", auth_provider_type="local") is False
         result = service.resolve("u1", "TEST_KEY", auth_provider_type="local")
         assert result is None
+
+    def test_has_ref_returns_false_for_reserved_name_when_user_has_no_row(
+        self,
+        service: WebSecretService,
+    ) -> None:
+        """Probing a reserved (ELSPETH_*) name that the user has not stored
+        must return False, not propagate SecretNotFoundError.
+
+        Regression: the server store's reserved-name guard used to raise
+        inside has_secret(), which turned has_ref()'s boolean composition
+        (user OR server) into an uncaught 500 whenever user-scope returned
+        False for a reserved name.  The boolean contract is load-bearing
+        for /api/secrets/validate, composer wire-secret-ref, and pipeline
+        validation's missing_refs walk.
+        """
+        assert service.has_ref("u1", "ELSPETH_FOO", auth_provider_type="local") is False
+        assert service.resolve("u1", "ELSPETH_FOO", auth_provider_type="local") is None
+
+    def test_has_ref_returns_true_when_user_has_reserved_name_row(
+        self,
+        service: WebSecretService,
+        user_store: UserSecretStore,
+    ) -> None:
+        """User-scope stores have no reserved-prefix guard — a user may
+        store 'ELSPETH_FOO' as a user secret.  When they do, has_ref must
+        return True (user-scope short-circuits the OR before reaching the
+        server store's reserved-name branch).
+        """
+        user_store.set_secret(
+            "ELSPETH_FOO", value="user-val", user_id="u1", auth_provider_type="local"
+        )
+        assert service.has_ref("u1", "ELSPETH_FOO", auth_provider_type="local") is True
+        result = service.resolve("u1", "ELSPETH_FOO", auth_provider_type="local")
+        assert result is not None
+        assert result.value == "user-val"
+        assert result.scope == "user"
+
+    def test_has_ref_reserved_name_invariant_with_missing_fingerprint_key(
+        self,
+        service: WebSecretService,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """Reviewer's specific scenario: reserved-name probe with
+        ELSPETH_FINGERPRINT_KEY unset.
+
+        user_store.has_secret returns False early (no fingerprint key),
+        the OR falls through to server_store.has_secret, which must
+        return False (not raise) for the reserved name.  resolve() also
+        returns None under both conditions.
+        """
+        monkeypatch.delenv("ELSPETH_FINGERPRINT_KEY")
+        assert (
+            service.has_ref("u1", "ELSPETH_FINGERPRINT_KEY", auth_provider_type="local")
+            is False
+        )
+        assert (
+            service.resolve("u1", "ELSPETH_FINGERPRINT_KEY", auth_provider_type="local")
+            is None
+        )
+
+    def test_has_ref_reserved_name_with_user_row_but_fingerprint_unset(
+        self,
+        service: WebSecretService,
+        user_store: UserSecretStore,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """Closes the 3x2 matrix corner: user *has* a reserved-name row
+        stored, but ELSPETH_FINGERPRINT_KEY becomes unset at probe time.
+
+        user_store.has_secret's fingerprint-key gate fires first
+        (returns False regardless of the stored row — audit trail is
+        broken without the key).  The OR must then fall through to
+        server_store.has_secret, which must return False (not raise)
+        for the reserved name.  This locks in that the fingerprint gate
+        is independent of the server store's reserved-name branch —
+        neither is allowed to shortcut the other into an exception.
+        """
+        user_store.set_secret(
+            "ELSPETH_FOO",
+            value="user-val",
+            user_id="u1",
+            auth_provider_type="local",
+        )
+        monkeypatch.delenv("ELSPETH_FINGERPRINT_KEY")
+
+        assert (
+            service.has_ref("u1", "ELSPETH_FOO", auth_provider_type="local")
+            is False
+        )
+        assert (
+            service.resolve("u1", "ELSPETH_FOO", auth_provider_type="local")
+            is None
+        )

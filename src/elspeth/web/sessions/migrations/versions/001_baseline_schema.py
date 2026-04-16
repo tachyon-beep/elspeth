@@ -11,11 +11,25 @@ Schema-shape detection:
 - **Empty DB** → create the full baseline (fresh install).
 - **Exact legacy five-table schema** → stamp as applied (DB created by
   the pre-Alembic ``metadata.create_all()`` path).
-- **Anything else** → refuse to stamp. A partial schema, a newer
-  pre-Alembic schema (already contains ``blobs``/``user_secrets``/etc.),
-  or an unknown database would silently stamp 001 and fail at 002+,
+- **Anything else** → refuse to stamp. A partial schema, a schema that
+  already contains later tables (``blobs``, ``user_secrets``, etc.), or
+  an unknown database would silently stamp 001 and fail at 002+,
   potentially leaving a half-migrated state. Tier 1 discipline: crash,
   don't guess.
+
+Why the "already has blobs/user_secrets" case is rejected, not accepted:
+
+  The pre-Alembic ``metadata.create_all()`` code path was replaced with
+  ``run_migrations()`` in the same commit that introduced Alembic
+  (``8ea99cee``). At that point ``models.py`` contained exactly the
+  five baseline tables. ``blobs`` was added by migration 002, and
+  ``user_secrets`` by migration 003 — both after Alembic was already
+  the sole init path. There is therefore no historical window in which
+  a ``create_all()``-produced database could contain those later
+  tables. Any DB that has them either (a) was itself produced by
+  Alembic (in which case ``alembic_version`` is already populated and
+  this sentinel is never reached) or (b) is of unknown provenance,
+  which is exactly the case Tier 1 refuses to silently adopt.
 """
 
 from collections.abc import Sequence

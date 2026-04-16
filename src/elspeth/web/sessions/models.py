@@ -241,7 +241,7 @@ user_secrets_table = Table(
     Column("id", String, primary_key=True),
     Column("name", String, nullable=False),
     Column("user_id", String, nullable=False),
-    Column("auth_provider_type", String, nullable=False, server_default="local"),
+    Column("auth_provider_type", String, nullable=False),
     Column("encrypted_value", LargeBinary, nullable=False),
     Column("salt", LargeBinary, nullable=False),
     Column("created_at", DateTime(timezone=True), nullable=False),

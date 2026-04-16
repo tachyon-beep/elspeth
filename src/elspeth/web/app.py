@@ -282,7 +282,7 @@ def create_app(settings: WebSettings | None = None) -> FastAPI:
     # --- Session database setup ---
     session_db_url = settings.get_session_db_url()
     session_engine = create_session_engine(session_db_url)
-    run_migrations(session_engine, auth_provider=settings.auth_provider)
+    run_migrations(session_engine)
 
     session_service = SessionServiceImpl(session_engine, data_dir=settings.data_dir)
     app.state.session_service = session_service
