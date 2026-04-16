@@ -725,76 +725,82 @@ def create_session_router() -> APIRouter:
         except ValueError as exc:
             raise HTTPException(status_code=404, detail=str(exc)) from exc
 
-        # Copy blobs from source session into the forked session.
-        # Returns old_id → new_blob mapping for source reference rewriting.
+        # Everything after fork_session() is a compensatable post-commit
+        # phase.  If ANY step fails, archive the fork to avoid orphaned
+        # sessions/blobs/state.  BlobQuotaExceededError gets a specific
+        # 413; all other failures re-raise after cleanup.
         blob_service: BlobServiceProtocol = request.app.state.blob_service
         try:
+            # Copy blobs from source session into the forked session.
+            # Returns old_id → new_blob mapping for source reference rewriting.
             blob_map = await blob_service.copy_blobs_for_fork(session_id, new_session.id)
+
+            # Rewrite source references in the forked state so the fork is
+            # self-contained.  Without this, blob_ref and path in the source
+            # options still point at the original session's assets.
+            if copied_state is not None and copied_state.source is not None and blob_map:
+                source_dict = deep_thaw(copied_state.source) if copied_state.source else None
+                if isinstance(source_dict, dict):
+                    options = source_dict.get("options", {})
+                    rewritten = False
+                    # Remap blob_ref to the new blob's ID.
+                    # Guard against non-UUID blob_ref values — if the persisted
+                    # source has a malformed ref, skip the remap rather than
+                    # crashing after fork artifacts are already committed.
+                    old_ref = options.get("blob_ref")
+                    if old_ref is not None:
+                        try:
+                            old_uuid = UUID(old_ref) if isinstance(old_ref, str) else old_ref
+                        except ValueError:
+                            old_uuid = None
+                        if old_uuid is not None and old_uuid in blob_map:
+                            options["blob_ref"] = str(blob_map[old_uuid].id)
+                            options["path"] = blob_map[old_uuid].storage_path
+                            rewritten = True
+
+                    if rewritten:
+                        source_dict["options"] = options
+                        # Save updated state with remapped source
+                        state_data = CompositionStateData(
+                            source=source_dict,
+                            nodes=deep_thaw(copied_state.nodes),
+                            edges=deep_thaw(copied_state.edges),
+                            outputs=deep_thaw(copied_state.outputs),
+                            metadata_=deep_thaw(copied_state.metadata_),
+                            is_valid=copied_state.is_valid,
+                            validation_errors=list(copied_state.validation_errors) if copied_state.validation_errors else None,
+                        )
+                        copied_state = await service.save_composition_state(
+                            new_session.id,
+                            state_data,
+                        )
+
+                        # The edited user message (last in list) still references
+                        # the pre-rewrite state.  Re-point it at the replacement
+                        # state so message-state lineage is self-contained.
+                        user_msg = new_messages[-1]
+                        await service.update_message_composition_state(
+                            user_msg.id,
+                            copied_state.id,
+                        )
+                        new_messages[-1] = ChatMessageRecord(
+                            id=user_msg.id,
+                            session_id=user_msg.session_id,
+                            role=user_msg.role,
+                            content=user_msg.content,
+                            tool_calls=user_msg.tool_calls,
+                            created_at=user_msg.created_at,
+                            composition_state_id=copied_state.id,
+                        )
         except BlobQuotaExceededError:
-            # Fork partially created — clean up by archiving the new session
             await service.archive_session(new_session.id)
             raise HTTPException(
                 status_code=413,
                 detail="Blob quota exceeded during fork — unable to copy files",
             ) from None
-
-        # Rewrite source references in the forked state so the fork is
-        # self-contained.  Without this, blob_ref and path in the source
-        # options still point at the original session's assets.
-        if copied_state is not None and copied_state.source is not None and blob_map:
-            source_dict = deep_thaw(copied_state.source) if copied_state.source else None
-            if isinstance(source_dict, dict):
-                options = source_dict.get("options", {})
-                rewritten = False
-                # Remap blob_ref to the new blob's ID.
-                # Guard against non-UUID blob_ref values — if the persisted
-                # source has a malformed ref, skip the remap rather than
-                # crashing after fork artifacts are already committed.
-                old_ref = options.get("blob_ref")
-                if old_ref is not None:
-                    try:
-                        old_uuid = UUID(old_ref) if isinstance(old_ref, str) else old_ref
-                    except ValueError:
-                        old_uuid = None
-                    if old_uuid is not None and old_uuid in blob_map:
-                        options["blob_ref"] = str(blob_map[old_uuid].id)
-                        options["path"] = blob_map[old_uuid].storage_path
-                        rewritten = True
-
-                if rewritten:
-                    source_dict["options"] = options
-                    # Save updated state with remapped source
-                    state_data = CompositionStateData(
-                        source=source_dict,
-                        nodes=deep_thaw(copied_state.nodes),
-                        edges=deep_thaw(copied_state.edges),
-                        outputs=deep_thaw(copied_state.outputs),
-                        metadata_=deep_thaw(copied_state.metadata_),
-                        is_valid=copied_state.is_valid,
-                        validation_errors=list(copied_state.validation_errors) if copied_state.validation_errors else None,
-                    )
-                    copied_state = await service.save_composition_state(
-                        new_session.id,
-                        state_data,
-                    )
-
-                    # The edited user message (last in list) still references
-                    # the pre-rewrite state.  Re-point it at the replacement
-                    # state so message-state lineage is self-contained.
-                    user_msg = new_messages[-1]
-                    await service.update_message_composition_state(
-                        user_msg.id,
-                        copied_state.id,
-                    )
-                    new_messages[-1] = ChatMessageRecord(
-                        id=user_msg.id,
-                        session_id=user_msg.session_id,
-                        role=user_msg.role,
-                        content=user_msg.content,
-                        tool_calls=user_msg.tool_calls,
-                        created_at=user_msg.created_at,
-                        composition_state_id=copied_state.id,
-                    )
+        except Exception:
+            await service.archive_session(new_session.id)
+            raise
 
         return ForkSessionResponse(
             session=_session_response(new_session),

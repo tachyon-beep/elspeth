@@ -1160,3 +1160,67 @@ class TestPruneStateVersions:
 
         deleted = await service.prune_state_versions(session.id, keep_latest=5)
         assert deleted == 0
+
+    @pytest.mark.asyncio
+    async def test_prune_preserves_derived_from_lineage(self, service) -> None:
+        """States referenced via derived_from_state_id must survive pruning.
+
+        Scenario: v1 (normal), v2 (normal), v3 (revert to v1).
+        Prune with keep_latest=1 keeps v3 (latest).  v1 must survive
+        because v3.derived_from_state_id points at it.  v2 can be deleted.
+        """
+        session = await service.create_session("alice", "Pipeline", "local")
+        v1 = await service.save_composition_state(
+            session.id,
+            CompositionStateData(is_valid=True),
+        )
+        await service.save_composition_state(
+            session.id,
+            CompositionStateData(is_valid=False),
+        )
+        # Revert to v1 — creates v3 with derived_from_state_id = v1.id
+        v3 = await service.set_active_state(session.id, v1.id)
+        assert v3.derived_from_state_id == v1.id
+
+        deleted = await service.prune_state_versions(session.id, keep_latest=1)
+        assert deleted == 1  # only v2 deleted
+
+        remaining = await service.get_state_versions(session.id)
+        remaining_ids = {v.id for v in remaining}
+        assert v1.id in remaining_ids, "v1 must survive — referenced by v3.derived_from_state_id"
+        assert v3.id in remaining_ids, "v3 must survive — it is the latest version"
+
+    @pytest.mark.asyncio
+    async def test_prune_preserves_transitive_derived_lineage(self, service) -> None:
+        """Transitive derived_from chains must be fully preserved.
+
+        Scenario: v1, v2, v3 (revert→v1), v4, v5 (revert→v3).
+        Prune with keep_latest=1 keeps v5.  v3 must survive (v5 points
+        at it), and v1 must survive (v3 points at it).  v2 and v4 can go.
+        """
+        session = await service.create_session("alice", "Pipeline", "local")
+        v1 = await service.save_composition_state(
+            session.id,
+            CompositionStateData(is_valid=True),
+        )
+        await service.save_composition_state(
+            session.id,
+            CompositionStateData(is_valid=False),
+        )
+        # v3: revert to v1
+        v3 = await service.set_active_state(session.id, v1.id)
+        await service.save_composition_state(
+            session.id,
+            CompositionStateData(is_valid=False),
+        )
+        # v5: revert to v3
+        v5 = await service.set_active_state(session.id, v3.id)
+
+        deleted = await service.prune_state_versions(session.id, keep_latest=1)
+        assert deleted == 2  # v2 and v4 deleted
+
+        remaining = await service.get_state_versions(session.id)
+        remaining_ids = {v.id for v in remaining}
+        assert v1.id in remaining_ids, "v1 must survive — v3.derived_from_state_id"
+        assert v3.id in remaining_ids, "v3 must survive — v5.derived_from_state_id"
+        assert v5.id in remaining_ids, "v5 must survive — latest version"

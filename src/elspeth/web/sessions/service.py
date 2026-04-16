@@ -848,8 +848,28 @@ class SessionServiceImpl:
                     ).fetchall()
                 }
 
-                # Candidates for deletion: not kept, not run-referenced, not message-referenced
-                protected = keep_ids | run_referenced | message_referenced
+                # IDs referenced via derived_from_state_id (revert lineage).
+                # Build transitive closure: if v5→v3→v1 and v5 is kept,
+                # both v3 and v1 must be protected.
+                derived_from_map: dict[str, str | None] = {
+                    row.id: row.derived_from_state_id
+                    for row in conn.execute(
+                        select(
+                            composition_states_table.c.id,
+                            composition_states_table.c.derived_from_state_id,
+                        ).where(composition_states_table.c.session_id == sid)
+                    ).fetchall()
+                }
+                lineage_protected: set[str] = set()
+                seeds = keep_ids | run_referenced | message_referenced
+                for seed_id in seeds:
+                    parent = derived_from_map.get(seed_id)
+                    while parent is not None and parent not in lineage_protected:
+                        lineage_protected.add(parent)
+                        parent = derived_from_map.get(parent)
+
+                # Candidates for deletion: not kept, not referenced, not in lineage
+                protected = keep_ids | run_referenced | message_referenced | lineage_protected
                 delete_ids = [row.id for row in all_rows if row.id not in protected]
 
                 if not delete_ids:

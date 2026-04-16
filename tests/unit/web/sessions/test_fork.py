@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import uuid
 from pathlib import Path
+from unittest.mock import AsyncMock, patch
 
 import pytest
 from fastapi import FastAPI
@@ -600,3 +601,100 @@ class TestForkEndpoint:
 
         # Fork should succeed (201), not crash with 500
         assert response.status_code == 201
+
+    @pytest.mark.asyncio
+    async def test_fork_non_quota_blob_error_archives_session(self, tmp_path) -> None:
+        """Non-quota blob failures during fork must archive the new session.
+
+        copy_blobs_for_fork can fail for reasons other than quota (missing
+        blob row, filesystem error, DB disconnect).  The fork route must
+        compensate by archiving the partially-created session.
+        """
+        app, service, blob_service = _make_fork_app(tmp_path)
+
+        session = await service.create_session("alice", "Original", "local")
+        await blob_service.create_blob(session.id, "data.csv", b"a,b\n1,2", "text/csv")
+        msg = await service.add_message(session.id, "user", "Go")
+
+        # Use raise_server_exceptions=False so the 500 is returned as an
+        # HTTP response rather than propagated as a Python exception.
+        client = TestClient(app, raise_server_exceptions=False)
+        with patch.object(
+            blob_service,
+            "copy_blobs_for_fork",
+            new=AsyncMock(side_effect=RuntimeError("disk I/O error")),
+        ):
+            response = client.post(
+                f"/api/sessions/{session.id}/fork",
+                json={
+                    "from_message_id": str(msg.id),
+                    "new_message_content": "Go edited",
+                },
+            )
+
+        assert response.status_code == 500
+
+        # The fork session must have been cleaned up
+        sessions = await service.list_sessions("alice", "local")
+        assert len(sessions) == 1  # Only the original remains
+
+    @pytest.mark.asyncio
+    async def test_fork_state_rewrite_failure_archives_session(self, tmp_path) -> None:
+        """Failure during state rewrite after blob copy must archive the fork.
+
+        If save_composition_state fails after fork_session and blob copy
+        have both committed, the fork session (and copied blobs) must be
+        cleaned up so users don't see an orphaned half-initialised fork.
+        """
+        app, service, blob_service = _make_fork_app(tmp_path)
+
+        session = await service.create_session("alice", "Original", "local")
+
+        # Save a state with a blob_ref so the rewrite path is triggered
+        blob = await blob_service.create_blob(
+            session.id,
+            "data.csv",
+            b"a,b\n1,2",
+            "text/csv",
+        )
+        await service.save_composition_state(
+            session.id,
+            CompositionStateData(
+                source={
+                    "plugin": "csv",
+                    "options": {"blob_ref": str(blob.id), "path": blob.storage_path},
+                },
+                is_valid=True,
+            ),
+        )
+
+        current_state = await service.get_current_state(session.id)
+        assert current_state is not None
+        msg = await service.add_message(
+            session.id,
+            "user",
+            "Go",
+            composition_state_id=current_state.id,
+        )
+
+        # Use raise_server_exceptions=False so the 500 is returned as an
+        # HTTP response rather than propagated as a Python exception.
+        client = TestClient(app, raise_server_exceptions=False)
+        with patch.object(
+            service,
+            "save_composition_state",
+            new=AsyncMock(side_effect=RuntimeError("DB write failed")),
+        ):
+            response = client.post(
+                f"/api/sessions/{session.id}/fork",
+                json={
+                    "from_message_id": str(msg.id),
+                    "new_message_content": "Go edited",
+                },
+            )
+
+        assert response.status_code == 500
+
+        # The fork session must have been cleaned up
+        sessions = await service.list_sessions("alice", "local")
+        assert len(sessions) == 1  # Only the original remains
