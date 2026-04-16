@@ -14,7 +14,7 @@ from typing import Any
 from unittest.mock import MagicMock
 
 import pytest
-from sqlalchemy import create_engine, select
+from sqlalchemy import select
 
 from elspeth.web.catalog.schemas import PluginSchemaInfo, PluginSummary
 from elspeth.web.composer.redaction import redact_source_storage_path
@@ -31,7 +31,9 @@ from elspeth.web.composer.tools import (
     diff_states,
     execute_tool,
 )
-from elspeth.web.sessions.models import blobs_table, metadata
+from elspeth.web.sessions.engine import create_session_engine
+from elspeth.web.sessions.migrations import run_migrations
+from elspeth.web.sessions.models import blobs_table
 
 
 def _empty_state() -> CompositionState:
@@ -59,13 +61,37 @@ def _mock_catalog() -> MagicMock:
 
 @pytest.fixture()
 def blob_env(tmp_path: Path) -> dict[str, Any]:
-    """Create a temporary session database and data directory for blob tests."""
-    engine = create_engine("sqlite:///:memory:")
-    metadata.create_all(engine)
+    """Create a temporary session database and data directory for blob tests.
+
+    Inserts a real ``sessions`` row so FK-enforced blob inserts succeed.
+    Previously these tests relied on SQLite silently skipping FK
+    enforcement; the engine factory now enables PRAGMA foreign_keys=ON,
+    so the session row must actually exist.
+    """
+    from datetime import UTC, datetime
+
+    from elspeth.web.sessions.models import sessions_table
+
+    engine = create_session_engine("sqlite:///:memory:")
+    run_migrations(engine)
+
+    session_id = "test-session-001"
+    now = datetime.now(UTC)
+    with engine.begin() as conn:
+        conn.execute(
+            sessions_table.insert().values(
+                id=session_id,
+                user_id="test-user",
+                auth_provider_type="local",
+                title="Test Session",
+                created_at=now,
+                updated_at=now,
+            )
+        )
+
     data_dir = tmp_path / "data"
     data_dir.mkdir()
     (data_dir / "blobs").mkdir()
-    session_id = "test-session-001"
     return {
         "engine": engine,
         "data_dir": str(data_dir),

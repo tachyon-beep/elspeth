@@ -15,7 +15,6 @@ from datetime import UTC, datetime
 from uuid import UUID, uuid4
 
 import pytest
-from sqlalchemy import create_engine
 from sqlalchemy.pool import StaticPool
 
 from elspeth.web.blobs.protocol import (
@@ -27,7 +26,9 @@ from elspeth.web.blobs.service import (
     content_hash,
     sanitize_filename,
 )
-from elspeth.web.sessions.models import metadata, sessions_table
+from elspeth.web.sessions.engine import create_session_engine
+from elspeth.web.sessions.migrations import run_migrations
+from elspeth.web.sessions.models import sessions_table
 
 # ---------------------------------------------------------------------------
 # Fixtures
@@ -37,12 +38,12 @@ from elspeth.web.sessions.models import metadata, sessions_table
 @pytest.fixture()
 def db_engine():
     """In-memory SQLite engine with all session tables created."""
-    engine = create_engine(
+    engine = create_session_engine(
         "sqlite:///:memory:",
         poolclass=StaticPool,
         connect_args={"check_same_thread": False},
     )
-    metadata.create_all(engine)
+    run_migrations(engine)
     return engine
 
 

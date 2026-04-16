@@ -5,9 +5,17 @@ Revises: None
 Create Date: 2026-03-30
 
 This is the initial migration capturing the existing sessions.db schema.
-For databases created by the prior create_all() path, run_migrations()
-will stamp this revision without re-creating existing tables. For fresh
-databases, this creates all five tables.
+
+Schema-shape detection:
+
+- **Empty DB** → create the full baseline (fresh install).
+- **Exact legacy five-table schema** → stamp as applied (DB created by
+  the pre-Alembic ``metadata.create_all()`` path).
+- **Anything else** → refuse to stamp. A partial schema, a newer
+  pre-Alembic schema (already contains ``blobs``/``user_secrets``/etc.),
+  or an unknown database would silently stamp 001 and fail at 002+,
+  potentially leaving a half-migrated state. Tier 1 discipline: crash,
+  don't guess.
 """
 
 from collections.abc import Sequence
@@ -20,20 +28,46 @@ down_revision: str | Sequence[str] | None = None
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
 
+# Exact table set this revision creates. Databases whose user tables match
+# this set (no more, no less) are safe to stamp as 001 without DDL.
+_BASELINE_TABLES: frozenset[str] = frozenset({"sessions", "chat_messages", "composition_states", "runs", "run_events"})
 
-def _table_exists(name: str) -> bool:
-    """Check if a table already exists (handles pre-migration databases)."""
+# Alembic creates alembic_version before calling upgrade(); it is not part
+# of the schema shape we compare against.
+_ALEMBIC_INTERNAL: frozenset[str] = frozenset({"alembic_version"})
+
+
+def _user_tables() -> frozenset[str]:
+    """Existing user-defined tables, excluding Alembic's own bookkeeping."""
     bind = op.get_bind()
-    return sa.inspect(bind).has_table(name)
+    all_tables = set(sa.inspect(bind).get_table_names())
+    return frozenset(all_tables - _ALEMBIC_INTERNAL)
 
 
 def upgrade() -> None:
-    """Create baseline tables if they don't already exist."""
-    if _table_exists("sessions"):
-        # Pre-migration database — tables were created by create_all().
-        # Nothing to do; Alembic stamps this revision as applied.
+    """Create baseline tables, stamp, or crash based on exact shape."""
+    existing = _user_tables()
+
+    if existing == _BASELINE_TABLES:
+        # DB already at exact baseline shape (pre-Alembic create_all() path).
+        # Stamp without running DDL.
         return
 
+    if existing:
+        raise RuntimeError(
+            "Session database refuses to stamp revision 001: existing tables "
+            f"{sorted(existing)!r} do not match the exact baseline set "
+            f"{sorted(_BASELINE_TABLES)!r}. Remediate the schema manually "
+            "(inspect, back up, reconcile) before re-running migrations. "
+            "Silent stamping would cause later revisions to fail or leave "
+            "the database half-migrated."
+        )
+
+    _create_baseline_tables()
+
+
+def _create_baseline_tables() -> None:
+    """Create the five baseline tables and their indexes."""
     op.create_table(
         "sessions",
         sa.Column("id", sa.String(), nullable=False),

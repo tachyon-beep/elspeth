@@ -16,7 +16,7 @@ from pathlib import Path
 from typing import Any, Literal, cast
 from uuid import UUID
 
-from sqlalchemy import ColumnElement, Engine, delete, desc, func, insert, select, update
+from sqlalchemy import ColumnElement, Connection, Engine, delete, desc, func, insert, select, update
 from sqlalchemy.exc import IntegrityError
 
 from elspeth.contracts.freeze import deep_thaw
@@ -36,6 +36,42 @@ from elspeth.web.sessions.protocol import (
     RunRecord,
     SessionRecord,
 )
+
+
+def _assert_state_in_session(
+    conn: Connection,
+    *,
+    state_id: str,
+    expected_session_id: str,
+    caller: str,
+) -> None:
+    """Offensive guard: composition state must belong to the expected session.
+
+    Catches cross-session reference bugs at the service boundary, before
+    they hit the DB-level composite FK. Produces a diagnostic naming the
+    caller, the state, and the session mismatch — something a generic
+    ``IntegrityError`` cannot.
+
+    Raises ``RuntimeError`` because a cross-session reference is a bug
+    in caller code, not invalid user input. The audit trail records the
+    attempted violation through the standard exception path.
+
+    Contrast with ``set_active_state``, which raises ``ValueError`` for
+    an equivalent-looking cross-session check on purpose: that method
+    receives the state_id from the HTTP body and must map an unknown /
+    non-owned state to 404 rather than 500. The exception type is
+    load-bearing and encodes whether the caller (RuntimeError) or the
+    user (ValueError) is wrong.
+    """
+    state_session_id = conn.execute(select(composition_states_table.c.session_id).where(composition_states_table.c.id == state_id)).scalar()
+    if state_session_id is None:
+        raise RuntimeError(f"{caller}: composition_state_id={state_id!r} does not exist (expected in session={expected_session_id!r})")
+    if state_session_id != expected_session_id:
+        raise RuntimeError(
+            f"{caller}: composition_state_id={state_id!r} belongs to session "
+            f"{state_session_id!r}, not {expected_session_id!r} — cross-session "
+            f"reference is a contract violation"
+        )
 
 
 class SessionServiceImpl:
@@ -210,9 +246,17 @@ class SessionServiceImpl:
         msg_id = uuid.uuid4()
         now = self._now()
         sid = str(session_id)
+        csid = str(composition_state_id) if composition_state_id else None
 
         def _sync() -> None:
             with self._engine.begin() as conn:
+                if csid is not None:
+                    _assert_state_in_session(
+                        conn,
+                        state_id=csid,
+                        expected_session_id=sid,
+                        caller="add_message",
+                    )
                 conn.execute(
                     insert(chat_messages_table).values(
                         id=str(msg_id),
@@ -221,7 +265,7 @@ class SessionServiceImpl:
                         content=content,
                         tool_calls=tool_calls,
                         created_at=now,
-                        composition_state_id=str(composition_state_id) if composition_state_id else None,
+                        composition_state_id=csid,
                     )
                 )
                 conn.execute(update(sessions_table).where(sessions_table.c.id == sid).values(updated_at=now))
@@ -445,9 +489,17 @@ class SessionServiceImpl:
         run_id = uuid.uuid4()
         now = self._now()
         sid = str(session_id)
+        state_sid = str(state_id)
 
         def _sync() -> None:
             with self._engine.begin() as conn:
+                _assert_state_in_session(
+                    conn,
+                    state_id=state_sid,
+                    expected_session_id=sid,
+                    caller="create_run",
+                )
+
                 # Early-out: check before INSERT to give a clear error message
                 active = conn.execute(
                     select(runs_table.c.id).where(
@@ -464,7 +516,7 @@ class SessionServiceImpl:
                         insert(runs_table).values(
                             id=str(run_id),
                             session_id=sid,
-                            state_id=str(state_id),
+                            state_id=state_sid,
                             status="pending",
                             started_at=now,
                             rows_processed=0,
@@ -655,6 +707,32 @@ class SessionServiceImpl:
             with self._engine.begin() as conn:
                 prior_row = conn.execute(select(composition_states_table).where(composition_states_table.c.id == str(state_id))).fetchone()
 
+                # NOTE: Both branches below raise ValueError (not RuntimeError),
+                # and the HTTP handler at routes.py maps ValueError to 404. This
+                # is INTENTIONAL and distinct from _assert_state_in_session
+                # (module-level) which raises RuntimeError on cross-session
+                # references:
+                #
+                #   * _assert_state_in_session guards internal callers that
+                #     supply BOTH session_id and state_id from the same scope
+                #     (e.g. add_message, create_run). A mismatch there is a
+                #     caller-code contract violation — RuntimeError/500 is
+                #     the correct signal because no legitimate user input
+                #     can produce it.
+                #
+                #   * set_active_state receives state_id from the HTTP body
+                #     while session_id comes from the authenticated URL path.
+                #     A state owned by another user's session is
+                #     indistinguishable from "does not exist" to this user —
+                #     surfacing a RuntimeError/500 would leak the existence
+                #     of that other session's states. Collapsing both cases
+                #     to ValueError -> 404 is the correct information-hiding
+                #     boundary for user-supplied identifiers.
+                #
+                # If you find yourself tempted to consolidate these checks,
+                # reconsider: the exception type is load-bearing because it
+                # encodes WHO is wrong (caller code vs. user) and the HTTP
+                # status depends on it.
                 if prior_row is None:
                     raise ValueError(f"State not found: {state_id}")
                 if prior_row.session_id != sid:
@@ -1087,15 +1165,29 @@ class SessionServiceImpl:
         message_id: UUID,
         composition_state_id: UUID,
     ) -> None:
-        """Re-point a message's composition_state_id to a different state."""
+        """Re-point a message's composition_state_id to a different state.
+
+        Enforces same-session ownership: the target state must belong to
+        the same session as the message. Cross-session re-pointing is a
+        caller bug and raises RuntimeError.
+        """
         mid = str(message_id)
-        sid = str(composition_state_id)
+        csid = str(composition_state_id)
 
         def _sync() -> None:
             with self._engine.begin() as conn:
-                result = conn.execute(update(chat_messages_table).where(chat_messages_table.c.id == mid).values(composition_state_id=sid))
-                if result.rowcount == 0:
+                message_session_id = conn.execute(select(chat_messages_table.c.session_id).where(chat_messages_table.c.id == mid)).scalar()
+                if message_session_id is None:
                     raise ValueError(f"Message {message_id} not found")
+
+                _assert_state_in_session(
+                    conn,
+                    state_id=csid,
+                    expected_session_id=str(message_session_id),
+                    caller="update_message_composition_state",
+                )
+
+                conn.execute(update(chat_messages_table).where(chat_messages_table.c.id == mid).values(composition_state_id=csid))
 
         await self._run_sync(_sync)
 

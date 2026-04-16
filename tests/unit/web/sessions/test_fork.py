@@ -8,7 +8,6 @@ from unittest.mock import AsyncMock, patch
 
 import pytest
 from fastapi import FastAPI
-from sqlalchemy import create_engine
 from sqlalchemy.pool import StaticPool
 from starlette.testclient import TestClient
 
@@ -16,7 +15,8 @@ from elspeth.web.auth.middleware import get_current_user
 from elspeth.web.auth.models import UserIdentity
 from elspeth.web.blobs.service import BlobServiceImpl
 from elspeth.web.config import WebSettings
-from elspeth.web.sessions.models import metadata
+from elspeth.web.sessions.engine import create_session_engine
+from elspeth.web.sessions.migrations import run_migrations
 from elspeth.web.sessions.protocol import (
     CompositionStateData,
     InvalidForkTargetError,
@@ -27,12 +27,12 @@ from elspeth.web.sessions.service import SessionServiceImpl
 
 @pytest.fixture
 def engine():
-    eng = create_engine(
+    eng = create_session_engine(
         "sqlite:///:memory:",
         connect_args={"check_same_thread": False},
         poolclass=StaticPool,
     )
-    metadata.create_all(eng)
+    run_migrations(eng)
     return eng
 
 
@@ -262,12 +262,12 @@ def _make_fork_app(
     user_id: str = "alice",
 ) -> tuple[FastAPI, SessionServiceImpl, BlobServiceImpl]:
     """Create a test app with session + blob services for fork testing."""
-    engine = create_engine(
+    engine = create_session_engine(
         "sqlite:///:memory:",
         poolclass=StaticPool,
         connect_args={"check_same_thread": False},
     )
-    metadata.create_all(engine)
+    run_migrations(engine)
     session_service = SessionServiceImpl(engine)
     blob_service = BlobServiceImpl(engine, tmp_path)
 
@@ -479,15 +479,14 @@ class TestForkEndpoint:
     async def test_fork_blob_quota_exceeded_returns_413(self, tmp_path) -> None:
         """Fork returns 413 and cleans up when blob quota is exceeded."""
         # Create blob service with very small quota
-        from sqlalchemy import create_engine
         from sqlalchemy.pool import StaticPool
 
-        engine = create_engine(
+        engine = create_session_engine(
             "sqlite:///:memory:",
             connect_args={"check_same_thread": False},
             poolclass=StaticPool,
         )
-        metadata.create_all(engine)
+        run_migrations(engine)
         session_service = SessionServiceImpl(engine)
         # Source blob service has generous quota; we'll swap to a tight one for the fork
         blob_service = BlobServiceImpl(engine, tmp_path, max_storage_per_session=500)

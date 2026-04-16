@@ -10,23 +10,23 @@ SessionServiceImpl._ensure_utc() restores UTC on all datetime reads.
 from __future__ import annotations
 
 import pytest
-from sqlalchemy import create_engine
 from sqlalchemy.pool import StaticPool
 
-from elspeth.web.sessions.models import metadata
+from elspeth.web.sessions.engine import create_session_engine
+from elspeth.web.sessions.migrations import run_migrations
 from elspeth.web.sessions.protocol import CompositionStateData
 from elspeth.web.sessions.service import SessionServiceImpl
 
 
 @pytest.fixture
 def engine():
-    """Create an in-memory SQLite engine with all tables."""
-    eng = create_engine(
+    """Create an in-memory SQLite engine migrated to head."""
+    eng = create_session_engine(
         "sqlite:///:memory:",
         connect_args={"check_same_thread": False},
         poolclass=StaticPool,
     )
-    metadata.create_all(eng)
+    run_migrations(eng)
     return eng
 
 

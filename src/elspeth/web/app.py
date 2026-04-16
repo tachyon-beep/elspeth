@@ -15,7 +15,6 @@ from fastapi import FastAPI, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
-from sqlalchemy import create_engine
 
 from elspeth.web.auth.local import LocalAuthProvider
 from elspeth.web.auth.protocol import AuthProvider
@@ -35,6 +34,7 @@ from elspeth.web.secrets.routes import create_secrets_router
 from elspeth.web.secrets.server_store import ServerSecretStore
 from elspeth.web.secrets.service import ScopedSecretResolver, WebSecretService
 from elspeth.web.secrets.user_store import UserSecretStore
+from elspeth.web.sessions.engine import create_session_engine
 from elspeth.web.sessions.migrations import run_migrations
 from elspeth.web.sessions.protocol import RunAlreadyActiveError
 from elspeth.web.sessions.routes import create_session_router
@@ -281,7 +281,7 @@ def create_app(settings: WebSettings | None = None) -> FastAPI:
 
     # --- Session database setup ---
     session_db_url = settings.get_session_db_url()
-    session_engine = create_engine(session_db_url)
+    session_engine = create_session_engine(session_db_url)
     run_migrations(session_engine, auth_provider=settings.auth_provider)
 
     session_service = SessionServiceImpl(session_engine, data_dir=settings.data_dir)

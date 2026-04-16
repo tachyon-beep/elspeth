@@ -11,7 +11,6 @@ from __future__ import annotations
 
 import pytest
 from fastapi import FastAPI, Request
-from sqlalchemy import create_engine
 from sqlalchemy.pool import StaticPool
 from starlette.testclient import TestClient
 
@@ -21,7 +20,8 @@ from elspeth.web.secrets.routes import create_secrets_router
 from elspeth.web.secrets.server_store import ServerSecretStore
 from elspeth.web.secrets.service import WebSecretService
 from elspeth.web.secrets.user_store import UserSecretStore
-from elspeth.web.sessions.models import metadata
+from elspeth.web.sessions.engine import create_session_engine
+from elspeth.web.sessions.migrations import run_migrations
 
 
 @pytest.fixture(autouse=True)
@@ -53,12 +53,12 @@ def _make_app(
     server_allowlist: tuple[str, ...] = (),
 ) -> FastAPI:
     """Create a test app with secret routes and an in-memory DB."""
-    engine = create_engine(
+    engine = create_session_engine(
         "sqlite:///:memory:",
         poolclass=StaticPool,
         connect_args={"check_same_thread": False},
     )
-    metadata.create_all(engine)
+    run_migrations(engine)
 
     user_store = UserSecretStore(engine, _TEST_MASTER_KEY)
     server_store = ServerSecretStore(server_allowlist)
@@ -304,12 +304,12 @@ class TestCrossUserIsolation:
 
     def _make_two_user_clients(self) -> tuple[TestClient, TestClient]:
         """Create two test clients authenticated as different users sharing the same DB."""
-        engine = create_engine(
+        engine = create_session_engine(
             "sqlite:///:memory:",
             poolclass=StaticPool,
             connect_args={"check_same_thread": False},
         )
-        metadata.create_all(engine)
+        run_migrations(engine)
 
         user_store = UserSecretStore(engine, _TEST_MASTER_KEY)
         server_store = ServerSecretStore(())

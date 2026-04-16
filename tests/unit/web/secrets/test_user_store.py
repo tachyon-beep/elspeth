@@ -18,13 +18,13 @@ import threading
 
 import pytest
 from cryptography.fernet import Fernet, InvalidToken
-from sqlalchemy import create_engine
 from sqlalchemy.pool import StaticPool
 
 from elspeth.contracts.secrets import SecretInventoryItem
 from elspeth.core.security.secret_loader import SecretNotFoundError
 from elspeth.web.secrets.user_store import UserSecretStore, _derive_fernet_key
-from elspeth.web.sessions.models import metadata
+from elspeth.web.sessions.engine import create_session_engine
+from elspeth.web.sessions.migrations import run_migrations
 
 TEST_MASTER_KEY = "test-master-key-for-encryption"
 
@@ -32,12 +32,12 @@ TEST_MASTER_KEY = "test-master-key-for-encryption"
 @pytest.fixture()
 def db_engine():
     """In-memory SQLite engine with all session tables created."""
-    engine = create_engine(
+    engine = create_session_engine(
         "sqlite:///:memory:",
         poolclass=StaticPool,
         connect_args={"check_same_thread": False},
     )
-    metadata.create_all(engine)
+    run_migrations(engine)
     return engine
 
 
@@ -207,8 +207,8 @@ class TestUserSecretStore:
         infrastructure issue, not a code bug.
         """
         db_path = tmp_path / "test_concurrent.db"
-        engine = create_engine(f"sqlite:///{db_path}")
-        metadata.create_all(engine)
+        engine = create_session_engine(f"sqlite:///{db_path}")
+        run_migrations(engine)
         store = UserSecretStore(engine=engine, master_key=TEST_MASTER_KEY)
         errors: list[Exception] = []
 

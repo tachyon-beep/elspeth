@@ -17,6 +17,7 @@ from sqlalchemy import (
     Column,
     DateTime,
     ForeignKey,
+    ForeignKeyConstraint,
     Index,
     Integer,
     LargeBinary,
@@ -63,11 +64,15 @@ chat_messages_table = Table(
     Column("content", Text, nullable=False),
     Column("tool_calls", JSON, nullable=True),
     Column("created_at", DateTime(timezone=True), nullable=False),
-    Column(
-        "composition_state_id",
-        String,
-        ForeignKey("composition_states.id"),
-        nullable=True,
+    # Composite FK forces same-session ownership: a message in session B
+    # cannot reference a composition state owned by session A. When
+    # composition_state_id is NULL, standard SQL partial-null semantics
+    # skip FK enforcement, which is the intended behavior.
+    Column("composition_state_id", String, nullable=True),
+    ForeignKeyConstraint(
+        ["composition_state_id", "session_id"],
+        ["composition_states.id", "composition_states.session_id"],
+        name="fk_chat_messages_composition_state_session",
     ),
     CheckConstraint(
         "role IN ('user', 'assistant', 'system', 'tool')",
@@ -102,6 +107,11 @@ composition_states_table = Table(
         nullable=True,
     ),
     UniqueConstraint("session_id", "version", name="uq_composition_state_version"),
+    # Composite uniqueness target for composite FKs on chat_messages /
+    # runs. The primary key already makes `id` unique on its own; this
+    # constraint exists solely so SQL engines (including Postgres) will
+    # accept (id, session_id) as an FK reference.
+    UniqueConstraint("id", "session_id", name="uq_composition_state_id_session"),
 )
 
 runs_table = Table(
@@ -115,12 +125,10 @@ runs_table = Table(
         nullable=False,
         index=True,
     ),
-    Column(
-        "state_id",
-        String,
-        ForeignKey("composition_states.id"),
-        nullable=False,
-    ),
+    # Composite FK forces same-session ownership: a run in session B
+    # cannot reference a composition state owned by session A. state_id
+    # is NOT NULL so no partial-null concerns.
+    Column("state_id", String, nullable=False),
     Column("status", String, nullable=False),
     Column("started_at", DateTime(timezone=True), nullable=False),
     Column("finished_at", DateTime(timezone=True), nullable=True),
@@ -131,6 +139,11 @@ runs_table = Table(
     Column("error", Text, nullable=True),
     Column("landscape_run_id", String, nullable=True),
     Column("pipeline_yaml", Text, nullable=True),
+    ForeignKeyConstraint(
+        ["state_id", "session_id"],
+        ["composition_states.id", "composition_states.session_id"],
+        name="fk_runs_state_session",
+    ),
     CheckConstraint(
         "status IN ('pending', 'running', 'completed', 'failed', 'cancelled')",
         name="ck_runs_status",

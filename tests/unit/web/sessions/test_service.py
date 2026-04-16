@@ -6,12 +6,10 @@ import uuid
 from datetime import datetime
 
 import pytest
-from sqlalchemy import create_engine
 from sqlalchemy.pool import StaticPool
 
-from elspeth.web.sessions.models import (
-    metadata,
-)
+from elspeth.web.sessions.engine import create_session_engine
+from elspeth.web.sessions.migrations import run_migrations
 from elspeth.web.sessions.protocol import (
     ChatMessageRecord,
     CompositionStateData,
@@ -30,12 +28,12 @@ def engine():
     Uses StaticPool so that run_in_executor threads share the same
     in-memory database connection.
     """
-    eng = create_engine(
+    eng = create_session_engine(
         "sqlite:///:memory:",
         connect_args={"check_same_thread": False},
         poolclass=StaticPool,
     )
-    metadata.create_all(eng)
+    run_migrations(eng)
     return eng
 
 

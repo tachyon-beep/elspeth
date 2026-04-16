@@ -14,7 +14,6 @@ import io
 from typing import Any
 
 from fastapi import FastAPI
-from sqlalchemy import create_engine
 from sqlalchemy.pool import StaticPool
 from starlette.testclient import TestClient
 
@@ -23,7 +22,8 @@ from elspeth.web.auth.models import UserIdentity
 from elspeth.web.blobs.routes import create_blobs_router
 from elspeth.web.blobs.service import BlobServiceImpl
 from elspeth.web.config import WebSettings
-from elspeth.web.sessions.models import metadata
+from elspeth.web.sessions.engine import create_session_engine
+from elspeth.web.sessions.migrations import run_migrations
 from elspeth.web.sessions.routes import create_session_router
 from elspeth.web.sessions.service import SessionServiceImpl
 
@@ -38,12 +38,12 @@ def _make_app(
     max_upload_bytes: int = 10 * 1024 * 1024,
 ) -> tuple[FastAPI, SessionServiceImpl, BlobServiceImpl]:
     """Create a test app with session and blob routes."""
-    engine = create_engine(
+    engine = create_session_engine(
         "sqlite:///:memory:",
         poolclass=StaticPool,
         connect_args={"check_same_thread": False},
     )
-    metadata.create_all(engine)
+    run_migrations(engine)
     session_service = SessionServiceImpl(engine)
     blob_service = BlobServiceImpl(engine, tmp_path)
 
@@ -271,12 +271,12 @@ class TestIDORProtection:
 
     def _make_two_session_app(self, tmp_path) -> tuple[TestClient, TestClient]:
         """Create shared-DB app with two users, each with a session."""
-        engine = create_engine(
+        engine = create_session_engine(
             "sqlite:///:memory:",
             poolclass=StaticPool,
             connect_args={"check_same_thread": False},
         )
-        metadata.create_all(engine)
+        run_migrations(engine)
         session_service = SessionServiceImpl(engine)
         blob_service = BlobServiceImpl(engine, tmp_path)
 

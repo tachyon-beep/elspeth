@@ -9,7 +9,8 @@ from elspeth.core.security.secret_loader import SecretNotFoundError
 from elspeth.web.secrets.server_store import ServerSecretStore
 from elspeth.web.secrets.service import WebSecretService
 from elspeth.web.secrets.user_store import UserSecretStore
-from elspeth.web.sessions.models import metadata as session_metadata
+from elspeth.web.sessions.engine import create_session_engine
+from elspeth.web.sessions.migrations import run_migrations
 
 
 @pytest.fixture(autouse=True)
@@ -20,9 +21,9 @@ def _ensure_fingerprint_key(monkeypatch: pytest.MonkeyPatch) -> None:
 
 @pytest.fixture()
 def engine() -> sa.engine.Engine:
-    """In-memory SQLite engine with session tables created."""
-    eng = sa.create_engine("sqlite:///:memory:")
-    session_metadata.create_all(eng)
+    """In-memory SQLite engine migrated to head."""
+    eng = create_session_engine("sqlite:///:memory:")
+    run_migrations(eng)
     return eng
 
 
