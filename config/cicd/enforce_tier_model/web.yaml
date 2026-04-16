@@ -159,12 +159,12 @@ allow_hits:
   reason: Tier 3 boundary — isinstance check on username from external IdP JWT payload (preferred_username is Any)
   safety: Raises AuthenticationError on non-string; validated at construction time
   expires: null
-- key: web/app.py:R5:_settings_from_env:fp=2063fc070e2ddebb
+- key: web/app.py:R5:_settings_from_env:fp=1c08ebd92d44a572
   owner: web-app
   reason: Tier 3 boundary — JSON-parsed env var may be a list; isinstance check classifies for tuple conversion
   safety: isinstance used only for type dispatch; no contract masking
   expires: null
-- key: web/app.py:R6:_settings_from_env:fp=00f64552ccea22e2
+- key: web/app.py:R6:_settings_from_env:fp=d19cd3ced6f1d25c
   owner: web-app
   reason: Tier 3 boundary — env var value that isn't valid JSON is treated as plain string (the common case)
   safety: JSONDecodeError caught only to fall back to raw string; no silent data loss
@@ -319,27 +319,27 @@ allow_hits:
   reason: isinstance(config_dict, dict) validates YAML parse output before resolve_secret_refs — yaml.safe_load can return non-dict for malformed input
   safety: Raises TypeError with diagnostic message; no error suppression
   expires: null
-- key: web/app.py:R1:create_app:fp=ad5b8e95fea97d8c
+- key: web/app.py:R1:create_app:fp=33496637a90d0d60
   owner: web-app
   reason: Tier 3 — os.environ.get() for optional WEB_CONCURRENCY env var
   safety: Defaults to "1" when absent
   expires: null
-- key: web/app.py:R6:create_app:fp=d7741b5583a64526
+- key: web/app.py:R6:create_app:fp=15a7ddc7d1db4ea8
   owner: web-app
   reason: ValueError from int() on non-numeric WEB_CONCURRENCY
   safety: Defaults to single worker
   expires: null
-- key: web/app.py:R6:create_app:fp=a38baed084d8038f
+- key: web/app.py:R6:create_app:fp=e6645fd5a0801ce8
   owner: web-app
   reason: ValueError from int() on non-numeric --workers arg
   safety: Skips this argv entry
   expires: null
-- key: web/app.py:R6:create_app:fp=813e41af3724d2de
+- key: web/app.py:R6:create_app:fp=e5c502663606619c
   owner: web-app
   reason: ValueError from int() on non-numeric --workers=N
   safety: Skips this argv entry
   expires: null
-- key: web/app.py:R6:create_app:fp=fe2175bb6e6264a4
+- key: web/app.py:R6:create_app:fp=e8bae6dac9624528
   owner: web-app
   reason: ValueError from int() on non-numeric -w arg
   safety: Skips this argv entry
@@ -449,7 +449,7 @@ allow_hits:
   reason: Last-resort safety net — isinstance check excludes KeyboardInterrupt/SystemExit from diagnostic logging
   safety: Only suppresses signal exceptions; all other exceptions logged as last-resort diagnostic
   expires: null
-- key: web/app.py:R1:create_app:fp=cf131f7973937aad
+- key: web/app.py:R1:create_app:fp=e76becb5a7b7f706
   owner: web-app
   reason: Tier 3 — os.environ.get() for optional ELSPETH_ENV
   safety: Returns None when absent; only used for test guard

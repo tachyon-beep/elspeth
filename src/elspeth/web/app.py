@@ -169,27 +169,40 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     execution_service.shutdown()
 
 
+# Fields that accept JSON-encoded collection values from environment variables.
+# Add any new tuple-typed WebSettings fields here so _settings_from_env()
+# JSON-decodes them.  Scalar fields (str, int, float, Path) are handled by Pydantic.
+_JSON_COLLECTION_FIELDS: frozenset[str] = frozenset({"cors_origins", "server_secret_allowlist"})
+
+
 def _settings_from_env() -> WebSettings:
     """Construct WebSettings from ELSPETH_WEB__* environment variables.
 
     Called when create_app() is invoked without explicit settings (e.g.,
-    by uvicorn's factory protocol). The CLI sets these env vars before
+    by uvicorn's factory protocol).  The CLI sets these env vars before
     calling uvicorn.run().
+
+    Collection-typed fields are JSON-decoded via ``_JSON_COLLECTION_FIELDS``.
+    The JSON literal ``null`` is decoded to ``None`` for all fields — this is
+    the env-var convention for "clear this optional setting."  Pydantic rejects
+    ``None`` for non-nullable fields, so there is no silent mistyping risk.
+    All other scalar values pass as raw strings; Pydantic coerces
+    str→int, str→float, str→Path automatically.
     """
     kwargs: dict[str, object] = {}
     prefix = "ELSPETH_WEB__"
     for key, value in os.environ.items():
         if key.startswith(prefix):
             field_name = key[len(prefix) :].lower()
-            # Attempt JSON decode for non-scalar types (tuples, lists).
-            # E.g. ELSPETH_WEB__CORS_ORIGINS='["https://app.example.com"]'
-            try:
-                parsed = json.loads(value)
-                if isinstance(parsed, list):
-                    kwargs[field_name] = tuple(parsed)
-                else:
-                    kwargs[field_name] = parsed
-            except (json.JSONDecodeError, ValueError):
+            if field_name in _JSON_COLLECTION_FIELDS:
+                try:
+                    parsed = json.loads(value)
+                    kwargs[field_name] = tuple(parsed) if isinstance(parsed, list) else parsed
+                except (json.JSONDecodeError, ValueError):
+                    kwargs[field_name] = value
+            elif value == "null":
+                kwargs[field_name] = None
+            else:
                 kwargs[field_name] = value
     return WebSettings(**kwargs)
 

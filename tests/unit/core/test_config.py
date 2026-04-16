@@ -404,22 +404,19 @@ class TestLandscapeSettings:
         from elspeth.core.config import LandscapeSettings
 
         # Not a valid URL format at all
-        with pytest.raises(ValidationError) as exc_info:
+        with pytest.raises(ValidationError, match="invalid database URL format"):
             LandscapeSettings(url="not-a-valid-url")
-        assert "Invalid database URL format" in str(exc_info.value)
 
         # Missing scheme/driver
-        with pytest.raises(ValidationError) as exc_info:
+        with pytest.raises(ValidationError, match="invalid database URL format"):
             LandscapeSettings(url="://localhost/db")
-        assert "Invalid database URL format" in str(exc_info.value)
 
     def test_landscape_settings_url_validation_rejects_empty(self) -> None:
         """Empty URL is rejected."""
         from elspeth.core.config import LandscapeSettings
 
-        with pytest.raises(ValidationError) as exc_info:
+        with pytest.raises(ValidationError, match="must not be blank"):
             LandscapeSettings(url="")
-        assert "Invalid database URL format" in str(exc_info.value) or "missing driver" in str(exc_info.value).lower()
 
     def test_sqlcipher_backend_requires_sqlite_url(self) -> None:
         """backend='sqlcipher' with a PostgreSQL URL is rejected."""

@@ -1079,17 +1079,9 @@ class LandscapeSettings(BaseModel):
         Catches malformed URLs early (fail-fast) rather than at first DB access.
         Uses SQLAlchemy's own URL parser for accurate validation.
         """
-        from sqlalchemy.engine.url import make_url
-        from sqlalchemy.exc import ArgumentError
+        from elspeth.contracts.database_url import validate_database_url_format
 
-        try:
-            parsed = make_url(v)
-            # Verify we got a valid driver/scheme
-            if not parsed.drivername:
-                raise ValueError("Database URL missing driver (e.g., 'sqlite', 'postgresql')")
-        except ArgumentError as e:
-            raise ValueError(f"Invalid database URL format: {e}") from e
-        return v
+        return validate_database_url_format(v)
 
     @model_validator(mode="after")
     def validate_backend_url_consistency(self) -> "LandscapeSettings":

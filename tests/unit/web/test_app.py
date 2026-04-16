@@ -9,9 +9,15 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 from fastapi import Depends
+from pydantic import ValidationError
 from starlette.testclient import TestClient
 
-from elspeth.web.app import _periodic_orphan_cleanup, _settings_from_env, create_app
+from elspeth.web.app import (
+    _JSON_COLLECTION_FIELDS,
+    _periodic_orphan_cleanup,
+    _settings_from_env,
+    create_app,
+)
 from elspeth.web.config import WebSettings
 from elspeth.web.dependencies import get_settings
 
@@ -238,6 +244,68 @@ class TestSettingsFromEnv:
         monkeypatch.setenv("ELSPETH_WEB__SERVER_SECRET_ALLOWLIST", '["MY_KEY"]')
         settings = _settings_from_env()
         assert settings.server_secret_allowlist == ("MY_KEY",)
+
+    def test_secret_key_numeric_string_preserved(self, monkeypatch) -> None:
+        """A string field set to a numeric value must stay str, not become int."""
+        monkeypatch.setenv("ELSPETH_WEB__SECRET_KEY", "12345")
+        settings = _settings_from_env()
+        assert settings.secret_key == "12345"
+        assert isinstance(settings.secret_key, str)
+
+    def test_secret_key_bool_string_preserved(self, monkeypatch) -> None:
+        """'true' must stay str, not become bool(True)."""
+        monkeypatch.setenv("ELSPETH_WEB__SECRET_KEY", "true")
+        settings = _settings_from_env()
+        assert settings.secret_key == "true"
+        assert isinstance(settings.secret_key, str)
+
+    def test_secret_key_null_rejected(self, monkeypatch) -> None:
+        """'null' → None for all fields; Pydantic rejects None for non-nullable str."""
+        monkeypatch.setenv("ELSPETH_WEB__SECRET_KEY", "null")
+        with pytest.raises(ValidationError, match="secret_key"):
+            _settings_from_env()
+
+    def test_nullable_field_null_becomes_none(self, monkeypatch) -> None:
+        """'null' → None for nullable fields, enabling default fallback."""
+        monkeypatch.setenv("ELSPETH_WEB__OIDC_AUTHORIZATION_ENDPOINT", "null")
+        settings = _settings_from_env()
+        assert settings.oidc_authorization_endpoint is None
+
+    def test_nullable_db_url_null_becomes_none(self, monkeypatch) -> None:
+        """'null' → None for landscape_url, so get_landscape_url() uses the default."""
+        monkeypatch.setenv("ELSPETH_WEB__LANDSCAPE_URL", "null")
+        settings = _settings_from_env()
+        assert settings.landscape_url is None
+
+    def test_port_string_coerced_by_pydantic(self, monkeypatch) -> None:
+        """Numeric string for int field is coerced by Pydantic, not json.loads."""
+        monkeypatch.setenv("ELSPETH_WEB__PORT", "9090")
+        settings = _settings_from_env()
+        assert settings.port == 9090
+        assert isinstance(settings.port, int)
+
+
+class TestJsonCollectionFieldsSync:
+    """Structural test: _JSON_COLLECTION_FIELDS must stay in sync with WebSettings."""
+
+    def test_all_tuple_fields_in_allowlist(self) -> None:
+        """Every tuple-typed field on WebSettings must appear in _JSON_COLLECTION_FIELDS."""
+        tuple_fields = {
+            name for name, field_info in WebSettings.model_fields.items() if getattr(field_info.annotation, "__origin__", None) is tuple
+        }
+        missing = tuple_fields - _JSON_COLLECTION_FIELDS
+        assert not missing, (
+            f"Tuple-typed WebSettings fields missing from _JSON_COLLECTION_FIELDS: {missing}. "
+            f"Add them so _settings_from_env() JSON-decodes them from env vars."
+        )
+
+    def test_no_non_tuple_fields_in_allowlist(self) -> None:
+        """_JSON_COLLECTION_FIELDS must not contain non-tuple fields."""
+        tuple_fields = {
+            name for name, field_info in WebSettings.model_fields.items() if getattr(field_info.annotation, "__origin__", None) is tuple
+        }
+        extra = _JSON_COLLECTION_FIELDS - tuple_fields
+        assert not extra, f"Non-tuple fields in _JSON_COLLECTION_FIELDS: {extra}. Scalar fields should not be JSON-decoded."
 
 
 class TestPeriodicOrphanCleanup:

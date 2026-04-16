@@ -5,7 +5,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Literal
 
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 _LOCAL_HOSTS = {"127.0.0.1", "localhost", "::1"}
 
@@ -65,6 +65,40 @@ class WebSettings(BaseModel):
     # Separate from landscape_url (audit DB)
     session_db_url: str | None = None
 
+    @field_validator(
+        "oidc_issuer",
+        "oidc_audience",
+        "oidc_client_id",
+        "oidc_authorization_endpoint",
+        "entra_tenant_id",
+    )
+    @classmethod
+    def _reject_blank_auth_fields(cls, v: str | None) -> str | None:
+        if v is None:
+            return None
+        if not v.strip():
+            raise ValueError("must not be blank (omit the field or set to a non-empty value)")
+        return v
+
+    @field_validator("landscape_url", "session_db_url")
+    @classmethod
+    def _validate_db_url(cls, v: str | None) -> str | None:
+        """Reject blank and malformed database URLs at config time."""
+        if v is None:
+            return None
+        from elspeth.contracts.database_url import validate_database_url_format
+
+        return validate_database_url_format(v)
+
+    @field_validator("landscape_passphrase")
+    @classmethod
+    def _reject_blank_passphrase(cls, v: str | None) -> str | None:
+        if v is None:
+            return None
+        if not v.strip():
+            raise ValueError("must not be blank (omit the field to disable encryption)")
+        return v
+
     @model_validator(mode="after")
     def _validate_auth_fields(self) -> WebSettings:
         """Enforce that OIDC/Entra providers have their required fields."""
@@ -76,7 +110,7 @@ class WebSettings(BaseModel):
                     ("oidc_audience", self.oidc_audience),
                     ("oidc_client_id", self.oidc_client_id),
                 )
-                if val is None
+                if not val
             ]
             if missing:
                 raise ValueError(f"OIDC auth requires: {', '.join(missing)}")
@@ -90,10 +124,25 @@ class WebSettings(BaseModel):
                     ("oidc_client_id", self.oidc_client_id),
                     ("entra_tenant_id", self.entra_tenant_id),
                 )
-                if val is None
+                if not val
             ]
             if missing:
                 raise ValueError(f"Entra auth requires: {', '.join(missing)}")
+        return self
+
+    @model_validator(mode="after")
+    def _validate_passphrase_requires_sqlite(self) -> WebSettings:
+        """Reject landscape_passphrase with non-SQLite URLs at config time."""
+        if self.landscape_passphrase is not None and self.landscape_url is not None:
+            from sqlalchemy.engine.url import make_url
+
+            driver = make_url(self.landscape_url).drivername.split("+")[0]
+            if driver != "sqlite":
+                raise ValueError(
+                    f"landscape_passphrase requires a SQLite landscape_url, "
+                    f"got driver '{driver}'. Either remove the passphrase "
+                    f"or change landscape_url to sqlite:///path/to/audit.db"
+                )
         return self
 
     @model_validator(mode="after")

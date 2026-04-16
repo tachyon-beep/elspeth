@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import types
+import typing
 from pathlib import Path
 
 import pytest
@@ -366,3 +368,204 @@ class TestAuthFieldValidation:
         )
         assert settings.auth_provider == "entra"
         assert settings.entra_tenant_id == "my-tenant-id"
+
+
+class TestOIDCBlankStringRejection:
+    """Blank/whitespace-only OIDC/Entra fields must be rejected at config time."""
+
+    _COMPOSER_DEFAULTS: typing.ClassVar[dict[str, object]] = {
+        "composer_max_composition_turns": 15,
+        "composer_max_discovery_turns": 10,
+        "composer_timeout_seconds": 85.0,
+        "composer_rate_limit_per_minute": 10,
+    }
+
+    def test_oidc_empty_string_issuer_rejected(self) -> None:
+        with pytest.raises(ValidationError, match="must not be blank"):
+            WebSettings(
+                auth_provider="oidc",
+                oidc_issuer="",
+                oidc_audience="my-audience",
+                oidc_client_id="my-client-id",
+                **self._COMPOSER_DEFAULTS,
+            )
+
+    def test_oidc_whitespace_issuer_rejected(self) -> None:
+        with pytest.raises(ValidationError, match="must not be blank"):
+            WebSettings(
+                auth_provider="oidc",
+                oidc_issuer="   ",
+                oidc_audience="my-audience",
+                oidc_client_id="my-client-id",
+                **self._COMPOSER_DEFAULTS,
+            )
+
+    def test_oidc_empty_audience_rejected(self) -> None:
+        with pytest.raises(ValidationError, match="must not be blank"):
+            WebSettings(
+                auth_provider="oidc",
+                oidc_issuer="https://issuer.example.com",
+                oidc_audience="",
+                oidc_client_id="my-client-id",
+                **self._COMPOSER_DEFAULTS,
+            )
+
+    def test_oidc_empty_client_id_rejected(self) -> None:
+        with pytest.raises(ValidationError, match="must not be blank"):
+            WebSettings(
+                auth_provider="oidc",
+                oidc_issuer="https://issuer.example.com",
+                oidc_audience="my-audience",
+                oidc_client_id="",
+                **self._COMPOSER_DEFAULTS,
+            )
+
+    def test_entra_empty_tenant_id_rejected(self) -> None:
+        with pytest.raises(ValidationError, match="must not be blank"):
+            WebSettings(
+                auth_provider="entra",
+                oidc_audience="my-audience",
+                oidc_client_id="my-client-id",
+                entra_tenant_id="",
+                **self._COMPOSER_DEFAULTS,
+            )
+
+    def test_entra_whitespace_tenant_id_rejected(self) -> None:
+        with pytest.raises(ValidationError, match="must not be blank"):
+            WebSettings(
+                auth_provider="entra",
+                oidc_audience="my-audience",
+                oidc_client_id="my-client-id",
+                entra_tenant_id="   ",
+                **self._COMPOSER_DEFAULTS,
+            )
+
+    def test_oidc_empty_authorization_endpoint_rejected(self) -> None:
+        with pytest.raises(ValidationError, match="must not be blank"):
+            WebSettings(
+                auth_provider="oidc",
+                oidc_issuer="https://issuer.example.com",
+                oidc_audience="my-audience",
+                oidc_client_id="my-client-id",
+                oidc_authorization_endpoint="",
+                **self._COMPOSER_DEFAULTS,
+            )
+
+    def test_local_auth_blank_oidc_field_still_rejected(self) -> None:
+        """Field validator fires regardless of auth_provider — blank is always invalid."""
+        with pytest.raises(ValidationError, match="must not be blank"):
+            WebSettings(
+                auth_provider="local",
+                oidc_issuer="",
+                **self._COMPOSER_DEFAULTS,
+            )
+
+
+class TestDBURLValidation:
+    """Database URL format and passphrase compatibility validation."""
+
+    _COMPOSER_DEFAULTS: typing.ClassVar[dict[str, object]] = {
+        "composer_max_composition_turns": 15,
+        "composer_max_discovery_turns": 10,
+        "composer_timeout_seconds": 85.0,
+        "composer_rate_limit_per_minute": 10,
+    }
+
+    def test_landscape_url_empty_rejected(self) -> None:
+        with pytest.raises(ValidationError, match="must not be blank"):
+            WebSettings(landscape_url="", **self._COMPOSER_DEFAULTS)
+
+    def test_landscape_url_whitespace_rejected(self) -> None:
+        with pytest.raises(ValidationError, match="must not be blank"):
+            WebSettings(landscape_url="   ", **self._COMPOSER_DEFAULTS)
+
+    def test_landscape_url_malformed_rejected(self) -> None:
+        with pytest.raises(ValidationError, match="invalid database URL"):
+            WebSettings(landscape_url="not-a-url", **self._COMPOSER_DEFAULTS)
+
+    def test_landscape_url_valid_sqlite_accepted(self) -> None:
+        settings = WebSettings(landscape_url="sqlite:///path/audit.db", **self._COMPOSER_DEFAULTS)
+        assert settings.landscape_url == "sqlite:///path/audit.db"
+
+    def test_landscape_url_valid_postgresql_accepted(self) -> None:
+        settings = WebSettings(landscape_url="postgresql://host/db", **self._COMPOSER_DEFAULTS)
+        assert settings.landscape_url == "postgresql://host/db"
+
+    def test_session_db_url_empty_rejected(self) -> None:
+        with pytest.raises(ValidationError, match="must not be blank"):
+            WebSettings(session_db_url="", **self._COMPOSER_DEFAULTS)
+
+    def test_session_db_url_whitespace_rejected(self) -> None:
+        with pytest.raises(ValidationError, match="must not be blank"):
+            WebSettings(session_db_url="   ", **self._COMPOSER_DEFAULTS)
+
+    def test_session_db_url_malformed_rejected(self) -> None:
+        with pytest.raises(ValidationError, match="invalid database URL"):
+            WebSettings(session_db_url="garbage", **self._COMPOSER_DEFAULTS)
+
+    def test_session_db_url_valid_accepted(self) -> None:
+        settings = WebSettings(session_db_url="sqlite:///sessions.db", **self._COMPOSER_DEFAULTS)
+        assert settings.session_db_url == "sqlite:///sessions.db"
+
+    def test_passphrase_with_postgresql_rejected(self) -> None:
+        with pytest.raises(ValidationError, match="requires a SQLite"):
+            WebSettings(
+                landscape_url="postgresql://host/db",
+                landscape_passphrase="secret",
+                **self._COMPOSER_DEFAULTS,
+            )
+
+    def test_passphrase_with_sqlite_accepted(self) -> None:
+        settings = WebSettings(
+            landscape_url="sqlite:///audit.db",
+            landscape_passphrase="secret",
+            **self._COMPOSER_DEFAULTS,
+        )
+        assert settings.landscape_passphrase == "secret"
+
+    def test_passphrase_without_explicit_url_accepted(self) -> None:
+        """When landscape_url is None, default is SQLite — passphrase is valid."""
+        settings = WebSettings(landscape_passphrase="secret", **self._COMPOSER_DEFAULTS)
+        assert settings.landscape_passphrase == "secret"
+        assert settings.landscape_url is None
+
+    def test_passphrase_empty_rejected(self) -> None:
+        with pytest.raises(ValidationError, match="must not be blank"):
+            WebSettings(landscape_passphrase="", **self._COMPOSER_DEFAULTS)
+
+    def test_passphrase_whitespace_rejected(self) -> None:
+        with pytest.raises(ValidationError, match="must not be blank"):
+            WebSettings(landscape_passphrase="   ", **self._COMPOSER_DEFAULTS)
+
+
+def _optional_string_field_names() -> list[str]:
+    """Enumerate all str | None fields on WebSettings for parametrized testing."""
+    fields: list[str] = []
+    for name, field_info in WebSettings.model_fields.items():
+        ann = field_info.annotation
+        if isinstance(ann, types.UnionType):
+            args = typing.get_args(ann)
+            if str in args and type(None) in args:
+                fields.append(name)
+    return fields
+
+
+class TestFieldValidatorCoverage:
+    """Structural test: every str | None field must reject blank strings.
+
+    Prevents the 'Drifting Goals' pattern — new optional string fields added
+    without blank-string validators silently accumulate validation gaps.
+    """
+
+    _COMPOSER_DEFAULTS: typing.ClassVar[dict[str, object]] = {
+        "composer_max_composition_turns": 15,
+        "composer_max_discovery_turns": 10,
+        "composer_timeout_seconds": 85.0,
+        "composer_rate_limit_per_minute": 10,
+    }
+
+    @pytest.mark.parametrize("field_name", _optional_string_field_names())
+    def test_blank_string_rejected_for_all_optional_string_fields(self, field_name: str) -> None:
+        """Every str | None field must reject empty strings at config time."""
+        with pytest.raises(ValidationError):
+            WebSettings(**{field_name: "", **self._COMPOSER_DEFAULTS})
