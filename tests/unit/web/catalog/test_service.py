@@ -169,12 +169,83 @@ class TestGetSchema:
         assert info.name == "null"
         assert info.json_schema == {}
 
-    def test_llm_transform_returns_base_schema(self, catalog: CatalogServiceImpl) -> None:
+    def test_llm_transform_emits_discriminated_schema(self, catalog: CatalogServiceImpl) -> None:
+        """Regression: bug elspeth-dcf12c061b.
+
+        The LLM transform dispatches config on ``provider`` at runtime. The
+        catalog must publish a Pydantic discriminated union with $defs per
+        provider — not just the thin base LLMConfig whose required set is
+        missing the Azure (deployment_name/endpoint/api_key) and OpenRouter
+        (model/api_key) mandatory fields.
+
+        Skipped when the ``[llm]`` extra is not installed: ``PluginManager``
+        discovery silently omits plugins whose module-level imports fail
+        (see ``discover_plugins_in_directory``), so the ``llm`` transform
+        will not be registered on a bare dev install. The test speaks to the
+        discriminated-union contract, not to plugin availability, so gating
+        on the extra is the correct scoping.
+        """
+        pytest.importorskip(
+            "litellm",
+            reason="LLM transform requires the [llm] extra; catalog discovery skips it otherwise.",
+        )
         info = catalog.get_schema("transform", "llm")
-        assert info.name == "llm"
-        assert isinstance(info.json_schema, dict)
-        if info.json_schema:
-            assert "properties" in info.json_schema
+        schema = info.json_schema
+        assert "oneOf" in schema
+        assert len(schema["oneOf"]) == 2
+        assert schema["discriminator"]["propertyName"] == "provider"
+        assert set(schema["discriminator"]["mapping"].keys()) == {"azure", "openrouter"}
+        defs = schema["$defs"]
+        assert "AzureOpenAIConfig" in defs
+        assert "OpenRouterConfig" in defs
+        assert set(defs["AzureOpenAIConfig"]["required"]) >= {
+            "deployment_name",
+            "endpoint",
+            "api_key",
+            "template",
+        }
+        assert set(defs["OpenRouterConfig"]["required"]) >= {"model", "api_key", "template"}
+
+    def test_llm_transform_summary_includes_provider_fields(self, catalog: CatalogServiceImpl) -> None:
+        """Regression: bug elspeth-dcf12c061b.
+
+        list_transforms()[llm].config_fields must surface provider-specific
+        fields (deployment_name, endpoint, api_key, base_url, timeout_seconds,
+        model) — not just the base LLMConfig fields. Required-in-all-variants
+        is the honest summary rule: api_key and template appear in every
+        provider's required set; provider-specific required fields are marked
+        required=False because they are conditional on the discriminator
+        value, and the full schema encodes that conditionality.
+
+        Gated on the ``[llm]`` extra for the same reason as the schema test
+        above — without litellm installed, the LLM transform module fails
+        to import and PluginManager skips it.
+        """
+        pytest.importorskip(
+            "litellm",
+            reason="LLM transform requires the [llm] extra; catalog discovery skips it otherwise.",
+        )
+        transforms = catalog.list_transforms()
+        llm = next(t for t in transforms if t.name == "llm")
+        field_names = {f.name for f in llm.config_fields}
+        assert field_names >= {
+            "provider",
+            "template",
+            "api_key",
+            "deployment_name",
+            "endpoint",
+            "model",
+            "base_url",
+            "timeout_seconds",
+        }
+        required = {f.name for f in llm.config_fields if f.required}
+        # Fields that are required in EVERY provider variant — honest intersection.
+        assert "api_key" in required
+        assert "template" in required
+        # Fields required only for some providers must not claim universal requiredness.
+        assert "deployment_name" not in required
+        assert "endpoint" not in required
+        assert "model" not in required
 
     def test_unknown_type_raises_value_error(self, catalog: CatalogServiceImpl) -> None:
         with pytest.raises(ValueError, match="Unknown plugin type"):
@@ -216,3 +287,234 @@ class TestTransformConfigVisibility:
     def test_value_transform_schema_has_properties(self, catalog: CatalogServiceImpl) -> None:
         info = catalog.get_schema("transform", "value_transform")
         assert "properties" in info.json_schema
+
+
+class TestGetConfigSchemaDefault:
+    """Single-model plugins inherit the default get_config_schema().
+
+    Pins the default implementation so that single-model plugins continue
+    to return exactly ``config_model.model_json_schema()`` — not some
+    subset or wrapper — and NullSource (no config_model) returns ``{}``.
+
+    The default is duplicated on BaseSource, BaseTransform, and BaseSink
+    (three near-identical copies). Each copy is regression-pinned
+    independently here so silent drift in any one of them fails the suite
+    instead of hiding until a plugin of that kind is catalog-inspected.
+    """
+
+    def test_default_matches_model_json_schema_for_csv_source(self, catalog: CatalogServiceImpl) -> None:
+        from elspeth.plugins.sources.csv_source import CSVSource, CSVSourceConfig
+
+        assert CSVSource.get_config_schema() == CSVSourceConfig.model_json_schema()
+        info = catalog.get_schema("source", "csv")
+        assert info.json_schema == CSVSourceConfig.model_json_schema()
+
+    def test_default_matches_model_json_schema_for_passthrough_transform(self, catalog: CatalogServiceImpl) -> None:
+        """BaseTransform's default must return exactly the Pydantic schema."""
+        from elspeth.plugins.transforms.passthrough import PassThrough, PassThroughConfig
+
+        assert PassThrough.get_config_schema() == PassThroughConfig.model_json_schema()
+        info = catalog.get_schema("transform", "passthrough")
+        assert info.json_schema == PassThroughConfig.model_json_schema()
+
+    def test_default_matches_model_json_schema_for_csv_sink(self, catalog: CatalogServiceImpl) -> None:
+        """BaseSink's default must return exactly the Pydantic schema."""
+        from elspeth.plugins.sinks.csv_sink import CSVSink, CSVSinkConfig
+
+        assert CSVSink.get_config_schema() == CSVSinkConfig.model_json_schema()
+        info = catalog.get_schema("sink", "csv")
+        assert info.json_schema == CSVSinkConfig.model_json_schema()
+
+    def test_null_source_returns_empty_schema_default(self, catalog: CatalogServiceImpl) -> None:
+        """Plugins without a config model return ``{}`` — not an error."""
+        info = catalog.get_schema("source", "null")
+        assert info.json_schema == {}
+
+
+class TestFieldsFromDiscriminatedMalformed:
+    """Exercise the boundary branches allowlisted in enforce_tier_model/web.yaml.
+
+    Each branch corresponds to one allowlist entry whose ``safety`` field
+    asserts a specific behavior when the incoming JSON schema is structurally
+    unusual. These tests pin those behaviors so the allowlist rationale and
+    the code stay in lockstep — a future refactor that silently changes
+    "returns empty field list" into "raises KeyError" fails here, not in
+    production.
+    """
+
+    @staticmethod
+    def _service() -> CatalogServiceImpl:
+        """Build a CatalogServiceImpl with builtins for driving internals."""
+        pm = PluginManager()
+        pm.register_builtin_plugins()
+        return CatalogServiceImpl(pm)
+
+    def test_oneof_entry_without_ref_is_skipped(self) -> None:
+        """Inline-schema oneOf entries (no ``$ref``) are skipped, not crashed on.
+
+        JSON Schema permits oneOf entries to be either ``{"$ref": ...}`` or
+        an inline object schema. Pydantic's discriminated-union emission uses
+        ``$ref``, but a mixed shape from a custom override must degrade
+        gracefully to "contribute no fields."
+        """
+        svc = self._service()
+        schema = {
+            "oneOf": [
+                {"type": "object", "properties": {"inline_field": {"type": "string"}}},
+                {"$ref": "#/$defs/RealVariant"},
+            ],
+            "$defs": {
+                "RealVariant": {
+                    "properties": {"real_field": {"type": "string"}},
+                    "required": ["real_field"],
+                }
+            },
+        }
+        fields = svc._fields_from_discriminated(schema)
+        assert [f.name for f in fields] == ["real_field"]
+
+    def test_non_defs_ref_prefix_is_skipped(self) -> None:
+        """``$ref`` that does not point into local ``$defs`` is skipped.
+
+        e.g. ``#/components/schemas/X`` — a remote OpenAPI shape, not the
+        local-$defs shape Pydantic emits. Skipped rather than raising so the
+        flattener stays robust to schemas we don't fully own.
+        """
+        svc = self._service()
+        schema = {
+            "oneOf": [
+                {"$ref": "#/components/schemas/External"},
+                {"$ref": "#/$defs/Local"},
+            ],
+            "$defs": {
+                "Local": {
+                    "properties": {"local_field": {"type": "string"}},
+                    "required": ["local_field"],
+                }
+            },
+        }
+        fields = svc._fields_from_discriminated(schema)
+        assert [f.name for f in fields] == ["local_field"]
+
+    def test_variant_without_properties_contributes_no_fields(self) -> None:
+        """A variant declaring no ``properties`` contributes zero fields.
+
+        Valid JSON Schema ("empty config is allowed") — not an error.
+        """
+        svc = self._service()
+        schema = {
+            "oneOf": [
+                {"$ref": "#/$defs/Empty"},
+                {"$ref": "#/$defs/WithField"},
+            ],
+            "$defs": {
+                "Empty": {},  # no properties, no required
+                "WithField": {
+                    "properties": {"only_field": {"type": "string"}},
+                    "required": ["only_field"],
+                },
+            },
+        }
+        fields = svc._fields_from_discriminated(schema)
+        assert [f.name for f in fields] == ["only_field"]
+        # Field appears in only one variant => not universally required.
+        assert fields[0].required is False
+
+    def test_variant_without_required_marks_field_not_required(self) -> None:
+        """Universal requiredness requires presence in EVERY variant.
+
+        A field present in two variants but required-listed in only one must
+        come back ``required=False`` — the intersection rule for honest
+        summary reporting.
+        """
+        svc = self._service()
+        schema = {
+            "oneOf": [
+                {"$ref": "#/$defs/A"},
+                {"$ref": "#/$defs/B"},
+            ],
+            "$defs": {
+                "A": {
+                    "properties": {"shared": {"type": "string"}},
+                    "required": ["shared"],
+                },
+                "B": {
+                    "properties": {"shared": {"type": "string"}},
+                    # no "required" key at all
+                },
+            },
+        }
+        fields = svc._fields_from_discriminated(schema)
+        shared = next(f for f in fields if f.name == "shared")
+        assert shared.required is False
+
+    def test_dangling_ref_raises(self) -> None:
+        """Dangling ``$ref`` surfaces as KeyError — treated as a Pydantic bug.
+
+        If Pydantic emits a ``$ref`` into ``$defs`` but the corresponding
+        entry is missing, silently returning an empty summary would hide
+        the schema-generation bug. Surfacing KeyError makes it an auditable
+        failure rather than invisible data loss.
+        """
+        svc = self._service()
+        schema = {
+            "oneOf": [{"$ref": "#/$defs/Missing"}],
+            "$defs": {},
+        }
+        with pytest.raises(KeyError):
+            svc._fields_from_discriminated(schema)
+
+
+class TestDiscriminatedFieldOrdering:
+    """Field insertion order across discriminated-union variants is preserved.
+
+    The flattener walks variants in ``oneOf`` order and appends each
+    field name the first time it is seen. This test pins that invariant so
+    a refactor replacing the ordered-dedup with ``set(...)`` (which would
+    lose ordering) fails loudly.
+    """
+
+    def test_llm_fields_ordered_common_then_azure_then_openrouter(self, catalog: CatalogServiceImpl) -> None:
+        pytest.importorskip(
+            "litellm",
+            reason="LLM transform requires the [llm] extra; catalog discovery skips it otherwise.",
+        )
+        transforms = catalog.list_transforms()
+        llm = next(t for t in transforms if t.name == "llm")
+        field_order = [f.name for f in llm.config_fields]
+        # ``provider`` + ``template`` are common to both variants (Azure first
+        # in _PROVIDERS) so they must precede the Azure-only and
+        # OpenRouter-only fields.
+        assert field_order.index("provider") < field_order.index("deployment_name")
+        assert field_order.index("provider") < field_order.index("base_url")
+        # Azure-specific fields must come before OpenRouter-only fields
+        # because Azure is registered first in _PROVIDERS.
+        assert field_order.index("deployment_name") < field_order.index("base_url")
+        assert field_order.index("endpoint") < field_order.index("base_url")
+
+
+class TestOneOfRoutingPredicate:
+    """``_extract_config_fields`` routes on BOTH ``oneOf`` and ``$defs``.
+
+    The routing predicate requires both keys before delegating to
+    ``_fields_from_discriminated``. A schema with just ``oneOf`` (and no
+    ``$defs``) falls through to the flat-schema path rather than crashing.
+    """
+
+    @staticmethod
+    def _service() -> CatalogServiceImpl:
+        pm = PluginManager()
+        pm.register_builtin_plugins()
+        return CatalogServiceImpl(pm)
+
+    def test_oneof_without_defs_treated_as_flat(self) -> None:
+        svc = self._service()
+        # No ``$defs`` => flat-schema path; returns whatever ``properties`` holds.
+        schema = {
+            "oneOf": [{"type": "object"}],
+            "properties": {"top_field": {"type": "string"}},
+            "required": ["top_field"],
+        }
+        fields = svc._extract_config_fields(schema)
+        assert [f.name for f in fields] == ["top_field"]
+        assert fields[0].required is True

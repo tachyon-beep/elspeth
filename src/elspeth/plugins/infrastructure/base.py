@@ -156,6 +156,24 @@ class BaseTransform(ABC):
         """
         return cls.config_model
 
+    @classmethod
+    def get_config_schema(cls) -> dict[str, Any]:
+        """Return the full JSON Schema advertising this plugin's configuration.
+
+        Default renders ``cls.config_model.model_json_schema()`` (or ``{}``
+        when ``config_model`` is None, e.g. NullSource). Subclasses whose
+        *effective* configuration is a discriminated union — even if
+        ``config_model`` is set to a base class used as a dispatch anchor,
+        as LLMTransform does — MUST override this to emit ``oneOf`` + ``$defs``.
+        Rendering the anchor alone publishes a contract missing every
+        variant-specific required field, which is the exact failure mode
+        tracked as bug elspeth-dcf12c061b.
+        """
+        if cls.config_model is None:
+            return {}
+        schema: dict[str, Any] = cls.config_model.model_json_schema()
+        return schema
+
     # Batch support - override to True for batch-aware transforms
     # When True, engine may pass list[dict] instead of single dict to process()
     is_batch_aware: bool = False
@@ -432,6 +450,22 @@ class BaseSink(ABC):
         """Return the Pydantic config model for this plugin type."""
         return cls.config_model
 
+    @classmethod
+    def get_config_schema(cls) -> dict[str, Any]:
+        """Return the full JSON Schema advertising this plugin's configuration.
+
+        Default renders ``cls.config_model.model_json_schema()`` (or ``{}``
+        when ``config_model`` is None). Subclasses whose *effective*
+        configuration is a discriminated union — even if ``config_model`` is
+        set to a base class used as a dispatch anchor — MUST override this to
+        emit ``oneOf`` + ``$defs`` so the catalog publishes the full
+        per-variant contract at schema-discovery time.
+        """
+        if cls.config_model is None:
+            return {}
+        schema: dict[str, Any] = cls.config_model.model_json_schema()
+        return schema
+
     # Default: sinks don't support resume. Override in subclasses that can append.
     supports_resume: bool = False
 
@@ -702,6 +736,22 @@ class BaseSource(ABC):
         Returns None for sources with no config (e.g. NullSource).
         """
         return cls.config_model
+
+    @classmethod
+    def get_config_schema(cls) -> dict[str, Any]:
+        """Return the full JSON Schema advertising this plugin's configuration.
+
+        Default renders ``cls.config_model.model_json_schema()`` (or ``{}``
+        when ``config_model`` is None, e.g. NullSource). Subclasses whose
+        *effective* configuration is a discriminated union — even if
+        ``config_model`` is set to a base class used as a dispatch anchor —
+        MUST override this to emit ``oneOf`` + ``$defs`` so the catalog
+        publishes the full per-variant contract at schema-discovery time.
+        """
+        if cls.config_model is None:
+            return {}
+        schema: dict[str, Any] = cls.config_model.model_json_schema()
+        return schema
 
     # Sink name for quarantined rows, or "discard" to drop invalid rows
     # All sources must set this - config-based sources get it from SourceDataConfig

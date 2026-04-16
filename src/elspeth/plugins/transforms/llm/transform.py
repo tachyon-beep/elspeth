@@ -20,9 +20,13 @@ import threading
 import time
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, field
-from typing import Any, Protocol, cast
+from functools import reduce
+from operator import or_
+from typing import Annotated, Any, Protocol, cast
 
 import structlog
+from pydantic import Field as PydanticField
+from pydantic import TypeAdapter
 
 from elspeth.contracts import Determinism, TransformErrorReason, TransformResult, propagate_contract
 from elspeth.contracts.audit_protocols import PluginAuditWriter
@@ -965,7 +969,7 @@ class LLMTransform(BaseTransform, BatchTransformMixin):
 
     name = "llm"
     plugin_version = "1.0.0"
-    source_file_hash: str | None = "sha256:35c0199fa61787ee"
+    source_file_hash: str | None = "sha256:979faae47c7e0918"
     determinism: Determinism = Determinism.NON_DETERMINISTIC
     config_model = LLMConfig  # Base; get_config_model dispatches to provider-specific
 
@@ -980,6 +984,63 @@ class LLMTransform(BaseTransform, BatchTransformMixin):
             raise ValueError(f"Unknown LLM provider '{provider}'. Valid providers: {sorted(_PROVIDERS)}")
         # provider missing — return base LLMConfig so Pydantic catches it with Literal validation
         return LLMConfig
+
+    @classmethod
+    def get_config_schema(cls) -> dict[str, Any]:
+        """Publish the full LLM config contract as a Pydantic discriminated union.
+
+        The runtime dispatches ``get_config_model(config)`` on ``config["provider"]``
+        to select the provider-specific config class registered in
+        :data:`_PROVIDERS`. The catalog needs to advertise the complete
+        contract at schema-discovery time — before any provider has been
+        chosen — so this returns ``oneOf`` + a ``provider`` discriminator
+        over every variant in ``_PROVIDERS``. The variant list is derived
+        from the same registry that drives runtime provider instantiation;
+        the two cannot drift.
+
+        Requires ``len(_PROVIDERS) >= 2`` because a discriminated union with
+        one branch degenerates — Pydantic's ``TypeAdapter`` would emit a
+        non-``oneOf`` schema and downstream consumers (catalog flattener,
+        frontend PluginCard) rely on the ``oneOf`` + ``$defs`` shape to route
+        rendering. The guard here surfaces the contract explicitly instead of
+        letting the shape silently change under a single-provider build.
+        """
+        variants = tuple(cfg for cfg, _ in _PROVIDERS.values())
+        if len(variants) < 2:
+            raise RuntimeError(
+                "LLMTransform.get_config_schema requires at least two providers "
+                f"registered in _PROVIDERS; found {len(variants)}. Discriminated "
+                "union shape requires multiple branches."
+            )
+        # Fold with ``|`` to a single types.UnionType — the form Pydantic's
+        # Annotated[..., Field(discriminator=...)] requires. typing.Union[*variants]
+        # and tuple-of-types do not produce the same schema shape.
+        union_type = reduce(or_, variants[1:], variants[0])
+        adapter: TypeAdapter[Any] = TypeAdapter(Annotated[union_type, PydanticField(discriminator="provider")])
+        schema: dict[str, Any] = adapter.json_schema(ref_template="#/$defs/{model}")
+        # Pydantic emits ``provider`` as ``{const, default}`` on each variant and,
+        # because the field has a default, omits it from the variant's ``required``
+        # set. That disagrees with the runtime contract: ``LLMTransform.__init__``
+        # raises ``ValueError`` when config lacks ``provider`` because the registry
+        # cannot dispatch without it. A JSON-Schema preflight consumer (MCP composer,
+        # PluginCard form generation) must see the same requirement the runtime
+        # enforces — otherwise it accepts configs the pipeline will reject.
+        # Republish ``provider`` as required on every variant defined by ``_PROVIDERS``.
+        # Targeting variants by class name (not by "has a provider property") keeps
+        # the injection scoped to the discriminated union; unrelated nested ``$defs``
+        # (e.g. ``SchemaConfig``) are untouched.
+        provider_variant_names = {cfg.__name__ for cfg, _ in _PROVIDERS.values()}
+        for variant_name in provider_variant_names:
+            variant_schema = schema["$defs"][variant_name]
+            # Each provider variant inherits non-empty required fields from
+            # LLMConfig (``schema``, ``template``, ...) so Pydantic always
+            # emits a ``required`` key on the variant $defs. Access it directly
+            # — a missing key would signal a schema-emission regression worth
+            # crashing on, not silently papering over with setdefault().
+            required = variant_schema["required"]
+            if "provider" not in required:
+                required.append("provider")
+        return schema
 
     def __init__(self, config: dict[str, Any]) -> None:
         super().__init__(config)

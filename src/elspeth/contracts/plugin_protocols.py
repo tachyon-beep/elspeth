@@ -173,6 +173,17 @@ class SourceProtocol(Protocol):
         """
         ...
 
+    @classmethod
+    def get_config_schema(cls) -> dict[str, Any]:
+        """Return the full JSON Schema advertising this plugin's configuration.
+
+        Single-model plugins inherit a default that renders
+        ``config_model.model_json_schema()``; plugins whose effective config
+        is a discriminated union override this to publish the full per-variant
+        contract (``oneOf`` + ``$defs``).
+        """
+        ...
+
 
 @runtime_checkable
 class TransformProtocol(Protocol):
@@ -313,6 +324,15 @@ class TransformProtocol(Protocol):
         """
         ...
 
+    @classmethod
+    def get_config_schema(cls) -> dict[str, Any]:
+        """Return the full JSON Schema advertising this plugin's configuration.
+
+        LLMTransform overrides to emit a discriminated union over ``provider``;
+        most other transforms inherit the default single-model rendering.
+        """
+        ...
+
 
 class BatchTransformProtocol(Protocol):
     """Protocol for batch-aware transforms — type-checking only, not @runtime_checkable.
@@ -426,6 +446,11 @@ class BatchTransformProtocol(Protocol):
 
         Override for dynamic dispatch based on config contents.
         """
+        ...
+
+    @classmethod
+    def get_config_schema(cls) -> dict[str, Any]:
+        """Return the full JSON Schema advertising this plugin's configuration."""
         ...
 
 
@@ -618,6 +643,15 @@ class SinkProtocol(Protocol):
         """Return the Pydantic config model for this plugin type.
 
         Override for dynamic dispatch based on config contents.
+        """
+        ...
+
+    @classmethod
+    def get_config_schema(cls) -> dict[str, Any]:
+        """Return the full JSON Schema advertising this plugin's configuration.
+
+        Override when the sink configuration is a discriminated union so the
+        catalog publishes the full per-variant contract at discovery time.
         """
         ...
 

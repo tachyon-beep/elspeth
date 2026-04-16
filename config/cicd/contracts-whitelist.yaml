@@ -174,8 +174,20 @@ allowed_dict_patterns:
   # JSON parsing - object_pairs_hook must return dict (json.loads contract)
   - "src/elspeth/plugins/infrastructure/clients/json_utils.py:_reject_duplicate_keys:return"
 
-  # Catalog service - Pydantic model_json_schema() output (standard JSON Schema dict)
-  - "src/elspeth/web/catalog/service.py:CatalogServiceImpl._get_json_schema:return"
+  # Plugin schema emission - model_json_schema() / Pydantic TypeAdapter output
+  # is a standard JSON Schema dict. Base implementations on BaseSource,
+  # BaseTransform, BaseSink, plus the LLMTransform discriminated-union override.
+  - "src/elspeth/plugins/infrastructure/base.py:BaseTransform.get_config_schema:return"
+  - "src/elspeth/plugins/infrastructure/base.py:BaseSink.get_config_schema:return"
+  - "src/elspeth/plugins/infrastructure/base.py:BaseSource.get_config_schema:return"
+  - "src/elspeth/plugins/transforms/llm/transform.py:LLMTransform.get_config_schema:return"
+
+  # Catalog service - JSON Schema traversal (helpers receive raw Pydantic-
+  # generated schema dicts and walk them; there is no stable TypedDict for
+  # arbitrary JSON Schema, including discriminated unions with $defs).
+  - "src/elspeth/web/catalog/service.py:CatalogServiceImpl._extract_config_fields:schema"
+  - "src/elspeth/web/catalog/service.py:CatalogServiceImpl._fields_from_discriminated:schema"
+  - "src/elspeth/web/catalog/service.py:CatalogServiceImpl._field_summary:field_schema"
 
   # Schema reconstruction - deserializing schemas from landscape database (refactored into orchestrator/export.py)
 
