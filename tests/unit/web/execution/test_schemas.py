@@ -14,6 +14,8 @@ from elspeth.web.execution.schemas import (
     FailedData,
     ProgressData,
     RunEvent,
+    RunResultsResponse,
+    RunStatusResponse,
     ValidationCheck,
     ValidationError,
     ValidationResult,
@@ -361,8 +363,6 @@ class TestResponseModelConstraints:
     """RunStatusResponse and RunResultsResponse enforce non-negative row counts."""
 
     def test_status_response_rejects_negative_rows(self) -> None:
-        from elspeth.web.execution.schemas import RunStatusResponse
-
         with pytest.raises(pydantic.ValidationError):
             RunStatusResponse(
                 run_id="r1",
@@ -378,8 +378,6 @@ class TestResponseModelConstraints:
             )
 
     def test_results_response_rejects_negative_rows(self) -> None:
-        from elspeth.web.execution.schemas import RunResultsResponse
-
         with pytest.raises(pydantic.ValidationError):
             RunResultsResponse(
                 run_id="r1",
@@ -391,3 +389,254 @@ class TestResponseModelConstraints:
                 landscape_run_id=None,
                 error=None,
             )
+
+
+# ── Tier 1 strictness regression tests ───────────────────────────────
+#
+# All execution response models serialize system-owned data (Tier 1).
+# Coercion and extra fields must be rejected — silent normalization
+# hides bugs and violates the Data Manifesto.
+
+
+class TestStrictCoercionRejected:
+    """String-to-int and string-to-bool coercion must crash, not silently convert."""
+
+    def test_validation_check_rejects_string_bool(self) -> None:
+        with pytest.raises(pydantic.ValidationError):
+            ValidationCheck(name="test", passed="true", detail="ok")  # type: ignore[arg-type]
+
+    def test_validation_result_rejects_string_bool(self) -> None:
+        with pytest.raises(pydantic.ValidationError):
+            ValidationResult(is_valid="false", checks=[], errors=[])  # type: ignore[arg-type]
+
+    def test_run_status_response_rejects_string_int(self) -> None:
+        with pytest.raises(pydantic.ValidationError):
+            RunStatusResponse(
+                run_id="r1",
+                status="completed",
+                started_at=None,
+                finished_at=None,
+                rows_processed="7",  # type: ignore[arg-type]
+                rows_succeeded=0,
+                rows_failed=0,
+                rows_quarantined=0,
+                error=None,
+                landscape_run_id=None,
+            )
+
+    def test_run_results_response_rejects_string_int(self) -> None:
+        with pytest.raises(pydantic.ValidationError):
+            RunResultsResponse(
+                run_id="r1",
+                status="completed",
+                rows_processed=10,
+                rows_succeeded=10,
+                rows_failed="2",  # type: ignore[arg-type]
+                rows_quarantined=0,
+                landscape_run_id=None,
+                error=None,
+            )
+
+    def test_progress_data_rejects_string_int(self) -> None:
+        with pytest.raises(pydantic.ValidationError):
+            ProgressData(rows_processed="10", rows_failed=0)  # type: ignore[arg-type]
+
+    def test_completed_data_rejects_string_int(self) -> None:
+        with pytest.raises(pydantic.ValidationError):
+            CompletedData(
+                rows_processed="100",  # type: ignore[arg-type]
+                rows_succeeded=95,
+                rows_failed=3,
+                rows_quarantined=2,
+                landscape_run_id="lscape-1",
+            )
+
+    def test_cancelled_data_rejects_string_int(self) -> None:
+        with pytest.raises(pydantic.ValidationError):
+            CancelledData(rows_processed="50", rows_failed=1)  # type: ignore[arg-type]
+
+    def test_error_data_rejects_int_as_string(self) -> None:
+        """node_id is str|None — an int should not be coerced to str."""
+        with pytest.raises(pydantic.ValidationError):
+            ErrorData(message="fail", node_id=42, row_id=None)  # type: ignore[arg-type]
+
+    def test_failed_data_rejects_int_as_string(self) -> None:
+        """node_id is str|None — an int should not be coerced to str."""
+        with pytest.raises(pydantic.ValidationError):
+            FailedData(detail="crash", node_id=42)  # type: ignore[arg-type]
+
+
+class TestExtraFieldsRejected:
+    """Extra fields must raise, not be silently dropped."""
+
+    def test_validation_check_rejects_extra(self) -> None:
+        with pytest.raises(pydantic.ValidationError, match="extra"):
+            ValidationCheck(name="test", passed=True, detail="ok", severity="high")  # type: ignore[call-arg]
+
+    def test_validation_error_rejects_extra(self) -> None:
+        with pytest.raises(pydantic.ValidationError, match="extra"):
+            ValidationError(
+                component_id=None,
+                component_type=None,
+                message="bad",
+                suggestion=None,
+                stack_trace="...",  # type: ignore[call-arg]
+            )
+
+    def test_validation_result_rejects_extra(self) -> None:
+        with pytest.raises(pydantic.ValidationError, match="extra"):
+            ValidationResult(is_valid=True, checks=[], errors=[], warnings=[])  # type: ignore[call-arg]
+
+    def test_run_status_response_rejects_extra(self) -> None:
+        with pytest.raises(pydantic.ValidationError, match="extra"):
+            RunStatusResponse(
+                run_id="r1",
+                status="completed",
+                started_at=None,
+                finished_at=None,
+                rows_processed=10,
+                rows_succeeded=10,
+                rows_failed=0,
+                rows_quarantined=0,
+                error=None,
+                landscape_run_id=None,
+                extra_field=42,  # type: ignore[call-arg]
+            )
+
+    def test_run_results_response_rejects_extra(self) -> None:
+        with pytest.raises(pydantic.ValidationError, match="extra"):
+            RunResultsResponse(
+                run_id="r1",
+                status="completed",
+                rows_processed=10,
+                rows_succeeded=10,
+                rows_failed=0,
+                rows_quarantined=0,
+                landscape_run_id=None,
+                error=None,
+                duration_ms=1234,  # type: ignore[call-arg]
+            )
+
+    def test_progress_data_rejects_extra(self) -> None:
+        with pytest.raises(pydantic.ValidationError, match="extra"):
+            ProgressData(rows_processed=10, rows_failed=0, percent=50.0)  # type: ignore[call-arg]
+
+    def test_completed_data_rejects_extra(self) -> None:
+        with pytest.raises(pydantic.ValidationError, match="extra"):
+            CompletedData(
+                rows_processed=100,
+                rows_succeeded=95,
+                rows_failed=3,
+                rows_quarantined=2,
+                landscape_run_id="lscape-1",
+                duration_ms=5000,  # type: ignore[call-arg]
+            )
+
+    def test_run_event_rejects_extra(self) -> None:
+        with pytest.raises(pydantic.ValidationError, match="extra"):
+            RunEvent(
+                run_id="run-1",
+                timestamp=datetime.now(tz=UTC),
+                event_type="progress",
+                data=ProgressData(rows_processed=10, rows_failed=0),
+                session_id="s-1",  # type: ignore[call-arg]
+            )
+
+    def test_cancelled_data_rejects_extra(self) -> None:
+        with pytest.raises(pydantic.ValidationError, match="extra"):
+            CancelledData(rows_processed=10, rows_failed=0, reason="timeout")  # type: ignore[call-arg]
+
+    def test_failed_data_rejects_extra(self) -> None:
+        with pytest.raises(pydantic.ValidationError, match="extra"):
+            FailedData(detail="crash", node_id=None, stack_trace="...")  # type: ignore[call-arg]
+
+    def test_error_data_rejects_extra(self) -> None:
+        with pytest.raises(pydantic.ValidationError, match="extra"):
+            ErrorData(message="fail", node_id=None, row_id=None, severity="high")  # type: ignore[call-arg]
+
+
+class TestRunStatusResponseDatetimeStrict:
+    """RunStatusResponse datetime fields reject string coercion (no JSON round-trip path)."""
+
+    def test_started_at_rejects_iso_string(self) -> None:
+        with pytest.raises(pydantic.ValidationError):
+            RunStatusResponse(
+                run_id="r1",
+                status="running",
+                started_at="2026-04-15T10:00:00+00:00",  # type: ignore[arg-type]
+                finished_at=None,
+                rows_processed=0,
+                rows_succeeded=0,
+                rows_failed=0,
+                rows_quarantined=0,
+                error=None,
+                landscape_run_id=None,
+            )
+
+    def test_finished_at_rejects_iso_string(self) -> None:
+        with pytest.raises(pydantic.ValidationError):
+            RunStatusResponse(
+                run_id="r1",
+                status="completed",
+                started_at=datetime.now(tz=UTC),
+                finished_at="2026-04-15T10:05:00+00:00",  # type: ignore[arg-type]
+                rows_processed=10,
+                rows_succeeded=10,
+                rows_failed=0,
+                rows_quarantined=0,
+                error=None,
+                landscape_run_id=None,
+            )
+
+
+class TestRunEventTimestampCoercion:
+    """RunEvent.timestamp accepts datetime and ISO strings, rejects integers."""
+
+    def test_accepts_datetime_directly(self) -> None:
+        event = RunEvent(
+            run_id="run-1",
+            timestamp=datetime.now(tz=UTC),
+            event_type="progress",
+            data=ProgressData(rows_processed=0, rows_failed=0),
+        )
+        assert isinstance(event.timestamp, datetime)
+
+    def test_accepts_iso_string_via_model_validate(self) -> None:
+        """Production reconnect path: model_dump(mode='json') → model_validate."""
+        raw = {
+            "run_id": "run-1",
+            "timestamp": "2026-04-15T10:00:00+00:00",
+            "event_type": "progress",
+            "data": {"rows_processed": 0, "rows_failed": 0},
+        }
+        event = RunEvent.model_validate(raw)
+        assert isinstance(event.timestamp, datetime)
+
+    def test_rejects_unix_epoch_integer(self) -> None:
+        """Unix epoch integers must NOT be silently coerced to datetime."""
+        with pytest.raises(pydantic.ValidationError, match="timestamp"):
+            RunEvent(
+                run_id="run-1",
+                timestamp=1713254400,  # type: ignore[arg-type]
+                event_type="progress",
+                data=ProgressData(rows_processed=0, rows_failed=0),
+            )
+
+
+class TestErrorEventRoundTrip:
+    """Round-trip coverage for the error event type (no backend producer yet)."""
+
+    def test_error_round_trip(self) -> None:
+        original = RunEvent(
+            run_id="run-1",
+            timestamp=datetime.now(tz=UTC),
+            event_type="error",
+            data=ErrorData(message="Row parse failure", node_id="csv_source", row_id="row-42"),
+        )
+        json_dict = original.model_dump(mode="json")
+        restored = RunEvent.model_validate(json_dict)
+        assert restored.event_type == "error"
+        assert isinstance(restored.data, ErrorData)
+        assert restored.data.message == "Row parse failure"
+        assert restored.data.node_id == "csv_source"
+        assert isinstance(restored.timestamp, datetime)

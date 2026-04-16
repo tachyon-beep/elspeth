@@ -1,14 +1,37 @@
-"""Pydantic response models for execution endpoints."""
+"""Pydantic response models for execution endpoints.
+
+All models in this module serialize **system-owned data** (Tier 1 in the
+Data Manifesto).  They use strict validation and forbid extra fields so
+that internal type drift crashes loudly instead of silently coercing
+values or dropping unknown fields.
+"""
 
 from __future__ import annotations
 
 from datetime import datetime
 from typing import Any, ClassVar, Literal, Self, get_args
 
-from pydantic import BaseModel, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 
-class ValidationCheck(BaseModel):
+class _StrictResponse(BaseModel):
+    """Base model for execution response schemas — Tier 1 trust rules.
+
+    strict=True:   No coercion.  ``"7"`` into an ``int`` field crashes
+                   instead of silently becoming ``7``.
+    extra="forbid": Unexpected fields crash instead of being silently
+                    dropped.
+
+    All execution schemas inherit this.  ``RunEvent.timestamp`` uses
+    ``Field(strict=False)`` for the WebSocket reconnect JSON round-trip
+    (ISO string → datetime), paired with a ``field_validator`` that
+    rejects Unix epoch integers.
+    """
+
+    model_config = ConfigDict(strict=True, extra="forbid")
+
+
+class ValidationCheck(_StrictResponse):
     """Individual check result from dry-run validation."""
 
     name: str
@@ -16,7 +39,7 @@ class ValidationCheck(BaseModel):
     detail: str
 
 
-class ValidationError(BaseModel):
+class ValidationError(_StrictResponse):
     """Error with per-component attribution."""
 
     component_id: str | None
@@ -25,7 +48,7 @@ class ValidationError(BaseModel):
     suggestion: str | None
 
 
-class ValidationResult(BaseModel):
+class ValidationResult(_StrictResponse):
     """Result of dry-run validation against real engine code."""
 
     is_valid: bool
@@ -40,14 +63,14 @@ class ValidationResult(BaseModel):
 # frontend TypeScript types.
 
 
-class ProgressData(BaseModel):
+class ProgressData(_StrictResponse):
     """Payload for ``progress`` events (non-terminal, streaming)."""
 
     rows_processed: int = Field(ge=0)
     rows_failed: int = Field(ge=0)
 
 
-class ErrorData(BaseModel):
+class ErrorData(_StrictResponse):
     """Payload for ``error`` events (non-terminal, per-row).
 
     Currently no backend producer emits this event type, but the frontend
@@ -59,7 +82,7 @@ class ErrorData(BaseModel):
     row_id: str | None
 
 
-class CompletedData(BaseModel):
+class CompletedData(_StrictResponse):
     """Payload for ``completed`` events (terminal)."""
 
     rows_processed: int = Field(ge=0)
@@ -87,21 +110,21 @@ class CompletedData(BaseModel):
         return self
 
 
-class CancelledData(BaseModel):
+class CancelledData(_StrictResponse):
     """Payload for ``cancelled`` events (terminal)."""
 
     rows_processed: int = Field(ge=0)
     rows_failed: int = Field(ge=0)
 
 
-class FailedData(BaseModel):
+class FailedData(_StrictResponse):
     """Payload for ``failed`` events (terminal)."""
 
     detail: str = Field(min_length=1)
     node_id: str | None
 
 
-class RunEvent(BaseModel):
+class RunEvent(_StrictResponse):
     """WebSocket event payload for live progress streaming.
 
     ``data`` is a typed union keyed by ``event_type``.  The model_validator
@@ -110,13 +133,29 @@ class RunEvent(BaseModel):
     """
 
     run_id: str
-    timestamp: datetime  # NOTE: Fast pipelines may produce identical timestamps.
+    timestamp: datetime = Field(strict=False)
+    # NOTE: Fast pipelines may produce identical timestamps.
     # Event ordering is guaranteed by the asyncio.Queue FIFO, not by timestamp.
     # Frontend must NOT sort by timestamp — use arrival order instead.
     event_type: Literal["progress", "error", "completed", "cancelled", "failed"]
     data: ProgressData | ErrorData | CompletedData | CancelledData | FailedData
 
-    _EVENT_TYPE_TO_DATA_TYPE: ClassVar[dict[str, type[BaseModel]]] = {
+    @field_validator("timestamp", mode="before")
+    @classmethod
+    def _reject_epoch_timestamp(cls, v: object) -> object:
+        """Reject Unix epoch integers while allowing ISO strings.
+
+        ``Field(strict=False)`` lets Pydantic parse ISO strings back to
+        datetime (needed for the WebSocket reconnect JSON round-trip).
+        But lax mode also accepts ``int`` (Unix epoch) — which would
+        hide a Tier 1 type error.  This before-validator fires first
+        and rejects anything that isn't a ``datetime`` or ``str``.
+        """
+        if isinstance(v, (datetime, str)):
+            return v
+        raise ValueError(f"timestamp must be a datetime or ISO string, got {type(v).__name__}")
+
+    _EVENT_TYPE_TO_DATA_TYPE: ClassVar[dict[str, type[_StrictResponse]]] = {
         "progress": ProgressData,
         "error": ErrorData,
         "completed": CompletedData,
@@ -168,7 +207,7 @@ if _mapping_keys != _literal_values:
 del _event_type_literal, _mapping_keys, _literal_values
 
 
-class RunStatusResponse(BaseModel):
+class RunStatusResponse(_StrictResponse):
     """REST response for run status queries."""
 
     run_id: str
@@ -183,7 +222,7 @@ class RunStatusResponse(BaseModel):
     landscape_run_id: str | None
 
 
-class RunResultsResponse(BaseModel):
+class RunResultsResponse(_StrictResponse):
     """REST response for terminal run results."""
 
     run_id: str

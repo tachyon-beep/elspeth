@@ -15,7 +15,7 @@ run's parent session.
 from __future__ import annotations
 
 import asyncio
-from typing import cast
+from typing import Literal, cast
 from uuid import UUID
 
 import structlog
@@ -190,9 +190,12 @@ def create_execution_router() -> APIRouter:
                 status_code=409,
                 detail=f"Run is still {status.status}",
             )
+        # mypy can't narrow Literal through `in` guards — cast is safe
+        # because the guard above rejects non-terminal statuses.
+        terminal_status = cast(Literal["completed", "failed", "cancelled"], status.status)
         return RunResultsResponse(
             run_id=status.run_id,
-            status=status.status,
+            status=terminal_status,
             rows_processed=status.rows_processed,
             rows_succeeded=status.rows_succeeded,
             rows_failed=status.rows_failed,
@@ -287,10 +290,16 @@ def create_execution_router() -> APIRouter:
                     raise RuntimeError(
                         f"Terminal run {current.run_id} has no timestamps — Tier 1 anomaly (both finished_at and started_at are NULL)"
                     )
+                # Terminal run status maps directly to event_type for seeding.
+                # mypy can't narrow through the if/elif/else chain above.
+                event_type = cast(
+                    Literal["progress", "error", "completed", "cancelled", "failed"],
+                    current.status,
+                )
                 event = RunEvent(
                     run_id=current.run_id,
                     timestamp=timestamp,
-                    event_type=current.status,
+                    event_type=event_type,
                     data=payload,
                 )
                 await websocket.send_json(event.model_dump(mode="json"))

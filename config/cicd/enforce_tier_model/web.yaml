@@ -661,27 +661,32 @@ allow_hits:
   reason: Tier 3 boundary — csv.Error during MIME sniffing on untrusted upload content
   safety: Continues to next delimiter; returns None for uncertain content; no data loss
   expires: null
-- key: web/execution/schemas.py:R5:RunEvent:_resolve_data_from_event_type:fp=305e4289a921ee83
+- key: web/execution/schemas.py:R5:RunEvent:_reject_epoch_timestamp:fp=a1808f9e934b4d29
+  owner: web-execution
+  reason: Tier 1 field_validator — isinstance whitelists datetime|str for timestamp, rejects int (Unix epoch)
+  safety: Raises ValueError on non-datetime/non-str; tightens Field(strict=False) coercion scope
+  expires: null
+- key: web/execution/schemas.py:R5:RunEvent:_resolve_data_from_event_type:fp=d100c71bbce019dc
   owner: web-execution
   reason: Pydantic before-validator — isinstance(values, dict) gates JSON round-trip path; non-dict values handled by Pydantic
   safety: Structural dispatch for deserialization, not error suppression
   expires: null
-- key: web/execution/schemas.py:R1:RunEvent:_resolve_data_from_event_type:fp=f9afb5822d7f14ab
+- key: web/execution/schemas.py:R1:RunEvent:_resolve_data_from_event_type:fp=cf970d0218bf474d
   owner: web-execution
   reason: Pydantic before-validator — .get() on pre-validated Tier 3 input from JSON round-trip
   safety: Missing keys fall through to Pydantic field validation downstream
   expires: null
-- key: web/execution/schemas.py:R1:RunEvent:_resolve_data_from_event_type:fp=14c53dc293159893
+- key: web/execution/schemas.py:R1:RunEvent:_resolve_data_from_event_type:fp=1b9ad44da700262b
   owner: web-execution
   reason: Pydantic before-validator — .get() on pre-validated Tier 3 input from JSON round-trip
   safety: Missing keys fall through to Pydantic field validation downstream
   expires: null
-- key: web/execution/schemas.py:R5:RunEvent:_resolve_data_from_event_type:fp=2e14a28ea1f17152
+- key: web/execution/schemas.py:R5:RunEvent:_resolve_data_from_event_type:fp=273695b5fe3c3ddb
   owner: web-execution
   reason: Pydantic before-validator — isinstance(data, dict) gates JSON round-trip resolution
   safety: Non-dict data falls through to Pydantic union matching
   expires: null
-- key: web/execution/schemas.py:R5:RunEvent:_enforce_data_type:fp=a5289c55c9755c02
+- key: web/execution/schemas.py:R5:RunEvent:_enforce_data_type:fp=b2c0ae1ff2459787
   owner: web-execution
   reason: Offensive programming — isinstance enforces event_type/data type correspondence at construction time
   safety: Raises ValueError on mismatch; belt-and-suspenders with before-validator
