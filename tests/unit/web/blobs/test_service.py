@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import hashlib
 from datetime import UTC, datetime
+from types import SimpleNamespace
 from uuid import UUID, uuid4
 
 import pytest
@@ -1971,3 +1972,187 @@ class TestLinkBlobToRunDirectionGuard:
         links = await blob_service.get_blob_run_links(blob.id)
         directions = sorted(link.direction for link in links)
         assert directions == ["input", "output"]
+
+
+# ---------------------------------------------------------------------------
+# Tier-1 read guards — audit-trail integrity for DB-sourced rows
+# ---------------------------------------------------------------------------
+
+
+class TestRowToRecordTierOneGuards:
+    """Tier-1 read guards in ``_row_to_record`` / ``_row_to_link_record``.
+
+    Context
+    -------
+    ``BlobRecord.status``, ``BlobRecord.created_by``, ``BlobRecord.mime_type``,
+    and ``BlobRunLinkRecord.direction`` are declared as closed ``Literal``
+    types. The write paths enforce this via CHECK constraints
+    (``ck_blobs_status``, ``ck_blobs_created_by``, ``ck_blob_run_links_direction``)
+    and an ``ALLOWED_MIME_TYPES`` membership check at create time.
+
+    The read paths add a second line of defence: assertions inside
+    ``_row_to_record`` / ``_row_to_link_record`` that crash if a row ever
+    reaches Python with a value outside the declared enum. This matters
+    because CHECK constraints can be bypassed by:
+
+    - Direct driver writes (raw SQL, another service writing to the file)
+    - A migration bug that drops or loosens the constraint
+    - ``PRAGMA ignore_check_constraints`` during maintenance
+    - Binary corruption of the sqlite file
+
+    Without the Python-side guard, the returned ``BlobRecord`` would carry
+    a ``status`` value that is a lie about its static type, and the
+    audit trail would confidently return fabricated data.
+
+    These tests synthesise raw row-like objects (``SimpleNamespace``) and
+    feed them through the private helpers to confirm the guard trips. The
+    tests deliberately do *not* route through the DB — the point is that
+    even a row that somehow slipped past the write-side constraints is
+    caught at the read boundary. If anyone weakens the guards (deletes an
+    assertion, loosens a membership set, swaps ``in`` for an always-true
+    comparison), these tests will fail.
+
+    Note on ``python -O``: ``assert`` is stripped at optimization level 1.
+    This project runs pytest without ``-O`` (pytest default); production
+    should also be unoptimised per the auditability standard. If optimised
+    builds ever become a concern, convert the asserts to explicit raises
+    and update these tests — AssertionError trip is still the contract
+    under the current policy.
+    """
+
+    @staticmethod
+    def _fake_blob_row(**overrides) -> SimpleNamespace:
+        """Build a SQLAlchemy-Row-shaped stand-in with valid defaults.
+
+        Any field can be overridden to force the guard under test.
+        """
+        defaults = {
+            "id": str(uuid4()),
+            "session_id": str(uuid4()),
+            "filename": "data.csv",
+            "mime_type": "text/csv",
+            "size_bytes": 42,
+            "content_hash": hashlib.sha256(b"x").hexdigest(),
+            "storage_path": "/tmp/blobs/x.csv",
+            "created_at": datetime.now(UTC),
+            "created_by": "user",
+            "source_description": None,
+            "status": "ready",
+        }
+        defaults.update(overrides)
+        return SimpleNamespace(**defaults)
+
+    @staticmethod
+    def _fake_link_row(**overrides) -> SimpleNamespace:
+        defaults = {
+            "blob_id": str(uuid4()),
+            "run_id": str(uuid4()),
+            "direction": "input",
+        }
+        defaults.update(overrides)
+        return SimpleNamespace(**defaults)
+
+    # ---- positive control -------------------------------------------------
+
+    def test_valid_row_returns_record(self, blob_service) -> None:
+        """Positive control: a row with all-valid values round-trips.
+
+        Without this, a bug that makes every row fail would be
+        indistinguishable from the guard tripping correctly.
+        """
+        row = self._fake_blob_row()
+        record = blob_service._row_to_record(row)
+        assert record.status == "ready"
+        assert record.created_by == "user"
+        assert record.mime_type == "text/csv"
+
+    def test_valid_link_row_returns_record(self, blob_service) -> None:
+        row = self._fake_link_row(direction="output")
+        record = blob_service._row_to_link_record(row)
+        assert record.direction == "output"
+
+    # ---- status guard -----------------------------------------------------
+
+    def test_status_outside_enum_trips_guard(self, blob_service) -> None:
+        """A tampered/corrupt row with ``status`` outside BLOB_STATUSES
+        must crash with a Tier-1 assertion message before the BlobRecord
+        is constructed with the lie."""
+        row = self._fake_blob_row(status="corrupted")
+        with pytest.raises(AssertionError, match=r"Tier 1: blobs\.status is 'corrupted'"):
+            blob_service._row_to_record(row)
+
+    def test_status_none_trips_guard(self, blob_service) -> None:
+        """NULL status — e.g. from a dropped NOT NULL + DEFAULT during
+        migration — is outside the enum and must crash."""
+        row = self._fake_blob_row(status=None)
+        with pytest.raises(AssertionError, match=r"Tier 1: blobs\.status"):
+            blob_service._row_to_record(row)
+
+    # ---- created_by guard ------------------------------------------------
+
+    def test_created_by_outside_enum_trips_guard(self, blob_service) -> None:
+        """An attacker who inserted a row directly (bypassing CHECK) with
+        ``created_by = 'root'`` would otherwise surface as a valid record
+        whose audit attribution is fabricated."""
+        row = self._fake_blob_row(created_by="root")
+        with pytest.raises(AssertionError, match=r"Tier 1: blobs\.created_by is 'root'"):
+            blob_service._row_to_record(row)
+
+    def test_created_by_empty_string_trips_guard(self, blob_service) -> None:
+        row = self._fake_blob_row(created_by="")
+        with pytest.raises(AssertionError, match=r"Tier 1: blobs\.created_by"):
+            blob_service._row_to_record(row)
+
+    # ---- mime_type guard -------------------------------------------------
+
+    def test_mime_type_outside_allowlist_trips_guard(self, blob_service) -> None:
+        """A row with an unallowed MIME type (e.g. ``application/x-sh``) must
+        crash — the allowlist exists to constrain what the composer/pipeline
+        layer will accept, and a laundered MIME would silently bypass it."""
+        row = self._fake_blob_row(mime_type="application/x-sh")
+        with pytest.raises(AssertionError, match=r"Tier 1: blobs\.mime_type is 'application/x-sh'"):
+            blob_service._row_to_record(row)
+
+    def test_mime_type_case_mismatch_trips_guard(self, blob_service) -> None:
+        """Membership in ``ALLOWED_MIME_TYPES`` is case-sensitive by
+        construction (the Literal values are lowercase). A row with
+        ``TEXT/CSV`` has the wrong casing and must be rejected — not
+        coerced, because coercion at the Tier-1 boundary is forbidden."""
+        row = self._fake_blob_row(mime_type="TEXT/CSV")
+        with pytest.raises(AssertionError, match=r"Tier 1: blobs\.mime_type"):
+            blob_service._row_to_record(row)
+
+    # ---- direction guard -------------------------------------------------
+
+    def test_link_direction_outside_enum_trips_guard(self, blob_service) -> None:
+        """``BlobRunLinkRecord.direction`` is typed as the Literal pair
+        ``('input', 'output')``. A row with ``direction='inout'`` (the exact
+        value the write-side test rejects) must also be rejected on read."""
+        row = self._fake_link_row(direction="inout")
+        with pytest.raises(AssertionError, match=r"Tier 1: blob_run_links\.direction is 'inout'"):
+            blob_service._row_to_link_record(row)
+
+    def test_link_direction_none_trips_guard(self, blob_service) -> None:
+        row = self._fake_link_row(direction=None)
+        with pytest.raises(AssertionError, match=r"Tier 1: blob_run_links\.direction"):
+            blob_service._row_to_link_record(row)
+
+    # ---- guard-fires-before-record-construction --------------------------
+
+    def test_bad_status_crashes_before_uuid_parse(self, blob_service) -> None:
+        """The Tier-1 guard must fire before any field coercion (e.g.
+        ``UUID(row.id)``). This pins the guard's position at the top of
+        ``_row_to_record`` — a refactor that moves assertions after the
+        ``BlobRecord(...)`` call would pass through a fabricated record to
+        anything that catches the later error."""
+        # ``id`` is a non-parseable string; if the guard were moved, the
+        # UUID constructor would raise ValueError first and mask the
+        # tampered-status condition.
+        row = self._fake_blob_row(status="corrupted", id="not-a-uuid")
+        with pytest.raises(AssertionError, match=r"Tier 1: blobs\.status"):
+            blob_service._row_to_record(row)
+
+    def test_bad_direction_crashes_before_uuid_parse(self, blob_service) -> None:
+        row = self._fake_link_row(direction="inout", blob_id="not-a-uuid")
+        with pytest.raises(AssertionError, match=r"Tier 1: blob_run_links\.direction"):
+            blob_service._row_to_link_record(row)
