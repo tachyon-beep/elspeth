@@ -11,6 +11,7 @@ from typing import Any
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
+from sqlalchemy.exc import OperationalError
 
 from elspeth.web.catalog.protocol import CatalogService
 from elspeth.web.catalog.schemas import (
@@ -1611,12 +1612,21 @@ class TestPluginCrashSessionPersistence:
     async def test_persist_crashed_session_failure_does_not_mask_plugin_bug(
         self,
     ) -> None:
-        """If _persist_crashed_session itself raises, slog.error fires and
-        the original plugin-bug exception still propagates unchanged.
+        """If _persist_crashed_session itself raises a recoverable audit-path
+        exception (SQLAlchemyError / OSError), slog.error fires and the
+        original plugin-bug exception still propagates unchanged.
+
+        Uses sqlalchemy.exc.OperationalError as the stand-in for a realistic
+        DB-write failure (connection drop, locking timeout, disk I/O
+        translated to SQLAlchemy layer). The catch at
+        service.py ComposerServiceImpl.compose is narrowed to
+        (SQLAlchemyError, OSError); substituting RuntimeError here would
+        assert the wrong invariant because RuntimeError deliberately
+        propagates past this catch (see the programmer-bug companion test).
 
         Two invariants asserted:
-        1. The ORIGINAL ValueError reaches the caller (not the RuntimeError
-           from the persistence failure).
+        1. The ORIGINAL ValueError reaches the caller (not the
+           OperationalError from the persistence failure).
         2. slog.error is called with the `composer_crash_persistence_failed`
            event — guarantees that an accidental removal of Step 4a-pre's
            structlog import would be caught (without this assertion, a
@@ -1658,7 +1668,7 @@ class TestPluginCrashSessionPersistence:
             patch.object(
                 service,
                 "_persist_crashed_session",
-                side_effect=RuntimeError("persistence failed"),
+                side_effect=OperationalError("UPDATE sessions", {}, Exception("db unavailable")),
             ),
             capture_logs() as cap_logs,
         ):
@@ -1682,7 +1692,7 @@ class TestPluginCrashSessionPersistence:
         # original plugin bug. Present so operators can distinguish "DB
         # write failed with IntegrityError" from "DB write failed with
         # OperationalError" without needing the traceback.
-        assert event["audit_exc_class"] == "RuntimeError"
+        assert event["audit_exc_class"] == "OperationalError"
         # No traceback / exception message fields — exc_info was deliberately
         # dropped from this slog call to prevent __cause__-chain secret
         # leakage into server logs.
@@ -1693,7 +1703,10 @@ class TestPluginCrashSessionPersistence:
         # event (defense-in-depth against accidental re-addition of a
         # message= field in a future refactor).
         assert "original plugin bug" not in str(event)
-        assert "persistence failed" not in str(event)
+        # The OperationalError carries its SQL statement and __cause__
+        # ("db unavailable") — neither may appear in the structured event.
+        assert "db unavailable" not in str(event)
+        assert "UPDATE sessions" not in str(event)
 
     @pytest.mark.asyncio
     async def test_persist_crashed_session_real_path_slog_emission(self) -> None:
@@ -1748,6 +1761,87 @@ class TestPluginCrashSessionPersistence:
         assert "plugin bug" in str(exc_info.value.original_exc)
 
         # No persistence-failure event — the real path succeeded.
+        persistence_failure_events = [entry for entry in cap_logs if entry.get("event") == "composer_crash_persistence_failed"]
+        assert persistence_failure_events == [], cap_logs
+
+    @pytest.mark.asyncio
+    async def test_persist_crashed_session_programmer_bug_propagates_past_catch(
+        self,
+    ) -> None:
+        """Programmer-bug exceptions inside _persist_crashed_session MUST NOT
+        be absorbed by the audit-cleanup catch in compose().
+
+        This test is the guardrail for the narrowed catch at
+        ComposerServiceImpl.compose: replacing ``except Exception`` with
+        ``except (SQLAlchemyError, OSError)`` means AttributeError, TypeError,
+        AssertionError, NameError and the like now escape the handler.
+        A future regression that re-widens the catch (e.g., "catch everything
+        so audit never crashes the request") would silently pass the sibling
+        ``test_persist_crashed_session_failure_does_not_mask_plugin_bug``
+        test because that path raises an audit-family exception. This test
+        closes the loop by asserting AttributeError — a canonical Tier 1/2
+        programmer bug — bubbles out of the compose() call unchanged, NOT
+        wrapped as ComposerPluginCrashError and NOT logged as
+        ``composer_crash_persistence_failed``.
+
+        The original plugin-bug ValueError becomes the ``__context__`` of the
+        escaping AttributeError because Python chains implicit exception
+        context through the re-raise site; we do not assert on ``__context__``
+        directly since that coupling is an implementation detail, but we do
+        verify the headline exception type flipped from
+        ComposerPluginCrashError to AttributeError.
+        """
+        from structlog.testing import capture_logs
+
+        catalog = _mock_catalog()
+        settings = _make_settings(data_dir=self.data_dir)
+        service = ComposerServiceImpl(
+            catalog=catalog,
+            settings=settings,
+            session_engine=self.engine,
+        )
+        state = _empty_state()
+
+        valid_call = _make_llm_response(
+            tool_calls=[
+                {
+                    "id": "c1",
+                    "name": "set_source",
+                    "arguments": {
+                        "plugin": "csv",
+                        "on_success": "out",
+                        "options": {},
+                        "on_validation_failure": "quarantine",
+                    },
+                }
+            ],
+        )
+
+        with (
+            patch.object(service, "_call_llm", new_callable=AsyncMock) as mock_llm,
+            patch(
+                "elspeth.web.composer.service.execute_tool",
+                side_effect=ValueError("original plugin bug"),
+            ),
+            patch.object(
+                service,
+                "_persist_crashed_session",
+                side_effect=AttributeError("sessions_table has no attribute 'c'"),
+            ),
+            capture_logs() as cap_logs,
+        ):
+            mock_llm.return_value = valid_call
+            # AttributeError escapes the narrowed catch; the outer
+            # ComposerPluginCrashError is never re-raised because the
+            # audit-site AttributeError propagates first.
+            with pytest.raises(AttributeError) as exc_info:
+                await service.compose("Setup", [], state, session_id=self.session_id)
+
+        assert "sessions_table" in str(exc_info.value)
+
+        # No slog event — the catch did not fire, so the structured-logging
+        # path was not reached. A regression that re-widens the catch would
+        # cause this assertion to fail (the event would appear).
         persistence_failure_events = [entry for entry in cap_logs if entry.get("event") == "composer_crash_persistence_failed"]
         assert persistence_failure_events == [], cap_logs
 

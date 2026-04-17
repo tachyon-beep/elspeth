@@ -25,6 +25,7 @@ import litellm
 import structlog
 from litellm.exceptions import BadRequestError as LiteLLMBadRequestError
 from sqlalchemy import Engine, update
+from sqlalchemy.exc import SQLAlchemyError
 
 from elspeth.web.catalog.protocol import CatalogService
 from elspeth.web.composer.prompts import build_messages
@@ -231,12 +232,22 @@ class ComposerServiceImpl:
             if self._session_engine is not None and session_id is not None:
                 try:
                     self._persist_crashed_session(session_id)
-                except Exception as audit_failure:
+                except (SQLAlchemyError, OSError) as audit_failure:
                     # Audit-persistence is best-effort on the crash path —
                     # failure to persist MUST NOT mask the original plugin
                     # bug. Log via slog.error (audit system itself is failing
                     # here, which is one of the three permitted slog use
                     # cases per the logging-telemetry-policy skill).
+                    #
+                    # Catch is narrowed to (SQLAlchemyError, OSError) so that
+                    # programmer-bug exceptions in _persist_crashed_session
+                    # itself — AssertionError from the engine guard,
+                    # AttributeError from a drifted table column, TypeError
+                    # from a signature change — propagate instead of being
+                    # laundered as "audit failure". Mirrors the cleanup-
+                    # rollback pattern at web/sessions/routes.py:968 and :987
+                    # in the same commit; see also the tier-model enforcer
+                    # entry for this call site.
                     #
                     # exc_info is deliberately omitted: the original plugin
                     # exception's message / __cause__ chain may carry DB

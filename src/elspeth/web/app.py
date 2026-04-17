@@ -15,6 +15,7 @@ from fastapi import FastAPI, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
+from sqlalchemy.exc import SQLAlchemyError
 
 from elspeth.web.auth.local import LocalAuthProvider
 from elspeth.web.auth.protocol import AuthProvider
@@ -74,8 +75,38 @@ async def _periodic_orphan_cleanup(
             )
             if cancelled:
                 slog.info("periodic_orphan_cleanup", cancelled=cancelled, excluded=len(live_run_ids))
-        except Exception:
-            slog.error("periodic_orphan_cleanup_failed", exc_info=True)
+        except (SQLAlchemyError, OSError) as cleanup_exc:
+            # Narrow catch — only recoverable audit/IO failures are
+            # absorbed so the loop retries on the next interval.
+            # SQLAlchemyError covers DB-layer transients raised from
+            # cancel_all_orphaned_runs (engine.begin(), conn.execute());
+            # OSError covers SQLite file-level failures that can escape
+            # before SQLAlchemy wraps them.
+            #
+            # Programmer-bug exceptions (AttributeError from a drifted
+            # attribute on ExecutionServiceImpl, TypeError from a
+            # signature change, AssertionError from an invariant guard)
+            # are NOT caught: they propagate out of the while-loop,
+            # terminating the task. The dead task surfaces to the
+            # operator at lifespan shutdown because the outer await
+            # re-raises the stored exception (the surrounding
+            # contextlib.suppress narrows to CancelledError only).
+            # Consistent with the audit-cleanup narrow catch in
+            # web/composer/service.py ComposerServiceImpl.compose and
+            # the cleanup-rollback sites in web/sessions/routes.py:968
+            # and :987.
+            #
+            # exc_info deliberately omitted: SQLAlchemyError __cause__
+            # chains routinely carry the DB connection URL, schema
+            # names, and the sqlite file path — the same leak vector
+            # that commit 59bdf514 closed in four HTTP-path slog.error
+            # sites. Structured logs carry exc_class only; operators
+            # reading logs get enough correlation to triage without
+            # the traceback text.
+            slog.error(
+                "periodic_orphan_cleanup_failed",
+                exc_class=type(cleanup_exc).__name__,
+            )
 
 
 @asynccontextmanager

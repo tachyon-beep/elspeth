@@ -14,6 +14,7 @@ from litellm.exceptions import APIError as LiteLLMAPIError
 from litellm.exceptions import AuthenticationError as LiteLLMAuthError
 from sqlalchemy.exc import SQLAlchemyError
 
+from elspeth.contracts.errors import AuditIntegrityError
 from elspeth.contracts.freeze import deep_thaw
 from elspeth.web.auth.middleware import get_current_user
 from elspeth.web.auth.models import UserIdentity
@@ -886,16 +887,33 @@ def create_session_router() -> APIRouter:
                     options = source_dict.get("options", {})
                     rewritten = False
                     # Remap blob_ref to the new blob's ID.
-                    # Guard against non-UUID blob_ref values — if the persisted
-                    # source has a malformed ref, skip the remap rather than
-                    # crashing after fork artifacts are already committed.
+                    # composition_states.source is Tier 1 ("our data") — the
+                    # composer writes blob_ref as the blob's UUID string
+                    # (composer/tools.py _execute_set_source_from_blob).  A
+                    # non-UUID value here means a write-path bug, DB
+                    # corruption, or tampering — crash with a diagnostic
+                    # rather than silently skipping the remap.  Silent skip
+                    # would leave the forked state's blob_ref pointing at
+                    # the source session's blob, which is the cross-session
+                    # reference class closed at the FK layer by commit
+                    # c86f935d and is audit-contradictory on its face.
+                    # The enclosing `except Exception` block archives the
+                    # partially-created fork (commit b8ba2214), so this
+                    # crash does not leak artifacts.
                     old_ref = options.get("blob_ref")
                     if old_ref is not None:
                         try:
                             old_uuid = UUID(old_ref) if isinstance(old_ref, str) else old_ref
-                        except ValueError:
-                            old_uuid = None
-                        if old_uuid is not None and old_uuid in blob_map:
+                        except ValueError as exc:
+                            raise AuditIntegrityError(
+                                f"Tier 1 audit anomaly: composition_state "
+                                f"{copied_state.id} has non-UUID blob_ref "
+                                f"{old_ref!r} in source.options (expected a "
+                                f"UUID string written by composer/tools.py). "
+                                f"Fork aborted to prevent cross-session blob "
+                                f"reference in forked session {new_session.id}."
+                            ) from exc
+                        if old_uuid in blob_map:
                             options["blob_ref"] = str(blob_map[old_uuid].id)
                             options["path"] = blob_map[old_uuid].storage_path
                             rewritten = True

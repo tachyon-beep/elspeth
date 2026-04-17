@@ -10,6 +10,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 from fastapi import Depends
 from pydantic import ValidationError
+from sqlalchemy.exc import OperationalError
 from starlette.testclient import TestClient
 
 from elspeth.web.app import (
@@ -334,22 +335,63 @@ class TestPeriodicOrphanCleanup:
 
     @pytest.mark.asyncio
     async def test_continues_after_exception(self) -> None:
-        """Periodic cleanup logs errors but keeps running."""
+        """Periodic cleanup logs recoverable audit/DB failures and keeps running.
+
+        The catch in _periodic_orphan_cleanup is narrowed to
+        (SQLAlchemyError, OSError). OperationalError models the realistic
+        production failure — transient connection drop, lock timeout, or
+        SQLite-busy — that the loop must survive. A prior iteration used
+        RuntimeError here, which is now the wrong signal: RuntimeError is a
+        programmer-bug class and must propagate past the catch (see the
+        companion programmer-bug test below).
+
+        The leak assertions on the structured log entry verify that the
+        exc_info drop (aligned with commit 59bdf514) holds: the DB URL
+        fragment and SQL statement from the OperationalError __cause__ chain
+        must NOT appear in the emitted event.
+        """
+        from structlog.testing import capture_logs
+
+        # Function-form side_effect rather than a two-item list: with
+        # interval_seconds=0 the loop body runs many times per 0.05s window,
+        # and a finite list exhausts into StopAsyncIteration (which the
+        # narrowed catch deliberately does NOT absorb). A callable cycling
+        # "fail once, then succeed forever" avoids that artifact while
+        # precisely modelling transient-failure-then-recovery.
+        call_count = {"n": 0}
+
+        async def cancel_side_effect(**_: object) -> int:
+            call_count["n"] += 1
+            if call_count["n"] == 1:
+                raise OperationalError("SELECT * FROM runs", {}, Exception("db unavailable"))
+            return 2
+
         mock_service = AsyncMock()
-        mock_service.cancel_all_orphaned_runs.side_effect = [
-            RuntimeError("db connection lost"),
-            2,  # recovers on second call
-        ]
+        mock_service.cancel_all_orphaned_runs.side_effect = cancel_side_effect
         mock_exec = MagicMock()
         mock_exec.get_live_run_ids.return_value = frozenset()
 
-        task = asyncio.create_task(_periodic_orphan_cleanup(mock_service, mock_exec, interval_seconds=0, max_age_seconds=3600))
-        await asyncio.sleep(0.05)
-        task.cancel()
-        with contextlib.suppress(asyncio.CancelledError):
-            await task
+        with capture_logs() as cap_logs:
+            task = asyncio.create_task(_periodic_orphan_cleanup(mock_service, mock_exec, interval_seconds=0, max_age_seconds=3600))
+            await asyncio.sleep(0.05)
+            task.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await task
 
         assert mock_service.cancel_all_orphaned_runs.call_count >= 2
+
+        failure_events = [entry for entry in cap_logs if entry.get("event") == "periodic_orphan_cleanup_failed"]
+        assert len(failure_events) >= 1, cap_logs
+        event = failure_events[0]
+        assert event["exc_class"] == "OperationalError"
+        # exc_info-derived fields MUST NOT appear — commit 59bdf514's
+        # redaction pattern applies to every slog.error on a path that
+        # handles SQLAlchemy __cause__ chains.
+        assert "exc_info" not in event
+        assert "exception" not in event
+        assert "stack_info" not in event
+        assert "db unavailable" not in str(event)
+        assert "SELECT * FROM runs" not in str(event)
 
     @pytest.mark.asyncio
     async def test_cancellation_is_clean(self) -> None:
@@ -364,6 +406,53 @@ class TestPeriodicOrphanCleanup:
         task.cancel()
         with pytest.raises(asyncio.CancelledError):
             await task
+
+    @pytest.mark.asyncio
+    async def test_programmer_bug_terminates_task_and_does_not_log(self) -> None:
+        """Programmer-bug exceptions (AttributeError, TypeError, AssertionError)
+        raised by either callee MUST escape the narrowed catch, killing the
+        background task so the bug surfaces at lifespan shutdown rather than
+        being silently logged every interval.
+
+        This is the guardrail for the narrowed catch at
+        _periodic_orphan_cleanup: replacing ``except Exception`` with
+        ``except (SQLAlchemyError, OSError)`` means a drifted attribute on
+        ExecutionServiceImpl, a signature change on SessionServiceImpl, or
+        an assertion violation now terminates the task immediately. A future
+        regression that re-widens the catch would turn production into an
+        error-storm — one bug logged every interval forever — and would fail
+        this test because (a) the task would not raise when awaited and (b)
+        the periodic_orphan_cleanup_failed event would appear.
+        """
+        from structlog.testing import capture_logs
+
+        mock_service = AsyncMock()
+        mock_exec = MagicMock()
+        # AttributeError from get_live_run_ids — canonical Tier-1/2 programmer
+        # bug (e.g., _shutdown_events replaced with a non-mapping type).
+        mock_exec.get_live_run_ids.side_effect = AttributeError("ExecutionServiceImpl has no attribute '_shutdown_events'")
+
+        with capture_logs() as cap_logs:
+            task = asyncio.create_task(_periodic_orphan_cleanup(mock_service, mock_exec, interval_seconds=0, max_age_seconds=3600))
+            await asyncio.sleep(0.05)
+            # Task must have terminated on its own with the AttributeError.
+            # Not cancelled: if the narrowing is wrong, cancel() would be
+            # needed and the assertion below would fail.
+            assert task.done(), "task should have terminated on programmer-bug propagation"
+            with pytest.raises(AttributeError) as exc_info:
+                await task
+
+        assert "_shutdown_events" in str(exc_info.value)
+
+        # cancel_all_orphaned_runs must NOT have been called — the bug
+        # short-circuits before the DB write.
+        mock_service.cancel_all_orphaned_runs.assert_not_called()
+
+        # No periodic_orphan_cleanup_failed event — the catch did not fire,
+        # so the structured logging path was not reached. A regression that
+        # widens the catch would cause this assertion to fail.
+        failure_events = [entry for entry in cap_logs if entry.get("event") == "periodic_orphan_cleanup_failed"]
+        assert failure_events == [], cap_logs
 
     @pytest.mark.asyncio
     async def test_excludes_live_run_ids(self) -> None:

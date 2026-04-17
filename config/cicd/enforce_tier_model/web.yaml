@@ -224,12 +224,12 @@ allow_hits:
   reason: Tier 3 boundary — isinstance check on username from external IdP JWT payload (preferred_username is Any)
   safety: Raises AuthenticationError on non-string; validated at construction time
   expires: null
-- key: web/app.py:R5:_settings_from_env:fp=1c08ebd92d44a572
+- key: web/app.py:R5:_settings_from_env:fp=e57298770846b8b4
   owner: web-app
   reason: Tier 3 boundary — JSON-parsed env var may be a list; isinstance check classifies for tuple conversion
   safety: isinstance used only for type dispatch; no contract masking
   expires: null
-- key: web/app.py:R6:_settings_from_env:fp=d19cd3ced6f1d25c
+- key: web/app.py:R6:_settings_from_env:fp=780142e7320e9687
   owner: web-app
   reason: Tier 3 boundary — env var value that isn't valid JSON is treated as plain string (the common case)
   safety: JSONDecodeError caught only to fall back to raw string; no silent data loss
@@ -398,27 +398,27 @@ allow_hits:
   reason: isinstance(config_dict, dict) validates YAML parse output before resolve_secret_refs — yaml.safe_load can return non-dict for malformed input
   safety: Raises TypeError with diagnostic message; no error suppression
   expires: null
-- key: web/app.py:R1:create_app:fp=05fe816d6a6d068a
+- key: web/app.py:R1:create_app:fp=66da20dd8cead3e0
   owner: web-app
   reason: Tier 3 — os.environ.get() for optional WEB_CONCURRENCY env var
   safety: Defaults to "1" when absent
   expires: null
-- key: web/app.py:R6:create_app:fp=a52c209119113022
+- key: web/app.py:R6:create_app:fp=f2da914d83f3ce8b
   owner: web-app
   reason: ValueError from int() on non-numeric WEB_CONCURRENCY
   safety: Defaults to single worker
   expires: null
-- key: web/app.py:R6:create_app:fp=e1bf11c7034d1cff
+- key: web/app.py:R6:create_app:fp=c5631e36153f72d4
   owner: web-app
   reason: ValueError from int() on non-numeric --workers arg
   safety: Skips this argv entry
   expires: null
-- key: web/app.py:R6:create_app:fp=9b29576594c75d01
+- key: web/app.py:R6:create_app:fp=a91e6bb2df64f0f8
   owner: web-app
   reason: ValueError from int() on non-numeric --workers=N
   safety: Skips this argv entry
   expires: null
-- key: web/app.py:R6:create_app:fp=229707e273052e47
+- key: web/app.py:R6:create_app:fp=9ecd82bfc08214d1
   owner: web-app
   reason: ValueError from int() on non-numeric -w arg
   safety: Skips this argv entry
@@ -532,7 +532,7 @@ allow_hits:
   reason: Last-resort safety net — isinstance check excludes KeyboardInterrupt/SystemExit from diagnostic logging
   safety: Only suppresses signal exceptions; all other exceptions logged as last-resort diagnostic
   expires: null
-- key: web/app.py:R1:create_app:fp=e76becb5a7b7f706
+- key: web/app.py:R1:create_app:fp=49743856b3fa00d7
   owner: web-app
   reason: Tier 3 — os.environ.get() for optional ELSPETH_ENV
   safety: Returns None when absent; only used for test guard
@@ -602,71 +602,65 @@ allow_hits:
   reason: TOCTOU guard — run may be deleted between verify_run_ownership and get_status
   safety: Only not-found errors close with 4004; returns immediately
   expires: null
-- key: web/app.py:R1:lifespan:fp=00b963adef49b433
+- key: web/app.py:R1:lifespan:fp=bd2fec40c6f4eb1a
   owner: web-app
   reason: False positive — httpx.AsyncClient.get() is an HTTP GET request, not dict.get()
   safety: HTTP errors caught by raise_for_status(); failure now raises SystemExit
   expires: null
-- key: web/app.py:R4:_periodic_orphan_cleanup:fp=519e5bde4a392bc6
-  owner: web-execution
-  reason: Periodic background task must survive transient DB errors to retry on next interval
-  safety: Logged with exc_info=True; loop continues; no silent data loss
-  expires: null
-- key: web/app.py:R7:lifespan:fp=b6d6c73feb2d0bf0
+- key: web/app.py:R7:lifespan:fp=4d592a4d97a3dc83
   owner: web-execution
   reason: contextlib.suppress(CancelledError) is the expected shutdown path for the periodic orphan cleanup task
   safety: Clean cancellation during app shutdown; no error suppression
   expires: null
+- key: "web/app.py:R6:_periodic_orphan_cleanup:fp=66dbc3448843ee35"
+  owner: web-execution
+  reason: "Audit/IO-cleanup narrow catch — except (SQLAlchemyError, OSError) absorbs recoverable failures of cancel_all_orphaned_runs (transient DB loss, lock contention, SQLite file I/O) so the periodic loop retries on the next interval. Catch is intentionally narrow; programmer-bug exceptions (AttributeError from a drifted attribute on ExecutionServiceImpl, TypeError from a signature change, AssertionError from an invariant guard) are NOT caught and terminate the background task so they surface at lifespan shutdown (the outer contextlib.suppress absorbs only CancelledError). Same pattern as the CRIT-2 audit-cleanup narrow catch at web/composer/service.py ComposerServiceImpl.compose and the rollback-cleanup sites at web/sessions/routes.py fork_from_message (lines 968 and 987)."
+  safety: "Recoverable failures are logged via slog.error periodic_orphan_cleanup_failed with exc_class only — exc_info is deliberately omitted so SQLAlchemy __cause__ chains (DB URLs, schema names, sqlite file path) cannot reach structured server logs. Same exc_info-redaction pattern commit 59bdf514 established across the HTTP-path slog.error sites. Programmer-bug propagation invariant is guarded by tests/unit/web/test_app.py test_programmer_bug_terminates_task_and_does_not_log (AttributeError terminates the task) and the recoverable-failure path by test_continues_after_exception (OperationalError logged, loop continues, no traceback text leaked)."
   expires: null
 - key: web/secrets/user_store.py:R1:_compute_fingerprint:fp=d88552191c8b792f
   owner: web-secrets
   reason: Tier 3 — fingerprint key from deployment environment; os.environ.get followed by check-and-crash
   safety: Missing key raises RuntimeError immediately; no silent default
   expires: null
-- key: web/sessions/routes.py:R6:_handle_convergence_error:fp=bb415c9d839594f8
+- key: web/sessions/routes.py:R6:_handle_convergence_error:fp=9bf25120b03e9edc
   owner: web-sessions
   reason: Convergence partial-state validation may fail on damaged LLM output — narrowed to data-shape errors
   safety: Returns 422 with structured error, does not swallow
   expires: null
-- key: web/sessions/routes.py:R6:_handle_convergence_error:fp=6560d425c8f4283c
+- key: web/sessions/routes.py:R6:_handle_convergence_error:fp=79390b445af58b69
   owner: web-sessions
   reason: Convergence partial-state save may fail — catch covers data-shape errors and the full SQLAlchemyError family (IntegrityError, OperationalError for lock timeout / pool disconnect, ProgrammingError for schema drift, and siblings). A narrow IntegrityError catch would let siblings escape and upgrade the structured 422 into an unstructured 500. exc_info stays omitted so SQLAlchemy __cause__ chains do not leak connection strings into structured server logs.
   safety: Returns 422 with structured error, sets partial_state_save_failed=True; does not swallow. Logs exc_class (class name only, no traceback) so operators can triage DB faults vs data-shape failures without exposing connection strings.
   expires: null
-- key: web/sessions/routes.py:R6:_handle_plugin_crash:fp=ab9d8e09e2606cf3
+- key: web/sessions/routes.py:R6:_handle_plugin_crash:fp=42bcecb3459a48a4
   owner: web-sessions
   reason: Plugin-crash partial-state validation may fail on damaged LLM output — narrowed to data-shape errors (ValueError, TypeError, KeyError). Mirrors the convergence-error validate-guard; required because partial_state is captured mid-mutation and may be structurally inconsistent.
   safety: Returns 500 with structured error; logs exc_class and falls back to ValidationSummary(is_valid=False). Original plugin crash still propagates — validation-guard failure never masks the primary bug.
   expires: null
-- key: web/sessions/routes.py:R6:_handle_plugin_crash:fp=9761289d9df2cbec
+- key: web/sessions/routes.py:R6:_handle_plugin_crash:fp=41e9e538629d759f
   owner: web-sessions
   reason: Plugin-crash partial-state save may fail — catch covers data-shape errors and the full SQLAlchemyError family. A narrow IntegrityError catch would let OperationalError, ProgrammingError, and siblings escape and mask the redacted 500 plugin-crash response. Mirrors the convergence-error persist-guard.
   safety: Returns 500 with structured error; logs exc_class (no traceback, same redaction policy as the convergence path). Original plugin crash still propagates via the outer `raise HTTPException(...) from crash.original_exc`.
   expires: null
-- key: web/sessions/routes.py:R5:create_session_router:fork_from_message:fp=4261efacf40549bd
+- key: web/sessions/routes.py:R5:create_session_router:fork_from_message:fp=36241754de850478
   owner: web-sessions
   reason: isinstance check on deserialized composition state source — Tier 3 boundary.
   safety: Validates structure from persisted state
   expires: null
-- key: web/sessions/routes.py:R1:create_session_router:fork_from_message:fp=fd68e4dc65e4a6fa
+- key: web/sessions/routes.py:R1:create_session_router:fork_from_message:fp=4bef2db8550ae384
   owner: web-sessions
   reason: source_dict.get() on Tier 3 composition state — optional source options.
   safety: Default empty dict is safe for optional field
   expires: null
-- key: web/sessions/routes.py:R1:create_session_router:fork_from_message:fp=28ef173b85e8e3bb
+- key: web/sessions/routes.py:R1:create_session_router:fork_from_message:fp=5a9db0678cf5c599
   owner: web-sessions
   reason: options.get() on Tier 3 state source — blob_ref is optional.
   safety: Returns None on miss, handled by conditional below
   expires: null
-- key: web/sessions/routes.py:R5:create_session_router:fork_from_message:fp=8e44c689ea8156a1
+- key: web/sessions/routes.py:R5:create_session_router:fork_from_message:fp=c0803afdc3c27308
   owner: web-sessions
   reason: isinstance check on blob_ref — may be str or UUID from persisted state.
   safety: Tier 3 boundary — persisted blob_ref type is not guaranteed
-  expires: null
-- key: web/sessions/routes.py:R6:create_session_router:fork_from_message:fp=52ed4173215b62f8
-  owner: web-sessions
-  reason: Tier 3 boundary — persisted blob_ref may be non-UUID string; skip rewrite gracefully (old_uuid=None falls through to "use original ref unchanged").
-  safety: Falls through to use original ref unchanged
   expires: null
 # The two entries below are the canonical RecoveryFailed[<type>] cleanup
 # pattern around archive_session() in the post-fork compensation phase.
@@ -675,12 +669,12 @@ allow_hits:
 # bugs in archive_session still propagate; only DB/IO faults are absorbed
 # into a note attached to the propagating exception so the orphan session
 # row is visible to operators.
-- key: web/sessions/routes.py:R6:create_session_router:fork_from_message:fp=f451f91217f0f811
+- key: web/sessions/routes.py:R6:create_session_router:fork_from_message:fp=ccb6654dec0ae735
   owner: web-sessions
   reason: Narrow (SQLAlchemyError, OSError) around fork-rollback archive_session in the BlobQuotaExceededError path — DB/IO faults expected during cleanup; programmer bugs still propagate
   safety: Cleanup failure attached as RecoveryFailed[<type>] note on the HTTPException(413) that propagates; orphan sessions.id flagged for manual cleanup; user-facing 413 response remains intact even when cleanup fails
   expires: null
-- key: web/sessions/routes.py:R6:create_session_router:fork_from_message:fp=8e9480a184e37a4b
+- key: web/sessions/routes.py:R6:create_session_router:fork_from_message:fp=5ec8c957eb300413
   owner: web-sessions
   reason: Narrow (SQLAlchemyError, OSError) around fork-rollback archive_session in the generic except Exception path — DB/IO faults expected during cleanup; programmer bugs still propagate
   safety: Cleanup failure attached as RecoveryFailed[<type>] note on primary_exc with orphan sessions.id; bare `raise` preserves primary_exc and its original traceback as the headline (regression-tested by test_fork_cleanup_failure_preserves_primary_exception_with_note)
@@ -745,7 +739,7 @@ allow_hits:
   safety: Removes a key rather than inventing one. Missing key is a valid state.
   expires: null
 # Group E (cont): _state_response dict.get() for redacted source — defensive unwrap of redaction helper
-- key: web/sessions/routes.py:R1:_state_response:fp=250059cc59749392
+- key: web/sessions/routes.py:R1:_state_response:fp=da4df6ac5edc28fb
   owner: web-sessions
   reason: Unwrapping redact_source_storage_path() output — helper returns dict with "source" key; .get() with fallback to original is defensive against helper contract change
   safety: Falls back to unredacted source_data (less privacy, not less safety)
@@ -901,11 +895,6 @@ allow_hits:
   owner: web-execution
   reason: Tier 3 — isinstance check on pipeline_yaml argument type
   safety: Raises TypeError with diagnostic; no silent default
-  expires: null
-- key: web/composer/service.py:R4:ComposerServiceImpl:compose:fp=e7b476f0d4c155e5
-  owner: web-composer
-  reason: Audit-system-failure catch — the inner try now calls _persist_crashed_session (the session-row breadcrumb). If that SQL update itself fails, the except must absorb *any* audit-layer exception (RuntimeError, SQLAlchemy OperationalError, etc.) so the original ComposerPluginCrashError still propagates to the route. This is one of the three permitted slog use cases per the logging-telemetry-policy skill.
-  safety: ComposerPluginCrashError is always re-raised (never swallowed). Persistence failure is logged via slog.error "composer_crash_persistence_failed" with original_exc_class + audit_exc_class; exc_info is deliberately omitted so SQLAlchemy __cause__ chains (which may carry DB URLs) cannot reach structured server logs. The original plugin-bug exception propagates unchanged to the route-layer typed handler, carrying partial_state for composition_states persistence.
   expires: null
 per_file_rules:
 - pattern: web/composer/tools.py

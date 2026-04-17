@@ -548,20 +548,25 @@ class TestForkEndpoint:
         assert len(sessions) == 1  # Only the original remains
 
     @pytest.mark.asyncio
-    async def test_fork_with_non_uuid_blob_ref_succeeds_gracefully(self, tmp_path) -> None:
-        """A non-UUID blob_ref in the source state should not crash the fork.
+    async def test_fork_with_non_uuid_blob_ref_raises_audit_integrity_error_and_archives(self, tmp_path) -> None:
+        """Tier 1 anomaly: non-UUID blob_ref in composition_states.source must crash.
 
-        The rewrite is best-effort — if the blob_ref isn't a valid UUID,
-        it can't match any entry in blob_map, so we skip the remap rather
-        than raising ValueError after irreversible side effects.
+        composition_states.source is our own data (Tier 1).  blob_ref is
+        written by composer/tools.py as a UUID string; a malformed value at
+        fork time indicates a write-path bug, DB corruption, or tampering
+        and must crash per CLAUDE.md's Tier 1 trust model.  Silently skipping
+        the remap would leave the forked session's blob_ref pointing at the
+        source session's blob (cross-session reference, audit-contradictory).
+
+        The fork-rollback machinery (commit b8ba2214) must archive the
+        partially-created fork session so no orphan artifacts remain.
         """
         app, service, blob_service = _make_fork_app(tmp_path)
-        client = TestClient(app)
 
         session = await service.create_session("alice", "Original", "local")
 
-        # Save state with a non-UUID blob_ref (simulates manual edit or
-        # corrupt persisted data)
+        # Tier 1 anomaly: persist a non-UUID blob_ref (simulates corrupt
+        # or tampered source data).
         await service.save_composition_state(
             session.id,
             CompositionStateData(
@@ -582,7 +587,7 @@ class TestForkEndpoint:
             composition_state_id=current_state.id,
         )
 
-        # Create a blob so blob_map is non-empty (triggers the rewrite path)
+        # Create a blob so blob_map is non-empty (triggers the rewrite path).
         await blob_service.create_blob(
             session.id,
             "data.csv",
@@ -590,16 +595,34 @@ class TestForkEndpoint:
             "text/csv",
         )
 
-        response = client.post(
-            f"/api/sessions/{session.id}/fork",
-            json={
-                "from_message_id": str(msg.id),
-                "new_message_content": "Hello edited",
-            },
-        )
+        # raise_server_exceptions=True (default) lets us inspect the actual
+        # exception object so we can verify diagnostic content and cause chain.
+        from elspeth.contracts.errors import AuditIntegrityError
 
-        # Fork should succeed (201), not crash with 500
-        assert response.status_code == 201
+        client = TestClient(app)
+        with pytest.raises(AuditIntegrityError) as exc_info:
+            client.post(
+                f"/api/sessions/{session.id}/fork",
+                json={
+                    "from_message_id": str(msg.id),
+                    "new_message_content": "Hello edited",
+                },
+            )
+
+        # Diagnostic names the tier, the offending value, and both state ids
+        # so operators can locate the corrupted record.
+        message = str(exc_info.value)
+        assert "Tier 1" in message
+        assert "blob_ref" in message
+        assert "not-a-valid-uuid" in message
+
+        # Cause chain preserves the original ValueError for forensics.
+        assert isinstance(exc_info.value.__cause__, ValueError)
+
+        # Fork-rollback archived the partially-created fork session — only
+        # the original session remains visible to the owner.
+        sessions = await service.list_sessions("alice", "local")
+        assert len(sessions) == 1
 
     @pytest.mark.asyncio
     async def test_fork_non_quota_blob_error_archives_session(self, tmp_path) -> None:
