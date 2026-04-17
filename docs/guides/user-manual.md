@@ -40,9 +40,9 @@ elspeth --help
 
 ## Environment Configuration
 
-See [Environment Variables Reference](reference/environment-variables.md) for the complete list of supported variables, including LLM provider keys, Azure service credentials, and security settings.
+See [Environment Variables Reference](../reference/environment-variables.md) for the complete list of supported variables, including LLM provider keys, Azure service credentials, and security settings.
 
-**Quick start:** Copy `.env.example` to `.env` (or create a new `.env` file) and fill in your API keys. ELSPETH automatically loads `.env` files from the current or parent directories.
+**Quick start:** Create a `.env` file if you want local environment-based configuration, then fill in the required keys. ELSPETH automatically loads `.env` files from the current or parent directories.
 
 ---
 
@@ -59,6 +59,8 @@ Options:
   --env-file PATH  Path to .env file (skips automatic search)
   --verbose, -v    Enable verbose/debug logging
   --json-logs      Output structured JSON logs (for machine processing)
+  --install-completion  Install completion for the current shell
+  --show-completion     Show completion script for the current shell
   --help           Show help message
 ```
 
@@ -132,36 +134,38 @@ elspeth plugins list
 Output:
 ```
 SOURCES:
-  csv                  - Load rows from a CSV file.
-  json                 - Load rows from a JSON file.
-  text                 - Load rows from a text file.
-  null                 - A source that yields no rows.
   azure_blob           - Load rows from Azure Blob Storage.
-  dataverse            - Load rows from Dataverse.
+  csv                  - Load rows from a CSV file.
+  dataverse            - Load rows from Microsoft Dataverse via OData v4 REST API.
+  json                 - Load rows from a JSON file.
+  null                 - A source that yields no rows.
+  text                 - Load one output row per text line into a configured column.
 
 TRANSFORMS:
-  passthrough          - Pass rows through unchanged.
+  batch_replicate      - Replicate rows based on a copies field.
+  batch_stats          - Compute aggregate statistics over a batch of rows.
   field_mapper         - Map, rename, and select row fields.
   json_explode         - Explode a JSON array field into multiple rows.
-  truncate             - Truncate field values to a maximum length.
   keyword_filter       - Filter rows containing blocked content patterns.
-  web_scrape           - Scrape web content from URLs.
+  passthrough          - Pass rows through unchanged.
+  truncate             - Truncate string fields to specified maximum lengths.
+  type_coerce          - Perform explicit, strict, per-field type normalization.
+  value_transform      - Apply expressions to compute new or modified field values.
+  web_scrape           - Fetch webpages, extract content, generate fingerprints.
   azure_content_safety - Analyze content using Azure Content Safety API.
-  azure_prompt_shield  - Detect jailbreak attempts and prompt injection.
-  llm                  - LLM transform (provider: azure, openrouter).
+  azure_prompt_shield  - Detect jailbreak attempts and prompt injection using Azure Prompt Shield.
   azure_batch_llm      - Batch LLM transform using Azure OpenAI Batch API.
-  openrouter_batch_llm - Batch LLM transform using OpenRouter Batch API.
-  rag_retrieval        - RAG retrieval transform for vector search.
-  batch_stats          - Compute aggregate statistics over a batch.
-  batch_replicate      - Replicate rows based on a copies field.
+  openrouter_batch_llm - Batch-aware LLM transform using OpenRouter API.
+  llm                  - Unified LLM transform with provider dispatch and strategy selection.
+  rag_retrieval        - Enriches rows with retrieval-augmented context from search providers.
 
 SINKS:
-  csv                  - Write rows to a CSV file.
-  json                 - Write rows to a JSON file.
-  database             - Write rows to a database table.
   azure_blob           - Write rows to Azure Blob Storage.
-  dataverse            - Write rows to Dataverse.
   chroma_sink          - Write rows to a Chroma vector database.
+  csv                  - Write rows to a CSV file.
+  database             - Write rows to a database table.
+  dataverse            - Write rows to Microsoft Dataverse via OData v4 REST API.
+  json                 - Write rows to a JSON file.
 ```
 
 ### Filter by Type
@@ -308,13 +312,13 @@ elspeth health --json
 ```json
 {
   "status": "healthy",
-  "version": "0.1.0",
+  "version": "0.5.0",
   "commit": "abc123f",
   "checks": {
-    "version": {"status": "ok", "value": "0.1.0"},
+    "version": {"status": "ok", "value": "0.5.0"},
     "python": {"status": "ok", "value": "3.11.9"},
     "database": {"status": "ok", "value": "connected"},
-    "plugins": {"status": "ok", "value": "4 sources, 11 transforms, 4 sinks"}
+    "plugins": {"status": "ok", "value": "6 sources, 16 transforms, 6 sinks"}
   }
 }
 ```
@@ -453,13 +457,13 @@ For more complex scenarios, see the configuration reference:
 - **Content Moderation with Routing** - Gates with condition expressions
 - **Fork/Join Patterns** - Parallel processing with coalesce
 
-See [Configuration Reference](reference/configuration.md) for the complete settings documentation.
+See [Configuration Reference](../reference/configuration.md) for the complete settings documentation.
 
 ---
 
 ## Troubleshooting
 
-For comprehensive troubleshooting, see the [Troubleshooting Guide](guides/troubleshooting.md).
+For comprehensive troubleshooting, see the [Troubleshooting Guide](troubleshooting.md).
 
 ### Quick Fixes
 

@@ -44,6 +44,6 @@ We use a modified version of Michael Nygard's ADR template. See `000-template.md
 
 ## Related Documentation
 
-- [Architecture Overview](../architecture.md)
+- [Architecture Overview](../overview.md)
 - [Requirements](../requirements.md)
-- [CLAUDE.md Guidelines](/CLAUDE.md)
+- [CLAUDE.md Guidelines](../../../CLAUDE.md)
