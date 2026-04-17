@@ -158,16 +158,11 @@ class BaseTransform(ABC):
 
     @classmethod
     def get_config_schema(cls) -> dict[str, Any]:
-        """Return the full JSON Schema advertising this plugin's configuration.
+        """Default ``get_config_schema`` — renders a single Pydantic model.
 
-        Default renders ``cls.config_model.model_json_schema()`` (or ``{}``
-        when ``config_model`` is None, e.g. NullSource). Subclasses whose
-        *effective* configuration is a discriminated union — even if
-        ``config_model`` is set to a base class used as a dispatch anchor,
-        as LLMTransform does — MUST override this to emit ``oneOf`` + ``$defs``.
-        Rendering the anchor alone publishes a contract missing every
-        variant-specific required field, which is the exact failure mode
-        tracked as bug elspeth-dcf12c061b.
+        See :meth:`~elspeth.contracts.plugin_protocols.TransformProtocol.get_config_schema`
+        for the canonical contract, including the MUST-override rule for
+        plugins whose effective configuration is a discriminated union.
         """
         if cls.config_model is None:
             return {}
@@ -452,14 +447,11 @@ class BaseSink(ABC):
 
     @classmethod
     def get_config_schema(cls) -> dict[str, Any]:
-        """Return the full JSON Schema advertising this plugin's configuration.
+        """Default ``get_config_schema`` — renders a single Pydantic model.
 
-        Default renders ``cls.config_model.model_json_schema()`` (or ``{}``
-        when ``config_model`` is None). Subclasses whose *effective*
-        configuration is a discriminated union — even if ``config_model`` is
-        set to a base class used as a dispatch anchor — MUST override this to
-        emit ``oneOf`` + ``$defs`` so the catalog publishes the full
-        per-variant contract at schema-discovery time.
+        See :meth:`~elspeth.contracts.plugin_protocols.SinkProtocol.get_config_schema`
+        for the canonical contract, including the MUST-override rule for
+        plugins whose effective configuration is a discriminated union.
         """
         if cls.config_model is None:
             return {}
@@ -739,14 +731,11 @@ class BaseSource(ABC):
 
     @classmethod
     def get_config_schema(cls) -> dict[str, Any]:
-        """Return the full JSON Schema advertising this plugin's configuration.
+        """Default ``get_config_schema`` — renders a single Pydantic model.
 
-        Default renders ``cls.config_model.model_json_schema()`` (or ``{}``
-        when ``config_model`` is None, e.g. NullSource). Subclasses whose
-        *effective* configuration is a discriminated union — even if
-        ``config_model`` is set to a base class used as a dispatch anchor —
-        MUST override this to emit ``oneOf`` + ``$defs`` so the catalog
-        publishes the full per-variant contract at schema-discovery time.
+        See :meth:`~elspeth.contracts.plugin_protocols.SourceProtocol.get_config_schema`
+        for the canonical contract, including the MUST-override rule for
+        plugins whose effective configuration is a discriminated union.
         """
         if cls.config_model is None:
             return {}

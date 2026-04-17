@@ -177,10 +177,30 @@ class SourceProtocol(Protocol):
     def get_config_schema(cls) -> dict[str, Any]:
         """Return the full JSON Schema advertising this plugin's configuration.
 
-        Single-model plugins inherit a default that renders
-        ``config_model.model_json_schema()``; plugins whose effective config
-        is a discriminated union override this to publish the full per-variant
-        contract (``oneOf`` + ``$defs``).
+        Contract
+        --------
+        The catalog flattens this schema at discovery time, before any
+        runtime config has been selected, so the return value MUST
+        describe the plugin's **complete** configuration surface —
+        every field a caller could legally supply under every
+        runtime-selected branch.
+
+        Single-model plugins inherit a default (on
+        :class:`~elspeth.plugins.infrastructure.base.BaseSource`) that
+        renders ``cls.config_model.model_json_schema()`` (or ``{}`` when
+        ``config_model`` is None, e.g. NullSource).
+
+        Plugins whose *effective* configuration is a discriminated union
+        — even if ``config_model`` is set to a base class used as a
+        dispatch anchor, as LLMTransform does — **MUST** override this
+        to emit ``oneOf`` + ``$defs`` over every branch. Rendering the
+        anchor alone publishes a contract missing every variant-specific
+        required field, which is the exact failure mode tracked as bug
+        elspeth-dcf12c061b.
+
+        This docstring is the canonical contract cross-referenced from
+        the Transform, BatchTransform, and Sink Protocol variants and
+        from the three base-class default implementations.
         """
         ...
 
@@ -328,8 +348,15 @@ class TransformProtocol(Protocol):
     def get_config_schema(cls) -> dict[str, Any]:
         """Return the full JSON Schema advertising this plugin's configuration.
 
-        LLMTransform overrides to emit a discriminated union over ``provider``;
-        most other transforms inherit the default single-model rendering.
+        Same contract as :meth:`SourceProtocol.get_config_schema` — see
+        there for the canonical specification, including the
+        MUST-override rule for plugins whose effective configuration is
+        a discriminated union (elspeth-dcf12c061b). LLMTransform is the
+        motivating example: it dispatches on ``config["provider"]`` at
+        runtime, so :meth:`~elspeth.plugins.transforms.llm.transform.LLMTransform.get_config_schema`
+        overrides to emit ``oneOf`` + ``$defs`` over every provider
+        variant; most other transforms inherit the default single-model
+        rendering on :class:`~elspeth.plugins.infrastructure.base.BaseTransform`.
         """
         ...
 
@@ -450,7 +477,13 @@ class BatchTransformProtocol(Protocol):
 
     @classmethod
     def get_config_schema(cls) -> dict[str, Any]:
-        """Return the full JSON Schema advertising this plugin's configuration."""
+        """Return the full JSON Schema advertising this plugin's configuration.
+
+        Same contract as :meth:`SourceProtocol.get_config_schema` — see
+        there for the canonical specification, including the
+        MUST-override rule for plugins whose effective configuration is
+        a discriminated union.
+        """
         ...
 
 
@@ -650,8 +683,10 @@ class SinkProtocol(Protocol):
     def get_config_schema(cls) -> dict[str, Any]:
         """Return the full JSON Schema advertising this plugin's configuration.
 
-        Override when the sink configuration is a discriminated union so the
-        catalog publishes the full per-variant contract at discovery time.
+        Same contract as :meth:`SourceProtocol.get_config_schema` — see
+        there for the canonical specification, including the
+        MUST-override rule for plugins whose effective configuration is
+        a discriminated union.
         """
         ...
 
