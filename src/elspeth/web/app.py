@@ -289,6 +289,8 @@ def create_app(settings: WebSettings | None = None) -> FastAPI:
         auth_provider = OIDCAuthProvider(
             issuer=settings.oidc_issuer,
             audience=settings.oidc_audience,
+            jwks_cache_ttl_seconds=settings.jwks_cache_ttl_seconds,
+            jwks_failure_retry_seconds=settings.jwks_failure_retry_seconds,
         )
     elif settings.auth_provider == "entra":
         from elspeth.web.auth.entra import EntraAuthProvider
@@ -298,6 +300,8 @@ def create_app(settings: WebSettings | None = None) -> FastAPI:
         auth_provider = EntraAuthProvider(
             tenant_id=settings.entra_tenant_id,
             audience=settings.oidc_audience,
+            jwks_cache_ttl_seconds=settings.jwks_cache_ttl_seconds,
+            jwks_failure_retry_seconds=settings.jwks_failure_retry_seconds,
         )
     app.state.auth_provider = auth_provider
     app.state.oidc_authorization_endpoint = None  # Set by lifespan for OIDC/Entra

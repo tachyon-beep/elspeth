@@ -61,6 +61,14 @@ class WebSettings(BaseModel):
     oidc_authorization_endpoint: str | None = None
     entra_tenant_id: str | None = None
 
+    # JWKS cache tuning (OIDC / Entra). Defaults match the provider
+    # defaults; operators may lower or raise them. Raising the failure
+    # retry makes stale-serve windows longer (safer during brief IdP
+    # outages); lowering it shrinks the partial-DoS blast radius during
+    # a sustained outage — see elspeth-32982f17cf.
+    jwks_cache_ttl_seconds: int = Field(default=3600, ge=1)
+    jwks_failure_retry_seconds: int = Field(default=300, ge=1)
+
     # Session database (sessions, messages, composition states, runs)
     # Separate from landscape_url (audit DB)
     session_db_url: str | None = None

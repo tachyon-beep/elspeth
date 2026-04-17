@@ -29,11 +29,16 @@ class JWKSTokenValidator:
         issuer: str,
         audience: str,
         jwks_cache_ttl_seconds: int = 3600,
-        jwks_failure_retry_seconds: int = 30,
+        jwks_failure_retry_seconds: int = 300,
     ) -> None:
         self._issuer = issuer.rstrip("/")
         self._audience = audience
         self._jwks_cache_ttl_seconds = jwks_cache_ttl_seconds
+        # 300s default (5 min): JWKS keys rotate on the order of hours
+        # to days, so serving stale keys for up to 5 minutes is safer
+        # than forcing concurrent auth requests through a blocked
+        # httpx.get to a dead IdP. Lower values amplify the per-retry
+        # partial DoS described in elspeth-32982f17cf.
         self._jwks_failure_retry_seconds = jwks_failure_retry_seconds
         self._jwks: dict[str, Any] | None = None
         # Separate "when should we try to refresh next" from "when did we
@@ -85,9 +90,27 @@ class JWKSTokenValidator:
         behind the lock re-hitting a dead IdP. (JWKS keys are long-lived;
         stale keys during a transient IdP blip are safer than a hard
         auth outage.)
+
+        Followers short-circuit when a refresh is already in flight:
+        if stale cache is populated and the refresh lock is held, return
+        stale immediately rather than queue behind a blocked ``httpx.get``.
+        Only the single lock-holder pays the network cost per retry
+        window — see elspeth-32982f17cf for the partial-DoS this
+        prevents.
         """
         now = time.time()
         if self._jwks is not None and now < self._next_refresh_at:
+            return self._jwks
+
+        # Lock-decoupled stale-serve: if another coroutine is already
+        # attempting a refresh and we have a cached (possibly stale) JWKS,
+        # return it without waiting on the lock. This prevents concurrent
+        # auth requests from serializing behind a dead IdP fetch (up to
+        # the httpx 15s timeout worst case). The ``locked()`` check is
+        # best-effort: if the lock is released between the check and our
+        # acquire call, we fall through to the normal double-checked
+        # locking path and the re-check inside the lock is authoritative.
+        if self._jwks is not None and self._jwks_lock.locked():
             return self._jwks
 
         async with self._jwks_lock:
@@ -173,7 +196,7 @@ class OIDCAuthProvider:
         issuer: str,
         audience: str,
         jwks_cache_ttl_seconds: int = 3600,
-        jwks_failure_retry_seconds: int = 30,
+        jwks_failure_retry_seconds: int = 300,
     ) -> None:
         self._validator = JWKSTokenValidator(
             issuer,

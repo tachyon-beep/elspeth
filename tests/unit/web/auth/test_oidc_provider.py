@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import asyncio
+import inspect
 import time
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -746,6 +748,116 @@ class TestOIDCStaleCacheBackoff:
             await provider.authenticate(token)  # should attempt fetch again
 
         assert attempt_count == 2
+
+
+class TestOIDCConcurrentStaleDuringOutage:
+    """Regression coverage for bug elspeth-32982f17cf: stale-serve must
+    not serialize behind the refresh lock during an IdP outage.
+
+    Without the fast-path decoupling, concurrent auth requests during an
+    IdP outage queue on ``self._jwks_lock`` while the lone fetcher blocks
+    on ``httpx.get`` (up to ~15s worst case). p99 auth latency becomes
+    ~15s — a partial DoS. The fix returns stale cache immediately when
+    the lock is already held, so only one coroutine pays the network
+    cost per retry window and followers short-circuit.
+    """
+
+    @pytest.mark.asyncio
+    async def test_followers_return_stale_without_waiting_on_refresh_lock(
+        self,
+        rsa_keypair,
+        mock_httpx_discovery,
+    ) -> None:
+        """During an in-flight refresh with stale cache available,
+        concurrent ``authenticate()`` calls must complete without
+        waiting on ``self._jwks_lock``.
+        """
+        private_key, _ = rsa_keypair
+        # TTL=0 so every call is past-due; retry window is long so this
+        # test pins lock-decoupling behaviour rather than horizon timing.
+        provider = OIDCAuthProvider(
+            issuer=ISSUER,
+            audience=AUDIENCE,
+            jwks_cache_ttl_seconds=0,
+            jwks_failure_retry_seconds=300,
+        )
+        token = make_rs256_token(private_key, _valid_claims())
+
+        # Seed the cache with a successful fetch.
+        with mock_httpx_discovery:
+            await provider.authenticate(token)
+
+        # Simulate a dead IdP: first httpx.get awaits a gate we control.
+        # The fix must ensure followers never await this gate.
+        release = asyncio.Event()
+        attempt_count = 0
+
+        async def hanging_get(url, **kwargs):
+            nonlocal attempt_count
+            attempt_count += 1
+            await release.wait()
+            raise httpx.ConnectError("IdP is down")
+
+        hanging_client = AsyncMock()
+        hanging_client.get = hanging_get
+        hanging_client.__aenter__ = AsyncMock(return_value=hanging_client)
+        hanging_client.__aexit__ = AsyncMock(return_value=False)
+
+        with patch("elspeth.web.auth.oidc.httpx.AsyncClient", return_value=hanging_client):
+            # Winner: acquires the lock and blocks inside hanging_get.
+            winner = asyncio.create_task(provider.authenticate(token))
+            # Poll until the winner has reached hanging_get; asyncio.Lock
+            # acquisition can take several scheduler turns through the
+            # httpx async context manager before reaching the await.
+            for _ in range(100):
+                await asyncio.sleep(0.01)
+                if attempt_count == 1:
+                    break
+            assert attempt_count == 1, "winner never reached the hanging httpx.get"
+
+            # Followers arrive during the winner's blocked refresh.
+            follower_count = 5
+            followers = [asyncio.create_task(provider.authenticate(token)) for _ in range(follower_count)]
+
+            # Give followers a chance to run. With the lock-decoupling
+            # fix they return stale immediately. Without it they queue
+            # on self._jwks_lock behind the still-blocked winner.
+            done, pending = await asyncio.wait(followers, timeout=1.0)
+            try:
+                assert not winner.done(), "winner should still be blocked in hanging_get"
+                assert len(done) == follower_count, (
+                    f"Expected all {follower_count} followers to short-circuit with "
+                    f"stale cache, but {len(pending)} remain blocked on the refresh lock. "
+                    f"Stale-serve is gated by _jwks_lock during an IdP outage — partial DoS."
+                )
+                # Followers did not hit the network.
+                assert attempt_count == 1, f"Followers triggered additional IdP fetches (attempt_count={attempt_count})"
+                # Followers all got the stale-but-valid identity.
+                for task in followers:
+                    assert task.result().user_id == "user-123"
+            finally:
+                # Unblock the winner so the test teardown is clean.
+                release.set()
+                await winner
+                # Drain any still-pending followers (shouldn't be any with the fix).
+                if pending:
+                    await asyncio.gather(*pending, return_exceptions=True)
+
+    def test_default_failure_retry_seconds_is_300(self) -> None:
+        """Pin the default so a silent regression is caught.
+
+        JWKS key rotation is measured in hours/days; a 5-minute stale
+        window is safe and bounds the per-retry DoS amplifier. Lower
+        values re-introduce the partial DoS documented in
+        elspeth-32982f17cf.
+        """
+        from elspeth.web.auth.oidc import JWKSTokenValidator
+
+        for cls in (JWKSTokenValidator, OIDCAuthProvider):
+            sig = inspect.signature(cls.__init__)
+            assert sig.parameters["jwks_failure_retry_seconds"].default == 300, (
+                f"{cls.__name__}.jwks_failure_retry_seconds default regressed below 300s — see elspeth-32982f17cf"
+            )
 
 
 class TestOIDCProtocolConformance:

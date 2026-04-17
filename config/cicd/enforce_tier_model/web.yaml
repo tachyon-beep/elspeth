@@ -73,12 +73,12 @@ allow_hits:
   reason: Tier 3 boundary — JSON schema field 'default' is optional
   safety: Returns None; ConfigFieldSummary.default accepts None
   expires: null
-- key: web/auth/oidc.py:R1:JWKSTokenValidator:ensure_jwks:fp=91165515af3936b3
+- key: web/auth/oidc.py:R1:JWKSTokenValidator:ensure_jwks:fp=8620d7134f519ede
   owner: web-auth
   reason: False positive — httpx.AsyncClient.get() is an HTTP GET request, not dict.get()
   safety: HTTP errors caught by raise_for_status() and except block
   expires: null
-- key: web/auth/oidc.py:R1:JWKSTokenValidator:ensure_jwks:fp=93ddf48d8606be05
+- key: web/auth/oidc.py:R1:JWKSTokenValidator:ensure_jwks:fp=9523314a8f3464b7
   owner: web-auth
   reason: False positive — httpx.AsyncClient.get() is an HTTP GET request, not dict.get()
   safety: HTTP errors caught by raise_for_status() and except block

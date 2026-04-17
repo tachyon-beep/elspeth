@@ -26,7 +26,7 @@ class EntraAuthProvider:
         tenant_id: str,
         audience: str,
         jwks_cache_ttl_seconds: int = 3600,
-        jwks_failure_retry_seconds: int = 30,
+        jwks_failure_retry_seconds: int = 300,
     ) -> None:
         self._tenant_id = tenant_id
         issuer = f"https://login.microsoftonline.com/{tenant_id}/v2.0"
