@@ -808,8 +808,14 @@ class BlobServiceImpl:
 # SHA-256 hex digest: exactly 64 lowercase hex characters.  Must match
 # FilesystemPayloadStore's validator (core/payload_store.py) — a blob
 # whose content_hash round-trips through the audit trail must use the
-# same canonical form everywhere.
-_SHA256_HEX_PATTERN = re.compile(r"^[a-f0-9]{64}$")
+# same canonical form everywhere.  Used with ``fullmatch`` (NOT
+# ``match``) because Python's ``$`` anchor matches at end-of-string OR
+# just before a final ``\n``, so the naive ``^[a-f0-9]{64}$`` pattern
+# would accept ``"a" * 64 + "\n"`` — letting a newline-terminated hash
+# slip past the pre-check and land at the DB CHECK as an opaque
+# IntegrityError rather than the structured BlobStateError this
+# validator is supposed to raise.
+_SHA256_HEX_PATTERN = re.compile(r"[a-f0-9]{64}")
 
 
 def _validate_finalize_hash(
@@ -817,17 +823,36 @@ def _validate_finalize_hash(
     status: FinalizeBlobStatus,
     content_hash_val: str | None,
 ) -> None:
-    """Reject malformed content_hash values before they reach the DB.
+    """Service-layer pre-check for the ``ready`` content_hash invariant.
 
-    A ``ready`` blob MUST carry a SHA-256 hex digest — that is the
-    integrity contract that makes ``read_blob_content`` verifiable
-    (AD-5/AD-7 in
+    This is the FIRST of two walls enforcing the Tier-1 integrity
+    contract that makes ``read_blob_content`` verifiable (AD-5/AD-7 in
     docs/plans/rc4.2-ux-remediation/2026-03-30-02-blob-manager-subplan.md).
-    Before these fixes, a caller could finalize with a bogus string
-    like ``"abc123"`` and the DB would happily store it, leaving a
-    ``ready`` row whose hash cannot be produced by any real bytes on
-    disk.  Tier 1 data must be pristine at the write side too, not
-    only at the read side.
+    A ``ready`` blob MUST carry a SHA-256 hex digest; before this
+    pre-check existed, a caller could finalize with a bogus string like
+    ``"abc123"`` and the DB would happily store it, leaving a ``ready``
+    row whose hash cannot be produced by any real bytes on disk.
+
+    Division of responsibility
+    --------------------------
+    This function is the SERVICE-LAYER pre-check. It runs on every
+    ``finalize_blob`` / ``_finalize_blob_sync`` write-path call and
+    raises :class:`BlobStateError` — a structured, caller-friendly
+    diagnostic — before any SQL is issued. The DB-level CHECK
+    constraint ``ck_blobs_ready_hash`` (migration 008) is the
+    AUTHORITATIVE guard: it closes the same invariant for any writer
+    that bypasses this service (direct SQL, future migrations, or an
+    ORM call path that skips finalize). If these two guards disagree,
+    the DB CHECK wins and the service pre-check is the bug.
+
+    Keeping both guards means a service regression surfaces as a clean
+    BlobStateError at the write-path entry point (easy to debug),
+    while a writer that skips the service still cannot corrupt the
+    audit trail. The shape rule is kept in agreement between the two
+    sites by design — the docstring of migration 008 documents the
+    pairing from the DB side, and the tests in
+    ``tests/unit/web/blobs/test_service.py::TestBlobsReadyHashDBConstraint``
+    pin the DB guard independently of this one.
     """
     if status != "ready":
         return
@@ -836,7 +861,9 @@ def _validate_finalize_hash(
             blob_id_str,
             f"Tier 1: cannot finalize blob {blob_id_str} as 'ready' without content_hash — audit integrity requires a hash",
         )
-    if not _SHA256_HEX_PATTERN.match(content_hash_val):
+    # ``fullmatch`` (not ``match``) — see the _SHA256_HEX_PATTERN comment
+    # above for why ``^...$`` + ``match`` admits trailing newlines.
+    if not _SHA256_HEX_PATTERN.fullmatch(content_hash_val):
         raise BlobStateError(
             blob_id_str,
             f"Tier 1: content_hash must be 64 lowercase hex characters (SHA-256), got {content_hash_val!r}",

@@ -19,9 +19,16 @@ from elspeth.contracts.payload_store import PayloadNotFoundError
 
 __all__ = ["FilesystemPayloadStore"]
 
-# SHA-256 hex digest: exactly 64 lowercase hex characters
-# Compiled regex for performance on repeated validation
-_SHA256_HEX_PATTERN = re.compile(r"^[a-f0-9]{64}$")
+# SHA-256 hex digest: exactly 64 lowercase hex characters.
+# Compiled regex for performance on repeated validation. Used with
+# ``fullmatch`` — NOT ``match`` — because Python's ``$`` anchor treats
+# "just before a final \n" as end-of-string, so
+# ``re.compile(r"^[a-f0-9]{64}$").match("a" * 64 + "\n")`` returns a
+# match object and would let a newline-terminated hash slip through.
+# A real ``hashlib.sha256().hexdigest()`` never contains a newline;
+# any value that does is either externally sourced (Tier 3 — reject)
+# or corrupt Tier-1 data (reject).
+_SHA256_HEX_PATTERN = re.compile(r"[a-f0-9]{64}")
 
 
 class FilesystemPayloadStore:
@@ -57,9 +64,11 @@ class FilesystemPayloadStore:
             ValueError: If content_hash is not a valid SHA-256 hex digest
                         or if resolved path escapes base_path
         """
-        # Validate hash format - must be exactly 64 lowercase hex characters
-        # Per CLAUDE.md Tier 1 rules: crash immediately on invalid audit data
-        if not _SHA256_HEX_PATTERN.match(content_hash):
+        # Validate hash format - must be exactly 64 lowercase hex characters.
+        # Per CLAUDE.md Tier 1 rules: crash immediately on invalid audit data.
+        # ``fullmatch`` (not ``match``) because Python's ``$`` would accept a
+        # trailing newline — see the _SHA256_HEX_PATTERN comment above.
+        if not _SHA256_HEX_PATTERN.fullmatch(content_hash):
             raise ValueError(f"Invalid content_hash: must be 64 lowercase hex characters, got {repr(content_hash)[:50]}")
 
         # Construct path using first 2 chars as subdirectory

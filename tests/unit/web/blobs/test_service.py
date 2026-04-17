@@ -697,6 +697,40 @@ class TestFinalizeBlob:
             )
 
     @pytest.mark.asyncio
+    async def test_finalize_blob_rejects_trailing_newline_hash(self, blob_service, session_id) -> None:
+        """``^[a-f0-9]{64}$`` + ``re.match`` accepts trailing ``\\n``; fullmatch rejects it.
+
+        Python's ``$`` anchor matches either end-of-string OR just
+        before a final newline.  A 64-hex hash followed by a single
+        ``\\n`` therefore slipped through the service-layer pre-check
+        under the old regex and landed at the DB, where the CHECK
+        constraint rejected it as an IntegrityError — the wrong failure
+        surface (opaque DB error rather than the clean BlobStateError
+        this validator is supposed to raise, and coverage on the
+        DB-authoritative guard only).  The service pre-check uses
+        ``fullmatch`` so the error path is always the structured
+        BlobStateError, and the DB CHECK remains the belt for any
+        writer that bypasses the service entirely.
+        """
+        pending = await blob_service.create_pending_blob(
+            session_id=session_id,
+            filename="output.csv",
+            mime_type="text/csv",
+            created_by="pipeline",
+        )
+
+        from elspeth.web.blobs.protocol import BlobStateError
+
+        trailing_newline_hash = content_hash(b"real-bytes") + "\n"
+        with pytest.raises(BlobStateError, match="64 lowercase hex"):
+            await blob_service.finalize_blob(
+                blob_id=pending.id,
+                status="ready",
+                size_bytes=10,
+                content_hash=trailing_newline_hash,
+            )
+
+    @pytest.mark.asyncio
     async def test_finalize_blob_as_error_without_hash_succeeds(self, blob_service, session_id) -> None:
         """The hash invariant applies only to 'ready' — 'error' needs no hash.
 
@@ -1809,6 +1843,7 @@ class TestBlobsReadyHashDBConstraint:
             "g" * 64,  # non-hex letter
             "a" * 63 + "Z",  # mostly-hex with one non-hex char
             "",  # empty
+            "a" * 64 + "\n",  # trailing newline — ``^...$`` regex accepts this, ``fullmatch`` rejects
         ],
     )
     @pytest.mark.asyncio
