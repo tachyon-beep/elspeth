@@ -30,6 +30,7 @@ from elspeth.web.catalog.protocol import CatalogService
 from elspeth.web.composer.prompts import build_messages
 from elspeth.web.composer.protocol import (
     ComposerConvergenceError,
+    ComposerPluginCrashError,
     ComposerResult,
     ComposerServiceError,
     ComposerSettings,
@@ -217,31 +218,38 @@ class ComposerServiceImpl:
         except ComposerConvergenceError:
             # Has its own partial_state; route handler persists. Do not intercept.
             raise
-        except Exception as exc:
-            # Plugin-bug crash path. Bump the session's updated_at as an audit
-            # breadcrumb (richer crash-marker columns tracked as a follow-up
-            # migration), then re-raise the ORIGINAL exception class unchanged
-            # so the route layer's final handler (Task 4.5) sees a bare
-            # TypeError/ValueError/etc.
+        except ComposerPluginCrashError as crash:
+            # Plugin-bug crash path. The exception already carries
+            # partial_state (populated by _compose_loop at the execute_tool
+            # site when state.version > initial_version), so the route
+            # handler can persist the accumulated mutations into
+            # composition_states symmetrically with the convergence path.
             #
-            # Note: last-known-state tracking is intentionally NOT threaded
-            # through the loop for now — the current schema has nowhere to
-            # persist it. The follow-up schema migration will add the columns
-            # and re-introduce the tracking at that point.
+            # Here we only add the session-row audit breadcrumb (updated_at
+            # bump — richer crash-marker columns tracked as a follow-up
+            # migration: elspeth-23b0987938).
             if self._session_engine is not None and session_id is not None:
                 try:
                     self._persist_crashed_session(session_id)
-                except Exception:
+                except Exception as audit_failure:
                     # Audit-persistence is best-effort on the crash path —
                     # failure to persist MUST NOT mask the original plugin
                     # bug. Log via slog.error (audit system itself is failing
                     # here, which is one of the three permitted slog use
                     # cases per the logging-telemetry-policy skill).
+                    #
+                    # exc_info is deliberately omitted: the original plugin
+                    # exception's message / __cause__ chain may carry DB
+                    # URLs, filesystem paths, or secret fragments from
+                    # deeper layers (the response-body redaction in
+                    # routes.py exists for the same reason). The two
+                    # exc_class fields give the operator enough correlation
+                    # to triage from structured logs alone.
                     slog.error(
                         "composer_crash_persistence_failed",
                         session_id=session_id,
-                        original_exc_class=type(exc).__name__,
-                        exc_info=True,
+                        original_exc_class=crash.exc_class,
+                        audit_exc_class=type(audit_failure).__name__,
                     )
             raise
 
@@ -461,6 +469,25 @@ class ComposerServiceImpl:
                         }
                     )
                     continue
+                except Exception as tool_exc:
+                    # Plugin-bug path: any exception class OTHER than
+                    # ToolArgumentError escaping execute_tool() is a plugin
+                    # bug (CLAUDE.md tier 1/2). Capture the loop-local
+                    # `state` — which has been rebound to
+                    # result.updated_state on every successful prior
+                    # iteration — so the route layer can persist the
+                    # accumulated mutations into composition_states before
+                    # returning the 500. Without this, any tool call that
+                    # successfully mutated state prior to the crash would
+                    # be silently dropped from the state history.
+                    #
+                    # Wrap narrow-scope: only exceptions from the
+                    # execute_tool call are wrapped here. Bugs in
+                    # _call_llm_before_deadline / _build_messages surface
+                    # through their own exception classes
+                    # (ComposerServiceError, ComposerConvergenceError).
+                    partial = state if state.version > initial_version else None
+                    raise ComposerPluginCrashError(tool_exc, partial_state=partial) from tool_exc
 
                 state = result.updated_state
                 last_validation = result.validation

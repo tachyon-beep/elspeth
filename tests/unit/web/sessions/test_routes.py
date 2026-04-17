@@ -14,7 +14,7 @@ from starlette.testclient import TestClient
 
 from elspeth.web.auth.middleware import get_current_user
 from elspeth.web.auth.models import UserIdentity
-from elspeth.web.composer.protocol import ComposerResult
+from elspeth.web.composer.protocol import ComposerPluginCrashError, ComposerResult
 from elspeth.web.composer.state import CompositionState, PipelineMetadata
 from elspeth.web.config import WebSettings
 from elspeth.web.sessions.engine import create_session_engine
@@ -1183,9 +1183,10 @@ class TestComposePluginCrashResponse:
     SECRET_PATH = "/etc/elspeth/secrets/bootstrap.key"
 
     def test_compose_plugin_value_error_returns_structured_500(self, tmp_path) -> None:
+        original = ValueError(f"plugin bug: {self.SECRET_PATH}")
         mock_composer = AsyncMock()
         mock_composer.compose = AsyncMock(
-            side_effect=ValueError(f"plugin bug: {self.SECRET_PATH}"),
+            side_effect=ComposerPluginCrashError(original, partial_state=None),
         )
 
         app, _ = _make_app(tmp_path)
@@ -1216,9 +1217,10 @@ class TestComposePluginCrashResponse:
     def test_recompose_plugin_type_error_returns_structured_500(self, tmp_path) -> None:
         import asyncio
 
+        original = TypeError(f"plugin bug: NoneType has no attribute 'read' from {self.SECRET_PATH}")
         mock_composer = AsyncMock()
         mock_composer.compose = AsyncMock(
-            side_effect=TypeError(f"plugin bug: NoneType has no attribute 'read' from {self.SECRET_PATH}"),
+            side_effect=ComposerPluginCrashError(original, partial_state=None),
         )
 
         app, service = _make_app(tmp_path)
@@ -1246,6 +1248,184 @@ class TestComposePluginCrashResponse:
         assert self.SECRET_PATH not in body_text
         assert "NoneType" not in body_text
         assert "TypeError" not in body_text
+
+    def test_compose_plugin_crash_persists_partial_state(self, tmp_path) -> None:
+        """P1 regression fix: when a plugin crashes AFTER one or more tool
+        calls succeeded in the same request, the accumulated ``partial_state``
+        MUST be persisted into ``composition_states`` before the 500 is
+        returned.  Without this, recompose restarts from the stale
+        pre-request state and silently reverts the LLM's successful mutations.
+
+        Symmetric with ``TestRecomposeConvergencePartialState`` for the
+        convergence-error path.
+        """
+        import asyncio
+
+        partial = CompositionState(
+            source=None,
+            nodes=(),
+            edges=(),
+            outputs=(),
+            metadata=PipelineMetadata(name="after-first-mutation"),
+            version=5,
+        )
+        original = ValueError(f"plugin bug after mutation: {self.SECRET_PATH}")
+        mock_composer = AsyncMock()
+        mock_composer.compose = AsyncMock(
+            side_effect=ComposerPluginCrashError(original, partial_state=partial),
+        )
+
+        app, service = _make_app(tmp_path)
+        app.state.composer_service = mock_composer
+        client = TestClient(app, raise_server_exceptions=False)
+
+        resp = client.post("/api/sessions", json={"title": "Test"})
+        session_id = resp.json()["id"]
+
+        response = client.post(
+            f"/api/sessions/{session_id}/messages",
+            json={"content": "Build me a pipeline"},
+        )
+        assert response.status_code == 500
+        body = response.json()
+        assert body["detail"]["error_type"] == "composer_plugin_error"
+        # Response body still fully redacted — persisting partial_state
+        # into composition_states does NOT echo it on the failure response.
+        assert self.SECRET_PATH not in response.text
+
+        # The partial_state row MUST exist in composition_states now.
+        loop = asyncio.new_event_loop()
+        try:
+            persisted = loop.run_until_complete(service.get_current_state(uuid.UUID(session_id)))
+        finally:
+            loop.close()
+        assert persisted is not None, "partial_state must be persisted to composition_states on plugin crash"
+        assert persisted.metadata_ is not None
+        assert persisted.metadata_.get("name") == "after-first-mutation"
+
+    def test_compose_plugin_crash_no_partial_state_persists_nothing(self, tmp_path) -> None:
+        """When a plugin crashes BEFORE any mutation (partial_state is None),
+        no new ``composition_states`` row is written. The 500 response shape
+        is identical to the persisted-partial case.
+        """
+        import asyncio
+
+        original = ValueError("plugin bug on first call")
+        mock_composer = AsyncMock()
+        mock_composer.compose = AsyncMock(
+            side_effect=ComposerPluginCrashError(original, partial_state=None),
+        )
+
+        app, service = _make_app(tmp_path)
+        app.state.composer_service = mock_composer
+        client = TestClient(app, raise_server_exceptions=False)
+
+        resp = client.post("/api/sessions", json={"title": "Test"})
+        session_id = resp.json()["id"]
+
+        response = client.post(
+            f"/api/sessions/{session_id}/messages",
+            json={"content": "Build me a pipeline"},
+        )
+        assert response.status_code == 500
+
+        loop = asyncio.new_event_loop()
+        try:
+            persisted = loop.run_until_complete(service.get_current_state(uuid.UUID(session_id)))
+        finally:
+            loop.close()
+        # A brand-new session with no successful mutations → no composition
+        # state row should have been created by the crash path.
+        assert persisted is None
+
+    def test_compose_plugin_crash_log_has_no_traceback_fields(self, tmp_path) -> None:
+        """P2 regression fix: the plugin-crash structured log MUST NOT
+        carry traceback-shaped fields. ``exc_info=True`` was dropped
+        because plugin exception ``__cause__`` chains may include DB
+        URLs, filesystem paths, or secret fragments.
+        """
+        from structlog.testing import capture_logs
+
+        original = ValueError(f"plugin bug with secret {self.SECRET_PATH}")
+        mock_composer = AsyncMock()
+        mock_composer.compose = AsyncMock(
+            side_effect=ComposerPluginCrashError(original, partial_state=None),
+        )
+
+        app, _ = _make_app(tmp_path)
+        app.state.composer_service = mock_composer
+        client = TestClient(app, raise_server_exceptions=False)
+
+        resp = client.post("/api/sessions", json={"title": "Test"})
+        session_id = resp.json()["id"]
+
+        with capture_logs() as cap_logs:
+            response = client.post(
+                f"/api/sessions/{session_id}/messages",
+                json={"content": "Build me a pipeline"},
+            )
+        assert response.status_code == 500
+
+        crash_events = [e for e in cap_logs if e.get("event") == "compose_plugin_crash"]
+        assert len(crash_events) == 1, cap_logs
+        event = crash_events[0]
+        # Triage fields present.
+        assert event["exc_class"] == "ValueError"
+        assert event["session_id"] == session_id
+        # Traceback-shaped fields absent.
+        assert "exc_info" not in event
+        assert "exception" not in event
+        assert "stack_info" not in event
+        # Exception message / secret fragments MUST NOT appear anywhere
+        # in the structured event (defense-in-depth).
+        serialised = str(event)
+        assert self.SECRET_PATH not in serialised
+        assert "plugin bug" not in serialised
+
+    def test_compose_plugin_crash_sentinel_leak(self, tmp_path) -> None:
+        """Multi-sentinel test: inject an exception whose ``__str__`` and
+        whose ``__cause__.__str__`` each carry a distinct secret sentinel.
+        Neither must appear in the HTTP response body nor in any captured
+        log record. This guards against future regressions where a
+        structlog processor or log field addition inadvertently serialises
+        exception content.
+        """
+        from structlog.testing import capture_logs
+
+        message_secret = "postgres://user:p4ss@prod-db.internal:5432/audit"
+        cause_secret = "/var/secrets/elspeth/bootstrap-key.pem"
+
+        original = RuntimeError(f"upstream failure: {message_secret}")
+        original.__cause__ = FileNotFoundError(cause_secret)
+
+        mock_composer = AsyncMock()
+        mock_composer.compose = AsyncMock(
+            side_effect=ComposerPluginCrashError(original, partial_state=None),
+        )
+
+        app, _ = _make_app(tmp_path)
+        app.state.composer_service = mock_composer
+        client = TestClient(app, raise_server_exceptions=False)
+
+        resp = client.post("/api/sessions", json={"title": "Test"})
+        session_id = resp.json()["id"]
+
+        with capture_logs() as cap_logs:
+            response = client.post(
+                f"/api/sessions/{session_id}/messages",
+                json={"content": "Build me a pipeline"},
+            )
+        assert response.status_code == 500
+
+        # Neither sentinel in response body.
+        assert message_secret not in response.text
+        assert cause_secret not in response.text
+
+        # Neither sentinel in any captured log record.
+        for event in cap_logs:
+            serialised = str(event)
+            assert message_secret not in serialised, event
+            assert cause_secret not in serialised, event
 
     def test_compose_unknown_exception_class_is_not_absorbed(self, tmp_path) -> None:
         """Deliberately narrow typed catch: RuntimeError (not in the handler's

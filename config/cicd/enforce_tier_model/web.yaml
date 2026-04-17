@@ -579,34 +579,44 @@ allow_hits:
   reason: Convergence partial-state validation may fail on damaged LLM output — narrowed to data-shape errors
   safety: Returns 422 with structured error, does not swallow
   expires: null
-- key: web/sessions/routes.py:R6:_handle_convergence_error:fp=1c6a5d0422f42969
+- key: web/sessions/routes.py:R6:_handle_convergence_error:fp=ba9dd9a0898b22e0
   owner: web-sessions
-  reason: Convergence partial-state save may fail — narrowed to data-shape and DB integrity errors
-  safety: Returns 422 with structured error, does not swallow
+  reason: Convergence partial-state save may fail — narrowed to data-shape and DB integrity errors. Fingerprint refreshed after dropping exc_info from the slog call (P2 of composer plugin-crash feedback) to prevent secret leakage via SQLAlchemy __cause__ chains into structured server logs.
+  safety: Returns 422 with structured error, does not swallow. Logs exc_class (class name only, no traceback) so operators can triage DB integrity vs data-shape failures without exposing connection strings.
   expires: null
-- key: web/sessions/routes.py:R5:create_session_router:fork_from_message:fp=1d0be779e9a067f5
+- key: web/sessions/routes.py:R6:_handle_plugin_crash:fp=ab9d8e09e2606cf3
   owner: web-sessions
-  reason: isinstance check on deserialized composition state source — Tier 3 boundary
+  reason: Plugin-crash partial-state validation may fail on damaged LLM output — narrowed to data-shape errors (ValueError, TypeError, KeyError). Mirrors the convergence-error validate-guard; required because partial_state is captured mid-mutation and may be structurally inconsistent.
+  safety: Returns 500 with structured error; logs exc_class and falls back to ValidationSummary(is_valid=False). Original plugin crash still propagates — validation-guard failure never masks the primary bug.
+  expires: null
+- key: web/sessions/routes.py:R6:_handle_plugin_crash:fp=619931d24651264c
+  owner: web-sessions
+  reason: Plugin-crash partial-state save may fail — narrowed to data-shape and DB integrity errors. Mirrors the convergence-error persist-guard. Must not upgrade the 500 plugin-crash response into a different class of failure if the DB write itself fails.
+  safety: Returns 500 with structured error; logs exc_class (no traceback, same redaction policy as the convergence path). Original plugin crash still propagates via the outer `raise HTTPException(...) from crash.original_exc`.
+  expires: null
+- key: web/sessions/routes.py:R5:create_session_router:fork_from_message:fp=4261efacf40549bd
+  owner: web-sessions
+  reason: isinstance check on deserialized composition state source — Tier 3 boundary. Fingerprint shifted due to line changes from adding _handle_plugin_crash above; guard itself unchanged.
   safety: Validates structure from persisted state
   expires: null
-- key: web/sessions/routes.py:R1:create_session_router:fork_from_message:fp=222fd3c86749d670
+- key: web/sessions/routes.py:R1:create_session_router:fork_from_message:fp=fd68e4dc65e4a6fa
   owner: web-sessions
-  reason: source_dict.get() on Tier 3 composition state — optional source options
+  reason: source_dict.get() on Tier 3 composition state — optional source options. Fingerprint shifted due to line changes from adding _handle_plugin_crash above; guard itself unchanged.
   safety: Default empty dict is safe for optional field
   expires: null
-- key: web/sessions/routes.py:R1:create_session_router:fork_from_message:fp=4fb4bdeddc055df2
+- key: web/sessions/routes.py:R1:create_session_router:fork_from_message:fp=28ef173b85e8e3bb
   owner: web-sessions
-  reason: options.get() on Tier 3 state source — blob_ref is optional
+  reason: options.get() on Tier 3 state source — blob_ref is optional. Fingerprint shifted due to line changes from adding _handle_plugin_crash above; guard itself unchanged.
   safety: Returns None on miss, handled by conditional below
   expires: null
-- key: web/sessions/routes.py:R5:create_session_router:fork_from_message:fp=041875762f779668
+- key: web/sessions/routes.py:R5:create_session_router:fork_from_message:fp=8e44c689ea8156a1
   owner: web-sessions
-  reason: isinstance check on blob_ref — may be str or UUID from persisted state
+  reason: isinstance check on blob_ref — may be str or UUID from persisted state. Fingerprint shifted due to line changes from adding _handle_plugin_crash above; guard itself unchanged.
   safety: Tier 3 boundary — persisted blob_ref type is not guaranteed
   expires: null
-- key: web/sessions/routes.py:R6:create_session_router:fork_from_message:fp=e0e68c3d97f379d6
+- key: web/sessions/routes.py:R6:create_session_router:fork_from_message:fp=52ed4173215b62f8
   owner: web-sessions
-  reason: Tier 3 boundary — persisted blob_ref may be non-UUID string; skip rewrite gracefully
+  reason: Tier 3 boundary — persisted blob_ref may be non-UUID string; skip rewrite gracefully. Fingerprint shifted due to line changes from adding _handle_plugin_crash above; guard itself unchanged.
   safety: Falls through to use original ref unchanged
   expires: null
 - key: web/sessions/service.py:R1:SessionServiceImpl:prune_state_versions:_sync:fp=09c474ed2cd0dc17
@@ -826,10 +836,10 @@ allow_hits:
   reason: Tier 3 — isinstance check on pipeline_yaml argument type
   safety: Raises TypeError with diagnostic; no silent default
   expires: null
-- key: web/composer/service.py:R4:ComposerServiceImpl:compose:fp=8952d86607a4d798
+- key: web/composer/service.py:R4:ComposerServiceImpl:compose:fp=e7b476f0d4c155e5
   owner: web-composer
-  reason: Plugin-bug crash-path breadcrumb — catches any escaping Exception from _compose_loop (after narrowing the inner tool-execution catch to ToolArgumentError) to best-effort bump the session's updated_at before re-raising the original exception. ComposerConvergenceError is re-raised without interception to preserve its partial-state persistence path.
-  safety: Original exception is always re-raised (never swallowed); persistence failure is caught, emits slog.error "composer_crash_persistence_failed" with exc_class (message stays in exc_info only), then the original plugin-bug exception propagates unchanged to the route-layer typed handler.
+  reason: Audit-system-failure catch — the inner try now calls _persist_crashed_session (the session-row breadcrumb). If that SQL update itself fails, the except must absorb *any* audit-layer exception (RuntimeError, SQLAlchemy OperationalError, etc.) so the original ComposerPluginCrashError still propagates to the route. This is one of the three permitted slog use cases per the logging-telemetry-policy skill.
+  safety: ComposerPluginCrashError is always re-raised (never swallowed). Persistence failure is logged via slog.error "composer_crash_persistence_failed" with original_exc_class + audit_exc_class; exc_info is deliberately omitted so SQLAlchemy __cause__ chains (which may carry DB URLs) cannot reach structured server logs. The original plugin-bug exception propagates unchanged to the route-layer typed handler, carrying partial_state for composition_states persistence.
   expires: null
 per_file_rules:
 - pattern: web/composer/tools.py

@@ -18,7 +18,12 @@ from elspeth.contracts.freeze import deep_thaw
 from elspeth.web.auth.middleware import get_current_user
 from elspeth.web.auth.models import UserIdentity
 from elspeth.web.blobs.protocol import BlobQuotaExceededError, BlobServiceProtocol
-from elspeth.web.composer.protocol import ComposerConvergenceError, ComposerService, ComposerServiceError
+from elspeth.web.composer.protocol import (
+    ComposerConvergenceError,
+    ComposerPluginCrashError,
+    ComposerService,
+    ComposerServiceError,
+)
 from elspeth.web.composer.redaction import redact_source_storage_path
 from elspeth.web.composer.state import CompositionState, PipelineMetadata, ValidationEntry, ValidationSummary
 from elspeth.web.composer.yaml_generator import generate_yaml
@@ -197,16 +202,104 @@ async def _handle_convergence_error(
             await service.save_composition_state(session_id, state_data)
             response_body["partial_state"] = redact_source_storage_path(state_d)
         except (ValueError, TypeError, KeyError, IntegrityError) as save_err:
+            # exc_info deliberately omitted: SQLAlchemy IntegrityError
+            # __cause__ chains can carry DB connection strings, schema
+            # introspection detail, or other operational secrets that
+            # structured server logs must not retain.
             slog.error(
                 f"{log_prefix}_partial_state_save_failed",
                 session_id=str(session_id),
-                error=str(save_err),
-                exc_info=True,
+                exc_class=type(save_err).__name__,
             )
             response_body["partial_state_save_failed"] = True
             response_body["partial_state_save_error"] = str(save_err)
 
     return response_body
+
+
+async def _handle_plugin_crash(
+    exc: ComposerPluginCrashError,
+    service: SessionServiceProtocol,
+    session_id: UUID,
+    user_id: str,
+    log_prefix: str,
+) -> dict[str, object]:
+    """Build 500 response body and persist partial state for plugin crashes.
+
+    Symmetric with :func:`_handle_convergence_error` — same validation
+    guard, same persistence guard, same response-body shape. The only
+    differences are the exception class and the HTTP status (500 vs 422):
+    a plugin crash is a server-side bug, not a user-driven failure.
+
+    Args:
+        exc: The plugin-crash wrapper with optional ``partial_state``.
+        service: Session service for DB persistence of partial state.
+        session_id: Session to persist partial state to.
+        user_id: Authenticated user id (logged for triage).
+        log_prefix: Prefix for structlog event names
+            (e.g. "compose" or "recompose").
+
+    Returns:
+        Response body dict for ``HTTPException(status_code=500, ...)``.
+    """
+    if exc.partial_state is not None:
+        # Validate guard: partial_state was captured mid-compose — it may
+        # be structurally damaged. Catch data-shape errors so we still
+        # persist with is_valid=False rather than losing the row.
+        try:
+            validation = exc.partial_state.validate()
+        except (ValueError, TypeError, KeyError) as val_err:
+            # No exc_info: val_err may carry references to the same
+            # secret-bearing state the plugin crash was mid-way through
+            # mutating.
+            slog.warning(
+                f"{log_prefix}_plugin_crash_validation_failed",
+                session_id=str(session_id),
+                exc_class=type(val_err).__name__,
+            )
+            validation = ValidationSummary(
+                is_valid=False,
+                errors=(ValidationEntry("validation", "validation_failed", "high"),),
+            )
+
+        # Persistence guard: DB write failure MUST NOT mask the original
+        # plugin crash (response stays as the 500 below, the save failure
+        # is recorded as a separate audit-system-failure slog event).
+        try:
+            state_d = exc.partial_state.to_dict()
+            state_data = CompositionStateData(
+                source=state_d["source"],
+                nodes=state_d["nodes"],
+                edges=state_d["edges"],
+                outputs=state_d["outputs"],
+                metadata_=state_d["metadata"],
+                is_valid=validation.is_valid,
+                validation_errors=[e.message for e in validation.errors] if validation.errors else None,
+            )
+            await service.save_composition_state(session_id, state_data)
+        except (ValueError, TypeError, KeyError, IntegrityError) as save_err:
+            slog.error(
+                f"{log_prefix}_plugin_crash_partial_state_save_failed",
+                session_id=str(session_id),
+                exc_class=type(save_err).__name__,
+            )
+
+    # exc_info deliberately omitted: exc.original_exc / its __cause__ chain
+    # may carry DB URLs, filesystem paths, or secret fragments. The
+    # structured exc_class + session_id correlation is the complete
+    # triage surface. The broader slog-for-run-events migration is
+    # tracked in elspeth-940bfe3a0d.
+    slog.error(
+        f"{log_prefix}_plugin_crash",
+        session_id=str(session_id),
+        user_id=user_id,
+        exc_class=exc.exc_class,
+    )
+
+    return {
+        "error_type": "composer_plugin_error",
+        "detail": ("A composer plugin crashed; see server logs for the traceback. This is not a user-retryable error."),
+    }
 
 
 def create_session_router() -> APIRouter:
@@ -387,30 +480,37 @@ def create_session_router() -> APIRouter:
                 status_code=502,
                 detail={"error_type": "llm_unavailable", "detail": str(exc)},
             ) from exc
+        except ComposerPluginCrashError as crash:
+            # Plugin-crash path: _compose_loop wraps any non-ToolArgumentError
+            # escape from execute_tool into ComposerPluginCrashError carrying
+            # partial_state — the accumulated mutations from earlier successful
+            # tool calls within the same request. _handle_plugin_crash persists
+            # that state into composition_states symmetrically with the
+            # convergence-error path, so recompose does not lose those
+            # mutations. The HTTP response body is fully redacted; the cause
+            # chain is preserved via `from crash.original_exc` for the ASGI /
+            # server-level error machinery only.
+            #
+            # MUST be caught BEFORE the generic `except ComposerServiceError`
+            # below — ComposerPluginCrashError inherits from
+            # ComposerServiceError (so it isn't caught by a later bare
+            # Exception or mistakenly promoted by the route's convergence
+            # handler), and Python evaluates except clauses top-to-bottom.
+            # Inverting this order routes plugin crashes into the 502
+            # composer_error branch, re-introducing the silent-laundering
+            # behaviour this plan exists to eliminate.
+            response_body = await _handle_plugin_crash(
+                crash,
+                service,
+                session.id,
+                str(user.user_id),
+                "compose",
+            )
+            raise HTTPException(status_code=500, detail=response_body) from crash.original_exc
         except ComposerServiceError as exc:
             raise HTTPException(
                 status_code=502,
                 detail={"error_type": "composer_error", "detail": str(exc)},
-            ) from exc
-        except (TypeError, ValueError, UnicodeError, KeyError, AttributeError) as exc:
-            # Plugin-crash path: after Task 4 narrowed the service catch,
-            # these classes escape _compose_loop unhandled (plugin bug per
-            # CLAUDE.md). Do NOT echo the exception message — it may
-            # contain secret fragments from __cause__-chained exceptions
-            # in deeper layers.
-            slog.error(
-                "compose_plugin_crash",
-                session_id=str(session_id),
-                user_id=str(user.user_id),
-                exc_class=type(exc).__name__,
-                exc_info=True,
-            )
-            raise HTTPException(
-                status_code=500,
-                detail={
-                    "error_type": "composer_plugin_error",
-                    "detail": ("A composer plugin crashed; see server logs for the traceback. This is not a user-retryable error."),
-                },
             ) from exc
 
         # 5. Save state if version changed — post-compose provenance
@@ -522,28 +622,23 @@ def create_session_router() -> APIRouter:
                 status_code=502,
                 detail={"error_type": "llm_unavailable", "detail": str(exc)},
             ) from exc
+        except ComposerPluginCrashError as crash:
+            # Plugin-crash path: mirror /messages handler. See the send_message
+            # block comment for full rationale on why the response body is
+            # redacted but partial_state is still persisted, AND for why this
+            # catch MUST precede `except ComposerServiceError` below.
+            response_body = await _handle_plugin_crash(
+                crash,
+                service,
+                session.id,
+                str(user.user_id),
+                "recompose",
+            )
+            raise HTTPException(status_code=500, detail=response_body) from crash.original_exc
         except ComposerServiceError as exc:
             raise HTTPException(
                 status_code=502,
                 detail={"error_type": "composer_error", "detail": str(exc)},
-            ) from exc
-        except (TypeError, ValueError, UnicodeError, KeyError, AttributeError) as exc:
-            # Plugin-crash path: mirror /messages handler.  See comment
-            # there for the rationale — exception message is NOT echoed
-            # because it may carry secret fragments from __cause__ chains.
-            slog.error(
-                "recompose_plugin_crash",
-                session_id=str(session_id),
-                user_id=str(user.user_id),
-                exc_class=type(exc).__name__,
-                exc_info=True,
-            )
-            raise HTTPException(
-                status_code=500,
-                detail={
-                    "error_type": "composer_plugin_error",
-                    "detail": ("A composer plugin crashed; see server logs for the traceback. This is not a user-retryable error."),
-                },
             ) from exc
 
         # Save state if version changed

@@ -19,6 +19,7 @@ from elspeth.web.catalog.schemas import (
 )
 from elspeth.web.composer.protocol import (
     ComposerConvergenceError,
+    ComposerPluginCrashError,
     ComposerResult,
     ComposerServiceError,
     ToolArgumentError,
@@ -27,6 +28,7 @@ from elspeth.web.composer.service import ComposerServiceImpl
 from elspeth.web.composer.state import (
     CompositionState,
     PipelineMetadata,
+    ValidationSummary,
 )
 from elspeth.web.composer.tools import ToolResult
 from elspeth.web.config import WebSettings
@@ -701,8 +703,14 @@ class TestComposerErrorHandling:
             ),
         ):
             mock_llm.return_value = valid_call
-            with pytest.raises(KeyError, match="internal_state_key"):
+            with pytest.raises(ComposerPluginCrashError) as exc_info:
                 await service.compose("Setup", [], state)
+        # The underlying KeyError is preserved on the wrapper so callers
+        # (server logs, route handler, capture_logs assertions) can still
+        # identify the original plugin-internal class.
+        assert isinstance(exc_info.value.original_exc, KeyError)
+        assert exc_info.value.exc_class == "KeyError"
+        assert "internal_state_key" in str(exc_info.value.original_exc)
 
     @pytest.mark.asyncio
     async def test_missing_args_error_message_lists_keys(self) -> None:
@@ -1204,8 +1212,13 @@ class TestPluginBugCrashesFromToolExecution:
             ),
         ):
             mock_llm.return_value = valid_call
-            with pytest.raises(ValueError, match="plugin bug"):
+            with pytest.raises(ComposerPluginCrashError) as exc_info:
                 await service.compose("Setup", [], state)
+        # Crash on first tool call → no prior mutations → partial_state is None.
+        assert exc_info.value.partial_state is None
+        assert isinstance(exc_info.value.original_exc, ValueError)
+        assert "plugin bug" in str(exc_info.value.original_exc)
+        assert exc_info.value.exc_class == "ValueError"
 
     @pytest.mark.asyncio
     async def test_plugin_type_error_is_not_swallowed(self) -> None:
@@ -1237,8 +1250,12 @@ class TestPluginBugCrashesFromToolExecution:
             ),
         ):
             mock_llm.return_value = valid_call
-            with pytest.raises(TypeError, match="plugin bug"):
+            with pytest.raises(ComposerPluginCrashError) as exc_info:
                 await service.compose("Setup", [], state)
+        assert exc_info.value.partial_state is None
+        assert isinstance(exc_info.value.original_exc, TypeError)
+        assert "plugin bug" in str(exc_info.value.original_exc)
+        assert exc_info.value.exc_class == "TypeError"
 
     @pytest.mark.asyncio
     async def test_plugin_unicode_error_is_not_swallowed(self) -> None:
@@ -1270,8 +1287,96 @@ class TestPluginBugCrashesFromToolExecution:
             ),
         ):
             mock_llm.return_value = valid_call
-            with pytest.raises(UnicodeDecodeError):
+            with pytest.raises(ComposerPluginCrashError) as exc_info:
                 await service.compose("Setup", [], state)
+        assert exc_info.value.partial_state is None
+        assert isinstance(exc_info.value.original_exc, UnicodeDecodeError)
+        assert exc_info.value.exc_class == "UnicodeDecodeError"
+
+    @pytest.mark.asyncio
+    async def test_plugin_crash_after_successful_mutation_preserves_partial_state(
+        self,
+    ) -> None:
+        """When a plugin crashes AFTER at least one prior mutation succeeded
+        in the same request, ``ComposerPluginCrashError.partial_state`` MUST
+        carry the accumulated post-mutation state so the route handler can
+        persist it into composition_states.
+
+        This closes the P1 regression flagged in review: the narrowed
+        ``except`` in compose() used to re-raise bare exceptions without
+        threading the loop-local ``state``, so any successful mutations
+        prior to the crash were silently dropped and recompose restarted
+        from the stale pre-request state.
+        """
+        catalog = _mock_catalog()
+        settings = _make_settings()
+        service = ComposerServiceImpl(catalog=catalog, settings=settings)
+        state = _empty_state()
+        initial_version = state.version
+
+        # Two tool calls in a single LLM turn: first succeeds (mutates
+        # state), second raises a plugin-bug exception.
+        two_calls = _make_llm_response(
+            tool_calls=[
+                {
+                    "id": "c1",
+                    "name": "set_source",
+                    "arguments": {
+                        "plugin": "csv",
+                        "on_success": "out",
+                        "options": {},
+                        "on_validation_failure": "quarantine",
+                    },
+                },
+                {
+                    "id": "c2",
+                    "name": "set_metadata",
+                    "arguments": {"patch": {"name": "after-mutation"}},
+                },
+            ],
+        )
+
+        mutated_state = CompositionState(
+            source=None,
+            nodes=(),
+            edges=(),
+            outputs=(),
+            metadata=PipelineMetadata(name="after-mutation"),
+            version=initial_version + 1,
+        )
+        successful_result = ToolResult(
+            success=True,
+            updated_state=mutated_state,
+            validation=ValidationSummary(is_valid=True, errors=()),
+            affected_nodes=(),
+        )
+
+        call_count = {"n": 0}
+
+        def _fake_execute_tool(*args: Any, **kwargs: Any) -> ToolResult:
+            call_count["n"] += 1
+            if call_count["n"] == 1:
+                return successful_result
+            raise ValueError("plugin bug: crash AFTER first mutation")
+
+        with (
+            patch.object(service, "_call_llm", new_callable=AsyncMock) as mock_llm,
+            patch(
+                "elspeth.web.composer.service.execute_tool",
+                side_effect=_fake_execute_tool,
+            ),
+        ):
+            mock_llm.return_value = two_calls
+            with pytest.raises(ComposerPluginCrashError) as exc_info:
+                await service.compose("Setup", [], state)
+
+        assert call_count["n"] == 2, "both tool calls should have been attempted"
+        crash = exc_info.value
+        assert crash.partial_state is not None, "partial_state MUST be populated when a mutation succeeded before the crash"
+        assert crash.partial_state.version == initial_version + 1
+        assert crash.partial_state.metadata.name == "after-mutation"
+        assert isinstance(crash.original_exc, ValueError)
+        assert crash.exc_class == "ValueError"
 
     @pytest.mark.asyncio
     async def test_tool_argument_error_is_caught_and_fed_to_llm(self) -> None:
@@ -1461,8 +1566,11 @@ class TestPluginCrashSessionPersistence:
             ),
         ):
             mock_llm.return_value = valid_call
-            with pytest.raises(ValueError, match="plugin bug"):
+            with pytest.raises(ComposerPluginCrashError) as exc_info:
                 await service.compose("Setup", [], state, session_id=self.session_id)
+        # The underlying plugin exception is preserved on the wrapper.
+        assert isinstance(exc_info.value.original_exc, ValueError)
+        assert "plugin bug" in str(exc_info.value.original_exc)
 
         # Assertion 1: session row was touched on the crash path.
         with self.engine.begin() as conn:
@@ -1543,8 +1651,11 @@ class TestPluginCrashSessionPersistence:
             capture_logs() as cap_logs,
         ):
             mock_llm.return_value = valid_call
-            with pytest.raises(ValueError, match="original plugin bug"):
+            with pytest.raises(ComposerPluginCrashError) as exc_info:
                 await service.compose("Setup", [], state, session_id=self.session_id)
+        # Original plugin exception survives the wrap.
+        assert isinstance(exc_info.value.original_exc, ValueError)
+        assert "original plugin bug" in str(exc_info.value.original_exc)
 
         # The crash-persistence-failure slog.error MUST fire. This closes
         # the regression risk where Step 4a-pre's structlog import is
@@ -1555,9 +1666,22 @@ class TestPluginCrashSessionPersistence:
         event = persistence_failure_events[0]
         assert event["session_id"] == self.session_id
         assert event["original_exc_class"] == "ValueError"
-        # Exception message MUST NOT appear in structured fields — only
-        # in exc_info (stderr traceback).
+        # audit_exc_class is the class of the *persistence* failure, not the
+        # original plugin bug. Present so operators can distinguish "DB
+        # write failed with IntegrityError" from "DB write failed with
+        # OperationalError" without needing the traceback.
+        assert event["audit_exc_class"] == "RuntimeError"
+        # No traceback / exception message fields — exc_info was deliberately
+        # dropped from this slog call to prevent __cause__-chain secret
+        # leakage into server logs.
+        assert "exc_info" not in event
+        assert "exception" not in event
+        assert "stack_info" not in event
+        # Exception messages MUST NOT appear anywhere in the structured
+        # event (defense-in-depth against accidental re-addition of a
+        # message= field in a future refactor).
         assert "original plugin bug" not in str(event)
+        assert "persistence failed" not in str(event)
 
     @pytest.mark.asyncio
     async def test_persist_crashed_session_real_path_slog_emission(self) -> None:
@@ -1606,8 +1730,10 @@ class TestPluginCrashSessionPersistence:
             capture_logs() as cap_logs,
         ):
             mock_llm.return_value = valid_call
-            with pytest.raises(ValueError, match="plugin bug"):
+            with pytest.raises(ComposerPluginCrashError) as exc_info:
                 await service.compose("Setup", [], state, session_id=self.session_id)
+        assert isinstance(exc_info.value.original_exc, ValueError)
+        assert "plugin bug" in str(exc_info.value.original_exc)
 
         # No persistence-failure event — the real path succeeded.
         persistence_failure_events = [entry for entry in cap_logs if entry.get("event") == "composer_crash_persistence_failed"]

@@ -57,6 +57,54 @@ class ComposerConvergenceError(ComposerServiceError):
         self.partial_state = partial_state
 
 
+class ComposerPluginCrashError(ComposerServiceError):
+    """Raised when an exception escapes ``execute_tool()`` inside the compose loop.
+
+    Signals a plugin (tier 1/2) bug — distinct from ``ToolArgumentError``
+    (which is a tier 3 boundary signal and is caught inside the loop).
+
+    Symmetric with :class:`ComposerConvergenceError`: both transport a
+    ``partial_state`` field from service to route so the route handler can
+    persist the accumulated in-memory mutations into ``composition_states``
+    before returning the failure response. Without this carrier, any tool
+    call that successfully mutated state prior to a later crash would be
+    silently dropped from the immutable-append state history, and recompose
+    would restart from the stale pre-request state.
+
+    Attributes:
+        original_exc: The underlying plugin-bug exception. Preserved on
+            ``__cause__`` via ``raise ... from`` so the ASGI error machinery
+            still has the full traceback, but the route handler redacts
+            ``str(original_exc)`` / its ``__cause__`` chain from the HTTP
+            response because those may carry DB URLs, filesystem paths, or
+            secret fragments.
+        partial_state: The last :class:`CompositionState` with ``version >
+            initial_version``, or ``None`` if no mutations occurred before
+            the crash.
+        exc_class: ``type(original_exc).__name__`` — the only safe
+            exception-identity hint for structured logs.
+
+    Route ordering: this class inherits from ``ComposerServiceError`` so the
+    route must catch ``ComposerPluginCrashError`` BEFORE the generic
+    ``except ComposerServiceError`` block, mirroring the ordering already
+    used for ``ComposerConvergenceError`` at routes.py:377/512. If the
+    ordering is inverted the generic handler would launder the crash into
+    a 502, reintroducing the silent-laundering behaviour the narrowed catch
+    was designed to eliminate.
+    """
+
+    def __init__(
+        self,
+        original_exc: Exception,
+        *,
+        partial_state: CompositionState | None = None,
+    ) -> None:
+        super().__init__(f"Composer plugin crash: {type(original_exc).__name__}")
+        self.original_exc = original_exc
+        self.partial_state = partial_state
+        self.exc_class = type(original_exc).__name__
+
+
 class ToolArgumentError(Exception):
     """Raised by a tool handler when LLM-supplied arguments are unusable.
 
