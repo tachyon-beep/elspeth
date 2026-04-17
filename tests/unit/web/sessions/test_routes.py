@@ -226,11 +226,80 @@ class TestSessionCRUDRoutes:
         assert del_resp.status_code == 204
 
 
+class TestIDORCoverageDrift:
+    """Drift guard: count ``_verify_session_ownership`` call sites in routes.py.
+
+    ``TestIDORProtection.test_idor_session_crud`` walks one cross-session
+    request for each session-scoped endpoint. The risk is that someone
+    adds a new route that calls ``_verify_session_ownership`` but forgets
+    to add a matching IDOR assertion — the ownership primitive is in
+    place, but its coverage in this suite silently rots.
+
+    This test parses ``sessions/routes.py`` and asserts the number of
+    ``_verify_session_ownership`` callers equals a fixed expectation.
+    When a route is added or removed, this test fails with a pointer
+    to the IDOR audit docstring — forcing the author to update both
+    the inventory and the assertion list together.
+    """
+
+    EXPECTED_OWNERSHIP_CALL_SITES: int = 11
+
+    def test_idor_audit_matches_ownership_call_site_count(self) -> None:
+        import ast
+
+        from elspeth.web.sessions import routes
+
+        source = Path(routes.__file__).read_text(encoding="utf-8")
+        tree = ast.parse(source)
+        call_sites = [
+            node
+            for node in ast.walk(tree)
+            if isinstance(node, ast.Call) and isinstance(node.func, ast.Name) and node.func.id == "_verify_session_ownership"
+        ]
+        assert len(call_sites) == self.EXPECTED_OWNERSHIP_CALL_SITES, (
+            f"Found {len(call_sites)} ``_verify_session_ownership`` call sites in "
+            f"sessions/routes.py, expected {self.EXPECTED_OWNERSHIP_CALL_SITES}. "
+            "A session-scoped endpoint was added or removed without updating the "
+            "IDOR audit. Update BOTH the ``TestIDORProtection`` docstring inventory "
+            "AND ``test_idor_session_crud`` with a matching cross-session request, "
+            "then update EXPECTED_OWNERSHIP_CALL_SITES here. Do not bump this "
+            "constant without adding the assertion — the whole point of the "
+            "guard is to force the pair to stay in sync."
+        )
+
+
 class TestIDORProtection:
     """Tests for W5 -- IDOR protection on all session-scoped routes.
 
     Creates a session as user A, then attempts to access it as user B.
     All should return 404 (not 403).
+
+    Inventory of session-scoped routes audited here (must match the set
+    of callers of ``_verify_session_ownership`` in
+    ``src/elspeth/web/sessions/routes.py``). If a new session-scoped
+    route is added upstream, its cross-session request MUST be added
+    to ``test_idor_session_crud`` — the test's purpose is to walk
+    EVERY endpoint that depends on the ownership primitive, so a new
+    route added without a matching assertion here is a silent
+    coverage regression.
+
+    Audited endpoints:
+
+    - ``GET  /{session_id}``                 (get_session)
+    - ``DELETE /{session_id}``               (delete_session)
+    - ``GET  /{session_id}/messages``        (get_messages)
+    - ``POST /{session_id}/messages``        (send_message)
+    - ``POST /{session_id}/recompose``       (recompose)
+    - ``GET  /{session_id}/runs``            (list_session_runs)
+    - ``GET  /{session_id}/state``           (get_current_state)
+    - ``GET  /{session_id}/state/versions``  (get_state_versions)
+    - ``POST /{session_id}/state/revert``    (revert_state)
+    - ``GET  /{session_id}/state/yaml``      (get_state_yaml)
+    - ``POST /{session_id}/fork``            (fork_from_message)
+
+    Counter-test: alice's own access continues to return 200 at the end,
+    guarding against the regression where an over-eager 404 breaks
+    legitimate access.
     """
 
     def test_idor_session_crud(self, tmp_path) -> None:
@@ -313,6 +382,42 @@ class TestIDORProtection:
         resp = bob_client.post(
             f"/api/sessions/{session_id}/state/revert",
             json={"state_id": str(uuid.uuid4())},
+        )
+        assert resp.status_code == 404
+
+        # Bob tries to POST recompose -- should be 404.  The ownership
+        # check runs before the rate limiter's side effects (see
+        # recompose handler at sessions/routes.py:569-570) so an
+        # attacker cannot use this endpoint to probe for session
+        # existence through rate-limit timing either.
+        resp = bob_client.post(f"/api/sessions/{session_id}/recompose")
+        assert resp.status_code == 404
+
+        # Bob tries to GET runs -- should be 404.  Without this guard,
+        # an attacker could enumerate run IDs / timings for sessions
+        # belonging to other users and correlate them with activity
+        # signals (response size, latency).
+        resp = bob_client.get(f"/api/sessions/{session_id}/runs")
+        assert resp.status_code == 404
+
+        # Bob tries to GET state/yaml -- should be 404.  The YAML export
+        # is the most information-dense state projection (full plugin
+        # options, source/sink names, routing); missing this guard would
+        # be the highest-bandwidth IDOR leak of the state-read family.
+        resp = bob_client.get(f"/api/sessions/{session_id}/state/yaml")
+        assert resp.status_code == 404
+
+        # Bob tries to POST fork -- should be 404.  A successful fork
+        # would create a new session owned by Bob but seeded from
+        # Alice's state history, cross-contaminating audit lineage.
+        # The ownership check runs before fork_session() is called
+        # (sessions/routes.py:844), so no rows are written on denial.
+        resp = bob_client.post(
+            f"/api/sessions/{session_id}/fork",
+            json={
+                "from_message_id": str(uuid.uuid4()),
+                "new_message_content": "hijacked",
+            },
         )
         assert resp.status_code == 404
 
