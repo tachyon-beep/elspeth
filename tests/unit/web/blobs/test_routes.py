@@ -464,8 +464,175 @@ class TestDownloadLifecycleGuard:
 
         with blob_service._engine.connect() as conn:
             row = conn.execute(blobs_table.select().where(blobs_table.c.id == blob_id)).first()
+        # Tier 1 read guard — the upload we just made cannot have vanished;
+        # a None here would indicate a catastrophic test-harness bug
+        # (concurrent delete, DB corruption).  Crash offensively rather
+        # than carry the Optional through the tamper sequence.
+        assert row is not None, f"blob {blob_id} vanished between upload and tamper"
         Path(row.storage_path).write_bytes(b"tampered-content")
 
         resp = client.get(f"/api/sessions/{session_id}/blobs/{blob_id}/content")
         assert resp.status_code == 500, f"Expected 500 for tampered blob, got {resp.status_code}"
         assert "integrity" in resp.json()["detail"].lower()
+
+
+# ---------------------------------------------------------------------------
+# Filename validation at the HTTP boundary (elspeth-12e778e606, elspeth-3b189ef8a5)
+# ---------------------------------------------------------------------------
+
+
+class TestFilenameValidation:
+    """Malformed filenames must produce 4xx, never 500."""
+
+    def test_multipart_upload_rejects_dotdot_filename(self, tmp_path) -> None:
+        app, _, _ = _make_app(tmp_path)
+        client = TestClient(app)
+        session_id = _create_session(client)
+
+        resp = client.post(
+            f"/api/sessions/{session_id}/blobs",
+            files={"file": ("..", io.BytesIO(b"a,b,c\n1,2,3\n"), "text/csv")},
+        )
+        assert resp.status_code == 422
+        assert "invalid filename" in resp.json()["detail"].lower()
+
+    def test_multipart_upload_rejects_dot_filename(self, tmp_path) -> None:
+        app, _, _ = _make_app(tmp_path)
+        client = TestClient(app)
+        session_id = _create_session(client)
+
+        resp = client.post(
+            f"/api/sessions/{session_id}/blobs",
+            files={"file": (".", io.BytesIO(b"a,b,c\n1,2,3\n"), "text/csv")},
+        )
+        assert resp.status_code == 422
+
+    def test_inline_rejects_empty_filename(self, tmp_path) -> None:
+        app, _, _ = _make_app(tmp_path)
+        client = TestClient(app)
+        session_id = _create_session(client)
+
+        resp = client.post(
+            f"/api/sessions/{session_id}/blobs/inline",
+            json={"filename": "", "content": "{}", "mime_type": "application/json"},
+        )
+        assert resp.status_code == 422
+
+    def test_inline_rejects_dotdot_filename(self, tmp_path) -> None:
+        app, _, _ = _make_app(tmp_path)
+        client = TestClient(app)
+        session_id = _create_session(client)
+
+        resp = client.post(
+            f"/api/sessions/{session_id}/blobs/inline",
+            json={"filename": "..", "content": "{}", "mime_type": "application/json"},
+        )
+        assert resp.status_code == 422
+
+
+# ---------------------------------------------------------------------------
+# Inline endpoint — mime_type contract (elspeth-f7daa8c016)
+# ---------------------------------------------------------------------------
+
+
+class TestInlineBlobRequest:
+    """/blobs/inline rejects malformed bodies and uses mime_type (not content_type)."""
+
+    def test_inline_happy_path_records_mime_type(self, tmp_path) -> None:
+        app, _, _ = _make_app(tmp_path)
+        client = TestClient(app)
+        session_id = _create_session(client)
+
+        resp = client.post(
+            f"/api/sessions/{session_id}/blobs/inline",
+            json={
+                "filename": "data.json",
+                "content": '{"a": 1}',
+                "mime_type": "application/json",
+            },
+        )
+        assert resp.status_code == 201
+        body = resp.json()
+        assert body["filename"] == "data.json"
+        assert body["mime_type"] == "application/json"
+
+    def test_inline_rejects_legacy_content_type_field(self, tmp_path) -> None:
+        """The old `content_type` key must not silently downgrade to text/plain."""
+        app, _, _ = _make_app(tmp_path)
+        client = TestClient(app)
+        session_id = _create_session(client)
+
+        resp = client.post(
+            f"/api/sessions/{session_id}/blobs/inline",
+            json={
+                "filename": "data.json",
+                "content": '{"a": 1}',
+                "content_type": "application/json",  # wrong key name
+            },
+        )
+        # extra="forbid" + mime_type missing → 422, never a silent text/plain
+        assert resp.status_code == 422
+
+    def test_inline_rejects_unsupported_mime_type(self, tmp_path) -> None:
+        """Literal-typed mime_type rejects values outside the allowlist."""
+        app, _, _ = _make_app(tmp_path)
+        client = TestClient(app)
+        session_id = _create_session(client)
+
+        resp = client.post(
+            f"/api/sessions/{session_id}/blobs/inline",
+            json={
+                "filename": "photo.png",
+                "content": "fake",
+                "mime_type": "image/png",
+            },
+        )
+        assert resp.status_code == 422
+
+    def test_inline_default_mime_type_is_text_plain(self, tmp_path) -> None:
+        app, _, _ = _make_app(tmp_path)
+        client = TestClient(app)
+        session_id = _create_session(client)
+
+        resp = client.post(
+            f"/api/sessions/{session_id}/blobs/inline",
+            json={"filename": "notes.txt", "content": "hello"},
+        )
+        assert resp.status_code == 201
+        assert resp.json()["mime_type"] == "text/plain"
+
+
+# ---------------------------------------------------------------------------
+# UTF-16 upload support (elspeth-3e6a7e0cdb)
+# ---------------------------------------------------------------------------
+
+
+class TestUTF16Uploads:
+    """Non-UTF-8 text uploads with BOMs must not be rejected as binary."""
+
+    def test_utf16_le_csv_upload_accepted(self, tmp_path) -> None:
+        app, _, _ = _make_app(tmp_path)
+        client = TestClient(app)
+        session_id = _create_session(client)
+
+        # UTF-16 LE BOM + 3-column CSV (the sniffer's CSV floor is 3 fields)
+        content = b"\xff\xfe" + "name,age,city\nAlice,30,London\n".encode("utf-16-le")
+        resp = client.post(
+            f"/api/sessions/{session_id}/blobs",
+            files={"file": ("data.csv", io.BytesIO(content), "text/csv")},
+        )
+        assert resp.status_code == 201, resp.text
+        assert resp.json()["mime_type"] == "text/csv"
+
+    def test_utf16_be_plain_text_upload_accepted(self, tmp_path) -> None:
+        app, _, _ = _make_app(tmp_path)
+        client = TestClient(app)
+        session_id = _create_session(client)
+
+        content = b"\xfe\xff" + "hello world\n".encode("utf-16-be")
+        resp = client.post(
+            f"/api/sessions/{session_id}/blobs",
+            files={"file": ("note.txt", io.BytesIO(content), "text/plain")},
+        )
+        assert resp.status_code == 201, resp.text
+        assert resp.json()["mime_type"] == "text/plain"

@@ -378,15 +378,15 @@ allow_hits:
   reason: ValueError from int() on non-numeric -w arg
   safety: Skips this argv entry
   expires: null
-- key: web/blobs/service.py:R4:BlobServiceImpl:copy_blobs_for_fork:fp=3016b298e0ed2afc
+# Fingerprints refreshed 2026-04-17 after moving `import re` to the top of
+# blobs/service.py (PR cluster elspeth-0fd9dfcb7e).  Guarded code is
+# unchanged; only module-level body indices shifted.  The prior recovery
+# handler (R4 broad-except at fp=d10df85f1a12eb55) was narrowed to
+# (SQLAlchemyError, OSError) and now appears as R6 below.
+- key: web/blobs/service.py:R4:BlobServiceImpl:copy_blobs_for_fork:fp=8dd7768e102662f9
   owner: web-blobs
   reason: Best-effort cleanup on fork failure — delete_blob may fail if DB disconnected
   safety: Falls back to file unlink; original error re-raised
-  expires: null
-- key: web/blobs/service.py:R4:BlobServiceImpl:finalize_run_output_blobs:_sync:fp=d10df85f1a12eb55
-  owner: web-blobs
-  reason: Best-effort recovery — marks failed blob as "error" to prevent permanent pending state
-  safety: WHERE status='pending' is a no-op if already finalized; failure is recorded in BlobFinalizationResult.errors
   expires: null
 - key: web/sessions/service.py:R5:SessionServiceImpl:_unwrap_envelope:fp=2efca5290efd65c5
   owner: web-sessions
@@ -488,15 +488,25 @@ allow_hits:
   reason: Tier 3 — os.environ.get() for optional ELSPETH_ENV
   safety: Returns None when absent; only used for test guard
   expires: null
-- key: web/blobs/service.py:R6:BlobServiceImpl:finalize_run_output_blobs:_sync:fp=5e84572db8da6697
+- key: web/blobs/service.py:R6:BlobServiceImpl:finalize_run_output_blobs:_sync:fp=c19f21d71620d72a
   owner: web-blobs
   reason: Quota exceeded during finalization marks blob as error instead of crashing run
   safety: Over-quota file deleted; blob marked error; run still finalized
   expires: null
-- key: web/blobs/service.py:R6:BlobServiceImpl:finalize_run_output_blobs:_sync:fp=7fef573079ab5d13
+- key: web/blobs/service.py:R6:BlobServiceImpl:finalize_run_output_blobs:_sync:fp=7bd1c970f4fd6979
   owner: web-blobs
   reason: Per-blob operational errors caught to prevent one failure from aborting remaining blobs
   safety: Failed blobs moved to "error" status best-effort; errors returned in BlobFinalizationResult
+  expires: null
+# Narrowed recovery handler added 2026-04-17 (PR cluster elspeth-0fd9dfcb7e):
+# the prior `except Exception: pass` silently swallowed DB recovery failures
+# with no audit trail; this replacement records the secondary failure as a
+# separate RecoveryFailed[<type>] entry in BlobFinalizationResult.errors so
+# the audit record carries both the primary cause and the recovery outcome.
+- key: web/blobs/service.py:R6:BlobServiceImpl:finalize_run_output_blobs:_sync:fp=42178d47e9e1c5e0
+  owner: web-blobs
+  reason: Narrow (SQLAlchemyError, OSError) around pending->error recovery UPDATE — DB/IO faults expected; programmer bugs still propagate
+  safety: Recovery failure appended to errors list as RecoveryFailed[<type>]; not a silent swallow
   expires: null
 - key: web/execution/routes.py:R1:create_execution_router:websocket_run_progress:fp=6c0b765eeb7a2af4
   owner: web-execution
@@ -622,17 +632,19 @@ allow_hits:
     (crash on missing). Only the deployment overlay is optional. Size guard rejects oversized files.
   expires: null
 # Group E: blob service Tier 1 read guards — isinstance assertions on COALESCE(SUM()) output
-- key: web/blobs/service.py:R5:BlobServiceImpl:create_blob:_sync:fp=bccbcb00a0c8b38d
+# Fingerprints refreshed 2026-04-17 (cluster elspeth-0fd9dfcb7e) after
+# hoisting `import re` to the top of service.py.  Guarded code unchanged.
+- key: web/blobs/service.py:R5:BlobServiceImpl:create_blob:_sync:fp=9f325950517fa085
   owner: web-blobs
   reason: Tier 1 read guard — COALESCE(SUM()) must return int; isinstance assertion crashes on anomaly instead of silent coercion
   safety: Assert crashes immediately with diagnostic message; no silent handling
   expires: null
-- key: web/blobs/service.py:R5:BlobServiceImpl:copy_blobs_for_fork:_check_quota:fp=e8d852fa052be572
+- key: web/blobs/service.py:R5:BlobServiceImpl:copy_blobs_for_fork:_check_quota:fp=ec4570ff17268cae
   owner: web-blobs
   reason: Tier 1 read guard — COALESCE(SUM()) must return int; isinstance assertion crashes on anomaly instead of silent coercion
   safety: Assert crashes immediately with diagnostic message; no silent handling
   expires: null
-- key: web/blobs/service.py:R5:BlobServiceImpl:_finalize_blob_sync:fp=e0488570dd51d9cf
+- key: web/blobs/service.py:R5:BlobServiceImpl:_finalize_blob_sync:fp=b386d16cc9a2570e
   owner: web-blobs
   reason: Tier 1 read guard — COALESCE(SUM()) must return int; isinstance assertion crashes on anomaly instead of silent coercion
   safety: Assert crashes immediately with diagnostic message; no silent handling
@@ -679,33 +691,42 @@ allow_hits:
     Cleanup is called on every session delete regardless. Matches ProgressBroadcaster.cleanup_run() pattern.
   safety: Missing key means session was never executed against; no cleanup needed
   expires: null
-- key: web/blobs/service.py:R5:_source_references_blob:fp=b4161741519ddd70
+# _source_references_blob fingerprints refreshed 2026-04-17 (cluster
+# elspeth-0fd9dfcb7e) after hoisting `import re` to the top of service.py.
+# Guarded code unchanged.
+- key: web/blobs/service.py:R5:_source_references_blob:fp=ce99b821e5b669e3
   owner: web-blobs
   reason: Tier 1 assertion — composition_states.source JSON must be dict when non-None; crashes on DB corruption
   safety: Assert raises immediately on type mismatch; not a silent recovery
   expires: null
-- key: web/blobs/service.py:R1:_source_references_blob:fp=da241e087c56b7fd
+- key: web/blobs/service.py:R1:_source_references_blob:fp=504f7c057b01dfee
   owner: web-blobs
   reason: JSON column navigation — source.options is optional (file-path sources omit it)
   safety: Returns False (no match) when absent; Tier 1 assert on wrong type if present
   expires: null
-- key: web/blobs/service.py:R5:_source_references_blob:fp=ec8a162014a7af20
+- key: web/blobs/service.py:R5:_source_references_blob:fp=d8d1d85e6d2fa603
   owner: web-blobs
   reason: Tier 1 assertion — source.options must be dict when non-None; crashes on DB corruption
   safety: Assert raises immediately on type mismatch; not a silent recovery
   expires: null
-- key: web/blobs/service.py:R1:_source_references_blob:fp=a69672ebbed320f1
+- key: web/blobs/service.py:R1:_source_references_blob:fp=3f226cea44e718be
   owner: web-blobs
   reason: JSON column navigation — blob_ref is optional (only present for blob-backed sources)
   safety: Returns False (no match) when absent; correct for file-path sources
   expires: null
-- key: web/blobs/service.py:R1:_source_references_blob:fp=46c8fb587764da44
+- key: web/blobs/service.py:R1:_source_references_blob:fp=c07a64293c9d2d91
   owner: web-blobs
   reason: JSON column navigation — path/file keys are optional in source options
   safety: Returns False (no match) when absent; correct for sources without path
   expires: null
 # Group F: RC5-UX review hardening — new isinstance/get/except patterns
-- key: web/blobs/sniff.py:R6:detect_mime_type:fp=586bedd84fa7e841
+# sniff.py was refactored 2026-04-17 (cluster elspeth-0fd9dfcb7e / issue
+# elspeth-3e6a7e0cdb) to add UTF-16/32 BOM decoding.  The detect_mime_type
+# UnicodeDecodeError branch now returns "application/octet-stream" (an
+# explicit error result, not silence) so it is no longer flagged by R6
+# and needs no allowlist entry.  Only _detect_from_text still carries a
+# silent-except shape (csv.Error → continue to next delimiter).
+- key: web/blobs/sniff.py:R6:_detect_from_text:fp=a966bc58c3ffd3b7
   owner: web-blobs
   reason: Tier 3 boundary — csv.Error during MIME sniffing on untrusted upload content
   safety: Continues to next delimiter; returns None for uncertain content; no data loss

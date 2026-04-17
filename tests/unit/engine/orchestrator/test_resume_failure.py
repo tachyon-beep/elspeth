@@ -13,7 +13,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from elspeth.contracts import RunStatus
+from elspeth.contracts import NodeID, RunStatus
 from elspeth.core.landscape.database import LandscapeDB
 from elspeth.core.landscape.factory import RecorderFactory
 from elspeth.engine.orchestrator.core import Orchestrator
@@ -170,9 +170,9 @@ class TestBuildProcessorCallsCleanupOnFailure:
 
         artifacts = GraphArtifacts(
             edge_map={},
-            source_id="source-1",
+            source_id=NodeID("source-1"),
             sink_id_map={},
-            transform_id_map={0: "transform-1"},
+            transform_id_map={0: NodeID("transform-1")},
             config_gate_id_map={},
             coalesce_id_map={},
         )

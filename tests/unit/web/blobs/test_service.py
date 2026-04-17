@@ -612,15 +612,114 @@ class TestFinalizeBlob:
         )
         assert pending.status == "pending"
 
+        # Valid SHA-256 hex is required when transitioning to 'ready' —
+        # see _validate_finalize_hash().  Using content_hash() here
+        # anchors the test to the same helper production code uses.
+        valid_hash = content_hash(b"pretend-output-bytes")
         finalized = await blob_service.finalize_blob(
             blob_id=pending.id,
             status="ready",
             size_bytes=42,
-            content_hash="abc123",
+            content_hash=valid_hash,
         )
         assert finalized.status == "ready"
         assert finalized.size_bytes == 42
-        assert finalized.content_hash == "abc123"
+        assert finalized.content_hash == valid_hash
+
+    @pytest.mark.asyncio
+    async def test_finalize_blob_rejects_missing_hash_for_ready(self, blob_service, session_id) -> None:
+        """Tier 1 invariant: finalizing as 'ready' without a hash is refused."""
+        pending = await blob_service.create_pending_blob(
+            session_id=session_id,
+            filename="output.csv",
+            mime_type="text/csv",
+            created_by="pipeline",
+        )
+
+        from elspeth.web.blobs.protocol import BlobStateError
+
+        with pytest.raises(BlobStateError, match="content_hash"):
+            await blob_service.finalize_blob(
+                blob_id=pending.id,
+                status="ready",
+                size_bytes=42,
+            )
+
+    @pytest.mark.asyncio
+    async def test_finalize_blob_rejects_non_sha256_hash(self, blob_service, session_id) -> None:
+        """Tier 1 invariant: content_hash must be 64 lowercase hex chars."""
+        pending = await blob_service.create_pending_blob(
+            session_id=session_id,
+            filename="output.csv",
+            mime_type="text/csv",
+            created_by="pipeline",
+        )
+
+        from elspeth.web.blobs.protocol import BlobStateError
+
+        with pytest.raises(BlobStateError, match="64 lowercase hex"):
+            await blob_service.finalize_blob(
+                blob_id=pending.id,
+                status="ready",
+                size_bytes=42,
+                content_hash="abc123",  # too short, not SHA-256
+            )
+
+    @pytest.mark.asyncio
+    async def test_finalize_blob_rejects_uppercase_hex_hash(self, blob_service, session_id) -> None:
+        """Canonical form is lowercase — uppercase hex is a bifurcation risk.
+
+        FilesystemPayloadStore writes the lowercase form, and
+        read_blob_content compares via hmac.compare_digest byte-for-byte.
+        Admitting uppercase at the write side would silently create
+        blobs whose hash does not match the stored form anywhere else
+        in the audit trail.  Mirrors the same assertion on the sync
+        path (TestFinalizeBlobSyncHashValidation) so both entry points
+        are pinned.
+        """
+        pending = await blob_service.create_pending_blob(
+            session_id=session_id,
+            filename="output.csv",
+            mime_type="text/csv",
+            created_by="pipeline",
+        )
+
+        from elspeth.web.blobs.protocol import BlobStateError
+
+        uppercase_hash = content_hash(b"real-bytes").upper()
+        with pytest.raises(BlobStateError, match="64 lowercase hex"):
+            await blob_service.finalize_blob(
+                blob_id=pending.id,
+                status="ready",
+                size_bytes=10,
+                content_hash=uppercase_hash,
+            )
+
+    @pytest.mark.asyncio
+    async def test_finalize_blob_as_error_without_hash_succeeds(self, blob_service, session_id) -> None:
+        """The hash invariant applies only to 'ready' — 'error' needs no hash.
+
+        Pins the ``status != 'ready'`` exemption branch of
+        _validate_finalize_hash.  A regression that tightened the
+        invariant to require hashes for error blobs would break every
+        failed-run cleanup path, and the failure mode would be
+        non-obvious (pipeline-level errors finalizing per-blob errors).
+        This positive test keeps the exemption honest.
+        """
+        pending = await blob_service.create_pending_blob(
+            session_id=session_id,
+            filename="failed-output.csv",
+            mime_type="text/csv",
+            created_by="pipeline",
+        )
+
+        record = await blob_service.finalize_blob(
+            blob_id=pending.id,
+            status="error",
+            # deliberately no content_hash, no size_bytes
+        )
+        assert record.status == "error"
+        assert record.content_hash is None
 
     @pytest.mark.asyncio
     async def test_finalize_blob_rejects_non_pending(self, blob_service, session_id) -> None:
@@ -653,6 +752,11 @@ class TestFinalizeBlob:
             created_by="pipeline",
         )
 
+        # Deliberate type-contract violation: we're exercising the
+        # runtime guard for dynamic callers that bypass static typing.
+        # `blob_service` is a pytest fixture whose type mypy treats as
+        # Any, so no `# type: ignore` is needed here to suppress the
+        # arg-type error.
         with pytest.raises(RuntimeError, match="Invalid finalize status"):
             await blob_service.finalize_blob(
                 blob_id=pending.id,
@@ -1532,3 +1636,338 @@ class TestFinalizeRunOutputBlobsErrorCleanup:
         result = await blob_service.finalize_run_output_blobs(run_id, success=False)
         assert len(result.finalized) == 1
         assert result.finalized[0].status == "error"
+
+
+# ---------------------------------------------------------------------------
+# Database-level integrity constraint — ck_blobs_ready_hash (elspeth-e435b147b7)
+# ---------------------------------------------------------------------------
+
+
+class TestBlobsReadyHashDBConstraint:
+    """The DB refuses status='ready' rows without a content_hash.
+
+    Service-level validation in _validate_finalize_hash is the first line
+    of defence, but the CHECK constraint (migration 008) is the belt:
+    even raw SQL / direct ORM writes that bypass the service cannot
+    commit a violating row.
+    """
+
+    def test_inserting_ready_without_hash_raises(self, db_engine, session_id) -> None:
+        """Direct INSERT violating the invariant is rejected at commit time."""
+        from datetime import UTC, datetime
+
+        from sqlalchemy.exc import IntegrityError
+
+        from elspeth.web.sessions.models import blobs_table
+
+        session_id_str = str(session_id)
+        with pytest.raises(IntegrityError), db_engine.begin() as conn:
+            conn.execute(
+                blobs_table.insert().values(
+                    id=str(uuid4()),
+                    session_id=session_id_str,
+                    filename="illegal.csv",
+                    mime_type="text/csv",
+                    size_bytes=1,
+                    content_hash=None,  # <-- the violation
+                    storage_path="/tmp/never",
+                    created_at=datetime.now(UTC),
+                    created_by="user",
+                    status="ready",
+                )
+            )
+
+    def test_inserting_pending_without_hash_is_allowed(self, db_engine, session_id) -> None:
+        """Pending and error rows may carry NULL hashes — only 'ready' is constrained."""
+        from datetime import UTC, datetime
+
+        from elspeth.web.sessions.models import blobs_table
+
+        session_id_str = str(session_id)
+        with db_engine.begin() as conn:
+            conn.execute(
+                blobs_table.insert().values(
+                    id=str(uuid4()),
+                    session_id=session_id_str,
+                    filename="pending.csv",
+                    mime_type="text/csv",
+                    size_bytes=0,
+                    content_hash=None,
+                    storage_path="/tmp/pending",
+                    created_at=datetime.now(UTC),
+                    created_by="pipeline",
+                    status="pending",
+                )
+            )
+
+    @pytest.mark.asyncio
+    async def test_update_ready_hash_to_null_rejected(self, blob_service, db_engine, session_id) -> None:
+        """Can't bypass the guard by mutating an existing ready row."""
+        from sqlalchemy import update
+        from sqlalchemy.exc import IntegrityError
+
+        from elspeth.web.sessions.models import blobs_table
+
+        record = await blob_service.create_blob(
+            session_id=session_id,
+            filename="legit.csv",
+            content=b"a,b,c\n1,2,3\n",
+            mime_type="text/csv",
+            created_by="user",
+        )
+
+        with pytest.raises(IntegrityError), db_engine.begin() as conn:
+            conn.execute(update(blobs_table).where(blobs_table.c.id == str(record.id)).values(content_hash=None))
+
+    @pytest.mark.parametrize(
+        "bad_hash",
+        [
+            "abc123",  # too short
+            "a" * 63,  # off-by-one: 63 chars
+            "a" * 65,  # off-by-one: 65 chars
+            "A" * 64,  # uppercase
+            "g" * 64,  # non-hex letter
+            "a" * 63 + "Z",  # mostly-hex with one non-hex char
+            "",  # empty
+        ],
+    )
+    @pytest.mark.asyncio
+    async def test_update_ready_hash_to_malformed_rejected(self, blob_service, db_engine, session_id, bad_hash: str) -> None:
+        """Updating a ready row's hash to a malformed value is rejected.
+
+        The service-level write path goes through ``_validate_finalize_hash``
+        which rejects malformed hashes before SQL.  This test bypasses the
+        service entirely and asserts the database CHECK is the second wall
+        — so a future caller that builds an UPDATE statement directly (or
+        a migration script that touches content_hash) cannot leave the row
+        in a "ready but unverifiable" state.
+        """
+        from sqlalchemy import update
+        from sqlalchemy.exc import IntegrityError
+
+        from elspeth.web.sessions.models import blobs_table
+
+        record = await blob_service.create_blob(
+            session_id=session_id,
+            filename="legit.csv",
+            content=b"a,b,c\n1,2,3\n",
+            mime_type="text/csv",
+            created_by="user",
+        )
+
+        with pytest.raises(IntegrityError), db_engine.begin() as conn:
+            conn.execute(update(blobs_table).where(blobs_table.c.id == str(record.id)).values(content_hash=bad_hash))
+
+
+# ---------------------------------------------------------------------------
+# _finalize_blob_sync — mirrors finalize_blob's hash validation but on the
+# path actually used by the pipeline output finalizer.  Coverage asymmetry
+# between the two entry points would let a regression strip validation
+# from the pipeline path while the REST path stayed healthy — the worst
+# kind of bifurcation for audit integrity.
+# ---------------------------------------------------------------------------
+
+
+class TestFinalizeBlobSyncHashValidation:
+    """_validate_finalize_hash must engage on the sync pipeline path too."""
+
+    @pytest.mark.asyncio
+    async def test_sync_path_rejects_missing_hash_for_ready(self, blob_service, session_id) -> None:
+        """Invoking _finalize_blob_sync with ready+None hash raises BlobStateError."""
+        from elspeth.web.blobs.protocol import BlobStateError
+
+        pending = await blob_service.create_pending_blob(
+            session_id=session_id,
+            filename="pipe.csv",
+            mime_type="text/csv",
+            created_by="pipeline",
+        )
+
+        with pytest.raises(BlobStateError, match="content_hash"):
+            blob_service._finalize_blob_sync(
+                pending.id,
+                "ready",
+                size_bytes=42,
+                content_hash_val=None,
+            )
+
+    @pytest.mark.asyncio
+    async def test_sync_path_rejects_non_sha256_hash(self, blob_service, session_id) -> None:
+        """Invoking _finalize_blob_sync with a malformed hash raises BlobStateError."""
+        from elspeth.web.blobs.protocol import BlobStateError
+
+        pending = await blob_service.create_pending_blob(
+            session_id=session_id,
+            filename="pipe.csv",
+            mime_type="text/csv",
+            created_by="pipeline",
+        )
+
+        with pytest.raises(BlobStateError, match="64 lowercase hex"):
+            blob_service._finalize_blob_sync(
+                pending.id,
+                "ready",
+                size_bytes=42,
+                content_hash_val="abc123",  # too short
+            )
+
+    @pytest.mark.asyncio
+    async def test_sync_path_rejects_uppercase_hex_hash(self, blob_service, session_id) -> None:
+        """The canonical form is lowercase; uppercase hex is a bifurcation risk.
+
+        FilesystemPayloadStore writes lowercase, and read_blob_content
+        compares via hmac.compare_digest — byte-for-byte.  If the
+        write-side validator silently admitted uppercase, a pipeline
+        could commit a blob whose hash does not match the stored form
+        anywhere else in the audit trail.
+        """
+        from elspeth.web.blobs.protocol import BlobStateError
+
+        pending = await blob_service.create_pending_blob(
+            session_id=session_id,
+            filename="pipe.csv",
+            mime_type="text/csv",
+            created_by="pipeline",
+        )
+
+        uppercase_hash = content_hash(b"real-bytes").upper()
+
+        with pytest.raises(BlobStateError, match="64 lowercase hex"):
+            blob_service._finalize_blob_sync(
+                pending.id,
+                "ready",
+                size_bytes=10,
+                content_hash_val=uppercase_hash,
+            )
+
+    @pytest.mark.asyncio
+    async def test_sync_path_allows_error_status_without_hash(self, blob_service, session_id) -> None:
+        """The hash invariant applies only to 'ready'; 'error' requires nothing."""
+        pending = await blob_service.create_pending_blob(
+            session_id=session_id,
+            filename="pipe.csv",
+            mime_type="text/csv",
+            created_by="pipeline",
+        )
+
+        record = blob_service._finalize_blob_sync(
+            pending.id,
+            "error",
+            size_bytes=None,
+            content_hash_val=None,
+        )
+        assert record.status == "error"
+        assert record.content_hash is None
+
+    @pytest.mark.asyncio
+    async def test_sync_path_invalid_status_raises_runtime_error(self, blob_service, session_id) -> None:
+        """Invalid status on the sync path must propagate as RuntimeError.
+
+        _PER_BLOB_SUPPRESSED deliberately excludes RuntimeError so a
+        programmer bug (typo'd status literal) crashes the pipeline
+        finalization loop rather than being converted silently into a
+        per-blob 'error' record.  BlobStateError would have been
+        suppressed — so this test pins the crash-not-suppress contract.
+        """
+        pending = await blob_service.create_pending_blob(
+            session_id=session_id,
+            filename="pipe.csv",
+            mime_type="text/csv",
+            created_by="pipeline",
+        )
+
+        with pytest.raises(RuntimeError, match="Invalid finalize status"):
+            blob_service._finalize_blob_sync(
+                pending.id,
+                "deleted",
+                size_bytes=None,
+                content_hash_val=None,
+            )
+
+
+# ---------------------------------------------------------------------------
+# link_blob_to_run — runtime guard on BlobRunLinkDirection (elspeth-b6ac739b83)
+# ---------------------------------------------------------------------------
+
+
+class TestLinkBlobToRunDirectionGuard:
+    """link_blob_to_run rejects direction values outside the Literal set."""
+
+    @staticmethod
+    def _make_run(db_engine, session_id: UUID) -> UUID:
+        """Seed a composition state and run for FK satisfaction."""
+        from elspeth.web.sessions.models import (
+            composition_states_table,
+            runs_table,
+        )
+
+        state_id = str(uuid4())
+        run_id = str(uuid4())
+        session_id_str = str(session_id)
+        now = datetime.now(UTC)
+        with db_engine.begin() as conn:
+            conn.execute(
+                composition_states_table.insert().values(
+                    id=state_id,
+                    session_id=session_id_str,
+                    version=1,
+                    is_valid=True,
+                    created_at=now,
+                )
+            )
+            conn.execute(
+                runs_table.insert().values(
+                    id=run_id,
+                    session_id=session_id_str,
+                    state_id=state_id,
+                    status="running",
+                    started_at=now,
+                    rows_processed=0,
+                    rows_failed=0,
+                )
+            )
+        return UUID(run_id)
+
+    @pytest.mark.asyncio
+    async def test_rejects_invalid_direction(self, blob_service, session_id, db_engine) -> None:
+        """A typo'd direction must raise RuntimeError before touching the DB.
+
+        Mirrors finalize_blob's invariant: the Literal alias narrows
+        static callers, but the runtime guard catches dynamic / untyped
+        call sites.  RuntimeError is the crash-not-suppress classification
+        for "caller passed a value outside the Literal set."
+        """
+        run_id = self._make_run(db_engine, session_id)
+        blob = await blob_service.create_blob(
+            session_id=session_id,
+            filename="input.csv",
+            content=b"a,b,c\n1,2,3\n",
+            mime_type="text/csv",
+            created_by="user",
+        )
+
+        with pytest.raises(RuntimeError, match="Invalid link direction"):
+            await blob_service.link_blob_to_run(
+                blob_id=blob.id,
+                run_id=run_id,
+                direction="inout",
+            )
+
+    @pytest.mark.asyncio
+    async def test_accepts_input_and_output(self, blob_service, session_id, db_engine) -> None:
+        """Positive control: both valid directions commit without error."""
+        run_id = self._make_run(db_engine, session_id)
+        blob = await blob_service.create_blob(
+            session_id=session_id,
+            filename="input.csv",
+            content=b"a,b,c\n1,2,3\n",
+            mime_type="text/csv",
+            created_by="user",
+        )
+
+        await blob_service.link_blob_to_run(blob.id, run_id, "input")
+        await blob_service.link_blob_to_run(blob.id, run_id, "output")
+
+        links = await blob_service.get_blob_run_links(blob.id)
+        directions = sorted(link.direction for link in links)
+        assert directions == ["input", "output"]

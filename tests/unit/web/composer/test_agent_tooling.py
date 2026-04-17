@@ -900,6 +900,12 @@ class TestSetSourceFromBlob:
                     filename="data.parquet",
                     mime_type="application/x-parquet",
                     size_bytes=100,
+                    # ck_blobs_ready_hash: ready rows must carry a
+                    # SHA-256 hex digest.  The exact value is immaterial
+                    # for this test (we only check MIME-inference error
+                    # handling) — any well-formed 64-char lowercase hex
+                    # satisfies the constraint.
+                    content_hash="0" * 64,
                     storage_path="/tmp/fake",
                     created_at=datetime.now(UTC),
                     created_by="user",

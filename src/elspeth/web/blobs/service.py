@@ -5,10 +5,11 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import hmac
+import re
 from collections.abc import Callable
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any, Literal, TypeVar
+from typing import Any, TypeVar
 from uuid import UUID, uuid4
 
 from sqlalchemy import Engine, func, select
@@ -17,15 +18,20 @@ from sqlalchemy.exc import SQLAlchemyError
 from elspeth.web.blobs.protocol import (
     ALLOWED_MIME_TYPES,
     BLOB_CREATORS,
+    BLOB_STATUSES,
+    AllowedMimeType,
     BlobActiveRunError,
+    BlobCreator,
     BlobFinalizationError,
     BlobFinalizationResult,
     BlobIntegrityError,
     BlobNotFoundError,
     BlobQuotaExceededError,
     BlobRecord,
+    BlobRunLinkDirection,
     BlobRunLinkRecord,
     BlobStateError,
+    FinalizeBlobStatus,
 )
 from elspeth.web.sessions.models import (
     blob_run_links_table,
@@ -40,10 +46,14 @@ _T = TypeVar("_T")
 def content_hash(data: bytes) -> str:
     """Compute SHA-256 hex digest of raw content bytes.
 
-    This is the shared hash helper referenced by AD-5 and AD-7 in the
-    blob manager plan. When a pipeline reads from a blob, the engine
-    records the raw data hash in PayloadStore. Using the same algorithm
-    here guarantees the hashes match when the bytes match.
+    This is the shared hash helper referenced by AD-5 and AD-7 in
+    docs/plans/rc4.2-ux-remediation/2026-03-30-02-blob-manager-subplan.md.
+    When a pipeline reads from a blob, the engine records the raw data
+    hash in PayloadStore. Using the same algorithm here guarantees the
+    hashes match when the bytes match. Output is SHA-256 hex, 64
+    lowercase characters — the canonical form validated by
+    ``_validate_finalize_hash`` at the write side and compared via
+    ``hmac.compare_digest`` at the read side.
     """
     return hashlib.sha256(data).hexdigest()
 
@@ -123,6 +133,16 @@ class BlobServiceImpl:
         return self._blob_dir(session_id) / f"{blob_id}_{filename}"
 
     def _row_to_record(self, row: Any) -> BlobRecord:
+        # Tier 1 read guards — BlobRecord's fields are declared as closed
+        # Literal types, but the DB can be tampered with via direct SQL
+        # or a migration bug.  Crash on any value outside the enum so the
+        # audit trail never silently returns a record whose static type
+        # is a lie.  Aligns with the frozenset CHECK constraints in
+        # web/sessions/models.py (ck_blobs_status, ck_blobs_created_by)
+        # and the MIME allowlist enforced at create_blob().
+        assert row.status in BLOB_STATUSES, f"Tier 1: blobs.status is {row.status!r}, expected one of {sorted(BLOB_STATUSES)}"
+        assert row.created_by in BLOB_CREATORS, f"Tier 1: blobs.created_by is {row.created_by!r}, expected one of {sorted(BLOB_CREATORS)}"
+        assert row.mime_type in ALLOWED_MIME_TYPES, f"Tier 1: blobs.mime_type is {row.mime_type!r}, not in the allowed MIME set"
         return BlobRecord(
             id=UUID(row.id),
             session_id=UUID(row.session_id),
@@ -138,6 +158,11 @@ class BlobServiceImpl:
         )
 
     def _row_to_link_record(self, row: Any) -> BlobRunLinkRecord:
+        # Tier 1 read guard — mirrors the ck_blob_run_links_direction
+        # CHECK constraint.  A row with a bogus direction would leave
+        # BlobRunLinkRecord.direction (typed BlobRunLinkDirection)
+        # carrying a value outside its Literal set.
+        assert row.direction in ("input", "output"), f"Tier 1: blob_run_links.direction is {row.direction!r}, expected 'input' or 'output'"
         return BlobRunLinkRecord(
             blob_id=UUID(row.blob_id),
             run_id=UUID(row.run_id),
@@ -149,8 +174,8 @@ class BlobServiceImpl:
         session_id: UUID,
         filename: str,
         content: bytes,
-        mime_type: str,
-        created_by: Literal["user", "assistant", "pipeline"] = "user",
+        mime_type: AllowedMimeType,
+        created_by: BlobCreator = "user",
         source_description: str | None = None,
     ) -> BlobRecord:
         """Create a blob from content bytes."""
@@ -221,8 +246,8 @@ class BlobServiceImpl:
         self,
         session_id: UUID,
         filename: str,
-        mime_type: str,
-        created_by: Literal["user", "assistant", "pipeline"] = "pipeline",
+        mime_type: AllowedMimeType,
+        created_by: BlobCreator = "pipeline",
         source_description: str | None = None,
     ) -> BlobRecord:
         """Reserve a pending output blob."""
@@ -273,12 +298,18 @@ class BlobServiceImpl:
     async def finalize_blob(
         self,
         blob_id: UUID,
-        status: str,
+        status: FinalizeBlobStatus,
         size_bytes: int | None = None,
         content_hash: str | None = None,
     ) -> BlobRecord:
         """Update a pending blob to ready or error after execution."""
         blob_id_str = str(blob_id)
+        # Runtime guard for dynamic callers — the Literal narrowing gives
+        # static callers the correct shape, but the Protocol boundary is
+        # still called by code that mypy may not fully verify (tests,
+        # factory-constructed services).  Keep the check as a belt.
+        if status not in ("ready", "error"):
+            raise RuntimeError(f"Invalid finalize status '{status}' — must be 'ready' or 'error'")
 
         def _sync() -> BlobRecord:
             with self._engine.begin() as conn:
@@ -288,8 +319,10 @@ class BlobServiceImpl:
 
                 if row.status != "pending":
                     raise BlobStateError(blob_id_str, f"Cannot finalize blob {blob_id_str} — status is '{row.status}', expected 'pending'")
-                if status not in ("ready", "error"):
-                    raise RuntimeError(f"Invalid finalize status '{status}' — must be 'ready' or 'error'")
+                # Hash-format validation runs after the state check so a
+                # callers confused by a stale blob hear about the lifecycle
+                # problem first.  See _validate_finalize_hash() docstring.
+                _validate_finalize_hash(blob_id_str, status, content_hash)
 
                 updates: dict[str, Any] = {"status": status}
                 if size_bytes is not None:
@@ -454,9 +487,11 @@ class BlobServiceImpl:
         self,
         blob_id: UUID,
         run_id: UUID,
-        direction: str,
+        direction: BlobRunLinkDirection,
     ) -> None:
         """Record a blob-to-run linkage."""
+        if direction not in ("input", "output"):
+            raise RuntimeError(f"Invalid link direction '{direction}' — must be 'input' or 'output'")
 
         def _sync() -> None:
             with self._engine.begin() as conn:
@@ -579,6 +614,7 @@ class BlobServiceImpl:
                     # so it doesn't remain permanently pending.  The WHERE
                     # on status='pending' makes this a no-op if already
                     # finalized or deleted.
+                    recovery_exc: BaseException | None = None
                     try:
                         with self._engine.begin() as err_conn:
                             err_conn.execute(
@@ -587,10 +623,14 @@ class BlobServiceImpl:
                                 .where(blobs_table.c.status == "pending")
                                 .values(status="error")
                             )
-                    except Exception:
-                        # Recovery failed — DB may be down.  The blob stays
-                        # pending; callers see it in result.errors.
-                        pass
+                    except (SQLAlchemyError, OSError) as rec_exc:
+                        # Narrow to DB/IO faults — programmer bugs
+                        # (TypeError, AttributeError, AssertionError) must
+                        # propagate per offensive-programming policy.
+                        # The blob stays pending; we record the recovery
+                        # failure alongside the primary exception so the
+                        # audit trail carries both causes.
+                        recovery_exc = rec_exc
                     errors.append(
                         BlobFinalizationError(
                             blob_id=blob_id,
@@ -598,6 +638,14 @@ class BlobServiceImpl:
                             detail=str(exc),
                         )
                     )
+                    if recovery_exc is not None:
+                        errors.append(
+                            BlobFinalizationError(
+                                blob_id=blob_id,
+                                exc_type=f"RecoveryFailed[{type(recovery_exc).__name__}]",
+                                detail=str(recovery_exc),
+                            )
+                        )
             return BlobFinalizationResult(finalized=finalized, errors=errors)
 
         return await self._run_sync(_sync)
@@ -676,28 +724,30 @@ class BlobServiceImpl:
     def _finalize_blob_sync(
         self,
         blob_id: UUID,
-        status: str,
+        status: FinalizeBlobStatus,
         size_bytes: int | None = None,
         content_hash_val: str | None = None,
     ) -> BlobRecord:
         """Synchronous single-blob finalize for use inside _run_sync closures."""
         blob_id_str = str(blob_id)
+        # Invalid status is a programmer bug at a Protocol boundary, not a
+        # per-blob operational condition.  RuntimeError propagates past
+        # _PER_BLOB_SUPPRESSED so the loop in finalize_run_output_blobs
+        # crashes loudly instead of silently converting the caller's typo
+        # into an "error" record the auditor cannot distinguish from a
+        # genuine run failure.  Mirrors the RuntimeError in finalize_blob().
+        if status not in ("ready", "error"):
+            raise RuntimeError(f"Invalid finalize status '{status}' — must be 'ready' or 'error'")
+        # Single source of truth for the ready-requires-valid-hash rule.
+        # See _validate_finalize_hash() docstring.
+        _validate_finalize_hash(blob_id_str, status, content_hash_val)
+
         with self._engine.begin() as conn:
             row = conn.execute(select(blobs_table).where(blobs_table.c.id == blob_id_str)).first()
             if row is None:
                 raise BlobNotFoundError(blob_id_str)
             if row.status != "pending":
                 raise BlobStateError(blob_id_str, f"Cannot finalize blob {blob_id_str} — status is '{row.status}', expected 'pending'")
-            if status not in ("ready", "error"):
-                raise BlobStateError(blob_id_str, f"Invalid finalize status '{status}' — must be 'ready' or 'error'")
-
-            # A ready blob must carry a content_hash — this is the
-            # write-side invariant that guarantees read_blob_content()
-            # can always verify integrity.
-            if status == "ready":
-                assert content_hash_val is not None, (
-                    f"Tier 1: finalizing blob {blob_id_str} as ready without content_hash — audit integrity requires a hash"
-                )
 
             # Enforce quota when finalizing with a real size — pending blobs
             # were reserved at size_bytes=0, so this is the first time the
@@ -726,3 +776,41 @@ class BlobServiceImpl:
             if updated is None:
                 raise RuntimeError(f"Blob {blob_id_str} vanished during finalize — concurrent deletion?")
             return self._row_to_record(updated)
+
+
+# SHA-256 hex digest: exactly 64 lowercase hex characters.  Must match
+# FilesystemPayloadStore's validator (core/payload_store.py) — a blob
+# whose content_hash round-trips through the audit trail must use the
+# same canonical form everywhere.
+_SHA256_HEX_PATTERN = re.compile(r"^[a-f0-9]{64}$")
+
+
+def _validate_finalize_hash(
+    blob_id_str: str,
+    status: FinalizeBlobStatus,
+    content_hash_val: str | None,
+) -> None:
+    """Reject malformed content_hash values before they reach the DB.
+
+    A ``ready`` blob MUST carry a SHA-256 hex digest — that is the
+    integrity contract that makes ``read_blob_content`` verifiable
+    (AD-5/AD-7 in
+    docs/plans/rc4.2-ux-remediation/2026-03-30-02-blob-manager-subplan.md).
+    Before these fixes, a caller could finalize with a bogus string
+    like ``"abc123"`` and the DB would happily store it, leaving a
+    ``ready`` row whose hash cannot be produced by any real bytes on
+    disk.  Tier 1 data must be pristine at the write side too, not
+    only at the read side.
+    """
+    if status != "ready":
+        return
+    if content_hash_val is None:
+        raise BlobStateError(
+            blob_id_str,
+            f"Tier 1: cannot finalize blob {blob_id_str} as 'ready' without content_hash — audit integrity requires a hash",
+        )
+    if not _SHA256_HEX_PATTERN.match(content_hash_val):
+        raise BlobStateError(
+            blob_id_str,
+            f"Tier 1: content_hash must be 64 lowercase hex characters (SHA-256), got {content_hash_val!r}",
+        )

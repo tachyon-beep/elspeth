@@ -139,3 +139,67 @@ class TestEdgeCases:
     def test_two_column_tab_delimited_is_ambiguous(self) -> None:
         """Two-column tab-delimited is below the 3-field threshold."""
         assert detect_mime_type(b"name\tage\nAlice\t30") is None
+
+
+# ---------------------------------------------------------------------------
+# UTF-16 / UTF-32 BOM detection (elspeth-3e6a7e0cdb)
+# ---------------------------------------------------------------------------
+
+
+class TestBomEncodings:
+    """Non-UTF-8 text with BOMs decodes to the right data type rather than
+    being misclassified as application/octet-stream because of its NUL bytes."""
+
+    def test_utf16_le_csv(self) -> None:
+        content = b"\xff\xfe" + "name,age,city\nAlice,30,London\n".encode("utf-16-le")
+        assert detect_mime_type(content) == "text/csv"
+
+    def test_utf16_be_csv(self) -> None:
+        content = b"\xfe\xff" + "name,age,city\nAlice,30,London\n".encode("utf-16-be")
+        assert detect_mime_type(content) == "text/csv"
+
+    def test_utf16_le_plain_text(self) -> None:
+        content = b"\xff\xfe" + "hello world\n".encode("utf-16-le")
+        assert detect_mime_type(content) == "text/plain"
+
+    def test_utf16_be_plain_text(self) -> None:
+        content = b"\xfe\xff" + "hello world\n".encode("utf-16-be")
+        assert detect_mime_type(content) == "text/plain"
+
+    def test_utf16_le_json(self) -> None:
+        content = b"\xff\xfe" + '{"key": "value"}'.encode("utf-16-le")
+        assert detect_mime_type(content) == "application/json"
+
+    def test_utf32_le_json(self) -> None:
+        content = b"\xff\xfe\x00\x00" + '{"k": 1}'.encode("utf-32-le")
+        assert detect_mime_type(content) == "application/json"
+
+    def test_utf32_be_csv(self) -> None:
+        # 3-column CSV so we clear the sniffer's CSV field floor
+        content = b"\x00\x00\xfe\xff" + "a,b,c\n1,2,3\n".encode("utf-32-be")
+        assert detect_mime_type(content) == "text/csv"
+
+    def test_utf32_le_bom_not_misread_as_utf16_le(self) -> None:
+        """UTF-32 LE BOM starts with the UTF-16 LE BOM.  If BOMs were
+        checked shortest-first, a UTF-32 file would decode as garbage
+        UTF-16 and return the wrong MIME.  Anchor the dispatch order.
+        """
+        content = b"\xff\xfe\x00\x00" + "hello\n".encode("utf-32-le")
+        assert detect_mime_type(content) == "text/plain"
+
+    def test_bom_with_corrupt_payload_returns_octet_stream(self) -> None:
+        """A BOM followed by bytes that don't decode is a deceptive or
+        corrupted upload.  The sniffer classifies it as binary so the
+        route layer's allowlist check rejects it — a BOM and its
+        following bytes are two Tier 3 signals, and disagreeing signals
+        do not earn the upload a pass via browser-declared MIME.
+        """
+        # UTF-16 LE BOM followed by lone high surrogate (invalid)
+        assert detect_mime_type(b"\xff\xfe" + b"\x00\xd8") == "application/octet-stream"
+
+    def test_real_binary_still_detected_as_octet_stream(self) -> None:
+        """PNG header has no recognised BOM and contains NUL bytes —
+        must still hit the binary path, not slip through as None.
+        """
+        png_magic = b"\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR"
+        assert detect_mime_type(png_magic) == "application/octet-stream"

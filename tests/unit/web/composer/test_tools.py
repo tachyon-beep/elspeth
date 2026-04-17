@@ -33,6 +33,15 @@ from elspeth.web.composer.tools import (
     get_tool_definitions,
 )
 
+# Stub SHA-256 hex digest for test fixtures.  Must satisfy the
+# ``ck_blobs_ready_hash`` invariant — exactly 64 lowercase hex
+# characters — even when the surrounding test does not actually verify
+# the hash.  Using a structurally valid placeholder keeps the fixtures
+# from accidentally exercising the malformed-hash bypass path the
+# database CHECK was added to close.
+_STUB_SHA256 = "a" * 64
+_STUB_SHA256_ALT = "b" * 64
+
 
 def _empty_state() -> CompositionState:
     return CompositionState(
@@ -207,6 +216,7 @@ class TestSetSource:
             catalog,
         )
         assert result.success is True
+        assert result.updated_state.source is not None
         assert result.updated_state.source.on_validation_failure == "bad_rows_sink"
 
     def test_unknown_plugin_fails(self) -> None:
@@ -1217,7 +1227,7 @@ class TestToolDefinitions:
         for defn in get_tool_definitions():
             self._assert_no_enum_on_validation_failure(defn.get("parameters", {}), defn["name"])
 
-    def _assert_no_enum_on_validation_failure(self, schema: dict, tool_name: str) -> None:
+    def _assert_no_enum_on_validation_failure(self, schema: object, tool_name: str) -> None:
         """Recursively walk a JSON schema and assert no on_validation_failure has enum."""
         if isinstance(schema, dict):
             for key, value in schema.items():
@@ -2017,7 +2027,7 @@ class TestBlobTools:
                     filename="data.csv",
                     mime_type="text/csv",
                     size_bytes=100,
-                    content_hash="abc123",
+                    content_hash=_STUB_SHA256,
                     storage_path="/tmp/fake/data.csv",
                     created_at=now,
                     created_by="user",
@@ -2379,7 +2389,7 @@ class TestBlobTools:
                     filename="test.csv",
                     mime_type="text/csv",
                     size_bytes=len(original_content),
-                    content_hash="old_hash",
+                    content_hash=_STUB_SHA256,
                     storage_path=str(storage_path),
                     created_at=now,
                     created_by="user",
@@ -2492,7 +2502,7 @@ class TestDeleteBlobActiveRunGuard:
                     filename="data.csv",
                     mime_type="text/csv",
                     size_bytes=100,
-                    content_hash="abc123",
+                    content_hash=_STUB_SHA256,
                     storage_path=str(self.storage_path),
                     created_at=now,
                     created_by="user",
@@ -2831,7 +2841,7 @@ class TestUpdateBlobQuota:
                     filename="data.csv",
                     mime_type="text/csv",
                     size_bytes=len(self.original_content),
-                    content_hash="old_hash",
+                    content_hash=_STUB_SHA256,
                     storage_path=str(self.storage_path),
                     created_at=now,
                     created_by="user",
@@ -2943,7 +2953,7 @@ class TestUpdateBlobQuota:
                     filename="filler.bin",
                     mime_type="application/octet-stream",
                     size_bytes=485,
-                    content_hash="filler",
+                    content_hash=_STUB_SHA256_ALT,
                     storage_path=str(filler_path),
                     created_at=now,
                     created_by="user",

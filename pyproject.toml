@@ -83,6 +83,7 @@ dev = [
     "pandas-stubs>=2.2,<3",  # Pandas type hints
     "types-networkx>=3.2,<4",  # NetworkX type hints
     "types-PyYAML>=6.0,<7",  # PyYAML type hints
+    "types-jsonschema>=4.25,<5",  # jsonschema type hints (used in LLM schema tests)
     # Mutation testing (Phase 3)
     "mutmut>=2.4,<3",  # Mutation testing
     # ChaosLLM test server

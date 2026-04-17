@@ -104,7 +104,7 @@ class TestRunEvent:
             RunEvent(
                 run_id="run-123",
                 timestamp=datetime.now(tz=UTC),
-                event_type="unknown",
+                event_type="unknown",  # type: ignore[arg-type]  # deliberate bad value for Pydantic to reject
                 data=ProgressData(rows_processed=0, rows_failed=0),
             )
 
@@ -115,6 +115,7 @@ class TestRunEvent:
             event_type="progress",
             data=ProgressData(rows_processed=10, rows_failed=2),
         )
+        assert isinstance(event.data, ProgressData)
         assert event.data.rows_processed == 10
         assert event.data.rows_failed == 2
 
@@ -131,6 +132,7 @@ class TestRunEvent:
                 landscape_run_id="lscape-1",
             ),
         )
+        assert isinstance(event.data, CompletedData)
         assert event.data.rows_succeeded == 95
         assert event.data.landscape_run_id == "lscape-1"
 
@@ -141,6 +143,7 @@ class TestRunEvent:
             event_type="cancelled",
             data=CancelledData(rows_processed=50, rows_failed=1),
         )
+        assert isinstance(event.data, CancelledData)
         assert event.data.rows_processed == 50
 
     def test_failed_event_valid(self) -> None:
@@ -150,6 +153,7 @@ class TestRunEvent:
             event_type="failed",
             data=FailedData(detail="Pipeline crashed", node_id=None),
         )
+        assert isinstance(event.data, FailedData)
         assert event.data.detail == "Pipeline crashed"
 
     def test_error_event_valid(self) -> None:
@@ -159,6 +163,7 @@ class TestRunEvent:
             event_type="error",
             data=ErrorData(message="Row parse failure", node_id="csv_source", row_id="row-42"),
         )
+        assert isinstance(event.data, ErrorData)
         assert event.data.message == "Row parse failure"
 
     def test_mismatched_event_type_and_data_rejected(self) -> None:
@@ -178,7 +183,7 @@ class TestRunEvent:
                 run_id="run-1",
                 timestamp=datetime.now(tz=UTC),
                 event_type="cancelled",
-                data={},
+                data={},  # type: ignore[arg-type]  # deliberate bad value for Pydantic to reject
             )
 
     def test_cancelled_requires_row_counts(self) -> None:
@@ -617,7 +622,7 @@ class TestRunEventTimestampCoercion:
         with pytest.raises(pydantic.ValidationError, match="timestamp"):
             RunEvent(
                 run_id="run-1",
-                timestamp=1713254400,  # type: ignore[arg-type]
+                timestamp=1713254400,
                 event_type="progress",
                 data=ProgressData(rows_processed=0, rows_failed=0),
             )

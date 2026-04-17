@@ -129,7 +129,10 @@ class TestExecutionFlow:
     @pytest.mark.asyncio
     async def test_execute_rejects_non_string_yaml_generator_output(self, service: ExecutionServiceImpl) -> None:
         """YamlGenerator contract violations must fail fast, not spin in PyYAML."""
-        service._yaml_generator.generate_yaml.return_value = MagicMock()
+        # _yaml_generator is a MagicMock in the fixture (see service fixture
+        # above); the production type is Callable[[CompositionState], str]
+        # which has no .return_value attribute.  Cast for mypy.
+        cast(MagicMock, service._yaml_generator).generate_yaml.return_value = MagicMock()
 
         with pytest.raises(TypeError, match="must return str"):
             await service.execute(session_id=uuid4())
@@ -1157,6 +1160,7 @@ class TestEventBusBridge:
     def test_progress_event_translated_to_run_event(self, service: ExecutionServiceImpl) -> None:
         """_to_run_event maps ProgressEvent fields to RunEvent.data."""
         from elspeth.contracts.cli import ProgressEvent
+        from elspeth.web.execution.schemas import ProgressData
 
         progress = ProgressEvent(
             rows_processed=100,
@@ -1169,6 +1173,7 @@ class TestEventBusBridge:
         run_event = service._to_run_event(run_id, progress)
 
         assert run_event.event_type == "progress"
+        assert isinstance(run_event.data, ProgressData)
         assert run_event.data.rows_processed == 100
         assert run_event.data.rows_failed == 5
         assert run_event.run_id == "run-123"

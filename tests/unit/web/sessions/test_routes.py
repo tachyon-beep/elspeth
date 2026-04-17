@@ -583,6 +583,7 @@ class TestRecomposeConvergencePartialState:
         loop.close()
 
         assert db_record is not None
+        assert db_record.source is not None, "composition state must carry a source"
         db_source_opts = db_record.source["options"]
         assert db_source_opts["path"] == "/internal/blobs/data.csv"
         assert db_source_opts["blob_ref"] == "abc123"

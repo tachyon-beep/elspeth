@@ -9,34 +9,53 @@ from __future__ import annotations
 from collections.abc import Sequence
 from dataclasses import dataclass
 from datetime import datetime
-from typing import Literal, Protocol, runtime_checkable
+from typing import Literal, Protocol, get_args, runtime_checkable
 from uuid import UUID
 
 from elspeth.contracts.freeze import freeze_fields
 
-# Valid blob statuses and their meanings:
+# Lifecycle literal aliases.
+#
+# BlobStatus is the full enum stored on a BlobRecord.  FinalizeBlobStatus
+# is the narrower set a pending blob may transition to — pending itself
+# is not a valid finalize target.  BlobCreator mirrors ck_blobs_created_by,
+# BlobRunLinkDirection mirrors ck_blob_run_links_direction, and
+# AllowedMimeType is the closed set of data-oriented MIME types accepted
+# for uploads.
+#
+# The Literal aliases are authoritative — their matching runtime
+# frozensets are *derived* via typing.get_args() so adding a member is
+# a single-site edit.  The static assert below anchors the derivation
+# (a frozenset literal that drifted from the Literal would now be an
+# immediate import-time crash rather than a silent Tier 1 gap).
+BlobStatus = Literal["ready", "pending", "error"]
+FinalizeBlobStatus = Literal["ready", "error"]
+BlobCreator = Literal["user", "assistant", "pipeline"]
+BlobRunLinkDirection = Literal["input", "output"]
+AllowedMimeType = Literal[
+    "text/csv",
+    "text/plain",
+    "application/json",
+    "application/x-jsonlines",
+    "application/jsonl",
+    "text/jsonl",
+]
+
+# Runtime frozensets derived from the Literal aliases above.  These are
+# used by the DB CHECK-mirroring read guards (_row_to_record) and by
+# boundary assertions at write sites (create_blob, create_pending_blob).
+# Deriving via get_args guarantees the static and runtime views cannot
+# drift apart — a single-edit-site contract.
 #   ready   — content is available for download/use
 #   pending — placeholder for an output blob not yet written
 #   error   — run failed before writing the output blob
-BLOB_STATUSES = frozenset({"ready", "pending", "error"})
-
-# Valid created_by values:
+BLOB_STATUSES: frozenset[str] = frozenset(get_args(BlobStatus))
 #   user      — uploaded by the user via REST or drag-and-drop
 #   assistant — materialised by the assistant via create_blob tool
 #   pipeline  — produced as output of a pipeline run
-BLOB_CREATORS = frozenset({"user", "assistant", "pipeline"})
-
+BLOB_CREATORS: frozenset[str] = frozenset(get_args(BlobCreator))
 # MIME types accepted for data-oriented uploads.
-ALLOWED_MIME_TYPES = frozenset(
-    {
-        "text/csv",
-        "text/plain",
-        "application/json",
-        "application/x-jsonlines",
-        "application/jsonl",
-        "text/jsonl",
-    }
-)
+ALLOWED_MIME_TYPES: frozenset[str] = frozenset(get_args(AllowedMimeType))
 
 
 @dataclass(frozen=True, slots=True)
@@ -49,14 +68,14 @@ class BlobRecord:
     id: UUID
     session_id: UUID
     filename: str
-    mime_type: str
+    mime_type: AllowedMimeType
     size_bytes: int
     content_hash: str | None
     storage_path: str
     created_at: datetime
-    created_by: Literal["user", "assistant", "pipeline"]
+    created_by: BlobCreator
     source_description: str | None
-    status: Literal["ready", "pending", "error"]
+    status: BlobStatus
 
 
 @dataclass(frozen=True, slots=True)
@@ -68,7 +87,7 @@ class BlobRunLinkRecord:
 
     blob_id: UUID
     run_id: UUID
-    direction: Literal["input", "output"]
+    direction: BlobRunLinkDirection
 
 
 class BlobNotFoundError(Exception):
@@ -178,8 +197,8 @@ class BlobServiceProtocol(Protocol):
         session_id: UUID,
         filename: str,
         content: bytes,
-        mime_type: str,
-        created_by: Literal["user", "assistant", "pipeline"] = "user",
+        mime_type: AllowedMimeType,
+        created_by: BlobCreator = "user",
         source_description: str | None = None,
     ) -> BlobRecord:
         """Create a blob from content bytes.
@@ -192,8 +211,8 @@ class BlobServiceProtocol(Protocol):
         self,
         session_id: UUID,
         filename: str,
-        mime_type: str,
-        created_by: Literal["user", "assistant", "pipeline"] = "pipeline",
+        mime_type: AllowedMimeType,
+        created_by: BlobCreator = "pipeline",
         source_description: str | None = None,
     ) -> BlobRecord:
         """Reserve a pending output blob (status='pending').
@@ -206,7 +225,7 @@ class BlobServiceProtocol(Protocol):
     async def finalize_blob(
         self,
         blob_id: UUID,
-        status: str,
+        status: FinalizeBlobStatus,
         size_bytes: int | None = None,
         content_hash: str | None = None,
     ) -> BlobRecord:
@@ -250,7 +269,7 @@ class BlobServiceProtocol(Protocol):
         self,
         blob_id: UUID,
         run_id: UUID,
-        direction: str,
+        direction: BlobRunLinkDirection,
     ) -> None:
         """Record a blob-to-run linkage (input or output)."""
         ...

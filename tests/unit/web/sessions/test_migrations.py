@@ -25,6 +25,7 @@ from __future__ import annotations
 import logging
 import uuid
 from datetime import UTC, datetime
+from typing import Any
 
 import pytest
 from alembic.config import Config
@@ -151,7 +152,7 @@ class TestRunMigrations:
 
         with engine.connect() as conn:
             rev = conn.execute(text("SELECT version_num FROM alembic_version")).scalar_one()
-        assert rev == "007"
+        assert rev == "008"
 
     def test_preserves_engine_identity_via_staticpool(self) -> None:
         """Bug 1 regression: the caller's engine must be migrated directly.
@@ -731,7 +732,7 @@ class TestMigration006RefusesFabrication:
 
         with engine.connect() as conn:
             rev = conn.execute(text("SELECT version_num FROM alembic_version")).scalar_one()
-        assert rev == "007"
+        assert rev == "008"
         cols = {c["name"] for c in inspect(engine).get_columns("user_secrets")}
         assert "auth_provider_type" in cols
 
@@ -764,7 +765,9 @@ class TestMigration007PreservesIndexes:
                 text("SELECT name, sql FROM sqlite_master WHERE type = 'index' AND tbl_name = :t"),
                 {"t": table},
             ).fetchall()
-        return dict(rows)
+        # Row objects are tuple-like; unpack explicitly so mypy sees the
+        # correct (str, str | None) shape.
+        return {row[0]: row[1] for row in rows}
 
     def test_runs_session_id_index_survives(self) -> None:
         """``ix_runs_session_id`` must remain after 007 applies."""
@@ -922,10 +925,10 @@ class TestCliMigrationPathUsesEngineFactory:
 
         import elspeth.web.sessions.engine as engine_mod
 
-        observed: list[tuple[str, dict]] = []
+        observed: list[tuple[str, dict[str, Any]]] = []
         original = engine_mod.create_session_engine
 
-        def spy(url, **kwargs):
+        def spy(url: str, **kwargs: Any) -> Engine:
             observed.append((url, dict(kwargs)))
             return original(url, **kwargs)
 
@@ -983,10 +986,10 @@ class TestCliMigrationPathUsesEngineFactory:
         expected_url = f"sqlite:///{unique_path}"
         monkeypatch.setenv("ELSPETH_WEB__SESSION_DB_URL", expected_url)
 
-        observed: list[dict] = []
+        observed: list[dict[str, Any]] = []
         original_configure = alembic_context_mod.configure
 
-        def spy(*args, **kwargs):
+        def spy(*args: Any, **kwargs: Any) -> Any:
             observed.append(dict(kwargs))
             return original_configure(*args, **kwargs)
 
@@ -1052,10 +1055,10 @@ class TestCliMigrationPathUsesEngineFactory:
         ini_url = f"sqlite:///{tmp_path / 'ini-loses.db'}"
         monkeypatch.setenv("ELSPETH_WEB__SESSION_DB_URL", env_url)
 
-        observed: list[dict] = []
+        observed: list[dict[str, Any]] = []
         original_configure = alembic_context_mod.configure
 
-        def spy(*args, **kwargs):
+        def spy(*args: Any, **kwargs: Any) -> Any:
             observed.append(dict(kwargs))
             return original_configure(*args, **kwargs)
 
@@ -1133,7 +1136,7 @@ class TestCreateSessionEngine:
         # Replace the factory's listener with one that DISABLES the PRAGMA.
         original = engine_mod.create_session_engine
 
-        def broken_factory(url, **kwargs):
+        def broken_factory(url: str, **kwargs: Any) -> Engine:
             from sqlalchemy import create_engine, event, text
 
             eng = create_engine(url, **kwargs)
@@ -1160,3 +1163,410 @@ class TestCreateSessionEngine:
                 connect_args={"check_same_thread": False},
             )
         _ = original  # silence unused
+
+
+# ---------------------------------------------------------------------------
+# Migration 008: ready-blob-requires-hash invariant (elspeth-e435b147b7)
+# ---------------------------------------------------------------------------
+
+
+class TestMigration008BlobReadyHashInvariant:
+    """008 must add ck_blobs_ready_hash without laundering violating data.
+
+    The service layer's _validate_finalize_hash is the first line of
+    defence; this migration is the second — even raw SQL cannot commit
+    a ready row without a hash once the constraint is in place.  The
+    migration deliberately REFUSES to apply if pre-existing data
+    already violates the invariant: silently repairing (coercing to
+    error, or fabricating a hash) would tamper with the audit trail.
+    Operators must quarantine or repair the row explicitly.
+    """
+
+    def _upgrade_to_007(self, engine: Engine) -> Config:
+        """Bring engine to revision 007 (pre-008 blobs shape)."""
+        from alembic import command
+
+        cfg = _alembic_config_for(engine)
+        with engine.connect() as connection:
+            cfg.attributes["connection"] = connection
+            command.upgrade(cfg, "007")
+        return cfg
+
+    def _seed_blobs_session(self, engine: Engine, session_id: str) -> None:
+        """Seed a session row so the blobs.session_id FK is satisfied."""
+        now_iso = datetime.now(UTC).isoformat()
+        with engine.begin() as conn:
+            conn.execute(
+                text(
+                    "INSERT INTO sessions "
+                    "(id, user_id, auth_provider_type, title, created_at, updated_at) "
+                    "VALUES (:id, :user_id, :apt, :title, :created_at, :updated_at)"
+                ),
+                {
+                    "id": session_id,
+                    "user_id": "u-legacy",
+                    "apt": "local",
+                    "title": "t",
+                    "created_at": now_iso,
+                    "updated_at": now_iso,
+                },
+            )
+
+    def test_upgrade_008_succeeds_on_clean_blobs_table(self) -> None:
+        """Fresh DB: 007 → 008 adds CHECK constraint cleanly."""
+        from alembic import command
+
+        engine = _fresh_engine()
+        cfg = self._upgrade_to_007(engine)
+        with engine.connect() as connection:
+            cfg.attributes["connection"] = connection
+            command.upgrade(cfg, "008")
+
+        with engine.connect() as conn:
+            rev = conn.execute(text("SELECT version_num FROM alembic_version")).scalar_one()
+        assert rev == "008"
+
+        # After the constraint is in place, INSERTing a violating row is rejected.
+        session_id = str(uuid.uuid4())
+        self._seed_blobs_session(engine, session_id)
+        now_iso = datetime.now(UTC).isoformat()
+        with pytest.raises(IntegrityError), engine.begin() as conn:
+            conn.execute(
+                text(
+                    "INSERT INTO blobs "
+                    "(id, session_id, filename, mime_type, size_bytes, content_hash, "
+                    " storage_path, created_at, created_by, status) "
+                    "VALUES (:id, :sid, :fn, :mt, :sz, :ch, :sp, :ca, :cb, :st)"
+                ),
+                {
+                    "id": str(uuid.uuid4()),
+                    "sid": session_id,
+                    "fn": "illegal.csv",
+                    "mt": "text/csv",
+                    "sz": 1,
+                    "ch": None,  # <-- violation: ready + NULL hash
+                    "sp": "/tmp/never",
+                    "ca": now_iso,
+                    "cb": "user",
+                    "st": "ready",
+                },
+            )
+
+    def test_upgrade_008_refuses_preexisting_ready_row_without_hash(self) -> None:
+        """A pre-existing ready row with NULL hash must make the upgrade fail.
+
+        At revision 007 the blobs CHECK was absent, so a legacy shape
+        could have committed a status='ready', content_hash=NULL row
+        (e.g. via a defective finalize path we've now fixed).  Running
+        008 over such a row must crash rather than silently repair —
+        the audit trail cannot mask the invariant violation by
+        rewriting the row.
+        """
+        from alembic import command
+
+        engine = _fresh_engine()
+        cfg = self._upgrade_to_007(engine)
+
+        session_id = str(uuid.uuid4())
+        self._seed_blobs_session(engine, session_id)
+        now_iso = datetime.now(UTC).isoformat()
+        with engine.begin() as conn:
+            conn.execute(
+                text(
+                    "INSERT INTO blobs "
+                    "(id, session_id, filename, mime_type, size_bytes, content_hash, "
+                    " storage_path, created_at, created_by, status) "
+                    "VALUES (:id, :sid, :fn, :mt, :sz, :ch, :sp, :ca, :cb, :st)"
+                ),
+                {
+                    "id": str(uuid.uuid4()),
+                    "sid": session_id,
+                    "fn": "legacy.csv",
+                    "mt": "text/csv",
+                    "sz": 1,
+                    "ch": None,  # <-- the pre-existing violation
+                    "sp": "/tmp/legacy",
+                    "ca": now_iso,
+                    "cb": "user",
+                    "st": "ready",
+                },
+            )
+
+        # Alembic's batch rebuild re-inserts rows into the new table
+        # shape.  The new table carries the CHECK, so re-insertion of
+        # the violating row raises IntegrityError — the upgrade aborts
+        # instead of laundering the bad data through.
+        with pytest.raises(IntegrityError), engine.connect() as connection:
+            cfg.attributes["connection"] = connection
+            command.upgrade(cfg, "008")
+
+        # Schema remained at 007 — no silent repair.
+        with engine.connect() as conn:
+            rev = conn.execute(text("SELECT version_num FROM alembic_version")).scalar_one()
+        assert rev == "007"
+
+    def test_downgrade_008_removes_constraint(self) -> None:
+        """008 → 007 round-trip drops ck_blobs_ready_hash.
+
+        Anchors the reversibility contract — a ready row with a NULL
+        hash that would be rejected at head becomes insertable again
+        at 007, proving the constraint was genuinely removed rather
+        than leaking through the batch rebuild.
+        """
+        from alembic import command
+
+        engine = _fresh_engine()
+        run_migrations(engine)  # to head (008)
+
+        cfg = _alembic_config_for(engine)
+        with engine.connect() as connection:
+            cfg.attributes["connection"] = connection
+            command.downgrade(cfg, "007")
+
+        with engine.connect() as conn:
+            rev = conn.execute(text("SELECT version_num FROM alembic_version")).scalar_one()
+        assert rev == "007"
+
+        # Post-downgrade, a ready+NULL-hash row is accepted again — the
+        # constraint is genuinely gone, not merely renamed or shadowed.
+        session_id = str(uuid.uuid4())
+        self._seed_blobs_session(engine, session_id)
+        now_iso = datetime.now(UTC).isoformat()
+        with engine.begin() as conn:
+            conn.execute(
+                text(
+                    "INSERT INTO blobs "
+                    "(id, session_id, filename, mime_type, size_bytes, content_hash, "
+                    " storage_path, created_at, created_by, status) "
+                    "VALUES (:id, :sid, :fn, :mt, :sz, :ch, :sp, :ca, :cb, :st)"
+                ),
+                {
+                    "id": str(uuid.uuid4()),
+                    "sid": session_id,
+                    "fn": "post-downgrade.csv",
+                    "mt": "text/csv",
+                    "sz": 1,
+                    "ch": None,
+                    "sp": "/tmp/post",
+                    "ca": now_iso,
+                    "cb": "user",
+                    "st": "ready",
+                },
+            )
+
+    # -- Hash-shape enforcement ------------------------------------------
+    #
+    # The CHECK at HEAD must reject not only NULL hashes but also
+    # malformed strings (wrong length, uppercase, non-hex chars).  Without
+    # the shape clause a direct SQL or ORM write could persist a "ready"
+    # row whose hash will never match any real bytes, leaving every
+    # download path raising BlobIntegrityError while the audit trail
+    # claims the blob is finalized.  These tests pin the shape rule at
+    # the database layer so a future migration that loosens the CHECK
+    # (or a backend-port that forgets to translate the GLOB clause) is
+    # caught immediately.
+
+    _VALID_SHA256 = "a" * 64  # 64 lowercase hex chars; structurally valid
+
+    def _insert_blob_row(
+        self,
+        engine: Engine,
+        session_id: str,
+        *,
+        content_hash: str | None,
+        status: str = "ready",
+        filename: str = "shape-test.csv",
+        storage_path: str = "/tmp/shape-test",
+    ) -> None:
+        """INSERT a single blobs row with the given hash/status.
+
+        Centralised so every shape test exercises the same column set
+        the production INSERT path uses; drift between this helper and
+        ``BlobServiceImpl.create_blob`` would mask shape regressions.
+        """
+        now_iso = datetime.now(UTC).isoformat()
+        with engine.begin() as conn:
+            conn.execute(
+                text(
+                    "INSERT INTO blobs "
+                    "(id, session_id, filename, mime_type, size_bytes, "
+                    " content_hash, storage_path, created_at, created_by, status) "
+                    "VALUES (:id, :sid, :fn, :mt, :sz, :ch, :sp, :ca, :cb, :st)"
+                ),
+                {
+                    "id": str(uuid.uuid4()),
+                    "sid": session_id,
+                    "fn": filename,
+                    "mt": "text/csv",
+                    "sz": 1,
+                    "ch": content_hash,
+                    "sp": storage_path,
+                    "ca": now_iso,
+                    "cb": "user",
+                    "st": status,
+                },
+            )
+
+    def test_ready_with_valid_sha256_hex_is_accepted(self) -> None:
+        """The shape CHECK admits a canonical 64-char lowercase hex hash."""
+        engine = _fresh_engine()
+        run_migrations(engine)  # to head (008)
+
+        session_id = str(uuid.uuid4())
+        self._seed_blobs_session(engine, session_id)
+
+        # Should not raise.
+        self._insert_blob_row(
+            engine,
+            session_id,
+            content_hash=self._VALID_SHA256,
+            status="ready",
+        )
+
+    @pytest.mark.parametrize(
+        ("bad_hash", "label"),
+        [
+            ("abc123", "too short — only 6 chars"),
+            ("a" * 63, "off-by-one — 63 chars"),
+            ("a" * 65, "off-by-one — 65 chars"),
+            ("A" * 64, "uppercase — 64 chars but [A-F]"),
+            ("g" * 64, "non-hex letter — 'g' outside [a-f0-9]"),
+            ("a" * 63 + "!", "trailing punctuation"),
+            ("a" * 63 + " ", "trailing whitespace"),
+            ("", "empty string"),
+        ],
+    )
+    def test_ready_with_malformed_hash_is_rejected(self, bad_hash: str, label: str) -> None:
+        """The shape CHECK refuses every flavour of malformed hash.
+
+        Each row is a real bypass path the write-side validator would
+        catch; the database CHECK is the second line of defence for
+        callers that skip the service entirely (raw SQL, alembic
+        scripts, ad-hoc ORM writes, future plugin code).  A passing
+        test for any of these would mean the audit trail can record a
+        "ready" blob whose ``content_hash`` cannot be reproduced from
+        any bytes — exactly the integrity-tampering vector the AD-5/AD-7
+        invariants exist to prevent.
+        """
+        _ = label  # surfaces in pytest output for failure diagnosis
+        engine = _fresh_engine()
+        run_migrations(engine)  # to head (008)
+
+        session_id = str(uuid.uuid4())
+        self._seed_blobs_session(engine, session_id)
+
+        with pytest.raises(IntegrityError):
+            self._insert_blob_row(
+                engine,
+                session_id,
+                content_hash=bad_hash,
+                status="ready",
+            )
+
+    @pytest.mark.parametrize("status", ["pending", "error"])
+    def test_non_ready_rows_are_unconstrained_by_shape(self, status: str) -> None:
+        """Non-ready rows may still carry NULL or malformed hashes.
+
+        The CHECK is intentionally scoped to ``status='ready'``: a
+        ``pending`` row by definition has not been finalised yet (no
+        hash exists), and an ``error`` row records a failed
+        finalisation whose hash may legitimately be NULL or carry the
+        partial value the failed writer computed.  The repair-runbook
+        Variant A path moves bad rows to ``status='error'`` precisely
+        so the migration can be applied — narrowing the CHECK to other
+        statuses would close that escape hatch.
+        """
+        engine = _fresh_engine()
+        run_migrations(engine)  # to head (008)
+
+        session_id = str(uuid.uuid4())
+        self._seed_blobs_session(engine, session_id)
+
+        # NULL hash on non-ready row: allowed.
+        self._insert_blob_row(
+            engine,
+            session_id,
+            content_hash=None,
+            status=status,
+            filename=f"{status}-null.csv",
+            storage_path=f"/tmp/{status}-null",
+        )
+        # Malformed hash on non-ready row: still allowed — only ready
+        # rows must pass the shape rule.
+        self._insert_blob_row(
+            engine,
+            session_id,
+            content_hash="abc123",
+            status=status,
+            filename=f"{status}-malformed.csv",
+            storage_path=f"/tmp/{status}-malformed",
+        )
+
+    def test_update_ready_to_malformed_hash_is_rejected(self) -> None:
+        """Updating a ready row's hash to a malformed value is rejected.
+
+        Plugs the same bypass class as ``UPDATE ... SET content_hash =
+        NULL``: a service regression that mutates the hash column
+        directly (e.g. via ``blobs_table.update().values(...)``) cannot
+        leave the row in a state the integrity check will accept on
+        the next read.
+        """
+        engine = _fresh_engine()
+        run_migrations(engine)  # to head (008)
+
+        session_id = str(uuid.uuid4())
+        self._seed_blobs_session(engine, session_id)
+
+        self._insert_blob_row(
+            engine,
+            session_id,
+            content_hash=self._VALID_SHA256,
+            status="ready",
+        )
+
+        with pytest.raises(IntegrityError), engine.begin() as conn:
+            conn.execute(
+                text("UPDATE blobs SET content_hash = :ch WHERE session_id = :sid"),
+                {"ch": "deadbeef", "sid": session_id},
+            )
+
+    def test_upgrade_008_refuses_preexisting_malformed_hash_row(self) -> None:
+        """A pre-existing ready row with malformed hash blocks the upgrade.
+
+        Mirrors ``test_upgrade_008_refuses_preexisting_ready_row_without_hash``
+        but for the shape invariant.  At revision 007 the CHECK is
+        absent, so a legacy row could carry ``content_hash='abc123'``
+        from a defective writer.  Migration 008's batch rebuild
+        re-inserts every row into the new shape and the constraint
+        rejects the re-insertion — by design, so the audit trail is
+        not silently laundered.  Operators must use the runbook to
+        quarantine or back-fill the row before the migration can land.
+        """
+        from alembic import command
+
+        engine = _fresh_engine()
+        cfg = self._upgrade_to_007(engine)
+
+        session_id = str(uuid.uuid4())
+        self._seed_blobs_session(engine, session_id)
+        # Insert a malformed-but-non-NULL hash row at 007, where no
+        # CHECK exists to reject it.
+        self._insert_blob_row(
+            engine,
+            session_id,
+            content_hash="abc123",
+            status="ready",
+            filename="legacy-malformed.csv",
+            storage_path="/tmp/legacy-malformed",
+        )
+
+        with pytest.raises(IntegrityError), engine.connect() as connection:
+            cfg.attributes["connection"] = connection
+            command.upgrade(cfg, "008")
+
+        # Schema remained at 007 — the migration did not rewrite the
+        # malformed hash to anything else; the row is still there for
+        # the operator to inspect.
+        with engine.connect() as conn:
+            rev = conn.execute(text("SELECT version_num FROM alembic_version")).scalar_one()
+        assert rev == "007"

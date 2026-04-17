@@ -5,6 +5,7 @@ from __future__ import annotations
 import types
 import typing
 from pathlib import Path
+from typing import Any
 
 import pytest
 from pydantic import ValidationError
@@ -542,7 +543,11 @@ def _optional_string_field_names() -> list[str]:
     """Enumerate all str | None fields on WebSettings for parametrized testing."""
     fields: list[str] = []
     for name, field_info in WebSettings.model_fields.items():
-        ann = field_info.annotation
+        # field_info.annotation is typed as `type[Any] | None` by pydantic,
+        # but at runtime a `str | None` field is stored as a types.UnionType
+        # instance.  Widen to Any so the isinstance narrowing is honest —
+        # mypy otherwise treats the branch body as unreachable.
+        ann: Any = field_info.annotation
         if isinstance(ann, types.UnionType):
             args = typing.get_args(ann)
             if str in args and type(None) in args:

@@ -183,6 +183,13 @@ class _TestSinkBase:
     def get_config_model(cls, config: dict[str, Any] | None = None) -> None:
         return None
 
+    @classmethod
+    def get_config_schema(cls) -> dict[str, Any]:
+        """Minimal schema stub — production sinks return a JSON schema,
+        test fixtures only need the attribute to satisfy SinkProtocol.
+        """
+        return {"type": "object", "additionalProperties": True}
+
 
 class _TestTransformBase(BaseTransform):
     """Base class for test transforms inheriting production BaseTransform.

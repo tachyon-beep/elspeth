@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import asyncio
 import threading
+from collections.abc import Callable
 from datetime import UTC, datetime
 from typing import Literal
 from unittest.mock import MagicMock
@@ -24,7 +25,12 @@ from elspeth.web.execution.schemas import (
     RunEvent,
 )
 
-_EVENT_DATA = {
+_EventData = ProgressData | ErrorData | CompletedData | CancelledData | FailedData
+
+# Typed as the concrete union so mypy resolves RunEvent(data=...) rather than
+# widening to the _StrictResponse base; also ensures the lambdas stay in
+# lockstep with RunEvent's discriminated union.
+_EVENT_DATA: dict[str, Callable[[], _EventData]] = {
     "progress": lambda: ProgressData(rows_processed=10, rows_failed=0),
     "error": lambda: ErrorData(message="test error", node_id=None, row_id=None),
     "completed": lambda: CompletedData(
@@ -153,6 +159,7 @@ class TestProgressBroadcasterThreadSafety:
         received = await asyncio.wait_for(queue.get(), timeout=5.0)
         assert received.run_id == "run-1"
         assert received.event_type == "progress"
+        assert isinstance(received.data, ProgressData)
         assert received.data.rows_processed == 10
 
     @pytest.mark.asyncio
@@ -183,6 +190,7 @@ class TestProgressBroadcasterThreadSafety:
         received = []
         for _ in range(5):
             item = await asyncio.wait_for(queue.get(), timeout=5.0)
+            assert isinstance(item.data, ProgressData)
             received.append(item.data.rows_processed)
 
         assert received == [0, 1, 2, 3, 4]

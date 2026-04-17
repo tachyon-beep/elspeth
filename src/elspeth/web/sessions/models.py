@@ -188,6 +188,29 @@ blobs_table = Table(
         "status IN ('ready', 'pending', 'error')",
         name="ck_blobs_status",
     ),
+    # Integrity invariant: a blob that claims to be ready MUST carry a
+    # SHA-256 hex content_hash (exactly 64 lowercase hex characters).
+    # Without this, a defective finalization path — or a direct SQL
+    # write — could persist a "ready" row whose hash either is NULL
+    # (no integrity check possible) or is a malformed string like
+    # "abc123" (will never match any real bytes, so every download
+    # raises BlobIntegrityError).  Either failure mode leaves the
+    # audit trail asserting "this blob is ready" while the bytes are
+    # unverifiable in practice (AD-5/AD-7 in
+    # docs/plans/rc4.2-ux-remediation/2026-03-30-02-blob-manager-subplan.md).
+    #
+    # The shape rule mirrors ``_validate_finalize_hash`` at the write
+    # side (``re.compile(r"^[a-f0-9]{64}$")``).  The DDL here uses
+    # SQLite GLOB syntax because the session DB is SQLite (see
+    # ``sessions/engine.py`` and the StaticPool test harness); the
+    # PostgreSQL POSIX-regex equivalent lives in migration 008's
+    # ``_ready_hash_check_clause`` and is selected at upgrade time.
+    # Operator repair guidance for both invariant classes (NULL and
+    # malformed) lives in docs/runbooks/repair-blob-ready-hash.md.
+    CheckConstraint(
+        "status != 'ready' OR (content_hash IS NOT NULL AND length(content_hash) = 64 AND content_hash NOT GLOB '*[^a-f0-9]*')",
+        name="ck_blobs_ready_hash",
+    ),
 )
 
 blob_run_links_table = Table(

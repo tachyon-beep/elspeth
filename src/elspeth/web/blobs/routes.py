@@ -7,6 +7,7 @@ belong to the authenticated user's session.
 
 from __future__ import annotations
 
+from typing import cast
 from urllib.parse import quote
 from uuid import UUID
 
@@ -17,6 +18,7 @@ from elspeth.web.auth.middleware import get_current_user
 from elspeth.web.auth.models import UserIdentity
 from elspeth.web.blobs.protocol import (
     ALLOWED_MIME_TYPES,
+    AllowedMimeType,
     BlobActiveRunError,
     BlobIntegrityError,
     BlobNotFoundError,
@@ -25,7 +27,7 @@ from elspeth.web.blobs.protocol import (
     BlobStateError,
 )
 from elspeth.web.blobs.schemas import BlobMetadataResponse, CreateInlineBlobRequest
-from elspeth.web.blobs.service import BlobServiceImpl
+from elspeth.web.blobs.service import BlobServiceImpl, sanitize_filename
 from elspeth.web.blobs.sniff import detect_mime_type
 
 
@@ -114,8 +116,13 @@ def create_blobs_router() -> APIRouter:
         # the effective type.
         mime_type = file.content_type or "application/octet-stream"
 
-        # Read content with size enforcement
-        original_filename = file.filename or "upload"
+        # Validate filename at the HTTP boundary (Tier 3) so malformed
+        # uploads surface as 422, not an uncaught ValueError propagated
+        # from sanitize_filename() deeper in the service layer.
+        try:
+            original_filename = sanitize_filename(file.filename or "upload")
+        except ValueError as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from None
         chunks: list[bytes] = []
         total_size = 0
         while chunk := await file.read(8192):
@@ -143,13 +150,19 @@ def create_blobs_router() -> APIRouter:
                 status_code=415,
                 detail=f"Detected content type '{effective_mime}' is not in the allowed set.",
             )
+        # The membership check above narrows effective_mime to one of the
+        # AllowedMimeType Literal members; mypy cannot follow a frozenset
+        # membership test to a Literal, so cast explicitly.  The cast is
+        # safe *because* of the runtime check two lines up — removing the
+        # check would also be a type-safety regression.
+        effective_mime_typed = cast(AllowedMimeType, effective_mime)
 
         try:
             record = await blob_service.create_blob(
                 session_id=session_id,
                 filename=original_filename,
                 content=content,
-                mime_type=effective_mime,
+                mime_type=effective_mime_typed,
                 created_by="user",
                 source_description="uploaded",
             )
@@ -164,14 +177,14 @@ def create_blobs_router() -> APIRouter:
         request: Request,
         user: UserIdentity = Depends(get_current_user),  # noqa: B008
     ) -> BlobMetadataResponse:
-        """Create a blob from inline text/JSON content."""
-        blob_service = await _verify_session_and_get_blob_service(session_id, user, request)
+        """Create a blob from inline text/JSON content.
 
-        if body.content_type not in ALLOWED_MIME_TYPES:
-            raise HTTPException(
-                status_code=415,
-                detail=f"Unsupported content type: {body.content_type}.",
-            )
+        Request validation — including filename sanitization, mime_type
+        allowlist enforcement, and rejection of unknown fields — is
+        performed by CreateInlineBlobRequest at the Pydantic layer.
+        This route only enforces size and persistence-layer concerns.
+        """
+        blob_service = await _verify_session_and_get_blob_service(session_id, user, request)
 
         settings = request.app.state.settings
         content_bytes = body.content.encode("utf-8")
@@ -186,7 +199,7 @@ def create_blobs_router() -> APIRouter:
                 session_id=session_id,
                 filename=body.filename,
                 content=content_bytes,
-                mime_type=body.content_type,
+                mime_type=body.mime_type,
                 created_by="assistant",
                 source_description="created inline",
             )
