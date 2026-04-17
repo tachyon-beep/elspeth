@@ -122,7 +122,7 @@ Error responses:
 - 404 with `{"detail": "Unknown plugin type: {type}"}` if `type` is not one of the three valid values.
 - 404 with `{"detail": "Unknown {type} plugin: {name}. Available: [...]"}` if the plugin name is not registered.
 
-No authentication is required for catalog endpoints in v1. The catalog is public information about the system's capabilities. If auth is later required, the existing auth middleware can be applied to the router.
+All catalog endpoints require authentication via `Depends(get_current_user)`, applied at the router-mount seam in `create_app()`. The earlier v1 position (public catalog) was predicated on the schema endpoint returning only the truncated base-class schema; once the flattener was widened to emit full Pydantic discriminated-union contracts (per-provider required fields, full docstrings), publishing that surface to anonymous callers was no longer consistent with the secured-deployment posture implied by `auth_provider=oidc|entra`. Contract pinned in `tests/unit/web/test_app.py::TestCatalogAuthGating`.
 
 ---
 

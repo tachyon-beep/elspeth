@@ -11,13 +11,14 @@ from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from pathlib import Path
 
-from fastapi import FastAPI, Request
+from fastapi import Depends, FastAPI, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from sqlalchemy.exc import SQLAlchemyError
 
 from elspeth.web.auth.local import LocalAuthProvider
+from elspeth.web.auth.middleware import get_current_user
 from elspeth.web.auth.protocol import AuthProvider
 from elspeth.web.auth.routes import create_auth_router
 from elspeth.web.blobs.routes import create_blobs_router
@@ -271,7 +272,11 @@ def create_app(settings: WebSettings | None = None) -> FastAPI:
 
     # --- Catalog ---
     app.state.catalog_service = create_catalog_service()
-    app.include_router(catalog_router, prefix="/api/catalog")
+    app.include_router(
+        catalog_router,
+        prefix="/api/catalog",
+        dependencies=[Depends(get_current_user)],
+    )
 
     # --- Auth provider setup ---
     auth_provider: AuthProvider

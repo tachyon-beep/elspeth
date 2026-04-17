@@ -137,13 +137,74 @@ class TestCatalogWiring:
         assert app.state.catalog_service is not None
 
     def test_catalog_sources_endpoint_reachable(self, tmp_path) -> None:
+        from elspeth.web.auth.middleware import get_current_user
+        from elspeth.web.auth.models import UserIdentity
+
         app = create_app(_settings(tmp_path))
+
+        async def _mock_user() -> UserIdentity:
+            return UserIdentity(user_id="test-user", username="test-user")
+
+        app.dependency_overrides[get_current_user] = _mock_user
         client = TestClient(app)
         response = client.get("/api/catalog/sources")
         assert response.status_code == 200
         data = response.json()
         assert isinstance(data, list)
         assert len(data) > 0
+
+
+class TestCatalogAuthGating:
+    """Catalog endpoints must require authentication.
+
+    Commit 46b94fda widened the catalog's disclosure surface from the
+    truncated base-class schema to the full Pydantic discriminated union
+    (per-provider required fields, full docstrings). The v1 design decision
+    to leave /api/catalog/* public (Sub-Spec 3, 2026-03-28) was made under
+    the old, thinner payload; these tests pin the revised contract.
+    """
+
+    def test_catalog_sources_requires_auth(self, tmp_path) -> None:
+        app = create_app(_settings(tmp_path))
+        client = TestClient(app)
+        response = client.get("/api/catalog/sources")
+        assert response.status_code == 401
+
+    def test_catalog_transforms_requires_auth(self, tmp_path) -> None:
+        app = create_app(_settings(tmp_path))
+        client = TestClient(app)
+        response = client.get("/api/catalog/transforms")
+        assert response.status_code == 401
+
+    def test_catalog_sinks_requires_auth(self, tmp_path) -> None:
+        app = create_app(_settings(tmp_path))
+        client = TestClient(app)
+        response = client.get("/api/catalog/sinks")
+        assert response.status_code == 401
+
+    def test_catalog_schema_requires_auth(self, tmp_path) -> None:
+        """The schema endpoint is the primary disclosure concern — reject
+        anonymous access explicitly so a regression on the router gate
+        doesn't reopen the full discriminated-union payload."""
+        app = create_app(_settings(tmp_path))
+        client = TestClient(app)
+        response = client.get("/api/catalog/transforms/passthrough/schema")
+        assert response.status_code == 401
+
+    def test_catalog_accessible_with_auth(self, tmp_path) -> None:
+        """Sanity: the gate doesn't break the authenticated path."""
+        from elspeth.web.auth.middleware import get_current_user
+        from elspeth.web.auth.models import UserIdentity
+
+        app = create_app(_settings(tmp_path))
+
+        async def _mock_user() -> UserIdentity:
+            return UserIdentity(user_id="test-user", username="test-user")
+
+        app.dependency_overrides[get_current_user] = _mock_user
+        client = TestClient(app)
+        response = client.get("/api/catalog/sources")
+        assert response.status_code == 200
 
 
 class TestAuthWiring:

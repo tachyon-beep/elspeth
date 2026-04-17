@@ -224,12 +224,12 @@ allow_hits:
   reason: Tier 3 boundary — isinstance check on username from external IdP JWT payload (preferred_username is Any)
   safety: Raises AuthenticationError on non-string; validated at construction time
   expires: null
-- key: web/app.py:R5:_settings_from_env:fp=e57298770846b8b4
+- key: web/app.py:R5:_settings_from_env:fp=21d5ebdcf643a1bd
   owner: web-app
   reason: Tier 3 boundary — JSON-parsed env var may be a list; isinstance check classifies for tuple conversion
   safety: isinstance used only for type dispatch; no contract masking
   expires: null
-- key: web/app.py:R6:_settings_from_env:fp=780142e7320e9687
+- key: web/app.py:R6:_settings_from_env:fp=4e67706ca34257c0
   owner: web-app
   reason: Tier 3 boundary — env var value that isn't valid JSON is treated as plain string (the common case)
   safety: JSONDecodeError caught only to fall back to raw string; no silent data loss
@@ -398,27 +398,27 @@ allow_hits:
   reason: isinstance(config_dict, dict) validates YAML parse output before resolve_secret_refs — yaml.safe_load can return non-dict for malformed input
   safety: Raises TypeError with diagnostic message; no error suppression
   expires: null
-- key: web/app.py:R1:create_app:fp=66da20dd8cead3e0
+- key: web/app.py:R1:create_app:fp=4e394272c03e1ece
   owner: web-app
   reason: Tier 3 — os.environ.get() for optional WEB_CONCURRENCY env var
   safety: Defaults to "1" when absent
   expires: null
-- key: web/app.py:R6:create_app:fp=f2da914d83f3ce8b
+- key: web/app.py:R6:create_app:fp=0a32a3839fd3efcf
   owner: web-app
   reason: ValueError from int() on non-numeric WEB_CONCURRENCY
   safety: Defaults to single worker
   expires: null
-- key: web/app.py:R6:create_app:fp=c5631e36153f72d4
+- key: web/app.py:R6:create_app:fp=10e82a2aadd05267
   owner: web-app
   reason: ValueError from int() on non-numeric --workers arg
   safety: Skips this argv entry
   expires: null
-- key: web/app.py:R6:create_app:fp=a91e6bb2df64f0f8
+- key: web/app.py:R6:create_app:fp=15f7c62c727f3314
   owner: web-app
   reason: ValueError from int() on non-numeric --workers=N
   safety: Skips this argv entry
   expires: null
-- key: web/app.py:R6:create_app:fp=9ecd82bfc08214d1
+- key: web/app.py:R6:create_app:fp=ea55cf32bf6d732c
   owner: web-app
   reason: ValueError from int() on non-numeric -w arg
   safety: Skips this argv entry
@@ -532,7 +532,7 @@ allow_hits:
   reason: Last-resort safety net — isinstance check excludes KeyboardInterrupt/SystemExit from diagnostic logging
   safety: Only suppresses signal exceptions; all other exceptions logged as last-resort diagnostic
   expires: null
-- key: web/app.py:R1:create_app:fp=49743856b3fa00d7
+- key: web/app.py:R1:create_app:fp=7bfabd82592a7dec
   owner: web-app
   reason: Tier 3 — os.environ.get() for optional ELSPETH_ENV
   safety: Returns None when absent; only used for test guard
@@ -602,17 +602,17 @@ allow_hits:
   reason: TOCTOU guard — run may be deleted between verify_run_ownership and get_status
   safety: Only not-found errors close with 4004; returns immediately
   expires: null
-- key: web/app.py:R1:lifespan:fp=bd2fec40c6f4eb1a
+- key: web/app.py:R1:lifespan:fp=b2581fe0eb3f128f
   owner: web-app
   reason: False positive — httpx.AsyncClient.get() is an HTTP GET request, not dict.get()
   safety: HTTP errors caught by raise_for_status(); failure now raises SystemExit
   expires: null
-- key: web/app.py:R7:lifespan:fp=4d592a4d97a3dc83
+- key: web/app.py:R7:lifespan:fp=644503148628f939
   owner: web-execution
   reason: contextlib.suppress(CancelledError) is the expected shutdown path for the periodic orphan cleanup task
   safety: Clean cancellation during app shutdown; no error suppression
   expires: null
-- key: "web/app.py:R6:_periodic_orphan_cleanup:fp=66dbc3448843ee35"
+- key: "web/app.py:R6:_periodic_orphan_cleanup:fp=702f7ae6cba0f026"
   owner: web-execution
   reason: "Audit/IO-cleanup narrow catch — except (SQLAlchemyError, OSError) absorbs recoverable failures of cancel_all_orphaned_runs (transient DB loss, lock contention, SQLite file I/O) so the periodic loop retries on the next interval. Catch is intentionally narrow; programmer-bug exceptions (AttributeError from a drifted attribute on ExecutionServiceImpl, TypeError from a signature change, AssertionError from an invariant guard) are NOT caught and terminate the background task so they surface at lifespan shutdown (the outer contextlib.suppress absorbs only CancelledError). Same pattern as the CRIT-2 audit-cleanup narrow catch at web/composer/service.py ComposerServiceImpl.compose and the rollback-cleanup sites at web/sessions/routes.py fork_from_message (lines 968 and 987)."
   safety: "Recoverable failures are logged via slog.error periodic_orphan_cleanup_failed with exc_class only — exc_info is deliberately omitted so SQLAlchemy __cause__ chains (DB URLs, schema names, sqlite file path) cannot reach structured server logs. Same exc_info-redaction pattern commit 59bdf514 established across the HTTP-path slog.error sites. Programmer-bug propagation invariant is guarded by tests/unit/web/test_app.py test_programmer_bug_terminates_task_and_does_not_log (AttributeError terminates the task) and the recoverable-failure path by test_continues_after_exception (OperationalError logged, loop continues, no traceback text leaked)."
