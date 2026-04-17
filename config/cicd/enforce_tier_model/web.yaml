@@ -73,20 +73,56 @@ allow_hits:
   reason: Tier 3 boundary — JSON schema field 'default' is optional
   safety: Returns None; ConfigFieldSummary.default accepts None
   expires: null
-- key: web/auth/oidc.py:R1:JWKSTokenValidator:ensure_jwks:fp=5d9ec6c99446cd42
+- key: web/auth/oidc.py:R1:JWKSTokenValidator:ensure_jwks:fp=91165515af3936b3
   owner: web-auth
   reason: False positive — httpx.AsyncClient.get() is an HTTP GET request, not dict.get()
   safety: HTTP errors caught by raise_for_status() and except block
   expires: null
-- key: web/auth/oidc.py:R1:JWKSTokenValidator:ensure_jwks:fp=0212bb5677a2406e
+- key: web/auth/oidc.py:R1:JWKSTokenValidator:ensure_jwks:fp=93ddf48d8606be05
   owner: web-auth
   reason: False positive — httpx.AsyncClient.get() is an HTTP GET request, not dict.get()
   safety: HTTP errors caught by raise_for_status() and except block
   expires: null
-- key: web/auth/oidc.py:R1:JWKSTokenValidator:decode_token:fp=43b5f14ace609f1d
+- key: web/auth/oidc.py:R1:JWKSTokenValidator:decode_token:fp=70b4dcac26ccb394
   owner: web-auth
   reason: Tier 3 boundary — JWT header kid field is optional per RFC 7515
-  safety: Missing kid falls through to first key in JWKS; AuthenticationError on decode failure
+  safety: Missing kid falls through to AuthenticationError path (no matching key); no silent acceptance
+  expires: null
+# Tier 3 boundary — OIDC discovery and JWKS documents are external IdP JSON.
+# We shape-validate at the trust boundary (isinstance + dict.get with
+# explicit checks) and raise AuthenticationError on mismatch so a wrong-
+# shaped IdP response surfaces as HTTP 401 rather than escaping as HTTP 500
+# (bug elspeth-c98e8e7047). The cache is only written AFTER validation, so
+# a malformed response cannot poison self._jwks for the TTL window.
+- key: web/auth/oidc.py:R5:JWKSTokenValidator:_validate_discovery_document:fp=826933292145d488
+  owner: web-auth
+  reason: Tier 3 boundary — OIDC discovery JSON top-level shape (dict vs. list/string) must be validated before indexing
+  safety: Non-dict raises AuthenticationError with got-type in message; no silent coercion; converts to HTTP 401
+  expires: null
+- key: web/auth/oidc.py:R1:JWKSTokenValidator:_validate_discovery_document:fp=586bfbffd6625a77
+  owner: web-auth
+  reason: Tier 3 boundary — discovery dict.get('jwks_uri') lets us validate type before use rather than letting KeyError mask malformed JSON
+  safety: Missing or non-string raises AuthenticationError; validated string is returned to caller; no caching before validation
+  expires: null
+- key: web/auth/oidc.py:R5:JWKSTokenValidator:_validate_discovery_document:fp=c8f61e0a7e0c46b8
+  owner: web-auth
+  reason: Tier 3 boundary — jwks_uri must be a non-empty string; IdPs have been observed returning integers/nulls for this field
+  safety: Non-string or empty raises AuthenticationError with a specific message; no silent fallback
+  expires: null
+- key: web/auth/oidc.py:R5:JWKSTokenValidator:_validate_jwks_document:fp=0850896bdc605c33
+  owner: web-auth
+  reason: Tier 3 boundary — JWKS JSON top-level shape must be dict before passing to PyJWKSet.from_dict (which raises AttributeError on non-dict)
+  safety: Non-dict raises AuthenticationError before self._jwks is assigned; malformed responses cannot poison the cache
+  expires: null
+- key: web/auth/oidc.py:R1:JWKSTokenValidator:_validate_jwks_document:fp=f275f0d2d6ad1c46
+  owner: web-auth
+  reason: Tier 3 boundary — jwks.get('keys') permits shape-checking the value type before handing off to PyJWKSet
+  safety: Non-list raises AuthenticationError; validation happens before cache assignment
+  expires: null
+- key: web/auth/oidc.py:R5:JWKSTokenValidator:_validate_jwks_document:fp=1aa9e3980886af84
+  owner: web-auth
+  reason: Tier 3 boundary — 'keys' field must be a list per RFC 7517; IdPs have been observed returning objects or nulls
+  safety: Non-list raises AuthenticationError; cache not written until shape is verified
   expires: null
 - key: web/auth/oidc.py:R1:OIDCAuthProvider:authenticate:fp=56d6ede6a5a01482
   owner: web-auth

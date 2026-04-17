@@ -26,6 +26,7 @@ class EntraAuthProvider:
         tenant_id: str,
         audience: str,
         jwks_cache_ttl_seconds: int = 3600,
+        jwks_failure_retry_seconds: int = 30,
     ) -> None:
         self._tenant_id = tenant_id
         issuer = f"https://login.microsoftonline.com/{tenant_id}/v2.0"
@@ -33,6 +34,7 @@ class EntraAuthProvider:
             issuer=issuer,
             audience=audience,
             jwks_cache_ttl_seconds=jwks_cache_ttl_seconds,
+            jwks_failure_retry_seconds=jwks_failure_retry_seconds,
         )
 
     def _validate_tenant(self, payload: dict[str, Any]) -> None:

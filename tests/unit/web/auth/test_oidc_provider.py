@@ -439,7 +439,10 @@ class TestOIDCJWKSFailures:
                 "elspeth.web.auth.oidc.httpx.AsyncClient",
                 return_value=client_mock,
             ),
-            pytest.raises(AuthenticationError, match="Failed to fetch JWKS"),
+            pytest.raises(
+                AuthenticationError,
+                match="missing non-empty string 'jwks_uri'",
+            ),
         ):
             await provider.authenticate("some-token")
 
@@ -552,6 +555,197 @@ class TestOIDCJWKSFailures:
             pytest.raises(AuthenticationError, match="Failed to fetch JWKS"),
         ):
             await provider.authenticate("some-token")
+
+
+class TestOIDCJWKSShapeValidation:
+    """Tests that shape-malformed IdP responses surface as AuthenticationError.
+
+    Regression coverage for bug elspeth-c98e8e7047: a JSON-valid response
+    with the wrong top-level type must not escape as TypeError/AttributeError
+    (which would become HTTP 500 via middleware) and must not poison the
+    JWKS cache.
+    """
+
+    @staticmethod
+    def _patch_responses(discovery_json: object, keys_json: object):
+        async def mock_get(url, **kwargs):
+            response = MagicMock()
+            response.raise_for_status = lambda: None
+            if ".well-known/openid-configuration" in url:
+                response.json.return_value = discovery_json
+            else:
+                response.json.return_value = keys_json
+            return response
+
+        client_mock = AsyncMock()
+        client_mock.get = mock_get
+        client_mock.__aenter__ = AsyncMock(return_value=client_mock)
+        client_mock.__aexit__ = AsyncMock(return_value=False)
+        return patch("elspeth.web.auth.oidc.httpx.AsyncClient", return_value=client_mock)
+
+    @pytest.mark.asyncio
+    async def test_discovery_json_array_raises_auth_error(self) -> None:
+        """Discovery returning a JSON array must raise AuthenticationError, not TypeError."""
+        provider = OIDCAuthProvider(issuer=ISSUER, audience=AUDIENCE)
+        with (
+            self._patch_responses([], {"keys": []}),
+            pytest.raises(AuthenticationError, match="not a JSON object"),
+        ):
+            await provider.authenticate("some-token")
+
+    @pytest.mark.asyncio
+    async def test_discovery_jwks_uri_empty_string_raises(self) -> None:
+        """Discovery with empty jwks_uri must raise AuthenticationError."""
+        provider = OIDCAuthProvider(issuer=ISSUER, audience=AUDIENCE)
+        with (
+            self._patch_responses({"jwks_uri": "", "issuer": ISSUER}, {"keys": []}),
+            pytest.raises(AuthenticationError, match="non-empty string 'jwks_uri'"),
+        ):
+            await provider.authenticate("some-token")
+
+    @pytest.mark.asyncio
+    async def test_discovery_jwks_uri_non_string_raises(self) -> None:
+        """Discovery with non-string jwks_uri must raise AuthenticationError."""
+        provider = OIDCAuthProvider(issuer=ISSUER, audience=AUDIENCE)
+        with (
+            self._patch_responses({"jwks_uri": 42, "issuer": ISSUER}, {"keys": []}),
+            pytest.raises(AuthenticationError, match="non-empty string 'jwks_uri'"),
+        ):
+            await provider.authenticate("some-token")
+
+    @pytest.mark.asyncio
+    async def test_jwks_json_array_raises_auth_error_and_does_not_poison_cache(self) -> None:
+        """JWKS returning a JSON array must raise AuthenticationError and leave cache untouched."""
+        provider = OIDCAuthProvider(issuer=ISSUER, audience=AUDIENCE)
+        with (
+            self._patch_responses({"jwks_uri": f"{ISSUER}/keys"}, []),
+            pytest.raises(AuthenticationError, match="not a JSON object"),
+        ):
+            await provider.authenticate("some-token")
+        # Cache must remain empty: a malformed response must not persist.
+        assert provider._validator._jwks is None
+
+    @pytest.mark.asyncio
+    async def test_jwks_missing_keys_list_raises(self) -> None:
+        """JWKS document without 'keys' list must raise AuthenticationError."""
+        provider = OIDCAuthProvider(issuer=ISSUER, audience=AUDIENCE)
+        with (
+            self._patch_responses({"jwks_uri": f"{ISSUER}/keys"}, {"not_keys": []}),
+            pytest.raises(AuthenticationError, match="missing 'keys' list"),
+        ):
+            await provider.authenticate("some-token")
+
+    @pytest.mark.asyncio
+    async def test_jwks_keys_non_list_raises(self) -> None:
+        """JWKS document with non-list 'keys' must raise AuthenticationError."""
+        provider = OIDCAuthProvider(issuer=ISSUER, audience=AUDIENCE)
+        with (
+            self._patch_responses({"jwks_uri": f"{ISSUER}/keys"}, {"keys": "not-a-list"}),
+            pytest.raises(AuthenticationError, match="missing 'keys' list"),
+        ):
+            await provider.authenticate("some-token")
+
+
+class TestOIDCStaleCacheBackoff:
+    """Tests that stale-cache fallback throttles IdP re-fetches during an outage.
+
+    Regression coverage for bug elspeth-7f262cf7e1: once the JWKS cache
+    expires during an IdP outage, stale-cache fallback must advance the
+    refresh horizon so concurrent auth requests do not all queue behind
+    the refresh lock re-hitting a dead IdP.
+    """
+
+    @pytest.mark.asyncio
+    async def test_stale_cache_throttles_refetch_within_retry_window(
+        self,
+        rsa_keypair,
+        mock_httpx_discovery,
+    ) -> None:
+        """After a failed refresh with stale cache served, subsequent calls within the retry window must not re-hit the IdP."""
+        private_key, _ = rsa_keypair
+        # TTL=0: every call is "past due" under the old implementation.
+        # Failure retry 60s: second call within this window should NOT re-fetch.
+        provider = OIDCAuthProvider(
+            issuer=ISSUER,
+            audience=AUDIENCE,
+            jwks_cache_ttl_seconds=0,
+            jwks_failure_retry_seconds=60,
+        )
+        token = make_rs256_token(private_key, _valid_claims())
+
+        # Seed the cache with a successful fetch.
+        with mock_httpx_discovery:
+            await provider.authenticate(token)
+
+        # Now simulate IdP outage. Count network attempts.
+        attempt_count = 0
+
+        async def failing_get(url, **kwargs):
+            nonlocal attempt_count
+            attempt_count += 1
+            raise httpx.ConnectError("IdP is down")
+
+        failing_client = AsyncMock()
+        failing_client.get = failing_get
+        failing_client.__aenter__ = AsyncMock(return_value=failing_client)
+        failing_client.__aexit__ = AsyncMock(return_value=False)
+
+        with patch("elspeth.web.auth.oidc.httpx.AsyncClient", return_value=failing_client):
+            # First call under outage: attempts one fetch, falls back to stale cache.
+            identity1 = await provider.authenticate(token)
+            # Second call within the 60s backoff window: MUST use cache, not re-fetch.
+            identity2 = await provider.authenticate(token)
+            # Third call too — still within window.
+            identity3 = await provider.authenticate(token)
+
+        assert identity1.user_id == "user-123"
+        assert identity2.user_id == "user-123"
+        assert identity3.user_id == "user-123"
+        # The fix: only one network attempt during the backoff window.
+        # Pre-fix behaviour: 3 attempts (one per authenticate call).
+        assert attempt_count == 1, (
+            f"Expected 1 IdP fetch during backoff window, got {attempt_count}. Stale-cache fallback is not advancing _next_refresh_at."
+        )
+
+    @pytest.mark.asyncio
+    async def test_retry_window_elapses_allows_new_fetch(
+        self,
+        rsa_keypair,
+        mock_httpx_discovery,
+    ) -> None:
+        """Once the failure-retry window elapses, a fresh fetch is attempted."""
+        private_key, _ = rsa_keypair
+        provider = OIDCAuthProvider(
+            issuer=ISSUER,
+            audience=AUDIENCE,
+            jwks_cache_ttl_seconds=0,
+            jwks_failure_retry_seconds=60,
+        )
+        token = make_rs256_token(private_key, _valid_claims())
+
+        # Seed the cache with a successful fetch.
+        with mock_httpx_discovery:
+            await provider.authenticate(token)
+
+        attempt_count = 0
+
+        async def failing_get(url, **kwargs):
+            nonlocal attempt_count
+            attempt_count += 1
+            raise httpx.ConnectError("IdP is down")
+
+        failing_client = AsyncMock()
+        failing_client.get = failing_get
+        failing_client.__aenter__ = AsyncMock(return_value=failing_client)
+        failing_client.__aexit__ = AsyncMock(return_value=False)
+
+        with patch("elspeth.web.auth.oidc.httpx.AsyncClient", return_value=failing_client):
+            await provider.authenticate(token)  # first failed fetch
+            # Simulate time passing past the retry window.
+            provider._validator._next_refresh_at = time.time() - 1
+            await provider.authenticate(token)  # should attempt fetch again
+
+        assert attempt_count == 2
 
 
 class TestOIDCProtocolConformance:
