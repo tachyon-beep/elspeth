@@ -214,12 +214,22 @@ class TestTreeNodeImmutability:
         with pytest.raises(FrozenInstanceError):
             node.expanded = False  # type: ignore[misc]
 
-    def test_tree_node_rejects_invalid_children_type(self) -> None:
-        """TreeNode raises TypeError for non-tuple children."""
+    def test_tree_node_normalizes_list_children_to_tuple(self) -> None:
+        """TreeNode deep-freezes container fields in __post_init__, so a list
+        of children (if the caller's type annotation was ignored) is normalised
+        to a tuple rather than rejected.
+
+        This is the correct behaviour per the freeze contract: deep_freeze
+        converts list → tuple, preserving the deep-immutability invariant
+        without requiring defensive isinstance guards on the container type.
+        The per-element isinstance(child, TreeNode) check remains the
+        relevant Tier 1 invariant.
+        """
         from elspeth.tui.widgets.lineage_tree import TreeNode
 
-        with pytest.raises(TypeError, match="children must be tuple"):
-            TreeNode(label="test", node_type="test", children=[])  # type: ignore[arg-type]
+        node = TreeNode(label="test", node_type="test", children=[])  # type: ignore[arg-type]
+        assert node.children == ()
+        assert isinstance(node.children, tuple)
 
     def test_tree_node_rejects_non_tree_node_children(self) -> None:
         """TreeNode raises TypeError for children that aren't TreeNodes."""

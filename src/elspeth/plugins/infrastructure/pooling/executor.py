@@ -20,6 +20,7 @@ from typing import Any
 from elspeth.contracts import TransformErrorReason, TransformResult
 from elspeth.contracts.engine import BufferEntry
 from elspeth.contracts.errors import TIER_1_ERRORS, PluginRetryableError
+from elspeth.contracts.freeze import freeze_fields
 from elspeth.plugins.infrastructure.pooling.config import PoolConfig
 from elspeth.plugins.infrastructure.pooling.errors import CapacityError
 from elspeth.plugins.infrastructure.pooling.reorder_buffer import ReorderBuffer
@@ -33,12 +34,14 @@ class RowContext:
     Frozen: row contexts cross thread boundaries — immutability prevents
     data races between the dispatch thread and worker threads.
 
-    Note: ``row`` stays as ``dict[str, Any]`` (not MappingProxyType) because
-    it is Tier 2 pipeline data that flows into PipelineRow, which enforces
-    ``type(data) is dict``.
+    ``row`` is deep-frozen in ``__post_init__`` (dict → MappingProxyType),
+    isolating the context from external mutation of the source dict.
+    Consumers that need to hand the row off to ``PipelineRow`` (which
+    enforces ``type(data) is dict`` as a Tier 1 guard) must materialise a
+    fresh dict at that boundary, e.g. ``PipelineRow(dict(ctx.row), ...)``.
 
     Attributes:
-        row: The row data to process
+        row: The row data to process (stored as MappingProxyType)
         state_id: State ID for audit trail. Can be unique per row OR shared
             across batch rows (when used with aggregation). When shared,
             call_index in PluginContext provides uniqueness for external_calls.
@@ -54,6 +57,7 @@ class RowContext:
             raise ValueError("RowContext.state_id must not be empty")
         if self.row_index < 0:
             raise ValueError(f"RowContext.row_index must be non-negative, got {self.row_index}")
+        freeze_fields(self, "row")
 
 
 class PooledExecutor:

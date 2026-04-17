@@ -30,6 +30,7 @@ from pydantic import Field
 from elspeth.contracts import CallStatus, CallType, Determinism, TransformResult
 from elspeth.contracts.audit_protocols import PluginAuditWriter
 from elspeth.contracts.contexts import LifecycleContext, TransformContext
+from elspeth.contracts.freeze import freeze_fields
 from elspeth.contracts.schema import SchemaConfig
 from elspeth.contracts.schema_contract import FieldContract, PipelineRow, SchemaContract
 from elspeth.contracts.token_usage import TokenUsage
@@ -72,12 +73,18 @@ class _RowSuccess:
     row: dict[str, Any]
     finish_reason: str | None = None
 
+    def __post_init__(self) -> None:
+        freeze_fields(self, "row")
+
 
 @dataclass(frozen=True, slots=True)
 class _RowFailure:
     """Failed single-row result in OpenRouter batch."""
 
     error: dict[str, Any]
+
+    def __post_init__(self) -> None:
+        freeze_fields(self, "error")
 
 
 _RowOutcome = _RowSuccess | _RowFailure
@@ -161,7 +168,7 @@ class OpenRouterBatchLLMTransform(BaseTransform):
 
     name = "openrouter_batch_llm"
     plugin_version = "1.0.0"
-    source_file_hash: str | None = "sha256:5b653dc8662fc700"
+    source_file_hash: str | None = "sha256:64293c08d7b3c8a2"
     is_batch_aware = True  # Engine passes list[dict] for batch processing
     config_model = OpenRouterBatchConfig
 
@@ -475,7 +482,12 @@ class OpenRouterBatchLLMTransform(BaseTransform):
                 output_rows.append(output_row)
 
             elif isinstance(result, _RowSuccess):
-                output_rows.append(result.row)
+                # result.row is a MappingProxyType (deep-frozen in _RowSuccess.__post_init__).
+                # PipelineRow below requires exact dict type (Tier 1 guard against
+                # silently coercing non-dict audit/replay data), so materialize a fresh
+                # dict here — PipelineRow re-deep-freezes internally, so immutability
+                # is preserved through the handoff.
+                output_rows.append(dict(result.row))
                 fr_key = result.finish_reason or "absent"
                 finish_reason_counts[fr_key] += 1
 

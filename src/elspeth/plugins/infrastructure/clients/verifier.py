@@ -26,7 +26,7 @@ from elspeth.core.canonical import stable_hash
 if TYPE_CHECKING:
     from elspeth.core.landscape.execution_repository import ExecutionRepository
 
-from elspeth.contracts.freeze import deep_thaw
+from elspeth.contracts.freeze import deep_thaw, freeze_fields
 from elspeth.core.landscape.row_data import CallDataState
 
 
@@ -74,6 +74,9 @@ class VerificationResult:
             raise ValueError("Cannot have both no_response_recorded and recorded_call_missing")
         if self.is_match is None and not self.payload_missing:
             raise ValueError("Indeterminate is_match (None) is only valid for missing payloads")
+        # Tier 3 external API responses (may be None for recorded_response);
+        # deep_freeze handles None as an opaque scalar, so no conditional needed.
+        freeze_fields(self, "live_response", "recorded_response", "differences")
 
     # --- Factory classmethods ---
 

@@ -2,6 +2,7 @@
 
 from dataclasses import dataclass
 
+from elspeth.contracts.freeze import freeze_fields
 from elspeth.tui.types import LineageData, TreeNodeDict
 
 
@@ -23,11 +24,13 @@ class TreeNode:
         """Validate construction invariants."""
         if not isinstance(self.label, str):
             raise TypeError(f"label must be str, got {type(self.label).__name__}")
-        if not isinstance(self.children, tuple):
-            raise TypeError(f"children must be tuple, got {type(self.children).__name__}")
         for i, child in enumerate(self.children):
             if not isinstance(child, TreeNode):
                 raise TypeError(f"children[{i}] must be TreeNode, got {type(child).__name__}")
+        # deep_freeze is idempotent on already-frozen values (tuple of TreeNode
+        # instances), so no type guard on `children` is needed — it will be a
+        # tuple of opaque frozen dataclasses and deep_freeze returns identity.
+        freeze_fields(self, "children")
 
 
 class LineageTree:

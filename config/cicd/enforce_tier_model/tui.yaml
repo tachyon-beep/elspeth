@@ -79,7 +79,7 @@ allow_hits:
   reason: Optional field access on NodeStateInfo (total=False TypedDict) — fields are conditionally present
   safety: Explicit None check before display, crash on required fields
   expires: '2026-05-02'
-- key: tui/widgets/lineage_tree.py:R1:LineageTree:_build_tree:fp=5e94beebd6bc46bb
+- key: tui/widgets/lineage_tree.py:R1:LineageTree:_build_tree:fp=60a7a8bf5283d1ba
   owner: architecture
   reason: Sparse token lookup — not all sinks have tokens attached
   safety: Returns empty tuple on missing key; no silent coercion

@@ -454,6 +454,9 @@ class MultiQueryStrategy:
         fields: dict[str, Any]
         audit_metadata: dict[str, str | None]
 
+        def __post_init__(self) -> None:
+            freeze_fields(self, "fields", "audit_metadata")
+
     def _execute_one_query(
         self,
         query_idx: int,
@@ -874,8 +877,13 @@ class MultiQueryStrategy:
                 ),
                 locked=True,
             )
+            # result.fields is a MappingProxyType (deep-frozen in
+            # _QuerySuccess.__post_init__). PipelineRow enforces
+            # ``type(data) is dict`` as a Tier 1 guard against silently coercing
+            # audit/replay data — so materialize a fresh dict here. PipelineRow
+            # re-deep-freezes internally, preserving immutability across the handoff.
             return TransformResult.success(
-                PipelineRow(result.fields, observed),
+                PipelineRow(dict(result.fields), observed),
                 success_reason={"action": "query_completed", "metadata": {"query_name": work["spec"].name}},
             )
 
@@ -969,7 +977,7 @@ class LLMTransform(BaseTransform, BatchTransformMixin):
 
     name = "llm"
     plugin_version = "1.0.0"
-    source_file_hash: str | None = "sha256:979faae47c7e0918"
+    source_file_hash: str | None = "sha256:d3063c722f9b741a"
     determinism: Determinism = Determinism.NON_DETERMINISTIC
     config_model = LLMConfig  # Base; get_config_model dispatches to provider-specific
 
