@@ -673,6 +673,23 @@ allow_hits:
   reason: Tier 3 boundary — persisted blob_ref may be non-UUID string; skip rewrite gracefully. Fingerprint shifted due to line changes from adding _handle_plugin_crash above; guard itself unchanged.
   safety: Falls through to use original ref unchanged
   expires: null
+# The two entries below are the canonical RecoveryFailed[<type>] cleanup
+# pattern around archive_session() in the post-fork compensation phase.
+# Mirrors web/blobs/service.py:copy_blobs_for_fork (fp=ae2bc89d3f10e8b7)
+# and _finalize_run_output_blobs_sync (fp=42178d47e9e1c5e0).  Programmer
+# bugs in archive_session still propagate; only DB/IO faults are absorbed
+# into a note attached to the propagating exception so the orphan session
+# row is visible to operators.
+- key: web/sessions/routes.py:R6:create_session_router:fork_from_message:fp=f451f91217f0f811
+  owner: web-sessions
+  reason: Narrow (SQLAlchemyError, OSError) around fork-rollback archive_session in the BlobQuotaExceededError path — DB/IO faults expected during cleanup; programmer bugs still propagate
+  safety: Cleanup failure attached as RecoveryFailed[<type>] note on the HTTPException(413) that propagates; orphan sessions.id flagged for manual cleanup; user-facing 413 response remains intact even when cleanup fails
+  expires: null
+- key: web/sessions/routes.py:R6:create_session_router:fork_from_message:fp=8e9480a184e37a4b
+  owner: web-sessions
+  reason: Narrow (SQLAlchemyError, OSError) around fork-rollback archive_session in the generic except Exception path — DB/IO faults expected during cleanup; programmer bugs still propagate
+  safety: Cleanup failure attached as RecoveryFailed[<type>] note on primary_exc with orphan sessions.id; bare `raise` preserves primary_exc and its original traceback as the headline (regression-tested by test_fork_cleanup_failure_preserves_primary_exception_with_note)
+  expires: null
 - key: web/sessions/service.py:R1:SessionServiceImpl:prune_state_versions:_sync:fp=09c474ed2cd0dc17
   owner: web-sessions
   reason: derived_from_map.get() on seed_id — seed may not exist in derived_from_map (states without derived_from parents)

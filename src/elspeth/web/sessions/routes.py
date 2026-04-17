@@ -12,7 +12,7 @@ import structlog
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from litellm.exceptions import APIError as LiteLLMAPIError
 from litellm.exceptions import AuthenticationError as LiteLLMAuthError
-from sqlalchemy.exc import IntegrityError
+from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 
 from elspeth.contracts.freeze import deep_thaw
 from elspeth.web.auth.middleware import get_current_user
@@ -926,13 +926,44 @@ def create_session_router() -> APIRouter:
                             composition_state_id=copied_state.id,
                         )
         except BlobQuotaExceededError:
-            await service.archive_session(new_session.id)
-            raise HTTPException(
+            # Build the HTTPException up-front so cleanup failures can be
+            # attached as a note on the object that actually propagates —
+            # the inner BlobQuotaExceededError is suppressed by `from None`
+            # and any note attached to it would never reach operator logs.
+            # Cleanup catch is narrowed to recoverable IO/DB failures so
+            # programmer bugs (AttributeError, TypeError) still crash.
+            quota_exc = HTTPException(
                 status_code=413,
                 detail="Blob quota exceeded during fork — unable to copy files",
-            ) from None
-        except Exception:
-            await service.archive_session(new_session.id)
+            )
+            try:
+                await service.archive_session(new_session.id)
+            except (SQLAlchemyError, OSError) as cleanup_exc:
+                quota_exc.add_note(
+                    f"RecoveryFailed[{type(cleanup_exc).__name__}]: "
+                    f"could not archive forked session {new_session.id} "
+                    f"after blob quota rollback ({cleanup_exc}). "
+                    f"Manual cleanup of sessions.id={new_session.id} required."
+                )
+            raise quota_exc from None
+        except Exception as primary_exc:
+            # Mirror the RecoveryFailed[...] convention from
+            # web/blobs/service.py:706-743 and _finalize_run_output_blobs_sync:
+            # cleanup failures must NOT mask the original error.  Narrow the
+            # catch to (SQLAlchemyError, OSError) — programmer bugs in
+            # archive_session must propagate — and attach the cleanup
+            # failure as a note so the orphan session row is visible to
+            # operators reading the traceback.  Bare `raise` preserves
+            # primary_exc and its original traceback as the headline.
+            try:
+                await service.archive_session(new_session.id)
+            except (SQLAlchemyError, OSError) as cleanup_exc:
+                primary_exc.add_note(
+                    f"RecoveryFailed[{type(cleanup_exc).__name__}]: "
+                    f"could not archive forked session {new_session.id} "
+                    f"during fork rollback ({cleanup_exc}). "
+                    f"Manual cleanup of sessions.id={new_session.id} required."
+                )
             raise
 
         return ForkSessionResponse(

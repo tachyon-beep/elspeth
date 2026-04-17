@@ -697,3 +697,62 @@ class TestForkEndpoint:
         # The fork session must have been cleaned up
         sessions = await service.list_sessions("alice", "local")
         assert len(sessions) == 1  # Only the original remains
+
+    @pytest.mark.asyncio
+    async def test_fork_cleanup_failure_preserves_primary_exception_with_note(self, tmp_path) -> None:
+        """archive_session failure during rollback must not mask the real cause.
+
+        If copy_blobs_for_fork raises and the compensating archive_session
+        ALSO fails (e.g. shutil.rmtree on a locked blob dir), the operator
+        must still see the original blob-copy failure as the headline.  A
+        RecoveryFailed[...] note flags that the fork session row is now an
+        orphan that needs manual cleanup.
+
+        Without this guarantee, a rare cleanup failure would replace the
+        true root cause in tracebacks, sending operators down the wrong
+        investigation path.
+        """
+        app, service, blob_service = _make_fork_app(tmp_path)
+
+        session = await service.create_session("alice", "Original", "local")
+        await blob_service.create_blob(session.id, "data.csv", b"a,b\n1,2", "text/csv")
+        msg = await service.add_message(session.id, "user", "Go")
+
+        primary = RuntimeError("disk I/O error during blob copy")
+        cleanup = OSError("permission denied removing blob dir")
+
+        # Default raise_server_exceptions=True propagates the exact
+        # exception object so __notes__ is inspectable.
+        client = TestClient(app)
+
+        with (
+            patch.object(
+                blob_service,
+                "copy_blobs_for_fork",
+                new=AsyncMock(side_effect=primary),
+            ),
+            patch.object(
+                service,
+                "archive_session",
+                new=AsyncMock(side_effect=cleanup),
+            ),
+            pytest.raises(RuntimeError) as exc_info,
+        ):
+            client.post(
+                f"/api/sessions/{session.id}/fork",
+                json={
+                    "from_message_id": str(msg.id),
+                    "new_message_content": "Go edited",
+                },
+            )
+
+        # Identity check: the propagated exception is the original primary,
+        # not a re-wrap and not the cleanup OSError.
+        assert exc_info.value is primary
+
+        # RecoveryFailed[...] note attached for orphan-session visibility.
+        notes = getattr(primary, "__notes__", [])
+        assert any("RecoveryFailed[OSError]" in note for note in notes), f"expected RecoveryFailed[OSError] note, got: {notes!r}"
+        assert any("permission denied removing blob dir" in note for note in notes)
+        # Note must identify the orphan session id so operators can clean up.
+        assert any("manual cleanup" in note.lower() for note in notes)
