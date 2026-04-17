@@ -395,10 +395,7 @@ class TestSecretValidationRedaction:
             request: Request,
             exc: RequestValidationError,
         ) -> JSONResponse:
-            safe_errors = [
-                {k: v for k, v in error.items() if k in safe_keys}
-                for error in exc.errors()
-            ]
+            safe_errors = [{k: v for k, v in error.items() if k in safe_keys} for error in exc.errors()]
             return JSONResponse(status_code=422, content={"detail": safe_errors})
 
         return app
@@ -416,9 +413,7 @@ class TestSecretValidationRedaction:
         assert resp.status_code == 422
 
         body_text = resp.text
-        assert secret_value not in body_text, (
-            "SECURITY: secret value must never appear in 422 response"
-        )
+        assert secret_value not in body_text, "SECURITY: secret value must never appear in 422 response"
         for error in resp.json()["detail"]:
             assert "input" not in error
             assert "ctx" not in error

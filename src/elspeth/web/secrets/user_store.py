@@ -165,9 +165,7 @@ class UserSecretStore:
 
     def has_secret_record(self, name: str, *, user_id: str, auth_provider_type: str) -> bool:
         """Check whether a user-scoped secret row exists, regardless of resolvability."""
-        return (
-            self._fetch_secret_row(name, user_id=user_id, auth_provider_type=auth_provider_type) is not None
-        )
+        return self._fetch_secret_row(name, user_id=user_id, auth_provider_type=auth_provider_type) is not None
 
     def get_secret(self, name: str, *, user_id: str, auth_provider_type: str) -> tuple[str, SecretRef]:
         """Retrieve and decrypt a user secret.
@@ -187,9 +185,7 @@ class UserSecretStore:
             web ``secret_key``.
         """
         if not _fingerprint_key_available():
-            raise SecretNotFoundError(
-                f"Secret {name!r} is not resolvable — ELSPETH_FINGERPRINT_KEY is not set"
-            )
+            raise SecretNotFoundError(f"Secret {name!r} is not resolvable — ELSPETH_FINGERPRINT_KEY is not set")
         row = self._fetch_secret_row(name, user_id=user_id, auth_provider_type=auth_provider_type)
         if row is None:
             raise SecretNotFoundError(f"Secret {name!r} not found for user {user_id!r}")

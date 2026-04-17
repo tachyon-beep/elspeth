@@ -375,9 +375,7 @@ class TestHasRefResolveInvariant:
         return True (user-scope short-circuits the OR before reaching the
         server store's reserved-name branch).
         """
-        user_store.set_secret(
-            "ELSPETH_FOO", value="user-val", user_id="u1", auth_provider_type="local"
-        )
+        user_store.set_secret("ELSPETH_FOO", value="user-val", user_id="u1", auth_provider_type="local")
         assert service.has_ref("u1", "ELSPETH_FOO", auth_provider_type="local") is True
         result = service.resolve("u1", "ELSPETH_FOO", auth_provider_type="local")
         assert result is not None
@@ -398,14 +396,8 @@ class TestHasRefResolveInvariant:
         returns None under both conditions.
         """
         monkeypatch.delenv("ELSPETH_FINGERPRINT_KEY")
-        assert (
-            service.has_ref("u1", "ELSPETH_FINGERPRINT_KEY", auth_provider_type="local")
-            is False
-        )
-        assert (
-            service.resolve("u1", "ELSPETH_FINGERPRINT_KEY", auth_provider_type="local")
-            is None
-        )
+        assert service.has_ref("u1", "ELSPETH_FINGERPRINT_KEY", auth_provider_type="local") is False
+        assert service.resolve("u1", "ELSPETH_FINGERPRINT_KEY", auth_provider_type="local") is None
 
     def test_has_ref_reserved_name_with_user_row_but_fingerprint_unset(
         self,
@@ -432,14 +424,8 @@ class TestHasRefResolveInvariant:
         )
         monkeypatch.delenv("ELSPETH_FINGERPRINT_KEY")
 
-        assert (
-            service.has_ref("u1", "ELSPETH_FOO", auth_provider_type="local")
-            is False
-        )
-        assert (
-            service.resolve("u1", "ELSPETH_FOO", auth_provider_type="local")
-            is None
-        )
+        assert service.has_ref("u1", "ELSPETH_FOO", auth_provider_type="local") is False
+        assert service.resolve("u1", "ELSPETH_FOO", auth_provider_type="local") is None
 
     def test_unresolvable_user_secret_shadows_server_secret_of_same_name(
         self,

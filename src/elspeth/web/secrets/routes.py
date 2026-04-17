@@ -55,9 +55,7 @@ def create_secrets_router() -> APIRouter:
         """
         service = _get_service(request)
         settings = _get_settings(request)
-        items = await asyncio.to_thread(
-            service.list_refs, user.user_id, auth_provider_type=settings.auth_provider
-        )
+        items = await asyncio.to_thread(service.list_refs, user.user_id, auth_provider_type=settings.auth_provider)
         return [
             SecretInventoryResponse(
                 name=item.name,
@@ -88,9 +86,7 @@ def create_secrets_router() -> APIRouter:
             body.value,
             auth_provider_type=settings.auth_provider,
         )
-        available = await asyncio.to_thread(
-            service.has_ref, user.user_id, body.name, auth_provider_type=settings.auth_provider
-        )
+        available = await asyncio.to_thread(service.has_ref, user.user_id, body.name, auth_provider_type=settings.auth_provider)
         return CreateSecretResponse(
             name=body.name,
             scope="user",
@@ -130,9 +126,7 @@ def create_secrets_router() -> APIRouter:
         """
         service = _get_service(request)
         settings = _get_settings(request)
-        available = await asyncio.to_thread(
-            service.has_ref, user.user_id, name, auth_provider_type=settings.auth_provider
-        )
+        available = await asyncio.to_thread(service.has_ref, user.user_id, name, auth_provider_type=settings.auth_provider)
         return ValidateSecretResponse(name=name, available=available)
 
     return router

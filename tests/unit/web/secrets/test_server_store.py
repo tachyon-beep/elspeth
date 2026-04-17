@@ -160,7 +160,9 @@ class TestReservedSecretNames:
         assert store._allowlist == ("elspeth_lowercase_key",)
 
     def test_has_secret_returns_false_for_reserved_even_if_in_env(
-        self, empty_store: ServerSecretStore, monkeypatch: pytest.MonkeyPatch,
+        self,
+        empty_store: ServerSecretStore,
+        monkeypatch: pytest.MonkeyPatch,
     ) -> None:
         """has_secret() returns False (not raise) for reserved names.
 

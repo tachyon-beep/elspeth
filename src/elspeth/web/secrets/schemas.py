@@ -31,9 +31,7 @@ class CreateSecretRequest(BaseModel):
     @classmethod
     def reject_invisible_only(cls, v: str) -> str:
         if not has_visible_content(v):
-            raise ValueError(
-                "Secret value must contain at least one visible character"
-            )
+            raise ValueError("Secret value must contain at least one visible character")
         return v
 
 

@@ -35,10 +35,7 @@ class ServerSecretStore:
     def __init__(self, allowlist: tuple[str, ...]) -> None:
         reserved = [n for n in allowlist if _is_reserved(n)]
         if reserved:
-            raise ValueError(
-                f"Server secret allowlist contains ELSPETH internal names "
-                f"that must never be exposed: {sorted(reserved)}"
-            )
+            raise ValueError(f"Server secret allowlist contains ELSPETH internal names that must never be exposed: {sorted(reserved)}")
         self._allowlist = allowlist
 
     def has_secret(self, name: str) -> bool:
@@ -79,9 +76,7 @@ class ServerSecretStore:
         if not value:
             raise SecretNotFoundError(name)
         if not _fingerprint_key_available():
-            raise SecretNotFoundError(
-                f"Secret {name!r} is not resolvable — ELSPETH_FINGERPRINT_KEY is not set"
-            )
+            raise SecretNotFoundError(f"Secret {name!r} is not resolvable — ELSPETH_FINGERPRINT_KEY is not set")
         fp = _compute_fingerprint(name, value)
         return value, SecretRef(name=name, fingerprint=fp, source="env")
 

@@ -27,10 +27,7 @@ class WebSecretService:
 
     def list_refs(self, user_id: str, *, auth_provider_type: str) -> list[SecretInventoryItem]:
         """Merge user and server inventories; user scope wins on name clash."""
-        user_items = {
-            item.name: item
-            for item in self._user_store.list_secrets(user_id=user_id, auth_provider_type=auth_provider_type)
-        }
+        user_items = {item.name: item for item in self._user_store.list_secrets(user_id=user_id, auth_provider_type=auth_provider_type)}
         server_items = {item.name: item for item in self._server_store.list_secrets()}
         merged = {**server_items, **user_items}  # user scope wins
         return sorted(merged.values(), key=lambda x: x.name)
@@ -43,12 +40,8 @@ class WebSecretService:
         currently undecryptable.  This keeps validation aligned with
         list_refs(), where user scope also wins on name clash.
         """
-        if self._user_store.has_secret_record(
-            name, user_id=user_id, auth_provider_type=auth_provider_type
-        ):
-            return self._user_store.has_secret(
-                name, user_id=user_id, auth_provider_type=auth_provider_type
-            )
+        if self._user_store.has_secret_record(name, user_id=user_id, auth_provider_type=auth_provider_type):
+            return self._user_store.has_secret(name, user_id=user_id, auth_provider_type=auth_provider_type)
         return self._server_store.has_secret(name)
 
     def resolve(self, user_id: str, name: str, *, auth_provider_type: str) -> ResolvedSecret | None:
@@ -58,16 +51,10 @@ class WebSecretService:
         core/secrets.py) batch all missing refs and raise SecretResolutionError.
         """
         # User scope first
-        if self._user_store.has_secret_record(
-            name, user_id=user_id, auth_provider_type=auth_provider_type
-        ):
-            if not self._user_store.has_secret(
-                name, user_id=user_id, auth_provider_type=auth_provider_type
-            ):
+        if self._user_store.has_secret_record(name, user_id=user_id, auth_provider_type=auth_provider_type):
+            if not self._user_store.has_secret(name, user_id=user_id, auth_provider_type=auth_provider_type):
                 return None
-            value, ref = self._user_store.get_secret(
-                name, user_id=user_id, auth_provider_type=auth_provider_type
-            )
+            value, ref = self._user_store.get_secret(name, user_id=user_id, auth_provider_type=auth_provider_type)
             return ResolvedSecret(name=name, value=value, scope="user", fingerprint=ref.fingerprint)
         # Server fallback
         if not self._server_store.has_secret(name):
