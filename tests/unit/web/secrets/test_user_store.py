@@ -17,6 +17,7 @@ import os
 import threading
 
 import pytest
+import sqlalchemy as sa
 from cryptography.fernet import Fernet, InvalidToken
 from sqlalchemy.pool import StaticPool
 
@@ -25,6 +26,7 @@ from elspeth.core.security.secret_loader import SecretNotFoundError
 from elspeth.web.secrets.user_store import UserSecretStore, _derive_fernet_key
 from elspeth.web.sessions.engine import create_session_engine
 from elspeth.web.sessions.migrations import run_migrations
+from elspeth.web.sessions.models import user_secrets_table
 
 TEST_MASTER_KEY = "test-master-key-for-encryption"
 
@@ -125,7 +127,7 @@ class TestUserSecretStore:
             store.get_secret("MISSING", user_id="user-1", auth_provider_type="local")
 
     def test_has_secret_true(self, store: UserSecretStore) -> None:
-        """has_secret returns True for existing secrets without decrypting."""
+        """has_secret returns True for existing, decryptable secrets."""
         store.set_secret("EXISTS", value="val", user_id="user-1", auth_provider_type="local")
         assert store.has_secret("EXISTS", user_id="user-1", auth_provider_type="local") is True
 
@@ -244,6 +246,45 @@ class TestUserSecretStore:
         items = store.list_secrets(user_id="u1", auth_provider_type="local")
         assert len(items) == 1
         assert items[0].available is False
+
+    def test_rotation_makes_existing_secret_unresolvable(self, db_engine) -> None:
+        """A master-key rotation must make old rows unavailable, not falsely available."""
+        writer_store = UserSecretStore(engine=db_engine, master_key=TEST_MASTER_KEY)
+        writer_store.set_secret("ROTATED", value="val", user_id="u1", auth_provider_type="local")
+
+        rotated_store = UserSecretStore(engine=db_engine, master_key="rotated-master-key")
+
+        assert rotated_store.has_secret("ROTATED", user_id="u1", auth_provider_type="local") is False
+        items = rotated_store.list_secrets(user_id="u1", auth_provider_type="local")
+        assert len(items) == 1
+        assert items[0].name == "ROTATED"
+        assert items[0].available is False
+        with pytest.raises(SecretNotFoundError, match="cannot be decrypted"):
+            rotated_store.get_secret("ROTATED", user_id="u1", auth_provider_type="local")
+
+    def test_corrupt_ciphertext_is_not_reported_available(self, store: UserSecretStore, db_engine) -> None:
+        """Ciphertext corruption must propagate as unavailable across all store APIs."""
+        store.set_secret("CORRUPT", value="val", user_id="u1", auth_provider_type="local")
+
+        with db_engine.begin() as conn:
+            conn.execute(
+                sa.update(user_secrets_table)
+                .where(
+                    sa.and_(
+                        user_secrets_table.c.name == "CORRUPT",
+                        user_secrets_table.c.user_id == "u1",
+                        user_secrets_table.c.auth_provider_type == "local",
+                    )
+                )
+                .values(encrypted_value=b"corrupt-token")
+            )
+
+        assert store.has_secret("CORRUPT", user_id="u1", auth_provider_type="local") is False
+        items = store.list_secrets(user_id="u1", auth_provider_type="local")
+        assert len(items) == 1
+        assert items[0].available is False
+        with pytest.raises(SecretNotFoundError, match="cannot be decrypted"):
+            store.get_secret("CORRUPT", user_id="u1", auth_provider_type="local")
 
 
 class TestDeriveFernetKey:

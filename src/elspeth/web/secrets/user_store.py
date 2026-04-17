@@ -18,7 +18,7 @@ from datetime import UTC, datetime
 from typing import Any
 
 import sqlalchemy as sa
-from cryptography.fernet import Fernet
+from cryptography.fernet import Fernet, InvalidToken
 from sqlalchemy.engine import Engine
 
 from elspeth.contracts.secrets import SecretInventoryItem
@@ -34,7 +34,7 @@ def _fingerprint_key_available() -> bool:
     """Check whether ELSPETH_FINGERPRINT_KEY is set.
 
     Required for audit fingerprint computation.  Without it, get_secret()
-    will raise RuntimeError, so has_secret() and list_secrets() must
+    will raise SecretNotFoundError, so has_secret() and list_secrets() must
     reflect the same availability — a secret that cannot be fingerprinted
     is not resolvable.
     """
@@ -118,24 +118,23 @@ class UserSecretStore:
     def has_secret(self, name: str, *, user_id: str, auth_provider_type: str) -> bool:
         """Check if a user secret is resolvable.
 
-        Returns True only when the secret exists AND the deployment is
-        configured for fingerprint computation (ELSPETH_FINGERPRINT_KEY).
-        This aligns with get_secret(), which requires both conditions.
+        Returns True only when the secret exists, the deployment is
+        configured for fingerprint computation (ELSPETH_FINGERPRINT_KEY),
+        and the stored ciphertext can be decrypted with the current
+        web ``secret_key``.  This aligns with get_secret().
         """
         if not _fingerprint_key_available():
             return False
-        t = user_secrets_table
-        with self._engine.connect() as conn:
-            row = conn.execute(
-                sa.select(t.c.id).where(
-                    sa.and_(
-                        t.c.name == name,
-                        t.c.user_id == user_id,
-                        t.c.auth_provider_type == auth_provider_type,
-                    )
-                )
-            ).first()
-            return row is not None
+        row = self._fetch_secret_row(name, user_id=user_id, auth_provider_type=auth_provider_type)
+        if row is None:
+            return False
+        return self._row_is_resolvable(name, row=row)
+
+    def has_secret_record(self, name: str, *, user_id: str, auth_provider_type: str) -> bool:
+        """Check whether a user-scoped secret row exists, regardless of resolvability."""
+        return (
+            self._fetch_secret_row(name, user_id=user_id, auth_provider_type=auth_provider_type) is not None
+        )
 
     def get_secret(self, name: str, *, user_id: str, auth_provider_type: str) -> tuple[str, SecretRef]:
         """Retrieve and decrypt a user secret.
@@ -150,29 +149,23 @@ class UserSecretStore:
         SecretNotFoundError
             If no secret with *name* exists for *user_id* and
             *auth_provider_type*, or if ELSPETH_FINGERPRINT_KEY is not set
-            (the secret exists but cannot be fingerprinted for audit).
+            (the secret exists but cannot be fingerprinted for audit), or
+            if the stored ciphertext cannot be decrypted with the current
+            web ``secret_key``.
         """
         if not _fingerprint_key_available():
             raise SecretNotFoundError(
                 f"Secret {name!r} is not resolvable — ELSPETH_FINGERPRINT_KEY is not set"
             )
-        t = user_secrets_table
-        stmt = sa.select(t.c.encrypted_value, t.c.salt).where(
-            sa.and_(
-                t.c.name == name,
-                t.c.user_id == user_id,
-                t.c.auth_provider_type == auth_provider_type,
-            )
-        )
-
-        with self._engine.connect() as conn:
-            row = conn.execute(stmt).first()
-
+        row = self._fetch_secret_row(name, user_id=user_id, auth_provider_type=auth_provider_type)
         if row is None:
             raise SecretNotFoundError(f"Secret {name!r} not found for user {user_id!r}")
 
-        key = _derive_fernet_key(self._master_key, row.salt)
-        plaintext = Fernet(key).decrypt(row.encrypted_value).decode("utf-8")
+        plaintext = self._decrypt_secret_value(
+            name,
+            encrypted_value=row.encrypted_value,
+            salt=row.salt,
+        )
         fp = _compute_fingerprint(name, plaintext)
         ref = SecretRef(name=name, fingerprint=fp, source="user")
         return plaintext, ref
@@ -233,13 +226,13 @@ class UserSecretStore:
     def list_secrets(self, *, user_id: str, auth_provider_type: str) -> list[SecretInventoryItem]:
         """List secret metadata for a user (no values returned).
 
-        The ``available`` flag reflects whether the deployment has the
-        fingerprint key configured — without it, secrets exist but cannot
-        be resolved (get_secret would raise RuntimeError).
+        The ``available`` flag reflects full resolvability: the
+        fingerprint key must be configured and the stored ciphertext must
+        be decryptable with the current web ``secret_key``.
         """
         t = user_secrets_table
         stmt = (
-            sa.select(t.c.name)
+            sa.select(t.c.name, t.c.encrypted_value, t.c.salt)
             .where(
                 sa.and_(
                     t.c.user_id == user_id,
@@ -257,8 +250,42 @@ class UserSecretStore:
             SecretInventoryItem(
                 name=row.name,
                 scope="user",
-                available=can_resolve,
+                available=can_resolve and self._row_is_resolvable(row.name, row=row),
                 source_kind="user_store",
             )
             for row in rows
         ]
+
+    # ------------------------------------------------------------------
+    # Internal helpers
+    # ------------------------------------------------------------------
+
+    def _fetch_secret_row(self, name: str, *, user_id: str, auth_provider_type: str) -> Any | None:
+        t = user_secrets_table
+        stmt = sa.select(t.c.encrypted_value, t.c.salt).where(
+            sa.and_(
+                t.c.name == name,
+                t.c.user_id == user_id,
+                t.c.auth_provider_type == auth_provider_type,
+            )
+        )
+        with self._engine.connect() as conn:
+            return conn.execute(stmt).first()
+
+    def _decrypt_secret_value(self, name: str, *, encrypted_value: bytes, salt: bytes) -> str:
+        key = _derive_fernet_key(self._master_key, salt)
+        try:
+            return Fernet(key).decrypt(encrypted_value).decode("utf-8")
+        except InvalidToken as exc:
+            raise SecretNotFoundError(
+                f"Secret {name!r} is not resolvable — stored value cannot be decrypted "
+                "with the current web secret_key (possible key rotation or row corruption)"
+            ) from exc
+
+    def _row_is_resolvable(self, name: str, *, row: Any) -> bool:
+        key = _derive_fernet_key(self._master_key, row.salt)
+        try:
+            Fernet(key).decrypt(row.encrypted_value)
+        except InvalidToken:
+            return False
+        return True

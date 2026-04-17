@@ -440,3 +440,31 @@ class TestHasRefResolveInvariant:
             service.resolve("u1", "ELSPETH_FOO", auth_provider_type="local")
             is None
         )
+
+    def test_unresolvable_user_secret_shadows_server_secret_of_same_name(
+        self,
+        engine: sa.engine.Engine,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """A broken user-scoped row must not fall through to a server-scoped secret.
+
+        list_refs() already lets user scope win on name clashes, so has_ref()
+        and resolve() must keep the same shadowing rule when the user copy
+        becomes undecryptable after a web secret_key rotation.
+        """
+        monkeypatch.setenv("TEST_KEY", "server-val")
+        writer_store = UserSecretStore(engine=engine, master_key="test-master-key-32chars-minimum!")
+        writer_store.set_secret("TEST_KEY", value="user-val", user_id="u1", auth_provider_type="local")
+
+        rotated_user_store = UserSecretStore(engine=engine, master_key="rotated-master-key")
+        service = WebSecretService(
+            user_store=rotated_user_store,
+            server_store=ServerSecretStore(allowlist=("TEST_KEY",)),
+        )
+
+        refs = service.list_refs("u1", auth_provider_type="local")
+        [item] = [ref for ref in refs if ref.name == "TEST_KEY"]
+        assert item.scope == "user"
+        assert item.available is False
+        assert service.has_ref("u1", "TEST_KEY", auth_provider_type="local") is False
+        assert service.resolve("u1", "TEST_KEY", auth_provider_type="local") is None

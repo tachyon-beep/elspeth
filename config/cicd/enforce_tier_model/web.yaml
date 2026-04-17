@@ -373,15 +373,10 @@ allow_hits:
   reason: Tier 3 boundary — os.environ.get() checks deployment env var presence for fingerprint key
   safety: Returns bool only; deployment readiness check; no default fabrication
   expires: null
-- key: web/secrets/service.py:R6:WebSecretService:resolve:fp=9c915e3f931310ca
+- key: web/secrets/user_store.py:R6:UserSecretStore:_row_is_resolvable:fp=273ec4d3a131376f
   owner: web-secrets
-  reason: Chained resolution — user store miss falls through to server store; SecretNotFoundError is the expected miss signal
-  safety: Only SecretNotFoundError is caught; all other exceptions propagate; no data loss
-  expires: null
-- key: web/secrets/service.py:R6:WebSecretService:resolve:fp=e0a95062e1360fdb
-  owner: web-secrets
-  reason: Chained resolution — server store miss returns None; SecretNotFoundError is the expected miss signal
-  safety: Only SecretNotFoundError is caught; caller receives None for genuine absence
+  reason: Decryptability probe — Fernet InvalidToken is the expected signal for key rotation or ciphertext corruption when computing browser-safe availability metadata
+  safety: Exception is converted only into available=False; get_secret() still raises SecretNotFoundError with explicit cause on the resolution path
   expires: null
 - key: web/execution/validation.py:R5:_collect_secret_refs:fp=960090b735d7640d
   owner: web-execution

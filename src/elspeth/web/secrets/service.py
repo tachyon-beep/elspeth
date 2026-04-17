@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 from elspeth.contracts.secrets import ResolvedSecret, SecretInventoryItem
-from elspeth.core.security.secret_loader import SecretNotFoundError
 from elspeth.web.secrets.server_store import ServerSecretStore
 from elspeth.web.secrets.user_store import UserSecretStore
 
@@ -39,12 +38,18 @@ class WebSecretService:
     def has_ref(self, user_id: str, name: str, *, auth_provider_type: str) -> bool:
         """Check whether *name* is resolvable in either scope.
 
-        Both stores verify that all prerequisites for resolution are
-        met (not just existence), ensuring has_ref() is aligned with resolve().
+        User scope shadows server scope by name: if the user has stored a
+        row for ``name``, that row controls availability even when it is
+        currently undecryptable.  This keeps validation aligned with
+        list_refs(), where user scope also wins on name clash.
         """
-        return self._user_store.has_secret(
+        if self._user_store.has_secret_record(
             name, user_id=user_id, auth_provider_type=auth_provider_type
-        ) or self._server_store.has_secret(name)
+        ):
+            return self._user_store.has_secret(
+                name, user_id=user_id, auth_provider_type=auth_provider_type
+            )
+        return self._server_store.has_secret(name)
 
     def resolve(self, user_id: str, name: str, *, auth_provider_type: str) -> ResolvedSecret | None:
         """Resolve a secret, trying user scope first then server.
@@ -53,19 +58,22 @@ class WebSecretService:
         core/secrets.py) batch all missing refs and raise SecretResolutionError.
         """
         # User scope first
-        try:
+        if self._user_store.has_secret_record(
+            name, user_id=user_id, auth_provider_type=auth_provider_type
+        ):
+            if not self._user_store.has_secret(
+                name, user_id=user_id, auth_provider_type=auth_provider_type
+            ):
+                return None
             value, ref = self._user_store.get_secret(
                 name, user_id=user_id, auth_provider_type=auth_provider_type
             )
             return ResolvedSecret(name=name, value=value, scope="user", fingerprint=ref.fingerprint)
-        except SecretNotFoundError:
-            pass
         # Server fallback
-        try:
-            value, ref = self._server_store.get_secret(name)
-            return ResolvedSecret(name=name, value=value, scope="server", fingerprint=ref.fingerprint)
-        except SecretNotFoundError:
+        if not self._server_store.has_secret(name):
             return None
+        value, ref = self._server_store.get_secret(name)
+        return ResolvedSecret(name=name, value=value, scope="server", fingerprint=ref.fingerprint)
 
     # -- REST API helpers (not part of WebSecretResolver) --------------------
 

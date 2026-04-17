@@ -839,6 +839,7 @@ dev = [
     { name = "respx" },
     { name = "ruff" },
     { name = "starlette" },
+    { name = "types-jsonschema" },
     { name = "types-networkx" },
     { name = "types-pyyaml" },
 ]
@@ -978,6 +979,7 @@ requires-dist = [
     { name = "tenacity", specifier = ">=9.0,<10" },
     { name = "textual", specifier = ">=7.2,<8" },
     { name = "typer", specifier = ">=0.21,<1" },
+    { name = "types-jsonschema", marker = "extra == 'dev'", specifier = ">=4.25,<5" },
     { name = "types-networkx", marker = "extra == 'all'", specifier = ">=3.2,<4" },
     { name = "types-networkx", marker = "extra == 'dev'", specifier = ">=3.2,<4" },
     { name = "types-pyyaml", marker = "extra == 'all'", specifier = ">=6.0,<7" },
@@ -3978,6 +3980,18 @@ dependencies = [
 sdist = { url = "https://files.pythonhosted.org/packages/17/d4/064570dec6358aa9049d4708e4a10407d74c99258f8b2136bb8702303f1a/typer_slim-0.21.1.tar.gz", hash = "sha256:73495dd08c2d0940d611c5a8c04e91c2a0a98600cbd4ee19192255a233b6dbfd", size = 110478, upload-time = "2026-01-06T11:21:11.176Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/c8/0a/4aca634faf693e33004796b6cee0ae2e1dba375a800c16ab8d3eff4bb800/typer_slim-0.21.1-py3-none-any.whl", hash = "sha256:6e6c31047f171ac93cc5a973c9e617dbc5ab2bddc4d0a3135dc161b4e2020e0d", size = 47444, upload-time = "2026-01-06T11:21:12.441Z" },
+]
+
+[[package]]
+name = "types-jsonschema"
+version = "4.26.0.20260408"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "referencing" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/9f/4c/2ef5483ef81e7b6e1b901eb2994fd280cb19860134a20ff99e72748f3ccb/types_jsonschema-4.26.0.20260408.tar.gz", hash = "sha256:82b75a976ed1507c473b8dee2d4841bd65926758c6d672bb93d08bf5e16f1b3f", size = 16553, upload-time = "2026-04-08T04:36:00.543Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/12/3c/724ad6ecaea06e8c6c8a8c9949a0979e6a2149b8aec4fe160135c64dd5ac/types_jsonschema-4.26.0.20260408-py3-none-any.whl", hash = "sha256:1ab0058c2612b0b81fc4e3c88ec3f9ad9b0af3fd31a176030d78b6d6cefb6e7b", size = 16081, upload-time = "2026-04-08T04:35:59.678Z" },
 ]
 
 [[package]]
