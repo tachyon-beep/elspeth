@@ -73,3 +73,11 @@ repos:
         types: [python]
         pass_filenames: false
         files: ^src/elspeth/web/composer/tools\.py$
+
+      - id: enforce-composer-catch-order
+        name: Composer catch-order discipline
+        entry: .venv/bin/python scripts/cicd/enforce_composer_catch_order.py check --root src/elspeth --allowlist config/cicd/enforce_composer_catch_order
+        language: system
+        types: [python]
+        pass_filenames: false
+        files: ^src/elspeth/web/.*\.py$
