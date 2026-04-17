@@ -235,12 +235,93 @@ class ToolArgumentError(Exception):
     an unstructured 500 for investigation, which is the correct failure
     mode for an invariant violation.
 
-    Handlers that wrap an underlying exception should use::
+    Structural safety (leak prevention)
+    -----------------------------------
+    The message composed by this class is echoed verbatim to the LLM
+    API by the compose loop AND recorded in the Landscape audit trail
+    via the synthetic ``role: tool`` chat message. Free-form f-string
+    construction — ``ToolArgumentError(f"bad value: {user_input!r}")``
+    — would be a direct leak channel for secrets, PII, and
+    attacker-controlled strings, because Tier-3 argument values are
+    by definition untrusted.
 
-        raise ToolArgumentError("descriptive message") from exc
+    To make that leak structurally impossible, this class accepts ONLY
+    three keyword-only, safe-by-construction fields:
 
-    so the cause chain survives ``asyncio.to_thread`` re-raise for audit.
+    - ``argument``: the parameter name as declared in the tool schema
+      (operator-chosen — safe for echo/audit).
+    - ``expected``: a brief description of the required shape, e.g.
+      ``"a string"`` or ``"a non-empty list"`` (operator-chosen — safe).
+    - ``actual_type``: typically ``type(value).__name__`` — carries
+      only the class name, never the value.
+
+    There is deliberately no field that can carry the LLM-supplied
+    value. The ``__cause__`` chain still carries full debugging
+    context for auditors (inspectable via ``exc.__cause__`` on the
+    captured exception record) but is NEVER echoed to the LLM: the
+    compose loop reads ``exc.args[0]`` only, and ``args[0]`` is
+    composed from the structured fields above.
+
+    The three declared fields are frozen after construction, matching
+    the pattern used by ``ComposerConvergenceError`` and
+    ``ComposerPluginCrashError``: each exception flows into an
+    immutable audit artefact, so allowing post-construction mutation
+    would let an intermediate layer silently rewrite what downstream
+    consumers see. Exception-chain dunders
+    (``__cause__``/``__context__``/``__traceback__``/``__notes__``)
+    remain writable so ``raise ... from ...`` and ``add_note()`` work
+    normally.
+
+    Usage::
+
+        raise ToolArgumentError(
+            argument="content",
+            expected="a string",
+            actual_type=type(content).__name__,
+        ) from exc
+
+    The ``from exc`` clause preserves the underlying cause on
+    ``__cause__`` so it survives ``asyncio.to_thread`` re-raise for
+    audit, without leaking into the LLM echo.
     """
+
+    _FROZEN_ATTRS: ClassVar[frozenset[str]] = frozenset({"argument", "expected", "actual_type"})
+
+    def __init__(
+        self,
+        *,
+        argument: str,
+        expected: str,
+        actual_type: str,
+    ) -> None:
+        # Reject empty strings at construction time: a blank field
+        # would produce a nonsensical LLM echo ("'' must be , got ")
+        # and — more importantly — undermines the audit record the
+        # exception lands in (the three fields appear as structured
+        # columns alongside the composed message).
+        if not argument:
+            raise ValueError("ToolArgumentError.argument must be a non-empty identifier")
+        if not expected:
+            raise ValueError("ToolArgumentError.expected must be a non-empty description")
+        if not actual_type:
+            raise ValueError("ToolArgumentError.actual_type must be a non-empty type name")
+        super().__init__(f"'{argument}' must be {expected}, got {actual_type}")
+        self.argument = argument
+        self.expected = expected
+        self.actual_type = actual_type
+
+    def __setattr__(self, name: str, value: object) -> None:
+        # Guard only the three declared attributes; exception-chain
+        # dunders (__cause__, __context__, __suppress_context__,
+        # __traceback__, __notes__) must remain writable so
+        # ``raise ... from ...``, structured-log capture, and
+        # ``add_note()`` continue to work. First-time write during
+        # ``__init__`` is allowed; subsequent reassignment raises.
+        if name in type(self)._FROZEN_ATTRS and name in self.__dict__:
+            raise AttributeError(
+                f"{type(self).__name__}.{name} is frozen after construction; exception attributes flow into the LLM echo and Landscape."
+            )
+        super().__setattr__(name, value)
 
 
 class ComposerSettings(Protocol):

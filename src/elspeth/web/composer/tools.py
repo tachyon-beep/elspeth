@@ -1760,7 +1760,11 @@ def _execute_create_blob(
     # validation failures (no file has been written at that point — cleanup
     # is a no-op but semantically wrong).
     if not isinstance(content, str):
-        raise ToolArgumentError(f"content must be a string, got {type(content).__name__}")
+        raise ToolArgumentError(
+            argument="content",
+            expected="a string",
+            actual_type=type(content).__name__,
+        )
 
     if mime_type not in _ALLOWED_BLOB_MIME_TYPES:
         return _failure_result(
@@ -1862,7 +1866,11 @@ def _execute_update_blob(
     # ``unlink(missing_ok=True)`` — a genuine no-op — so the precise
     # rationale does not transfer by back-reference.)
     if not isinstance(content, str):
-        raise ToolArgumentError(f"content must be a string, got {type(content).__name__}")
+        raise ToolArgumentError(
+            argument="content",
+            expected="a string",
+            actual_type=type(content).__name__,
+        )
 
     blob = _sync_get_blob(session_engine, blob_id, session_id)
     if blob is None:

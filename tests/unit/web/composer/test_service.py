@@ -597,7 +597,11 @@ class TestComposerErrorHandling:
         with (
             patch(
                 "elspeth.web.composer.service.execute_tool",
-                side_effect=ToolArgumentError("content must be a string, got int"),
+                side_effect=ToolArgumentError(
+                    argument="content",
+                    expected="a string",
+                    actual_type="int",
+                ),
             ),
             patch.object(service, "_call_llm", new_callable=AsyncMock) as mock_llm,
         ):
@@ -1406,7 +1410,11 @@ class TestPluginBugCrashesFromToolExecution:
             patch.object(service, "_call_llm", new_callable=AsyncMock) as mock_llm,
             patch(
                 "elspeth.web.composer.service.execute_tool",
-                side_effect=ToolArgumentError("plugin expected str, got int"),
+                side_effect=ToolArgumentError(
+                    argument="plugin",
+                    expected="a string",
+                    actual_type="int",
+                ),
             ),
         ):
             mock_llm.side_effect = [valid_call, text]
@@ -1417,7 +1425,7 @@ class TestPluginBugCrashesFromToolExecution:
         tool_messages = [m for m in second_call_messages if m.get("role") == "tool"]
         assert len(tool_messages) == 1
         error_payload = json.loads(tool_messages[0]["content"])
-        assert "plugin expected str, got int" in error_payload["error"]
+        assert "'plugin' must be a string, got int" in error_payload["error"]
 
     @pytest.mark.asyncio
     async def test_tool_argument_error_subclass_cannot_leak_cause_to_llm(self) -> None:
@@ -1442,7 +1450,11 @@ class TestPluginBugCrashesFromToolExecution:
 
         secret_path = "/etc/elspeth/secrets/bootstrap.key"
         secret_cause = ValueError(f"bad path: {secret_path}")
-        leaky = LeakyToolArgumentError("content must be a string, got int")
+        leaky = LeakyToolArgumentError(
+            argument="content",
+            expected="a string",
+            actual_type="int",
+        )
         leaky.__cause__ = secret_cause
 
         valid_call = _make_llm_response(
@@ -1475,7 +1487,7 @@ class TestPluginBugCrashesFromToolExecution:
         tool_messages = [m for m in second_call_messages if m.get("role") == "tool"]
         assert len(tool_messages) == 1
         error_payload = json.loads(tool_messages[0]["content"])
-        assert "content must be a string, got int" in error_payload["error"]
+        assert "'content' must be a string, got int" in error_payload["error"]
         # The crucial assertion: the cause-chain content NEVER appears.
         assert secret_path not in error_payload["error"]
         assert "caused by" not in error_payload["error"]
@@ -1939,6 +1951,12 @@ class TestToolArgumentError:
     with semantically invalid values that could not be coerced. The compose
     loop catches this and feeds the message back to the LLM for retry. Any
     OTHER exception escaping execute_tool is a plugin bug and must crash.
+
+    The class is deliberately a structured DTO rather than a free-form
+    ``Exception`` subclass: its composed message is echoed verbatim to
+    the LLM API AND recorded in the Landscape audit trail, so any
+    channel that could carry an LLM-supplied value would be a secret/PII
+    leak pathway. Tests below lock in the "safe by construction" shape.
     """
 
     def test_inherits_from_exception_directly_not_composer_service_error(self) -> None:
@@ -1954,23 +1972,111 @@ class TestToolArgumentError:
         assert issubclass(ToolArgumentError, Exception)
         assert not issubclass(ToolArgumentError, ComposerServiceError)
 
-    def test_message_preserved(self) -> None:
-        """Constructor accepts a message string; str() returns it unchanged."""
-        exc = ToolArgumentError("content must be a string, got int")
-        assert str(exc) == "content must be a string, got int"
+    def test_structured_fields_compose_canonical_message(self) -> None:
+        """Constructor composes args[0] deterministically from the three fields.
+
+        The compose loop reads ``exc.args[0]`` to build the LLM-echo
+        payload, so the composition template is a documented wire
+        contract — a change here is a change to what the LLM and
+        Landscape see.
+        """
+        exc = ToolArgumentError(
+            argument="content",
+            expected="a string",
+            actual_type="int",
+        )
+        assert exc.argument == "content"
+        assert exc.expected == "a string"
+        assert exc.actual_type == "int"
+        assert exc.args[0] == "'content' must be a string, got int"
+        assert str(exc) == "'content' must be a string, got int"
+
+    def test_constructor_is_keyword_only(self) -> None:
+        """Positional construction must fail — structural leak prevention.
+
+        The whole point of the DTO shape is that there is no way to
+        sneak a raw LLM-supplied value into the message. A positional
+        ``ToolArgumentError(f"bad: {user_input!r}")`` would defeat
+        that. Making the constructor keyword-only forces every call
+        site through the three-field safe channel.
+        """
+        with pytest.raises(TypeError):
+            ToolArgumentError("content must be a string, got int")  # type: ignore[misc]
+
+    def test_empty_argument_rejected(self) -> None:
+        """Blank ``argument`` produces a nonsensical audit record and must be rejected."""
+        with pytest.raises(ValueError, match="argument must be a non-empty"):
+            ToolArgumentError(argument="", expected="a string", actual_type="int")
+
+    def test_empty_expected_rejected(self) -> None:
+        """Blank ``expected`` produces a nonsensical audit record and must be rejected."""
+        with pytest.raises(ValueError, match="expected must be a non-empty"):
+            ToolArgumentError(argument="content", expected="", actual_type="int")
+
+    def test_empty_actual_type_rejected(self) -> None:
+        """Blank ``actual_type`` produces a nonsensical audit record and must be rejected."""
+        with pytest.raises(ValueError, match="actual_type must be a non-empty"):
+            ToolArgumentError(argument="content", expected="a string", actual_type="")
+
+    def test_declared_fields_frozen_after_construction(self) -> None:
+        """Declared fields must not be mutable after construction.
+
+        The exception flows into ``composition_states`` / LLM echo as
+        an immutable audit artefact. Mirror the _FROZEN_ATTRS pattern
+        used by ComposerConvergenceError and ComposerPluginCrashError
+        so no intermediate layer can silently rewrite what downstream
+        consumers see.
+        """
+        exc = ToolArgumentError(
+            argument="content",
+            expected="a string",
+            actual_type="int",
+        )
+        with pytest.raises(AttributeError, match="frozen after construction"):
+            exc.argument = "other"
+        with pytest.raises(AttributeError, match="frozen after construction"):
+            exc.expected = "a dict"
+        with pytest.raises(AttributeError, match="frozen after construction"):
+            exc.actual_type = "str"
+
+    def test_exception_chain_dunders_remain_writable(self) -> None:
+        """__cause__, __context__, __traceback__, __notes__ must stay writable.
+
+        ``raise ... from ...`` and ``add_note()`` rely on these being
+        assignable. The freeze guard covers only the three declared
+        fields — the rest of the exception machinery must work
+        unchanged.
+        """
+        exc = ToolArgumentError(
+            argument="content",
+            expected="a string",
+            actual_type="int",
+        )
+        cause = ValueError("deep cause")
+        exc.__cause__ = cause
+        assert exc.__cause__ is cause
+        exc.add_note("diagnostic note")
+        assert "diagnostic note" in exc.__notes__
 
     def test_supports_exception_chaining(self) -> None:
         """raise ToolArgumentError(...) from exc must preserve __cause__.
 
         Audit-grade error reporting depends on the cause chain surviving
-        asyncio.to_thread re-raise and the service-level catch.
+        asyncio.to_thread re-raise and the service-level catch. The
+        cause is carried on ``__cause__`` for debug/audit but NEVER
+        echoed to the LLM (see test_tool_argument_error_subclass_
+        cannot_leak_cause_to_llm).
         """
         original = ValueError("bad input")
         try:
             try:
                 raise original
             except ValueError as exc:
-                raise ToolArgumentError("wrapped") from exc
+                raise ToolArgumentError(
+                    argument="content",
+                    expected="a string",
+                    actual_type="int",
+                ) from exc
         except ToolArgumentError as wrapped:
             assert wrapped.__cause__ is original
 
@@ -2052,7 +2158,7 @@ class TestToolArgumentErrorAcrossThreadBoundary:
         tool_messages = [m for m in second_call_messages if m.get("role") == "tool"]
         assert len(tool_messages) == 1
         error_content = json.loads(tool_messages[0]["content"])
-        assert "content must be a string" in error_content["error"]
+        assert "'content' must be a string, got int" in error_content["error"]
 
 
 class TestComposerErrorConstructionInvariants:

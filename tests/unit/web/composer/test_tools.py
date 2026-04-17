@@ -4896,7 +4896,7 @@ class TestCreateBlobTypeGuard:
         catalog = _mock_catalog()
         state = _empty_state()
 
-        with pytest.raises(ToolArgumentError, match="content must be a string, got int"):
+        with pytest.raises(ToolArgumentError, match=r"'content' must be a string, got int"):
             execute_tool(
                 "create_blob",
                 {
@@ -4979,7 +4979,7 @@ class TestUpdateBlobTypeGuard:
         blob_id = create_result.data["blob_id"]
         state = create_result.updated_state
 
-        with pytest.raises(ToolArgumentError, match="content must be a string, got int"):
+        with pytest.raises(ToolArgumentError, match=r"'content' must be a string, got int"):
             execute_tool(
                 "update_blob",
                 {"blob_id": blob_id, "content": 42},

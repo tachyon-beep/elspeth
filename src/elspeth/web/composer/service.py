@@ -448,14 +448,20 @@ class ComposerServiceImpl:
                     if not is_discovery_tool(tool_name):
                         turn_has_mutation = True
                     # Trust-boundary redaction: the echoed message reaches the
-                    # LLM API and (via audit) the Landscape. Use exc.args[0]
-                    # rather than str(exc) so a future subclass that overrides
-                    # __str__ to include __cause__ context (which may carry DB
-                    # URLs, filesystem paths, or secret fragments from deeper
-                    # layers) cannot leak through this path. Handlers that
-                    # use `raise ToolArgumentError(msg) from exc` get the
-                    # cause preserved on __cause__ for debug/audit but NOT
-                    # echoed to the LLM.
+                    # LLM API and (via audit) the Landscape. ToolArgumentError
+                    # is structurally safe by construction — the keyword-only
+                    # constructor accepts (argument, expected, actual_type)
+                    # and composes args[0] from those fields alone, so the
+                    # message cannot carry a raw LLM-supplied value. Belt-
+                    # and-suspenders: read ``exc.args[0]`` rather than
+                    # ``str(exc)`` so a future subclass that overrides
+                    # ``__str__`` to embed ``__cause__`` context (which may
+                    # carry DB URLs, filesystem paths, or secret fragments
+                    # from deeper layers) cannot leak through this path.
+                    # Handlers that use
+                    # ``raise ToolArgumentError(...) from exc`` get the
+                    # cause preserved on ``__cause__`` for debug/audit but
+                    # NOT echoed to the LLM.
                     safe_message = exc.args[0] if exc.args else "tool argument error"
                     llm_messages.append(
                         {

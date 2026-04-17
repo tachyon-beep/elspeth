@@ -55,7 +55,7 @@ class TestComposerExceptionChannelEnforcer:
             "from elspeth.web.composer.protocol import ToolArgumentError\n"
             "def f(x):\n"
             "    if not isinstance(x, str):\n"
-            "        raise ToolArgumentError('bad')\n"
+            "        raise ToolArgumentError(argument='x', expected='a string', actual_type=type(x).__name__)\n"
         )
         result = _run(["check", "--root", str(tmp_path)])
         assert result.returncode == 0, result.stdout + result.stderr
@@ -256,7 +256,11 @@ class TestComposerExceptionChannelEnforcer:
         silently treating the typo as an empty allowlist. Fail closed.
         """
         target = _make_composer_tree(tmp_path)
-        target.write_text("from elspeth.web.composer.protocol import ToolArgumentError\ndef f(x):\n    raise ToolArgumentError('bad')\n")
+        target.write_text(
+            "from elspeth.web.composer.protocol import ToolArgumentError\n"
+            "def f(x):\n"
+            "    raise ToolArgumentError(argument='x', expected='a string', actual_type=type(x).__name__)\n"
+        )
         bogus = tmp_path / "does-not-exist"
         result = _run(["check", "--root", str(tmp_path), "--allowlist", str(bogus)])
         assert result.returncode != 0

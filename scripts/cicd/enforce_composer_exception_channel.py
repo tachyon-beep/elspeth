@@ -36,7 +36,7 @@ RULES = {
     "CEC1": {
         "name": "bare-exception-raise-in-composer-tools",
         "description": "Bare raise of TypeError/ValueError/UnicodeError in composer tools — use ToolArgumentError",
-        "remediation": "raise ToolArgumentError(...) from exc, or catch locally and return _failure_result",
+        "remediation": "raise ToolArgumentError(argument=..., expected=..., actual_type=...) from exc, or catch locally and return _failure_result",
     }
 }
 
