@@ -481,6 +481,128 @@ class TestMigration007IntegrityScan:
             cfg.attributes["connection"] = connection
             command.upgrade(cfg, "head")
 
+    def test_abort_then_remap_then_rerun_reaches_head(self) -> None:
+        """Operator's alternative remediation path — UPDATE rather than DELETE.
+
+        The 007 abort error instructs the operator to "Remediate
+        manually before re-running migrations." The ``DELETE`` path
+        (drop the orphan rows entirely) is one valid remediation, but
+        it is NOT the only one: a row whose ``composition_state_id``
+        points at the wrong session may be semantically recoverable if
+        the operator identifies the correct same-session state to remap
+        it to (e.g. from audit lineage, from the session's own
+        composition history, or from a replayed source). In that case
+        the remediation is an ``UPDATE`` — rewrite the foreign key to a
+        valid target in the current session — not a ``DELETE``.
+
+        This test covers that alternative path end-to-end:
+
+        1. upgrade to 006;
+        2. seed a cross-session orphan in ``chat_messages`` AND a
+           same-session valid state the orphan can be remapped onto;
+        3. attempt upgrade — RuntimeError from 007 (prereq);
+        4. UPDATE the orphan row's ``composition_state_id`` to the
+           same-session state's id;
+        5. ``run_migrations(engine)`` — must now reach head with the
+           composite FK in place.
+
+        Without this test the alternative remediation path is a
+        documentation claim the migration never mechanically
+        demonstrated — an operator could follow the UPDATE recipe and
+        still hit a latent bug (e.g. the integrity scan mis-computing
+        "different session" after the update), and there would be no
+        in-tree proof that the advertised path actually reaches head.
+        """
+        from alembic import command
+
+        engine = _fresh_engine()
+        cfg = _upgrade_to_006(engine)
+
+        # Seed the corruption shape the scan refuses: a chat_messages
+        # row in session B points at a composition_state owned by
+        # session A. Also seed a VALID state in session B so the
+        # remediation has a legitimate target to remap onto — this is
+        # how an operator would recover, not by deletion.
+        sa_id = str(uuid.uuid4())
+        sb_id = str(uuid.uuid4())
+        state_a = str(uuid.uuid4())  # owned by session A
+        state_b = str(uuid.uuid4())  # owned by session B — the remap target
+        orphan_message_id = str(uuid.uuid4())
+        with engine.begin() as conn:
+            _seed_session(conn, sa_id)
+            _seed_session(conn, sb_id)
+            _seed_state(conn, state_a, sa_id)
+            _seed_state(conn, state_b, sb_id)
+            conn.execute(
+                insert(chat_messages_table).values(
+                    id=orphan_message_id,
+                    session_id=sb_id,  # session B
+                    role="user",
+                    content="orphan-to-be-remapped",
+                    created_at=datetime.now(UTC),
+                    composition_state_id=state_a,  # but points at session A's state
+                )
+            )
+
+        # Prereq: at this point 007 refuses to apply — matches
+        # test_blocks_on_orphan_chat_message above. Asserting it here
+        # rather than relying on the other test proves the remediation
+        # starts from the blocked state the operator would actually
+        # see, not from an already-clean schema.
+        with pytest.raises(RuntimeError, match="Migration 007 blocked"), engine.connect() as connection:
+            cfg.attributes["connection"] = connection
+            command.upgrade(cfg, "head")
+
+        # Operator's remediation: identify the orphan, determine the
+        # correct same-session state (state_b), and UPDATE the row.
+        # This is the "remap" path — the row survives with its audit
+        # history intact, just re-anchored to a valid same-session
+        # target. ``DELETE`` would lose the row's audit lineage.
+        with engine.begin() as conn:
+            result = conn.execute(
+                text("UPDATE chat_messages SET composition_state_id = :new_state WHERE id = :mid"),
+                {"new_state": state_b, "mid": orphan_message_id},
+            )
+            assert result.rowcount == 1, (
+                f"Remap UPDATE should affect exactly 1 row (the orphan), rowcount={result.rowcount}. Seed data drift."
+            )
+
+        # Re-run migrations end-to-end via ``run_migrations`` (not raw
+        # ``command.upgrade``) to prove the operator-facing entry point
+        # reaches head cleanly — the advertised remediation path must
+        # work through the production-facing API, not just via alembic
+        # internals.
+        run_migrations(engine)
+
+        # Verify head reached AND the composite FK is now in place —
+        # the remap row should satisfy the newly-applied constraint.
+        with engine.connect() as conn:
+            rev = conn.execute(text("SELECT version_num FROM alembic_version")).scalar_one()
+        # Head is whatever the latest migration is; we care that it is
+        # at least 007 (the one we were blocked on). An exact-match
+        # against a hardcoded "008" would fail the moment a 009 ships.
+        assert rev >= "007", (
+            f"Expected alembic_version >= '007' after remap remediation, got {rev!r}. "
+            "Migration 007 refused to apply even after the orphan was remapped."
+        )
+
+        # Proof that the composite FK is actually enforcing now:
+        # attempting to INSERT a NEW cross-session orphan must fail at
+        # the DB layer, not slip through. This is the positive
+        # assertion that the remediation genuinely restored Tier 1
+        # integrity, not merely advanced the alembic_version counter.
+        with pytest.raises(IntegrityError), engine.begin() as conn:
+            conn.execute(
+                insert(chat_messages_table).values(
+                    id=str(uuid.uuid4()),
+                    session_id=sb_id,
+                    role="user",
+                    content="post-remediation cross-session orphan",
+                    created_at=datetime.now(UTC),
+                    composition_state_id=state_a,  # session A's state — should be rejected now
+                )
+            )
+
 
 # ---------------------------------------------------------------------------
 # Migration 006: refuse to fabricate auth_provider ownership on legacy rows
@@ -848,6 +970,149 @@ class TestMigration007PreservesIndexes:
                     session_id=session_id,
                     state_id=state_id,
                     status="pending",
+                    started_at=datetime.now(UTC),
+                )
+            )
+
+    def test_downgrade_007_restores_single_column_fks_and_preserves_uq_runs_one_active_per_session(self) -> None:
+        """007 → 006 round-trip restores single-column FKs WITHOUT dropping
+        the ``uq_runs_one_active_per_session`` partial unique index.
+
+        Anchors the reversibility contract for migration 007 — symmetric
+        with ``test_downgrade_008_removes_constraint`` for migration 008.
+        The upgrade-side index-preservation suite above asserts the
+        partial index survives the copy_from-driven upgrade. The
+        downgrade path is *different code*: ``007.downgrade()`` calls
+        ``op.batch_alter_table("runs")`` WITHOUT ``copy_from``, which
+        means Alembic reflects the live shape to drive the table-copy
+        rebuild on SQLite. Reflection does NOT carry the
+        ``sqlite_where`` predicate for partial unique indexes — a
+        regression that relies on reflection alone would silently drop
+        the partial index, reopening the TOCTOU race in ``create_run``.
+
+        The test pins three properties that a correct downgrade must
+        hold simultaneously:
+
+        1. Version bookkeeping: alembic_version reports 006 after the
+           downgrade completes. A partial-success that leaves the row
+           at 007 would be an audit lie — the schema no longer matches
+           what the version claims.
+        2. FK shape reversal: ``uq_composition_state_id_session`` (the
+           composite-uniqueness target created in 007.upgrade) is gone,
+           and the runs/chat_messages FKs resolve to ``composition_states.id``
+           alone rather than the composite ``(id, session_id)``.
+        3. Partial index survival + behavioural proof: the partial
+           unique index remains, and at the post-downgrade schema a
+           second pending run per session is still rejected while
+           multiple completed runs remain accepted. Schema inspection
+           alone is weak here — a reflection regression could create
+           a plain unique-on-session_id that has the right NAME but
+           the wrong WHERE clause, and only a behavioural assertion
+           catches that.
+        """
+        from alembic import command
+
+        engine = _fresh_engine()
+        # Stop at 007 specifically (not head) so the observed downgrade
+        # behaviour is attributable to 007.downgrade alone. Going
+        # head→006 would also exercise 008.downgrade, which would
+        # conflate ``blobs``-table behaviour with the runs/chat_messages
+        # invariants this test pins.
+        cfg = _alembic_config_for(engine)
+        with engine.connect() as connection:
+            cfg.attributes["connection"] = connection
+            command.upgrade(cfg, "007")
+            command.downgrade(cfg, "006")
+
+        # (1) Version bookkeeping — downgrade reached 006 cleanly.
+        with engine.connect() as conn:
+            rev = conn.execute(text("SELECT version_num FROM alembic_version")).scalar_one()
+        assert rev == "006", (
+            f"Expected alembic_version == '006' after 007 downgrade, got {rev!r}. The schema no longer matches the version claim."
+        )
+
+        # (2) FK shape reversal — composite uniqueness target gone.
+        inspector = inspect(engine)
+        comp_state_uniques = {u["name"] for u in inspector.get_unique_constraints("composition_states")}
+        assert "uq_composition_state_id_session" not in comp_state_uniques, (
+            f"uq_composition_state_id_session should be dropped by 007.downgrade, "
+            f"but is still present on composition_states. Surviving uniques: {sorted(comp_state_uniques)}"
+        )
+
+        # FK shape — runs.state_id and chat_messages.composition_state_id
+        # must resolve as SINGLE-column references to composition_states.id.
+        # Composite references to (id, session_id) would indicate the
+        # 007 downgrade failed to rewrite the constraint.
+        run_fks = {
+            frozenset(fk["constrained_columns"]): frozenset(fk["referred_columns"])
+            for fk in inspector.get_foreign_keys("runs")
+            if fk["referred_table"] == "composition_states"
+        }
+        assert run_fks, "runs has no FK to composition_states post-downgrade — FK was dropped without replacement"
+        assert frozenset({"state_id"}) in run_fks, f"runs.state_id FK is no longer single-column after 007.downgrade. Found: {run_fks}"
+        # No composite FK should remain.
+        assert frozenset({"state_id", "session_id"}) not in run_fks, (
+            f"Composite FK (state_id, session_id) still present on runs after 007.downgrade. Found: {run_fks}"
+        )
+
+        chat_fks = {
+            frozenset(fk["constrained_columns"]): frozenset(fk["referred_columns"])
+            for fk in inspector.get_foreign_keys("chat_messages")
+            if fk["referred_table"] == "composition_states"
+        }
+        assert frozenset({"composition_state_id"}) in chat_fks, (
+            f"chat_messages.composition_state_id FK is no longer single-column after 007.downgrade. Found: {chat_fks}"
+        )
+        assert frozenset({"composition_state_id", "session_id"}) not in chat_fks, (
+            f"Composite FK still present on chat_messages after 007.downgrade. Found: {chat_fks}"
+        )
+
+        # (3) Partial index survival — schema shape first.
+        runs_indexes = self._sqlite_master_indexes(engine, "runs")
+        assert "uq_runs_one_active_per_session" in runs_indexes, (
+            f"uq_runs_one_active_per_session was dropped by 007.downgrade's batch rebuild. "
+            f"Surviving indexes on runs: {sorted(runs_indexes)}. "
+            "This reopens the TOCTOU race in create_run — see the "
+            "TestMigration007PreservesIndexes docstring for why this index "
+            "is load-bearing."
+        )
+        sql = runs_indexes["uq_runs_one_active_per_session"]
+        assert sql is not None, "sqlite_master returned NULL sql for the partial index post-downgrade"
+        assert "WHERE" in sql.upper(), (
+            f"Partial index lost its WHERE clause during 007.downgrade. SQL: {sql!r}. "
+            "A plain unique-on-session_id would forbid ANY second run per session, "
+            "breaking historical-run browsing."
+        )
+        assert "pending" in sql and "running" in sql, (
+            f"Partial index WHERE clause no longer references pending/running after 007.downgrade. SQL: {sql!r}"
+        )
+
+        # (3b) Partial index survival — behavioural proof. Schema shape
+        # can mislead if the WHERE clause is syntactically present but
+        # semantically empty. An end-to-end insert/reject proves the
+        # predicate still gates correctly.
+        session_id = str(uuid.uuid4())
+        state_id = str(uuid.uuid4())
+        with engine.begin() as conn:
+            _seed_session(conn, session_id)
+            _seed_state(conn, state_id, session_id)
+            conn.execute(
+                insert(runs_table).values(
+                    id=str(uuid.uuid4()),
+                    session_id=session_id,
+                    state_id=state_id,
+                    status="pending",
+                    started_at=datetime.now(UTC),
+                )
+            )
+
+        with pytest.raises(IntegrityError, match=r"uq_runs_one_active_per_session|UNIQUE"), engine.begin() as conn:
+            conn.execute(
+                insert(runs_table).values(
+                    id=str(uuid.uuid4()),
+                    session_id=session_id,
+                    state_id=state_id,
+                    status="running",
                     started_at=datetime.now(UTC),
                 )
             )
@@ -1506,6 +1771,13 @@ class TestMigration008BlobReadyHashInvariant:
             ("g" * 64, "non-hex letter — 'g' outside [a-f0-9]"),
             ("a" * 63 + "!", "trailing punctuation"),
             ("a" * 63 + " ", "trailing whitespace"),
+            # Trailing newline is a distinct bypass path from generic
+            # whitespace: a naive client that appends "\n" to a digest
+            # produced by ``sha256sum`` (which emits "<hex>  <file>\n")
+            # would otherwise persist a 65-char "ready" blob whose hash
+            # cannot match any bytes. The CHECK must reject it just as
+            # strictly as the ASCII-space case above.
+            ("a" * 64 + "\n", "trailing newline — sha256sum-style digest"),
             ("", "empty string"),
         ],
     )

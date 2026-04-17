@@ -440,6 +440,20 @@ def create_session_router() -> APIRouter:
             # another tab mutated state.
             if body.state_id is not None:
                 client_state_id = body.state_id
+                # Two 404 paths below return byte-identical bodies by
+                # design. The commit that introduced this validation
+                # called the RuntimeError/ValueError mapping
+                # "load-bearing ... to avoid leaking other sessions'
+                # state existence" — but distinguishable 404 *details*
+                # would leak exactly that (an attacker could observe
+                # "State not found" vs "State not found for this
+                # session" and conclude the UUID exists in some OTHER
+                # user's session, which is the IDOR information leak
+                # the check exists to prevent). Keep both details
+                # identical; if a future refactor needs diagnostic
+                # precision, route it through structured audit/
+                # telemetry (server-side only), not through the HTTP
+                # response body.
                 try:
                     client_state = await service.get_state(client_state_id)
                 except ValueError:
@@ -450,7 +464,7 @@ def create_session_router() -> APIRouter:
                 if client_state.session_id != session.id:
                     raise HTTPException(
                         status_code=404,
-                        detail="State not found for this session",
+                        detail="State not found",
                     )
                 pre_send_state_id = client_state_id
             else:

@@ -227,7 +227,7 @@ class TestSessionCRUDRoutes:
 
 
 class TestIDORCoverageDrift:
-    """Drift guard: count ``_verify_session_ownership`` call sites in routes.py.
+    """Drift guard: enumerate endpoints that call ``_verify_session_ownership``.
 
     ``TestIDORProtection.test_idor_session_crud`` walks one cross-session
     request for each session-scoped endpoint. The risk is that someone
@@ -235,36 +235,118 @@ class TestIDORCoverageDrift:
     to add a matching IDOR assertion — the ownership primitive is in
     place, but its coverage in this suite silently rots.
 
-    This test parses ``sessions/routes.py`` and asserts the number of
-    ``_verify_session_ownership`` callers equals a fixed expectation.
-    When a route is added or removed, this test fails with a pointer
-    to the IDOR audit docstring — forcing the author to update both
-    the inventory and the assertion list together.
+    This test parses ``sessions/routes.py`` and asserts the SET of
+    enclosing function names for every ``_verify_session_ownership``
+    call equals a fixed inventory. A pure count would silently accept
+    "added endpoint X, removed endpoint Y, count unchanged" — masking
+    real drift. Set-equality forces the specific endpoint identities
+    to match, so an unintended swap fails the assertion with a diff
+    the author can read directly.
+
+    The inventory mirrors ``TestIDORProtection`` docstring verbatim: if
+    a new endpoint is added upstream, both this set and the assertion
+    walk in ``test_idor_session_crud`` must be updated in the same
+    commit. Bumping either without the other leaves the audit in a
+    lying state.
     """
 
-    EXPECTED_OWNERSHIP_CALL_SITES: int = 11
+    EXPECTED_OWNERSHIP_ENDPOINTS: frozenset[str] = frozenset(
+        {
+            "get_session",
+            "delete_session",
+            "get_messages",
+            "send_message",
+            "recompose",
+            "list_session_runs",
+            "get_current_state",
+            "get_state_versions",
+            "revert_state",
+            "get_state_yaml",
+            "fork_from_message",
+        }
+    )
 
-    def test_idor_audit_matches_ownership_call_site_count(self) -> None:
+    def test_idor_audit_matches_ownership_call_site_identities(self) -> None:
+        """Walk routes.py's AST, collect the enclosing function name of every
+        ``_verify_session_ownership`` call, and assert set-equality with
+        ``EXPECTED_OWNERSHIP_ENDPOINTS``.
+
+        Why set-equality rather than count:
+
+        * A count-based guard is satisfied by ``{add endpoint X, drop
+          endpoint Y}`` — the count stays at 11 while the IDOR audit
+          silently swaps a covered endpoint for an uncovered one.
+        * Set-equality surfaces exactly which identity appeared or
+          disappeared, so the failure message points the author at the
+          specific endpoint whose audit coverage must be reconciled.
+
+        Why walk function-def bodies rather than using parent pointers:
+
+        * ``ast.walk`` yields nodes in no defined order and without
+          parentage. We instead enumerate top-level class bodies and
+          their async/sync function defs, and for each one check
+          whether any ``_verify_session_ownership`` call appears in
+          its subtree. This gives us the (function_name, has_call)
+          mapping the assertion needs.
+        """
         import ast
 
         from elspeth.web.sessions import routes
 
         source = Path(routes.__file__).read_text(encoding="utf-8")
         tree = ast.parse(source)
-        call_sites = [
-            node
-            for node in ast.walk(tree)
-            if isinstance(node, ast.Call) and isinstance(node.func, ast.Name) and node.func.id == "_verify_session_ownership"
-        ]
-        assert len(call_sites) == self.EXPECTED_OWNERSHIP_CALL_SITES, (
-            f"Found {len(call_sites)} ``_verify_session_ownership`` call sites in "
-            f"sessions/routes.py, expected {self.EXPECTED_OWNERSHIP_CALL_SITES}. "
-            "A session-scoped endpoint was added or removed without updating the "
-            "IDOR audit. Update BOTH the ``TestIDORProtection`` docstring inventory "
-            "AND ``test_idor_session_crud`` with a matching cross-session request, "
-            "then update EXPECTED_OWNERSHIP_CALL_SITES here. Do not bump this "
-            "constant without adding the assertion — the whole point of the "
-            "guard is to force the pair to stay in sync."
+
+        # Build a child->parent map so each call can be attributed to
+        # its SMALLEST enclosing function def. ``ast.walk`` alone would
+        # also match the outer factory ``create_session_router`` — which
+        # contains every nested endpoint — bloating the set with a
+        # non-endpoint name. Walking upward from the call to the nearest
+        # FunctionDef / AsyncFunctionDef is the only correct way to
+        # attribute ownership to the handler that actually contains it.
+        parents: dict[ast.AST, ast.AST] = {}
+        for parent in ast.walk(tree):
+            for child in ast.iter_child_nodes(parent):
+                parents[child] = parent
+
+        endpoints_with_ownership_check: set[str] = set()
+        for node in ast.walk(tree):
+            if not (isinstance(node, ast.Call) and isinstance(node.func, ast.Name) and node.func.id == "_verify_session_ownership"):
+                continue
+            # Walk up to the nearest function def. A call outside any
+            # function (module level) is a structural anomaly we want
+            # the assertion to surface, not silently absorb — so we
+            # only record names of function-scoped calls, and let the
+            # set comparison below flag any missing endpoint.
+            current: ast.AST | None = parents.get(node)
+            while current is not None and not isinstance(current, ast.FunctionDef | ast.AsyncFunctionDef):
+                current = parents.get(current)
+            if current is not None:
+                endpoints_with_ownership_check.add(current.name)
+
+        # ``_verify_session_ownership`` itself contains no such call, so
+        # the helper's own def does not appear in the set. We also drop
+        # it explicitly in case a future refactor introduces a
+        # self-reference (recursion, delegation) — the drift guard is
+        # about ROUTE HANDLERS, not the helper.
+        endpoints_with_ownership_check.discard("_verify_session_ownership")
+
+        missing = self.EXPECTED_OWNERSHIP_ENDPOINTS - endpoints_with_ownership_check
+        unexpected = endpoints_with_ownership_check - self.EXPECTED_OWNERSHIP_ENDPOINTS
+
+        assert endpoints_with_ownership_check == self.EXPECTED_OWNERSHIP_ENDPOINTS, (
+            "IDOR audit drift detected in sessions/routes.py.\n"
+            f"  Expected endpoints calling _verify_session_ownership: "
+            f"{sorted(self.EXPECTED_OWNERSHIP_ENDPOINTS)}\n"
+            f"  Found: {sorted(endpoints_with_ownership_check)}\n"
+            f"  Missing (endpoint advertised in audit but no call found): {sorted(missing)}\n"
+            f"  Unexpected (endpoint calls helper but not in audit inventory): {sorted(unexpected)}\n"
+            "Update BOTH the ``TestIDORProtection`` docstring inventory AND "
+            "``test_idor_session_crud`` with a matching cross-session request "
+            "when endpoints enter or leave this set, then update "
+            "EXPECTED_OWNERSHIP_ENDPOINTS here. Do NOT bump the inventory "
+            "without adding a paired assertion — the whole point of the "
+            "guard is to force the three locations (inventory, assertion, "
+            "handler set) to stay in sync."
         )
 
 
@@ -424,6 +506,250 @@ class TestIDORProtection:
         # Alice can still access her own session
         resp = alice_client.get(f"/api/sessions/{session_id}")
         assert resp.status_code == 200
+
+
+class TestSendMessageStateIdValidation:
+    """Route-layer IDOR + information-leak coverage for ``POST /messages``
+    ``state_id`` validation.
+
+    The ``send_message`` handler accepts an optional ``state_id`` in the
+    request body (see ``sessions/routes.py``'s ``send_message`` around
+    the ``if body.state_id is not None`` block). That value is used as
+    the ``composition_state_id`` stamped onto the persisted user
+    message (AD-2 provenance), so any path that lets a client assert
+    a state owned by a *different* session would corrupt Tier 1
+    audit lineage — a message in session B claiming to have been
+    composed against session A's state.
+
+    The outer ``_verify_session_ownership`` check only gates the
+    session itself. The ``state_id`` gate is an independent check that
+    runs AFTER ownership passes, so it needs its own assertions:
+
+    * ``test_cross_session_state_id_rejected`` (Gap 16): Bob owns his
+      own session but supplies a ``state_id`` owned by Alice's session.
+      The route must return 404 — not 200 (silently stamp the user
+      message with cross-session provenance), not 403 (acknowledges
+      the state exists), and not 500 (a ``RuntimeError`` from the
+      service-layer defensive guard would indicate the route check
+      was bypassed — that would be a separate bug, tested elsewhere).
+
+    * ``test_404_body_is_identical_for_unknown_and_cross_session``
+      (Gap 17): the commit that introduced this validation called
+      the 404 mapping "load-bearing ... to avoid leaking other
+      sessions' state existence". A distinguishable 404 body (for
+      example ``"State not found"`` for unknown UUIDs vs ``"State
+      not found for this session"`` for owned-by-other) would defeat
+      that claim — an attacker who held any UUID could tell from the
+      response text whether the UUID exists in a different session,
+      reviving the IDOR information leak. This test pins the two
+      responses to byte-for-byte parity.
+
+    Sibling ``test_revert_state_not_belonging_to_session`` already
+    covers the analogous case for ``POST /state/revert``; the send-
+    message handler has its own ``state_id`` check and needs its own
+    pins.
+    """
+
+    def _alice_plus_bob_with_state(
+        self,
+        tmp_path: Path,
+    ) -> tuple[TestClient, str, str]:
+        """Seed the shared-DB IDOR scenario used by both tests below.
+
+        Returns ``(bob_client, bob_session_id, alice_state_id)``:
+
+        * ``alice_state_id`` is a composition_state owned by ``alice``
+          in a session ``alice`` alone can access. Bob never touched it.
+        * ``bob_session_id`` is a session owned by ``bob`` with a
+          composition_state of its own — so ``get_current_state``
+          returns non-None in the send_message handler and the
+          ``state_id`` validation branch is actually exercised (an
+          empty session would route through the ``state_record is
+          None`` branch and SKIP the cross-session check, which
+          would make the test vacuous).
+
+        The helper owns the engine and service so both users share the
+        same underlying DB — the only way the cross-session lookup can
+        resolve at all.
+        """
+        import asyncio
+
+        engine = create_session_engine(
+            "sqlite:///:memory:",
+            poolclass=StaticPool,
+            connect_args={"check_same_thread": False},
+        )
+        run_migrations(engine)
+        service = SessionServiceImpl(engine)
+
+        def make_app_for_user(uid: str) -> FastAPI:
+            app = FastAPI()
+            identity = UserIdentity(user_id=uid, username=uid)
+
+            async def mock_user():
+                return identity
+
+            app.dependency_overrides[get_current_user] = mock_user
+            app.state.session_service = service
+            app.state.settings = WebSettings(
+                data_dir=tmp_path,
+                composer_max_composition_turns=15,
+                composer_max_discovery_turns=10,
+                composer_timeout_seconds=85.0,
+                composer_rate_limit_per_minute=10,
+            )
+            app.state.catalog_service = None
+            # Composer MUST NOT be called — state_id validation fails
+            # before compose is reached. Set to None so any
+            # regression that skips validation surfaces as an
+            # AttributeError in the test run rather than silently
+            # succeeding against a mock.
+            app.state.composer_service = None
+
+            from elspeth.web.middleware.rate_limit import ComposerRateLimiter
+
+            app.state.rate_limiter = ComposerRateLimiter(limit=100)
+            app.include_router(create_session_router())
+            return app
+
+        # Alice creates her own session and a state in it.
+        loop = asyncio.new_event_loop()
+        try:
+            alice_session = loop.run_until_complete(
+                service.create_session("alice", "Alice Only", "local"),
+            )
+            alice_state = loop.run_until_complete(
+                service.save_composition_state(
+                    alice_session.id,
+                    CompositionStateData(
+                        metadata_={"name": "Alice", "description": ""},
+                        is_valid=True,
+                    ),
+                ),
+            )
+            # Bob creates his own session AND seeds a composition state
+            # so get_current_state on bob's session returns non-None —
+            # otherwise the send_message handler skips the state_id
+            # validation branch and the test is vacuous. ``metadata_``
+            # must be a non-None mapping because the route goes through
+            # ``_state_from_record`` which Tier-1 crashes on ``None``
+            # (see ``converters.state_from_record``).
+            bob_session = loop.run_until_complete(
+                service.create_session("bob", "Bob's Own", "local"),
+            )
+            loop.run_until_complete(
+                service.save_composition_state(
+                    bob_session.id,
+                    CompositionStateData(
+                        metadata_={"name": "Bob", "description": ""},
+                        is_valid=True,
+                    ),
+                ),
+            )
+        finally:
+            loop.close()
+
+        bob_app = make_app_for_user("bob")
+        bob_client = TestClient(bob_app)
+        return bob_client, str(bob_session.id), str(alice_state.id)
+
+    def test_cross_session_state_id_rejected(self, tmp_path) -> None:
+        """Gap 16: POST /messages with a state_id owned by ANOTHER session → 404.
+
+        This closes the specific IDOR vector where Bob's session is
+        legitimately his (``_verify_session_ownership`` passes), but
+        the ``state_id`` in the request body points at a state from
+        a session he does NOT own. Without the route-layer cross-
+        session check, the persisted user message would record
+        Alice's state_id as its ``composition_state_id`` — corrupting
+        audit lineage. The outer session-ownership check does not
+        catch this (Bob legitimately owns the session he is posting
+        to); the state_id check is a separate, independent guard.
+
+        Mirrors the existing ``test_revert_state_not_belonging_to_session``
+        for ``POST /state/revert`` — every endpoint that accepts a
+        client-supplied ``state_id`` needs its own cross-session
+        assertion, since the primitive isn't shared.
+        """
+        bob_client, bob_session_id, alice_state_id = self._alice_plus_bob_with_state(tmp_path)
+
+        resp = bob_client.post(
+            f"/api/sessions/{bob_session_id}/messages",
+            json={"content": "hello", "state_id": alice_state_id},
+        )
+        assert resp.status_code == 404, (
+            f"Expected 404 for cross-session state_id, got {resp.status_code}. "
+            f"Body: {resp.text!r}. Without this guard, the persisted user "
+            "message would claim provenance from a session Bob does not own."
+        )
+
+    def test_404_body_is_identical_for_unknown_and_cross_session(self, tmp_path) -> None:
+        """Gap 17: pin the "load-bearing" 404 parity claim from commit c86f935d.
+
+        Two distinct failure modes MUST produce byte-identical response
+        bodies:
+
+        1. The UUID does not exist anywhere (``service.get_state``
+           raises ``ValueError`` → caught by the route).
+        2. The UUID exists but belongs to a session the requester
+           does not own (route's ``client_state.session_id !=
+           session.id`` branch fires).
+
+        If these two paths return distinguishable bodies, an attacker
+        holding any UUID can tell whether it maps to a real state in
+        *some other user's* session — the exact IDOR information leak
+        the commit claimed to prevent. Bytes must match, not just
+        status codes.
+
+        Both requests use Bob's client against Bob's own session, so
+        ``_verify_session_ownership`` passes for both — the
+        differentiating factor is purely the ``state_id`` value. The
+        ``offset=1`` placeholder UUID is constructed to be astronomically
+        unlikely to collide with alice_state_id (the only real
+        composition_state a UUID could match in this scenario).
+        """
+        bob_client, bob_session_id, alice_state_id = self._alice_plus_bob_with_state(tmp_path)
+        unknown_state_id = str(uuid.uuid4())
+        # Sanity: guard against the minuscule probability of collision
+        # — if uuid4 ever produced alice's id, the test would
+        # accidentally exercise the same branch twice.
+        assert unknown_state_id != alice_state_id, "uuid4 collided — retry the test"
+
+        unknown_resp = bob_client.post(
+            f"/api/sessions/{bob_session_id}/messages",
+            json={"content": "hello", "state_id": unknown_state_id},
+        )
+        cross_session_resp = bob_client.post(
+            f"/api/sessions/{bob_session_id}/messages",
+            json={"content": "hello", "state_id": alice_state_id},
+        )
+
+        assert unknown_resp.status_code == 404
+        assert cross_session_resp.status_code == 404
+
+        # Byte-identical bodies — the strict assertion. FastAPI serialises
+        # the HTTPException detail into ``{"detail": "..."}``, and any
+        # divergence in the detail string shows up here as a byte-diff.
+        assert unknown_resp.content == cross_session_resp.content, (
+            "404 body parity broken — unknown-UUID vs cross-session UUID "
+            "responses differ. This re-introduces the IDOR information "
+            "leak commit c86f935d3 existed to prevent.\n"
+            f"  unknown:       {unknown_resp.content!r}\n"
+            f"  cross-session: {cross_session_resp.content!r}\n"
+            "Unify the HTTPException detail strings in send_message's "
+            "state_id validation block."
+        )
+        # Also pin the detail text explicitly so a future refactor that
+        # renames BOTH strings symmetrically (preserving parity but
+        # introducing a new leak vector through a different channel
+        # like response headers) still surfaces as a diff here.
+        assert unknown_resp.json() == {"detail": "State not found"}, (
+            f"Unexpected 404 body shape: {unknown_resp.json()!r}. "
+            "The route's 404 detail must remain the generic "
+            '"State not found" — anything more specific (e.g. '
+            '"State not found in session", "Wrong owner") leaks '
+            "membership information."
+        )
 
 
 class TestMessageRoutes:

@@ -263,10 +263,40 @@ def upgrade() -> None:
 
     # --- Schema changes ---
 
-    # composite uniqueness target — same DDL on every dialect.
-    with op.batch_alter_table("composition_states") as batch_op:
-        batch_op.create_unique_constraint(
+    # Composite uniqueness target for the FKs we're about to add.
+    # Dialect split is load-bearing, not cosmetic:
+    #
+    # * SQLite:  ``create_unique_constraint`` via ``batch_alter_table``
+    #   forces a table-copy rebuild (CREATE + INSERT ... SELECT +
+    #   DROP TABLE + RENAME). That DROP TABLE fails with
+    #   ``sqlite3.IntegrityError: FOREIGN KEY constraint failed`` on
+    #   every upgrade from 006 that has ANY pre-existing
+    #   chat_messages.composition_state_id or runs.state_id row — i.e.
+    #   every real installation with user activity.
+    #   ``CREATE UNIQUE INDEX`` is accepted by SQLite as a composite
+    #   FK target (per the SQLite docs: "either the PRIMARY KEY of the
+    #   parent table, or subject to a UNIQUE constraint, or must have
+    #   a UNIQUE INDEX") and does not rebuild the table, so pre-existing
+    #   FK-holding rows remain undisturbed. SQLite stores UNIQUE
+    #   constraints as unique indexes internally anyway — this is
+    #   semantic parity on disk, just expressed as CREATE INDEX instead
+    #   of ALTER TABLE ADD CONSTRAINT.
+    # * PostgreSQL / MySQL: a plain UNIQUE INDEX does NOT qualify as an
+    #   FK target — the FK must resolve to a UNIQUE CONSTRAINT or
+    #   PRIMARY KEY. ALTER TABLE ADD CONSTRAINT runs as direct DDL on
+    #   these dialects with no rebuild, so no FK-pressure concern
+    #   applies. Use ``create_unique_constraint`` for correctness.
+    if bind.dialect.name == "sqlite":
+        op.create_index(
             "uq_composition_state_id_session",
+            "composition_states",
+            ["id", "session_id"],
+            unique=True,
+        )
+    else:
+        op.create_unique_constraint(
+            "uq_composition_state_id_session",
+            "composition_states",
             ["id", "session_id"],
         )
 
@@ -339,5 +369,22 @@ def downgrade() -> None:
             ["id"],
         )
 
-    with op.batch_alter_table("composition_states") as batch_op:
-        batch_op.drop_constraint("uq_composition_state_id_session", type_="unique")
+    # Mirror the dialect split from ``upgrade()``: on SQLite the
+    # composite uniqueness was created as a UNIQUE INDEX to avoid a
+    # table rebuild that would have failed against FK-holding rows.
+    # Drop it as an index here for the same reason — a batch
+    # ``drop_constraint`` would force the same rebuild and the same
+    # FK-violation failure on any DB whose runs/chat_messages still
+    # hold references to composition_states (which they do, via the
+    # single-column FKs we just restored above). On PostgreSQL/MySQL
+    # the uniqueness was a proper UNIQUE CONSTRAINT, so drop it as
+    # one.
+    bind = op.get_bind()
+    if bind.dialect.name == "sqlite":
+        op.drop_index("uq_composition_state_id_session", table_name="composition_states")
+    else:
+        op.drop_constraint(
+            "uq_composition_state_id_session",
+            "composition_states",
+            type_="unique",
+        )
