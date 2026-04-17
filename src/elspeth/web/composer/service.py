@@ -18,12 +18,13 @@ import asyncio
 import json
 from collections.abc import Mapping
 from dataclasses import dataclass
+from datetime import UTC, datetime
 from typing import Any, cast
 
 import litellm
 import structlog
 from litellm.exceptions import BadRequestError as LiteLLMBadRequestError
-from sqlalchemy import Engine
+from sqlalchemy import Engine, update
 
 from elspeth.web.catalog.protocol import CatalogService
 from elspeth.web.composer.prompts import build_messages
@@ -41,6 +42,7 @@ from elspeth.web.composer.tools import (
     is_cacheable_discovery_tool,
     is_discovery_tool,
 )
+from elspeth.web.sessions.models import sessions_table
 
 slog = structlog.get_logger()
 
@@ -550,12 +552,6 @@ class ComposerServiceImpl:
         MUST NOT mask the original plugin-bug exception if persistence
         itself fails.
         """
-        from datetime import UTC, datetime
-
-        from sqlalchemy import update
-
-        from elspeth.web.sessions.models import sessions_table
-
         assert self._session_engine is not None, "_persist_crashed_session must only be called when session_engine is set"
         now = datetime.now(UTC)
         with self._session_engine.begin() as conn:

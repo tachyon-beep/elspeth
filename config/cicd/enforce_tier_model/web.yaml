@@ -805,7 +805,7 @@ allow_hits:
   reason: Tier 3 — isinstance check on pipeline_yaml argument type
   safety: Raises TypeError with diagnostic; no silent default
   expires: null
-- key: web/composer/service.py:R4:ComposerServiceImpl:compose:fp=227bc2851d4f5b05
+- key: web/composer/service.py:R4:ComposerServiceImpl:compose:fp=8952d86607a4d798
   owner: web-composer
   reason: Plugin-bug crash-path breadcrumb — catches any escaping Exception from _compose_loop (after narrowing the inner tool-execution catch to ToolArgumentError) to best-effort bump the session's updated_at before re-raising the original exception. ComposerConvergenceError is re-raised without interception to preserve its partial-state persistence path.
   safety: Original exception is always re-raised (never swallowed); persistence failure is caught, emits slog.error "composer_crash_persistence_failed" with exc_class (message stays in exc_info only), then the original plugin-bug exception propagates unchanged to the route-layer typed handler.
