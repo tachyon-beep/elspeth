@@ -4989,3 +4989,78 @@ class TestUpdateBlobTypeGuard:
                 session_engine=self.engine,
                 session_id=self.session_id,
             )
+
+
+# ---------------------------------------------------------------------------
+# set_source_from_blob Tier-3 type guard (elspeth-7d32b34bf7)
+# ---------------------------------------------------------------------------
+
+
+class TestSetSourceFromBlobTypeGuard:
+    """Malformed `options` must stay a retryable tool-argument failure."""
+
+    @pytest.fixture(autouse=True)
+    def _setup(self, tmp_path: Path) -> None:
+        from datetime import UTC, datetime
+        from uuid import uuid4
+
+        from sqlalchemy.pool import StaticPool
+
+        from elspeth.web.sessions.engine import create_session_engine
+        from elspeth.web.sessions.migrations import run_migrations
+        from elspeth.web.sessions.models import sessions_table
+
+        self.engine = create_session_engine(
+            "sqlite:///:memory:",
+            poolclass=StaticPool,
+            connect_args={"check_same_thread": False},
+        )
+        run_migrations(self.engine)
+
+        self.session_id = str(uuid4())
+        self.data_dir = tmp_path
+        now = datetime.now(UTC)
+        with self.engine.begin() as conn:
+            conn.execute(
+                sessions_table.insert().values(
+                    id=self.session_id,
+                    user_id="test-user",
+                    auth_provider_type="local",
+                    title="Test",
+                    created_at=now,
+                    updated_at=now,
+                )
+            )
+
+    def test_non_object_options_raises_tool_argument_error(self) -> None:
+        from elspeth.web.composer.protocol import ToolArgumentError
+
+        catalog = _mock_catalog()
+        state = _empty_state()
+
+        create_result = execute_tool(
+            "create_blob",
+            {"filename": "seed.txt", "mime_type": "text/plain", "content": "hello"},
+            state,
+            catalog,
+            data_dir=str(self.data_dir),
+            session_engine=self.engine,
+            session_id=self.session_id,
+        )
+        blob_id = create_result.data["blob_id"]
+        state = create_result.updated_state
+
+        with pytest.raises(ToolArgumentError, match=r"'options' must be an object, got str"):
+            execute_tool(
+                "set_source_from_blob",
+                {
+                    "blob_id": blob_id,
+                    "on_success": "out",
+                    "options": "column=text",
+                },
+                state,
+                catalog,
+                data_dir=str(self.data_dir),
+                session_engine=self.engine,
+                session_id=self.session_id,
+            )

@@ -693,6 +693,74 @@ class TestRecomposeConvergencePartialState:
         assert db_source_opts["path"] == "/internal/blobs/data.csv"
         assert db_source_opts["blob_ref"] == "abc123"
 
+    def test_recompose_convergence_save_operational_error_preserves_422_body(self, tmp_path) -> None:
+        """Regression (elspeth-303f751204): when save_composition_state
+        raises an ``OperationalError`` (lock timeout / pool disconnect)
+        while persisting partial_state from a convergence error, the
+        handler MUST still return the structured 422 body with
+        ``partial_state_save_failed=True`` rather than upgrading the
+        user-driven 422 to an uncaught 500.
+
+        Before the fix, the handler's ``except`` clause caught only
+        ``IntegrityError``; any other ``SQLAlchemyError`` subclass escaped
+        and the user received a generic 500 with no structured diagnostic.
+        """
+        import asyncio
+
+        from sqlalchemy.exc import OperationalError
+
+        from elspeth.web.composer.protocol import ComposerConvergenceError
+
+        partial = CompositionState(
+            source=None,
+            nodes=(),
+            edges=(),
+            outputs=(),
+            metadata=PipelineMetadata(),
+            version=2,
+        )
+
+        mock_composer = AsyncMock()
+        mock_composer.compose = AsyncMock(
+            side_effect=ComposerConvergenceError(
+                max_turns=5,
+                budget_exhausted="composition",
+                partial_state=partial,
+            ),
+        )
+
+        app, service = _make_app(tmp_path)
+        app.state.composer_service = mock_composer
+
+        async def _raise_operational(*_args, **_kwargs):
+            raise OperationalError(
+                "INSERT INTO composition_states ...",
+                {},
+                Exception("server has gone away"),
+            )
+
+        service.save_composition_state = _raise_operational  # type: ignore[method-assign]
+
+        client = TestClient(app, raise_server_exceptions=False)
+        resp = client.post("/api/sessions", json={"title": "Test"})
+        session_id = resp.json()["id"]
+
+        loop = asyncio.new_event_loop()
+        loop.run_until_complete(
+            service.add_message(uuid.UUID(session_id), "user", "Build a pipeline"),
+        )
+        loop.close()
+
+        recompose_resp = client.post(f"/api/sessions/{session_id}/recompose")
+
+        # Structured 422 body is preserved despite the secondary save failure.
+        assert recompose_resp.status_code == 422
+        detail = recompose_resp.json()["detail"]
+        assert detail["error_type"] == "convergence"
+        assert detail["partial_state_save_failed"] is True
+        # partial_state is not populated on save failure (no successful row).
+        assert "partial_state" not in detail
+
 
 class TestStateRoutes:
     """Tests for composition state endpoints."""
@@ -1531,6 +1599,77 @@ class TestComposePluginCrashResponse:
             serialised = str(event)
             assert message_secret not in serialised, event
             assert cause_secret not in serialised, event
+
+    def test_compose_plugin_crash_save_operational_error_preserves_500_body(self, tmp_path) -> None:
+        """Regression (elspeth-303f751204): when save_composition_state
+        raises an ``OperationalError`` (lock timeout, pool disconnect,
+        deadlock) while persisting partial_state during a plugin crash,
+        the handler MUST still return the structured ``composer_plugin_error``
+        500 body rather than letting the secondary DB failure mask the
+        primary crash.  The save failure is recorded via
+        ``_plugin_crash_partial_state_save_failed`` slog.
+
+        Before the fix, the handler's ``except`` clause caught only
+        ``IntegrityError``; any other ``SQLAlchemyError`` subclass escaped,
+        producing a generic (unstructured) 500 and losing the redacted
+        response path entirely.
+        """
+        from sqlalchemy.exc import OperationalError
+        from structlog.testing import capture_logs
+
+        partial = CompositionState(
+            source=None,
+            nodes=(),
+            edges=(),
+            outputs=(),
+            metadata=PipelineMetadata(name="mid-crash-mutation"),
+            version=3,
+        )
+        original = ValueError(f"plugin bug: {self.SECRET_PATH}")
+        mock_composer = AsyncMock()
+        mock_composer.compose = AsyncMock(
+            side_effect=ComposerPluginCrashError(original, partial_state=partial),
+        )
+
+        app, service = _make_app(tmp_path)
+        app.state.composer_service = mock_composer
+
+        # Patch save_composition_state to raise a non-IntegrityError
+        # SQLAlchemyError subclass — simulates lock timeout / deadlock /
+        # pool disconnect / schema drift.
+        async def _raise_operational(*_args, **_kwargs):
+            raise OperationalError(
+                "UPDATE composition_states ...",
+                {},
+                Exception("lock wait timeout exceeded"),
+            )
+
+        service.save_composition_state = _raise_operational  # type: ignore[method-assign]
+
+        client = TestClient(app, raise_server_exceptions=False)
+        resp = client.post("/api/sessions", json={"title": "Test"})
+        session_id = resp.json()["id"]
+
+        with capture_logs() as cap_logs:
+            response = client.post(
+                f"/api/sessions/{session_id}/messages",
+                json={"content": "Build me a pipeline"},
+            )
+
+        # Structured 500 body is preserved despite the secondary save failure.
+        assert response.status_code == 500
+        body = response.json()
+        assert body["detail"]["error_type"] == "composer_plugin_error"
+        assert self.SECRET_PATH not in response.text
+
+        # The secondary failure is recorded via slog.
+        save_fail_events = [e for e in cap_logs if e.get("event") == "compose_plugin_crash_partial_state_save_failed"]
+        assert len(save_fail_events) == 1, cap_logs
+        assert save_fail_events[0]["exc_class"] == "OperationalError"
+
+        # And the primary plugin_crash slog still fires.
+        crash_events = [e for e in cap_logs if e.get("event") == "compose_plugin_crash"]
+        assert len(crash_events) == 1, cap_logs
 
     def test_compose_unknown_exception_class_is_not_absorbed(self, tmp_path) -> None:
         """Deliberately narrow typed catch: RuntimeError (not in the handler's

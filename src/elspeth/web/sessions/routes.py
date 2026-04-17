@@ -12,7 +12,7 @@ import structlog
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from litellm.exceptions import APIError as LiteLLMAPIError
 from litellm.exceptions import AuthenticationError as LiteLLMAuthError
-from sqlalchemy.exc import IntegrityError, SQLAlchemyError
+from sqlalchemy.exc import SQLAlchemyError
 
 from elspeth.contracts.freeze import deep_thaw
 from elspeth.web.auth.middleware import get_current_user
@@ -201,8 +201,13 @@ async def _handle_convergence_error(
             )
             await service.save_composition_state(session_id, state_data)
             response_body["partial_state"] = redact_source_storage_path(state_d)
-        except (ValueError, TypeError, KeyError, IntegrityError) as save_err:
-            # exc_info deliberately omitted: SQLAlchemy IntegrityError
+        except (ValueError, TypeError, KeyError, SQLAlchemyError) as save_err:
+            # Catch the full SQLAlchemyError family — ``IntegrityError`` alone
+            # would let ``OperationalError`` (lock timeout / pool disconnect /
+            # deadlock), ``ProgrammingError`` (schema drift), and other
+            # siblings escape, upgrading the 422 convergence response to an
+            # unstructured 500.
+            # exc_info deliberately omitted: SQLAlchemyError
             # __cause__ chains can carry DB connection strings, schema
             # introspection detail, or other operational secrets that
             # structured server logs must not retain.
@@ -277,7 +282,11 @@ async def _handle_plugin_crash(
                 validation_errors=[e.message for e in validation.errors] if validation.errors else None,
             )
             await service.save_composition_state(session_id, state_data)
-        except (ValueError, TypeError, KeyError, IntegrityError) as save_err:
+        except (ValueError, TypeError, KeyError, SQLAlchemyError) as save_err:
+            # Catch the full SQLAlchemyError family — a narrow
+            # ``IntegrityError`` catch would let ``OperationalError``,
+            # ``ProgrammingError``, and other siblings escape and mask the
+            # primary plugin-crash response / slog path.
             slog.error(
                 f"{log_prefix}_plugin_crash_partial_state_save_failed",
                 session_id=str(session_id),

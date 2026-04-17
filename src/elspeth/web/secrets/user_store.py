@@ -14,6 +14,7 @@ import base64
 import hashlib
 import os
 import uuid
+from collections.abc import Callable
 from datetime import UTC, datetime
 from typing import Any
 
@@ -28,6 +29,8 @@ from elspeth.web.sessions.models import user_secrets_table
 
 _PBKDF2_ITERATIONS = 480_000
 _SALT_BYTES = 16
+_USER_SECRET_CONFLICT_COLUMNS = ("name", "user_id", "auth_provider_type")
+_USER_SECRET_UPSERT_UPDATE_COLUMNS = ("encrypted_value", "salt", "updated_at")
 
 
 def _fingerprint_key_available() -> bool:
@@ -70,27 +73,57 @@ def _derive_fernet_key(master_key: str, salt: bytes) -> bytes:
     return base64.urlsafe_b64encode(raw)
 
 
-def _resolve_dialect_insert(engine: Engine) -> Any:
-    """Resolve the dialect-specific ``insert`` function for atomic upsert.
+_UpsertBuilder = Callable[[sa.Table, dict[str, Any]], Any]
 
-    Both SQLite and PostgreSQL support ``INSERT ... ON CONFLICT DO UPDATE``
-    through SQLAlchemy, but require dialect-specific import paths.  Resolved
-    once at construction time so unsupported dialects fail fast at startup
-    rather than silently at first write.
+
+def _upsert_update_mapping(insert_namespace: Any) -> dict[str, Any]:
+    """Build the per-column update mapping for dialect-specific upsert clauses."""
+    return {column: getattr(insert_namespace, column) for column in _USER_SECRET_UPSERT_UPDATE_COLUMNS}
+
+
+def _resolve_upsert_builder(engine: Engine) -> _UpsertBuilder:
+    """Resolve the dialect-specific upsert builder for atomic secret writes.
+
+    SQLite and PostgreSQL expose ``INSERT ... ON CONFLICT DO UPDATE`` via
+    dialect-specific ``insert()`` helpers. MySQL-family backends use
+    ``INSERT ... ON DUPLICATE KEY UPDATE``. Resolve the builder once at
+    construction time so unsupported dialects still fail fast at startup.
     """
     dialect = engine.dialect.name
     if dialect == "sqlite":
         from sqlalchemy.dialects.sqlite import insert as _sqlite_insert
 
-        return _sqlite_insert
+        def _sqlite_upsert(table: sa.Table, values: dict[str, Any]) -> Any:
+            stmt = _sqlite_insert(table).values(**values)
+            return stmt.on_conflict_do_update(
+                index_elements=list(_USER_SECRET_CONFLICT_COLUMNS),
+                set_=_upsert_update_mapping(stmt.excluded),
+            )
+
+        return _sqlite_upsert
     if dialect == "postgresql":
         from sqlalchemy.dialects.postgresql import insert as _pg_insert
 
-        return _pg_insert
+        def _pg_upsert(table: sa.Table, values: dict[str, Any]) -> Any:
+            stmt = _pg_insert(table).values(**values)
+            return stmt.on_conflict_do_update(
+                index_elements=list(_USER_SECRET_CONFLICT_COLUMNS),
+                set_=_upsert_update_mapping(stmt.excluded),
+            )
+
+        return _pg_upsert
+    if dialect in {"mysql", "mariadb"}:
+        from sqlalchemy.dialects.mysql import insert as _mysql_insert
+
+        def _mysql_upsert(table: sa.Table, values: dict[str, Any]) -> Any:
+            stmt = _mysql_insert(table).values(**values)
+            return stmt.on_duplicate_key_update(**_upsert_update_mapping(stmt.inserted))
+
+        return _mysql_upsert
     raise NotImplementedError(
-        f"UserSecretStore requires INSERT ... ON CONFLICT DO UPDATE, "
-        f"which is not available for session database dialect {dialect!r}. "
-        f"Supported dialects: sqlite, postgresql."
+        "UserSecretStore requires an atomic upsert for concurrent secret writes, "
+        f"but no dialect builder is registered for session database dialect {dialect!r}. "
+        "Supported dialects: sqlite, postgresql, mysql, mariadb."
     )
 
 
@@ -109,7 +142,7 @@ class UserSecretStore:
     def __init__(self, engine: Engine, master_key: str) -> None:
         self._engine = engine
         self._master_key = master_key
-        self._dialect_insert = _resolve_dialect_insert(engine)
+        self._build_upsert = _resolve_upsert_builder(engine)
 
     # ------------------------------------------------------------------
     # Public API
@@ -183,24 +216,17 @@ class UserSecretStore:
         now = datetime.now(UTC)
 
         t = user_secrets_table
-        stmt = self._dialect_insert(t).values(
-            id=str(uuid.uuid4()),
-            name=name,
-            user_id=user_id,
-            auth_provider_type=auth_provider_type,
-            encrypted_value=encrypted,
-            salt=salt,
-            created_at=now,
-            updated_at=now,
-        )
-        stmt = stmt.on_conflict_do_update(
-            index_elements=["name", "user_id", "auth_provider_type"],
-            set_={
-                "encrypted_value": stmt.excluded.encrypted_value,
-                "salt": stmt.excluded.salt,
-                "updated_at": stmt.excluded.updated_at,
-            },
-        )
+        values = {
+            "id": str(uuid.uuid4()),
+            "name": name,
+            "user_id": user_id,
+            "auth_provider_type": auth_provider_type,
+            "encrypted_value": encrypted,
+            "salt": salt,
+            "created_at": now,
+            "updated_at": now,
+        }
+        stmt = self._build_upsert(t, values)
         with self._engine.begin() as conn:
             conn.execute(stmt)
 

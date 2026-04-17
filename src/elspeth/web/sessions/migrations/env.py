@@ -28,6 +28,7 @@ from alembic import context
 from sqlalchemy import pool
 
 from elspeth.web.sessions.engine import create_session_engine
+from elspeth.web.sessions.migrations._config import escape_alembic_config_value
 from elspeth.web.sessions.models import metadata as target_metadata
 
 config = context.config
@@ -50,7 +51,10 @@ def run_migrations_offline() -> None:
         discipline: crash rather than emit dialect-less SQL.
     """
     if "ELSPETH_WEB__SESSION_DB_URL" in os.environ:
-        config.set_main_option("sqlalchemy.url", os.environ["ELSPETH_WEB__SESSION_DB_URL"])
+        config.set_main_option(
+            "sqlalchemy.url",
+            escape_alembic_config_value(os.environ["ELSPETH_WEB__SESSION_DB_URL"]),
+        )
 
     url = config.get_main_option("sqlalchemy.url")
     if not url:
@@ -94,7 +98,10 @@ def run_migrations_online() -> None:
 
     # CLI mode: honor env var override, then ini fallback.
     if "ELSPETH_WEB__SESSION_DB_URL" in os.environ:
-        config.set_main_option("sqlalchemy.url", os.environ["ELSPETH_WEB__SESSION_DB_URL"])
+        config.set_main_option(
+            "sqlalchemy.url",
+            escape_alembic_config_value(os.environ["ELSPETH_WEB__SESSION_DB_URL"]),
+        )
 
     # Route through create_session_engine so SQLite gets its
     # ``PRAGMA foreign_keys=ON`` listener and startup probe. Using

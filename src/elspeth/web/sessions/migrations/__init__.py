@@ -12,6 +12,8 @@ from alembic import command
 from alembic.config import Config
 from sqlalchemy import Engine
 
+from elspeth.web.sessions.migrations._config import escape_alembic_config_value
+
 
 def _alembic_config(engine: Engine) -> Config:
     """Build an Alembic Config pointing at the sessions migration environment.
@@ -27,7 +29,7 @@ def _alembic_config(engine: Engine) -> Config:
     cfg = Config(str(ini_path))
     cfg.set_main_option(
         "sqlalchemy.url",
-        engine.url.render_as_string(hide_password=False).replace("%", "%%"),
+        escape_alembic_config_value(engine.url.render_as_string(hide_password=False)),
     )
     return cfg
 

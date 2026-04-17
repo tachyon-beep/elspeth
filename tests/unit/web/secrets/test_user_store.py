@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import os
 import threading
+from typing import Any
 
 import pytest
 import sqlalchemy as sa
@@ -230,6 +231,52 @@ class TestUserSecretStore:
         # One value should have won
         val, _ = store.get_secret("RACE", user_id="u1", auth_provider_type="local")
         assert val.startswith("v")
+
+    @pytest.mark.parametrize("dialect_name", ["mysql", "mariadb"])
+    def test_mysql_family_dialects_use_atomic_upsert_statements(self, dialect_name: str) -> None:
+        """MySQL-family dialects must keep startup and write paths usable.
+
+        The regression happened at construction time (`create_app()`
+        instantiates `UserSecretStore` unconditionally), but correctness also
+        depends on the eventual write statement being the MySQL-family atomic
+        upsert form rather than SQLite/PostgreSQL's `ON CONFLICT`.
+        """
+        from sqlalchemy.dialects.mysql import dialect as mysql_dialect
+
+        class _CaptureConnection:
+            def __init__(self) -> None:
+                self.statements: list[Any] = []
+
+            def execute(self, stmt: Any) -> None:
+                self.statements.append(stmt)
+
+        class _CaptureBegin:
+            def __init__(self, conn: _CaptureConnection) -> None:
+                self._conn = conn
+
+            def __enter__(self) -> _CaptureConnection:
+                return self._conn
+
+            def __exit__(self, exc_type, exc, tb) -> bool:
+                return False
+
+        class _CaptureEngine:
+            def __init__(self, dialect_name: str) -> None:
+                self.dialect = type("_Dialect", (), {"name": dialect_name})()
+                self.connection = _CaptureConnection()
+
+            def begin(self) -> _CaptureBegin:
+                return _CaptureBegin(self.connection)
+
+        engine = _CaptureEngine(dialect_name)
+        store = UserSecretStore(engine=engine, master_key=TEST_MASTER_KEY)
+
+        store.set_secret("API_KEY", value="secret", user_id="user-1", auth_provider_type="local")
+
+        assert len(engine.connection.statements) == 1
+        compiled = str(engine.connection.statements[0].compile(dialect=mysql_dialect()))
+        assert "ON DUPLICATE KEY UPDATE" in compiled
+        assert "ON CONFLICT" not in compiled
 
     # -- Regression: fingerprint key availability (Bugs 1 & 2) --
 

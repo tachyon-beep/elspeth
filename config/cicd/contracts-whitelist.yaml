@@ -601,6 +601,19 @@ allowed_dict_patterns:
   - "src/elspeth/web/composer/tools.py:_prevalidate_transform:options"
   - "src/elspeth/web/composer/tools.py:_prevalidate_sink:options"
 
+  # ═══════════════════════════════════════════════════════════════════════════
+  # WEB SECRETS — Dialect-specific SQLAlchemy upsert builders
+  # `values` is the SQLAlchemy Core `insert().values(**mapping)` input — a
+  # column-name → column-value dict. SQLAlchemy dispatches per-column type
+  # handling internally, so a TypedDict here would duplicate Column metadata
+  # without adding safety. `_upsert_update_mapping` builds the same shape
+  # from the dialect-specific excluded/inserted namespace.
+  # ═══════════════════════════════════════════════════════════════════════════
+  - "src/elspeth/web/secrets/user_store.py:_upsert_update_mapping:return"
+  - "src/elspeth/web/secrets/user_store.py:_sqlite_upsert:values"
+  - "src/elspeth/web/secrets/user_store.py:_pg_upsert:values"
+  - "src/elspeth/web/secrets/user_store.py:_mysql_upsert:values"
+
   # WEB COMPOSER — Service, protocol, prompts (LLM message lists)
   # LiteLLM message format is list[dict[str, Any]] by API contract.
   # Chat history arrives as plain dicts from the route handler (seam contract B).

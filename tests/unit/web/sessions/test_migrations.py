@@ -1079,6 +1079,79 @@ class TestCliMigrationPathUsesEngineFactory:
             f"precedence regressed."
         )
 
+    def test_offline_mode_env_var_with_percent_encoded_password_round_trips(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """Percent-encoded env URLs must survive ConfigParser-backed writes.
+
+        Without escaping before `config.set_main_option(...)`, ConfigParser
+        treats `%40` / `%2F` as interpolation syntax and env.py crashes
+        before it can configure Alembic.
+        """
+        from pathlib import Path
+
+        import alembic.context as alembic_context_mod
+        from alembic import command
+
+        env_url = "postgresql://user:pa%40ss%2Fword@db.example/sessions"
+        monkeypatch.setenv("ELSPETH_WEB__SESSION_DB_URL", env_url)
+
+        observed: list[dict[str, Any]] = []
+        original_configure = alembic_context_mod.configure
+
+        def spy(*args: Any, **kwargs: Any) -> Any:
+            observed.append(dict(kwargs))
+            return original_configure(*args, **kwargs)
+
+        monkeypatch.setattr(alembic_context_mod, "configure", spy)
+
+        ini_path = Path(__file__).parent.parent.parent.parent.parent / "src" / "elspeth" / "web" / "sessions" / "alembic.ini"
+        cfg = Config(str(ini_path))
+
+        command.upgrade(cfg, "head:head", sql=True)
+
+        assert observed, "context.configure was never invoked"
+        assert observed[0].get("url") == env_url
+
+    def test_cli_mode_env_var_with_percent_encoded_password_round_trips(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """CLI migrations must pass the original percent-encoded DSN onward."""
+        from alembic import command
+        from sqlalchemy import pool as sa_pool
+
+        import elspeth.web.sessions.engine as engine_mod
+
+        env_url = "postgresql://user:pa%40ss%2Fword@db.example/sessions"
+        monkeypatch.setenv("ELSPETH_WEB__SESSION_DB_URL", env_url)
+
+        observed: list[tuple[str, dict[str, Any]]] = []
+        original = engine_mod.create_session_engine
+
+        def spy(url: str, **kwargs: Any) -> Engine:
+            observed.append((url, dict(kwargs)))
+            return original(
+                "sqlite:///:memory:",
+                poolclass=StaticPool,
+                connect_args={"check_same_thread": False},
+            )
+
+        monkeypatch.setattr(engine_mod, "create_session_engine", spy)
+
+        from pathlib import Path
+
+        ini_path = Path(__file__).parent.parent.parent.parent.parent / "src" / "elspeth" / "web" / "sessions" / "alembic.ini"
+        cfg = Config(str(ini_path))
+
+        command.upgrade(cfg, "head")
+
+        assert len(observed) == 1
+        observed_url, observed_kwargs = observed[0]
+        assert observed_url == env_url
+        assert observed_kwargs.get("poolclass") is sa_pool.NullPool
+
     def test_cli_path_migration_has_foreign_keys_enabled(self, monkeypatch: pytest.MonkeyPatch, tmp_path) -> None:
         """Behavioural proof: after a CLI upgrade, FKs are enforced.
 

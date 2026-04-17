@@ -2160,6 +2160,56 @@ class TestToolArgumentErrorAcrossThreadBoundary:
         error_content = json.loads(tool_messages[0]["content"])
         assert "'content' must be a string, got int" in error_content["error"]
 
+    @pytest.mark.asyncio
+    async def test_real_set_source_from_blob_options_guard_feeds_error_to_llm(self) -> None:
+        from elspeth.web.composer.tools import execute_tool
+
+        catalog = _mock_catalog()
+        settings = _make_settings(data_dir=self.data_dir)
+        service = ComposerServiceImpl(
+            catalog=catalog,
+            settings=settings,
+            session_engine=self.engine,
+        )
+        state = _empty_state()
+
+        create_result = execute_tool(
+            "create_blob",
+            {"filename": "seed.txt", "mime_type": "text/plain", "content": "hello"},
+            state,
+            catalog,
+            data_dir=str(self.data_dir),
+            session_engine=self.engine,
+            session_id=self.session_id,
+        )
+        blob_id = create_result.data["blob_id"]
+
+        bad_call = _make_llm_response(
+            tool_calls=[
+                {
+                    "id": "call_bad",
+                    "name": "set_source_from_blob",
+                    "arguments": {
+                        "blob_id": blob_id,
+                        "on_success": "out",
+                        "options": "column=text",
+                    },
+                }
+            ],
+        )
+        text = _make_llm_response(content="Fixed.")
+
+        with patch.object(service, "_call_llm", new_callable=AsyncMock) as mock_llm:
+            mock_llm.side_effect = [bad_call, text]
+            result = await service.compose("Setup", [], state, session_id=self.session_id)
+
+        assert result.message == "Fixed."
+        second_call_messages = mock_llm.call_args_list[1].args[0]
+        tool_messages = [m for m in second_call_messages if m.get("role") == "tool"]
+        assert len(tool_messages) == 1
+        error_content = json.loads(tool_messages[0]["content"])
+        assert "'options' must be an object, got str" in error_content["error"]
+
 
 class TestComposerErrorConstructionInvariants:
     """Type-level invariants for composer service exceptions.

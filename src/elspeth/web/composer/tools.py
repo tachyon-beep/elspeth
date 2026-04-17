@@ -1662,6 +1662,12 @@ def _execute_set_source_from_blob(
     # This allows callers to provide plugin-specific config (schema, column, etc.)
     # while ensuring path and blob_ref always reflect the actual blob.
     caller_options = arguments.get("options", {})
+    if not isinstance(caller_options, dict):
+        raise ToolArgumentError(
+            argument="options",
+            expected="an object",
+            actual_type=type(caller_options).__name__,
+        )
     merged_options = {
         **caller_options,
         **mime_extra,
