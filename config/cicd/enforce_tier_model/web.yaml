@@ -627,10 +627,19 @@ allow_hits:
   reason: Convergence partial-state validation may fail on damaged LLM output — narrowed to data-shape errors
   safety: Returns 422 with structured error, does not swallow
   expires: null
-- key: web/sessions/routes.py:R6:_handle_convergence_error:fp=79390b445af58b69
+- key: web/sessions/routes.py:R6:_handle_convergence_error:fp=65f35ff21a6061fe
   owner: web-sessions
   reason: Convergence partial-state save may fail — catch covers data-shape errors and the full SQLAlchemyError family (IntegrityError, OperationalError for lock timeout / pool disconnect, ProgrammingError for schema drift, and siblings). A narrow IntegrityError catch would let siblings escape and upgrade the structured 422 into an unstructured 500. exc_info stays omitted so SQLAlchemy __cause__ chains do not leak connection strings into structured server logs.
-  safety: Returns 422 with structured error, sets partial_state_save_failed=True; does not swallow. Logs exc_class (class name only, no traceback) so operators can triage DB faults vs data-shape failures without exposing connection strings.
+  safety: >-
+    Returns 422 with structured error, sets partial_state_save_failed=True;
+    does not swallow. Both the slog (exc_class=...) and the HTTP response
+    body (partial_state_save_error=ClassName) carry the exception class
+    name only — no SQL statement, no bound parameters, no __cause__ text.
+    str(SQLAlchemyError) would expand to '[SQL: ...][parameters: ...]' plus
+    __cause__ (DB URLs / credentials on OperationalError);
+    str(ValueError/TypeError/KeyError) over dict access to
+    composition-state fields can surface source options / metadata
+    (potential secret refs). Redaction is uniform across both channels.
   expires: null
 - key: web/sessions/routes.py:R6:_handle_plugin_crash:fp=42bcecb3459a48a4
   owner: web-sessions

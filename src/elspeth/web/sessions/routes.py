@@ -218,7 +218,14 @@ async def _handle_convergence_error(
                 exc_class=type(save_err).__name__,
             )
             response_body["partial_state_save_failed"] = True
-            response_body["partial_state_save_error"] = str(save_err)
+            # Class name only. ``str(save_err)`` on SQLAlchemyError
+            # subclasses expands to ``[SQL: ...]`` + ``[parameters: ...]``
+            # (the bound composition-state payload, which may reference
+            # secrets) and appends ``__cause__`` text that can carry DB
+            # URLs or credentials on ``OperationalError``. The slog above
+            # is the triage surface; the HTTP body must not re-expose the
+            # same material the ``exc_info`` omission was protecting.
+            response_body["partial_state_save_error"] = type(save_err).__name__
 
     return response_body
 

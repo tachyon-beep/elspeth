@@ -1087,6 +1087,88 @@ class TestRecomposeConvergencePartialState:
         # partial_state is not populated on save failure (no successful row).
         assert "partial_state" not in detail
 
+    def test_recompose_convergence_save_failure_redacts_sqlalchemy_internals(self, tmp_path) -> None:
+        """Regression: the 422 body's ``partial_state_save_error`` field must
+        carry only the exception class name — never SQL statements, parameter
+        tuples, or ``__cause__`` text. ``str(SQLAlchemyError)`` includes
+        ``[SQL: ...]`` and ``[parameters: ...]`` which on this code path carry
+        the composition-state JSON payload (potential secret refs); on
+        ``OperationalError`` the ``__cause__`` message can carry DB URLs or
+        credentials. The slog side already redacts
+        (``exc_class=type(save_err).__name__``); the HTTP response body must
+        match that redaction so a 422 cannot become a leak channel.
+
+        Paired with the sibling ``_handle_plugin_crash`` contract (same file),
+        which emits no response-body diagnostic at all.
+        """
+        import asyncio
+
+        from sqlalchemy.exc import OperationalError
+
+        from elspeth.web.composer.protocol import ComposerConvergenceError
+
+        partial = CompositionState(
+            source=None,
+            nodes=(),
+            edges=(),
+            outputs=(),
+            metadata=PipelineMetadata(),
+            version=2,
+        )
+
+        mock_composer = AsyncMock()
+        mock_composer.compose = AsyncMock(
+            side_effect=ComposerConvergenceError(
+                max_turns=5,
+                budget_exhausted="composition",
+                partial_state=partial,
+            ),
+        )
+
+        app, service = _make_app(tmp_path)
+        app.state.composer_service = mock_composer
+
+        # Canary strings chosen to be recognisably synthetic — if any appear
+        # anywhere in the JSON response body, redaction failed.
+        sql_canary = "__CANARY_SQL_INSERT_composition_states_source_options__"
+        params_canary = "__CANARY_PARAM_secret_ref_opaque_token__"
+        cause_canary = "__CANARY_CAUSE_postgresql_conn_str_password__"
+
+        async def _raise_operational(*_args, **_kwargs):
+            raise OperationalError(
+                f"INSERT INTO composition_states (id, session_id, source) VALUES (...) -- {sql_canary}",
+                {"source_options": params_canary},
+                Exception(f"connection closed: {cause_canary}"),
+            )
+
+        service.save_composition_state = _raise_operational  # type: ignore[method-assign]
+
+        client = TestClient(app, raise_server_exceptions=False)
+        resp = client.post("/api/sessions", json={"title": "Redaction"})
+        session_id = resp.json()["id"]
+
+        loop = asyncio.new_event_loop()
+        loop.run_until_complete(
+            service.add_message(uuid.UUID(session_id), "user", "Build a pipeline"),
+        )
+        loop.close()
+
+        recompose_resp = client.post(f"/api/sessions/{session_id}/recompose")
+
+        assert recompose_resp.status_code == 422
+        body_text = recompose_resp.text
+        # Primary assertion: no canary substring anywhere in the serialised body.
+        assert sql_canary not in body_text, "SQL statement leaked into HTTP response body"
+        assert params_canary not in body_text, "parameter tuple leaked into HTTP response body"
+        assert cause_canary not in body_text, "DBAPI __cause__ text leaked into HTTP response body"
+
+        detail = recompose_resp.json()["detail"]
+        # The boolean signal is preserved so clients can still distinguish
+        # "partial state saved" from "partial state lost to a save failure".
+        assert detail["partial_state_save_failed"] is True
+        # The diagnostic field carries ONLY the exception class name.
+        assert detail.get("partial_state_save_error") == "OperationalError"
+
 
 class TestStateRoutes:
     """Tests for composition state endpoints."""
