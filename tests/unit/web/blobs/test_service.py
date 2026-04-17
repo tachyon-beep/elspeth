@@ -940,6 +940,85 @@ class TestCopyBlobsForForkRollback:
         target_blobs = await blob_service.list_blobs(target_session_id)
         assert target_blobs == []
 
+    @pytest.mark.asyncio
+    async def test_cleanup_failures_attached_as_notes_not_swallowed(
+        self,
+        blob_service: BlobServiceImpl,
+        session_id: UUID,
+        target_session_id: UUID,
+    ) -> None:
+        """Rollback delete_blob failures must surface as notes on the primary exception.
+
+        The original silent-failure was an inner ``except Exception: pass`` on
+        the rollback delete_blob call.  A failed delete_blob leaves the DB row
+        orphaned — the target session would carry phantom blob metadata that
+        auditors interpret as successfully-copied blobs while the file is
+        gone.  Mirrors the RecoveryFailed[...] convention used by
+        finalize_run_output_blobs (BlobServiceImpl._finalize_run_output_blobs_sync).
+
+        Contract: primary copy exception is the headline; every cleanup
+        failure is attached as an ``add_note()`` entry naming the orphan
+        blob_id and the underlying exception type.
+        """
+        # Create two source blobs — second create_blob will fail to trigger rollback
+        await blob_service.create_blob(
+            session_id=session_id,
+            filename="first.csv",
+            content=b"first",
+            mime_type="text/csv",
+            created_by="user",
+        )
+        await blob_service.create_blob(
+            session_id=session_id,
+            filename="second.csv",
+            content=b"second",
+            mime_type="text/csv",
+            created_by="user",
+        )
+
+        original_create = blob_service.create_blob
+        original_delete = blob_service.delete_blob
+        create_calls = 0
+
+        async def _failing_create(*args, **kwargs):
+            nonlocal create_calls
+            create_calls += 1
+            if create_calls >= 2:
+                raise RuntimeError("Simulated copy failure on second blob")
+            return await original_create(*args, **kwargs)
+
+        # Make the rollback delete_blob also fail.  OSError is one of the
+        # narrowly-caught recovery faults; programmer bugs would propagate.
+        delete_failure = OSError(5, "I/O error during cleanup")
+
+        async def _failing_delete(*_args, **_kwargs):
+            raise delete_failure
+
+        blob_service.create_blob = _failing_create  # type: ignore[method-assign]
+        blob_service.delete_blob = _failing_delete  # type: ignore[method-assign]
+
+        try:
+            with pytest.raises(RuntimeError, match="Simulated copy failure") as exc_info:
+                await blob_service.copy_blobs_for_fork(session_id, target_session_id)
+        finally:
+            # Restore so cleanup in fixtures doesn't break
+            blob_service.create_blob = original_create  # type: ignore[method-assign]
+            blob_service.delete_blob = original_delete  # type: ignore[method-assign]
+
+        # Headline exception must remain the primary copy failure
+        assert type(exc_info.value) is RuntimeError, f"Cleanup OSError masked primary exception: got {type(exc_info.value).__name__}"
+
+        notes = getattr(exc_info.value, "__notes__", [])
+        assert notes, (
+            "Cleanup failure was silently swallowed — expected add_note() to attach RecoveryFailed diagnostic to primary exception"
+        )
+
+        recovery_notes = [n for n in notes if "RecoveryFailed[OSError]" in n]
+        assert recovery_notes, f"Missing RecoveryFailed[OSError] note in {notes!r}"
+        # Note must identify the orphaned blob_id and target session for triage
+        assert any("manual cleanup" in n.lower() for n in recovery_notes), "Note must direct operator to manual cleanup"
+        assert any(str(target_session_id) in n for n in recovery_notes), "Note must identify the target session containing the orphan row"
+
 
 # ---------------------------------------------------------------------------
 # finalize_run_output_blobs — run-level batch finalization

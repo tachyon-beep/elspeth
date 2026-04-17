@@ -703,20 +703,43 @@ class BlobServiceImpl:
                 )
                 copied.append(new_blob)
                 blob_map[blob.id] = new_blob
-        except Exception:
+        except Exception as primary_exc:
             # Clean up both files AND database rows for any blobs already
             # committed. create_blob() commits each blob atomically, so
             # without this cleanup the forked session would have "ready"
             # blob metadata pointing at files we're about to delete.
+            #
+            # Cleanup failures must NOT be silently swallowed: a failed
+            # delete_blob leaves an orphan DB row in the target session
+            # that auditors would interpret as a successfully copied blob.
+            # Mirror the RecoveryFailed[...] convention used by
+            # _finalize_run_output_blobs_sync (lines 626-648): narrow the
+            # catch to (SQLAlchemyError, OSError) — programmer bugs must
+            # propagate — collect every cleanup failure, and attach them
+            # as notes on primary_exc.  The fallback file unlink stays for
+            # disk-quota recovery, but the DB-row orphan is now visible
+            # to operators reading the traceback.  Bare `raise` re-raises
+            # primary_exc (sys.exc_info() reverts after each nested except),
+            # preserving the original copy failure as the headline.
+            cleanup_failures: list[tuple[UUID, BaseException]] = []
             for written_blob in copied:
                 try:
                     await self.delete_blob(written_blob.id)
-                except Exception:
-                    # Best-effort cleanup — if delete_blob fails (e.g.
-                    # DB already disconnected), at least unlink the file
+                except (SQLAlchemyError, OSError) as cleanup_exc:
+                    cleanup_failures.append((written_blob.id, cleanup_exc))
                     storage = Path(written_blob.storage_path)
                     if storage.exists():
                         storage.unlink(missing_ok=True)
+            for orphan_id, recorded_exc in cleanup_failures:
+                primary_exc.add_note(
+                    f"RecoveryFailed[{type(recorded_exc).__name__}]: "
+                    f"could not delete partially-copied blob {orphan_id} from "
+                    f"target session {target_session_id_str} "
+                    f"({recorded_exc}). "
+                    f"Storage file was unlinked, but the DB row remains and "
+                    f"will appear as a 'ready' blob in the target session — "
+                    f"manual cleanup of blobs.id={orphan_id} required."
+                )
             raise
 
         return blob_map

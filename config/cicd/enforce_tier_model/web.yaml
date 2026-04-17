@@ -319,6 +319,20 @@ allow_hits:
   reason: UnknownPluginTypeError is expected for unrecognised plugin names — lets engine validation catch it later
   safety: Returns None (no pre-validation result); plugin name still validated during full pipeline instantiation
   expires: null
+# _execute_update_blob rollback handler — added 2026-04-17
+# (silent-failure-hunter finding 3).  The DB-transaction except block
+# restores the prior file content via storage_path.write_bytes(old_content);
+# wrapping that rollback in `except OSError` ensures a secondary disk fault
+# (ENOSPC, EIO, EACCES) cannot mask the primary DB exception.  The handler
+# attaches a diagnostic note via primary_exc.add_note() naming the blob_id
+# and flagging the file/DB inconsistency, then bare `raise` re-raises the
+# primary exception (sys.exc_info() reverts after the nested except).
+# Programmer bugs propagate per offensive-programming policy.
+- key: web/composer/tools.py:R6:_execute_update_blob:fp=31cd8686549bf7c4
+  owner: web-composer
+  reason: Narrow OSError around storage_path.write_bytes(old_content) rollback — disk faults during rollback expected; programmer bugs still propagate
+  safety: Rollback failure attached as add_note() on primary_exc with blob_id and "manual reconciliation required"; primary DB exception remains the headline (verified by test_rollback_oserror_does_not_mask_primary_db_exception)
+  expires: null
 - key: web/execution/validation.py:R5:validate_pipeline:fp=650270c571bb9401
   owner: web-execution
   reason: isinstance(exc, PluginConfigError) discriminates exception type to extract plugin_name attribute
@@ -414,15 +428,19 @@ allow_hits:
   reason: ValueError from int() on non-numeric -w arg
   safety: Skips this argv entry
   expires: null
-# Fingerprints refreshed 2026-04-17 after moving `import re` to the top of
-# blobs/service.py (PR cluster elspeth-0fd9dfcb7e).  Guarded code is
-# unchanged; only module-level body indices shifted.  The prior recovery
-# handler (R4 broad-except at fp=d10df85f1a12eb55) was narrowed to
-# (SQLAlchemyError, OSError) and now appears as R6 below.
-- key: web/blobs/service.py:R4:BlobServiceImpl:copy_blobs_for_fork:fp=8dd7768e102662f9
+# copy_blobs_for_fork rollback handler — narrowed 2026-04-17 from the
+# prior `except Exception: pass` (silent-failure-hunter finding 4) to
+# `except (SQLAlchemyError, OSError)`.  Programmer bugs (TypeError,
+# AttributeError, AssertionError) now propagate.  Cleanup failures are
+# accumulated and attached to the primary copy exception via
+# primary_exc.add_note(f"RecoveryFailed[<type>]: ...") with the orphan
+# blob_id and target session_id, mirroring the convention used by
+# _finalize_run_output_blobs_sync (fp=42178d47e9e1c5e0 below).  This is
+# not a silent swallow — operators see both causes in the traceback.
+- key: web/blobs/service.py:R6:BlobServiceImpl:copy_blobs_for_fork:fp=ae2bc89d3f10e8b7
   owner: web-blobs
-  reason: Best-effort cleanup on fork failure — delete_blob may fail if DB disconnected
-  safety: Falls back to file unlink; original error re-raised
+  reason: Narrow (SQLAlchemyError, OSError) around fork-rollback delete_blob — DB/IO faults expected during cleanup; programmer bugs still propagate
+  safety: Cleanup failure attached as RecoveryFailed[<type>] note on primary_exc with orphan blob_id and target session_id; storage file unlinked best-effort; primary copy exception remains the headline
   expires: null
 - key: web/sessions/service.py:R5:SessionServiceImpl:_unwrap_envelope:fp=2efca5290efd65c5
   owner: web-sessions

@@ -1898,12 +1898,37 @@ def _execute_update_blob(
                     content_hash=file_hash,
                 )
             )
-    except Exception:
+    except Exception as primary_exc:
         # Restore old content so file matches DB metadata.  Exception
         # (not BaseException) because write_bytes() is not atomic — under
         # KeyboardInterrupt the rollback write could truncate the file,
         # leaving it inconsistent with both old and new DB state.
-        storage_path.write_bytes(old_content)
+        #
+        # Wrap the rollback write so a secondary OSError (ENOSPC, EIO, EACCES,
+        # parent-dir vanished mid-flight) cannot mask primary_exc.  Without
+        # this wrapper the new OSError would propagate as the headline and
+        # operators triaging the incident would investigate the disk fault
+        # instead of the actual root cause (the failed DB transaction).
+        # Narrow to OSError per offensive-programming policy: programmer bugs
+        # (TypeError, AttributeError, AssertionError) must propagate so a
+        # broken rollback isn't silently downgraded to a note.  add_note()
+        # attaches the rollback diagnostic to primary_exc without changing
+        # its type — upstream `except <PrimaryType>:` clauses still match,
+        # but operators see both causes in the traceback.  The bare `raise`
+        # below re-raises primary_exc (sys.exc_info() reverts to the outer
+        # frame after the nested except completes), so primary_exc remains
+        # the headline.
+        try:
+            storage_path.write_bytes(old_content)
+        except OSError as rollback_exc:
+            primary_exc.add_note(
+                f"Rollback failed: could not restore prior content of {storage_path} "
+                f"({type(rollback_exc).__name__}: {rollback_exc}). "
+                f"Storage file and DB metadata for blob_id={blob_id!r} may now be "
+                f"inconsistent — the file may contain the new (uncommitted) bytes "
+                f"while the DB row retains the prior size_bytes/content_hash. "
+                f"Manual reconciliation required."
+            )
         raise
 
     return _discovery_result(

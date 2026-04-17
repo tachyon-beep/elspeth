@@ -3045,6 +3045,179 @@ class TestUpdateBlobQuota:
         assert result.success is True, f"Quota check used stale snapshot instead of current DB size: {result.data}"
 
 
+class TestUpdateBlobRollbackPreservesPrimaryException:
+    """Rollback-failure must NOT mask the primary DB exception.
+
+    _execute_update_blob writes new content to disk, then opens a DB
+    transaction.  If the transaction raises, the except block restores
+    the prior file content via storage_path.write_bytes(old_content).
+    If THAT rollback write itself raises (ENOSPC, EIO, EACCES, etc.),
+    a naive `raise` would let the rollback OSError propagate as the
+    headline exception while the DB error is buried in __context__.
+    Operators triaging the incident would investigate the disk fault
+    instead of the actual root cause.
+
+    Contract: the primary DB exception is the headline; the rollback
+    failure is attached as a note describing the file/DB inconsistency.
+    """
+
+    @pytest.fixture(autouse=True)
+    def _setup(self, tmp_path: Path):
+        from datetime import UTC, datetime
+        from uuid import uuid4
+
+        from sqlalchemy.pool import StaticPool
+
+        from elspeth.web.sessions.engine import create_session_engine
+        from elspeth.web.sessions.migrations import run_migrations
+        from elspeth.web.sessions.models import blobs_table, sessions_table
+
+        self.engine = create_session_engine(
+            "sqlite:///:memory:",
+            poolclass=StaticPool,
+            connect_args={"check_same_thread": False},
+        )
+        run_migrations(self.engine)
+
+        self.session_id = str(uuid4())
+        self.blob_id = str(uuid4())
+        self.data_dir = str(tmp_path)
+        now = datetime.now(UTC)
+
+        storage_dir = tmp_path / "blobs" / self.session_id
+        storage_dir.mkdir(parents=True)
+        self.storage_path = storage_dir / f"{self.blob_id}_data.csv"
+        self.original_content = b"original-bytes"
+        self.storage_path.write_bytes(self.original_content)
+
+        with self.engine.begin() as conn:
+            conn.execute(
+                sessions_table.insert().values(
+                    id=self.session_id,
+                    user_id="test-user",
+                    auth_provider_type="local",
+                    title="Test",
+                    created_at=now,
+                    updated_at=now,
+                )
+            )
+            conn.execute(
+                blobs_table.insert().values(
+                    id=self.blob_id,
+                    session_id=self.session_id,
+                    filename="data.csv",
+                    mime_type="text/csv",
+                    size_bytes=len(self.original_content),
+                    content_hash=_STUB_SHA256,
+                    storage_path=str(self.storage_path),
+                    created_at=now,
+                    created_by="user",
+                    source_description=None,
+                    status="ready",
+                )
+            )
+
+    def test_rollback_oserror_does_not_mask_primary_db_exception(self) -> None:
+        """When rollback write_bytes fails, primary DB exception stays as headline.
+
+        Forces _check_blob_quota to raise RuntimeError mid-transaction, then
+        makes the rollback write_bytes raise OSError.  Asserts the operator
+        sees RuntimeError as the headline (not OSError) and that __notes__
+        carries the rollback-failure diagnostic.
+        """
+        from unittest.mock import patch
+
+        from elspeth.web.composer.tools import _execute_update_blob
+
+        # Force a primary failure inside the DB transaction by making
+        # the in-transaction quota check raise.  Use content larger than
+        # current size so size_delta > 0 routes through _check_blob_quota.
+        primary_message = "primary-db-fault"
+
+        def _raise_primary(*_args: Any, **_kwargs: Any) -> str | None:
+            raise RuntimeError(primary_message)
+
+        # Patch Path.write_bytes so the rollback (second call against
+        # this storage_path) raises OSError.  The first call writes the
+        # new content; the second call is the except-branch rollback.
+        real_write_bytes = Path.write_bytes
+        target_path_str = str(self.storage_path)
+        rollback_oserror = OSError(28, "No space left on device")
+        call_log: list[str] = []
+
+        def _fake_write_bytes(path_self: Path, data: bytes) -> int:
+            call_log.append(str(path_self))
+            if str(path_self) == target_path_str and call_log.count(target_path_str) >= 2:
+                raise rollback_oserror
+            return real_write_bytes(path_self, data)
+
+        state = _empty_state()
+        catalog = _mock_catalog()
+
+        with (
+            patch("elspeth.web.composer.tools._check_blob_quota", side_effect=_raise_primary),
+            patch.object(Path, "write_bytes", _fake_write_bytes),
+            pytest.raises(RuntimeError, match=primary_message) as exc_info,
+        ):
+            _execute_update_blob(
+                {"blob_id": self.blob_id, "content": "x" * 100},
+                state,
+                catalog,
+                session_engine=self.engine,
+                session_id=self.session_id,
+            )
+
+        # Headline must be the primary RuntimeError, not the rollback OSError.
+        assert type(exc_info.value) is RuntimeError, f"Rollback OSError masked primary exception: got {type(exc_info.value).__name__}"
+
+        # Rollback diagnostic must appear in __notes__ so operators see
+        # both causes in the traceback.
+        notes = getattr(exc_info.value, "__notes__", [])
+        assert notes, "Expected add_note() to attach rollback diagnostic to primary exception"
+        rollback_note = next((n for n in notes if "Rollback failed" in n), None)
+        assert rollback_note is not None, f"Missing rollback note in {notes!r}"
+        assert "OSError" in rollback_note
+        assert "No space left on device" in rollback_note
+        assert self.blob_id in rollback_note, "Note must identify the affected blob_id for triage"
+        assert "Manual reconciliation required" in rollback_note, "Note must flag the file/DB inconsistency to the operator"
+
+    def test_successful_rollback_attaches_no_note(self) -> None:
+        """Happy rollback path: primary exception propagates, no note added.
+
+        When the rollback write_bytes succeeds (the common case), the primary
+        exception must propagate cleanly without a spurious diagnostic note.
+        """
+        from unittest.mock import patch
+
+        from elspeth.web.composer.tools import _execute_update_blob
+
+        primary_message = "primary-db-fault-clean-rollback"
+
+        def _raise_primary(*_args: Any, **_kwargs: Any) -> str | None:
+            raise RuntimeError(primary_message)
+
+        state = _empty_state()
+        catalog = _mock_catalog()
+
+        with (
+            patch("elspeth.web.composer.tools._check_blob_quota", side_effect=_raise_primary),
+            pytest.raises(RuntimeError, match=primary_message) as exc_info,
+        ):
+            _execute_update_blob(
+                {"blob_id": self.blob_id, "content": "x" * 100},
+                state,
+                catalog,
+                session_engine=self.engine,
+                session_id=self.session_id,
+            )
+
+        # File must have been restored to original content
+        assert self.storage_path.read_bytes() == self.original_content
+        # No rollback note when rollback succeeded
+        notes = getattr(exc_info.value, "__notes__", [])
+        assert not any("Rollback failed" in n for n in notes), f"Spurious rollback note attached on successful rollback: {notes!r}"
+
+
 # ---------------------------------------------------------------------------
 # Secret tool tests — composer-level secret reference wiring
 # ---------------------------------------------------------------------------
