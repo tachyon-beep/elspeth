@@ -18,7 +18,9 @@ from sqlalchemy.exc import SQLAlchemyError
 from elspeth.web.blobs.protocol import (
     ALLOWED_MIME_TYPES,
     BLOB_CREATORS,
+    BLOB_RUN_LINK_DIRECTIONS,
     BLOB_STATUSES,
+    FINALIZE_BLOB_STATUSES,
     AllowedMimeType,
     BlobActiveRunError,
     BlobCreator,
@@ -162,7 +164,9 @@ class BlobServiceImpl:
         # CHECK constraint.  A row with a bogus direction would leave
         # BlobRunLinkRecord.direction (typed BlobRunLinkDirection)
         # carrying a value outside its Literal set.
-        assert row.direction in ("input", "output"), f"Tier 1: blob_run_links.direction is {row.direction!r}, expected 'input' or 'output'"
+        assert row.direction in BLOB_RUN_LINK_DIRECTIONS, (
+            f"Tier 1: blob_run_links.direction is {row.direction!r}, expected one of {sorted(BLOB_RUN_LINK_DIRECTIONS)}"
+        )
         return BlobRunLinkRecord(
             blob_id=UUID(row.blob_id),
             run_id=UUID(row.run_id),
@@ -308,8 +312,8 @@ class BlobServiceImpl:
         # static callers the correct shape, but the Protocol boundary is
         # still called by code that mypy may not fully verify (tests,
         # factory-constructed services).  Keep the check as a belt.
-        if status not in ("ready", "error"):
-            raise RuntimeError(f"Invalid finalize status '{status}' — must be 'ready' or 'error'")
+        if status not in FINALIZE_BLOB_STATUSES:
+            raise RuntimeError(f"Invalid finalize status '{status}' — must be one of {sorted(FINALIZE_BLOB_STATUSES)}")
 
         def _sync() -> BlobRecord:
             with self._engine.begin() as conn:
@@ -490,8 +494,8 @@ class BlobServiceImpl:
         direction: BlobRunLinkDirection,
     ) -> None:
         """Record a blob-to-run linkage."""
-        if direction not in ("input", "output"):
-            raise RuntimeError(f"Invalid link direction '{direction}' — must be 'input' or 'output'")
+        if direction not in BLOB_RUN_LINK_DIRECTIONS:
+            raise RuntimeError(f"Invalid link direction '{direction}' — must be one of {sorted(BLOB_RUN_LINK_DIRECTIONS)}")
 
         def _sync() -> None:
             with self._engine.begin() as conn:
@@ -759,8 +763,8 @@ class BlobServiceImpl:
         # crashes loudly instead of silently converting the caller's typo
         # into an "error" record the auditor cannot distinguish from a
         # genuine run failure.  Mirrors the RuntimeError in finalize_blob().
-        if status not in ("ready", "error"):
-            raise RuntimeError(f"Invalid finalize status '{status}' — must be 'ready' or 'error'")
+        if status not in FINALIZE_BLOB_STATUSES:
+            raise RuntimeError(f"Invalid finalize status '{status}' — must be one of {sorted(FINALIZE_BLOB_STATUSES)}")
         # Single source of truth for the ready-requires-valid-hash rule.
         # See _validate_finalize_hash() docstring.
         _validate_finalize_hash(blob_id_str, status, content_hash_val)

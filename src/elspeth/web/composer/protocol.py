@@ -7,7 +7,7 @@ pipeline composition.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any, Literal, Protocol
+from typing import Any, ClassVar, Literal, Protocol
 
 from elspeth.web.composer.state import CompositionState
 
@@ -32,13 +32,29 @@ class ComposerServiceError(Exception):
 class ComposerConvergenceError(ComposerServiceError):
     """Raised when the LLM tool-use loop exhausts its budget or times out.
 
+    Declared attributes are frozen after construction (see ``__setattr__``
+    below): this exception instance flows into the 422 HTTP response body
+    and — when ``partial_state`` is non-None — into the immutable
+    ``composition_states`` audit table. Allowing post-construction
+    reassignment would let any intermediate layer silently rewrite what
+    downstream consumers see. Exception-chain dunders
+    (``__cause__``/``__context__``/``__traceback__``/``__notes__``) remain
+    writable so ``raise ... from ...`` and ``add_note()`` work normally.
+
     Attributes:
         max_turns: Total turns used before exhaustion.
         budget_exhausted: Which budget was exhausted — one of
             "composition", "discovery", or "timeout".
-        partial_state: The last CompositionState with version > initial,
-            or None if no mutations occurred.
+        partial_state: The last CompositionState with
+            ``version > initial_version``, or None if no mutations
+            occurred. Production raise sites MUST go through
+            :meth:`capture`, which encapsulates the rule as a single
+            source of truth. The direct constructor exists for tests
+            that inject specific ``partial_state`` shapes to exercise
+            route-handler branches.
     """
+
+    _FROZEN_ATTRS: ClassVar[frozenset[str]] = frozenset({"max_turns", "budget_exhausted", "partial_state"})
 
     def __init__(
         self,
@@ -55,6 +71,47 @@ class ComposerConvergenceError(ComposerServiceError):
         self.max_turns = max_turns
         self.budget_exhausted = budget_exhausted
         self.partial_state = partial_state
+
+    def __setattr__(self, name: str, value: object) -> None:
+        # Guard only the declared attributes; exception-chain machinery
+        # (__cause__, __context__, __suppress_context__, __traceback__,
+        # __notes__) must remain writable so `raise ... from ...` and
+        # `add_note()` continue to work. First-time write during
+        # ``__init__`` is allowed; subsequent reassignment raises.
+        if name in type(self)._FROZEN_ATTRS and name in self.__dict__:
+            raise AttributeError(
+                f"{type(self).__name__}.{name} is frozen after construction; exception attributes flow into HTTP responses and Landscape."
+            )
+        super().__setattr__(name, value)
+
+    @classmethod
+    def capture(
+        cls,
+        max_turns: int,
+        *,
+        budget_exhausted: Literal["composition", "discovery", "timeout"] = "composition",
+        state: CompositionState,
+        initial_version: int,
+    ) -> ComposerConvergenceError:
+        """Build from compose-loop locals, applying the partial-state rule.
+
+        ``partial_state`` is set to ``state`` iff ``state.version >
+        initial_version`` — i.e. at least one tool call successfully
+        committed a mutation before the budget was hit. Otherwise
+        ``partial_state`` is ``None`` so the route handler does not
+        append an identity-copy row to ``composition_states`` (which
+        would pollute the audit history with zero-delta entries).
+
+        This classmethod is the SINGLE source of truth for the rule.
+        Every production compose-loop raise site MUST use it so the
+        invariant cannot drift between sites.
+        """
+        partial = state if state.version > initial_version else None
+        return cls(
+            max_turns,
+            budget_exhausted=budget_exhausted,
+            partial_state=partial,
+        )
 
 
 class ComposerPluginCrashError(ComposerServiceError):
@@ -85,13 +142,19 @@ class ComposerPluginCrashError(ComposerServiceError):
             exception-identity hint for structured logs.
 
     Route ordering: this class inherits from ``ComposerServiceError`` so the
-    route must catch ``ComposerPluginCrashError`` BEFORE the generic
-    ``except ComposerServiceError`` block, mirroring the ordering already
-    used for ``ComposerConvergenceError`` at routes.py:377/512. If the
-    ordering is inverted the generic handler would launder the crash into
-    a 502, reintroducing the silent-laundering behaviour the narrowed catch
-    was designed to eliminate.
+    compose/recompose endpoints in ``web/sessions/routes.py`` must catch
+    ``ComposerPluginCrashError`` BEFORE the generic ``except
+    ComposerServiceError`` block, mirroring the ordering already used for
+    ``ComposerConvergenceError``. If the ordering is inverted the generic
+    handler would launder the crash into a 502, reintroducing the
+    silent-laundering behaviour the narrowed catch was designed to
+    eliminate. The invariant is mechanically enforced by
+    ``scripts/cicd/enforce_composer_catch_order.py`` (rule CCO1), which
+    scans ``web/`` for any ``try`` block where a superclass handler
+    precedes one of its ``ComposerServiceError`` subclasses.
     """
+
+    _FROZEN_ATTRS: ClassVar[frozenset[str]] = frozenset({"original_exc", "partial_state", "exc_class"})
 
     def __init__(
         self,
@@ -103,6 +166,46 @@ class ComposerPluginCrashError(ComposerServiceError):
         self.original_exc = original_exc
         self.partial_state = partial_state
         self.exc_class = type(original_exc).__name__
+
+    def __setattr__(self, name: str, value: object) -> None:
+        # Guard only the declared attributes; exception-chain dunders
+        # (__cause__, __context__, __suppress_context__, __traceback__,
+        # __notes__) must remain writable so `raise ... from ...`,
+        # structured-log capture, and `add_note()` continue to work.
+        # First-time write during ``__init__`` is allowed; subsequent
+        # reassignment raises — the three declared fields are consumed
+        # verbatim by the HTTP response body, Landscape partial-state
+        # persistence, and structured-log exc_class correlation.
+        if name in type(self)._FROZEN_ATTRS and name in self.__dict__:
+            raise AttributeError(
+                f"{type(self).__name__}.{name} is frozen after construction; exception attributes flow into HTTP responses and Landscape."
+            )
+        super().__setattr__(name, value)
+
+    @classmethod
+    def capture(
+        cls,
+        original_exc: Exception,
+        *,
+        state: CompositionState,
+        initial_version: int,
+    ) -> ComposerPluginCrashError:
+        """Build from compose-loop locals, applying the partial-state rule.
+
+        ``partial_state`` is set to ``state`` iff ``state.version >
+        initial_version`` — i.e. at least one tool call successfully
+        committed a mutation before the crash. Otherwise ``partial_state``
+        is ``None`` so the route handler does not append an identity-copy
+        row to ``composition_states`` (polluting the audit history with
+        zero-delta entries).
+
+        This classmethod is the SINGLE source of truth for the rule.
+        Every production compose-loop raise site MUST use it so the
+        invariant cannot drift between sites (mirrors
+        :meth:`ComposerConvergenceError.capture`).
+        """
+        partial = state if state.version > initial_version else None
+        return cls(original_exc, partial_state=partial)
 
 
 class ToolArgumentError(Exception):
@@ -122,8 +225,9 @@ class ToolArgumentError(Exception):
 
     Inheritance rationale: this class inherits from ``Exception`` directly,
     NOT from ``ComposerServiceError``. A handler-internal signal caught by
-    the compose loop must not be absorbed by the route-level
-    ``except ComposerServiceError`` block (routes.py:390/505), which would
+    the compose loop must not be absorbed by the route-level generic
+    ``except ComposerServiceError`` block (present in both the compose and
+    recompose endpoints of ``web/sessions/routes.py``), which would
     silently convert an escaped ToolArgumentError into a 502 — recreating
     the laundering pattern the compose-loop narrowing is designed to
     eliminate. If a ToolArgumentError ever escapes ``_compose_loop``, that

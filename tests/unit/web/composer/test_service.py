@@ -2053,3 +2053,126 @@ class TestToolArgumentErrorAcrossThreadBoundary:
         assert len(tool_messages) == 1
         error_content = json.loads(tool_messages[0]["content"])
         assert "content must be a string" in error_content["error"]
+
+
+class TestComposerErrorConstructionInvariants:
+    """Type-level invariants for composer service exceptions.
+
+    These exceptions flow into HTTP responses (as error_type/detail bodies)
+    and into Landscape (via partial_state persistence in composition_states
+    and structured-log exc_class correlation). Post-construction attribute
+    reassignment would let any layer silently rewrite what downstream HTTP
+    and audit consumers see. The class-level freeze and the ``capture()``
+    classmethod encode the "partial_state only when state.version >
+    initial_version" invariant mechanically rather than relying on each
+    raise site to apply the rule by hand.
+    """
+
+    def test_plugin_crash_error_attributes_are_frozen_after_construction(self) -> None:
+        exc = ComposerPluginCrashError(ValueError("boom"), partial_state=None)
+
+        with pytest.raises(AttributeError, match="frozen"):
+            exc.original_exc = RuntimeError("replaced")  # type: ignore[misc]
+
+        with pytest.raises(AttributeError, match="frozen"):
+            exc.partial_state = _empty_state()  # type: ignore[misc]
+
+        with pytest.raises(AttributeError, match="frozen"):
+            exc.exc_class = "PrettyException"  # type: ignore[misc]
+
+    def test_plugin_crash_error_allows_exception_chain_machinery(self) -> None:
+        # __cause__, __context__, __suppress_context__, __traceback__, and
+        # add_note() target BaseException-managed slots, not our declared
+        # attrs. The freeze MUST NOT break `raise X from Y` or add_note.
+        root = RuntimeError("underlying")
+        exc = ComposerPluginCrashError(ValueError("boom"))
+        exc.__cause__ = root
+        exc.__suppress_context__ = True
+        exc.add_note("operator triage hint")
+
+        assert exc.__cause__ is root
+        assert exc.__suppress_context__ is True
+        assert "operator triage hint" in exc.__notes__
+
+    def test_convergence_error_attributes_are_frozen_after_construction(self) -> None:
+        exc = ComposerConvergenceError(
+            max_turns=3,
+            budget_exhausted="composition",
+            partial_state=None,
+        )
+
+        with pytest.raises(AttributeError, match="frozen"):
+            exc.max_turns = 99  # type: ignore[misc]
+
+        with pytest.raises(AttributeError, match="frozen"):
+            exc.budget_exhausted = "timeout"  # type: ignore[misc]
+
+        with pytest.raises(AttributeError, match="frozen"):
+            exc.partial_state = _empty_state()  # type: ignore[misc]
+
+    def test_plugin_crash_capture_returns_none_when_state_not_mutated(self) -> None:
+        # Invariant: partial_state is None when state.version == initial_version
+        # (no tool call successfully mutated state before the crash).
+        state = _empty_state()  # version=1
+        exc = ComposerPluginCrashError.capture(
+            KeyError("missing"),
+            state=state,
+            initial_version=state.version,
+        )
+
+        assert exc.partial_state is None
+        assert exc.exc_class == "KeyError"
+
+    def test_plugin_crash_capture_returns_state_when_mutated(self) -> None:
+        # Invariant: partial_state IS the state when state.version moved
+        # beyond initial_version (at least one tool call persisted).
+        initial = _empty_state()  # version=1
+        mutated = CompositionState(
+            source=None,
+            nodes=(),
+            edges=(),
+            outputs=(),
+            metadata=PipelineMetadata(),
+            version=initial.version + 2,
+        )
+        exc = ComposerPluginCrashError.capture(
+            ValueError("boom"),
+            state=mutated,
+            initial_version=initial.version,
+        )
+
+        assert exc.partial_state is mutated
+        assert exc.exc_class == "ValueError"
+
+    def test_convergence_capture_returns_none_when_state_not_mutated(self) -> None:
+        state = _empty_state()
+        exc = ComposerConvergenceError.capture(
+            max_turns=5,
+            budget_exhausted="composition",
+            state=state,
+            initial_version=state.version,
+        )
+
+        assert exc.partial_state is None
+        assert exc.max_turns == 5
+        assert exc.budget_exhausted == "composition"
+
+    def test_convergence_capture_returns_state_when_mutated(self) -> None:
+        initial = _empty_state()
+        mutated = CompositionState(
+            source=None,
+            nodes=(),
+            edges=(),
+            outputs=(),
+            metadata=PipelineMetadata(),
+            version=initial.version + 1,
+        )
+        exc = ComposerConvergenceError.capture(
+            max_turns=7,
+            budget_exhausted="timeout",
+            state=mutated,
+            initial_version=initial.version,
+        )
+
+        assert exc.partial_state is mutated
+        assert exc.budget_exhausted == "timeout"

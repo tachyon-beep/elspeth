@@ -50,10 +50,18 @@ AllowedMimeType = Literal[
 #   pending — placeholder for an output blob not yet written
 #   error   — run failed before writing the output blob
 BLOB_STATUSES: frozenset[str] = frozenset(get_args(BlobStatus))
+#   ready   — pending blob whose backing content has been written
+#   error   — pending blob whose run failed before writing content
+# Narrower than BLOB_STATUSES: ``pending`` is the starting state, not a
+# valid finalize target.
+FINALIZE_BLOB_STATUSES: frozenset[str] = frozenset(get_args(FinalizeBlobStatus))
 #   user      — uploaded by the user via REST or drag-and-drop
 #   assistant — materialised by the assistant via create_blob tool
 #   pipeline  — produced as output of a pipeline run
 BLOB_CREATORS: frozenset[str] = frozenset(get_args(BlobCreator))
+#   input  — blob consumed by a run as source data
+#   output — blob produced by a run as a pipeline result
+BLOB_RUN_LINK_DIRECTIONS: frozenset[str] = frozenset(get_args(BlobRunLinkDirection))
 # MIME types accepted for data-oriented uploads.
 ALLOWED_MIME_TYPES: frozenset[str] = frozenset(get_args(AllowedMimeType))
 

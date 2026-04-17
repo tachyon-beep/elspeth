@@ -1847,17 +1847,20 @@ def _execute_update_blob(
     # ToolArgumentError (not TypeError) so the compose loop can distinguish
     # this LLM-side error from plugin-internal type errors.
     #
-    # IMPORTANT: this guard MUST remain BEFORE content.encode() at line 1859
-    # and BEFORE the storage_path.read_bytes()/write_bytes() pair at lines
-    # 1864-1865. If it moved after, the file would be overwritten with
-    # garbage before validation fails. It MUST also remain BEFORE the
-    # `try: with session_engine.begin()` block below: the `except Exception`
-    # cleanup at line 1892 restores old_content via write_bytes — running
-    # that rollback on a pure argument-validation failure would issue an
-    # unnecessary filesystem write over a file that was never modified on
-    # this call path. (This failure mode differs from _execute_create_blob,
-    # whose cleanup is unlink(missing_ok=True) — a genuine no-op — so the
-    # precise rationale does not transfer by back-reference.)
+    # IMPORTANT: this guard MUST remain BEFORE the ``content.encode()`` call
+    # that produces ``content_bytes`` and BEFORE the
+    # ``storage_path.read_bytes()`` / ``storage_path.write_bytes()`` pair
+    # that snapshots ``old_content`` and overwrites the backing file. If it
+    # moved after, the file would be overwritten with garbage before
+    # validation fails. It MUST also remain BEFORE the
+    # ``try: with session_engine.begin()`` block below: that block's
+    # ``except Exception`` branch restores ``old_content`` via
+    # ``storage_path.write_bytes(old_content)`` — running that rollback on a
+    # pure argument-validation failure would issue an unnecessary filesystem
+    # write over a file that was never modified on this call path. (This
+    # failure mode differs from ``_execute_create_blob``, whose cleanup is
+    # ``unlink(missing_ok=True)`` — a genuine no-op — so the precise
+    # rationale does not transfer by back-reference.)
     if not isinstance(content, str):
         raise ToolArgumentError(f"content must be a string, got {type(content).__name__}")
 

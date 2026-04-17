@@ -486,8 +486,11 @@ class ComposerServiceImpl:
                     # _call_llm_before_deadline / _build_messages surface
                     # through their own exception classes
                     # (ComposerServiceError, ComposerConvergenceError).
-                    partial = state if state.version > initial_version else None
-                    raise ComposerPluginCrashError(tool_exc, partial_state=partial) from tool_exc
+                    raise ComposerPluginCrashError.capture(
+                        tool_exc,
+                        state=state,
+                        initial_version=initial_version,
+                    ) from tool_exc
 
                 state = result.updated_state
                 last_validation = result.validation
@@ -539,20 +542,20 @@ class ComposerServiceImpl:
                             message=assistant_message.content or "",
                             state=state,
                         )
-                    partial = state if state.version > initial_version else None
-                    raise ComposerConvergenceError(
+                    raise ComposerConvergenceError.capture(
                         max_turns=composition_turns_used + discovery_turns_used,
                         budget_exhausted="composition",
-                        partial_state=partial,
+                        state=state,
+                        initial_version=initial_version,
                     )
             else:
                 discovery_turns_used += 1
                 if discovery_turns_used >= self._max_discovery_turns:
-                    partial = state if state.version > initial_version else None
-                    raise ComposerConvergenceError(
+                    raise ComposerConvergenceError.capture(
                         max_turns=composition_turns_used + discovery_turns_used,
                         budget_exhausted="discovery",
-                        partial_state=partial,
+                        state=state,
+                        initial_version=initial_version,
                     )
 
     def _persist_crashed_session(self, session_id: str) -> None:
@@ -661,11 +664,11 @@ class ComposerServiceImpl:
         """
         remaining = deadline - asyncio.get_event_loop().time()
         if remaining <= 0:
-            partial = state if state.version > initial_version else None
-            raise ComposerConvergenceError(
+            raise ComposerConvergenceError.capture(
                 max_turns=0,
                 budget_exhausted="timeout",
-                partial_state=partial,
+                state=state,
+                initial_version=initial_version,
             )
         try:
             return await asyncio.wait_for(
@@ -673,11 +676,11 @@ class ComposerServiceImpl:
                 timeout=remaining,
             )
         except TimeoutError:
-            partial = state if state.version > initial_version else None
-            raise ComposerConvergenceError(
+            raise ComposerConvergenceError.capture(
                 max_turns=0,
                 budget_exhausted="timeout",
-                partial_state=partial,
+                state=state,
+                initial_version=initial_version,
             ) from None
 
     def _compute_availability(self) -> ComposerAvailability:
