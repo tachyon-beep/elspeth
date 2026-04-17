@@ -1847,3 +1847,83 @@ class TestToolArgumentError:
                 raise ToolArgumentError("wrapped") from exc
         except ToolArgumentError as wrapped:
             assert wrapped.__cause__ is original
+
+
+class TestToolArgumentErrorAcrossThreadBoundary:
+    """End-to-end: ToolArgumentError raised inside the worker thread is caught
+    correctly by the service-level catch, with message preserved.
+
+    Closes the sleepy-assertion gap in the mocked service-level tests
+    (which raise synchronously on the mock and never exercise the real
+    asyncio.to_thread re-raise path).
+    """
+
+    @pytest.fixture(autouse=True)
+    def _setup(self, tmp_path: Path) -> None:
+        from datetime import UTC, datetime
+        from uuid import uuid4
+
+        from sqlalchemy.pool import StaticPool
+
+        from elspeth.web.sessions.engine import create_session_engine
+        from elspeth.web.sessions.migrations import run_migrations
+        from elspeth.web.sessions.models import sessions_table
+
+        self.engine = create_session_engine(
+            "sqlite:///:memory:",
+            poolclass=StaticPool,
+            connect_args={"check_same_thread": False},
+        )
+        run_migrations(self.engine)
+
+        self.session_id = str(uuid4())
+        self.data_dir = tmp_path
+        now = datetime.now(UTC)
+        with self.engine.begin() as conn:
+            conn.execute(
+                sessions_table.insert().values(
+                    id=self.session_id,
+                    user_id="test-user",
+                    auth_provider_type="local",
+                    title="Test",
+                    created_at=now,
+                    updated_at=now,
+                )
+            )
+
+    @pytest.mark.asyncio
+    async def test_real_create_blob_type_guard_feeds_error_to_llm(self) -> None:
+        catalog = _mock_catalog()
+        settings = _make_settings(data_dir=self.data_dir)
+        service = ComposerServiceImpl(
+            catalog=catalog,
+            settings=settings,
+            session_engine=self.engine,
+        )
+        state = _empty_state()
+
+        bad_call = _make_llm_response(
+            tool_calls=[
+                {
+                    "id": "call_bad",
+                    "name": "create_blob",
+                    "arguments": {
+                        "filename": "x.txt",
+                        "mime_type": "text/plain",
+                        "content": 42,  # wrong type
+                    },
+                }
+            ],
+        )
+        text = _make_llm_response(content="Fixed.")
+
+        with patch.object(service, "_call_llm", new_callable=AsyncMock) as mock_llm:
+            mock_llm.side_effect = [bad_call, text]
+            result = await service.compose("Setup", [], state, session_id=self.session_id)
+
+        assert result.message == "Fixed."
+        second_call_messages = mock_llm.call_args_list[1].args[0]
+        tool_messages = [m for m in second_call_messages if m.get("role") == "tool"]
+        assert len(tool_messages) == 1
+        error_content = json.loads(tool_messages[0]["content"])
+        assert "content must be a string" in error_content["error"]
