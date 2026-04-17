@@ -210,3 +210,54 @@ class TestComposerExceptionChannelEnforcer:
         )
         assert result.returncode != 0
         assert "justification" in (result.stdout + result.stderr)
+
+    def test_allowlist_entry_missing_file_key_fails(self, tmp_path: Path) -> None:
+        """An allowlist entry missing the required 'file' key is rejected
+        with a targeted error, not an uninformative KeyError crash."""
+        target = _make_composer_tree(tmp_path)
+        target.write_text("def f(x):\n    raise TypeError('bad')\n")
+        allowlist_dir = tmp_path / "allowlist"
+        allowlist_dir.mkdir()
+        (allowlist_dir / "_defaults.yaml").write_text("allowed:\n  - line: 2\n    justification: 'missing file key'\n")
+        result = _run(["check", "--root", str(tmp_path), "--allowlist", str(allowlist_dir)])
+        assert result.returncode != 0
+        assert "file" in (result.stdout + result.stderr).lower()
+
+    def test_allowlist_entry_missing_line_key_fails(self, tmp_path: Path) -> None:
+        """An allowlist entry missing the required 'line' key is rejected
+        with a targeted error, not an uninformative KeyError crash."""
+        target = _make_composer_tree(tmp_path)
+        target.write_text("def f(x):\n    raise TypeError('bad')\n")
+        allowlist_dir = tmp_path / "allowlist"
+        allowlist_dir.mkdir()
+        (allowlist_dir / "_defaults.yaml").write_text("allowed:\n  - file: web/composer/tools.py\n    justification: 'missing line key'\n")
+        result = _run(["check", "--root", str(tmp_path), "--allowlist", str(allowlist_dir)])
+        assert result.returncode != 0
+        assert "line" in (result.stdout + result.stderr).lower()
+
+    def test_allowlist_entry_non_integer_line_fails(self, tmp_path: Path) -> None:
+        """A non-integer 'line' value is rejected with a targeted error,
+        not an uninformative ValueError from int() coercion."""
+        target = _make_composer_tree(tmp_path)
+        target.write_text("def f(x):\n    raise TypeError('bad')\n")
+        allowlist_dir = tmp_path / "allowlist"
+        allowlist_dir.mkdir()
+        (allowlist_dir / "_defaults.yaml").write_text(
+            "allowed:\n  - file: web/composer/tools.py\n    line: 'not-a-number'\n    justification: 'bad line'\n"
+        )
+        result = _run(["check", "--root", str(tmp_path), "--allowlist", str(allowlist_dir)])
+        assert result.returncode != 0
+        assert "line" in (result.stdout + result.stderr).lower()
+
+    def test_allowlist_path_not_found_fails_closed(self, tmp_path: Path) -> None:
+        """If --allowlist points to a non-existent directory, exit non-zero.
+
+        Prevents a workflow typo from masking allowlisted entries by
+        silently treating the typo as an empty allowlist. Fail closed.
+        """
+        target = _make_composer_tree(tmp_path)
+        target.write_text("from elspeth.web.composer.protocol import ToolArgumentError\ndef f(x):\n    raise ToolArgumentError('bad')\n")
+        bogus = tmp_path / "does-not-exist"
+        result = _run(["check", "--root", str(tmp_path), "--allowlist", str(bogus)])
+        assert result.returncode != 0
+        assert "does not exist" in (result.stdout + result.stderr).lower()

@@ -70,5 +70,6 @@ repos:
         name: Composer exception-channel discipline
         entry: .venv/bin/python scripts/cicd/enforce_composer_exception_channel.py check --root src/elspeth --allowlist config/cicd/enforce_composer_exception_channel
         language: system
+        types: [python]
         pass_filenames: false
         files: ^src/elspeth/web/composer/tools\.py$

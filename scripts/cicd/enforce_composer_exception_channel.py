@@ -90,8 +90,14 @@ def _scan_file(path: Path, root: Path) -> list[Finding]:
 
 
 def _load_allowlist(path: Path | None) -> set[tuple[str, int]]:
-    if path is None or not path.exists():
+    if path is None:
         return set()
+    if not path.exists():
+        print(
+            f"Error: allowlist path {path} does not exist. Fail-closed: refusing to treat a typo as an empty allowlist.",
+            file=sys.stderr,
+        )
+        sys.exit(1)
     entries: set[tuple[str, int]] = set()
     for yml in path.glob("*.yaml"):
         data = yaml.safe_load(yml.read_text()) or {}
@@ -102,7 +108,27 @@ def _load_allowlist(path: Path | None) -> set[tuple[str, int]]:
                     file=sys.stderr,
                 )
                 sys.exit(1)
-            entries.add((str(item["file"]), int(item["line"])))
+            if "file" not in item:
+                print(
+                    f"Error: allowlist entry in {yml} missing required 'file' key: {item!r}",
+                    file=sys.stderr,
+                )
+                sys.exit(1)
+            if "line" not in item:
+                print(
+                    f"Error: allowlist entry in {yml} missing required 'line' key: {item!r}",
+                    file=sys.stderr,
+                )
+                sys.exit(1)
+            try:
+                line_no = int(item["line"])
+            except (TypeError, ValueError):
+                print(
+                    f"Error: allowlist entry in {yml} has non-integer 'line' value {item['line']!r}: {item!r}",
+                    file=sys.stderr,
+                )
+                sys.exit(1)
+            entries.add((str(item["file"]), line_no))
     return entries
 
 
