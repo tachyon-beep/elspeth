@@ -67,12 +67,17 @@ def _ready_hash_check_clause(dialect_name: str) -> str:
     SQLite uses GLOB with a negated hex-character class plus an explicit
     length predicate — SQLite GLOB has no quantifier syntax for "exactly
     N of these," so the length is checked separately.  Negation in
-    SQLite GLOB character classes is ``^`` (verified empirically on
-    SQLite 3.47): ``[!...]`` treats ``!`` as a literal class member,
-    so the surface-similar ``[!a-f0-9]`` would actually match ``!`` in
-    addition to hex chars.  ``NOT GLOB '*[^a-f0-9]*'`` therefore
-    matches strings containing only hex characters.  The same
-    negated-class spelling is used by the diagnostic queries in
+    SQLite GLOB character classes is ``^`` (see the GLOB semantics
+    documented at https://www.sqlite.org/lang_expr.html#like ;
+    SQLite's ``patternCompare`` implementation uses ``^`` as the
+    class-negation sentinel, diverging from POSIX shell glob which
+    uses ``!``).  The POSIX-shell spelling ``[!a-f0-9]`` would treat
+    ``!`` as a literal class member in SQLite and actually MATCH
+    ``!`` in addition to hex chars — silently weakening the
+    constraint without any syntax error to warn the operator.
+    ``NOT GLOB '*[^a-f0-9]*'`` therefore matches strings containing
+    only hex characters.  The same negated-class spelling is used by
+    the diagnostic queries in
     ``docs/runbooks/repair-blob-ready-hash.md`` so operators see
     consistent syntax everywhere.
 
