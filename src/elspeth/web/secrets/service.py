@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import structlog
+
 from elspeth.contracts.secrets import (
     CreateSecretResult,
     FingerprintKeyMissingError,
@@ -12,6 +14,58 @@ from elspeth.contracts.secrets import (
 from elspeth.core.security.secret_loader import SecretNotFoundError
 from elspeth.web.secrets.server_store import ServerSecretStore
 from elspeth.web.secrets.user_store import UserSecretStore
+
+_slog = structlog.get_logger()
+
+# Once-per-process memo so an unconfigured deployment emits exactly one
+# deployment-error breadcrumb on the resolve path, not one per request.
+# The ``resolve`` method aggregates FingerprintKeyMissingError into
+# "secret absent" to preserve its pipeline-validation contract, which
+# would otherwise make an unset ``ELSPETH_FINGERPRINT_KEY`` silently look
+# like "no secrets are configured" across the whole server — with no
+# audit record, no telemetry, and no log.  The ``check_user_ref_resolvable``
+# HTTP path surfaces the same error typed (mapped to 503), but any
+# non-HTTP caller (pipeline validation, composer tool execution) would
+# otherwise be invisible to operators.
+#
+# Module-level flag because the intent IS process-global: the second and
+# subsequent silencings carry zero operational information beyond the
+# first.  Test suites reset it via
+# ``monkeypatch.setattr(module, "_fingerprint_missing_logged", False)``.
+_fingerprint_missing_logged = False
+
+
+def _log_fingerprint_missing_once() -> None:
+    """Emit a once-per-process breadcrumb when the resolve path swallows
+    FingerprintKeyMissingError.
+
+    This is a web-layer deployment-error slog emission, matching the
+    precedent set by the app-level ``FingerprintKeyMissingError`` HTTP
+    handler in :mod:`elspeth.web.app` (``http_fingerprint_key_missing``).
+    The resolve path cannot raise — it supports the pipeline-validation
+    aggregation invariant (all misses bucketed into a single
+    ``SecretResolutionError``) — so the typed signal is converted into an
+    operational breadcrumb instead of a per-request 503.
+
+    Per CLAUDE.md ``logging-telemetry-policy``: this is a deployment
+    misconfiguration event, not pipeline activity.  The audit trail
+    (Landscape) records WHAT the pipeline did; it does not have a slot
+    for "server-wide secrets subsystem is misconfigured."  Telemetry
+    would be preferred but the web layer does not yet have an
+    operational-metric emitter distinct from slog.
+    """
+    global _fingerprint_missing_logged
+    if _fingerprint_missing_logged:
+        return
+    _fingerprint_missing_logged = True
+    _slog.error(
+        "secret_resolve_fingerprint_key_missing",
+        detail=(
+            "ELSPETH_FINGERPRINT_KEY is unset or misconfigured; every "
+            "call to WebSecretService.resolve() will return None until "
+            "the deployment environment is fixed."
+        ),
+    )
 
 
 class WebSecretService:
@@ -90,7 +144,17 @@ class WebSecretService:
             # failure class; all are absorbed into "None" below.
             value, ref = self._server_store.get_secret(name)
             return ResolvedSecret(name=name, value=value, scope="server", fingerprint=ref.fingerprint)
-        except (SecretNotFoundError, FingerprintKeyMissingError, SecretDecryptionError):
+        except FingerprintKeyMissingError:
+            # Deployment misconfiguration breadcrumb (once per process) —
+            # see ``_log_fingerprint_missing_once`` docstring.  Returning
+            # None preserves the pipeline-validation aggregation contract
+            # (misses bucketed into a single SecretResolutionError), but
+            # without this emission the deployment error would be
+            # invisible to operators until they hit the /validate HTTP
+            # route or the ``set_user_secret`` write path.
+            _log_fingerprint_missing_once()
+            return None
+        except (SecretNotFoundError, SecretDecryptionError):
             return None
 
     def check_user_ref_resolvable(

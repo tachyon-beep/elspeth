@@ -11,9 +11,24 @@ Responsibilities:
 from __future__ import annotations
 
 import os
+import sys
 
 import pytest
 from hypothesis import Phase, Verbosity, settings
+
+# Belt-and-suspenders fence: the Tier-1 guards in production code are
+# explicit ``raise AuditIntegrityError`` (survives ``python -O``), but a
+# handful of existing tests still use plain ``assert`` statements in
+# arrange/act lines.  Running the suite under ``-O`` would silently erase
+# those assertions, turning coverage-theatre into green-on-broken.  We
+# refuse to import the suite under an optimised interpreter so the
+# failure is loud and unmistakable.  Expressed as an ``if / raise`` (not
+# ``assert``) because ``-O`` strips asserts at import time.
+if sys.flags.optimize != 0:
+    raise RuntimeError(
+        "ELSPETH tests must not run under `python -O` — assert statements are stripped, "
+        "which silently disables assertion-based test contracts.  Re-run without -O."
+    )
 
 # ---------------------------------------------------------------------------
 # Marker Registration

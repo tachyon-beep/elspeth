@@ -1085,7 +1085,7 @@ def create_session_router() -> APIRouter:
         except Exception as primary_exc:
             # Mirror the RecoveryFailed[...] convention from
             # ``BlobServiceImpl.copy_blobs_for_fork`` and
-            # ``_finalize_run_output_blobs_sync`` (web/blobs/service.py):
+            # ``BlobServiceImpl.finalize_run_output_blobs`` (web/blobs/service.py):
             # cleanup failures must NOT mask the original error.  Narrow the
             # catch to (SQLAlchemyError, OSError) — programmer bugs in
             # archive_session must propagate — and attach the cleanup

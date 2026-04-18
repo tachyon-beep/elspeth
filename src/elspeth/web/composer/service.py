@@ -497,17 +497,69 @@ class ComposerServiceImpl:
                         }
                     )
                     continue
+                except (AssertionError, MemoryError, RecursionError, SystemError):
+                    # CLAUDE.md policy exception — DOCUMENTED DIVERGENCE.
+                    #
+                    # CLAUDE.md "Plugin Ownership" says a defective plugin
+                    # MUST crash rather than be wrapped and laundered as a
+                    # recoverable error.  The web server relaxes this for
+                    # ordinary exception classes (see the wider except
+                    # Exception below) because crashing the whole ASGI
+                    # process on one bad request would take down every
+                    # other concurrent session.
+                    #
+                    # The exceptions listed on this handler are NOT
+                    # relaxed: they represent states where the interpreter
+                    # or our own Tier-1 invariants are compromised and any
+                    # subsequent work — including the partial-state
+                    # persistence inside ``ComposerPluginCrashError.capture``
+                    # — would be operating on potentially-poisoned memory
+                    # or data.
+                    #
+                    # - AssertionError: a plain ``assert`` fired inside
+                    #   plugin code.  Asserts encode Tier-1 invariants
+                    #   (CLAUDE.md: "crash on any anomaly").  Writing the
+                    #   composition_states row after an invariant failure
+                    #   would persist data the invariant said was
+                    #   impossible.
+                    # - MemoryError / RecursionError: interpreter-level
+                    #   resource exhaustion.  The subsequent DB write may
+                    #   itself fail or corrupt state; better to unwind.
+                    # - SystemError: CPython internal invariant breach.
+                    #
+                    # ``BaseException``-only classes (SystemExit,
+                    # KeyboardInterrupt, GeneratorExit) already propagate
+                    # through ``except Exception`` below without any
+                    # handling here.
+                    raise
                 except Exception as tool_exc:
                     # Plugin-bug path: any exception class OTHER than
                     # ToolArgumentError escaping execute_tool() is a plugin
                     # bug (CLAUDE.md tier 1/2). Capture the loop-local
-                    # `state` — which has been rebound to
+                    # ``state`` — which has been rebound to
                     # result.updated_state on every successful prior
                     # iteration — so the route layer can persist the
                     # accumulated mutations into composition_states before
                     # returning the 500. Without this, any tool call that
                     # successfully mutated state prior to the crash would
                     # be silently dropped from the state history.
+                    #
+                    # Web-server policy exception: CLAUDE.md says a
+                    # defective plugin must crash.  In the pipeline engine
+                    # (single-shot CLI process) that is straightforward —
+                    # abort the run.  In the web server a single malformed
+                    # request reaching a buggy tool handler would take the
+                    # ASGI worker down and abort every other concurrent
+                    # session, including audit writes, websocket progress
+                    # streams, and unrelated users.  We wrap the exception
+                    # into a typed ComposerPluginCrashError that surfaces
+                    # to the operator as an HTTP 500 with
+                    # ``type(exc).__name__`` in the structured log, and
+                    # preserves the original on ``__cause__`` for the ASGI
+                    # error machinery.  The handler directly above
+                    # re-raises the narrow set of exception classes that
+                    # MUST NOT be laundered, so the concession below is
+                    # bounded.
                     #
                     # Wrap narrow-scope: only exceptions from the
                     # execute_tool call are wrapped here. Bugs in

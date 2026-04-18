@@ -15,6 +15,7 @@ from uuid import UUID, uuid4
 from sqlalchemy import Engine, func, select
 from sqlalchemy.exc import SQLAlchemyError
 
+from elspeth.contracts.errors import AuditIntegrityError
 from elspeth.web.blobs.protocol import (
     ALLOWED_MIME_TYPES,
     BLOB_CREATORS,
@@ -89,16 +90,21 @@ def _source_references_blob(
     Returns True if the source's options contain a matching ``blob_ref``
     OR a ``path``/``file`` that matches the blob's storage_path.
 
-    Tier 1 assertions: if source or options have wrong types, that is DB
+    Tier 1 guards: if source or options have wrong types, that is DB
     corruption — crash immediately rather than silently passing the guard.
+    Explicit raises (not ``assert``) because ``python -O`` strips asserts
+    and would turn every corruption-detection site here into a silent
+    pass-through.
     """
     if source is None:
         return False
-    assert isinstance(source, dict), f"Tier 1: composition_states.source is {type(source).__name__}, expected dict"
+    if not isinstance(source, dict):
+        raise AuditIntegrityError(f"Tier 1: composition_states.source is {type(source).__name__}, expected dict")
     options = source.get("options")
     if options is None:
         return False
-    assert isinstance(options, dict), f"Tier 1: composition_states.source.options is {type(options).__name__}, expected dict"
+    if not isinstance(options, dict):
+        raise AuditIntegrityError(f"Tier 1: composition_states.source.options is {type(options).__name__}, expected dict")
     # Check blob_ref (canonical blob reference)
     if options.get("blob_ref") == blob_id:
         return True
@@ -142,9 +148,17 @@ class BlobServiceImpl:
         # is a lie.  Aligns with the frozenset CHECK constraints in
         # web/sessions/models.py (ck_blobs_status, ck_blobs_created_by)
         # and the MIME allowlist enforced at create_blob().
-        assert row.status in BLOB_STATUSES, f"Tier 1: blobs.status is {row.status!r}, expected one of {sorted(BLOB_STATUSES)}"
-        assert row.created_by in BLOB_CREATORS, f"Tier 1: blobs.created_by is {row.created_by!r}, expected one of {sorted(BLOB_CREATORS)}"
-        assert row.mime_type in ALLOWED_MIME_TYPES, f"Tier 1: blobs.mime_type is {row.mime_type!r}, not in the allowed MIME set"
+        #
+        # Explicit raise (not ``assert``): ``python -O`` strips asserts,
+        # so an optimised interpreter would silently pass a tampered row
+        # through these guards. AuditIntegrityError is the contract for
+        # Tier 1 DB-corruption conditions and survives ``-O`` execution.
+        if row.status not in BLOB_STATUSES:
+            raise AuditIntegrityError(f"Tier 1: blobs.status is {row.status!r}, expected one of {sorted(BLOB_STATUSES)}")
+        if row.created_by not in BLOB_CREATORS:
+            raise AuditIntegrityError(f"Tier 1: blobs.created_by is {row.created_by!r}, expected one of {sorted(BLOB_CREATORS)}")
+        if row.mime_type not in ALLOWED_MIME_TYPES:
+            raise AuditIntegrityError(f"Tier 1: blobs.mime_type is {row.mime_type!r}, not in the allowed MIME set")
         return BlobRecord(
             id=UUID(row.id),
             session_id=UUID(row.session_id),
@@ -163,10 +177,12 @@ class BlobServiceImpl:
         # Tier 1 read guard — mirrors the ck_blob_run_links_direction
         # CHECK constraint.  A row with a bogus direction would leave
         # BlobRunLinkRecord.direction (typed BlobRunLinkDirection)
-        # carrying a value outside its Literal set.
-        assert row.direction in BLOB_RUN_LINK_DIRECTIONS, (
-            f"Tier 1: blob_run_links.direction is {row.direction!r}, expected one of {sorted(BLOB_RUN_LINK_DIRECTIONS)}"
-        )
+        # carrying a value outside its Literal set.  Explicit raise (not
+        # ``assert``) so the guard survives ``python -O``.
+        if row.direction not in BLOB_RUN_LINK_DIRECTIONS:
+            raise AuditIntegrityError(
+                f"Tier 1: blob_run_links.direction is {row.direction!r}, expected one of {sorted(BLOB_RUN_LINK_DIRECTIONS)}"
+            )
         return BlobRunLinkRecord(
             blob_id=UUID(row.blob_id),
             run_id=UUID(row.run_id),
@@ -183,8 +199,14 @@ class BlobServiceImpl:
         source_description: str | None = None,
     ) -> BlobRecord:
         """Create a blob from content bytes."""
-        assert created_by in BLOB_CREATORS, f"Invalid created_by: {created_by!r}"
-        assert mime_type in ALLOWED_MIME_TYPES, f"Invalid mime_type: {mime_type!r}"
+        # Programmer-bug guards on Literal-typed parameters.  Explicit
+        # raises (not ``assert``) so the guard survives ``python -O`` —
+        # mirrors the RuntimeError at ``link_blob_to_run`` (direction) and
+        # ``_finalize_blob_sync`` (status).
+        if created_by not in BLOB_CREATORS:
+            raise RuntimeError(f"Invalid created_by {created_by!r} — must be one of {sorted(BLOB_CREATORS)}")
+        if mime_type not in ALLOWED_MIME_TYPES:
+            raise RuntimeError(f"Invalid mime_type {mime_type!r} — not in the allowed MIME set")
         safe_filename = sanitize_filename(filename)
         blob_id = str(uuid4())
         session_id_str = str(session_id)
@@ -204,8 +226,10 @@ class BlobServiceImpl:
                     current_total = conn.execute(
                         select(func.coalesce(func.sum(blobs_table.c.size_bytes), 0)).where(blobs_table.c.session_id == session_id_str)
                     ).scalar()
-                    # COALESCE guarantees an int; non-int = Tier 1 anomaly
-                    assert isinstance(current_total, int), f"Tier 1: COALESCE(SUM) returned {type(current_total).__name__}, expected int"
+                    # COALESCE guarantees an int; non-int = Tier 1 anomaly.
+                    # Explicit raise (not assert) so the guard survives -O.
+                    if not isinstance(current_total, int):
+                        raise AuditIntegrityError(f"Tier 1: COALESCE(SUM) returned {type(current_total).__name__}, expected int")
                     if current_total + len(content) > self._max_storage_per_session:
                         raise BlobQuotaExceededError(
                             session_id_str,
@@ -259,7 +283,10 @@ class BlobServiceImpl:
         source_description: str | None = None,
     ) -> BlobRecord:
         """Reserve a pending output blob."""
-        assert created_by in BLOB_CREATORS, f"Invalid created_by: {created_by!r}"
+        # Programmer-bug guard on Literal-typed parameter.  Explicit raise
+        # so the check survives ``python -O`` (mirrors create_blob()).
+        if created_by not in BLOB_CREATORS:
+            raise RuntimeError(f"Invalid created_by {created_by!r} — must be one of {sorted(BLOB_CREATORS)}")
         safe_filename = sanitize_filename(filename)
         blob_id = str(uuid4())
         session_id_str = str(session_id)
@@ -483,9 +510,11 @@ class BlobServiceImpl:
                 # A ready blob must always have a content_hash — it is set
                 # by create_blob() and required by _finalize_blob_sync()
                 # when transitioning to ready.  NULL here is a DB anomaly.
-                assert row.content_hash is not None, (
-                    f"Tier 1: ready blob {blob_id_str} has NULL content_hash — DB integrity anomaly, cannot verify"
-                )
+                # Explicit raise so the guard survives ``python -O``.
+                if row.content_hash is None:
+                    raise AuditIntegrityError(
+                        f"Tier 1: ready blob {blob_id_str} has NULL content_hash — DB integrity anomaly, cannot verify"
+                    )
                 actual = content_hash(data)
                 if not hmac.compare_digest(actual, row.content_hash):
                     raise BlobIntegrityError(blob_id_str, expected=row.content_hash, actual=actual)
@@ -690,7 +719,10 @@ class BlobServiceImpl:
                 current = conn.execute(
                     select(func.coalesce(func.sum(blobs_table.c.size_bytes), 0)).where(blobs_table.c.session_id == target_session_id_str)
                 ).scalar()
-                assert isinstance(current, int), f"Tier 1: COALESCE(SUM) returned {type(current).__name__}, expected int"
+                # COALESCE guarantees an int; non-int = Tier 1 anomaly.
+                # Explicit raise so the guard survives ``python -O``.
+                if not isinstance(current, int):
+                    raise AuditIntegrityError(f"Tier 1: COALESCE(SUM) returned {type(current).__name__}, expected int")
                 return current
 
         current_usage = await self._run_sync(_check_quota)
@@ -728,7 +760,8 @@ class BlobServiceImpl:
             # delete_blob leaves an orphan DB row in the target session
             # that auditors would interpret as a successfully copied blob.
             # Mirror the RecoveryFailed[...] convention used by
-            # ``BlobServiceImpl._finalize_run_output_blobs_sync``: narrow
+            # ``BlobServiceImpl.finalize_run_output_blobs`` (the per-blob
+            # error-record path inside its nested ``_sync`` closure): narrow
             # the catch to (SQLAlchemyError, OSError) — programmer bugs must
             # propagate — collect every cleanup failure, and attach them
             # as notes on primary_exc.  The fallback file unlink stays for
@@ -802,7 +835,10 @@ class BlobServiceImpl:
                         blobs_table.c.id != blob_id_str,
                     )
                 ).scalar()
-                assert isinstance(current_total, int), f"Tier 1: COALESCE(SUM) returned {type(current_total).__name__}, expected int"
+                # COALESCE guarantees an int; non-int = Tier 1 anomaly.
+                # Explicit raise so the guard survives ``python -O``.
+                if not isinstance(current_total, int):
+                    raise AuditIntegrityError(f"Tier 1: COALESCE(SUM) returned {type(current_total).__name__}, expected int")
                 if current_total + size_bytes > self._max_storage_per_session:
                     raise BlobQuotaExceededError(
                         session_id_str,

@@ -393,7 +393,7 @@ allow_hits:
   reason: Decryptability probe — Fernet InvalidToken is the expected signal for key rotation or ciphertext corruption when computing browser-safe availability metadata
   safety: Exception is converted only into available=False; get_secret() still raises SecretNotFoundError with explicit cause on the resolution path
   expires: null
-- key: web/secrets/service.py:R6:WebSecretService:resolve:fp=8323379c46b8f92f
+- key: web/secrets/service.py:R6:WebSecretService:resolve:fp=964779ff896c073d
   owner: web-secrets
   reason: |
     TOCTOU boundary — resolve() runs has-check and get-call across multiple
@@ -404,18 +404,37 @@ allow_hits:
     for missing secrets" — the caller (resolve_secret_refs in
     core/secrets.py) aggregates missing refs and translates them into a
     SecretResolutionError at batch boundary. Letting SecretNotFoundError
-    escape from resolve() propagates as HTTP 500 instead of the intended
-    aggregated missing-ref error, violating the contract load-bearing for
-    /api/secrets/validate and composer wire-secret-ref probes.
+    or SecretDecryptionError escape from resolve() propagates as HTTP 500
+    instead of the intended aggregated missing-ref error, violating the
+    contract load-bearing for /api/secrets/validate and composer
+    wire-secret-ref probes.
   safety: |
-    Exception is converted into None only for the narrow SecretNotFoundError
-    class; other exception classes (SQLAlchemyError, OSError, RuntimeError
-    from fingerprint computation, etc.) continue to propagate. The None
-    return is behaviorally identical to the LBYL-miss branches above it,
-    which callers already handle as "ref absent at this scope" in the
-    missing-ref aggregation. Regression coverage:
+    Exception is converted into None only for SecretNotFoundError and
+    SecretDecryptionError; other exception classes (SQLAlchemyError,
+    OSError, RuntimeError from fingerprint computation, etc.) continue to
+    propagate.  The None return is behaviorally identical to the LBYL-miss
+    branches above it, which callers already handle as "ref absent at this
+    scope" in the missing-ref aggregation. Regression coverage:
     TestHasRefResolveInvariant.test_resolve_returns_none_when_user_secret_deleted_between_has_and_get
     and test_resolve_returns_none_when_server_env_cleared_between_has_and_get.
+  expires: null
+- key: web/secrets/service.py:R6:WebSecretService:resolve:fp=a72995a3ebcc2bd6
+  owner: web-secrets
+  reason: |
+    FingerprintKeyMissingError is handled separately (rather than inside the
+    TOCTOU-bucket catch below) so the once-per-process deployment breadcrumb
+    can fire.  The None return preserves the same aggregation contract
+    (resolve() returning None for unresolvable refs), but the deployment
+    misconfiguration — ELSPETH_FINGERPRINT_KEY unset — is no longer silent
+    to operators.  See _log_fingerprint_missing_once().
+  safety: |
+    None return matches the aggregation contract (TOCTOU catch below).
+    Breadcrumb is memoized at module scope so flood of resolve calls
+    against a misconfigured deployment emits exactly one slog.error event,
+    not one per call.  Other exception classes (SQLAlchemyError, OSError)
+    still propagate.  Regression coverage:
+    test_resolve_emits_once_per_process_when_fingerprint_key_missing and
+    test_resolve_emits_breadcrumb_only_for_fingerprint_missing_not_generic_miss.
   expires: null
 - key: web/execution/validation.py:R5:_collect_secret_refs:fp=960090b735d7640d
   owner: web-execution
@@ -469,9 +488,9 @@ allow_hits:
 # accumulated and attached to the primary copy exception via
 # primary_exc.add_note(f"RecoveryFailed[<type>]: ...") with the orphan
 # blob_id and target session_id, mirroring the convention used by
-# _finalize_run_output_blobs_sync (fp=42178d47e9e1c5e0 below).  This is
+# finalize_run_output_blobs (fp=42178d47e9e1c5e0 below).  This is
 # not a silent swallow — operators see both causes in the traceback.
-- key: web/blobs/service.py:R6:BlobServiceImpl:copy_blobs_for_fork:fp=ae2bc89d3f10e8b7
+- key: web/blobs/service.py:R6:BlobServiceImpl:copy_blobs_for_fork:fp=cd7218304350da2a
   owner: web-blobs
   reason: Narrow (SQLAlchemyError, OSError) around fork-rollback delete_blob — DB/IO faults expected during cleanup; programmer bugs still propagate
   safety: Cleanup failure attached as RecoveryFailed[<type>] note on primary_exc with orphan blob_id and target session_id; storage file unlinked best-effort; primary copy exception remains the headline
@@ -576,12 +595,12 @@ allow_hits:
   reason: Tier 3 — os.environ.get() for optional ELSPETH_ENV
   safety: Returns None when absent; only used for test guard
   expires: null
-- key: web/blobs/service.py:R6:BlobServiceImpl:finalize_run_output_blobs:_sync:fp=c19f21d71620d72a
+- key: web/blobs/service.py:R6:BlobServiceImpl:finalize_run_output_blobs:_sync:fp=d078191a11890c8c
   owner: web-blobs
   reason: Quota exceeded during finalization marks blob as error instead of crashing run
   safety: Over-quota file deleted; blob marked error; run still finalized
   expires: null
-- key: web/blobs/service.py:R6:BlobServiceImpl:finalize_run_output_blobs:_sync:fp=7bd1c970f4fd6979
+- key: web/blobs/service.py:R6:BlobServiceImpl:finalize_run_output_blobs:_sync:fp=31fd193a4df3eec4
   owner: web-blobs
   reason: Per-blob operational errors caught to prevent one failure from aborting remaining blobs
   safety: Failed blobs moved to "error" status best-effort; errors returned in BlobFinalizationResult
@@ -591,7 +610,7 @@ allow_hits:
 # with no audit trail; this replacement records the secondary failure as a
 # separate RecoveryFailed[<type>] entry in BlobFinalizationResult.errors so
 # the audit record carries both the primary cause and the recovery outcome.
-- key: web/blobs/service.py:R6:BlobServiceImpl:finalize_run_output_blobs:_sync:fp=42178d47e9e1c5e0
+- key: web/blobs/service.py:R6:BlobServiceImpl:finalize_run_output_blobs:_sync:fp=b015b10f708e02b4
   owner: web-blobs
   reason: Narrow (SQLAlchemyError, OSError) around pending->error recovery UPDATE — DB/IO faults expected; programmer bugs still propagate
   safety: Recovery failure appended to errors list as RecoveryFailed[<type>]; not a silent swallow
@@ -737,7 +756,7 @@ allow_hits:
 # The two entries below are the canonical RecoveryFailed[<type>] cleanup
 # pattern around archive_session() in the post-fork compensation phase.
 # Mirrors web/blobs/service.py:copy_blobs_for_fork (fp=ae2bc89d3f10e8b7)
-# and _finalize_run_output_blobs_sync (fp=42178d47e9e1c5e0).  Programmer
+# and finalize_run_output_blobs (fp=42178d47e9e1c5e0).  Programmer
 # bugs in archive_session still propagate; only DB/IO faults are absorbed
 # into a note attached to the propagating exception so the orphan session
 # row is visible to operators.
@@ -773,23 +792,27 @@ allow_hits:
   safety: Returns empty string for absent file only (not a fabricated default). Core skill always loads
     (crash on missing). Only the deployment overlay is optional. Size guard rejects oversized files.
   expires: null
-# Group E: blob service Tier 1 read guards — isinstance assertions on COALESCE(SUM()) output
-# Fingerprints refreshed 2026-04-17 (cluster elspeth-0fd9dfcb7e) after
-# hoisting `import re` to the top of service.py.  Guarded code unchanged.
-- key: web/blobs/service.py:R5:BlobServiceImpl:create_blob:_sync:fp=9f325950517fa085
+# Group E: blob service Tier 1 read guards — isinstance checks on COALESCE(SUM()) output.
+# Fingerprints refreshed 2026-04-18 (CR-1 review remediation): the
+# previous ``assert isinstance(...)`` guards were converted to
+# ``if not isinstance(...): raise AuditIntegrityError(...)`` so they
+# survive ``python -O`` execution (asserts are stripped under -O,
+# silently removing Tier-1 audit integrity checks).  Guarded code
+# semantics are unchanged — still crash-loud on anomaly.
+- key: web/blobs/service.py:R5:BlobServiceImpl:create_blob:_sync:fp=945cbfb0d8a32720
   owner: web-blobs
-  reason: Tier 1 read guard — COALESCE(SUM()) must return int; isinstance assertion crashes on anomaly instead of silent coercion
-  safety: Assert crashes immediately with diagnostic message; no silent handling
+  reason: Tier 1 read guard — COALESCE(SUM()) must return int; raises AuditIntegrityError on anomaly instead of silent coercion
+  safety: Explicit raise crashes immediately with diagnostic message; survives ``python -O``
   expires: null
-- key: web/blobs/service.py:R5:BlobServiceImpl:copy_blobs_for_fork:_check_quota:fp=ec4570ff17268cae
+- key: web/blobs/service.py:R5:BlobServiceImpl:copy_blobs_for_fork:_check_quota:fp=3433715149d9f25a
   owner: web-blobs
-  reason: Tier 1 read guard — COALESCE(SUM()) must return int; isinstance assertion crashes on anomaly instead of silent coercion
-  safety: Assert crashes immediately with diagnostic message; no silent handling
+  reason: Tier 1 read guard — COALESCE(SUM()) must return int; raises AuditIntegrityError on anomaly instead of silent coercion
+  safety: Explicit raise crashes immediately with diagnostic message; survives ``python -O``
   expires: null
-- key: web/blobs/service.py:R5:BlobServiceImpl:_finalize_blob_sync:fp=b386d16cc9a2570e
+- key: web/blobs/service.py:R5:BlobServiceImpl:_finalize_blob_sync:fp=3668dadeaca7b9ec
   owner: web-blobs
-  reason: Tier 1 read guard — COALESCE(SUM()) must return int; isinstance assertion crashes on anomaly instead of silent coercion
-  safety: Assert crashes immediately with diagnostic message; no silent handling
+  reason: Tier 1 read guard — COALESCE(SUM()) must return int; raises AuditIntegrityError on anomaly instead of silent coercion
+  safety: Explicit raise crashes immediately with diagnostic message; survives ``python -O``
   expires: null
 # Group E: redact_source_storage_path — polymorphic dict input
 # Called with full to_dict() output (has "source") AND component-specific dicts
@@ -833,30 +856,32 @@ allow_hits:
     Cleanup is called on every session delete regardless. Matches ProgressBroadcaster.cleanup_run() pattern.
   safety: Missing key means session was never executed against; no cleanup needed
   expires: null
-# _source_references_blob fingerprints refreshed 2026-04-17 (cluster
-# elspeth-0fd9dfcb7e) after hoisting `import re` to the top of service.py.
-# Guarded code unchanged.
-- key: web/blobs/service.py:R5:_source_references_blob:fp=ce99b821e5b669e3
+# _source_references_blob fingerprints refreshed 2026-04-18 (CR-1
+# review remediation): the previous ``assert isinstance(...)`` guards
+# were converted to ``if not isinstance(...): raise AuditIntegrityError``
+# so they survive ``python -O`` execution.  Dict-navigation semantics
+# unchanged.
+- key: web/blobs/service.py:R5:_source_references_blob:fp=a4b8a69c4778e803
   owner: web-blobs
-  reason: Tier 1 assertion — composition_states.source JSON must be dict when non-None; crashes on DB corruption
-  safety: Assert raises immediately on type mismatch; not a silent recovery
+  reason: Tier 1 read guard — composition_states.source JSON must be dict when non-None; raises AuditIntegrityError on DB corruption
+  safety: Explicit raise fires immediately on type mismatch; not a silent recovery; survives ``python -O``
   expires: null
-- key: web/blobs/service.py:R1:_source_references_blob:fp=504f7c057b01dfee
+- key: web/blobs/service.py:R1:_source_references_blob:fp=c564ff3540aefd09
   owner: web-blobs
   reason: JSON column navigation — source.options is optional (file-path sources omit it)
-  safety: Returns False (no match) when absent; Tier 1 assert on wrong type if present
+  safety: Returns False (no match) when absent; Tier 1 raise on wrong type if present
   expires: null
-- key: web/blobs/service.py:R5:_source_references_blob:fp=d8d1d85e6d2fa603
+- key: web/blobs/service.py:R5:_source_references_blob:fp=7c8ae7d8d2e35abe
   owner: web-blobs
-  reason: Tier 1 assertion — source.options must be dict when non-None; crashes on DB corruption
-  safety: Assert raises immediately on type mismatch; not a silent recovery
+  reason: Tier 1 read guard — source.options must be dict when non-None; raises AuditIntegrityError on DB corruption
+  safety: Explicit raise fires immediately on type mismatch; not a silent recovery; survives ``python -O``
   expires: null
-- key: web/blobs/service.py:R1:_source_references_blob:fp=3f226cea44e718be
+- key: web/blobs/service.py:R1:_source_references_blob:fp=49a5af52e3369116
   owner: web-blobs
   reason: JSON column navigation — blob_ref is optional (only present for blob-backed sources)
   safety: Returns False (no match) when absent; correct for file-path sources
   expires: null
-- key: web/blobs/service.py:R1:_source_references_blob:fp=c07a64293c9d2d91
+- key: web/blobs/service.py:R1:_source_references_blob:fp=0b190c02bbe2ce38
   owner: web-blobs
   reason: JSON column navigation — path/file keys are optional in source options
   safety: Returns False (no match) when absent; correct for sources without path
@@ -985,7 +1010,7 @@ allow_hits:
     reading slog events and response bodies can distinguish
     middleware-bypassed failures from normal ones.
   expires: null
-- key: web/secrets/service.py:R6:WebSecretService:check_user_ref_resolvable:fp=659114141f25118e
+- key: web/secrets/service.py:R6:WebSecretService:check_user_ref_resolvable:fp=9dbfc1889b72c96e
   owner: web-secrets
   reason: |
     Narrow catch by design. check_user_ref_resolvable is the typed-error

@@ -2932,3 +2932,71 @@ class TestSequentialErrorReasonNotFabricated:
             pytest.raises(FrameworkBugError, match="reason=None"),
         ):
             strategy.execute(row, ctx, provider=Mock(), tracer=Mock())
+
+
+class TestQuerySuccessPostFreezeMutationGuards:
+    """Exercise the ``freeze_fields`` post-init guard on
+    ``MultiQueryStrategy._QuerySuccess``.
+
+    ``enforce_freeze_guards.py`` is a static scanner — a typo that omits
+    a field name (``freeze_fields(self, "fields")`` without
+    ``"audit_metadata"``) still parses as a valid call expression and
+    would silently leave ``audit_metadata`` mutable.  These tests pin the
+    runtime contract by mutating each container field after construction
+    and asserting TypeError surfaces.
+    """
+
+    def test_query_success_fields_is_immutable_after_construction(self) -> None:
+        """Mutating ``_QuerySuccess.fields`` after construction must raise TypeError."""
+        from elspeth.plugins.transforms.llm.transform import MultiQueryStrategy
+
+        result = MultiQueryStrategy._QuerySuccess(
+            fields={"label": "positive", "confidence": 0.9},
+            audit_metadata={"prompt_hash": "abc"},
+        )
+
+        with pytest.raises(TypeError):
+            result.fields["label"] = "mutated"  # type: ignore[index]
+
+        with pytest.raises(TypeError):
+            result.fields["new_field"] = "x"  # type: ignore[index]
+
+    def test_query_success_audit_metadata_is_immutable_after_construction(self) -> None:
+        """Mutating ``_QuerySuccess.audit_metadata`` after construction must raise TypeError.
+
+        This is the specific leak that a scanner-defeating typo would
+        cause: if a future refactor drops ``"audit_metadata"`` from the
+        freeze_fields call, audit metadata would become mutable and the
+        caller that re-emits it to the Landscape would be writing a live
+        reference — a prime Tier-1 audit-integrity hazard.
+        """
+        from elspeth.plugins.transforms.llm.transform import MultiQueryStrategy
+
+        result = MultiQueryStrategy._QuerySuccess(
+            fields={"label": "positive"},
+            audit_metadata={"prompt_hash": "abc", "model_snapshot": "gpt-4o-mini-2024-07-18"},
+        )
+
+        with pytest.raises(TypeError):
+            result.audit_metadata["prompt_hash"] = "def"  # type: ignore[index]
+
+        with pytest.raises(TypeError):
+            result.audit_metadata["injected"] = "x"  # type: ignore[index]
+
+    def test_query_success_source_detachment(self) -> None:
+        """Source mutations to fields / audit_metadata passed in must NOT affect the stored views."""
+        from elspeth.plugins.transforms.llm.transform import MultiQueryStrategy
+
+        fields_src = {"label": "positive"}
+        meta_src = {"prompt_hash": "abc"}
+
+        result = MultiQueryStrategy._QuerySuccess(
+            fields=fields_src,
+            audit_metadata=meta_src,
+        )
+
+        fields_src["label"] = "mutated"
+        meta_src["prompt_hash"] = "def"
+
+        assert result.fields["label"] == "positive"
+        assert result.audit_metadata["prompt_hash"] == "abc"

@@ -1003,3 +1003,64 @@ class TestBug4_8_FieldCollisionBeforeAPICall:
         assert "llm_response" in transform.declared_output_fields
         assert isinstance(transform.declared_output_fields, frozenset)
         assert len(transform.declared_output_fields) > 0
+
+
+class TestRowOutcomePostFreezeMutationGuards:
+    """Exercise the ``freeze_fields`` post-init guards on ``_RowSuccess`` /
+    ``_RowFailure``.
+
+    ``enforce_freeze_guards.py`` is a static scanner — a typo like
+    ``freeze_fields(self)`` (no args) or ``freeze_fields(self, "wrong_name")``
+    still parses as a valid call expression and silently defeats the scan
+    without tripping the regex.  These tests pin the runtime contract by
+    mutating each container field after construction and asserting the
+    post-freeze TypeError surfaces.  If a future refactor drops a field
+    from the ``freeze_fields`` call, the corresponding mutation succeeds
+    and the test fails loudly.
+    """
+
+    def test_row_success_row_is_immutable_after_construction(self) -> None:
+        """Mutating ``_RowSuccess.row`` after construction must raise TypeError.
+
+        A mutation that succeeds would leave a frozen dataclass with a
+        live shared reference — the "frozen=True is a lie" pattern
+        CLAUDE.md's deep-freeze contract was written to prevent.
+        """
+        from elspeth.plugins.transforms.llm.openrouter_batch import _RowSuccess
+
+        success = _RowSuccess(row={"k": "v"}, finish_reason="stop")
+
+        with pytest.raises(TypeError):
+            # MappingProxyType raises TypeError on item assignment.
+            success.row["k"] = "mutated"  # type: ignore[index]
+
+        with pytest.raises(TypeError):
+            success.row["new_key"] = "x"  # type: ignore[index]
+
+    def test_row_failure_error_is_immutable_after_construction(self) -> None:
+        """Mutating ``_RowFailure.error`` after construction must raise TypeError."""
+        from elspeth.plugins.transforms.llm.openrouter_batch import _RowFailure
+
+        failure = _RowFailure(error={"code": "rate_limited", "detail": "429"})
+
+        with pytest.raises(TypeError):
+            failure.error["code"] = "timeout"  # type: ignore[index]
+
+        with pytest.raises(TypeError):
+            failure.error["extra"] = "x"  # type: ignore[index]
+
+    def test_row_success_source_detachment(self) -> None:
+        """Mutating the source dict passed to _RowSuccess must NOT affect the stored view.
+
+        Belt-and-suspenders alongside the post-freeze tests: confirms the
+        deep-freeze took a detached snapshot, not a live reference.
+        """
+        from elspeth.plugins.transforms.llm.openrouter_batch import _RowSuccess
+
+        source = {"k": "v"}
+        success = _RowSuccess(row=source, finish_reason="stop")
+        source["k"] = "mutated"
+        source["new_key"] = "x"
+
+        assert success.row["k"] == "v"
+        assert "new_key" not in success.row

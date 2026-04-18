@@ -145,6 +145,118 @@ class TestVerificationResult:
             )
 
 
+class TestVerificationResultPostFreezeMutationGuards:
+    """Exercise the ``freeze_fields`` post-init guard on ``VerificationResult``.
+
+    ``enforce_freeze_guards.py`` is a static scanner — a typo that drops
+    a field name from the ``freeze_fields(self, ...)`` call still parses
+    as valid Python and silently defeats the scan.  These tests pin the
+    runtime contract by mutating each container field after construction
+    and asserting the post-freeze TypeError surfaces.  If a refactor
+    drops a field, the mutation succeeds and this test fails loudly.
+    """
+
+    def test_live_response_is_immutable_after_construction(self) -> None:
+        """Mutating ``VerificationResult.live_response`` must raise TypeError."""
+        result = VerificationResult(
+            request_hash="abc123",
+            live_response={"content": "Hello"},
+            recorded_response={"content": "Hello"},
+            is_match=True,
+        )
+
+        with pytest.raises(TypeError):
+            result.live_response["content"] = "mutated"  # type: ignore[index]
+
+        with pytest.raises(TypeError):
+            result.live_response["new_key"] = "x"  # type: ignore[index]
+
+    def test_recorded_response_is_immutable_after_construction(self) -> None:
+        """Mutating ``VerificationResult.recorded_response`` must raise TypeError."""
+        result = VerificationResult(
+            request_hash="abc123",
+            live_response={"content": "Hello"},
+            recorded_response={"content": "Hello"},
+            is_match=True,
+        )
+
+        assert result.recorded_response is not None
+        with pytest.raises(TypeError):
+            result.recorded_response["content"] = "mutated"  # type: ignore[index]
+
+        with pytest.raises(TypeError):
+            result.recorded_response["new_key"] = "x"  # type: ignore[index]
+
+    def test_differences_is_immutable_after_construction(self) -> None:
+        """Mutating ``VerificationResult.differences`` must raise TypeError.
+
+        This is the specific leak that a scanner-defeating typo would
+        cause: the differences map is consumed by VerificationReport and
+        downstream audit emitters — a mutable reference would allow a
+        caller to rewrite the diff after the match decision was made.
+        """
+        result = VerificationResult(
+            request_hash="abc123",
+            live_response={"content": "New"},
+            recorded_response={"content": "Old"},
+            is_match=False,
+            differences={"values_changed": {"root['content']": {"new_value": "New", "old_value": "Old"}}},
+        )
+
+        with pytest.raises(TypeError):
+            result.differences["values_changed"] = {}  # type: ignore[index]
+
+        with pytest.raises(TypeError):
+            result.differences["added_key"] = {}  # type: ignore[index]
+
+    def test_recorded_response_none_does_not_crash_freeze(self) -> None:
+        """``recorded_response=None`` is a valid state (missing payload);
+        freeze must handle None transparently without raising.
+
+        This pins the docstring's claim at verifier.py:77-78 that
+        ``deep_freeze`` handles None as an opaque scalar, so no
+        conditional guard is needed.  A future refactor that adds an
+        ``if self.recorded_response is not None`` guard around the
+        freeze call would still work, but a refactor that drops the
+        field from ``freeze_fields`` entirely would fail this test via
+        the live_response/differences tests above.
+        """
+        result = VerificationResult.missing_payload(
+            request_hash="abc123",
+            live_response={"content": "Hello"},
+            is_match=None,
+            differences={"unverifiable": {"reason": "payload purged"}},
+        )
+
+        assert result.recorded_response is None
+        # live_response still guarded
+        with pytest.raises(TypeError):
+            result.live_response["content"] = "mutated"  # type: ignore[index]
+
+    def test_source_detachment_across_all_container_fields(self) -> None:
+        """Source mutations to inputs must NOT affect the stored views."""
+        live_src = {"content": "Hello"}
+        recorded_src = {"content": "Hello"}
+        diffs_src: dict[str, Any] = {"values_changed": {}}
+
+        result = VerificationResult(
+            request_hash="abc123",
+            live_response=live_src,
+            recorded_response=recorded_src,
+            is_match=False,
+            differences=diffs_src,
+        )
+
+        live_src["content"] = "mutated"
+        recorded_src["content"] = "mutated"
+        diffs_src["values_changed"] = {"root['x']": {"new_value": "Z"}}
+
+        assert result.live_response["content"] == "Hello"
+        assert result.recorded_response is not None
+        assert result.recorded_response["content"] == "Hello"
+        assert result.differences["values_changed"] == {}
+
+
 class TestVerificationReport:
     """Tests for VerificationReport dataclass."""
 

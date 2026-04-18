@@ -466,6 +466,63 @@ class TestHasRefResolveInvariant:
         result = service.resolve("u1", "TEST_KEY", auth_provider_type="local")
         assert result is None
 
+    def test_resolve_emits_once_per_process_when_fingerprint_key_missing(
+        self,
+        service: WebSecretService,
+        user_store: UserSecretStore,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """A missing ELSPETH_FINGERPRINT_KEY on the resolve path must emit
+        exactly one operational breadcrumb per process, not one per call.
+
+        The resolve path cannot raise — the pipeline-validation aggregation
+        invariant requires all misses to bucket into a single
+        SecretResolutionError — so the typed signal is turned into an slog
+        event.  Without memoization the server would flood logs with one
+        entry per secret lookup (potentially thousands per composition),
+        which drowns out the signal operators need.
+        """
+        from elspeth.web.secrets import service as service_module
+
+        user_store.set_secret("KEY", value="val", user_id="u1", auth_provider_type="local")
+        monkeypatch.delenv("ELSPETH_FINGERPRINT_KEY")
+        # Reset the process-global memo so the test is deterministic
+        # regardless of test ordering.
+        monkeypatch.setattr(service_module, "_fingerprint_missing_logged", False)
+
+        with patch.object(service_module, "_slog") as mock_slog:
+            service.resolve("u1", "KEY", auth_provider_type="local")
+            service.resolve("u1", "KEY", auth_provider_type="local")
+            service.resolve("u1", "OTHER", auth_provider_type="local")
+
+        assert mock_slog.error.call_count == 1
+        args, kwargs = mock_slog.error.call_args
+        assert args[0] == "secret_resolve_fingerprint_key_missing"
+        assert "ELSPETH_FINGERPRINT_KEY" in kwargs["detail"]
+
+    def test_resolve_emits_breadcrumb_only_for_fingerprint_missing_not_generic_miss(
+        self,
+        service: WebSecretService,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """A plain SecretNotFoundError on resolve must NOT fire the
+        fingerprint-key breadcrumb.  The breadcrumb is specific to a
+        deployment-error class; confusing it with a genuine cache miss
+        would cause operators to chase ghost misconfigurations every
+        time a pipeline references an unknown secret.
+        """
+        from elspeth.web.secrets import service as service_module
+
+        # Fingerprint key IS set (the autouse fixture provides it).  The
+        # lookup just misses — this is a normal validation condition.
+        monkeypatch.setattr(service_module, "_fingerprint_missing_logged", False)
+
+        with patch.object(service_module, "_slog") as mock_slog:
+            result = service.resolve("u1", "NONEXISTENT", auth_provider_type="local")
+
+        assert result is None
+        assert mock_slog.error.call_count == 0
+
     def test_has_ref_returns_false_for_reserved_name_when_user_has_no_row(
         self,
         service: WebSecretService,

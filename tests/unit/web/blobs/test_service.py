@@ -18,6 +18,7 @@ from uuid import UUID, uuid4
 import pytest
 from sqlalchemy.pool import StaticPool
 
+from elspeth.contracts.errors import AuditIntegrityError
 from elspeth.web.blobs.protocol import (
     BlobActiveRunError,
     BlobNotFoundError,
@@ -988,7 +989,8 @@ class TestCopyBlobsForForkRollback:
         orphaned — the target session would carry phantom blob metadata that
         auditors interpret as successfully-copied blobs while the file is
         gone.  Mirrors the RecoveryFailed[...] convention used by
-        finalize_run_output_blobs (BlobServiceImpl._finalize_run_output_blobs_sync).
+        ``BlobServiceImpl.finalize_run_output_blobs`` (the per-blob
+        recovery branch inside its nested ``_sync`` closure).
 
         Contract: primary copy exception is the headline; every cleanup
         failure is attached as an ``add_note()`` entry naming the orphan
@@ -2126,12 +2128,11 @@ class TestRowToRecordTierOneGuards:
     assertion, loosens a membership set, swaps ``in`` for an always-true
     comparison), these tests will fail.
 
-    Note on ``python -O``: ``assert`` is stripped at optimization level 1.
-    This project runs pytest without ``-O`` (pytest default); production
-    should also be unoptimised per the auditability standard. If optimised
-    builds ever become a concern, convert the asserts to explicit raises
-    and update these tests — AssertionError trip is still the contract
-    under the current policy.
+    Note on ``python -O``: the guards are implemented with explicit
+    ``raise AuditIntegrityError(...)`` (not ``assert``) so they survive
+    optimised interpreter execution.  The Tier-1 DB-corruption contract
+    is AuditIntegrityError; tests below pin that type so a silent
+    downgrade back to ``assert`` (which ``-O`` strips) would fail here.
     """
 
     @staticmethod
@@ -2192,14 +2193,14 @@ class TestRowToRecordTierOneGuards:
         must crash with a Tier-1 assertion message before the BlobRecord
         is constructed with the lie."""
         row = self._fake_blob_row(status="corrupted")
-        with pytest.raises(AssertionError, match=r"Tier 1: blobs\.status is 'corrupted'"):
+        with pytest.raises(AuditIntegrityError, match=r"Tier 1: blobs\.status is 'corrupted'"):
             blob_service._row_to_record(row)
 
     def test_status_none_trips_guard(self, blob_service) -> None:
         """NULL status — e.g. from a dropped NOT NULL + DEFAULT during
         migration — is outside the enum and must crash."""
         row = self._fake_blob_row(status=None)
-        with pytest.raises(AssertionError, match=r"Tier 1: blobs\.status"):
+        with pytest.raises(AuditIntegrityError, match=r"Tier 1: blobs\.status"):
             blob_service._row_to_record(row)
 
     # ---- created_by guard ------------------------------------------------
@@ -2209,12 +2210,12 @@ class TestRowToRecordTierOneGuards:
         ``created_by = 'root'`` would otherwise surface as a valid record
         whose audit attribution is fabricated."""
         row = self._fake_blob_row(created_by="root")
-        with pytest.raises(AssertionError, match=r"Tier 1: blobs\.created_by is 'root'"):
+        with pytest.raises(AuditIntegrityError, match=r"Tier 1: blobs\.created_by is 'root'"):
             blob_service._row_to_record(row)
 
     def test_created_by_empty_string_trips_guard(self, blob_service) -> None:
         row = self._fake_blob_row(created_by="")
-        with pytest.raises(AssertionError, match=r"Tier 1: blobs\.created_by"):
+        with pytest.raises(AuditIntegrityError, match=r"Tier 1: blobs\.created_by"):
             blob_service._row_to_record(row)
 
     # ---- mime_type guard -------------------------------------------------
@@ -2224,7 +2225,7 @@ class TestRowToRecordTierOneGuards:
         crash — the allowlist exists to constrain what the composer/pipeline
         layer will accept, and a laundered MIME would silently bypass it."""
         row = self._fake_blob_row(mime_type="application/x-sh")
-        with pytest.raises(AssertionError, match=r"Tier 1: blobs\.mime_type is 'application/x-sh'"):
+        with pytest.raises(AuditIntegrityError, match=r"Tier 1: blobs\.mime_type is 'application/x-sh'"):
             blob_service._row_to_record(row)
 
     def test_mime_type_case_mismatch_trips_guard(self, blob_service) -> None:
@@ -2233,7 +2234,7 @@ class TestRowToRecordTierOneGuards:
         ``TEXT/CSV`` has the wrong casing and must be rejected — not
         coerced, because coercion at the Tier-1 boundary is forbidden."""
         row = self._fake_blob_row(mime_type="TEXT/CSV")
-        with pytest.raises(AssertionError, match=r"Tier 1: blobs\.mime_type"):
+        with pytest.raises(AuditIntegrityError, match=r"Tier 1: blobs\.mime_type"):
             blob_service._row_to_record(row)
 
     # ---- direction guard -------------------------------------------------
@@ -2243,12 +2244,12 @@ class TestRowToRecordTierOneGuards:
         ``('input', 'output')``. A row with ``direction='inout'`` (the exact
         value the write-side test rejects) must also be rejected on read."""
         row = self._fake_link_row(direction="inout")
-        with pytest.raises(AssertionError, match=r"Tier 1: blob_run_links\.direction is 'inout'"):
+        with pytest.raises(AuditIntegrityError, match=r"Tier 1: blob_run_links\.direction is 'inout'"):
             blob_service._row_to_link_record(row)
 
     def test_link_direction_none_trips_guard(self, blob_service) -> None:
         row = self._fake_link_row(direction=None)
-        with pytest.raises(AssertionError, match=r"Tier 1: blob_run_links\.direction"):
+        with pytest.raises(AuditIntegrityError, match=r"Tier 1: blob_run_links\.direction"):
             blob_service._row_to_link_record(row)
 
     # ---- guard-fires-before-record-construction --------------------------
@@ -2263,10 +2264,10 @@ class TestRowToRecordTierOneGuards:
         # UUID constructor would raise ValueError first and mask the
         # tampered-status condition.
         row = self._fake_blob_row(status="corrupted", id="not-a-uuid")
-        with pytest.raises(AssertionError, match=r"Tier 1: blobs\.status"):
+        with pytest.raises(AuditIntegrityError, match=r"Tier 1: blobs\.status"):
             blob_service._row_to_record(row)
 
     def test_bad_direction_crashes_before_uuid_parse(self, blob_service) -> None:
         row = self._fake_link_row(direction="inout", blob_id="not-a-uuid")
-        with pytest.raises(AssertionError, match=r"Tier 1: blob_run_links\.direction"):
+        with pytest.raises(AuditIntegrityError, match=r"Tier 1: blob_run_links\.direction"):
             blob_service._row_to_link_record(row)
