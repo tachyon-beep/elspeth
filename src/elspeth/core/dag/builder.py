@@ -245,6 +245,7 @@ def build_execution_graph(
             input_schema=transform.input_schema,  # TransformProtocol requires this
             output_schema=transform.output_schema,  # TransformProtocol requires this
             output_schema_config=output_schema_config,
+            passes_through_input=transform.passes_through_input,
         )
 
     graph.set_transform_id_map(transform_ids_by_seq)
@@ -274,6 +275,7 @@ def build_execution_graph(
             input_schema=transform.input_schema,  # TransformProtocol requires this (aggregations use transforms)
             output_schema=transform.output_schema,  # TransformProtocol requires this (aggregations use transforms)
             output_schema_config=agg_output_schema_config,
+            passes_through_input=transform.passes_through_input,
         )
 
     graph.set_aggregation_id_map(aggregation_ids)

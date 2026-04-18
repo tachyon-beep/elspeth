@@ -58,6 +58,7 @@ class MockFieldAddingTransform:
     output_schema = None
     on_error: str | None = None
     on_success: str | None = "output"
+    passes_through_input: bool = False
 
     def __init__(
         self,
@@ -67,9 +68,11 @@ class MockFieldAddingTransform:
         declared_output_fields: frozenset[str] = frozenset(),
         required_input_fields: list[str] | None = None,
         output_schema_config_override: Any = _SENTINEL,
+        passes_through_input: bool = False,
     ) -> None:
         self.name = name
         self.declared_output_fields = declared_output_fields
+        self.passes_through_input = passes_through_input
 
         if output_schema_config_override is not _SENTINEL:
             self._output_schema_config = output_schema_config_override
@@ -266,6 +269,129 @@ class TestEdgeValidationWithOutputSchemaContract:
                 source_settings=SourceSettings(plugin="mock_source", on_success="source_out", options={}),
                 transforms=[wired],
                 sinks={"output": CollectSink("output")},
+                aggregations={},
+                gates=[],
+            )
+
+
+class TestPassThroughFlagThroughProductionPath:
+    """Prove passes_through_input flows plugin → builder → NodeInfo → validator."""
+
+    def test_pass_through_flag_propagates_upstream_guarantees_through_builder(self) -> None:
+        """A pass-through transform built via from_plugin_instances() satisfies a sink that requires upstream fields."""
+        from tests.fixtures.plugins import CollectSink, ListSource
+
+        producer = MockFieldAddingTransform(
+            "producer",
+            guaranteed_fields=("upstream_field",),
+            declared_output_fields=frozenset({"upstream_field"}),
+        )
+        pass_through = MockFieldAddingTransform(
+            "pt_adder",
+            guaranteed_fields=("added_field",),
+            declared_output_fields=frozenset({"added_field"}),
+            required_input_fields=["upstream_field"],
+            passes_through_input=True,
+        )
+
+        source = ListSource([], name="mock_source", on_success="source_out")
+        source_settings = SourceSettings(plugin="mock_source", on_success="source_out", options={})
+        producer_wired = WiredTransform(
+            plugin=producer,  # type: ignore[arg-type]
+            settings=TransformSettings(
+                name="producer_0",
+                plugin=producer.name,
+                input="source_out",
+                on_success="pt_in",
+                on_error="discard",
+                options={},
+            ),
+        )
+        pt_wired = WiredTransform(
+            plugin=pass_through,  # type: ignore[arg-type]
+            settings=TransformSettings(
+                name="pt_0",
+                plugin=pass_through.name,
+                input="pt_in",
+                on_success="output",
+                on_error="discard",
+                options={},
+            ),
+        )
+
+        graph = ExecutionGraph.from_plugin_instances(
+            source=source,
+            source_settings=source_settings,
+            transforms=[producer_wired, pt_wired],
+            sinks={"output": CollectSink("output")},
+            aggregations={},
+            gates=[],
+        )
+
+        # Flag is carried into NodeInfo and effective guarantees include upstream fields.
+        pt_nodes = [n for n in graph.get_nodes() if n.plugin_name == "pt_adder"]
+        assert len(pt_nodes) == 1
+        pt_info = pt_nodes[0]
+        assert pt_info.passes_through_input is True
+        effective = graph.get_effective_guaranteed_fields(pt_info.node_id)
+        assert effective == frozenset({"upstream_field", "added_field"})
+
+    def test_default_flag_false_keeps_legacy_semantics(self) -> None:
+        """Without the flag, a downstream sink requiring upstream fields is rejected (regression guard)."""
+        producer = MockFieldAddingTransform(
+            "producer",
+            guaranteed_fields=("upstream_field",),
+            declared_output_fields=frozenset({"upstream_field"}),
+        )
+        # Not a pass-through; its own guaranteed set is only {added_field}.
+        consumer = MockFieldAddingTransform(
+            "consumer",
+            guaranteed_fields=("added_field",),
+            declared_output_fields=frozenset({"added_field"}),
+            required_input_fields=["upstream_field"],
+        )
+        from tests.fixtures.plugins import CollectSink, ListSource
+
+        source = ListSource([], name="mock_source", on_success="source_out")
+        source_settings = SourceSettings(plugin="mock_source", on_success="source_out", options={})
+        producer_wired = WiredTransform(
+            plugin=producer,  # type: ignore[arg-type]
+            settings=TransformSettings(
+                name="producer_0",
+                plugin=producer.name,
+                input="source_out",
+                on_success="c_in",
+                on_error="discard",
+                options={},
+            ),
+        )
+        consumer_wired = WiredTransform(
+            plugin=consumer,  # type: ignore[arg-type]
+            settings=TransformSettings(
+                name="consumer_0",
+                plugin=consumer.name,
+                input="c_in",
+                on_success="output",
+                on_error="discard",
+                options={},
+            ),
+        )
+
+        # Wire a sink that requires BOTH upstream_field and added_field —
+        # without the flag, consumer's effective guarantees are only {added_field},
+        # so the sink's upstream_field requirement is not satisfied.
+        strict_sink = CollectSink("output")
+        strict_sink.config = {
+            **strict_sink.config,
+            "schema": {"mode": "observed", "required_fields": ["upstream_field", "added_field"]},
+        }
+
+        with pytest.raises(GraphValidationError):
+            ExecutionGraph.from_plugin_instances(
+                source=source,
+                source_settings=source_settings,
+                transforms=[producer_wired, consumer_wired],
+                sinks={"output": strict_sink},
                 aggregations={},
                 gates=[],
             )

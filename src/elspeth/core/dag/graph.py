@@ -108,6 +108,7 @@ class ExecutionGraph:
         output_schema: type[PluginSchema] | None = None,
         input_schema_config: SchemaConfig | None = None,
         output_schema_config: SchemaConfig | None = None,
+        passes_through_input: bool = False,
     ) -> None:
         """Add a node to the execution graph.
 
@@ -120,6 +121,9 @@ class ExecutionGraph:
             output_schema: Output schema Pydantic type (None for dynamic or N/A like sinks)
             input_schema_config: Input schema config for contract validation
             output_schema_config: Output schema config for contract validation
+            passes_through_input: True iff the underlying transform/aggregation
+                preserves every input-row field in its output in addition to its
+                declared_output_fields. Default False (conservative).
         """
         info = NodeInfo(
             node_id=NodeID(node_id),
@@ -130,6 +134,7 @@ class ExecutionGraph:
             output_schema=output_schema,
             input_schema_config=input_schema_config,
             output_schema_config=output_schema_config,
+            passes_through_input=passes_through_input,
         )
         self._graph.add_node(node_id, info=info)
 
@@ -886,13 +891,22 @@ class ExecutionGraph:
         # Schema resolution cache shared across all edge validations.
         # Eliminates redundant recursion through long gate chains (O(N^2) → O(N)).
         schema_cache: dict[str, type[PluginSchema] | None] = {}
+        # Guarantee resolution cache shared across all edge validations.
+        # Same motivation as schema_cache: walking through long pass-through
+        # chains is O(N) per validation; sharing a cache keeps the total O(N).
+        guarantee_cache: dict[str, frozenset[str]] = {}
 
         # Validate each edge (skip divert edges — quarantine/error data doesn't
         # conform to producer schemas because it failed validation or errored)
         for from_id, to_id, edge_data in self._graph.edges(data=True):
             if edge_data["mode"] == RoutingMode.DIVERT:
                 continue
-            self._validate_single_edge(from_id, to_id, _schema_cache=schema_cache)
+            self._validate_single_edge(
+                from_id,
+                to_id,
+                _schema_cache=schema_cache,
+                _guarantee_cache=guarantee_cache,
+            )
 
         # Validate all coalesce nodes (must have compatible schemas from all branches)
         coalesce_nodes = [node_id for node_id, data in self._graph.nodes(data=True) if data["info"].node_type == NodeType.COALESCE]
@@ -1011,6 +1025,7 @@ class ExecutionGraph:
         to_node_id: str,
         *,
         _schema_cache: dict[str, type[PluginSchema] | None] | None = None,
+        _guarantee_cache: dict[str, frozenset[str]] | None = None,
     ) -> None:
         """Validate schema compatibility for a single edge.
 
@@ -1056,7 +1071,7 @@ class ExecutionGraph:
 
         if consumer_required:
             # Get effective guaranteed fields (walks through pass-through nodes)
-            producer_guaranteed = self.get_effective_guaranteed_fields(from_node_id)
+            producer_guaranteed = self.get_effective_guaranteed_fields(from_node_id, _guarantee_cache)
 
             missing = consumer_required - producer_guaranteed
             if missing:
@@ -1484,13 +1499,22 @@ class ExecutionGraph:
 
         return frozenset()
 
-    def get_effective_guaranteed_fields(self, node_id: str) -> frozenset[str]:
+    def get_effective_guaranteed_fields(
+        self,
+        node_id: str,
+        _cache: dict[str, frozenset[str]] | None = None,
+    ) -> frozenset[str]:
         """Get effective output guarantees, walking through pass-through nodes.
 
         Gates inherit guarantees from upstream. Coalesce nodes are strategy-aware:
         - **union**: intersection of branch guarantees (only fields in ALL branches)
         - **nested**: the node's own guarantees (branch names, not inner fields)
         - **select**: the node's own guarantees (selected branch's schema)
+
+        Transforms and aggregations that declared ``passes_through_input=True``
+        inherit upstream guarantees unioned with their own declared output
+        fields. Intersection is used across multiple predecessors: a field is
+        only propagated if every predecessor guarantees it.
 
         IMPORTANT: Gates ALWAYS inherit from upstream, even if they have raw schema
         guarantees. This is because gates copy raw config["schema"] from upstream,
@@ -1500,10 +1524,17 @@ class ExecutionGraph:
 
         Args:
             node_id: Node to get effective guarantees for
+            _cache: Internal memoization dict, created on first call. Keeps
+                validation O(N) instead of O(N^2) on long pass-through chains.
 
         Returns:
             Frozenset of field names effectively guaranteed at this point
         """
+        if _cache is None:
+            _cache = {}
+        if node_id in _cache:
+            return _cache[node_id]
+
         node_info = self.get_node_info(node_id)
 
         # Gates ALWAYS inherit from upstream - they don't compute schemas.
@@ -1512,9 +1543,12 @@ class ExecutionGraph:
         if node_info.node_type == NodeType.GATE:
             incoming = list(self._graph.in_edges(node_id, data=True))
             if not incoming:
-                return frozenset()
-            # Gates pass through - inherit from single upstream
-            return self.get_effective_guaranteed_fields(incoming[0][0])
+                result: frozenset[str] = frozenset()
+            else:
+                # Gates pass through - inherit from single upstream
+                result = self.get_effective_guaranteed_fields(incoming[0][0], _cache)
+            _cache[node_id] = result
+            return result
 
         # Coalesce nodes: strategy-aware guaranteed fields
         if node_info.node_type == NodeType.COALESCE:
@@ -1526,20 +1560,44 @@ class ExecutionGraph:
             # - Select output is the selected branch's data — its schema was
             #   copied by the builder into this node's config.
             if merge_strategy in ("nested", "select"):
-                return self.get_guaranteed_fields(node_id)
+                result = self.get_guaranteed_fields(node_id)
+                _cache[node_id] = result
+                return result
 
             # union: intersection of branch guarantees. Only fields present in
             # ALL branches are guaranteed in the flat merged output.
             incoming = list(self._graph.in_edges(node_id, data=True))
             if not incoming:
-                return frozenset()
-            branch_guarantees = [self.get_effective_guaranteed_fields(from_id) for from_id, _, _ in incoming]
-            if not branch_guarantees:
-                return frozenset()
+                _cache[node_id] = frozenset()
+                return _cache[node_id]
+            branch_guarantees = [self.get_effective_guaranteed_fields(from_id, _cache) for from_id, _, _ in incoming]
             result = branch_guarantees[0]
             for guarantees in branch_guarantees[1:]:
                 result = result & guarantees
+            _cache[node_id] = result
+            return result
+
+        # Transforms/aggregations that opted into pass-through propagate
+        # upstream guarantees. Conservative default (flag=False) keeps legacy
+        # behaviour: the node's own declared guarantees are returned as-is.
+        if (
+            node_info.node_type in (NodeType.TRANSFORM, NodeType.AGGREGATION)
+            and node_info.passes_through_input
+        ):
+            own = self.get_guaranteed_fields(node_id)
+            incoming = list(self._graph.in_edges(node_id, data=True))
+            if not incoming:
+                _cache[node_id] = own
+                return own
+            upstream_guarantees = [self.get_effective_guaranteed_fields(from_id, _cache) for from_id, _, _ in incoming]
+            inherited = upstream_guarantees[0]
+            for guarantees in upstream_guarantees[1:]:
+                inherited = inherited & guarantees
+            result = inherited | own
+            _cache[node_id] = result
             return result
 
         # Non-pass-through nodes return their own guarantees
-        return self.get_guaranteed_fields(node_id)
+        result = self.get_guaranteed_fields(node_id)
+        _cache[node_id] = result
+        return result

@@ -32,6 +32,12 @@ class TestBatchReplicateHappyPath:
         assert BatchReplicate.name == "batch_replicate"
         assert BatchReplicate.is_batch_aware is True
 
+    def test_declares_pass_through_input(self) -> None:
+        """BatchReplicate deep-copies row.to_dict() before adding copy_index, so the flag must be True."""
+        from elspeth.plugins.transforms.batch_replicate import BatchReplicate
+
+        assert BatchReplicate.passes_through_input is True
+
     def test_replicates_rows_by_copies_field(self, ctx: PluginContext) -> None:
         """BatchReplicate creates N copies of each row based on copies field."""
         from elspeth.plugins.transforms.batch_replicate import BatchReplicate

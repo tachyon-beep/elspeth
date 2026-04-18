@@ -209,6 +209,13 @@ class TransformProtocol(Protocol):
     # mandatory (not opt-in per plugin). Empty frozenset = no fields added = no check.
     declared_output_fields: frozenset[str]
 
+    # DAG guarantee propagation opt-in.
+    # When True, process() emits rows that contain every input-row field plus
+    # declared_output_fields. The DAG validator propagates upstream guarantees
+    # through this node when computing effective guaranteed fields. False is
+    # always safe (legacy semantics: node's own guarantees only).
+    passes_through_input: bool
+
     # DAG contract: output schema for transforms that declare output fields.
     # Set by BaseTransform._build_output_schema_config() after declared_output_fields
     # is populated. None for shape-preserving transforms that add no fields.
@@ -335,6 +342,13 @@ class BatchTransformProtocol(Protocol):
     # When True, process() may return TransformResult.success_multi(rows)
     # and new tokens will be created for each output row.
     creates_tokens: bool
+
+    # DAG guarantee propagation opt-in.
+    # When True, process() emits rows that contain every input-row field plus
+    # declared_output_fields. The DAG validator propagates upstream guarantees
+    # through this node when computing effective guaranteed fields. False is
+    # always safe (legacy semantics: node's own guarantees only).
+    passes_through_input: bool
 
     # Error routing configuration
     # Injected by cli_helpers.py bridge from AggregationSettings/TransformSettings.

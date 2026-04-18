@@ -98,6 +98,10 @@ class BatchReplicate(BaseTransform):
     name = "batch_replicate"
     plugin_version = "1.0.0"
     is_batch_aware = True  # CRITICAL: Engine buffers rows for batch processing
+    # process() deep-copies row.to_dict() and adds copy_index, so every input
+    # field flows through unchanged. Lets the DAG validator propagate upstream
+    # guarantees downstream even when this node declares mode: observed.
+    passes_through_input = True
 
     def __init__(self, config: dict[str, Any]) -> None:
         super().__init__(config)

@@ -107,6 +107,11 @@ class NodeInfo:
     output_schema: type[PluginSchema] | None = None
     input_schema_config: SchemaConfig | None = None
     output_schema_config: SchemaConfig | None = None
+    # When True, the underlying transform/aggregation is guaranteed to emit
+    # every input-row field unchanged in addition to its own declared_output_fields.
+    # The DAG validator uses this to propagate upstream guarantees through this
+    # node. Always False for sources, sinks, gates, and coalesce nodes.
+    passes_through_input: bool = False
 
     def __post_init__(self) -> None:
         if len(self.node_id) > _NODE_ID_MAX_LENGTH:

@@ -158,6 +158,14 @@ class BaseTransform(ABC):
     # the transform. Empty frozenset = no fields added = no check needed.
     declared_output_fields: frozenset[str] = frozenset()
 
+    # DAG guarantee propagation opt-in.
+    # When True, process() is guaranteed to emit rows containing every field
+    # present on the input row plus declared_output_fields. The DAG validator
+    # uses this to propagate upstream guarantees through this node when
+    # computing effective guaranteed fields. False is always safe — it keeps
+    # validation behaviour identical to pre-flag semantics.
+    passes_through_input: bool = False
+
     # Input validation (centralized in TransformExecutor).
     # When True, executor validates input against input_schema before process().
     validate_input: bool = False

@@ -213,6 +213,130 @@ class TestEffectiveGuaranteedFields:
         result = graph.get_effective_guaranteed_fields("coalesce_1")
         assert result == frozenset({"common"})
 
+    def test_pass_through_transform_inherits_upstream_guarantees(self) -> None:
+        """Pass-through transform unions upstream guarantees with its own."""
+        graph = ExecutionGraph()
+        graph.add_node(
+            "source_1",
+            node_type=NodeType.SOURCE,
+            plugin_name="csv",
+            config={"schema": {"mode": "observed", "guaranteed_fields": ["a", "b"]}},
+        )
+        graph.add_node(
+            "transform_1",
+            node_type=NodeType.TRANSFORM,
+            plugin_name="pt",
+            config={"schema": {"mode": "observed", "guaranteed_fields": ["c"]}},
+            passes_through_input=True,
+        )
+        graph.add_edge("source_1", "transform_1", label="continue")
+
+        result = graph.get_effective_guaranteed_fields("transform_1")
+        assert result == frozenset({"a", "b", "c"})
+
+    def test_non_pass_through_transform_keeps_own_guarantees_only(self) -> None:
+        """Conservative default: transforms without the flag expose only their own guarantees."""
+        graph = ExecutionGraph()
+        graph.add_node(
+            "source_1",
+            node_type=NodeType.SOURCE,
+            plugin_name="csv",
+            config={"schema": {"mode": "observed", "guaranteed_fields": ["a", "b"]}},
+        )
+        graph.add_node(
+            "transform_1",
+            node_type=NodeType.TRANSFORM,
+            plugin_name="llm",
+            config={"schema": {"mode": "observed", "guaranteed_fields": ["c"]}},
+        )
+        graph.add_edge("source_1", "transform_1", label="continue")
+
+        result = graph.get_effective_guaranteed_fields("transform_1")
+        assert result == frozenset({"c"})
+
+    def test_pass_through_chain_propagates_over_multiple_hops(self) -> None:
+        """Consecutive pass-through transforms propagate the original source guarantees."""
+        graph = ExecutionGraph()
+        graph.add_node(
+            "source_1",
+            node_type=NodeType.SOURCE,
+            plugin_name="csv",
+            config={"schema": {"mode": "observed", "guaranteed_fields": ["a", "b"]}},
+        )
+        graph.add_node(
+            "pt_1",
+            node_type=NodeType.TRANSFORM,
+            plugin_name="pt",
+            config={"schema": {"mode": "observed", "guaranteed_fields": ["c"]}},
+            passes_through_input=True,
+        )
+        graph.add_node(
+            "pt_2",
+            node_type=NodeType.TRANSFORM,
+            plugin_name="pt",
+            config={"schema": {"mode": "observed", "guaranteed_fields": ["d"]}},
+            passes_through_input=True,
+        )
+        graph.add_edge("source_1", "pt_1", label="continue")
+        graph.add_edge("pt_1", "pt_2", label="continue")
+
+        # Cache reuse must not change the answer on repeated calls
+        cache: dict[str, frozenset[str]] = {}
+        first = graph.get_effective_guaranteed_fields("pt_2", cache)
+        second = graph.get_effective_guaranteed_fields("pt_2", cache)
+        assert first == frozenset({"a", "b", "c", "d"})
+        assert first == second
+
+    def test_pass_through_intersects_multiple_predecessors(self) -> None:
+        """With multiple predecessors, a pass-through propagates only fields ALL predecessors guarantee."""
+        graph = ExecutionGraph()
+        graph.add_node(
+            "source_a",
+            node_type=NodeType.SOURCE,
+            plugin_name="csv",
+            config={"schema": {"mode": "observed", "guaranteed_fields": ["shared", "only_a"]}},
+        )
+        graph.add_node(
+            "source_b",
+            node_type=NodeType.SOURCE,
+            plugin_name="csv",
+            config={"schema": {"mode": "observed", "guaranteed_fields": ["shared"]}},
+        )
+        graph.add_node(
+            "pt_merge",
+            node_type=NodeType.TRANSFORM,
+            plugin_name="pt",
+            config={"schema": {"mode": "observed", "guaranteed_fields": ["added"]}},
+            passes_through_input=True,
+        )
+        graph.add_edge("source_a", "pt_merge", label="continue")
+        graph.add_edge("source_b", "pt_merge", label="continue")
+
+        result = graph.get_effective_guaranteed_fields("pt_merge")
+        # "shared" is in both upstreams; "only_a" is not in source_b, so it is not propagated.
+        assert result == frozenset({"shared", "added"})
+
+    def test_pass_through_aggregation_propagates_upstream_guarantees(self) -> None:
+        """Aggregation nodes marked pass-through propagate upstream guarantees (BatchReplicate shape)."""
+        graph = ExecutionGraph()
+        graph.add_node(
+            "source_1",
+            node_type=NodeType.SOURCE,
+            plugin_name="csv",
+            config={"schema": {"mode": "fixed", "fields": ["id: int", "name: str", "copies: int"]}},
+        )
+        graph.add_node(
+            "agg_replicate",
+            node_type=NodeType.AGGREGATION,
+            plugin_name="batch_replicate",
+            config={"schema": {"mode": "observed", "guaranteed_fields": ["copy_index"]}},
+            passes_through_input=True,
+        )
+        graph.add_edge("source_1", "agg_replicate", label="continue")
+
+        result = graph.get_effective_guaranteed_fields("agg_replicate")
+        assert result == frozenset({"id", "name", "copies", "copy_index"})
+
 
 class TestContractValidation:
     """Tests for contract validation in _validate_single_edge."""
@@ -857,4 +981,62 @@ class TestForkCoalesceContracts:
         graph.add_edge("coalesce_1", "sink_1", label="continue")
 
         with pytest.raises(ValueError, match="any_field"):
+            graph.validate_edge_compatibility()
+
+
+class TestPassThroughTransformContract:
+    """Sink validation must succeed when required fields flow through pass-through transforms."""
+
+    def test_sink_required_fields_satisfied_through_pass_through_transform(self) -> None:
+        """Pass-through transform with mode: observed must satisfy a sink requiring upstream fields."""
+        graph = ExecutionGraph()
+        graph.add_node(
+            "source_1",
+            node_type=NodeType.SOURCE,
+            plugin_name="csv",
+            config={"schema": {"mode": "fixed", "fields": ["id: int", "name: str"]}},
+        )
+        graph.add_node(
+            "pt_1",
+            node_type=NodeType.TRANSFORM,
+            plugin_name="pt",
+            config={"schema": {"mode": "observed", "guaranteed_fields": ["added"]}},
+            passes_through_input=True,
+        )
+        graph.add_node(
+            "sink_1",
+            node_type=NodeType.SINK,
+            plugin_name="csv",
+            config={"schema": {"mode": "observed", "required_fields": ["id", "name", "added"]}},
+        )
+        graph.add_edge("source_1", "pt_1", label="continue")
+        graph.add_edge("pt_1", "sink_1", label="continue")
+
+        graph.validate_edge_compatibility()
+
+    def test_sink_required_fields_unsatisfied_through_non_pass_through(self) -> None:
+        """Regression: without the flag, the same shape still raises (conservative default intact)."""
+        graph = ExecutionGraph()
+        graph.add_node(
+            "source_1",
+            node_type=NodeType.SOURCE,
+            plugin_name="csv",
+            config={"schema": {"mode": "fixed", "fields": ["id: int", "name: str"]}},
+        )
+        graph.add_node(
+            "transform_1",
+            node_type=NodeType.TRANSFORM,
+            plugin_name="other",
+            config={"schema": {"mode": "observed", "guaranteed_fields": ["added"]}},
+        )
+        graph.add_node(
+            "sink_1",
+            node_type=NodeType.SINK,
+            plugin_name="csv",
+            config={"schema": {"mode": "observed", "required_fields": ["id", "name", "added"]}},
+        )
+        graph.add_edge("source_1", "transform_1", label="continue")
+        graph.add_edge("transform_1", "sink_1", label="continue")
+
+        with pytest.raises(ValueError, match="Schema contract violation"):
             graph.validate_edge_compatibility()
