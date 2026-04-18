@@ -11,12 +11,17 @@ from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from pathlib import Path
 
+import structlog
 from fastapi import Depends, FastAPI, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from sqlalchemy.exc import SQLAlchemyError
 
+from elspeth.contracts.secrets import (
+    FingerprintKeyMissingError,
+    SecretDecryptionError,
+)
 from elspeth.web.auth.local import LocalAuthProvider
 from elspeth.web.auth.middleware import get_current_user
 from elspeth.web.auth.protocol import AuthProvider
@@ -32,6 +37,7 @@ from elspeth.web.execution.progress import ProgressBroadcaster
 from elspeth.web.execution.routes import create_execution_router
 from elspeth.web.execution.service import ExecutionServiceImpl
 from elspeth.web.middleware.rate_limit import ComposerRateLimiter
+from elspeth.web.middleware.request_id import RequestIdMiddleware
 from elspeth.web.secrets.routes import create_secrets_router
 from elspeth.web.secrets.server_store import ServerSecretStore
 from elspeth.web.secrets.service import ScopedSecretResolver, WebSecretService
@@ -262,6 +268,14 @@ def create_app(settings: WebSettings | None = None) -> FastAPI:
         allow_headers=["*"],
     )
 
+    # Request-id middleware registered AFTER CORS so it runs outermost
+    # (Starlette's add_middleware is LIFO): the correlation id is set on
+    # request.state before any downstream code — including the CORS
+    # middleware, route handlers, and the app-level exception handlers
+    # below — can read it.  Echoed back as the X-Request-ID response
+    # header for client-side log correlation.
+    app.add_middleware(RequestIdMiddleware)
+
     app.state.settings = settings
 
     # Ensure data directory and subdirectories exist before any DB access.
@@ -423,6 +437,135 @@ def create_app(settings: WebSettings | None = None) -> FastAPI:
         return JSONResponse(
             status_code=409,
             content={"detail": str(exc), "error_type": "run_already_active"},
+        )
+
+    # --- Secret-subsystem typed error translation ---
+    # Trust-boundary translation layer: store/service-level typed errors
+    # become deterministic HTTP contracts for API consumers.  Each handler
+    # follows the redaction pattern established by commit 59bdf514 for
+    # SQLAlchemy __cause__ chains:
+    #
+    #   * slog event carries ``exc_class`` only — NO ``exc_info``.
+    #   * response body contains NO ``str(exc)`` — the message is a
+    #     static operator-authored string, not the exception text (which
+    #     may carry DB URLs, bound SQL parameters, stored secret names,
+    #     or other Tier-3 data the redaction was meant to protect).
+    #   * ``request_id`` correlation id surfaced in both the response
+    #     body and the slog event so operators can pair a user-reported
+    #     error to its triage trail with one lookup.
+    #
+    # The pending (elspeth-149856079f) Landscape audit events will hang
+    # off these same handlers — the correlation id threads through to
+    # those records when that work lands.
+
+    _handler_slog = structlog.get_logger()
+
+    def _request_id(request: Request) -> str:
+        """Read the correlation id set by RequestIdMiddleware.
+
+        Defaults to the sentinel ``"unset"`` if the middleware did not
+        run (e.g., a handler fires during a pre-middleware exception
+        path), ensuring the response body is always JSON-serialisable.
+        """
+        return getattr(request.state, "request_id", "unset")
+
+    @app.exception_handler(FingerprintKeyMissingError)
+    async def handle_fingerprint_missing(
+        request: Request,
+        exc: FingerprintKeyMissingError,
+    ) -> JSONResponse:
+        request_id = _request_id(request)
+        _handler_slog.error(
+            "http_fingerprint_key_missing",
+            path=request.url.path,
+            method=request.method,
+            request_id=request_id,
+            exc_class=type(exc).__name__,
+        )
+        return JSONResponse(
+            status_code=503,
+            content={
+                "detail": (
+                    "Secret resolver is not configured: ELSPETH_FINGERPRINT_KEY is unset. "
+                    "Set the environment variable on the server and retry."
+                ),
+                "error_type": "fingerprint_key_missing",
+                "request_id": request_id,
+            },
+        )
+
+    @app.exception_handler(SecretDecryptionError)
+    async def handle_secret_decryption_failed(
+        request: Request,
+        exc: SecretDecryptionError,
+    ) -> JSONResponse:
+        request_id = _request_id(request)
+        _handler_slog.error(
+            "http_secret_decryption_failed",
+            path=request.url.path,
+            method=request.method,
+            request_id=request_id,
+            exc_class=type(exc).__name__,
+        )
+        return JSONResponse(
+            status_code=409,
+            content={
+                "detail": ("Stored secret cannot be decrypted — likely a web secret_key rotation. Re-save the secret to resolve."),
+                "error_type": "secret_decryption_failed",
+                "request_id": request_id,
+            },
+        )
+
+    @app.exception_handler(SQLAlchemyError)
+    async def handle_database_unavailable(
+        request: Request,
+        exc: SQLAlchemyError,
+    ) -> JSONResponse:
+        request_id = _request_id(request)
+        _handler_slog.error(
+            "http_database_unavailable",
+            path=request.url.path,
+            method=request.method,
+            request_id=request_id,
+            exc_class=type(exc).__name__,
+        )
+        return JSONResponse(
+            status_code=503,
+            content={
+                "detail": ("Database is currently unavailable. Please retry in a moment."),
+                "error_type": "database_unavailable",
+                "request_id": request_id,
+            },
+        )
+
+    @app.exception_handler(OSError)
+    async def handle_storage_unavailable(
+        request: Request,
+        exc: OSError,
+    ) -> JSONResponse:
+        """Catches OS-level failures (disk full, permission denied, EBADF).
+
+        SQLite can raise ``OSError`` before SQLAlchemy wraps it — e.g., a
+        full data volume surfaces as ``errno 28`` from the native
+        sqlite3 module.  Without this handler such an escape produces
+        an opaque 500 indistinguishable from an application crash.
+        """
+        request_id = _request_id(request)
+        _handler_slog.error(
+            "http_storage_unavailable",
+            path=request.url.path,
+            method=request.method,
+            request_id=request_id,
+            exc_class=type(exc).__name__,
+            errno=exc.errno,
+        )
+        return JSONResponse(
+            status_code=503,
+            content={
+                "detail": ("Storage backend is currently unavailable. Please retry in a moment."),
+                "error_type": "storage_unavailable",
+                "request_id": request_id,
+            },
         )
 
     # --- 422 input redaction (all routes) ---

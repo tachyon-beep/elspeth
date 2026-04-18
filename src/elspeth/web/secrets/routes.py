@@ -76,21 +76,33 @@ def create_secrets_router() -> APIRouter:
 
         SECURITY: response is write-only acknowledgement -- NEVER includes
         the value.
+
+        TOCTOU: the service returns a :class:`CreateSecretResult` whose
+        ``available`` flag is derived at write-time from the eager
+        fingerprint computation (see ``UserSecretStore.set_secret``).
+        A successful return means the row was BOTH persisted AND
+        immediately resolvable — no second ``has_ref`` probe is needed
+        or performed, closing the race window where a concurrent DELETE
+        or an env-var clear between set and probe could flip
+        ``available`` to False for a row that was in fact correctly
+        written.  If the deployment is misconfigured (e.g., missing
+        ``ELSPETH_FINGERPRINT_KEY``), ``set_user_secret`` raises
+        ``FingerprintKeyMissingError`` which the app-level handler
+        translates to 503.
         """
         service = _get_service(request)
         settings = _get_settings(request)
-        await asyncio.to_thread(
+        result = await asyncio.to_thread(
             service.set_user_secret,
             user.user_id,
             body.name,
             body.value,
             auth_provider_type=settings.auth_provider,
         )
-        available = await asyncio.to_thread(service.has_ref, user.user_id, body.name, auth_provider_type=settings.auth_provider)
         return CreateSecretResponse(
-            name=body.name,
-            scope="user",
-            available=available,
+            name=result.name,
+            scope=result.scope,
+            available=result.available,
         )
 
     @router.delete("/{name}", status_code=204)
@@ -123,10 +135,29 @@ def create_secrets_router() -> APIRouter:
         """Check whether a named secret reference is resolvable.
 
         SECURITY: does NOT return the value -- only resolvability status.
+
+        Typed-error surface: uses
+        :meth:`WebSecretService.check_user_ref_resolvable` rather than
+        ``has_ref`` so deployment / server-state issues produce
+        actionable HTTP responses:
+
+        * ``FingerprintKeyMissingError`` → 503 (``fingerprint_key_missing``)
+        * ``SecretDecryptionError``       → 409 (``secret_decryption_failed``)
+        * resolvable                      → 200 ``available=True``
+        * absent                          → 200 ``available=False``
+
+        Both typed exceptions propagate past this handler to the
+        app-level exception handlers in ``web/app.py``; only the
+        success / absence cases are represented as a ``ValidateSecretResponse``.
         """
         service = _get_service(request)
         settings = _get_settings(request)
-        available = await asyncio.to_thread(service.has_ref, user.user_id, name, auth_provider_type=settings.auth_provider)
+        available = await asyncio.to_thread(
+            service.check_user_ref_resolvable,
+            user.user_id,
+            name,
+            auth_provider_type=settings.auth_provider,
+        )
         return ValidateSecretResponse(name=name, available=available)
 
     return router

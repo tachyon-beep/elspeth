@@ -638,3 +638,194 @@ class TestValidationErrorRedaction:
         assert "leaked-password-value" not in body_text
         for error in resp.json()["detail"]:
             assert set(error.keys()) <= self._SAFE_KEYS
+
+
+class TestSecretsExceptionHandlers:
+    """Trust-boundary translation: store-layer typed errors → HTTP status codes.
+
+    Exercises the app-level handlers for:
+
+    * ``FingerprintKeyMissingError`` → 503 (deployment misconfigured)
+    * ``SecretDecryptionError``     → 409 (re-save required)
+    * ``SQLAlchemyError``            → 503 (database unavailable)
+    * ``OSError``                    → 503 (SQLite / filesystem level)
+
+    Redaction invariants (from the commit 59bdf514 pattern):
+      - response body never contains ``str(exc)`` or ``__cause__`` fragments
+      - slog event omits ``exc_info`` / ``exception`` fields
+      - DB URLs, SQL text, bound parameters absent from both
+    """
+
+    @staticmethod
+    def _authed_client(tmp_path: Path) -> TestClient:
+        from elspeth.web.auth.middleware import get_current_user
+        from elspeth.web.auth.models import UserIdentity
+
+        app = create_app(_settings(tmp_path))
+        identity = UserIdentity(user_id="test-user", username="test-user")
+
+        async def _mock_user() -> UserIdentity:
+            return identity
+
+        app.dependency_overrides[get_current_user] = _mock_user
+        return TestClient(app, raise_server_exceptions=False)
+
+    # -- FingerprintKeyMissingError → 503 -------------------------------------
+
+    def test_fingerprint_missing_on_create_returns_503(self, tmp_path, monkeypatch) -> None:
+        """POST /api/secrets with ELSPETH_FINGERPRINT_KEY unset → 503.
+
+        The eager-fingerprint design in ``UserSecretStore.set_secret``
+        raises ``FingerprintKeyMissingError`` before any DB write; the
+        app-level handler maps it to 503 with a deployment-guidance
+        body and a correlation ``request_id``.
+        """
+        monkeypatch.delenv("ELSPETH_FINGERPRINT_KEY", raising=False)
+        client = self._authed_client(tmp_path)
+        resp = client.post("/api/secrets", json={"name": "API_KEY", "value": "v"})
+
+        assert resp.status_code == 503
+        body = resp.json()
+        assert body["error_type"] == "fingerprint_key_missing"
+        assert "ELSPETH_FINGERPRINT_KEY" in body["detail"]
+        # Correlation id must be present and echoed on the response header.
+        assert body["request_id"]
+        assert resp.headers["X-Request-ID"] == body["request_id"]
+
+    # -- SecretDecryptionError → 409 ------------------------------------------
+
+    def test_decryption_failure_on_validate_returns_409(self, tmp_path, monkeypatch) -> None:
+        """Validate against a secret whose master key was rotated → 409.
+
+        Seeds a row with master_key A, then monkeypatches the store's
+        master key to B so the next decrypt fails with InvalidToken —
+        which the store translates to ``SecretDecryptionError`` and the
+        app handler maps to 409 with re-save guidance.
+        """
+        monkeypatch.setenv("ELSPETH_FINGERPRINT_KEY", "fp-k")
+        client = self._authed_client(tmp_path)
+
+        # Write one secret under the original master key.
+        create = client.post("/api/secrets", json={"name": "ROTATED", "value": "v"})
+        assert create.status_code == 201
+
+        # Rotate the in-memory master key on the running store — emulates
+        # a deploy-time secret_key rotation without the old secrets
+        # being re-saved.
+        app = client.app
+        user_store = app.state.secret_service._user_store
+        user_store._master_key = "rotated-master-key"
+
+        resp = client.post("/api/secrets/ROTATED/validate")
+
+        assert resp.status_code == 409
+        body = resp.json()
+        assert body["error_type"] == "secret_decryption_failed"
+        assert "re-save" in body["detail"].lower()
+        assert body["request_id"]
+
+    # -- SQLAlchemyError → 503 ------------------------------------------------
+
+    def test_sqlalchemy_error_on_list_returns_503(self, tmp_path, monkeypatch) -> None:
+        """Underlying ``OperationalError`` on list must surface as 503 with a redacted body.
+
+        Redaction invariant: the response body MUST NOT contain ``str(exc)``,
+        the SQL statement, or bound parameters (which can carry secrets or
+        DB URLs via ``OperationalError.__cause__``).
+        """
+        monkeypatch.setenv("ELSPETH_FINGERPRINT_KEY", "fp-k")
+        client = self._authed_client(tmp_path)
+
+        def _raise_operational(*args, **kwargs):
+            raise OperationalError(
+                "SELECT * FROM user_secrets WHERE name = ?",
+                {"name": "LEAK_ME"},
+                Exception("postgresql://admin:sekretpass@db.internal/prod"),
+            )
+
+        app = client.app
+        monkeypatch.setattr(app.state.secret_service, "list_refs", _raise_operational)
+
+        resp = client.get("/api/secrets")
+        assert resp.status_code == 503
+        body = resp.json()
+        body_text = resp.text
+        assert body["error_type"] == "database_unavailable"
+        assert body["request_id"]
+
+        # Redaction invariant: no DB URL, SQL fragment, or bound param leaks.
+        assert "postgresql://" not in body_text
+        assert "sekretpass" not in body_text
+        assert "SELECT * FROM" not in body_text
+        assert "LEAK_ME" not in body_text
+
+    # -- OSError → 503 --------------------------------------------------------
+
+    def test_oserror_on_list_returns_503(self, tmp_path, monkeypatch) -> None:
+        """A bare OSError (e.g., SQLite disk-full) must also map to 503.
+
+        SQLite can raise OSError before SQLAlchemy wraps it; the handler
+        must cover that escape path too.
+        """
+        monkeypatch.setenv("ELSPETH_FINGERPRINT_KEY", "fp-k")
+        client = self._authed_client(tmp_path)
+
+        def _raise_oserror(*args, **kwargs):
+            raise OSError(28, "No space left on device", "/var/lib/elspeth.db")
+
+        app = client.app
+        monkeypatch.setattr(app.state.secret_service, "list_refs", _raise_oserror)
+
+        resp = client.get("/api/secrets")
+        assert resp.status_code == 503
+        body = resp.json()
+        assert body["error_type"] == "storage_unavailable"
+        assert body["request_id"]
+        # Redaction: the underlying DB file path must not leak.
+        assert "/var/lib/elspeth.db" not in resp.text
+
+    # -- Hypothesis property: TOCTOU-free create ------------------------------
+
+    def test_create_ack_available_true_implies_validate_true(self, tmp_path, monkeypatch) -> None:
+        """Property: create with available=True + immediate validate agrees.
+
+        Post-eager-fingerprint, a 201 response claiming ``available=True``
+        is an honest ack: an immediate validate of the same name (with no
+        intervening DELETE) must return ``available=True``.  Exercised
+        across a variety of name/value shapes.
+        """
+        try:
+            from hypothesis import given
+            from hypothesis import strategies as st
+        except ImportError:
+            pytest.skip("hypothesis not installed")
+
+        monkeypatch.setenv("ELSPETH_FINGERPRINT_KEY", "fp-k")
+        client = self._authed_client(tmp_path)
+
+        # Names match the schema regex: ^[A-Za-z][A-Za-z0-9_]*$
+        name_strategy = st.from_regex(r"^[A-Za-z][A-Za-z0-9_]{0,40}$", fullmatch=True)
+        # Value must have at least one visible character; keep to printable
+        # ASCII for the body to survive JSON encoding unambiguously.
+        value_strategy = st.text(
+            alphabet=st.characters(
+                min_codepoint=0x21,
+                max_codepoint=0x7E,
+                blacklist_categories=(),
+            ),
+            min_size=1,
+            max_size=40,
+        )
+
+        @given(name=name_strategy, value=value_strategy)
+        def _prop(name: str, value: str) -> None:
+            create = client.post("/api/secrets", json={"name": name, "value": value})
+            if create.status_code != 201:
+                # Schema validators may reject some generated names; skip.
+                return
+            assert create.json()["available"] is True
+            validate = client.post(f"/api/secrets/{name}/validate")
+            assert validate.status_code == 200
+            assert validate.json()["available"] is True
+
+        _prop()

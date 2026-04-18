@@ -224,12 +224,12 @@ allow_hits:
   reason: Tier 3 boundary — isinstance check on username from external IdP JWT payload (preferred_username is Any)
   safety: Raises AuthenticationError on non-string; validated at construction time
   expires: null
-- key: web/app.py:R5:_settings_from_env:fp=21d5ebdcf643a1bd
+- key: web/app.py:R5:_settings_from_env:fp=e8b23ba0546e4afb
   owner: web-app
   reason: Tier 3 boundary — JSON-parsed env var may be a list; isinstance check classifies for tuple conversion
   safety: isinstance used only for type dispatch; no contract masking
   expires: null
-- key: web/app.py:R6:_settings_from_env:fp=4e67706ca34257c0
+- key: web/app.py:R6:_settings_from_env:fp=2189045663811872
   owner: web-app
   reason: Tier 3 boundary — env var value that isn't valid JSON is treated as plain string (the common case)
   safety: JSONDecodeError caught only to fall back to raw string; no silent data loss
@@ -373,7 +373,7 @@ allow_hits:
   reason: Tier 3 boundary — os.environ.get() checks env var presence for has_secret fast path
   safety: Returns bool only; no secret value exposed; no default fabrication
   expires: null
-- key: web/secrets/server_store.py:R1:ServerSecretStore:get_secret:fp=c42047652ee9cba0
+- key: web/secrets/server_store.py:R1:ServerSecretStore:get_secret:fp=4a9d005ca1e42097
   owner: web-secrets
   reason: Tier 3 boundary — os.environ.get() reads external env var; unset/empty raises SecretNotFoundError
   safety: Missing env var raises SecretNotFoundError; no default fabrication
@@ -393,7 +393,7 @@ allow_hits:
   reason: Decryptability probe — Fernet InvalidToken is the expected signal for key rotation or ciphertext corruption when computing browser-safe availability metadata
   safety: Exception is converted only into available=False; get_secret() still raises SecretNotFoundError with explicit cause on the resolution path
   expires: null
-- key: web/secrets/service.py:R6:WebSecretService:resolve:fp=56fbd0a189e9caf9
+- key: web/secrets/service.py:R6:WebSecretService:resolve:fp=8323379c46b8f92f
   owner: web-secrets
   reason: |
     TOCTOU boundary — resolve() runs has-check and get-call across multiple
@@ -437,27 +437,27 @@ allow_hits:
   reason: isinstance(config_dict, dict) validates YAML parse output before resolve_secret_refs — yaml.safe_load can return non-dict for malformed input
   safety: Raises TypeError with diagnostic message; no error suppression
   expires: null
-- key: web/app.py:R1:create_app:fp=4e394272c03e1ece
+- key: web/app.py:R1:create_app:fp=23fc9527067c7c3a
   owner: web-app
   reason: Tier 3 — os.environ.get() for optional WEB_CONCURRENCY env var
   safety: Defaults to "1" when absent
   expires: null
-- key: web/app.py:R6:create_app:fp=0a32a3839fd3efcf
+- key: web/app.py:R6:create_app:fp=5211f343b841a3bf
   owner: web-app
   reason: ValueError from int() on non-numeric WEB_CONCURRENCY
   safety: Defaults to single worker
   expires: null
-- key: web/app.py:R6:create_app:fp=10e82a2aadd05267
+- key: web/app.py:R6:create_app:fp=b487e4c11a59d833
   owner: web-app
   reason: ValueError from int() on non-numeric --workers arg
   safety: Skips this argv entry
   expires: null
-- key: web/app.py:R6:create_app:fp=15f7c62c727f3314
+- key: web/app.py:R6:create_app:fp=cf257b35244b5bdd
   owner: web-app
   reason: ValueError from int() on non-numeric --workers=N
   safety: Skips this argv entry
   expires: null
-- key: web/app.py:R6:create_app:fp=ea55cf32bf6d732c
+- key: web/app.py:R6:create_app:fp=bde4c701bb77071d
   owner: web-app
   reason: ValueError from int() on non-numeric -w arg
   safety: Skips this argv entry
@@ -571,7 +571,7 @@ allow_hits:
   reason: Last-resort safety net — isinstance check excludes KeyboardInterrupt/SystemExit from diagnostic logging
   safety: Only suppresses signal exceptions; all other exceptions logged as last-resort diagnostic
   expires: null
-- key: web/app.py:R1:create_app:fp=7bfabd82592a7dec
+- key: web/app.py:R1:create_app:fp=b06e9400e709e5a4
   owner: web-app
   reason: Tier 3 — os.environ.get() for optional ELSPETH_ENV
   safety: Returns None when absent; only used for test guard
@@ -641,17 +641,17 @@ allow_hits:
   reason: TOCTOU guard — run may be deleted between verify_run_ownership and get_status
   safety: Only not-found errors close with 4004; returns immediately
   expires: null
-- key: web/app.py:R1:lifespan:fp=b2581fe0eb3f128f
+- key: web/app.py:R1:lifespan:fp=e628b3b2f8b2d666
   owner: web-app
   reason: False positive — httpx.AsyncClient.get() is an HTTP GET request, not dict.get()
   safety: HTTP errors caught by raise_for_status(); failure now raises SystemExit
   expires: null
-- key: web/app.py:R7:lifespan:fp=644503148628f939
+- key: web/app.py:R7:lifespan:fp=1abd5ca700ba5f3e
   owner: web-execution
   reason: contextlib.suppress(CancelledError) is the expected shutdown path for the periodic orphan cleanup task
   safety: Clean cancellation during app shutdown; no error suppression
   expires: null
-- key: "web/app.py:R6:_periodic_orphan_cleanup:fp=702f7ae6cba0f026"
+- key: "web/app.py:R6:_periodic_orphan_cleanup:fp=a59a5a31639b7b52"
   owner: web-execution
   reason: "Audit/IO-cleanup narrow catch — except (SQLAlchemyError, OSError) absorbs recoverable failures of cancel_all_orphaned_runs (transient DB loss, lock contention, SQLite file I/O) so the periodic loop retries on the next interval. Catch is intentionally narrow; programmer-bug exceptions (AttributeError from a drifted attribute on ExecutionServiceImpl, TypeError from a signature change, AssertionError from an invariant guard) are NOT caught and terminate the background task so they surface at lifespan shutdown (the outer contextlib.suppress absorbs only CancelledError). Same pattern as the CRIT-2 audit-cleanup narrow catch at web/composer/service.py ComposerServiceImpl.compose and the rollback-cleanup sites at web/sessions/routes.py fork_from_message (lines 968 and 987)."
   safety: "Recoverable failures are logged via slog.error periodic_orphan_cleanup_failed with exc_class only — exc_info is deliberately omitted so SQLAlchemy __cause__ chains (DB URLs, schema names, sqlite file path) cannot reach structured server logs. Same exc_info-redaction pattern commit 59bdf514 established across the HTTP-path slog.error sites. Programmer-bug propagation invariant is guarded by tests/unit/web/test_app.py test_programmer_bug_terminates_task_and_does_not_log (AttributeError terminates the task) and the recoverable-failure path by test_continues_after_exception (OperationalError logged, loop continues, no traceback text leaked)."
@@ -943,6 +943,60 @@ allow_hits:
   owner: web-execution
   reason: Tier 3 — isinstance check on pipeline_yaml argument type
   safety: Raises TypeError with diagnostic; no silent default
+  expires: null
+- key: web/app.py:R2:create_app:_request_id:fp=c2600d2750e2496d
+  owner: web-app
+  reason: |
+    Trust-boundary fallback. The exception handlers registered in
+    create_app() use this helper to read request.state.request_id, set
+    by RequestIdMiddleware on every request. If a pre-middleware path
+    ever fires an exception (e.g., Starlette itself rejecting the
+    request before the middleware chain completes), the attribute will
+    not exist. getattr(..., "unset") provides a JSON-serialisable
+    sentinel so the handler still produces a well-formed response body
+    rather than compounding the failure with AttributeError.
+  safety: |
+    The "unset" sentinel cannot be confused with a real UUID4 or any
+    value accepted by RequestIdMiddleware's validator, so operators
+    reading slog events and response bodies can distinguish
+    middleware-bypassed failures from normal ones.
+  expires: null
+- key: web/secrets/service.py:R6:WebSecretService:check_user_ref_resolvable:fp=659114141f25118e
+  owner: web-secrets
+  reason: |
+    Narrow catch by design. check_user_ref_resolvable is the typed-error
+    variant of has_ref for the HTTP /api/secrets/{name}/validate route.
+    It catches SecretNotFoundError ONLY (server-store allowlist / env-var
+    miss → "absent" → return False), and deliberately lets
+    FingerprintKeyMissingError and SecretDecryptionError propagate to
+    the app-level handlers in web/app.py, which map them to 503 / 409
+    respectively. A broader catch would defeat the typed-error design
+    and regress to "validate silently reports available=False with no
+    deployment guidance" — the defect this method exists to close
+    (issue elspeth-e9b86eca8c).
+  safety: |
+    Only SecretNotFoundError is translated to the False return value.
+    Programmer-bug exceptions (AttributeError, TypeError) propagate
+    uncaught; the tests in TestCheckUserRefResolvable pin the typed-
+    error propagation behaviour so a future widen-the-catch regression
+    fails loudly.
+  expires: null
+- key: web/middleware/request_id.py:R1:RequestIdMiddleware:dispatch:fp=a17a1317c0fa8e7b
+  owner: web-middleware
+  reason: |
+    Tier 3 trust boundary — inbound X-Request-ID header is untrusted
+    external input and is explicitly optional by design. request.headers
+    is a multidict; the .get(name, "") default matches the protocol
+    convention that an absent header is equivalent to an empty one, and
+    the middleware's validator (_is_safe_request_id) treats "" as a
+    safety violation and regenerates a fresh UUID4. Direct subscript
+    would raise KeyError on every request without the header, converting
+    an optional protocol feature into a crash.
+  safety: |
+    All failure modes converge on _generate_request_id() — absent,
+    empty, oversized, or control-character-bearing inbound ids are
+    silently replaced with a fresh UUID4 so an attacker cannot poison
+    the log correlation field.
   expires: null
 per_file_rules:
 - pattern: web/composer/tools.py

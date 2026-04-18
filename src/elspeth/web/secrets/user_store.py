@@ -22,7 +22,11 @@ import sqlalchemy as sa
 from cryptography.fernet import Fernet, InvalidToken
 from sqlalchemy.engine import Engine
 
-from elspeth.contracts.secrets import SecretInventoryItem
+from elspeth.contracts.secrets import (
+    FingerprintKeyMissingError,
+    SecretDecryptionError,
+    SecretInventoryItem,
+)
 from elspeth.contracts.security import secret_fingerprint
 from elspeth.core.security.secret_loader import SecretNotFoundError, SecretRef
 from elspeth.web.sessions.models import user_secrets_table
@@ -47,14 +51,17 @@ def _fingerprint_key_available() -> bool:
 def _compute_fingerprint(name: str, value: str) -> str:
     """Compute HMAC fingerprint of a secret value.
 
-    Returns a 64-char hex digest.  Raises if ELSPETH_FINGERPRINT_KEY is
-    not set — the fingerprint is required for audit trail integrity, and
-    an empty value would crash downstream at SecretResolutionInput
-    validation with a confusing generic error.
+    Returns a 64-char hex digest.  Raises ``FingerprintKeyMissingError``
+    when ``ELSPETH_FINGERPRINT_KEY`` is unset — the fingerprint is required
+    for audit-trail integrity, and an empty value would crash downstream
+    at ``SecretResolutionInput`` validation with a confusing generic error.
+    The typed exception lets HTTP handlers map the condition to 503 with
+    actionable deployment guidance, and lets pipeline resolution fail fast
+    rather than silently bucketing the miss into ``SecretResolutionError``.
     """
     fp_key = os.environ.get("ELSPETH_FINGERPRINT_KEY")
     if not fp_key:
-        raise RuntimeError(
+        raise FingerprintKeyMissingError(
             f"ELSPETH_FINGERPRINT_KEY is not set — cannot compute fingerprint for secret {name!r}. "
             "Set the environment variable before starting the web server."
         )
@@ -179,13 +186,17 @@ class UserSecretStore:
         ------
         SecretNotFoundError
             If no secret with *name* exists for *user_id* and
-            *auth_provider_type*, or if ELSPETH_FINGERPRINT_KEY is not set
-            (the secret exists but cannot be fingerprinted for audit), or
-            if the stored ciphertext cannot be decrypted with the current
-            web ``secret_key``.
+            *auth_provider_type*.
+        FingerprintKeyMissingError
+            If ``ELSPETH_FINGERPRINT_KEY`` is not set — the secret exists
+            but cannot be fingerprinted for audit.  Typed separately from
+            SecretNotFoundError so the HTTP layer can map to 503 with
+            deployment guidance and pipeline resolution fails fast.
+        SecretDecryptionError
+            If the stored ciphertext cannot be decrypted with the current
+            web ``secret_key`` (key rotation, row corruption, or tamper).
+            HTTP layer maps to 409 with re-save guidance.
         """
-        if not _fingerprint_key_available():
-            raise SecretNotFoundError(f"Secret {name!r} is not resolvable — ELSPETH_FINGERPRINT_KEY is not set")
         row = self._fetch_secret_row(name, user_id=user_id, auth_provider_type=auth_provider_type)
         if row is None:
             raise SecretNotFoundError(f"Secret {name!r} not found for user {user_id!r}")
@@ -199,13 +210,40 @@ class UserSecretStore:
         ref = SecretRef(name=name, fingerprint=fp, source="user")
         return plaintext, ref
 
-    def set_secret(self, name: str, *, value: str, user_id: str, auth_provider_type: str) -> None:
+    def set_secret(self, name: str, *, value: str, user_id: str, auth_provider_type: str) -> str:
         """Create or update a user secret (atomic upsert).
 
-        A fresh random salt is generated on every write so that updating a
+        Eager-fingerprint design: compute the audit fingerprint BEFORE
+        encrypting and persisting so a deployment missing
+        ``ELSPETH_FINGERPRINT_KEY`` fails the write atomically — no row
+        is ever stored in a state where the audit trail has no
+        fingerprint for it.  This also closes the TOCTOU window in the
+        HTTP ``create_secret`` route: a returned fingerprint proves the
+        row was both persisted and immediately resolvable.
+
+        A fresh random salt is generated on every write so updating a
         secret also rotates the derived key.  Uses INSERT ... ON CONFLICT
-        DO UPDATE to prevent race conditions under concurrent writes.
+        DO UPDATE for atomic concurrent writes.
+
+        Returns
+        -------
+        str
+            The 64-char hex fingerprint of the stored value — safe to
+            surface in API responses and audit records (never the value).
+
+        Raises
+        ------
+        FingerprintKeyMissingError
+            If ``ELSPETH_FINGERPRINT_KEY`` is unset.  No row is written.
         """
+        # Eager fingerprint: raises FingerprintKeyMissingError BEFORE the
+        # write, preserving audit-trail integrity — if we cannot produce a
+        # fingerprint we cannot record the write, so we must not perform
+        # the write.  Intentional deviation from lazy-fingerprint designs:
+        # we accept the extra HMAC cost on every write to guarantee atomic
+        # audit-eligibility.
+        fingerprint = _compute_fingerprint(name, value)
+
         salt = os.urandom(_SALT_BYTES)
         key = _derive_fernet_key(self._master_key, salt)
         encrypted = Fernet(key).encrypt(value.encode("utf-8"))
@@ -225,6 +263,7 @@ class UserSecretStore:
         stmt = self._build_upsert(t, values)
         with self._engine.begin() as conn:
             conn.execute(stmt)
+        return fingerprint
 
     def delete_secret(self, name: str, *, user_id: str, auth_provider_type: str) -> bool:
         """Delete a user secret.
@@ -299,7 +338,7 @@ class UserSecretStore:
         try:
             return Fernet(key).decrypt(encrypted_value).decode("utf-8")
         except InvalidToken as exc:
-            raise SecretNotFoundError(
+            raise SecretDecryptionError(
                 f"Secret {name!r} is not resolvable — stored value cannot be decrypted "
                 "with the current web secret_key (possible key rotation or row corruption)"
             ) from exc

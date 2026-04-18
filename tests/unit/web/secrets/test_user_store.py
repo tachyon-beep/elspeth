@@ -22,7 +22,11 @@ import sqlalchemy as sa
 from cryptography.fernet import Fernet, InvalidToken
 from sqlalchemy.pool import StaticPool
 
-from elspeth.contracts.secrets import SecretInventoryItem
+from elspeth.contracts.secrets import (
+    FingerprintKeyMissingError,
+    SecretDecryptionError,
+    SecretInventoryItem,
+)
 from elspeth.core.security.secret_loader import SecretNotFoundError
 from elspeth.web.secrets.user_store import UserSecretStore, _derive_fernet_key
 from elspeth.web.sessions.engine import create_session_engine
@@ -151,15 +155,16 @@ class TestUserSecretStore:
         assert all(c in "0123456789abcdef" for c in ref.fingerprint)
 
     def test_fingerprint_missing_key_raises(self, store: UserSecretStore, monkeypatch: pytest.MonkeyPatch) -> None:
-        """get_secret raises SecretNotFoundError when ELSPETH_FINGERPRINT_KEY is not set.
+        """get_secret raises FingerprintKeyMissingError when ELSPETH_FINGERPRINT_KEY is unset.
 
-        The secret exists but is not resolvable — aligns get_secret() with
-        has_secret() which also returns False when the fingerprint key is missing.
+        Typed exception (not SecretNotFoundError) so HTTP handlers can map
+        deployment misconfiguration to 503 rather than treating the row as
+        absent (which would be 404 / ``available=False`` territory).
         """
         monkeypatch.setenv("ELSPETH_FINGERPRINT_KEY", "temp-for-set")
         store.set_secret("FP_EMPTY", value="val", user_id="user-1", auth_provider_type="local")
         monkeypatch.delenv("ELSPETH_FINGERPRINT_KEY")
-        with pytest.raises(SecretNotFoundError, match="ELSPETH_FINGERPRINT_KEY is not set"):
+        with pytest.raises(FingerprintKeyMissingError, match="ELSPETH_FINGERPRINT_KEY"):
             store.get_secret("FP_EMPTY", user_id="user-1", auth_provider_type="local")
 
     # -- Regression: provider namespace isolation (Bug 4) --
@@ -295,7 +300,12 @@ class TestUserSecretStore:
         assert items[0].available is False
 
     def test_rotation_makes_existing_secret_unresolvable(self, db_engine) -> None:
-        """A master-key rotation must make old rows unavailable, not falsely available."""
+        """A master-key rotation must make old rows unavailable, not falsely available.
+
+        Typed ``SecretDecryptionError`` (not ``SecretNotFoundError``) so HTTP
+        handlers can map to 409 Conflict with re-save guidance — the row
+        exists but is in conflict with current server configuration.
+        """
         writer_store = UserSecretStore(engine=db_engine, master_key=TEST_MASTER_KEY)
         writer_store.set_secret("ROTATED", value="val", user_id="u1", auth_provider_type="local")
 
@@ -306,7 +316,7 @@ class TestUserSecretStore:
         assert len(items) == 1
         assert items[0].name == "ROTATED"
         assert items[0].available is False
-        with pytest.raises(SecretNotFoundError, match="cannot be decrypted"):
+        with pytest.raises(SecretDecryptionError, match="cannot be decrypted"):
             rotated_store.get_secret("ROTATED", user_id="u1", auth_provider_type="local")
 
     def test_corrupt_ciphertext_is_not_reported_available(self, store: UserSecretStore, db_engine) -> None:
@@ -330,8 +340,87 @@ class TestUserSecretStore:
         items = store.list_secrets(user_id="u1", auth_provider_type="local")
         assert len(items) == 1
         assert items[0].available is False
-        with pytest.raises(SecretNotFoundError, match="cannot be decrypted"):
+        with pytest.raises(SecretDecryptionError, match="cannot be decrypted"):
             store.get_secret("CORRUPT", user_id="u1", auth_provider_type="local")
+
+    # -- Eager fingerprint / write-time atomicity (A+B best-practice design) --
+
+    def test_set_secret_raises_fingerprint_missing_when_key_unset(
+        self, store: UserSecretStore, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """set_secret eager-computes the fingerprint BEFORE encrypting+writing.
+
+        When ELSPETH_FINGERPRINT_KEY is unset the write must fail with
+        FingerprintKeyMissingError so HTTP handlers map to 503 rather than
+        returning 201 ``available=False`` (the old silent half-success).
+        """
+        monkeypatch.delenv("ELSPETH_FINGERPRINT_KEY")
+        with pytest.raises(FingerprintKeyMissingError, match="ELSPETH_FINGERPRINT_KEY"):
+            store.set_secret("EAGER", value="val", user_id="u1", auth_provider_type="local")
+
+    def test_set_secret_atomic_no_row_left_on_fingerprint_missing(
+        self,
+        store: UserSecretStore,
+        db_engine,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """Transactional guarantee: a failed set_secret must leave no DB row.
+
+        CLAUDE.md's audit-primacy rule requires that unfingerprinted secrets
+        are never persisted. Regression test: the fingerprint check must
+        precede the upsert so the DB stays consistent with the audit trail.
+        """
+        monkeypatch.delenv("ELSPETH_FINGERPRINT_KEY")
+
+        with pytest.raises(FingerprintKeyMissingError):
+            store.set_secret("ATOMIC", value="val", user_id="u1", auth_provider_type="local")
+
+        # Direct DB check — NOT via has_secret/get_secret, which themselves
+        # check the fingerprint key and would report False for unrelated
+        # reasons. We want to prove the row itself does not exist.
+        with db_engine.connect() as conn:
+            rows = conn.execute(
+                sa.select(user_secrets_table.c.name).where(
+                    sa.and_(
+                        user_secrets_table.c.name == "ATOMIC",
+                        user_secrets_table.c.user_id == "u1",
+                        user_secrets_table.c.auth_provider_type == "local",
+                    )
+                )
+            ).fetchall()
+        assert rows == [], "Fingerprint pre-check must prevent any row from being written"
+
+    def test_set_secret_returns_fingerprint_on_success(
+        self, store: UserSecretStore, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """set_secret returns the computed fingerprint for audit correlation."""
+        monkeypatch.setenv("ELSPETH_FINGERPRINT_KEY", "eager-fp-key")
+        fp = store.set_secret("RETURN_FP", value="val", user_id="u1", auth_provider_type="local")
+        assert isinstance(fp, str)
+        assert len(fp) == 64
+        assert all(c in "0123456789abcdef" for c in fp)
+
+        # Fingerprint returned by set_secret matches the one computed on read.
+        _, ref = store.get_secret("RETURN_FP", user_id="u1", auth_provider_type="local")
+        assert ref.fingerprint == fp
+
+    def test_get_secret_raises_secret_decryption_error_on_rotation(
+        self, db_engine
+    ) -> None:
+        """Decryption failure surfaces as SecretDecryptionError (typed).
+
+        Complement to test_rotation_makes_existing_secret_unresolvable —
+        explicit contract that callers can catch SecretDecryptionError
+        specifically (e.g., HTTP layer mapping to 409 with re-save
+        guidance).
+        """
+        writer = UserSecretStore(engine=db_engine, master_key=TEST_MASTER_KEY)
+        writer.set_secret("TYPED_ROT", value="val", user_id="u1", auth_provider_type="local")
+
+        rotated = UserSecretStore(engine=db_engine, master_key="different-master-key")
+
+        with pytest.raises(SecretDecryptionError, match="cannot be decrypted"):
+            rotated.get_secret("TYPED_ROT", user_id="u1", auth_provider_type="local")
 
 
 class TestDeriveFernetKey:

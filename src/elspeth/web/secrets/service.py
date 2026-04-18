@@ -2,7 +2,13 @@
 
 from __future__ import annotations
 
-from elspeth.contracts.secrets import ResolvedSecret, SecretInventoryItem
+from elspeth.contracts.secrets import (
+    CreateSecretResult,
+    FingerprintKeyMissingError,
+    ResolvedSecret,
+    SecretDecryptionError,
+    SecretInventoryItem,
+)
 from elspeth.core.security.secret_loader import SecretNotFoundError
 from elspeth.web.secrets.server_store import ServerSecretStore
 from elspeth.web.secrets.user_store import UserSecretStore
@@ -48,39 +54,124 @@ class WebSecretService:
     def resolve(self, user_id: str, name: str, *, auth_provider_type: str) -> ResolvedSecret | None:
         """Resolve a secret, trying user scope first then server.
 
-        Returns None for missing secrets — callers (resolve_secret_refs in
-        core/secrets.py) batch all missing refs and raise SecretResolutionError.
+        Returns None for any condition that makes the ref unresolvable —
+        genuine absence, fingerprint-key misconfiguration, or
+        decryption failure.  Callers (``resolve_secret_refs`` in
+        ``core/secrets.py``) batch all misses into a single
+        ``SecretResolutionError`` so a pipeline-validation pass reports
+        every bad ref in one round trip.
 
-        TOCTOU note: the has_*/get_* sequence below opens several independent
-        database reads (and independent env-var reads on the server path).
-        A concurrent ``DELETE /api/secrets/{name}`` or env-var clear landing
-        between the has-check and the get-call can make get_secret raise
-        ``SecretNotFoundError`` even though the has-check saw the row/value.
-        The outer catch translates that race into ``None`` so the ``Returns
-        None for missing`` contract holds — otherwise the error propagates
-        to resolve_secret_refs as an HTTP 500 instead of being aggregated
-        as a missing ref.
+        The typed exceptions from the stores (``FingerprintKeyMissingError``,
+        ``SecretDecryptionError``) are intentionally swallowed **here** to
+        preserve that aggregation contract.  Callers that DO want the
+        typed signal (e.g., the ``/api/secrets/{name}/validate`` HTTP
+        route and the ``set_user_secret`` write path) use
+        :meth:`check_user_ref_resolvable` or :meth:`set_user_secret` —
+        both of which propagate the typed errors so HTTP handlers can
+        map them to 503 / 409 responses.
+
+        TOCTOU note: the fetch sequence below opens a bounded number of
+        independent reads (user scope: one record probe + one row fetch;
+        server scope: one env read).  A concurrent ``DELETE`` or env-clear
+        landing between the probe and the fetch is absorbed into the
+        "absent" bucket.
         """
         try:
-            # User scope first
+            # User scope first: the record-existence probe distinguishes
+            # "no user-scope row, try server" from "user-scope row exists
+            # — its state controls availability (shadowing rule)".  We do
+            # NOT call has_secret as a pre-check here because it eats
+            # decryption failures as False; the shadowing invariant
+            # requires a failing user row to NOT fall through to server.
             if self._user_store.has_secret_record(name, user_id=user_id, auth_provider_type=auth_provider_type):
-                if not self._user_store.has_secret(name, user_id=user_id, auth_provider_type=auth_provider_type):
-                    return None
                 value, ref = self._user_store.get_secret(name, user_id=user_id, auth_provider_type=auth_provider_type)
                 return ResolvedSecret(name=name, value=value, scope="user", fingerprint=ref.fingerprint)
-            # Server fallback
-            if not self._server_store.has_secret(name):
-                return None
+            # Server fallback — get_secret raises typed errors for each
+            # failure class; all are absorbed into "None" below.
             value, ref = self._server_store.get_secret(name)
             return ResolvedSecret(name=name, value=value, scope="server", fingerprint=ref.fingerprint)
-        except SecretNotFoundError:
+        except (SecretNotFoundError, FingerprintKeyMissingError, SecretDecryptionError):
             return None
+
+    def check_user_ref_resolvable(
+        self,
+        user_id: str,
+        name: str,
+        *,
+        auth_provider_type: str,
+    ) -> bool:
+        """Typed-error variant of :meth:`has_ref` for the HTTP validate route.
+
+        Returns True if the ref resolves right now, False if genuinely
+        absent.  **Propagates** typed store errors so HTTP handlers can
+        translate them into actionable status codes rather than reporting
+        a silent ``available=False`` that hides the deployment issue:
+
+        Raises
+        ------
+        FingerprintKeyMissingError
+            ``ELSPETH_FINGERPRINT_KEY`` is unset — mapped to 503 by the
+            app-level handler.
+        SecretDecryptionError
+            Row exists but its ciphertext cannot be decrypted (key
+            rotation, corruption) — mapped to 409 with re-save guidance.
+
+        Distinct from :meth:`resolve` because the contracts differ:
+        ``resolve`` supports the pipeline-path aggregation invariant
+        (all misses bucketed into a single ``SecretResolutionError``),
+        while this method surfaces per-condition typed signals the HTTP
+        layer needs to give an API consumer something to act on.
+        """
+        if self._user_store.has_secret_record(
+            name, user_id=user_id, auth_provider_type=auth_provider_type
+        ):
+            # Exercises the full get_secret path so both
+            # FingerprintKeyMissingError and SecretDecryptionError can
+            # surface.  The plaintext is immediately discarded — this
+            # method is security-equivalent to has_ref (no value leak).
+            self._user_store.get_secret(
+                name, user_id=user_id, auth_provider_type=auth_provider_type
+            )
+            return True
+        # No user-scope row — check server scope.  A server-scope row
+        # with fingerprint key unset will raise FingerprintKeyMissingError
+        # (propagates); allowlist / env misses raise SecretNotFoundError
+        # (absorbed into False below).
+        try:
+            self._server_store.get_secret(name)
+        except SecretNotFoundError:
+            return False
+        return True
 
     # -- REST API helpers (not part of WebSecretResolver) --------------------
 
-    def set_user_secret(self, user_id: str, name: str, value: str, *, auth_provider_type: str) -> None:
-        """Create or update a user-scoped secret."""
-        self._user_store.set_secret(name, value=value, user_id=user_id, auth_provider_type=auth_provider_type)
+    def set_user_secret(
+        self, user_id: str, name: str, value: str, *, auth_provider_type: str
+    ) -> CreateSecretResult:
+        """Create or update a user-scoped secret.
+
+        Returns a ``CreateSecretResult`` describing the persisted state.
+        Eager-fingerprint semantics (see :meth:`UserSecretStore.set_secret`)
+        guarantee that a successful return implies the secret is both
+        persisted AND immediately resolvable — no TOCTOU window against
+        a separate ``has_ref`` probe, and no silent half-success state
+        where ``available=False`` for a row that was nevertheless written.
+
+        Raises
+        ------
+        FingerprintKeyMissingError
+            Propagated from the store when ``ELSPETH_FINGERPRINT_KEY`` is
+            unset.  No row is written.  HTTP handlers map to 503.
+        """
+        fingerprint = self._user_store.set_secret(
+            name, value=value, user_id=user_id, auth_provider_type=auth_provider_type
+        )
+        return CreateSecretResult(
+            name=name,
+            scope="user",
+            available=True,
+            fingerprint=fingerprint,
+        )
 
     def delete_user_secret(self, user_id: str, name: str, *, auth_provider_type: str) -> bool:
         """Delete a user-scoped secret. Returns True if deleted."""

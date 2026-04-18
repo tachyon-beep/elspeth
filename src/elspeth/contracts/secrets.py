@@ -9,6 +9,77 @@ from dataclasses import dataclass
 from typing import Literal, Protocol, runtime_checkable
 
 
+class SecretsError(Exception):
+    """Base for all secrets-subsystem errors.
+
+    Raised by stores/services and caught by the HTTP application layer
+    (web/app.py exception handlers) or the pipeline resolution path
+    (core/secrets.resolve_secret_refs).  Callers that want a generic
+    "something about secrets went wrong" catch should target this base
+    class; tests that need to discriminate failure modes should target
+    the specific subclasses below.
+    """
+
+
+class SecretsConfigurationError(SecretsError):
+    """Deployment-level misconfiguration preventing a secret operation.
+
+    Semantically distinct from user-input errors: the operator must fix
+    server configuration, not the API consumer.  HTTP handlers map this
+    family to 503 Service Unavailable so clients know the request was
+    well-formed and retrying won't help until configuration changes.
+    """
+
+
+class FingerprintKeyMissingError(SecretsConfigurationError):
+    """``ELSPETH_FINGERPRINT_KEY`` is not set.
+
+    Without the fingerprint key, audit fingerprints cannot be computed.
+    CLAUDE.md's audit-primacy rule requires the audit record to precede
+    any persistent write, so a secret write that cannot be fingerprinted
+    must fail atomically rather than store an unfingerprinted row.
+    """
+
+
+class SecretDecryptionError(SecretsError):
+    """Stored ciphertext cannot be decrypted with the current master key.
+
+    Typical causes: master-key rotation, row corruption, or tampering.
+    HTTP handlers map this to 409 Conflict — the request was well-formed
+    but the stored state conflicts with current server configuration;
+    the caller recovers by re-saving the secret.
+
+    The pipeline resolution path (WebSecretService.resolve) continues to
+    translate this into ``None`` so batched secret resolution treats the
+    row as missing rather than propagating a 500 through run startup;
+    HTTP callers see the explicit error only on direct validate/create
+    endpoints where the explicit failure is actionable.
+    """
+
+
+@dataclass(frozen=True, slots=True)
+class CreateSecretResult:
+    """Outcome of a successful ``WebSecretService.set_user_secret`` call.
+
+    Eager-fingerprint design guarantees that if this value is returned
+    (rather than an exception being raised), the secret is both persisted
+    AND immediately resolvable — closing the TOCTOU window that the
+    prior two-step ``set_secret`` + ``has_ref`` check suffered.  The
+    ``available`` field is therefore always True today; it remains on
+    the contract so clients stay forward-compatible with a future
+    deferred-fingerprint mode.
+
+    ``fingerprint`` is safe to surface — it is an HMAC digest, not the
+    secret value, and is already recorded in the Landscape audit trail
+    for correlation.
+    """
+
+    name: str
+    scope: Literal["user", "server", "org"]
+    available: bool
+    fingerprint: str
+
+
 @dataclass(frozen=True, slots=True)
 class ResolvedSecret:
     """A resolved secret value with provenance metadata.

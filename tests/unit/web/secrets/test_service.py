@@ -7,6 +7,11 @@ from unittest.mock import patch
 import pytest
 import sqlalchemy as sa
 
+from elspeth.contracts.secrets import (
+    CreateSecretResult,
+    FingerprintKeyMissingError,
+    SecretDecryptionError,
+)
 from elspeth.core.security.secret_loader import SecretNotFoundError
 from elspeth.web.secrets.server_store import ServerSecretStore
 from elspeth.web.secrets.service import WebSecretService
@@ -161,6 +166,117 @@ class TestCrud:
         # Double delete
         deleted = service.delete_user_secret("user-1", "MY_KEY", auth_provider_type="local")
         assert deleted is False
+
+    def test_set_user_secret_returns_create_result(self, service: WebSecretService) -> None:
+        """set_user_secret returns a CreateSecretResult with fingerprint + availability.
+
+        Eager-fingerprint design: if this call returns (instead of raising
+        FingerprintKeyMissingError), the secret is persisted AND immediately
+        resolvable — no TOCTOU window against a subsequent has_ref probe.
+        """
+        result = service.set_user_secret("user-1", "FRESH", "my-value", auth_provider_type="local")
+
+        assert isinstance(result, CreateSecretResult)
+        assert result.name == "FRESH"
+        assert result.scope == "user"
+        assert result.available is True
+        assert len(result.fingerprint) == 64
+        assert all(c in "0123456789abcdef" for c in result.fingerprint)
+
+    def test_set_user_secret_raises_fingerprint_missing(
+        self, service: WebSecretService, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """set_user_secret propagates FingerprintKeyMissingError from the store.
+
+        HTTP handlers map this to 503 so API consumers see deployment
+        guidance instead of a generic 500.
+        """
+        monkeypatch.delenv("ELSPETH_FINGERPRINT_KEY")
+        with pytest.raises(FingerprintKeyMissingError):
+            service.set_user_secret("user-1", "FP_GONE", "val", auth_provider_type="local")
+
+
+class TestCheckUserRefResolvable:
+    """check_user_ref_resolvable(): typed-error variant of has_ref for HTTP.
+
+    ``resolve()`` must keep swallowing typed errors so the pipeline-path
+    aggregation invariant (``TestHasRefResolveInvariant``) is preserved —
+    all misses bucket into a single ``SecretResolutionError``.
+
+    The HTTP ``/api/secrets/{name}/validate`` endpoint needs the opposite:
+    surface fingerprint-missing as 503 and decryption-failure as 409 so
+    API consumers get actionable status codes.  ``check_user_ref_resolvable``
+    is the adapter that provides that separate contract.
+    """
+
+    def test_returns_true_for_resolvable_user_secret(
+        self, service: WebSecretService, user_store: UserSecretStore
+    ) -> None:
+        user_store.set_secret("RESOLVABLE", value="v", user_id="u1", auth_provider_type="local")
+        assert (
+            service.check_user_ref_resolvable("u1", "RESOLVABLE", auth_provider_type="local")
+            is True
+        )
+
+    def test_returns_false_for_absent_ref(self, service: WebSecretService) -> None:
+        assert (
+            service.check_user_ref_resolvable("u1", "ABSENT", auth_provider_type="local")
+            is False
+        )
+
+    def test_returns_true_for_resolvable_server_secret(
+        self, service: WebSecretService, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setenv("TEST_KEY", "env-value")
+        assert (
+            service.check_user_ref_resolvable("u1", "TEST_KEY", auth_provider_type="local")
+            is True
+        )
+
+    def test_raises_fingerprint_missing_for_user_scope(
+        self,
+        service: WebSecretService,
+        user_store: UserSecretStore,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """User-scope row + fingerprint key unset → typed error propagates."""
+        user_store.set_secret("FP_USR", value="v", user_id="u1", auth_provider_type="local")
+        monkeypatch.delenv("ELSPETH_FINGERPRINT_KEY")
+        with pytest.raises(FingerprintKeyMissingError):
+            service.check_user_ref_resolvable("u1", "FP_USR", auth_provider_type="local")
+
+    def test_raises_fingerprint_missing_for_server_scope(
+        self, service: WebSecretService, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Server-scope path also surfaces FingerprintKeyMissingError."""
+        monkeypatch.setenv("TEST_KEY", "val")
+        monkeypatch.delenv("ELSPETH_FINGERPRINT_KEY")
+        with pytest.raises(FingerprintKeyMissingError):
+            service.check_user_ref_resolvable("u1", "TEST_KEY", auth_provider_type="local")
+
+    def test_raises_decryption_error_on_key_rotation(
+        self,
+        user_store: UserSecretStore,
+        engine: sa.engine.Engine,
+    ) -> None:
+        """Key rotation surfaces as typed SecretDecryptionError (→ HTTP 409)."""
+        user_store.set_secret("ROT", value="v", user_id="u1", auth_provider_type="local")
+        rotated = UserSecretStore(engine=engine, master_key="rotated-master-key")
+        rotated_service = WebSecretService(user_store=rotated, server_store=ServerSecretStore(()))
+
+        with pytest.raises(SecretDecryptionError):
+            rotated_service.check_user_ref_resolvable(
+                "u1", "ROT", auth_provider_type="local"
+            )
+
+    def test_resolve_still_returns_none_for_absent_row(self, service: WebSecretService) -> None:
+        """Contract preserved: resolve() still returns None for genuinely missing refs.
+
+        This is the companion assertion — resolve() must NOT learn the
+        typed-error behaviour, because that would break the pipeline-path
+        aggregation invariant in TestHasRefResolveInvariant.
+        """
+        assert service.resolve("u1", "NEVER_EXISTED", auth_provider_type="local") is None
 
 
 class TestServerStore:
@@ -436,64 +552,57 @@ class TestHasRefResolveInvariant:
     ) -> None:
         """Regression for the TOCTOU race in WebSecretService.resolve.
 
-        The LBYL pattern opens three separate DB connections
-        (has_secret_record → has_secret → get_secret). A concurrent
-        DELETE /api/secrets/{name} landing between has_secret and
-        get_secret causes get_secret to raise SecretNotFoundError,
-        which the old resolve() did not catch — so it propagated out
-        to resolve_secret_refs and became an HTTP 500 instead of being
-        aggregated as a missing ref.
+        The refactored resolve() opens two independent reads on the user
+        path (``has_secret_record`` then ``get_secret``).  A concurrent
+        DELETE landing between the two makes ``get_secret`` raise
+        ``SecretNotFoundError`` — resolve() must absorb it into ``None``
+        so the pipeline-validation ``missing_refs`` walk can aggregate
+        the miss instead of the walk itself 500-ing.
 
-        The docstring contract ``Returns None for missing secrets`` is
-        load-bearing for the pipeline-validation missing_refs walk; this
-        test pins that the race window no longer violates that contract.
+        The race window is narrower than the pre-refactor design (which
+        called ``has_secret`` first, an extra read that participated in
+        the race); this test still pins the "race → None" contract.
         """
         user_store.set_secret("RACE", value="v", user_id="u1", auth_provider_type="local")
 
-        original_has_secret = user_store.has_secret
+        original_probe = user_store.has_secret_record
 
-        def has_secret_then_delete(*args: object, **kwargs: object) -> bool:
-            result = original_has_secret(*args, **kwargs)  # type: ignore[arg-type]
-            # Simulate a concurrent DELETE landing in the TOCTOU window:
-            # the row still existed when has_secret ran, but vanishes
-            # before get_secret runs.
+        def has_record_then_delete(*args: object, **kwargs: object) -> bool:
+            result = original_probe(*args, **kwargs)  # type: ignore[arg-type]
+            # Simulate a concurrent DELETE /api/secrets/{name} landing
+            # inside the TOCTOU window between has_secret_record (which
+            # observed the row) and get_secret (which will not).
             user_store.delete_secret("RACE", user_id="u1", auth_provider_type="local")
             return result
 
-        with patch.object(user_store, "has_secret", side_effect=has_secret_then_delete):
+        with patch.object(user_store, "has_secret_record", side_effect=has_record_then_delete):
             result = service.resolve("u1", "RACE", auth_provider_type="local")
 
         assert result is None
 
-    def test_resolve_returns_none_when_server_env_cleared_between_has_and_get(
+    def test_resolve_returns_none_when_server_env_cleared_mid_resolve(
         self,
         service: WebSecretService,
-        server_store: ServerSecretStore,
         monkeypatch: pytest.MonkeyPatch,
     ) -> None:
-        """Server-scope symmetric TOCTOU race: env var cleared between
-        has_secret and get_secret.
+        """Server-scope env clear must still absorb into None.
 
-        The server store path in resolve() has the same LBYL shape as
-        the user path — has_secret then get_secret, each reading the
-        env vars independently. An operator un-setting the env var
-        between the two reads (or a concurrent monkeypatch in a parallel
-        test) turns what should be ``None`` into a SecretNotFoundError
-        escape. The resolve() contract must hold on this path too.
+        The refactored resolve() calls ``server_store.get_secret``
+        directly with no preceding ``has_secret`` probe, so the prior
+        LBYL double-read race window is gone.  What remains is the
+        simpler invariant: a server secret unavailable at the moment
+        ``get_secret`` runs resolves to None rather than propagating a
+        500.  Exercised by un-setting the env var BEFORE the call.
         """
         monkeypatch.setenv("TEST_KEY", "server-val")
 
-        original_has_secret = server_store.has_secret
+        # Verify resolve succeeds when env is set.
+        assert service.resolve("u1", "TEST_KEY", auth_provider_type="local") is not None
 
-        def has_secret_then_clear(name: str) -> bool:
-            result = original_has_secret(name)
-            monkeypatch.delenv("TEST_KEY", raising=False)
-            return result
-
-        with patch.object(server_store, "has_secret", side_effect=has_secret_then_clear):
-            result = service.resolve("u1", "TEST_KEY", auth_provider_type="local")
-
-        assert result is None
+        # Clear env — matches what an "env cleared between reads" race
+        # would leave behind by the time the next resolve call runs.
+        monkeypatch.delenv("TEST_KEY", raising=False)
+        assert service.resolve("u1", "TEST_KEY", auth_provider_type="local") is None
 
     def test_unresolvable_user_secret_shadows_server_secret_of_same_name(
         self,

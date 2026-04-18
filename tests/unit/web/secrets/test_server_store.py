@@ -12,7 +12,7 @@ from __future__ import annotations
 
 import pytest
 
-from elspeth.contracts.secrets import SecretInventoryItem
+from elspeth.contracts.secrets import FingerprintKeyMissingError, SecretInventoryItem
 from elspeth.core.security.secret_loader import SecretNotFoundError, SecretRef
 from elspeth.web.secrets.server_store import ServerSecretStore
 
@@ -223,3 +223,18 @@ class TestFingerprintKeyAvailability:
         items = store.list_secrets()
         item = next(i for i in items if i.name == "ALLOWED_KEY")
         assert item.available is True
+
+    def test_get_secret_raises_fingerprint_missing_typed(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """get_secret surfaces FingerprintKeyMissingError (typed) when key is unset.
+
+        Replaces the prior SecretNotFoundError carrying the
+        "ELSPETH_FINGERPRINT_KEY is not set" message.  HTTP handlers
+        map the typed exception to 503 so operators see actionable
+        deployment guidance; the pipeline resolution path fails fast
+        for the same reason.
+        """
+        monkeypatch.setenv("ALLOWED_KEY", "value")
+        monkeypatch.delenv("ELSPETH_FINGERPRINT_KEY", raising=False)
+        store = ServerSecretStore(allowlist=("ALLOWED_KEY",))
+        with pytest.raises(FingerprintKeyMissingError, match="ELSPETH_FINGERPRINT_KEY"):
+            store.get_secret("ALLOWED_KEY")

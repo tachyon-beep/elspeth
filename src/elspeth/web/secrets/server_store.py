@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import os
 
-from elspeth.contracts.secrets import SecretInventoryItem
+from elspeth.contracts.secrets import FingerprintKeyMissingError, SecretInventoryItem
 from elspeth.core.security.secret_loader import SecretNotFoundError, SecretRef
 from elspeth.web.secrets.user_store import _compute_fingerprint, _fingerprint_key_available
 
@@ -64,10 +64,26 @@ class ServerSecretStore:
         """Resolve an allowlisted env var.
 
         Raises:
-            SecretNotFoundError: If *name* is not in the allowlist,
-                is reserved, the env var is unset / empty, or
-                ELSPETH_FINGERPRINT_KEY is not set.
+            FingerprintKeyMissingError: If ``ELSPETH_FINGERPRINT_KEY`` is
+                unset.  Checked first so deployment misconfiguration
+                surfaces as 503 at the HTTP boundary rather than being
+                indistinguishable from "secret not in allowlist".
+            SecretNotFoundError: If *name* is reserved, not in the
+                allowlist, or the env var is unset / empty.  These cases
+                are deliberately indistinguishable to callers — a
+                non-allowlisted probe must not reveal whether the name
+                matches a real env var.
         """
+        # Fingerprint-availability check intentionally precedes the reserved
+        # / allowlist / env-var checks: deployment misconfiguration is a
+        # global state and the typed exception carries no per-secret
+        # information that a probing caller could exploit.  This also
+        # aligns with user_store.get_secret which fails fast on the same
+        # deployment issue.
+        if not _fingerprint_key_available():
+            raise FingerprintKeyMissingError(
+                f"Secret {name!r} is not resolvable — ELSPETH_FINGERPRINT_KEY is not set"
+            )
         if _is_reserved(name):
             raise SecretNotFoundError(name)
         if name not in self._allowlist:
@@ -75,8 +91,6 @@ class ServerSecretStore:
         value = os.environ.get(name)  # Tier 3: env vars are external input
         if not value:
             raise SecretNotFoundError(name)
-        if not _fingerprint_key_available():
-            raise SecretNotFoundError(f"Secret {name!r} is not resolvable — ELSPETH_FINGERPRINT_KEY is not set")
         fp = _compute_fingerprint(name, value)
         return value, SecretRef(name=name, fingerprint=fp, source="env")
 
